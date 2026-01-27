@@ -1197,7 +1197,7 @@ export function SettingsPage() {
                     <a href="https://originhq.com" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-info)]/70 hover:text-[var(--accent-info)] hover:underline">Origin</a> is an endpoint security company building protection for the semantic era of computing. As AI agents become integral to enterprise workflows, Origin provides the visibility and control organizations need to safely grant agents the permissions they require.
                   </p>
                   <p className="text-sm text-muted mb-8">
-                    <a href="https://github.com/originhq/praxis" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-info)]/70 hover:text-[var(--accent-info)] hover:underline">Praxis</a> is Origin's experimental research platform for exploring the adversarial boundaries of legitimate semantic tools. By understanding how computer-use agents and their underlying capabilities can be leveraged offensively, we build better defenses for the endpoints they operate on.
+                    <a href="https://github.com/originsec/praxis" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-info)]/70 hover:text-[var(--accent-info)] hover:underline">Praxis</a> is Origin's experimental research platform for exploring the adversarial boundaries of legitimate semantic tools. By understanding how computer-use agents and their underlying capabilities can be leveraged offensively, we build better defenses for the endpoints they operate on.
                   </p>
                   <div className="flex gap-4">
                     <a
