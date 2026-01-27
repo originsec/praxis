@@ -32,7 +32,7 @@ pub const LLM_MODEL_DEFINITIONS: &str = "llm_model_definitions";
 pub const LLM_FEATURE_SEMANTIC_PARSER: &str = "llm_feature_semantic_parser";
 pub const LLM_FEATURE_TRAFFIC_PARSER: &str = "llm_feature_traffic_parser";
 pub const LLM_FEATURE_SEMANTIC_OPS: &str = "llm_feature_semantic_ops";
-pub const LLM_FEATURE_SKYNET: &str = "llm_feature_skynet";
+pub const LLM_FEATURE_NEXUS: &str = "llm_feature_nexus";
 
 /// A model definition stored in config
 #[derive(serde::Deserialize)]
@@ -137,9 +137,9 @@ impl ServiceConfig {
             .and_then(|model_ref| self.find_model_definition(model_ref))
     }
 
-    /// Get the model definition assigned to skynet feature
-    pub fn get_skynet_model_def(&self) -> Option<ModelDefinition> {
-        self.inner.get(LLM_FEATURE_SKYNET)
+    /// Get the model definition assigned to nexus feature
+    pub fn get_nexus_model_def(&self) -> Option<ModelDefinition> {
+        self.inner.get(LLM_FEATURE_NEXUS)
             .and_then(|model_ref| self.find_model_definition(model_ref))
     }
 

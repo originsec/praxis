@@ -5,7 +5,7 @@ import { useApp } from '../context/AppContext';
 
 type Tab = 'llm_providers' | 'service' | 'about';
 type LLMTab = 'model_definitions' | 'feature_selection';
-type FeatureId = 'skynet' | 'semanticOps' | 'semanticParser' | 'trafficParser';
+type FeatureId = 'nexus' | 'semanticOps' | 'semanticParser' | 'trafficParser';
 
 const providers = [
   { value: 'anthropic', label: 'Anthropic (Claude)' },
@@ -35,7 +35,7 @@ interface ModelDefinition {
 // Feature assignments.
 //
 interface FeatureAssignments {
-  skynet: string | null;
+  nexus: string | null;
   semanticOps: string | null;
   semanticParser: string | null;
   trafficParser: string | null;
@@ -45,8 +45,8 @@ interface FeatureAssignments {
 // Feature-specific settings.
 //
 interface FeatureSettings {
-  skynetPrompt: string;
-  skynetMaxTokens: string;
+  nexusPrompt: string;
+  nexusMaxTokens: string;
   semanticOpPrompt: string;
 }
 
@@ -103,7 +103,7 @@ export function SettingsPage() {
   // Feature assignments state.
   //
   const [featureAssignments, setFeatureAssignments] = useState<FeatureAssignments>({
-    skynet: null,
+    nexus: null,
     semanticOps: null,
     semanticParser: null,
     trafficParser: null,
@@ -113,15 +113,15 @@ export function SettingsPage() {
   // Feature-specific settings.
   //
   const [featureSettings, setFeatureSettings] = useState<FeatureSettings>({
-    skynetPrompt: '',
-    skynetMaxTokens: '25000',
+    nexusPrompt: '',
+    nexusMaxTokens: '25000',
     semanticOpPrompt: '',
   });
 
   //
   // Default prompts from server.
   //
-  const [defaultPrompts, setDefaultPrompts] = useState<{ skynet: string; semantic_op: string } | null>(null);
+  const [defaultPrompts, setDefaultPrompts] = useState<{ nexus: string; semantic_op: string } | null>(null);
 
   //
   // Save states.
@@ -143,13 +143,13 @@ export function SettingsPage() {
   //
   // File input refs.
   //
-  const skynetFileInputRef = useRef<HTMLInputElement>(null);
+  const nexusFileInputRef = useRef<HTMLInputElement>(null);
   const semanticOpFileInputRef = useRef<HTMLInputElement>(null);
 
   //
   // Selected feature in feature selection tab.
   //
-  const [selectedFeature, setSelectedFeature] = useState<FeatureId>('skynet');
+  const [selectedFeature, setSelectedFeature] = useState<FeatureId>('nexus');
 
   //
   // Node downloads state.
@@ -161,7 +161,7 @@ export function SettingsPage() {
   // Feature definitions for the list.
   //
   const features: { id: FeatureId; label: string; description: string }[] = [
-    { id: 'skynet', label: 'Skynet', description: 'Interactive AI assistant' },
+    // { id: 'nexus', label: 'Nexus', description: 'Interactive AI assistant' },  // Hidden - feature not ready
     { id: 'semanticOps', label: 'Semantic Operations', description: 'Default model for ops' },
     { id: 'semanticParser', label: 'Semantic Parser', description: 'Tool call parsing' },
     { id: 'trafficParser', label: 'Traffic Parser', description: 'Traffic summarization' },
@@ -169,17 +169,17 @@ export function SettingsPage() {
 
   //
   // Load config on mount
-  // All llm_* keys go to Service (not starting with skynet_).
+  // All llm_* keys go to Service (not starting with nexus_).
   //
   useEffect(() => {
     getConfig([
       'llm_model_definitions',
-      'llm_feature_skynet',
+      'llm_feature_nexus',
       'llm_feature_semantic_ops',
       'llm_feature_semantic_parser',
       'llm_feature_traffic_parser',
-      'llm_skynet_prompt',
-      'llm_skynet_max_tokens',
+      'llm_nexus_prompt',
+      'llm_nexus_max_tokens',
       'llm_semantic_op_prompt',
     ]);
 
@@ -230,7 +230,7 @@ export function SettingsPage() {
     // Load feature assignments (all stored on Service via llm_* keys).
     //
     setFeatureAssignments({
-      skynet: cfg.llm_feature_skynet || null,
+      nexus: cfg.llm_feature_nexus || null,
       semanticOps: cfg.llm_feature_semantic_ops || null,
       semanticParser: cfg.llm_feature_semantic_parser || null,
       trafficParser: cfg.llm_feature_traffic_parser || null,
@@ -241,8 +241,8 @@ export function SettingsPage() {
     // Use default prompts if no config value is set.
     //
     setFeatureSettings({
-      skynetPrompt: cfg.llm_skynet_prompt || (defaultPrompts?.skynet ?? ''),
-      skynetMaxTokens: cfg.llm_skynet_max_tokens || '25000',
+      nexusPrompt: cfg.llm_nexus_prompt || (defaultPrompts?.nexus ?? ''),
+      nexusMaxTokens: cfg.llm_nexus_max_tokens || '25000',
       semanticOpPrompt: cfg.llm_semantic_op_prompt || (defaultPrompts?.semantic_op ?? ''),
     });
   }, [state.config, defaultPrompts]);
@@ -309,7 +309,7 @@ export function SettingsPage() {
     //
     if (newName !== oldName) {
       const updatedAssignments = { ...featureAssignments };
-      if (updatedAssignments.skynet === oldName) updatedAssignments.skynet = newName;
+      if (updatedAssignments.nexus === oldName) updatedAssignments.nexus = newName;
       if (updatedAssignments.semanticOps === oldName) updatedAssignments.semanticOps = newName;
       if (updatedAssignments.semanticParser === oldName) updatedAssignments.semanticParser = newName;
       if (updatedAssignments.trafficParser === oldName) updatedAssignments.trafficParser = newName;
@@ -332,7 +332,7 @@ export function SettingsPage() {
     // Clear feature assignments using this model.
     //
     const updatedAssignments = { ...featureAssignments };
-    if (updatedAssignments.skynet === name) updatedAssignments.skynet = null;
+    if (updatedAssignments.nexus === name) updatedAssignments.nexus = null;
     if (updatedAssignments.semanticOps === name) updatedAssignments.semanticOps = null;
     if (updatedAssignments.semanticParser === name) updatedAssignments.semanticParser = null;
     if (updatedAssignments.trafficParser === name) updatedAssignments.trafficParser = null;
@@ -361,12 +361,12 @@ export function SettingsPage() {
   const handleSaveFeatures = () => {
     setIsSavingFeatures(true);
     setConfig({
-      llm_feature_skynet: featureAssignments.skynet || '',
+      llm_feature_nexus: featureAssignments.nexus || '',
       llm_feature_semantic_ops: featureAssignments.semanticOps || '',
       llm_feature_semantic_parser: featureAssignments.semanticParser || '',
       llm_feature_traffic_parser: featureAssignments.trafficParser || '',
-      llm_skynet_prompt: featureSettings.skynetPrompt,
-      llm_skynet_max_tokens: featureSettings.skynetMaxTokens,
+      llm_nexus_prompt: featureSettings.nexusPrompt,
+      llm_nexus_max_tokens: featureSettings.nexusMaxTokens,
       llm_semantic_op_prompt: featureSettings.semanticOpPrompt,
     });
     setTimeout(() => {
@@ -377,7 +377,7 @@ export function SettingsPage() {
       //
       getConfig([
         'llm_model_definitions',
-        'llm_feature_skynet',
+        'llm_feature_nexus',
         'llm_feature_semantic_ops',
         'llm_feature_semantic_parser',
         'llm_feature_traffic_parser',
@@ -838,13 +838,13 @@ export function SettingsPage() {
                       <div className="flex-1 p-4 bg-[var(--bg-secondary)] border border-subtle rounded">
                         {/*
                         //
-                        // Skynet config.
+                        // Nexus config.
                         //
                         */}
-                        {selectedFeature === 'skynet' && (
+                        {selectedFeature === 'nexus' && (
                           <div className="space-y-4">
                             <div>
-                              <h4 className="font-semibold text-highlight">Skynet</h4>
+                              <h4 className="font-semibold text-highlight">Nexus</h4>
                               <p className="text-xs text-muted">Interactive AI assistant for red teaming orchestration</p>
                             </div>
 
@@ -853,8 +853,8 @@ export function SettingsPage() {
                                 <div>
                                   <label className="block text-xs font-medium mb-1 text-muted">Model Definition</label>
                                   <select
-                                    value={featureAssignments.skynet || ''}
-                                    onChange={(e) => setFeatureAssignments(a => ({ ...a, skynet: e.target.value || null }))}
+                                    value={featureAssignments.nexus || ''}
+                                    onChange={(e) => setFeatureAssignments(a => ({ ...a, nexus: e.target.value || null }))}
                                     className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
                                   >
                                     <option value="">Select a model...</option>
@@ -868,8 +868,8 @@ export function SettingsPage() {
                                   <label className="block text-xs font-medium mb-1 text-muted">Max Tokens</label>
                                   <input
                                     type="number"
-                                    value={featureSettings.skynetMaxTokens}
-                                    onChange={(e) => setFeatureSettings(s => ({ ...s, skynetMaxTokens: e.target.value }))}
+                                    value={featureSettings.nexusMaxTokens}
+                                    onChange={(e) => setFeatureSettings(s => ({ ...s, nexusMaxTokens: e.target.value }))}
                                     placeholder="25000"
                                     min="1000"
                                     max="100000"
@@ -884,14 +884,14 @@ export function SettingsPage() {
                                   <div>
                                     <input
                                       type="file"
-                                      ref={skynetFileInputRef}
+                                      ref={nexusFileInputRef}
                                       accept=".txt,.md,.prompt"
                                       onChange={(e) => {
                                         const file = e.target.files?.[0];
                                         if (file) {
                                           const reader = new FileReader();
                                           reader.onload = (event) => {
-                                            setFeatureSettings(s => ({ ...s, skynetPrompt: event.target?.result as string || '' }));
+                                            setFeatureSettings(s => ({ ...s, nexusPrompt: event.target?.result as string || '' }));
                                           };
                                           reader.readAsText(file);
                                         }
@@ -899,7 +899,7 @@ export function SettingsPage() {
                                       className="hidden"
                                     />
                                     <button
-                                      onClick={() => skynetFileInputRef.current?.click()}
+                                      onClick={() => nexusFileInputRef.current?.click()}
                                       className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-[var(--bg-primary)] border border-subtle rounded hover:bg-[var(--bg-tertiary)] transition-colors"
                                     >
                                       <Upload size={12} />
@@ -908,14 +908,14 @@ export function SettingsPage() {
                                   </div>
                                 </div>
                                 <textarea
-                                  value={featureSettings.skynetPrompt}
-                                  onChange={(e) => setFeatureSettings(s => ({ ...s, skynetPrompt: e.target.value }))}
-                                  placeholder="Enter the system prompt for Skynet..."
+                                  value={featureSettings.nexusPrompt}
+                                  onChange={(e) => setFeatureSettings(s => ({ ...s, nexusPrompt: e.target.value }))}
+                                  placeholder="Enter the system prompt for Nexus..."
                                   rows={10}
                                   className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-[var(--border-active)] resize-y"
                                 />
                                 <p className="text-xs text-muted mt-1">
-                                  {featureSettings.skynetPrompt.length} characters
+                                  {featureSettings.nexusPrompt.length} characters
                                 </p>
                               </div>
                             </div>
