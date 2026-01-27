@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 $PraxisHome = if ($env:PRAXIS_HOME) { $env:PRAXIS_HOME } else { "$env:USERPROFILE\.praxis" }
 $PraxisBin = "$PraxisHome\bin"
 $PraxisNodes = "$PraxisBin\nodes\windows"
-$PraxisRepo = "https://github.com/preludeorg/praxis"
+$PraxisRepo = "https://github.com/originsec/praxis"
 $PraxisBranch = if ($env:PRAXIS_BRANCH) { $env:PRAXIS_BRANCH } else { "main" }
 
 # Colors
