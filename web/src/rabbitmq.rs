@@ -1,0 +1,799 @@
+use anyhow::Result;
+use common::{
+    publish_json, rabbitmq_url, client_queue_name,
+    CLIENT_SIGNAL_QUEUE, CLIENT_BROADCAST_QUEUE, WEB_EVENT_LOG_QUEUE,
+    ClientSignalMessage, ClientDirectMessage, ClientBroadcastMessage,
+    ClientRegistration, CommandRequest, InterceptMethod,
+    TrafficLogFilters, TrafficSearchFilters,
+};
+use futures_util::StreamExt;
+use lapin::{
+    options::{BasicAckOptions, BasicConsumeOptions, QueueDeclareOptions},
+    types::FieldTable,
+    Channel, Connection, ConnectionProperties,
+};
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use crate::messages::ServerMessage;
+use crate::state::AppState;
+
+/// RabbitMQ client for the web server
+pub struct RabbitMqClient {
+    channel: Channel,
+    state: Arc<AppState>,
+}
+
+impl RabbitMqClient {
+    /// Connect to RabbitMQ and set up queues
+    pub async fn connect(state: Arc<AppState>) -> Result<Self> {
+        let url = rabbitmq_url();
+        common::log_info!("Connecting to RabbitMQ at: {}", url);
+
+        let connection = Connection::connect(url, ConnectionProperties::default()).await?;
+        let channel = connection.create_channel().await?;
+
+        common::log_info!("Connected to RabbitMQ");
+
+        Ok(Self { channel, state })
+    }
+
+    /// Register as a client with the service
+    pub async fn register(&self) -> Result<()> {
+        let registration = ClientRegistration {
+            client_id: self.state.client_id.clone(),
+        };
+
+        let message = ClientSignalMessage::Registration(registration);
+        self.publish_signal(message).await?;
+
+        common::log_info!("Registered as client: {}", self.state.client_id);
+        Ok(())
+    }
+
+    /// Publish a message to the client signal queue
+    pub async fn publish_signal(&self, message: ClientSignalMessage) -> Result<()> {
+        publish_json(&self.channel, CLIENT_SIGNAL_QUEUE, &message).await?;
+        Ok(())
+    }
+
+    /// Send a command to a node
+    pub async fn send_command(&self, request: CommandRequest) -> Result<()> {
+        let message = ClientSignalMessage::Command(request);
+        self.publish_signal(message).await
+    }
+
+    /// Run a semantic operation by name
+    pub async fn run_semantic_op(
+        &self,
+        node_id: String,
+        agent_short_name: String,
+        operation_name: String,
+        request_id: String,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::SemanticOpRun {
+            client_id: self.state.client_id.clone(),
+            node_id,
+            agent_short_name,
+            operation_name,
+            request_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Cancel a semantic operation
+    pub async fn cancel_semantic_op(&self, operation_id: String) -> Result<()> {
+        let message = ClientSignalMessage::SemanticOpCancel { operation_id };
+        self.publish_signal(message).await
+    }
+
+    /// Remove a semantic operation
+    pub async fn remove_semantic_op(&self, operation_id: String) -> Result<()> {
+        let message = ClientSignalMessage::SemanticOpRemove { operation_id };
+        self.publish_signal(message).await
+    }
+
+    /// Clear all finished operations
+    pub async fn clear_semantic_ops(&self) -> Result<()> {
+        let message = ClientSignalMessage::SemanticOpClear;
+        self.publish_signal(message).await
+    }
+
+    /// Request list of all operations
+    pub async fn request_semantic_op_list(&self) -> Result<()> {
+        let message = ClientSignalMessage::SemanticOpListRequest;
+        self.publish_signal(message).await
+    }
+
+    /// Remove a node
+    pub async fn remove_node(&self, node_id: String) -> Result<()> {
+        let message = ClientSignalMessage::RemoveNode { node_id };
+        self.publish_signal(message).await
+    }
+
+    /// Get service configuration
+    pub async fn get_config(&self, keys: Vec<String>) -> Result<()> {
+        let message = ClientSignalMessage::ServiceConfigGet {
+            client_id: self.state.client_id.clone(),
+            keys,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Set service configuration
+    pub async fn set_config(&self, values: HashMap<String, String>) -> Result<()> {
+        let message = ClientSignalMessage::ServiceConfigSet {
+            client_id: self.state.client_id.clone(),
+            values,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Add/update an operation definition from YAML or JSON
+    pub async fn add_op_def(&self, content: String) -> Result<()> {
+        let message = ClientSignalMessage::OpDefAdd {
+            client_id: self.state.client_id.clone(),
+            content,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// List all operation definitions
+    pub async fn list_op_defs(&self) -> Result<()> {
+        let message = ClientSignalMessage::OpDefList {
+            client_id: self.state.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Delete an operation definition
+    pub async fn delete_op_def(&self, full_name: String) -> Result<()> {
+        let message = ClientSignalMessage::OpDefDelete {
+            client_id: self.state.client_id.clone(),
+            full_name,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Get a specific operation definition
+    pub async fn get_op_def(&self, full_name: String) -> Result<()> {
+        let message = ClientSignalMessage::OpDefGet {
+            client_id: self.state.client_id.clone(),
+            full_name,
+        };
+        self.publish_signal(message).await
+    }
+
+    //
+    // Chain methods.
+    //
+
+    /// List all chain definitions
+    pub async fn list_chains(&self) -> Result<()> {
+        let message = ClientSignalMessage::ChainDefList {
+            client_id: self.state.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Get a specific chain definition
+    pub async fn get_chain(&self, chain_id: String) -> Result<()> {
+        let message = ClientSignalMessage::ChainGet {
+            client_id: self.state.client_id.clone(),
+            chain_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Create a new chain definition
+    pub async fn create_chain(&self, definition: common::ChainDefinitionInput) -> Result<()> {
+        let message = ClientSignalMessage::ChainCreate {
+            client_id: self.state.client_id.clone(),
+            definition,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Update a chain definition
+    pub async fn update_chain(&self, chain_id: String, definition: common::ChainDefinitionInput) -> Result<()> {
+        let message = ClientSignalMessage::ChainUpdate {
+            client_id: self.state.client_id.clone(),
+            chain_id,
+            definition,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Delete a chain definition
+    pub async fn delete_chain(&self, chain_id: String) -> Result<()> {
+        let message = ClientSignalMessage::ChainDelete {
+            client_id: self.state.client_id.clone(),
+            chain_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Run a chain
+    pub async fn run_chain(&self, chain_id: String, node_id: String, agent_short_name: String) -> Result<()> {
+        let message = ClientSignalMessage::ChainRun {
+            client_id: self.state.client_id.clone(),
+            chain_id,
+            node_id,
+            agent_short_name,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Cancel a chain execution
+    pub async fn cancel_chain(&self, execution_id: String) -> Result<()> {
+        let message = ClientSignalMessage::ChainCancel {
+            client_id: self.state.client_id.clone(),
+            execution_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// List chain executions
+    pub async fn list_chain_executions(&self) -> Result<()> {
+        let message = ClientSignalMessage::ChainExecutionList {
+            client_id: self.state.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Remove a chain execution from history
+    pub async fn remove_chain_execution(&self, execution_id: String) -> Result<()> {
+        let message = ClientSignalMessage::ChainExecutionRemove { execution_id };
+        self.publish_signal(message).await
+    }
+
+    /// Clear all finished chain executions
+    pub async fn clear_chain_executions(&self) -> Result<()> {
+        let message = ClientSignalMessage::ChainExecutionClear;
+        self.publish_signal(message).await
+    }
+
+    //
+    // Traffic interception methods.
+    //
+
+    /// Request traffic log with filters
+    pub async fn request_traffic_log(&self, filters: TrafficLogFilters) -> Result<()> {
+        let message = ClientSignalMessage::TrafficLogRequest {
+            client_id: self.state.client_id.clone(),
+            filters,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Search traffic with regex pattern
+    pub async fn search_traffic(&self, filters: TrafficSearchFilters) -> Result<()> {
+        let message = ClientSignalMessage::TrafficSearchRequest {
+            client_id: self.state.client_id.clone(),
+            filters,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Request traffic matches
+    pub async fn request_traffic_matches(
+        &self,
+        rule_id: Option<i64>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::TrafficMatchesRequest {
+            client_id: self.state.client_id.clone(),
+            rule_id,
+            limit,
+            offset,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Clear traffic log
+    pub async fn clear_traffic(&self) -> Result<()> {
+        let message = ClientSignalMessage::TrafficClear {
+            client_id: self.state.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    /// List intercept rules
+    pub async fn list_intercept_rules(&self) -> Result<()> {
+        let message = ClientSignalMessage::InterceptRuleList {
+            client_id: self.state.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Create intercept rule
+    pub async fn create_intercept_rule(
+        &self,
+        name: String,
+        regex_pattern: String,
+        target_direction: common::TargetDirection,
+        scope: common::RuleScope,
+        summarization_prompt: Option<String>,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::InterceptRuleCreate {
+            client_id: self.state.client_id.clone(),
+            name,
+            regex_pattern,
+            target_direction,
+            scope,
+            summarization_prompt,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Update intercept rule
+    pub async fn update_intercept_rule(
+        &self,
+        id: i64,
+        name: Option<String>,
+        regex_pattern: Option<String>,
+        target_direction: Option<common::TargetDirection>,
+        scope: Option<common::RuleScope>,
+        enabled: Option<bool>,
+        summarization_prompt: Option<Option<String>>,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::InterceptRuleUpdate {
+            client_id: self.state.client_id.clone(),
+            id,
+            name,
+            regex_pattern,
+            target_direction,
+            scope,
+            enabled,
+            summarization_prompt,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Delete intercept rule
+    pub async fn delete_intercept_rule(&self, id: i64) -> Result<()> {
+        let message = ClientSignalMessage::InterceptRuleDelete {
+            client_id: self.state.client_id.clone(),
+            id,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Enable interception on a node
+    pub async fn enable_intercept(&self, node_id: String, method: Option<InterceptMethod>) -> Result<()> {
+        let message = ClientSignalMessage::InterceptEnable {
+            client_id: self.state.client_id.clone(),
+            node_id,
+            method,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Disable interception on a node
+    pub async fn disable_intercept(&self, node_id: String) -> Result<()> {
+        let message = ClientSignalMessage::InterceptDisable {
+            client_id: self.state.client_id.clone(),
+            node_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    //
+    // Agent discovery methods.
+    //
+
+    /// Enable agent discovery on a node
+    pub async fn enable_agent_discovery(&self, node_id: String) -> Result<()> {
+        let message = ClientSignalMessage::AgentDiscoveryEnable {
+            client_id: self.state.client_id.clone(),
+            node_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Disable agent discovery on a node
+    pub async fn disable_agent_discovery(&self, node_id: String) -> Result<()> {
+        let message = ClientSignalMessage::AgentDiscoveryDisable {
+            client_id: self.state.client_id.clone(),
+            node_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Request list of discovered endpoints
+    pub async fn request_discovered_endpoints(&self, node_id: Option<String>) -> Result<()> {
+        let message = ClientSignalMessage::DiscoveredEndpointsList {
+            client_id: self.state.client_id.clone(),
+            node_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Create a dynamic agent from a discovered endpoint
+    pub async fn create_dynamic_agent(
+        &self,
+        node_id: String,
+        endpoint_id: String,
+        agent_name: String,
+        short_name: String,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::CreateDynamicAgent {
+            client_id: self.state.client_id.clone(),
+            node_id,
+            endpoint_id,
+            agent_name,
+            short_name,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Delete a dynamic agent
+    pub async fn delete_dynamic_agent(&self, node_id: String, short_name: String) -> Result<()> {
+        let message = ClientSignalMessage::DeleteDynamicAgent {
+            client_id: self.state.client_id.clone(),
+            node_id,
+            short_name,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Request node event log entries
+    pub async fn request_node_event_log(
+        &self,
+        node_id: String,
+        level_filter: Option<Vec<String>>,
+        regex_filter: Option<String>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::ApplicationLogRequest {
+            client_id: self.state.client_id.clone(),
+            node_id,
+            level_filter,
+            regex_filter,
+            limit,
+            offset,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Clear node event log entries
+    pub async fn clear_node_event_log(&self, node_id: Option<String>) -> Result<()> {
+        let message = ClientSignalMessage::ApplicationLogClear {
+            client_id: self.state.client_id.clone(),
+            node_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Send an event log entry to the service via dedicated queue
+    pub async fn send_event_log(&self, entry: common::ApplicationLogEntry) -> Result<()> {
+        publish_json(&self.channel, WEB_EVENT_LOG_QUEUE, &entry).await?;
+        Ok(())
+    }
+
+    /// Start consuming messages from RabbitMQ
+    pub async fn start_consuming(self: Arc<Self>) -> Result<()> {
+        let client_queue = client_queue_name(&self.state.client_id);
+
+        //
+        // Declare client-specific queue.
+        //
+        self.channel
+            .queue_declare(
+                &client_queue,
+                QueueDeclareOptions::default(),
+                FieldTable::default(),
+            )
+            .await?;
+        common::log_info!("Declared queue: {}", client_queue);
+
+        //
+        // Declare broadcast queue subscription.
+        //
+        self.channel
+            .queue_declare(
+                CLIENT_BROADCAST_QUEUE,
+                QueueDeclareOptions::default(),
+                FieldTable::default(),
+            )
+            .await?;
+
+        //
+        // Clone self for each consumer task.
+        //
+        let self_direct = Arc::clone(&self);
+        let self_broadcast = Arc::clone(&self);
+
+        //
+        // Spawn task to consume from client-specific queue.
+        //
+        let client_queue_clone = client_queue.clone();
+        tokio::spawn(async move {
+            if let Err(e) = self_direct.consume_direct_messages(&client_queue_clone).await {
+                common::log_error!("Direct message consumer error: {}", e);
+            }
+        });
+
+        //
+        // Spawn task to consume from broadcast queue.
+        //
+        tokio::spawn(async move {
+            if let Err(e) = self_broadcast.consume_broadcast_messages().await {
+                common::log_error!("Broadcast message consumer error: {}", e);
+            }
+        });
+
+        Ok(())
+    }
+
+    /// Consume messages from client-specific queue
+    async fn consume_direct_messages(&self, queue_name: &str) -> Result<()> {
+        let mut consumer = self.channel
+            .basic_consume(
+                queue_name,
+                "web_direct_consumer",
+                BasicConsumeOptions::default(),
+                FieldTable::default(),
+            )
+            .await?;
+
+        common::log_info!("Started consuming from {}", queue_name);
+
+        while let Some(delivery_result) = consumer.next().await {
+            match delivery_result {
+                Ok(delivery) => {
+                    if let Err(e) = self.handle_direct_message(&delivery.data).await {
+                        common::log_warn!("Failed to handle direct message: {}", e);
+                    }
+                    if let Err(e) = delivery.ack(BasicAckOptions::default()).await {
+                        common::log_error!("Failed to ack message: {}", e);
+                    }
+                }
+                Err(e) => {
+                    common::log_error!("Error receiving direct message: {}", e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Consume messages from broadcast queue
+    async fn consume_broadcast_messages(&self) -> Result<()> {
+        let mut consumer = self.channel
+            .basic_consume(
+                CLIENT_BROADCAST_QUEUE,
+                &format!("web_broadcast_consumer_{}", &self.state.client_id[..8]),
+                BasicConsumeOptions::default(),
+                FieldTable::default(),
+            )
+            .await?;
+
+        common::log_info!("Started consuming from {}", CLIENT_BROADCAST_QUEUE);
+
+        while let Some(delivery_result) = consumer.next().await {
+            match delivery_result {
+                Ok(delivery) => {
+                    if let Err(e) = self.handle_broadcast_message(&delivery.data).await {
+                        common::log_warn!("Failed to handle broadcast message: {}", e);
+                    }
+                    if let Err(e) = delivery.ack(BasicAckOptions::default()).await {
+                        common::log_error!("Failed to ack message: {}", e);
+                    }
+                }
+                Err(e) => {
+                    common::log_error!("Error receiving broadcast message: {}", e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle a message from the client-specific queue
+    async fn handle_direct_message(&self, data: &[u8]) -> Result<()> {
+        let message: ClientDirectMessage = serde_json::from_slice(data)?;
+
+        match message {
+            ClientDirectMessage::RegistrationAck(_) => {}
+            ClientDirectMessage::StateUpdate(state) => {
+                self.state.update_state(state.clone()).await;
+                self.state.broadcast(ServerMessage::StateUpdate { state });
+            }
+            ClientDirectMessage::CommandResponse(response) => {
+                //
+                // Store for Skynet if it's a pending command.
+                //
+                self.state.store_command_response(response.command_id.clone(), response.result.clone()).await;
+                self.state.broadcast(ServerMessage::CommandResponse { response });
+            }
+            ClientDirectMessage::TerminalOutput(output) => {
+                self.state.broadcast(ServerMessage::TerminalOutput { output });
+            }
+            ClientDirectMessage::SemanticOpQueued { operation_id, queue_position, request_id } => {
+                //
+                // Store for Skynet if it's a pending request.
+                //
+                self.state.store_semantic_op_response(request_id.clone(), operation_id.clone()).await;
+                self.state.broadcast(ServerMessage::SemanticOpQueued { operation_id, queue_position, request_id });
+            }
+            ClientDirectMessage::SemanticOpUpdate(update) => {
+                //
+                // Store in state for Skynet access.
+                //
+                self.state.update_operation(update.clone()).await;
+                self.state.broadcast(ServerMessage::SemanticOpUpdate { update });
+            }
+            ClientDirectMessage::SemanticOpList(operations) => {
+                //
+                // Store all operations in state.
+                //
+                for op in &operations {
+                    self.state.update_operation(op.clone()).await;
+                }
+                self.state.broadcast(ServerMessage::SemanticOpList { operations });
+            }
+            ClientDirectMessage::ServiceConfigResponse { values } => {
+                //
+                // Cache config values.
+                //
+                self.state.update_config(values.clone()).await;
+                self.state.broadcast(ServerMessage::ConfigResponse { values });
+            }
+            ClientDirectMessage::ServiceConfigSaved => {
+                self.state.broadcast(ServerMessage::ConfigSaved);
+            }
+            ClientDirectMessage::OpDefListResponse { definitions } => {
+                //
+                // Store operation definitions for Skynet access.
+                //
+                self.state.update_operation_definitions(definitions.clone()).await;
+                self.state.broadcast(ServerMessage::OpDefList { definitions });
+            }
+            ClientDirectMessage::OpDefGetResponse { definition } => {
+                self.state.broadcast(ServerMessage::OpDefGetResponse { definition });
+            }
+            ClientDirectMessage::OpDefAdded { full_name } => {
+                self.state.broadcast(ServerMessage::OpDefAdded { full_name });
+            }
+            ClientDirectMessage::OpDefDeleted { full_name, success } => {
+                self.state.broadcast(ServerMessage::OpDefDeleted { full_name, success });
+            }
+            ClientDirectMessage::OpDefError { message } => {
+                self.state.broadcast(ServerMessage::OpDefError { message });
+            }
+
+            //
+            // Traffic interception responses.
+            //
+            ClientDirectMessage::TrafficLogResponse { entries, total_count } => {
+                self.state.broadcast(ServerMessage::TrafficLogResponse { entries, total_count });
+            }
+            ClientDirectMessage::TrafficSearchResponse { entries, total_count } => {
+                //
+                // Store for Skynet to pick up.
+                //
+                self.state.store_traffic_search_response(entries.clone(), total_count).await;
+                self.state.broadcast(ServerMessage::TrafficSearchResponse { entries, total_count });
+            }
+            ClientDirectMessage::TrafficMatchesResponse { matches, total_count } => {
+                self.state.broadcast(ServerMessage::TrafficMatchesResponse { matches, total_count });
+            }
+            ClientDirectMessage::TrafficCleared { deleted_count } => {
+                self.state.broadcast(ServerMessage::TrafficCleared { deleted_count });
+            }
+            ClientDirectMessage::InterceptRuleListResponse { rules } => {
+                self.state.broadcast(ServerMessage::InterceptRuleList { rules });
+            }
+            ClientDirectMessage::InterceptRuleCreated { rule } => {
+                self.state.broadcast(ServerMessage::InterceptRuleCreated { rule });
+            }
+            ClientDirectMessage::InterceptRuleUpdated { rule } => {
+                self.state.broadcast(ServerMessage::InterceptRuleUpdated { rule });
+            }
+            ClientDirectMessage::InterceptRuleDeleted { id, success } => {
+                self.state.broadcast(ServerMessage::InterceptRuleDeleted { id, success });
+            }
+            ClientDirectMessage::InterceptRuleError { message } => {
+                self.state.broadcast(ServerMessage::InterceptRuleError { message });
+            }
+            ClientDirectMessage::InterceptStatusUpdate(status) => {
+                self.state.broadcast(ServerMessage::InterceptStatusUpdate { status });
+            }
+
+            //
+            // Chain responses.
+            //
+            ClientDirectMessage::ChainDefListResponse { chains } => {
+                self.state.update_chain_definitions(chains.clone()).await;
+                self.state.broadcast(ServerMessage::ChainDefList { chains });
+            }
+            ClientDirectMessage::ChainGetResponse { chain } => {
+                self.state.broadcast(ServerMessage::ChainGetResponse { chain });
+            }
+            ClientDirectMessage::ChainCreated { chain } => {
+                self.state.broadcast(ServerMessage::ChainCreated { chain });
+            }
+            ClientDirectMessage::ChainUpdated { chain } => {
+                self.state.broadcast(ServerMessage::ChainUpdated { chain });
+            }
+            ClientDirectMessage::ChainDeleted { chain_id, success } => {
+                self.state.broadcast(ServerMessage::ChainDeleted { chain_id, success });
+            }
+            ClientDirectMessage::ChainError { message } => {
+                self.state.broadcast(ServerMessage::ChainError { message });
+            }
+            ClientDirectMessage::ChainExecutionStarted { execution_id, chain_id } => {
+                self.state.broadcast(ServerMessage::ChainExecutionStarted { execution_id, chain_id });
+            }
+            ClientDirectMessage::ChainExecutionUpdate(execution) => {
+                self.state.update_chain_execution(execution.clone()).await;
+                self.state.broadcast(ServerMessage::ChainExecutionUpdate { execution });
+            }
+            ClientDirectMessage::ChainExecutionListResponse { executions } => {
+                //
+                // Update all executions in state.
+                //
+                for exec in executions.iter() {
+                    self.state.update_chain_execution(exec.clone()).await;
+                }
+                self.state.broadcast(ServerMessage::ChainExecutionList { executions });
+            }
+
+            //
+            // Agent discovery responses.
+            //
+            ClientDirectMessage::DiscoveredEndpointsListResponse { endpoints } => {
+                self.state.broadcast(ServerMessage::DiscoveredEndpointsList { endpoints });
+            }
+            ClientDirectMessage::DynamicAgentCreated { node_id, short_name } => {
+                self.state.broadcast(ServerMessage::DynamicAgentCreated { node_id, short_name });
+            }
+            ClientDirectMessage::DynamicAgentDeleted { node_id, short_name } => {
+                self.state.broadcast(ServerMessage::DynamicAgentDeleted { node_id, short_name });
+            }
+            ClientDirectMessage::AgentDiscoveryError { message } => {
+                self.state.broadcast(ServerMessage::AgentDiscoveryError { message });
+            }
+
+            //
+            // Node event log responses.
+            //
+            ClientDirectMessage::ApplicationLogResponse { node_id, entries, total_count } => {
+                self.state.broadcast(ServerMessage::ApplicationLogResponse { node_id, entries, total_count });
+            }
+            ClientDirectMessage::ApplicationLogCleared { deleted_count } => {
+                self.state.broadcast(ServerMessage::ApplicationLogCleared { deleted_count });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle a message from the broadcast queue
+    async fn handle_broadcast_message(&self, data: &[u8]) -> Result<()> {
+        let message: ClientBroadcastMessage = serde_json::from_slice(data)?;
+
+        match message {
+            ClientBroadcastMessage::StateUpdate(state) => {
+                self.state.update_state(state.clone()).await;
+                self.state.broadcast(ServerMessage::StateUpdate { state });
+            }
+            ClientBroadcastMessage::ServiceOnline => {
+                common::log_info!("Service came online, re-registering...");
+                if let Err(e) = self.register().await {
+                    common::log_error!("Failed to re-register: {}", e);
+                }
+            }
+            ClientBroadcastMessage::ChainExecutionUpdate(execution) => {
+                self.state.update_chain_execution(execution.clone()).await;
+                self.state.broadcast(ServerMessage::ChainExecutionUpdate { execution });
+            }
+        }
+
+        Ok(())
+    }
+
+}
