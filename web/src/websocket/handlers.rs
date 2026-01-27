@@ -88,17 +88,17 @@ pub async fn handle_browser_message(
         BrowserMessage::OpDefGet { full_name } => {
             state.rabbitmq.get_op_def(full_name).await?;
         }
-        BrowserMessage::SkynetStart => {
-            super::handle_skynet_start(state, connection_id).await?;
+        BrowserMessage::NexusStart => {
+            super::handle_nexus_start(state, connection_id).await?;
         }
-        BrowserMessage::SkynetPrompt { message } => {
-            super::handle_skynet_prompt(state, connection_id, &message).await?;
+        BrowserMessage::NexusPrompt { message } => {
+            super::handle_nexus_prompt(state, connection_id, &message).await?;
         }
-        BrowserMessage::SkynetStop => {
-            super::handle_skynet_stop(state, connection_id).await?;
+        BrowserMessage::NexusStop => {
+            super::handle_nexus_stop(state, connection_id).await?;
         }
-        BrowserMessage::SkynetCancel => {
-            super::handle_skynet_cancel(state, connection_id).await?;
+        BrowserMessage::NexusCancel => {
+            super::handle_nexus_cancel(state, connection_id).await?;
         }
 
         //
@@ -253,11 +253,11 @@ pub async fn handle_browser_message(
 
 async fn handle_config_get(state: &Arc<WsState>, keys: Vec<String>) -> anyhow::Result<()> {
     //
-    // Split keys into local (skynet_*) and service (semantic_parser_*,
+    // Split keys into local (nexus_*) and service (semantic_parser_*,
     // semantic_op_*).
     //
     let (local_keys, service_keys): (Vec<_>, Vec<_>) =
-        keys.into_iter().partition(|k| k.starts_with("skynet_"));
+        keys.into_iter().partition(|k| k.starts_with("nexus_"));
 
     //
     // Get local config values.
@@ -287,11 +287,11 @@ async fn handle_config_set(
     values: HashMap<String, String>,
 ) -> anyhow::Result<()> {
     //
-    // Split values into local (skynet_*) and service (semantic_parser_*,
+    // Split values into local (nexus_*) and service (semantic_parser_*,
     // semantic_op_*).
     //
     let (local_values, service_values): (HashMap<_, _>, HashMap<_, _>) =
-        values.into_iter().partition(|(k, _)| k.starts_with("skynet_"));
+        values.into_iter().partition(|(k, _)| k.starts_with("nexus_"));
 
     //
     // Save local config values.

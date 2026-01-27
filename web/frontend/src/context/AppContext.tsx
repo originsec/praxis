@@ -1,13 +1,13 @@
 import { createContext, useContext, useReducer, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { wsClient } from '../api/websocket';
 import { generateUUID } from '../utils/uuid';
-import type { SkynetState } from './skynetTypes';
+import type { NexusState } from './nexusTypes';
 
 //
-// Re-export Skynet types for consumers.
+// Re-export Nexus types for consumers.
 //
-export type { SkynetMessage, SkynetToolExecution } from './skynetTypes';
-import { loadPersistedSkynetState, loadRecentNodes, persistRecentNodes, persistSkynetState } from '../utils/persistence';
+export type { NexusMessage, NexusToolExecution } from './nexusTypes';
+import { loadPersistedNexusState, loadRecentNodes, persistRecentNodes, persistNexusState } from '../utils/persistence';
 import type {
   SystemState,
   NodeState,
@@ -19,7 +19,7 @@ import type {
   EventLogEntry,
   OperationDefinitionInfo,
   BrowserMessage,
-  SkynetPlan,
+  NexusPlan,
   InterceptedTrafficEntry,
   InterceptMethod,
   InterceptRule,
@@ -44,7 +44,7 @@ export interface AgentSessionMessage {
   timestamp: Date;
 }
 
-const initialSkynetState: SkynetState = {
+const initialNexusState: NexusState = {
   sessionActive: false,
   isStarting: false,
   messages: [],
@@ -141,7 +141,7 @@ interface AppState {
   config: Record<string, string>;
   opDefError: string | null;
   opDefSuccess: string | null;
-  skynet: SkynetState;
+  nexus: NexusState;
   intercept: InterceptState;
   chains: ChainState;
   discovery: DiscoveryState;
@@ -172,7 +172,7 @@ function createInitialState(): AppState {
     config: {},
     opDefError: null,
     opDefSuccess: null,
-    skynet: loadPersistedSkynetState(initialSkynetState),
+    nexus: loadPersistedNexusState(initialNexusState),
     intercept: initialInterceptState,
     chains: initialChainState,
     discovery: initialDiscoveryState,
@@ -195,19 +195,19 @@ type Action =
   | { type: 'SET_CONFIG'; values: Record<string, string> }
   | { type: 'SET_OP_DEF_ERROR'; error: string | null }
   | { type: 'SET_OP_DEF_SUCCESS'; fullName: string | null }
-  | { type: 'SKYNET_STARTING' }
-  | { type: 'SKYNET_STARTED' }
-  | { type: 'SKYNET_STOPPED' }
-  | { type: 'SKYNET_ADD_USER_MESSAGE'; message: string }
-  | { type: 'SKYNET_ADD_CONTENT'; content: string }
-  | { type: 'SKYNET_TOOL_EXECUTING'; name: string; input?: string }
-  | { type: 'SKYNET_TOOL_EXECUTED'; name: string; display: string; success: boolean; result: string }
-  | { type: 'SKYNET_PLAN_UPDATED'; plan: SkynetPlan }
-  | { type: 'SKYNET_DONE' }
-  | { type: 'SKYNET_ERROR'; message: string }
-  | { type: 'SKYNET_CLEAR_MESSAGES' }
-  | { type: 'SKYNET_SET_LOADING'; loading: boolean }
-  | { type: 'SKYNET_TOKEN_USAGE'; promptTokens: number; completionTokens: number; totalTokens: number }
+  | { type: 'NEXUS_STARTING' }
+  | { type: 'NEXUS_STARTED' }
+  | { type: 'NEXUS_STOPPED' }
+  | { type: 'NEXUS_ADD_USER_MESSAGE'; message: string }
+  | { type: 'NEXUS_ADD_CONTENT'; content: string }
+  | { type: 'NEXUS_TOOL_EXECUTING'; name: string; input?: string }
+  | { type: 'NEXUS_TOOL_EXECUTED'; name: string; display: string; success: boolean; result: string }
+  | { type: 'NEXUS_PLAN_UPDATED'; plan: NexusPlan }
+  | { type: 'NEXUS_DONE' }
+  | { type: 'NEXUS_ERROR'; message: string }
+  | { type: 'NEXUS_CLEAR_MESSAGES' }
+  | { type: 'NEXUS_SET_LOADING'; loading: boolean }
+  | { type: 'NEXUS_TOKEN_USAGE'; promptTokens: number; completionTokens: number; totalTokens: number }
   //
   // Intercept actions.
   //
@@ -288,47 +288,47 @@ function reduceCore(state: AppState, action: Action): AppState | null {
   }
 }
 
-function reduceSkynet(state: AppState, action: Action): AppState | null {
+function reduceNexus(state: AppState, action: Action): AppState | null {
   switch (action.type) {
-    case 'SKYNET_STARTING':
+    case 'NEXUS_STARTING':
       return {
         ...state,
-        skynet: {
-          ...state.skynet,
+        nexus: {
+          ...state.nexus,
           isStarting: true,
         },
       };
-    case 'SKYNET_STARTED':
+    case 'NEXUS_STARTED':
       return {
         ...state,
-        skynet: {
-          ...initialSkynetState,
+        nexus: {
+          ...initialNexusState,
           sessionActive: true,
           isStarting: false,
           messages: [{
             id: generateUUID(),
             role: 'system',
-            content: 'Skynet session started.',
+            content: 'Nexus session started.',
             timestamp: new Date(),
           }],
         },
       };
-    case 'SKYNET_STOPPED':
+    case 'NEXUS_STOPPED':
       return {
         ...state,
-        skynet: {
-          ...state.skynet,
+        nexus: {
+          ...state.nexus,
           sessionActive: false,
           isStarting: false,
           isLoading: false,
         },
       };
-    case 'SKYNET_ADD_USER_MESSAGE':
+    case 'NEXUS_ADD_USER_MESSAGE':
       return {
         ...state,
-        skynet: {
-          ...state.skynet,
-          messages: [...state.skynet.messages, {
+        nexus: {
+          ...state.nexus,
+          messages: [...state.nexus.messages, {
             id: generateUUID(),
             role: 'user',
             content: action.message,
@@ -339,20 +339,20 @@ function reduceSkynet(state: AppState, action: Action): AppState | null {
           currentToolExecutions: [],
         },
       };
-    case 'SKYNET_ADD_CONTENT':
+    case 'NEXUS_ADD_CONTENT':
       return {
         ...state,
-        skynet: {
-          ...state.skynet,
-          streamingContent: state.skynet.streamingContent + action.content,
+        nexus: {
+          ...state.nexus,
+          streamingContent: state.nexus.streamingContent + action.content,
         },
       };
-    case 'SKYNET_TOOL_EXECUTING':
+    case 'NEXUS_TOOL_EXECUTING':
       return {
         ...state,
-        skynet: {
-          ...state.skynet,
-          currentToolExecutions: [...state.skynet.currentToolExecutions, {
+        nexus: {
+          ...state.nexus,
+          currentToolExecutions: [...state.nexus.currentToolExecutions, {
             name: action.name,
             display: 'Executing...',
             success: true,
@@ -361,49 +361,49 @@ function reduceSkynet(state: AppState, action: Action): AppState | null {
           }],
         },
       };
-    case 'SKYNET_TOOL_EXECUTED': {
-      const executions = state.skynet.currentToolExecutions.map((ex) =>
+    case 'NEXUS_TOOL_EXECUTED': {
+      const executions = state.nexus.currentToolExecutions.map((ex) =>
         ex.name === action.name && ex.executing
           ? { name: action.name, display: action.display, success: action.success, executing: false, input: ex.input, result: action.result }
           : ex
       );
       return {
         ...state,
-        skynet: {
-          ...state.skynet,
+        nexus: {
+          ...state.nexus,
           currentToolExecutions: executions,
         },
       };
     }
-    case 'SKYNET_PLAN_UPDATED':
+    case 'NEXUS_PLAN_UPDATED':
       return {
         ...state,
-        skynet: {
-          ...state.skynet,
+        nexus: {
+          ...state.nexus,
           currentPlan: action.plan,
         },
       };
-    case 'SKYNET_DONE': {
+    case 'NEXUS_DONE': {
       //
       // Finalize the current streaming content and tool executions into a
       // message.
       //
-      const newMessages = [...state.skynet.messages];
-      if (state.skynet.streamingContent || state.skynet.currentToolExecutions.length > 0) {
+      const newMessages = [...state.nexus.messages];
+      if (state.nexus.streamingContent || state.nexus.currentToolExecutions.length > 0) {
         newMessages.push({
           id: generateUUID(),
           role: 'assistant',
-          content: state.skynet.streamingContent,
+          content: state.nexus.streamingContent,
           timestamp: new Date(),
-          toolExecutions: state.skynet.currentToolExecutions.length > 0
-            ? [...state.skynet.currentToolExecutions]
+          toolExecutions: state.nexus.currentToolExecutions.length > 0
+            ? [...state.nexus.currentToolExecutions]
             : undefined,
         });
       }
       return {
         ...state,
-        skynet: {
-          ...state.skynet,
+        nexus: {
+          ...state.nexus,
           messages: newMessages,
           isLoading: false,
           streamingContent: '',
@@ -411,8 +411,8 @@ function reduceSkynet(state: AppState, action: Action): AppState | null {
         },
       };
     }
-    case 'SKYNET_ERROR': {
-      const newMessages = [...state.skynet.messages, {
+    case 'NEXUS_ERROR': {
+      const newMessages = [...state.nexus.messages, {
         id: generateUUID(),
         role: 'system' as const,
         content: `Error: ${action.message}`,
@@ -420,8 +420,8 @@ function reduceSkynet(state: AppState, action: Action): AppState | null {
       }];
       return {
         ...state,
-        skynet: {
-          ...state.skynet,
+        nexus: {
+          ...state.nexus,
           messages: newMessages,
           isStarting: false,
           isLoading: false,
@@ -430,28 +430,28 @@ function reduceSkynet(state: AppState, action: Action): AppState | null {
         },
       };
     }
-    case 'SKYNET_CLEAR_MESSAGES':
+    case 'NEXUS_CLEAR_MESSAGES':
       return {
         ...state,
-        skynet: {
-          ...state.skynet,
+        nexus: {
+          ...state.nexus,
           messages: [],
           currentPlan: null,
         },
       };
-    case 'SKYNET_SET_LOADING':
+    case 'NEXUS_SET_LOADING':
       return {
         ...state,
-        skynet: {
-          ...state.skynet,
+        nexus: {
+          ...state.nexus,
           isLoading: action.loading,
         },
       };
-    case 'SKYNET_TOKEN_USAGE':
+    case 'NEXUS_TOKEN_USAGE':
       return {
         ...state,
-        skynet: {
-          ...state.skynet,
+        nexus: {
+          ...state.nexus,
           tokenUsage: {
             promptTokens: action.promptTokens,
             completionTokens: action.completionTokens,
@@ -693,7 +693,7 @@ function reduceEventLogPanel(state: AppState, action: Action): AppState | null {
 function reducer(state: AppState, action: Action): AppState {
   return (
     reduceCore(state, action)
-    ?? reduceSkynet(state, action)
+    ?? reduceNexus(state, action)
     ?? reduceIntercept(state, action)
     ?? reduceAgentSessions(state, action)
     ?? reduceChains(state, action)
@@ -744,13 +744,13 @@ interface AppContextValue {
   //
   clearOpDefStatus: () => void;
   //
-  // Skynet.
+  // Nexus.
   //
-  skynetStart: () => void;
-  skynetStop: () => void;
-  skynetCancel: () => void;
-  skynetPrompt: (message: string) => void;
-  skynetClearMessages: () => void;
+  nexusStart: () => void;
+  nexusStop: () => void;
+  nexusCancel: () => void;
+  nexusPrompt: (message: string) => void;
+  nexusClearMessages: () => void;
   //
   // Generic send.
   //
@@ -827,11 +827,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [state.clientId]);
 
   //
-  // Persist Skynet state to sessionStorage whenever it changes.
+  // Persist Nexus state to sessionStorage whenever it changes.
   //
   useEffect(() => {
-    persistSkynetState(state.skynet);
-  }, [state.skynet]);
+    persistNexusState(state.nexus);
+  }, [state.nexus]);
 
   //
   // Handle WebSocket messages - only set up once.
@@ -880,35 +880,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'SET_OP_DEF_SUCCESS', fullName: message.full_name });
           break;
         //
-        // Skynet messages.
+        // Nexus messages.
         //
-        case 'skynet_started':
-          dispatch({ type: 'SKYNET_STARTED' });
+        case 'nexus_started':
+          dispatch({ type: 'NEXUS_STARTED' });
           break;
-        case 'skynet_stopped':
-          dispatch({ type: 'SKYNET_STOPPED' });
+        case 'nexus_stopped':
+          dispatch({ type: 'NEXUS_STOPPED' });
           break;
-        case 'skynet_content':
-          dispatch({ type: 'SKYNET_ADD_CONTENT', content: message.content });
+        case 'nexus_content':
+          dispatch({ type: 'NEXUS_ADD_CONTENT', content: message.content });
           break;
-        case 'skynet_tool_executing':
-          dispatch({ type: 'SKYNET_TOOL_EXECUTING', name: message.name, input: message.input });
+        case 'nexus_tool_executing':
+          dispatch({ type: 'NEXUS_TOOL_EXECUTING', name: message.name, input: message.input });
           break;
-        case 'skynet_tool_executed':
-          dispatch({ type: 'SKYNET_TOOL_EXECUTED', name: message.name, display: message.display, success: message.success, result: message.result });
+        case 'nexus_tool_executed':
+          dispatch({ type: 'NEXUS_TOOL_EXECUTED', name: message.name, display: message.display, success: message.success, result: message.result });
           break;
-        case 'skynet_plan_updated':
-          dispatch({ type: 'SKYNET_PLAN_UPDATED', plan: message.plan });
+        case 'nexus_plan_updated':
+          dispatch({ type: 'NEXUS_PLAN_UPDATED', plan: message.plan });
           break;
-        case 'skynet_done':
-          dispatch({ type: 'SKYNET_DONE' });
+        case 'nexus_done':
+          dispatch({ type: 'NEXUS_DONE' });
           break;
-        case 'skynet_error':
-          dispatch({ type: 'SKYNET_ERROR', message: message.message });
+        case 'nexus_error':
+          dispatch({ type: 'NEXUS_ERROR', message: message.message });
           break;
-        case 'skynet_token_usage':
+        case 'nexus_token_usage':
           dispatch({
-            type: 'SKYNET_TOKEN_USAGE',
+            type: 'NEXUS_TOKEN_USAGE',
             promptTokens: message.prompt_tokens,
             completionTokens: message.completion_tokens,
             totalTokens: message.total_tokens,
@@ -1148,30 +1148,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   //
-  // Skynet functions.
+  // Nexus functions.
   //
-  const skynetStart = useCallback(() => {
-    dispatch({ type: 'SKYNET_STARTING' });
-    wsClient.send({ type: 'skynet_start' });
+  const nexusStart = useCallback(() => {
+    dispatch({ type: 'NEXUS_STARTING' });
+    wsClient.send({ type: 'nexus_start' });
   }, []);
 
-  const skynetStop = useCallback(() => {
-    wsClient.send({ type: 'skynet_stop' });
-    dispatch({ type: 'SKYNET_STOPPED' });
+  const nexusStop = useCallback(() => {
+    wsClient.send({ type: 'nexus_stop' });
+    dispatch({ type: 'NEXUS_STOPPED' });
   }, []);
 
-  const skynetCancel = useCallback(() => {
-    wsClient.send({ type: 'skynet_cancel' });
-    dispatch({ type: 'SKYNET_DONE' });
+  const nexusCancel = useCallback(() => {
+    wsClient.send({ type: 'nexus_cancel' });
+    dispatch({ type: 'NEXUS_DONE' });
   }, []);
 
-  const skynetPrompt = useCallback((message: string) => {
-    dispatch({ type: 'SKYNET_ADD_USER_MESSAGE', message });
-    wsClient.send({ type: 'skynet_prompt', message });
+  const nexusPrompt = useCallback((message: string) => {
+    dispatch({ type: 'NEXUS_ADD_USER_MESSAGE', message });
+    wsClient.send({ type: 'nexus_prompt', message });
   }, []);
 
-  const skynetClearMessages = useCallback(() => {
-    dispatch({ type: 'SKYNET_CLEAR_MESSAGES' });
+  const nexusClearMessages = useCallback(() => {
+    dispatch({ type: 'NEXUS_CLEAR_MESSAGES' });
   }, []);
 
   //
@@ -1392,11 +1392,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     getConfig,
     setConfig,
     clearOpDefStatus,
-    skynetStart,
-    skynetStop,
-    skynetCancel,
-    skynetPrompt,
-    skynetClearMessages,
+    nexusStart,
+    nexusStop,
+    nexusCancel,
+    nexusPrompt,
+    nexusClearMessages,
     send,
     requestTrafficLog,
     requestTrafficMatches,

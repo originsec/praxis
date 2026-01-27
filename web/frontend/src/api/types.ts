@@ -423,7 +423,7 @@ export interface ChainExecutionUpdate {
 }
 
 //
-// Skynet Plan types.
+// Nexus Plan types.
 //
 export type PlanStepStatus = 'not_started' | 'in_progress' | 'done';
 
@@ -432,7 +432,7 @@ export interface PlanStep {
   status: PlanStepStatus;
 }
 
-export interface SkynetPlan {
+export interface NexusPlan {
   steps: PlanStep[];
   summary?: string;
   current_step_description?: string;
@@ -554,10 +554,10 @@ export type BrowserMessage =
   | { type: 'op_def_list' }
   | { type: 'op_def_delete'; full_name: string }
   | { type: 'op_def_get'; full_name: string }
-  | { type: 'skynet_start' }
-  | { type: 'skynet_prompt'; message: string }
-  | { type: 'skynet_stop' }
-  | { type: 'skynet_cancel' }
+  | { type: 'nexus_start' }
+  | { type: 'nexus_prompt'; message: string }
+  | { type: 'nexus_stop' }
+  | { type: 'nexus_cancel' }
   //
   // Traffic interception messages.
   //
@@ -617,15 +617,15 @@ export type ServerMessage =
   | { type: 'op_def_added'; full_name: string }
   | { type: 'op_def_deleted'; full_name: string; success: boolean }
   | { type: 'op_def_error'; message: string }
-  | { type: 'skynet_started' }
-  | { type: 'skynet_content'; content: string }
-  | { type: 'skynet_tool_executing'; name: string; input?: string }
-  | { type: 'skynet_tool_executed'; name: string; display: string; success: boolean; result: string }
-  | { type: 'skynet_plan_updated'; plan: SkynetPlan }
-  | { type: 'skynet_done' }
-  | { type: 'skynet_stopped' }
-  | { type: 'skynet_error'; message: string }
-  | { type: 'skynet_token_usage'; prompt_tokens: number; completion_tokens: number; total_tokens: number }
+  | { type: 'nexus_started' }
+  | { type: 'nexus_content'; content: string }
+  | { type: 'nexus_tool_executing'; name: string; input?: string }
+  | { type: 'nexus_tool_executed'; name: string; display: string; success: boolean; result: string }
+  | { type: 'nexus_plan_updated'; plan: NexusPlan }
+  | { type: 'nexus_done' }
+  | { type: 'nexus_stopped' }
+  | { type: 'nexus_error'; message: string }
+  | { type: 'nexus_token_usage'; prompt_tokens: number; completion_tokens: number; total_tokens: number }
   //
   // Traffic interception messages.
   //

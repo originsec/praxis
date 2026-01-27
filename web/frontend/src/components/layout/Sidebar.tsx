@@ -20,10 +20,10 @@ export function Sidebar() {
   const navItems = [
     { to: '/', icon: LayoutDashboard, label: 'DASHBOARD', end: true },
     { to: '/nodes', icon: Server, label: 'NODES', end: false },
-    { to: '/skynet', icon: Bot, label: 'SKYNET', end: false },
     { to: '/operations', icon: Zap, label: 'OPERATIONS', end: false },
     { to: '/intercept', icon: Shield, label: 'INTERCEPT', end: false },
     // { to: '/discovery', icon: Radar, label: 'DISCOVERY', end: false },  // Hidden - feature not ready
+    { to: '/nexus', icon: Bot, label: 'NEXUS', end: false },
     { to: '/toolkit', icon: Wrench, label: 'TOOLKIT', end: false },
     { to: '/settings', icon: Settings, label: 'SETTINGS', end: false },
   ];

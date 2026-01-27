@@ -1,4 +1,4 @@
-import type { AgentSessionMessage, SkynetMessage } from '../context/AppContext';
+import type { AgentSessionMessage, NexusMessage } from '../context/AppContext';
 import type { SemanticOpUpdate, ChainExecutionUpdate, ElementExecutionStatus } from '../api/types';
 
 //
@@ -80,15 +80,15 @@ export function exportAgentSession(
 }
 
 //
-// Export Skynet session to Markdown.
+// Export Nexus session to Markdown.
 //
-export function exportSkynetSession(
-  messages: SkynetMessage[],
+export function exportNexusSession(
+  messages: NexusMessage[],
   tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number } | null
 ): string {
   const lines: string[] = [];
 
-  lines.push('# Skynet Session Transcript');
+  lines.push('# Nexus Session Transcript');
   lines.push('');
   if (messages.length > 0) {
     lines.push(`**Started:** ${formatDate(messages[0].timestamp)}`);
@@ -103,7 +103,7 @@ export function exportSkynetSession(
   lines.push('');
 
   for (const msg of messages) {
-    const role = msg.role === 'user' ? '**User**' : msg.role === 'assistant' ? '**Skynet**' : '**System**';
+    const role = msg.role === 'user' ? '**User**' : msg.role === 'assistant' ? '**Nexus**' : '**System**';
     lines.push(`### ${role} - ${formatDate(msg.timestamp)}`);
     lines.push('');
 
