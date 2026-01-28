@@ -7,7 +7,7 @@ use crate::agent_connectors::modes::devtools::GenericDevToolsSession;
 use crate::agent_connectors::modes::uiautomation::GenericUIAutomationSession;
 use crate::agent_connectors::traits::{AgentMode, AgentSession};
 use anyhow::Result;
-use std::any::Any;
+
 use uuid::Uuid;
 
 use super::devtools_adapter::M365DevToolsAdapter;
@@ -86,9 +86,5 @@ impl AgentSession for M365CopilotSession {
             M365CopilotSession::UIAutomation(s) => s.close(),
             M365CopilotSession::DevTools(s) => s.close(),
         }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }

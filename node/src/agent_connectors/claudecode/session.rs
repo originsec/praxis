@@ -2,7 +2,7 @@ use crate::agent_connectors::traits::{AgentMode, AgentSession};
 use crate::agent_connectors::utils::{build_command, run_command};
 use anyhow::{anyhow, Result};
 use common::SessionContext;
-use std::any::Any;
+
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -141,9 +141,5 @@ impl AgentSession for ClaudeCodeSession {
         // Claude Code sessions don't need explicit cleanup (atomic execution).
         //
         common::log_info!("ClaudeCodeSession: Session closed");
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }

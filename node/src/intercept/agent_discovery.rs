@@ -100,12 +100,6 @@ impl AgentDiscoveryManager {
         self.intercept_domain_tx = None;
     }
 
-    /// Check if a domain is pending interception (waiting for API key)
-    pub async fn is_pending_intercept(&self, domain: &str) -> bool {
-        let pending = self.pending_intercept_domains.read().await;
-        pending.contains(domain)
-    }
-
     /// Check if agent discovery is enabled
     pub fn is_enabled(&self) -> bool {
         self.enabled

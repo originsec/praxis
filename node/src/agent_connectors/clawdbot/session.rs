@@ -6,7 +6,7 @@ use crate::agent_connectors::traits::{AgentMode, AgentSession};
 use anyhow::{anyhow, Result};
 use common::SessionContext;
 use serde::Deserialize;
-use std::any::Any;
+
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -187,9 +187,5 @@ impl AgentSession for ClawdbotSession {
         //
         // Note: We do NOT stop the gateway on session close per requirements.
         //
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }

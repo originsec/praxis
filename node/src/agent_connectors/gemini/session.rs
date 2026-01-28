@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use common::SessionContext;
 use once_cell::sync::OnceCell;
 use regex::Regex;
-use std::any::Any;
+
 use std::process::Stdio;
 use uuid::Uuid;
 
@@ -169,10 +169,6 @@ impl AgentSession for GeminiSession {
 
     fn close(&self) {
         self.delete_session();
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 

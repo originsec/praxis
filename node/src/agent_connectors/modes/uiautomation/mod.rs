@@ -7,10 +7,9 @@ mod adapter;
 
 pub use adapter::{UIAutomationAdapter, UIAutomationConfig};
 
-use crate::agent_connectors::traits::{AgentInfo, AgentMode, AgentSession};
+use crate::agent_connectors::traits::{AgentMode, AgentSession};
 use crate::utils;
 use anyhow::Result;
-use std::any::Any;
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -76,6 +75,11 @@ impl<A: UIAutomationAdapter> GenericUIAutomationSession<A> {
             process_path,
         }
     }
+
+    /// Get the running process ID (if available).
+    pub fn running_pid(&self) -> Option<String> {
+        self.process_id.map(|pid| pid.to_string())
+    }
 }
 
 impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSession<A> {
@@ -85,10 +89,6 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
 
     fn process_path(&self) -> Option<String> {
         self.process_path.clone()
-    }
-
-    fn running_pid(&self) -> Option<String> {
-        self.process_id.map(|pid| pid.to_string())
     }
 
     fn mode(&self) -> AgentMode {
@@ -188,10 +188,6 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
         if let Some(pid) = self.process_id {
             utils::terminate_process(pid);
         }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 

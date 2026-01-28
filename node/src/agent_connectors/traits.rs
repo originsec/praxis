@@ -1,7 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use common::{ReconResult, SessionContext};
-use std::any::Any;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -10,6 +9,7 @@ use uuid::Uuid;
 //
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Used on Windows (m365copilot), appears unused on Linux
 pub enum AgentMode {
     UIAutomation,
     DevTools,
@@ -30,11 +30,10 @@ pub trait AgentSession: Send + Sync {
         None
     }
 
+    #[allow(dead_code)] // Used on Windows (m365copilot), appears unused on Linux
     fn mode(&self) -> AgentMode;
     fn transact(&self, prompt: &str) -> Result<String>;
     fn close(&self);
-
-    fn as_any(&self) -> &dyn Any;   // For downcasting to concrete session types.
 }
 
 //

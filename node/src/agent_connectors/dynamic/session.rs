@@ -6,7 +6,7 @@ use crate::agent_connectors::traits::{AgentMode, AgentSession};
 use anyhow::Result;
 use common::ai::providers::OpenAIClient;
 use common::ai::types::{ChatCompletionRequest, ChatCompletionResponse, Message};
-use std::any::Any;
+
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -127,9 +127,5 @@ impl AgentSession for DynamicAgentSession {
         let mut history = self.history.lock().unwrap();
         history.clear();
         common::log_debug!("Dynamic agent session {} closed", self.session_id);
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }

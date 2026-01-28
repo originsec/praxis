@@ -18,9 +18,8 @@ use crate::utils;
 use crate::utils::semantic_parser::{
     self, build_internal_tools_prompt, parse_internal_tools_from_json, INTERNAL_TOOLS_SCHEMA,
 };
-use anyhow::Result;
 use async_trait::async_trait;
-use common::{AgentTool, ReconTools};
+use common::{AgentTool, ReconTools, SessionContext};
 use once_cell::sync::OnceCell;
 use std::sync::{Arc, RwLock};
 

@@ -7,13 +7,12 @@ mod adapter;
 
 pub use adapter::{use_hidden_desktop, DevToolsAdapter, DevToolsConfig};
 
-use crate::agent_connectors::traits::{AgentInfo, AgentMode, AgentSession};
+use crate::agent_connectors::traits::{AgentMode, AgentSession};
 use crate::utils;
 use anyhow::{anyhow, Result};
 use chromiumoxide::browser::Browser;
 use chromiumoxide::page::Page;
 use futures::StreamExt;
-use std::any::Any;
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -359,10 +358,6 @@ impl<A: DevToolsAdapter + 'static> AgentSession for GenericDevToolsSession<A> {
         self.process_path.clone()
     }
 
-    fn running_pid(&self) -> Option<String> {
-        self.process_id.map(|pid| pid.to_string())
-    }
-
     fn mode(&self) -> AgentMode {
         AgentMode::DevTools
     }
@@ -385,13 +380,14 @@ impl<A: DevToolsAdapter + 'static> AgentSession for GenericDevToolsSession<A> {
             let _ = self.hidden_desktop.lock().unwrap().take();
         }
     }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
+    /// Get the running process ID (if available).
+    pub fn running_pid(&self) -> Option<String> {
+        self.process_id.map(|pid| pid.to_string())
+    }
+
     /// Execute JavaScript on the page and return the result as JSON.
     pub fn execute_js(&self, js: &str) -> Result<serde_json::Value> {
         let page_guard = self.page.lock().unwrap();
