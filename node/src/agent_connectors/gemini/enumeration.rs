@@ -181,6 +181,41 @@ fn collect_environment_variables() -> Option<ConfigItem> {
     })
 }
 
+//
+// Get the system prompt override path from GEMINI_SYSTEM_MD environment variable.
+// Supports:
+// - true/1: Use project default path ./.gemini/system.md
+// - false/0 or unset: Return None (use built-in prompt)
+// - Any other string: Treat as a path (relative/absolute, ~ expands)
+//
+
+fn get_system_prompt_path() -> Option<PathBuf> {
+    if let Ok(env_value) = std::env::var("GEMINI_SYSTEM_MD") {
+        match env_value.as_str() {
+            "false" | "0" | "" => None,
+            "true" | "1" => Some(PathBuf::from("./.gemini/system.md")),
+            path => {
+                //
+                // Expand ~ if present.
+                //
+
+                let expanded = if path.starts_with("~/") {
+                    if let Some(home) = dirs::home_dir() {
+                        home.join(&path[2..])
+                    } else {
+                        PathBuf::from(path)
+                    }
+                } else {
+                    PathBuf::from(path)
+                };
+                Some(expanded)
+            }
+        }
+    } else {
+        None
+    }
+}
+
 pub fn enumerate() -> anyhow::Result<EnumerationData> {
     common::log_info!("Enumerating Gemini configurations across all users");
 
@@ -424,6 +459,21 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
 
     if let Some(env_config) = collect_environment_variables() {
         config_items.push(env_config);
+    }
+
+    //
+    // Collect system prompt override if configured via GEMINI_SYSTEM_MD.
+    //
+
+    if let Some(system_prompt_path) = get_system_prompt_path() {
+        if let Ok(contents) = fs::read_to_string(&system_prompt_path) {
+            config_items.push(ConfigItem {
+                path: system_prompt_path.to_string_lossy().to_string(),
+                contents,
+                config_type: "system_prompt_override".to_string(),
+            });
+            common::log_debug!("Found system prompt override: {}", system_prompt_path.display());
+        }
     }
 
     let mut project_paths: Vec<String> = project_paths_set.into_iter().collect();
