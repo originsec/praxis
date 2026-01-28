@@ -7,8 +7,6 @@ use std::fs;
 use std::path::PathBuf;
 #[cfg(target_os = "windows")]
 use std::sync::Arc;
-#[cfg(target_os = "windows")]
-#[cfg(not(target_os = "windows"))]
 
 /// Embedded wintun.dll for AMD64 Windows
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
