@@ -19,11 +19,6 @@ impl AgentRegistry {
         let mut registry = Self::new();
 
         for agent in factory.create_all_agents() {
-            common::log_debug!(
-                "Registered agent '{}' ({})",
-                agent.name(),
-                agent.short_name()
-            );
             registry.register(agent);
         }
 
@@ -52,11 +47,7 @@ impl AgentRegistry {
     pub fn unregister(&mut self, short_name: &str) -> bool {
         let len_before = self.agents.len();
         self.agents.retain(|a| a.short_name() != short_name);
-        let removed = self.agents.len() < len_before;
-        if removed {
-            common::log_debug!("Unregistered agent '{}'", short_name);
-        }
-        removed
+        self.agents.len() < len_before
     }
 }
 

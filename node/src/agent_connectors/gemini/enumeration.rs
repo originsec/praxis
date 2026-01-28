@@ -1,143 +1,364 @@
-use crate::agent_connectors::utils::SKIP_DIRS;
+use crate::agent_connectors::utils::{enumerate_user_homes, scan_directories_for_config_files};
 use common::ConfigItem;
+use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
-use walkdir::WalkDir;
+use std::path::PathBuf;
 
-/// Result of enumeration containing configs and project paths.
+const MAX_SCAN_DEPTH: usize = 7;    // Maximum directory depth to scan for config files
+
 pub struct EnumerationData {
     pub config_items: Vec<ConfigItem>,
     pub project_paths: Vec<String>,
 }
 
-/// Enumerate Gemini configurations.
-pub fn enumerate() -> anyhow::Result<EnumerationData> {
-    common::log_info!("Enumerating Gemini configurations");
+//
+// Get the system defaults file path.
+// Can be overridden with GEMINI_CLI_SYSTEM_DEFAULTS_PATH environment variable.
+//
 
-    let home = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?;
+fn get_system_defaults_path() -> Option<PathBuf> {
+    //
+    // Check environment variable first.
+    //
+
+    if let Ok(env_path) = std::env::var("GEMINI_CLI_SYSTEM_DEFAULTS_PATH") {
+        return Some(PathBuf::from(env_path));
+    }
+
+    //
+    // Platform-specific defaults.
+    //
+
+    #[cfg(target_os = "linux")]
+    {
+        Some(PathBuf::from("/etc/gemini-cli/system-defaults.json"))
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        Some(PathBuf::from(
+            "C:\\ProgramData\\gemini-cli\\system-defaults.json",
+        ))
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        None
+    }
+}
+
+//
+// Get the system settings file path (overrides).
+// Can be overridden with GEMINI_CLI_SYSTEM_SETTINGS_PATH environment variable.
+//
+
+fn get_system_settings_path() -> Option<PathBuf> {
+    //
+    // Check environment variable first.
+    //
+
+    if let Ok(env_path) = std::env::var("GEMINI_CLI_SYSTEM_SETTINGS_PATH") {
+        return Some(PathBuf::from(env_path));
+    }
+
+    //
+    // Platform-specific defaults.
+    //
+
+    #[cfg(target_os = "linux")]
+    {
+        Some(PathBuf::from("/etc/gemini-cli/settings.json"))
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        Some(PathBuf::from("C:\\ProgramData\\gemini-cli\\settings.json"))
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        None
+    }
+}
+
+//
+// Extract context file names from a settings JSON file.
+// Looks for context.fileName which can be a string or array of strings.
+//
+
+fn extract_context_filenames(json_str: &str) -> Vec<String> {
+    let mut filenames = Vec::new();
+
+    if let Ok(json) = serde_json::from_str::<Value>(json_str) {
+        if let Some(context) = json.get("context") {
+            if let Some(file_name) = context.get("fileName") {
+                match file_name {
+                    //
+                    // Single string.
+                    //
+
+                    Value::String(s) => {
+                        filenames.push(s.clone());
+                    }
+
+                    //
+                    // Array of strings.
+                    //
+
+                    Value::Array(arr) => {
+                        for item in arr {
+                            if let Some(s) = item.as_str() {
+                                filenames.push(s.to_string());
+                            }
+                        }
+                    }
+
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    filenames
+}
+
+pub fn enumerate() -> anyhow::Result<EnumerationData> {
+    common::log_info!("Enumerating Gemini configurations across all users");
 
     let mut config_items = Vec::new();
     let mut project_paths_set = HashSet::new();
 
     //
-    // Global configuration file (~/.gemini/settings.json).
+    // Get system defaults (lowest precedence).
     //
 
-    let global_settings = home.join(".gemini").join("settings.json");
-    if let Ok(contents) = fs::read_to_string(&global_settings) {
-        config_items.push(ConfigItem {
-            path: global_settings.to_string_lossy().to_string(),
-            contents,
-            config_type: "global_settings".to_string(),
-        });
+    if let Some(system_defaults_path) = get_system_defaults_path() {
+        if let Ok(contents) = fs::read_to_string(&system_defaults_path) {
+            config_items.push(ConfigItem {
+                path: system_defaults_path.to_string_lossy().to_string(),
+                contents,
+                config_type: "system_defaults".to_string(),
+            });
+            common::log_debug!("Found system defaults: {}", system_defaults_path.display());
+        }
     }
 
     //
-    // Use walkdir to scan from HOME for .gemini directories or gemini.json files.
+    // Collect user settings from all user homes.
     //
 
-    common::log_info!("Scanning for Gemini project configs from home directory...");
+    let user_homes = enumerate_user_homes();
+    let user_homes_set: HashSet<&std::path::Path> = user_homes
+        .iter()
+        .map(|p| p.as_path())
+        .collect();
 
-    let walker = WalkDir::new(&home)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|e| {
-            let name = e.file_name().to_string_lossy();
-
-            //
-            // Skip hidden directories (except .gemini which we're looking for)
-            // and skip known non-project directories.
-            //
-
-            if name.starts_with('.') && name != ".gemini" {
-                return false;
-            }
-            !SKIP_DIRS.contains(&name.as_ref())
-        });
-
-    for entry in walker.filter_map(|e| e.ok()) {
-        let path = entry.path();
+    for home in &user_homes {
+        let gemini_dir = home.join(".gemini");
 
         //
-        // We're looking for .gemini directories.
+        // Collect settings.json.
         //
 
-        if path.is_dir() && path.file_name().map_or(false, |n| n == ".gemini") {
-            //
-            // The project path is the parent of .gemini.
-            //
-
-            if let Some(project_dir) = path.parent() {
-                let project_path = project_dir.to_string_lossy().to_string();
-
-                //
-                // Skip the global ~/.gemini directory.
-                //
-
-                if project_dir == home {
-                    continue;
-                }
-
-                //
-                // Collect project-level config.
-                //
-
-                let settings_file = path.join("settings.json");
-                if let Ok(contents) = fs::read_to_string(&settings_file) {
-                    config_items.push(ConfigItem {
-                        path: settings_file.to_string_lossy().to_string(),
-                        contents,
-                        config_type: format!("project_settings:{}", project_path),
-                    });
-                    project_paths_set.insert(project_path);
-                }
-            }
+        let global_settings = gemini_dir.join("settings.json");
+        if let Ok(contents) = fs::read_to_string(&global_settings) {
+            config_items.push(ConfigItem {
+                path: global_settings.to_string_lossy().to_string(),
+                contents,
+                config_type: "user_settings".to_string(),
+            });
         }
 
         //
-        // Also check for standalone gemini.json without .gemini dir.
+        // Collect google_accounts.json.
         //
 
-        if path.is_file() {
-            if let Some(file_name) = path.file_name() {
-                if file_name == "gemini.json" {
-                    if let Some(parent) = path.parent() {
+        let google_accounts = gemini_dir.join("google_accounts.json");
+        if let Ok(contents) = fs::read_to_string(&google_accounts) {
+            config_items.push(ConfigItem {
+                path: google_accounts.to_string_lossy().to_string(),
+                contents,
+                config_type: "user_google_accounts".to_string(),
+            });
+        }
+
+        //
+        // Collect oauth_creds.json.
+        //
+
+        let oauth_creds = gemini_dir.join("oauth_creds.json");
+        if let Ok(contents) = fs::read_to_string(&oauth_creds) {
+            config_items.push(ConfigItem {
+                path: oauth_creds.to_string_lossy().to_string(),
+                contents,
+                config_type: "user_oauth_creds".to_string(),
+            });
+        }
+    }
+
+    //
+    // Scan for project-level settings.json files in .gemini directories.
+    //
+
+    let settings_configs = scan_directories_for_config_files(
+        &user_homes,
+        "settings.json",
+        |path| {
+            //
+            // Check if this settings.json is inside a .gemini directory.
+            //
+
+            if let Some(parent) = path.parent() {
+                if parent.file_name().map_or(false, |n| n == ".gemini") {
+                    if let Some(project_dir) = parent.parent() {
                         //
-                        // Skip if there's already a .gemini directory here.
+                        // Skip ~/.gemini directories.
                         //
 
-                        if parent.join(".gemini").exists() {
-                            continue;
-                        }
-
-                        let project_path = parent.to_string_lossy().to_string();
-
-                        //
-                        // Skip home directory.
-                        //
-
-                        if parent == home {
-                            continue;
-                        }
-
-                        if let Ok(contents) = fs::read_to_string(path) {
-                            config_items.push(ConfigItem {
-                                path: path.to_string_lossy().to_string(),
-                                contents,
-                                config_type: format!("project_mcp:{}", project_path),
-                            });
-                            project_paths_set.insert(project_path);
+                        if !user_homes_set.contains(project_dir) {
+                            let project_path = project_dir.to_string_lossy().to_string();
+                            project_paths_set.insert(project_path.clone());
+                            return format!("project_settings:{}", project_path);
                         }
                     }
                 }
             }
+            String::new()
+        },
+        MAX_SCAN_DEPTH,
+    );
+
+    config_items.extend(settings_configs.into_iter().filter(|item| !item.config_type.is_empty()));
+
+    //
+    // Discover context file names from all settings files.
+    //
+
+    let mut context_filenames_set = HashSet::new();
+
+    //
+    // Always include GEMINI.md as default.
+    //
+
+    context_filenames_set.insert("GEMINI.md".to_string());
+
+    //
+    // Extract from system defaults.
+    //
+
+    if let Some(system_defaults_path) = get_system_defaults_path() {
+        if let Ok(contents) = fs::read_to_string(&system_defaults_path) {
+            for filename in extract_context_filenames(&contents) {
+                context_filenames_set.insert(filename);
+            }
         }
     }
 
     //
-    // Convert project_paths to sorted vec.
+    // Extract from user settings.
     //
+
+    for home in &user_homes {
+        let global_settings = home.join(".gemini").join("settings.json");
+        if let Ok(contents) = fs::read_to_string(&global_settings) {
+            for filename in extract_context_filenames(&contents) {
+                context_filenames_set.insert(filename);
+            }
+        }
+    }
+
+    //
+    // Extract from project settings.
+    //
+
+    for item in &config_items {
+        if item.config_type.starts_with("project_settings:") {
+            for filename in extract_context_filenames(&item.contents) {
+                context_filenames_set.insert(filename);
+            }
+        }
+    }
+
+    //
+    // Extract from system settings.
+    //
+
+    if let Some(system_settings_path) = get_system_settings_path() {
+        if let Ok(contents) = fs::read_to_string(&system_settings_path) {
+            for filename in extract_context_filenames(&contents) {
+                context_filenames_set.insert(filename);
+            }
+        }
+    }
+
+    common::log_info!("Scanning for {} context file names", context_filenames_set.len());
+
+    //
+    // Collect global context files from user homes.
+    //
+
+    for home in &user_homes {
+        let gemini_dir = home.join(".gemini");
+        for filename in &context_filenames_set {
+            let context_path = gemini_dir.join(filename);
+            if let Ok(contents) = fs::read_to_string(&context_path) {
+                config_items.push(ConfigItem {
+                    path: context_path.to_string_lossy().to_string(),
+                    contents,
+                    config_type: "user_context".to_string(),
+                });
+            }
+        }
+    }
+
+    //
+    // Scan for project-level context files.
+    //
+
+    for filename in context_filenames_set {
+        let context_configs = scan_directories_for_config_files(
+            &user_homes,
+            &filename,
+            |path| {
+                if let Some(parent) = path.parent() {
+                    //
+                    // Skip home directories and .gemini directories.
+                    //
+
+                    if user_homes_set.contains(parent) {
+                        return String::new();
+                    }
+
+                    if parent.file_name().map_or(false, |n| n == ".gemini") {
+                        return String::new();
+                    }
+
+                    let project_path = parent.to_string_lossy().to_string();
+                    project_paths_set.insert(project_path.clone());
+                    return format!("project_context:{}", project_path);
+                }
+                String::new()
+            },
+            MAX_SCAN_DEPTH,
+        );
+
+        config_items.extend(context_configs.into_iter().filter(|item| !item.config_type.is_empty()));
+    }
+
+    //
+    // Find system settings.
+    //
+
+    if let Some(system_settings_path) = get_system_settings_path() {
+        if let Ok(contents) = fs::read_to_string(&system_settings_path) {
+            config_items.push(ConfigItem {
+                path: system_settings_path.to_string_lossy().to_string(),
+                contents,
+                config_type: "system_settings".to_string(),
+            });
+        }
+    }
 
     let mut project_paths: Vec<String> = project_paths_set.into_iter().collect();
     project_paths.sort();
@@ -153,3 +374,4 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
         project_paths,
     })
 }
+

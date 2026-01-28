@@ -1,4 +1,6 @@
 use anyhow::{anyhow, Result};
+use std::fs;
+use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
 //
@@ -67,6 +69,135 @@ pub const SKIP_DIRS: &[&str] = &[
     "temp",
     ".tmp",
 ];
+
+//
+// Enumerate all user home directories on the system.
+// Returns a list of home directories that can be accessed.
+//
+// - Windows: Enumerates C:\Users\*
+// - Linux/Unix: Enumerates /home/* and /root
+// - Always includes current user's home as fallback
+//
+pub fn enumerate_user_homes() -> Vec<PathBuf> {
+    let mut homes = Vec::new();
+
+    #[cfg(target_os = "windows")]
+    {
+        //
+        // On Windows, enumerate C:\Users\*
+        //
+        if let Ok(entries) = fs::read_dir("C:\\Users") {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if path.is_dir() {
+                    homes.push(path);
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        //
+        // On Linux/Unix, enumerate /home/* and /root.
+        //
+        if let Ok(entries) = fs::read_dir("/home") {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if path.is_dir() {
+                    homes.push(path);
+                }
+            }
+        }
+
+        //
+        // Add /root if it exists.
+        //
+        let root_path = PathBuf::from("/root");
+        if root_path.is_dir() {
+            homes.push(root_path);
+        }
+    }
+
+    //
+    // Always include current user's home directory as fallback.
+    //
+    if let Some(current_home) = dirs::home_dir() {
+        if !homes.contains(&current_home) {
+            homes.push(current_home);
+        }
+    }
+
+    common::log_info!("Found {} user home directories to scan", homes.len());
+    homes
+}
+
+//
+// Scan multiple base directories for config files matching specific patterns.
+// For each file pattern, provide a filename and a function to generate the config_type.
+//
+// The config_type function receives the full path to the found file, allowing
+// dynamic config types based on file location (e.g., "project_settings:{path}").
+// Uses FnMut to allow the closure to mutate captured state (e.g., collecting project paths).
+//
+pub fn scan_directories_for_config_files<F>(
+    base_dirs: &[PathBuf],
+    filename: &str,
+    mut config_type_fn: F,
+    max_depth: usize,
+) -> Vec<common::ConfigItem>
+where
+    F: FnMut(&PathBuf) -> String,
+{
+    use walkdir::WalkDir;
+
+    let mut config_items = Vec::new();
+
+    for base_dir in base_dirs {
+        let walker = WalkDir::new(base_dir)
+            .follow_links(false)
+            .max_depth(max_depth)
+            .into_iter()
+            .filter_entry(|e| {
+                let name = e.file_name().to_string_lossy();
+
+                //
+                // Skip hidden directories and known non-project directories.
+                //
+                if name.starts_with('.') && name != filename {
+                    return false;
+                }
+                !SKIP_DIRS.contains(&name.as_ref())
+            });
+
+        for entry in walker.filter_map(|e| e.ok()) {
+            let path = entry.path();
+
+            //
+            // Check if this is the file we're looking for.
+            //
+            if path.is_file() {
+                if let Some(file_name) = path.file_name() {
+                    if file_name == filename {
+                        //
+                        // Read the file and create a ConfigItem.
+                        //
+                        if let Ok(contents) = fs::read_to_string(path) {
+                            let config_type = config_type_fn(&path.to_path_buf());
+                            config_items.push(common::ConfigItem {
+                                path: path.to_string_lossy().to_string(),
+                                contents,
+                                config_type,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    config_items
+}
 
 //
 // Expand environment variables in a path template.

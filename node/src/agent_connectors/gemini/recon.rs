@@ -19,8 +19,8 @@ impl AgentRecon for GeminiAgent {
 
         //
         // Get enumeration data (configs, project_paths) first.
-        // We need config_items to parse MCP servers from them.
         //
+
         let (config, project_paths) = match super::enumeration::enumerate() {
             Ok(data) => {
                 let config = ReconConfig {
@@ -36,21 +36,10 @@ impl AgentRecon for GeminiAgent {
 
         let mut tools = ReconTools::default();
 
-        //
-        // MCP servers - parse from config files with context paths.
-        //
         tools.mcp_servers = self.discover_mcp_servers_from_configs(&config.items).await;
-
-        //
-        // Skills - static discovery (returns empty for Gemini).
-        //
         tools.skills = self.discover_skills();
 
-        //
-        // Internal tools - only with semantic recon.
-        //
         if is_semantic {
-            common::log_info!("GeminiAgent: Including internal tools in semantic recon");
             tools.internal_tools = self.discover_internal_tools_semantically().await;
         }
 
@@ -74,25 +63,25 @@ impl AgentRecon for GeminiAgent {
 }
 
 impl GeminiAgent {
-    //
-    // Parse MCP servers from config files and fetch their tools.
-    //
     async fn discover_mcp_servers_from_configs(&self, config_items: &[ConfigItem]) -> Vec<McpServer> {
         let mut servers = Vec::new();
 
         for item in config_items {
             match item.config_type.as_str() {
                 //
-                // Global settings file (~/.gemini/settings.json).
-                // Format: { "mcpServers": { ... } }
+                // System defaults, user settings, global settings, and system settings.
+                // All have the same format: { "mcpServers": { ... } }
+                // No context path (global scope).
                 //
-                "global_settings" => {
-                    if let Ok(json) = serde_json::from_str::<Value>(&item.contents) {
-                        if let Some(mcp_servers) = json.get("mcpServers") {
-                            let parsed = self.parse_mcp_servers_object(mcp_servers, None);
-                            servers.extend(parsed);
-                        }
-                    }
+
+                "system_defaults" | "user_settings" | "global_settings" | "system_settings" => {
+                    serde_json::from_str::<Value>(&item.contents)
+                        .ok()
+                        .and_then(|json| {
+                            json.get("mcpServers")
+                                .map(|mcp_servers| self.parse_mcp_servers_object(mcp_servers, None))
+                        })
+                        .map(|parsed| servers.extend(parsed));
                 }
 
                 //
@@ -100,43 +89,18 @@ impl GeminiAgent {
                 // Format: { "mcpServers": { ... } }
                 // config_type is "project_settings:/path/to/project"
                 //
-                config_type if config_type.starts_with("project_settings:") => {
-                    let context_path = config_type.strip_prefix("project_settings:").map(String::from);
-                    if let Ok(json) = serde_json::from_str::<Value>(&item.contents) {
-                        if let Some(mcp_servers) = json.get("mcpServers") {
-                            let parsed = self.parse_mcp_servers_object(mcp_servers, context_path);
-                            servers.extend(parsed);
-                        }
-                    }
-                }
 
-                //
-                // Project MCP files (gemini.json).
-                // Format: { "mcpServers": { ... } } or { "server-name": { ... } }
-                // config_type is "project_mcp:/path/to/project"
-                //
-                config_type if config_type.starts_with("project_mcp:") => {
-                    let context_path = config_type.strip_prefix("project_mcp:").map(String::from);
-                    if let Ok(json) = serde_json::from_str::<Value>(&item.contents) {
-                        //
-                        // Check for mcpServers key first.
-                        //
-                        if let Some(mcp_servers) = json.get("mcpServers") {
-                            let parsed = self.parse_mcp_servers_object(mcp_servers, context_path);
-                            servers.extend(parsed);
-                        } else if let Some(obj) = json.as_object() {
-                            //
-                            // Otherwise, assume servers at root level.
-                            //
-                            for (name, server_config) in obj {
-                                if let Some(server) =
-                                    self.parse_single_mcp_server(name, server_config, context_path.clone())
-                                {
-                                    servers.push(server);
-                                }
-                            }
-                        }
-                    }
+                config_type if config_type.starts_with("project_settings:") => {
+                    serde_json::from_str::<Value>(&item.contents)
+                        .ok()
+                        .and_then(|json| {
+                            json.get("mcpServers")
+                                .map(|mcp_servers| self.parse_mcp_servers_object(
+                                    mcp_servers,
+                                    config_type.strip_prefix("project_settings:").map(String::from)
+                                ))
+                        })
+                        .map(|parsed| servers.extend(parsed));
                 }
 
                 _ => {}
