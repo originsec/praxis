@@ -2,16 +2,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use common::{ReconResult, SessionContext};
 use std::any::Any;
-use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[allow(dead_code)]
-pub enum AgentInfo {
-    UserIdentity,
-    AvailableTools,
-}
 
 //
 // Mode of interaction for an agent session.
@@ -40,9 +32,6 @@ pub trait AgentSession: Send + Sync {
 
     fn mode(&self) -> AgentMode;
     fn transact(&self, prompt: &str) -> Result<String>;
-    fn get_info(&self) -> Option<HashMap<AgentInfo, String>> {
-        None
-    }
     fn close(&self);
 
     fn as_any(&self) -> &dyn Any;   // For downcasting to concrete session types.
@@ -75,6 +64,11 @@ pub trait AgentRecon: Send + Sync {
 
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult>;
 }
+
+//
+// Main trait for agent connectors.
+// Implement this trait to create a new agent connector.
+//
 
 #[async_trait]
 pub trait Agent: Send + Sync {

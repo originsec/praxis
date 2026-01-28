@@ -11,18 +11,15 @@ impl AgentRegistry {
         Self { agents: Vec::new() }
     }
 
-    /// Load agents from the factory.
-    ///
-    /// # Arguments
-    /// * `factory` - The agent factory to use for creating agents
-    ///
-    /// # Returns
-    /// A new AgentRegistry populated with agents
+    //
+    // Load agents from the factory.
+    //
+
     pub fn load_from_factory(factory: &AgentFactory) -> Self {
         let mut registry = Self::new();
 
         for agent in factory.create_all_agents() {
-            common::log_info!(
+            common::log_debug!(
                 "Registered agent '{}' ({})",
                 agent.name(),
                 agent.short_name()
@@ -45,7 +42,6 @@ impl AgentRegistry {
         self.agents.clone()
     }
 
-    /// Find an agent by short name
     pub fn find_by_short_name(&self, short_name: &str) -> Option<Arc<dyn Agent>> {
         self.agents
             .iter()
@@ -53,14 +49,12 @@ impl AgentRegistry {
             .cloned()
     }
 
-    /// Unregister an agent by short name.
-    /// Returns true if the agent was found and removed.
     pub fn unregister(&mut self, short_name: &str) -> bool {
         let len_before = self.agents.len();
         self.agents.retain(|a| a.short_name() != short_name);
         let removed = self.agents.len() < len_before;
         if removed {
-            common::log_info!("Unregistered agent '{}'", short_name);
+            common::log_debug!("Unregistered agent '{}'", short_name);
         }
         removed
     }

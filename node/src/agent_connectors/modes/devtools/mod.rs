@@ -14,7 +14,6 @@ use chromiumoxide::browser::Browser;
 use chromiumoxide::page::Page;
 use futures::StreamExt;
 use std::any::Any;
-use std::collections::HashMap;
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -385,20 +384,6 @@ impl<A: DevToolsAdapter + 'static> AgentSession for GenericDevToolsSession<A> {
         {
             let _ = self.hidden_desktop.lock().unwrap().take();
         }
-    }
-
-    fn get_info(&self) -> Option<HashMap<AgentInfo, String>> {
-        let prompt = self.adapter.info_prompt()?;
-
-        let response = match self.transact(prompt) {
-            Ok(r) => r,
-            Err(_) => return None,
-        };
-
-        let mut info = HashMap::new();
-        info.insert(AgentInfo::AvailableTools, response);
-
-        Some(info)
     }
 
     fn as_any(&self) -> &dyn Any {

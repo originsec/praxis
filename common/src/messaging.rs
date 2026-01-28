@@ -443,8 +443,6 @@ pub enum SessionCommand {
         #[serde(default)]
         context: SessionContext,
     },
-    /// Get information about the current session
-    Info,
     /// Close the current session
     Close,
     /// Send a prompt to the session and get a response
@@ -563,7 +561,6 @@ pub enum AgentCommandResult {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum SessionCommandResult {
     Created { session_id: String },
-    Info { data: HashMap<String, String> },
     Closed,
     /// Response to a prompt, includes transaction_id for matching
     PromptResponse { transaction_id: TransactionId, response: String },

@@ -11,7 +11,6 @@ use crate::agent_connectors::traits::{AgentInfo, AgentMode, AgentSession};
 use crate::utils;
 use anyhow::Result;
 use std::any::Any;
-use std::collections::HashMap;
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -189,20 +188,6 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
         if let Some(pid) = self.process_id {
             utils::terminate_process(pid);
         }
-    }
-
-    fn get_info(&self) -> Option<HashMap<AgentInfo, String>> {
-        let prompt = self.adapter.info_prompt()?;
-
-        let response = match self.transact(prompt) {
-            Ok(r) => r,
-            Err(_) => return None,
-        };
-
-        let mut info = HashMap::new();
-        info.insert(AgentInfo::AvailableTools, response);
-
-        Some(info)
     }
 
     fn as_any(&self) -> &dyn Any {

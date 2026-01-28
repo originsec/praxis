@@ -123,7 +123,6 @@ export type AgentCommand =
 
 export type SessionCommand =
   | { Create: { context: SessionContext } }
-  | 'Info'
   | 'Close'
   | { Prompt: { text: string; transaction_id: string } }
   | { CancelTransaction: { transaction_id: string } };
@@ -172,7 +171,6 @@ export type AgentCommandResult =
 
 export type SessionCommandResult =
   | { Created: { session_id: string } }
-  | { Info: { data: Record<string, string> } }
   | 'Closed'
   | { PromptResponse: { transaction_id: string; response: string } }
   | { TransactionCancelled: { transaction_id: string } };

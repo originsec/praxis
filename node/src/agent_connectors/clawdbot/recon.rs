@@ -218,7 +218,7 @@ impl ClawdbotAgent {
         //
         // Use shared recon function to discover internal tools.
         //
-        crate::agent_connectors::recon::discover_internal_tools_semantically(
+        crate::agent_connectors::utils::discover_internal_tools_semantically(
             "ClawdbotAgent",
             || {
                 let temp_context = SessionContext::default();

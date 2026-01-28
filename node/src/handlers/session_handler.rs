@@ -74,22 +74,6 @@ pub async fn handle_session_command(
                 }
             }
         }
-        SessionCommand::Info => match agent.get_session() {
-            Some(session) => {
-                let info = session.get_info();
-                let data: HashMap<String, String> = info
-                    .map(|m| {
-                        m.into_iter()
-                            .map(|(k, v)| (format!("{:?}", k), v))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                NodeCommandResult::Session(SessionCommandResult::Info { data })
-            }
-            None => NodeCommandResult::Error {
-                message: "No active session".to_string(),
-            },
-        },
         SessionCommand::Close => {
             if agent.has_session() {
                 agent.close_session();

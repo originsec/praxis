@@ -35,10 +35,9 @@ impl AgentFactory {
         //
         // Dummy agent - for testing (disabled by default).
         //
-        // common::log_info!("AgentFactory: Creating DummyAgent");
         // agents.push(Arc::new(DummyAgent::new()));
+        //
 
-        common::log_info!("AgentFactory: Created {} agents", agents.len());
         agents
     }
 }
