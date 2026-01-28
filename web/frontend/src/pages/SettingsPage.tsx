@@ -147,9 +147,9 @@ export function SettingsPage() {
   const semanticOpFileInputRef = useRef<HTMLInputElement>(null);
 
   //
-  // Selected feature in feature selection tab.
+  // Selected feature in feature configuration tab.
   //
-  const [selectedFeature, setSelectedFeature] = useState<FeatureId>('nexus');
+  const [selectedFeature, setSelectedFeature] = useState<FeatureId>('semanticOps');
 
   //
   // Node downloads state.
@@ -509,7 +509,7 @@ export function SettingsPage() {
               <div className="flex gap-2 border-b border-subtle">
                 {[
                   { id: 'model_definitions' as LLMTab, label: 'Model Definitions' },
-                  { id: 'feature_selection' as LLMTab, label: 'Feature Selection' },
+                  { id: 'feature_selection' as LLMTab, label: 'Feature Configuration' },
                 ].map((tab) => (
                   <button
                     key={tab.id}
@@ -787,7 +787,7 @@ export function SettingsPage() {
 
               {/*
               //
-              // Feature Selection Tab.
+              // Feature Configuration Tab.
               //
               */}
               {activeLLMTab === 'feature_selection' && (
@@ -931,7 +931,7 @@ export function SettingsPage() {
                           <div className="space-y-4">
                             <div>
                               <h4 className="font-semibold text-highlight">Semantic Operations</h4>
-                              <p className="text-xs text-muted">Default model for automated operation execution. Individual operations and chains can override this.</p>
+                              <p className="text-xs text-muted">Default model for ops</p>
                             </div>
 
                             <div className="space-y-4">
