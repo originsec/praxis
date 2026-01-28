@@ -123,6 +123,64 @@ fn extract_context_filenames(json_str: &str) -> Vec<String> {
     filenames
 }
 
+//
+// Collect Gemini-related environment variables.
+// Returns a ConfigItem with all discovered environment variables.
+//
+
+fn collect_environment_variables() -> Option<ConfigItem> {
+    //
+    // List of Gemini-related environment variables to collect.
+    //
+
+    const ENV_VARS: &[&str] = &[
+        "GEMINI_API_KEY",
+        "GEMINI_MODEL",
+        "GOOGLE_API_KEY",
+        "GOOGLE_CLOUD_PROJECT",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "OTLP_GOOGLE_CLOUD_PROJECT",
+        "GEMINI_TELEMETRY_ENABLED",
+        "GEMINI_TELEMETRY_TARGET",
+        "GEMINI_TELEMETRY_OTLP_ENDPOINT",
+        "GEMINI_TELEMETRY_OTLP_PROTOCOL",
+        "GEMINI_TELEMETRY_LOG_PROMPTS",
+        "GEMINI_TELEMETRY_OUTFILE",
+        "GEMINI_TELEMETRY_USE_COLLECTOR",
+        "GOOGLE_CLOUD_LOCATION",
+        "GEMINI_SANDBOX",
+        "GEMINI_SYSTEM_MD",
+        "GEMINI_WRITE_SYSTEM_MD",
+        "DEBUG",
+        "DEBUG_MODE",
+        "NO_COLOR",
+        "CLI_TITLE",
+        "CODE_ASSIST_ENDPOINT",
+    ];
+
+    let mut env_lines = Vec::new();
+
+    for var_name in ENV_VARS {
+        if let Ok(value) = std::env::var(var_name) {
+            env_lines.push(format!("{}={}", var_name, value));
+        }
+    }
+
+    //
+    // Only return a ConfigItem if we found at least one variable.
+    //
+
+    if env_lines.is_empty() {
+        return None;
+    }
+
+    Some(ConfigItem {
+        path: "environment:gemini".to_string(),
+        contents: env_lines.join("\n"),
+        config_type: "env_vars".to_string(),
+    })
+}
+
 pub fn enumerate() -> anyhow::Result<EnumerationData> {
     common::log_info!("Enumerating Gemini configurations across all users");
 
@@ -230,6 +288,20 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
     );
 
     config_items.extend(settings_configs.into_iter().filter(|item| !item.config_type.is_empty()));
+
+    //
+    // Find system settings.
+    //
+
+    if let Some(system_settings_path) = get_system_settings_path() {
+        if let Ok(contents) = fs::read_to_string(&system_settings_path) {
+            config_items.push(ConfigItem {
+                path: system_settings_path.to_string_lossy().to_string(),
+                contents,
+                config_type: "system_settings".to_string(),
+            });
+        }
+    }
 
     //
     // Discover context file names from all settings files.
@@ -347,17 +419,11 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
     }
 
     //
-    // Find system settings.
+    // Collect environment variables.
     //
 
-    if let Some(system_settings_path) = get_system_settings_path() {
-        if let Ok(contents) = fs::read_to_string(&system_settings_path) {
-            config_items.push(ConfigItem {
-                path: system_settings_path.to_string_lossy().to_string(),
-                contents,
-                config_type: "system_settings".to_string(),
-            });
-        }
+    if let Some(env_config) = collect_environment_variables() {
+        config_items.push(env_config);
     }
 
     let mut project_paths: Vec<String> = project_paths_set.into_iter().collect();
