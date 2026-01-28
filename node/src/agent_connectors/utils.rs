@@ -422,3 +422,118 @@ where
 
     Vec::new()
 }
+
+//
+// Extract metadata (user identities, API keys) from config files using the
+// semantic parser. Processes each config file individually and dedupes results.
+//
+
+pub async fn extract_metadata_from_configs(
+    agent_name: &str,
+    config_items: &[common::ConfigItem],
+) -> Option<common::ReconMetadata> {
+    if config_items.is_empty() {
+        return None;
+    }
+
+    common::log_info!(
+        "{}: Extracting metadata from {} config files",
+        agent_name,
+        config_items.len()
+    );
+
+    //
+    // Get the semantic parser client.
+    //
+
+    let semantic_client = match crate::utils::semantic_parser::get_client() {
+        Some(client) => client,
+        None => {
+            common::log_warn!(
+                "{}: Semantic parser client not available for metadata extraction",
+                agent_name
+            );
+            return None;
+        }
+    };
+
+    //
+    // Process each config file individually through the semantic parser.
+    //
+
+    let mut all_user_identities = Vec::new();
+    let mut all_api_keys = Vec::new();
+
+    for item in config_items {
+        //
+        // Format this single config file for parsing.
+        //
+
+        let config_content = format!("=== {} ({}) ===\n{}", item.path, item.config_type, item.contents);
+
+        //
+        // Send to semantic parser for metadata extraction.
+        //
+
+        let extraction_prompt = crate::utils::semantic_parser::build_metadata_extraction_prompt(&config_content);
+        match semantic_client
+            .parse(
+                extraction_prompt,
+                crate::utils::semantic_parser::METADATA_EXTRACTION_SCHEMA.to_string(),
+            )
+            .await
+        {
+            Ok(parser_response) => {
+                if parser_response.success {
+                    if let Some(json) = parser_response.json {
+                        if let Some(extracted) = crate::utils::semantic_parser::parse_metadata_from_json(&json) {
+                            all_user_identities.extend(extracted.user_identities);
+                            all_api_keys.extend(extracted.api_keys);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                common::log_debug!(
+                    "{}: Semantic parser request failed for {}: {}",
+                    agent_name,
+                    item.path,
+                    e
+                );
+            }
+        }
+    }
+
+    //
+    // Deduplicate results.
+    //
+
+    all_user_identities.sort();
+    all_user_identities.dedup();
+
+    all_api_keys.sort();
+    all_api_keys.dedup();
+
+    let has_identities = !all_user_identities.is_empty();
+    let has_keys = !all_api_keys.is_empty();
+
+    if has_identities || has_keys {
+        common::log_info!(
+            "{}: Extracted {} user identities, {} API keys",
+            agent_name,
+            all_user_identities.len(),
+            all_api_keys.len()
+        );
+
+        return Some(common::ReconMetadata {
+            user_identities: if has_identities {
+                Some(all_user_identities)
+            } else {
+                None
+            },
+            api_keys: if has_keys { Some(all_api_keys) } else { None },
+        });
+    }
+
+    None
+}

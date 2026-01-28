@@ -197,9 +197,16 @@ impl AgentRecon for GeminiAgent {
         tools.mcp_servers = discover_mcp_servers_from_configs(&config.items).await;
         tools.skills = discover_skills();
 
-        if is_semantic {
+        let metadata = if is_semantic {
             tools.internal_tools = self.discover_internal_tools_semantically().await;
-        }
+            crate::agent_connectors::utils::extract_metadata_from_configs(
+                "GeminiAgent",
+                &config.items,
+            )
+            .await
+        } else {
+            None
+        };
 
         common::log_info!(
             "GeminiAgent: Recon complete - {} MCP servers, {} skills, {} internal tools, {} config items, {} projects",
@@ -215,7 +222,7 @@ impl AgentRecon for GeminiAgent {
             config,
             sessions: Vec::new(),
             project_paths,
-            metadata: None,
+            metadata,
         })
     }
 }
