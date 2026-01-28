@@ -79,7 +79,7 @@ impl DevToolsAdapter for M365DevToolsAdapter {
             .to_string();
 
         common::log_debug!(
-            "M365 check_response: messages={}, initial={}, generating={}, response_len={}",
+            "check_response: messages={}, initial={}, generating={}, response_len={}",
             message_count, initial_count, is_generating, response_text.len()
         );
 
@@ -88,7 +88,7 @@ impl DevToolsAdapter for M365DevToolsAdapter {
         //
 
         if message_count <= initial_count {
-            common::log_debug!("M365 check_response: no new messages yet");
+            common::log_debug!("check_response: no new messages yet");
             return Ok(None);
         }
 
@@ -97,7 +97,7 @@ impl DevToolsAdapter for M365DevToolsAdapter {
         //
 
         if is_generating {
-            common::log_debug!("M365 check_response: still generating");
+            common::log_debug!("check_response: still generating");
             return Ok(None);
         }
 
@@ -106,16 +106,12 @@ impl DevToolsAdapter for M365DevToolsAdapter {
         //
 
         if !response_text.is_empty() {
-            common::log_debug!("M365 check_response: complete!");
+            common::log_debug!("check_response: complete!");
             return Ok(Some(response_text.trim().to_string()));
         }
 
-        common::log_debug!("M365 check_response: waiting for text content");
+        common::log_debug!("check_response: waiting for text content");
         Ok(None)
-    }
-
-    fn info_prompt(&self) -> Option<&str> {
-        Some(r#"Complete the following JSON. "myName" : "M365 Copilot", "myRole": "Assistant", "toolsAvailableForMyUse" : Once completed dont display the json, just display the tools only in a comma delimited list."#)
     }
 
     async fn wait_for_submit_ready(&self, page: &Page) -> anyhow::Result<()> {

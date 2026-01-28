@@ -5,10 +5,9 @@
 
 use crate::agent_connectors::modes::devtools::GenericDevToolsSession;
 use crate::agent_connectors::modes::uiautomation::GenericUIAutomationSession;
-use crate::agent_connectors::traits::{AgentInfo, AgentMode, AgentSession};
+use crate::agent_connectors::traits::{AgentMode, AgentSession};
 use anyhow::Result;
-use std::any::Any;
-use std::collections::HashMap;
+
 use uuid::Uuid;
 
 use super::devtools_adapter::M365DevToolsAdapter;
@@ -60,13 +59,6 @@ impl AgentSession for M365CopilotSession {
         }
     }
 
-    fn running_pid(&self) -> Option<String> {
-        match self {
-            M365CopilotSession::UIAutomation(s) => s.running_pid(),
-            M365CopilotSession::DevTools(s) => s.running_pid(),
-        }
-    }
-
     fn mode(&self) -> AgentMode {
         match self {
             M365CopilotSession::UIAutomation(s) => s.mode(),
@@ -81,21 +73,10 @@ impl AgentSession for M365CopilotSession {
         }
     }
 
-    fn get_info(&self) -> Option<HashMap<AgentInfo, String>> {
-        match self {
-            M365CopilotSession::UIAutomation(s) => s.get_info(),
-            M365CopilotSession::DevTools(s) => s.get_info(),
-        }
-    }
-
     fn close(&self) {
         match self {
             M365CopilotSession::UIAutomation(s) => s.close(),
             M365CopilotSession::DevTools(s) => s.close(),
         }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }

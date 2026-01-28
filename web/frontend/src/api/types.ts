@@ -24,9 +24,8 @@ export interface SelectedAgent {
   short_name: string;
   session_id: string | null;
   process_name: string | null;
-  running_pid: string | null;
   yolo_mode: boolean;
-  project_path: string | null;
+  working_dir: string | null;
 }
 
 //
@@ -101,7 +100,7 @@ export interface AgentSessionInfo {
 // Session Context for creating sessions with specific parameters.
 //
 export interface SessionContext {
-  project_path?: string;
+  working_dir?: string;
   yolo_mode?: boolean;
 }
 
@@ -120,12 +119,10 @@ export type AgentCommand =
   | 'Recon'
   | 'ReconSemantic'
   | { Select: { short_name: string } }
-  | { SetYolo: { enabled: boolean } }
   | { UpdateConfigFile: { path: string; contents: string } };
 
 export type SessionCommand =
   | { Create: { context: SessionContext } }
-  | 'Info'
   | 'Close'
   | { Prompt: { text: string; transaction_id: string } }
   | { CancelTransaction: { transaction_id: string } };
@@ -174,7 +171,6 @@ export type AgentCommandResult =
 
 export type SessionCommandResult =
   | { Created: { session_id: string } }
-  | { Info: { data: Record<string, string> } }
   | 'Closed'
   | { PromptResponse: { transaction_id: string; response: string } }
   | { TransactionCancelled: { transaction_id: string } };

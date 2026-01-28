@@ -23,6 +23,58 @@ pub fn silent_command(program: &str) -> Command {
 }
 
 //
+// Find an executable in PATH using which (Unix) or where (Windows).
+// Returns the path to the executable if found, None otherwise.
+//
+pub fn find_executable_in_path(executable_name: &str) -> Option<String> {
+    #[cfg(windows)]
+    let which_result = silent_command("where").arg(executable_name).output();
+
+    #[cfg(not(windows))]
+    let which_result = silent_command("which").arg(executable_name).output();
+
+    if let Ok(output) = which_result {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Some(path) = stdout.lines().next() {
+                let path = path.trim().to_string();
+                if !path.is_empty() {
+                    return Some(path);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+//
+// Find all instances of an executable in PATH using which (Unix) or where
+// (Windows). Returns a Vec of all paths found.
+// Useful when 'where' on Windows returns multiple results.
+//
+pub fn find_all_executables_in_path(executable_name: &str) -> Vec<String> {
+    #[cfg(windows)]
+    let which_result = silent_command("where").arg(executable_name).output();
+
+    #[cfg(not(windows))]
+    let which_result = silent_command("which").arg(executable_name).output();
+
+    if let Ok(output) = which_result {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return stdout
+                .lines()
+                .map(|line| line.trim().to_string())
+                .filter(|line| !line.is_empty())
+                .collect();
+        }
+    }
+
+    Vec::new()
+}
+
+//
 // Add Windows Firewall rule for the current executable to allow inbound
 // connections without prompting the user. Returns true if rule was added
 // or already exists.

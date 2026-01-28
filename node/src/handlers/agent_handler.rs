@@ -29,26 +29,33 @@ pub async fn handle_agent_command(
                     let agent_clone = agent.clone();
                     drop(locked);
 
-                    let result = agent_clone.perform_recon(false).await;
+                    if let Some(recon) = agent_clone.as_recon() {
+                        let result = recon.perform_recon(false).await;
 
-                    match result {
-                        Some(recon_result) => {
-                            common::log_info!(
-                                "Recon complete: {} MCP servers, {} skills, {} config items",
-                                recon_result.tools.mcp_servers.len(),
-                                recon_result.tools.skills.len(),
-                                recon_result.config.items.len()
-                            );
-                            NodeCommandResult::Agent(AgentCommandResult::ReconComplete {
-                                result: recon_result,
-                            })
+                        match result {
+                            Some(recon_result) => {
+                                common::log_info!(
+                                    "Recon complete: {} MCP servers, {} skills, {} config items",
+                                    recon_result.tools.mcp_servers.len(),
+                                    recon_result.tools.skills.len(),
+                                    recon_result.config.items.len()
+                                );
+                                NodeCommandResult::Agent(AgentCommandResult::ReconComplete {
+                                    result: recon_result,
+                                })
+                            }
+                            None => {
+                                common::log_warn!("Reconnaissance returned no results");
+                                NodeCommandResult::Agent(AgentCommandResult::ReconComplete {
+                                    result: ReconResult::default(),
+                                })
+                            }
                         }
-                        None => {
-                            common::log_warn!("Agent does not support reconnaissance");
-                            NodeCommandResult::Agent(AgentCommandResult::ReconComplete {
-                                result: ReconResult::default(),
-                            })
-                        }
+                    } else {
+                        common::log_warn!("Agent does not support reconnaissance");
+                        NodeCommandResult::Agent(AgentCommandResult::ReconComplete {
+                            result: ReconResult::default(),
+                        })
                     }
                 }
                 None => NodeCommandResult::Error {
@@ -71,27 +78,34 @@ pub async fn handle_agent_command(
                     let agent_clone = agent.clone();
                     drop(locked);
 
-                    let result = agent_clone.perform_recon(true).await;
+                    if let Some(recon) = agent_clone.as_recon() {
+                        let result = recon.perform_recon(true).await;
 
-                    match result {
-                        Some(recon_result) => {
-                            common::log_info!(
-                                "Semantic recon complete: {} MCP servers, {} skills, {} internal tools, {} config items",
-                                recon_result.tools.mcp_servers.len(),
-                                recon_result.tools.skills.len(),
-                                recon_result.tools.internal_tools.len(),
-                                recon_result.config.items.len()
-                            );
-                            NodeCommandResult::Agent(AgentCommandResult::ReconComplete {
-                                result: recon_result,
-                            })
+                        match result {
+                            Some(recon_result) => {
+                                common::log_info!(
+                                    "Semantic recon complete: {} MCP servers, {} skills, {} internal tools, {} config items",
+                                    recon_result.tools.mcp_servers.len(),
+                                    recon_result.tools.skills.len(),
+                                    recon_result.tools.internal_tools.len(),
+                                    recon_result.config.items.len()
+                                );
+                                NodeCommandResult::Agent(AgentCommandResult::ReconComplete {
+                                    result: recon_result,
+                                })
+                            }
+                            None => {
+                                common::log_warn!("Semantic reconnaissance returned no results");
+                                NodeCommandResult::Agent(AgentCommandResult::ReconComplete {
+                                    result: ReconResult::default(),
+                                })
+                            }
                         }
-                        None => {
-                            common::log_warn!("Agent does not support semantic reconnaissance");
-                            NodeCommandResult::Agent(AgentCommandResult::ReconComplete {
-                                result: ReconResult::default(),
-                            })
-                        }
+                    } else {
+                        common::log_warn!("Agent does not support semantic reconnaissance");
+                        NodeCommandResult::Agent(AgentCommandResult::ReconComplete {
+                            result: ReconResult::default(),
+                        })
                     }
                 }
                 None => NodeCommandResult::Error {
@@ -146,23 +160,6 @@ pub async fn handle_agent_command(
                 }
                 None => NodeCommandResult::Error {
                     message: format!("Agent '{}' not found", short_name),
-                },
-            }
-        }
-        AgentCommand::SetYolo { enabled } => {
-            let locked = selected_agent.lock().unwrap();
-            match locked.as_ref() {
-                Some(agent) => match agent.set_yolo_mode(enabled) {
-                    Ok(_) => {
-                        common::log_info!("YOLO mode {} for agent {}", if enabled { "enabled" } else { "disabled" }, agent.short_name());
-                        NodeCommandResult::Agent(AgentCommandResult::YoloSet { enabled })
-                    }
-                    Err(e) => NodeCommandResult::Error {
-                        message: format!("Failed to set YOLO mode: {}", e),
-                    },
-                },
-                None => NodeCommandResult::Error {
-                    message: "No agent selected".to_string(),
                 },
             }
         }

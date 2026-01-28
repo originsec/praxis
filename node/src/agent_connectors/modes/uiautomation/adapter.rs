@@ -43,9 +43,4 @@ pub trait UIAutomationAdapter: Send + Sync {
         ctrl: &UIAutomationControl,
         initial_count: usize,
     ) -> Result<Option<String>>;
-
-    /// Optional prompt to use for get_info(). Returns None if get_info is not supported.
-    fn info_prompt(&self) -> Option<&str> {
-        None
-    }
 }

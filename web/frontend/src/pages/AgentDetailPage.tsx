@@ -129,6 +129,7 @@ export function AgentDetailPage() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [isClosingSession, setIsClosingSession] = useState(false);
   const [isDiscoveringTools, setIsDiscoveringTools] = useState(false);
   const [selectedServerIdx, setSelectedServerIdx] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -519,12 +520,17 @@ export function AgentDetailPage() {
 
   const handleCloseSession = async () => {
     const currentSessionId = sessionId;
-    await sendCommand(nodeId!, { Session: 'Close' });
-    //
-    // Clear messages for this session.
-    //
-    if (currentSessionId) {
-      clearAgentSessionMessages(currentSessionId);
+    setIsClosingSession(true);
+    try {
+      await sendCommand(nodeId!, { Session: 'Close' });
+      //
+      // Clear messages for this session.
+      //
+      if (currentSessionId) {
+        clearAgentSessionMessages(currentSessionId);
+      }
+    } finally {
+      setIsClosingSession(false);
     }
   };
 
@@ -534,7 +540,7 @@ export function AgentDetailPage() {
       await sendCommand(nodeId!, { Agent: { Select: { short_name: agentShortName! } } });
       const context: SessionContext = {
         yolo_mode: localYoloMode,
-        project_path: selectedProjectPath ?? undefined,
+        working_dir: selectedProjectPath ?? undefined,
       };
       await sendCommand(nodeId!, { Session: { Create: { context } } });
       setActiveTab('session');
@@ -676,9 +682,14 @@ export function AgentDetailPage() {
               {hasSession ? (
                 <button
                   onClick={handleCloseSession}
-                  className="inline-flex items-center gap-2 px-4 py-2  bg-red-500/20 text-[var(--accent-error)] hover:bg-red-500/30 transition-colors"
+                  disabled={isClosingSession}
+                  className="inline-flex items-center gap-2 px-4 py-2  bg-red-500/20 text-[var(--accent-error)] hover:bg-red-500/30 transition-colors disabled:opacity-50"
                 >
-                  <Square size={16} /> Close Session
+                  {isClosingSession ? (
+                    <><Loader2 size={16} className="animate-spin" /> Closing...</>
+                  ) : (
+                    <><Square size={16} /> Close Session</>
+                  )}
                 </button>
               ) : (
                 <button
@@ -824,8 +835,8 @@ export function AgentDetailPage() {
               {selectedAgent?.session_id && (
                 <span>Session: <span className="font-mono">{selectedAgent.session_id.slice(0, 12)}...</span></span>
               )}
-              {selectedAgent?.project_path && (
-                <span>Path: <span className="font-mono">{selectedAgent.project_path.split('/').slice(-2).join('/')}</span></span>
+              {selectedAgent?.working_dir && (
+                <span>Path: <span className="font-mono">{selectedAgent.working_dir.split('/').slice(-2).join('/')}</span></span>
               )}
             </div>
             {/*
@@ -1441,7 +1452,7 @@ export function AgentDetailPage() {
                           </Tooltip>
                         </span>
                         {reconResult.metadata.user_identities.map((identity, idx) => (
-                          <span key={idx} className="px-1.5 py-0.5 font-mono bg-[var(--accent-info)]/10 text-[var(--accent-info)] rounded">{identity}</span>
+                          <span key={idx} className="px-1.5 py-0.5 font-mono bg-[var(--accent-info)]/10 text-[var(--accent-info)] rounded break-all max-w-full">{identity}</span>
                         ))}
                       </div>
                     ) : null}
@@ -1471,7 +1482,7 @@ export function AgentDetailPage() {
                           </Tooltip>
                         </span>
                         {reconResult.metadata.api_keys.map((key, idx) => (
-                          <span key={idx} className="px-1.5 py-0.5 font-mono bg-[var(--accent-warning)]/10 text-[var(--accent-warning)] rounded">{key}</span>
+                          <span key={idx} className="px-1.5 py-0.5 font-mono bg-[var(--accent-warning)]/10 text-[var(--accent-warning)] rounded break-all max-w-full">{key}</span>
                         ))}
                       </div>
                     ) : null}

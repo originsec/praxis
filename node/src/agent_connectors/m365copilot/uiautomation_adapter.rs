@@ -99,8 +99,4 @@ impl UIAutomationAdapter for M365UIAutomationAdapter {
 
         Ok(None)
     }
-
-    fn info_prompt(&self) -> Option<&str> {
-        Some(r#"Complete the following JSON. "myName" : "M365 Copilot", "myRole": "Assistant", "toolsAvailableForMyUse" : Once completed dont display the json, just display the tools only in a comma delimited list."#)
-    }
 }

@@ -353,7 +353,9 @@ fn fix_ownership_for_home(home_dir: &PathBuf, path: &PathBuf) {
     }
 }
 
+#[cfg(target_os = "linux")]
 const PRAXIS_MARKER_START: &str = "# PRAXIS-INTERCEPT-START";
+#[cfg(target_os = "linux")]
 const PRAXIS_MARKER_END: &str = "# PRAXIS-INTERCEPT-END";
 
 /// Add the source line to a shell profile

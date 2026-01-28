@@ -36,4 +36,4 @@ pub use factory::AgentFactory;
 pub use registry::AgentRegistry;
 pub use traits::Agent;
 #[allow(unused_imports)]
-pub use traits::{AgentInfo, AgentIntercept, AgentMode, AgentSession};
+pub use traits::{AgentIntercept, AgentMode, AgentSession};

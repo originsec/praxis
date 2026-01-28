@@ -542,7 +542,7 @@ function MatchesTab() {
 }
 
 function RulesTab() {
-  const { state, updateInterceptRule, deleteInterceptRule, requestInterceptRules } = useApp();
+  const { state, updateInterceptRule, deleteInterceptRule } = useApp();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingRule, setEditingRule] = useState<InterceptRule | null>(null);
   const [ruleToDelete, setRuleToDelete] = useState<InterceptRule | null>(null);

@@ -7,14 +7,12 @@ mod adapter;
 
 pub use adapter::{use_hidden_desktop, DevToolsAdapter, DevToolsConfig};
 
-use crate::agent_connectors::traits::{AgentInfo, AgentMode, AgentSession};
+use crate::agent_connectors::traits::{AgentMode, AgentSession};
 use crate::utils;
 use anyhow::{anyhow, Result};
 use chromiumoxide::browser::Browser;
 use chromiumoxide::page::Page;
 use futures::StreamExt;
-use std::any::Any;
-use std::collections::HashMap;
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -69,7 +67,7 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
         //
 
         let port = config.base_port + (rand::random::<u16>() % config.port_range);
-        common::log_info!("GenericDevToolsSession: Using DevTools port {}", port);
+        common::log_info!("Using DevTools port {}", port);
 
         //
         // Launch process with DevTools environment variable. On Windows, spawn
@@ -99,7 +97,7 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
                         &d.name,
                     )?;
                     common::log_info!(
-                        "GenericDevToolsSession: Spawned process on hidden desktop '{}' with PID: {}",
+                        "Spawned process on hidden desktop '{}' with PID: {}",
                         d.name, pid
                     );
                     pid
@@ -110,7 +108,7 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
                         .map_err(|e| anyhow!("Failed to spawn process: {}", e))?;
                     let pid = process.id();
                     common::log_info!(
-                        "GenericDevToolsSession: Spawned process with PID: {} (no hidden desktop)",
+                        "Spawned process with PID: {} (no hidden desktop)",
                         pid
                     );
                     pid
@@ -127,7 +125,7 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
                     .map_err(|e| anyhow!("Failed to spawn process: {}", e))?;
                 let pid = process.id();
                 common::log_info!(
-                    "GenericDevToolsSession: Spawned process with PID: {}",
+                    "Spawned process with PID: {}",
                     pid
                 );
                 pid
@@ -147,7 +145,7 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
         let page = Self::connect_to_devtools(port).await?;
 
         *self.page.lock().unwrap() = Some(page);
-        common::log_info!("GenericDevToolsSession: Connected to DevTools");
+        common::log_info!("Connected to DevTools");
 
         Ok(())
     }
@@ -162,7 +160,7 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
         let mut connected = false;
         for attempt in 0..30 {
             common::log_debug!(
-                "GenericDevToolsSession: Connection attempt {} to {}",
+                "Connection attempt {} to {}",
                 attempt + 1,
                 ws_url
             );
@@ -205,9 +203,9 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
                     if err_str.contains("ResetWithoutClosingHandshake")
                         || err_str.contains("Connection reset")
                     {
-                        common::log_debug!("GenericDevToolsSession: Browser connection closed");
+                        common::log_debug!("Browser connection closed");
                     } else {
-                        common::log_error!("GenericDevToolsSession: Browser handler error: {}", e);
+                        common::log_error!("Browser handler error: {}", e);
                     }
                 }
             }
@@ -223,7 +221,7 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
                 return Ok(page);
             }
             common::log_debug!(
-                "GenericDevToolsSession: No pages yet, attempt {}/30",
+                "No pages yet, attempt {}/30",
                 attempt + 1
             );
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -245,7 +243,7 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
     }
 
     async fn transact_async(&self, page: &Page, prompt: &str) -> Result<String> {
-        common::log_info!("DevTools transact: starting with prompt length {}", prompt.len());
+        common::log_info!("starting with prompt length {}", prompt.len());
 
         let input_selector = self.adapter.input_selector();
         let message_selector = self.adapter.message_selector();
@@ -254,17 +252,17 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
         // Wait for input element to be ready.
         //
 
-        common::log_info!("DevTools transact: waiting for input element (selector: {})", input_selector);
+        common::log_info!("waiting for input element (selector: {})", input_selector);
         let mut input_ready = false;
         for attempt in 1..=10 {
             match page.find_element(input_selector).await {
                 Ok(_) => {
                     input_ready = true;
-                    common::log_info!("DevTools transact: input element found on attempt {}", attempt);
+                    common::log_info!("input element found on attempt {}", attempt);
                     break;
                 }
                 Err(e) => {
-                    common::log_debug!("DevTools transact: input element not found, attempt {}/10: {}", attempt, e);
+                    common::log_debug!("input element not found, attempt {}/10: {}", attempt, e);
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 }
             }
@@ -284,7 +282,7 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
             let page_url = page.url().await.unwrap_or_else(|_| None).unwrap_or_else(|| "unknown".to_string());
 
             common::log_error!(
-                "DevTools transact: input element not ready after 10 attempts. Selector: '{}', Page title: '{}', Page URL: '{}'",
+                "input element not ready after 10 attempts. Selector: '{}', Page title: '{}', Page URL: '{}'",
                 input_selector, page_title, page_url
             );
             return Err(anyhow!(
@@ -292,7 +290,7 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
                 input_selector, page_title, page_url
             ));
         }
-        common::log_info!("DevTools transact: input element ready");
+        common::log_info!("input element ready");
 
         //
         // Get initial message count.
@@ -303,14 +301,14 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
             .await
             .unwrap_or_default();
         let initial_message_count = initial_messages.len();
-        common::log_info!("DevTools transact: initial message count = {}", initial_message_count);
+        common::log_info!("initial message count = {}", initial_message_count);
 
         //
         // Find input element and send the prompt. Use InsertText CDP command
         // which handles emojis and special characters (emulates IME input).
         //
 
-        common::log_info!("DevTools transact: sending prompt");
+        common::log_info!("sending prompt");
         let input = page.find_element(input_selector).await?;
         input.click().await?;
 
@@ -320,7 +318,7 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
         self.adapter.wait_for_submit_ready(page).await?;
 
         input.press_key("Enter").await?;
-        common::log_info!("DevTools transact: prompt sent, waiting for response");
+        common::log_info!("prompt sent, waiting for response");
 
         //
         // Poll for response.
@@ -342,7 +340,7 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
                 .check_response_complete(page, initial_message_count)
                 .await?
             {
-                common::log_info!("DevTools transact: response received, length = {}", response.len());
+                common::log_info!("response received, length = {}", response.len());
                 return Ok(response);
             }
         }
@@ -358,10 +356,6 @@ impl<A: DevToolsAdapter + 'static> AgentSession for GenericDevToolsSession<A> {
 
     fn process_path(&self) -> Option<String> {
         self.process_path.clone()
-    }
-
-    fn running_pid(&self) -> Option<String> {
-        self.process_id.map(|pid| pid.to_string())
     }
 
     fn mode(&self) -> AgentMode {
@@ -385,24 +379,6 @@ impl<A: DevToolsAdapter + 'static> AgentSession for GenericDevToolsSession<A> {
         {
             let _ = self.hidden_desktop.lock().unwrap().take();
         }
-    }
-
-    fn get_info(&self) -> Option<HashMap<AgentInfo, String>> {
-        let prompt = self.adapter.info_prompt()?;
-
-        let response = match self.transact(prompt) {
-            Ok(r) => r,
-            Err(_) => return None,
-        };
-
-        let mut info = HashMap::new();
-        info.insert(AgentInfo::AvailableTools, response);
-
-        Some(info)
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 

@@ -332,11 +332,10 @@ pub struct SelectedAgent {
     pub short_name: String,
     pub session_id: Option<String>,
     pub process_name: Option<String>,
-    pub running_pid: Option<String>,
     /// Whether YOLO mode is enabled for this agent
     pub yolo_mode: bool,
-    /// Project path context for the session
-    pub project_path: Option<String>,
+    /// Working directory context for the session
+    pub working_dir: Option<String>,
     //
     // Note: Tools and config are now retrieved via Recon/ReconSemantic
     // commands.
@@ -412,8 +411,6 @@ pub enum AgentCommand {
     Update,
     /// Select an agent by short_name (only one can be selected at a time)
     Select { short_name: String },
-    /// Set YOLO mode (autonomous operation, fire-and-forget)
-    SetYolo { enabled: bool },
     /// Perform reconnaissance on the selected agent (static discovery)
     /// Returns MCP servers, skills, and config
     Recon,
@@ -432,7 +429,7 @@ pub type TransactionId = String;
 pub struct SessionContext {
     /// Working directory for the session (absolute path)
     /// If None, defaults to user's home directory
-    pub project_path: Option<String>,
+    pub working_dir: Option<String>,
     /// YOLO mode - skip permission prompts and auto-approve actions
     #[serde(default)]
     pub yolo_mode: bool,
@@ -446,8 +443,6 @@ pub enum SessionCommand {
         #[serde(default)]
         context: SessionContext,
     },
-    /// Get information about the current session
-    Info,
     /// Close the current session
     Close,
     /// Send a prompt to the session and get a response
@@ -556,7 +551,6 @@ pub struct CommandRequest {
 pub enum AgentCommandResult {
     UpdateSent,
     Selected { short_name: String },
-    YoloSet { enabled: bool },
     /// Reconnaissance completed with discovered tools and config
     ReconComplete { result: ReconResult },
     /// Config file update result
@@ -567,7 +561,6 @@ pub enum AgentCommandResult {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum SessionCommandResult {
     Created { session_id: String },
-    Info { data: HashMap<String, String> },
     Closed,
     /// Response to a prompt, includes transaction_id for matching
     PromptResponse { transaction_id: TransactionId, response: String },
