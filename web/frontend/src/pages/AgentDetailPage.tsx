@@ -1452,7 +1452,7 @@ export function AgentDetailPage() {
                           </Tooltip>
                         </span>
                         {reconResult.metadata.user_identities.map((identity, idx) => (
-                          <span key={idx} className="px-1.5 py-0.5 font-mono bg-[var(--accent-info)]/10 text-[var(--accent-info)] rounded">{identity}</span>
+                          <span key={idx} className="px-1.5 py-0.5 font-mono bg-[var(--accent-info)]/10 text-[var(--accent-info)] rounded break-all max-w-full">{identity}</span>
                         ))}
                       </div>
                     ) : null}
@@ -1482,7 +1482,7 @@ export function AgentDetailPage() {
                           </Tooltip>
                         </span>
                         {reconResult.metadata.api_keys.map((key, idx) => (
-                          <span key={idx} className="px-1.5 py-0.5 font-mono bg-[var(--accent-warning)]/10 text-[var(--accent-warning)] rounded">{key}</span>
+                          <span key={idx} className="px-1.5 py-0.5 font-mono bg-[var(--accent-warning)]/10 text-[var(--accent-warning)] rounded break-all max-w-full">{key}</span>
                         ))}
                       </div>
                     ) : null}
