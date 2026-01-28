@@ -14,7 +14,7 @@ use std::sync::Arc;
 impl AgentRecon for ClawdbotAgent {
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
         common::log_info!(
-            "ClawdbotAgent: Performing recon (is_semantic={})",
+            "Performing recon (is_semantic={})",
             is_semantic
         );
 
@@ -29,7 +29,7 @@ impl AgentRecon for ClawdbotAgent {
                 (config, data.sessions, data.project_paths)
             }
             Err(e) => {
-                common::log_warn!("ClawdbotAgent: Enumeration failed: {}", e);
+                common::log_warn!("Enumeration failed: {}", e);
                 (ReconConfig::default(), Vec::new(), Vec::new())
             }
         };
@@ -57,7 +57,7 @@ impl AgentRecon for ClawdbotAgent {
         };
 
         common::log_info!(
-            "ClawdbotAgent: Recon complete - {} config items, {} sessions, {} projects, metadata={}",
+            "Recon complete - {} config items, {} sessions, {} projects, metadata={}",
             config.items.len(),
             sessions.len(),
             project_paths.len(),
@@ -85,7 +85,7 @@ impl ClawdbotAgent {
         }
 
         common::log_info!(
-            "ClawdbotAgent: Extracting metadata from {} config files",
+            "Extracting metadata from {} config files",
             config.items.len()
         );
 
@@ -131,7 +131,7 @@ impl ClawdbotAgent {
             Some(client) => client,
             None => {
                 common::log_warn!(
-                    "ClawdbotAgent: Semantic parser client not available for metadata extraction"
+                    "Semantic parser client not available for metadata extraction"
                 );
                 return None;
             }
@@ -154,7 +154,7 @@ impl ClawdbotAgent {
 
                             if has_identities || has_keys {
                                 common::log_info!(
-                                    "ClawdbotAgent: Extracted {} user identities, {} API keys",
+                                    "Extracted {} user identities, {} API keys",
                                     extracted.user_identities.len(),
                                     extracted.api_keys.len()
                                 );
@@ -176,13 +176,13 @@ impl ClawdbotAgent {
                     }
                 }
                 common::log_warn!(
-                    "ClawdbotAgent: Semantic parser failed for metadata extraction: {:?}",
+                    "Semantic parser failed for metadata extraction: {:?}",
                     parser_response.error
                 );
             }
             Err(e) => {
                 common::log_warn!(
-                    "ClawdbotAgent: Semantic parser request failed for metadata extraction: {}",
+                    "Semantic parser request failed for metadata extraction: {}",
                     e
                 );
             }
@@ -198,7 +198,7 @@ impl ClawdbotAgent {
         let binary_path = match self.process_path.get() {
             Some(path) => path.clone(),
             None => {
-                common::log_warn!("ClawdbotAgent: No binary path available for internal tools discovery");
+                common::log_warn!("No binary path available for internal tools discovery");
                 return Vec::new();
             }
         };
@@ -209,7 +209,7 @@ impl ClawdbotAgent {
         {
             let mut guard = self.session.write().unwrap();
             if let Some(session) = guard.as_ref() {
-                common::log_info!("ClawdbotAgent: Closing existing session for internal tools discovery");
+                common::log_info!("Closing existing session for internal tools discovery");
                 session.close();
             }
             *guard = None;

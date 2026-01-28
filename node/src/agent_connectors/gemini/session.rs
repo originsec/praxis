@@ -142,7 +142,7 @@ impl GeminiSession {
             let _ = cmd.output();
         }
 
-        common::log_info!("GeminiSession: Session closed");
+        common::log_info!("Session closed");
     }
 }
 

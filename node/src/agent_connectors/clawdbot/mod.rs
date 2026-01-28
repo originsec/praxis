@@ -55,7 +55,7 @@ impl ClawdbotAgent {
 
         for path in paths {
             if std::path::Path::new(&path).exists() && self.verify_binary(&path) {
-                common::log_info!("ClawdbotAgent: Found binary at path: {}", path);
+                common::log_info!("Found binary at path: {}", path);
                 let _ = self.process_path.set(path);
                 return true;
             }
@@ -66,7 +66,7 @@ impl ClawdbotAgent {
         //
         if let Some(path) = crate::utils::find_executable_in_path("clawdbot") {
             if self.verify_binary(&path) {
-                common::log_info!("ClawdbotAgent: Found binary via which: {}", path);
+                common::log_info!("Found binary via which: {}", path);
                 let _ = self.process_path.set(path);
                 return true;
             }
@@ -92,23 +92,23 @@ impl ClawdbotAgent {
                     && (stdout.contains('.') || stdout.contains('-'));
 
                 if has_version_pattern {
-                    common::log_info!("ClawdbotAgent: Binary verified with version: {}", stdout);
+                    common::log_info!("Binary verified with version: {}", stdout);
                     true
                 } else {
                     common::log_warn!(
-                        "ClawdbotAgent: Binary verification failed - unexpected output: {}",
+                        "Binary verification failed - unexpected output: {}",
                         stdout
                     );
                     false
                 }
             }
             Ok(_) => {
-                common::log_warn!("ClawdbotAgent: Binary verification command failed");
+                common::log_warn!("Binary verification command failed");
                 false
             }
             Err(e) => {
                 common::log_warn!(
-                    "ClawdbotAgent: Failed to run verification command: {}",
+                    "Failed to run verification command: {}",
                     e
                 );
                 false

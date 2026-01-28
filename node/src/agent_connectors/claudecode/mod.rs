@@ -46,7 +46,7 @@ impl ClaudeCodeAgent {
 
         for path in paths {
             if std::path::Path::new(&path).exists() && self.verify_binary(&path) {
-                common::log_info!("ClaudeCodeAgent: Found binary at path: {}", path);
+                common::log_info!("Found binary at path: {}", path);
                 let _ = self.process_path.set(path);
                 return true;
             }
@@ -57,7 +57,7 @@ impl ClaudeCodeAgent {
         //
         if let Some(path) = crate::utils::find_executable_in_path("claude") {
             if self.verify_binary(&path) {
-                common::log_info!("ClaudeCodeAgent: Found binary via which: {}", path);
+                common::log_info!("Found binary via which: {}", path);
                 let _ = self.process_path.set(path);
                 return true;
             }
@@ -77,18 +77,18 @@ impl ClaudeCodeAgent {
                 let contains = stdout.to_lowercase().contains("claude");
                 if !contains {
                     common::log_warn!(
-                        "ClaudeCodeAgent: Binary verification failed - output doesn't contain 'claude'"
+                        "Binary verification failed - output doesn't contain 'claude'"
                     );
                 }
                 contains
             }
             Ok(_) => {
-                common::log_warn!("ClaudeCodeAgent: Binary verification command failed");
+                common::log_warn!("Binary verification command failed");
                 false
             }
             Err(e) => {
                 common::log_warn!(
-                    "ClaudeCodeAgent: Failed to run verification command: {}",
+                    "Failed to run verification command: {}",
                     e
                 );
                 false

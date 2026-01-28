@@ -93,7 +93,7 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
     fn transact(&self, prompt: &str) -> Result<String> {
         let ctrl_guard = self.automation_ctrl.lock().unwrap();
         let ctrl = ctrl_guard.as_ref().ok_or_else(|| {
-            common::log_error!("GenericUIAutomationSession transact: Automation control not initialized");
+            common::log_error!("Automation control not initialized");
             anyhow::anyhow!("Automation control not initialized")
         })?;
 
@@ -103,7 +103,7 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
 
         if let Err(e) = ctrl.focus_window() {
             common::log_error!(
-                "GenericUIAutomationSession transact: Failed to focus window: {}",
+                "Failed to focus window: {}",
                 e
             );
             return Err(e.into());
@@ -122,7 +122,7 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
             std::thread::sleep(std::time::Duration::from_secs(1));
         }
         if !input_ready {
-            common::log_error!("GenericUIAutomationSession transact: Input element not ready after waiting");
+            common::log_error!("Input element not ready after waiting");
             anyhow::bail!("Input element not ready");
         }
 
@@ -138,7 +138,7 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
 
         if let Err(e) = self.adapter.send_prompt(ctrl, prompt) {
             common::log_error!(
-                "GenericUIAutomationSession transact: Failed to send prompt: {}",
+                "Failed to send prompt: {}",
                 e
             );
             return Err(e);
@@ -150,7 +150,7 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
 
         if let Err(e) = self.adapter.submit_prompt(ctrl) {
             common::log_error!(
-                "GenericUIAutomationSession transact: Failed to submit prompt: {}",
+                "Failed to submit prompt: {}",
                 e
             );
             return Err(e);
@@ -175,7 +175,7 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
             }
         }
 
-        common::log_error!("GenericUIAutomationSession transact: Timed out waiting for response");
+        common::log_error!("Timed out waiting for response");
         anyhow::bail!("Timed out waiting for response")
     }
 

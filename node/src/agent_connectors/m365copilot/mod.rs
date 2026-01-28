@@ -57,7 +57,7 @@ impl M365CopilotAgent {
         let semantic_client = match semantic_parser::get_client() {
             Some(c) => c,
             None => {
-                common::log_warn!("M365CopilotAgent: No semantic parser client available");
+                common::log_warn!("No semantic parser client available");
                 return Vec::new();
             }
         };
@@ -72,7 +72,7 @@ impl M365CopilotAgent {
                     if let Some(json) = parser_response.json {
                         if let Some(internal_tools) = parse_internal_tools_from_json(&json) {
                             common::log_info!(
-                                "M365CopilotAgent: Discovered {} internal tools",
+                                "Discovered {} internal tools",
                                 internal_tools.len()
                             );
                             return internal_tools;
@@ -80,13 +80,13 @@ impl M365CopilotAgent {
                     }
                 }
                 common::log_warn!(
-                    "M365CopilotAgent: Semantic parser failed for internal tools: {:?}",
+                    "Semantic parser failed for internal tools: {:?}",
                     parser_response.error
                 );
             }
             Err(e) => {
                 common::log_warn!(
-                    "M365CopilotAgent: Semantic parser request failed for internal tools: {}",
+                    "Semantic parser request failed for internal tools: {}",
                     e
                 );
             }
@@ -209,7 +209,7 @@ impl AgentRecon for M365CopilotAgent {
         // Create a temporary session for recon.
         //
 
-        common::log_info!("M365CopilotAgent: Creating temporary session for recon");
+        common::log_info!("Creating temporary session for recon");
         let mode = AgentMode::DevTools;
         let temp_session = match tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()
@@ -217,7 +217,7 @@ impl AgentRecon for M365CopilotAgent {
         }) {
             Ok(s) => s,
             Err(e) => {
-                common::log_error!("M365CopilotAgent: Failed to create temp session for recon: {}", e);
+                common::log_error!("Failed to create temp session for recon: {}", e);
                 return None;
             }
         };
@@ -247,12 +247,12 @@ impl AgentRecon for M365CopilotAgent {
                 }
             }
             Err(e) => {
-                common::log_warn!("M365CopilotAgent: Failed to get profile (continuing): {}", e);
+                common::log_warn!("Failed to get profile (continuing): {}", e);
             }
         }
 
         if !identities.is_empty() {
-            common::log_info!("M365CopilotAgent: Found identities: {:?}", identities);
+            common::log_info!("Found identities: {:?}", identities);
         }
 
         //
@@ -260,14 +260,14 @@ impl AgentRecon for M365CopilotAgent {
         //
 
         let prompt = crate::agent_connectors::utils::INTERNAL_TOOLS_DISCOVERY_PROMPT;
-        common::log_info!("M365CopilotAgent: Sending internal tools discovery prompt");
+        common::log_info!("Sending internal tools discovery prompt");
         let internal_tools = match temp_session.transact(prompt) {
             Ok(response) => {
                 self.parse_internal_tools_response(&response).await
             }
             Err(e) => {
                 common::log_warn!(
-                    "M365CopilotAgent: Failed to get internal tools list from agent: {}",
+                    "Failed to get internal tools list from agent: {}",
                     e
                 );
                 Vec::new()
@@ -279,7 +279,7 @@ impl AgentRecon for M365CopilotAgent {
         //
 
         temp_session.close();
-        common::log_info!("M365CopilotAgent: Temporary recon session closed");
+        common::log_info!("Temporary recon session closed");
 
         //
         // Build the result. Always return Some for semantic recon to indicate
@@ -289,7 +289,7 @@ impl AgentRecon for M365CopilotAgent {
         let has_identities = !identities.is_empty();
 
         common::log_info!(
-            "M365CopilotAgent: Recon complete - {} identities, {} internal tools",
+            "Recon complete - {} identities, {} internal tools",
             identities.len(),
             internal_tools.len()
         );

@@ -10,6 +10,13 @@ use std::process::{Command, Output, Stdio};
 pub const INTERNAL_TOOLS_DISCOVERY_PROMPT: &str = "List all your internal/built-in tools with their descriptions. Do NOT include MCP tools - only internal tools that are part of your core functionality.";
 
 //
+// Maximum characters per batch when extracting metadata from config files.
+// Config files are batched together until this threshold would be exceeded.
+//
+
+const METADATA_BATCH_CHAR_THRESHOLD: usize = 15000;
+
+//
 // Directories to skip during recursive scanning.
 // Includes common build artifacts, version control, caches, and OS-specific
 // directories for Windows, Linux, and macOS.
@@ -425,7 +432,8 @@ where
 
 //
 // Extract metadata (user identities, API keys) from config files using the
-// semantic parser. Processes each config file individually and dedupes results.
+// semantic parser. Batches config files together up to a character threshold
+// before sending to semantic parser for efficiency.
 //
 
 pub async fn extract_metadata_from_configs(
@@ -458,50 +466,103 @@ pub async fn extract_metadata_from_configs(
     };
 
     //
-    // Process each config file individually through the semantic parser.
+    // Batch config files together until threshold is reached, then send to
+    // semantic parser.
     //
 
     let mut all_user_identities = Vec::new();
     let mut all_api_keys = Vec::new();
 
+    let mut current_batch = String::new();
+    let mut batch_count = 0;
+
     for item in config_items {
         //
-        // Format this single config file for parsing.
+        // Format this config file.
         //
 
-        let config_content = format!("=== {} ({}) ===\n{}", item.path, item.config_type, item.contents);
+        let config_content = format!("=== {} ({}) ===\n{}\n\n", item.path, item.config_type, item.contents);
+        let content_len = config_content.len();
 
         //
-        // Send to semantic parser for metadata extraction.
+        // If this single file exceeds threshold, send it alone.
         //
 
-        let extraction_prompt = crate::utils::semantic_parser::build_metadata_extraction_prompt(&config_content);
-        match semantic_client
-            .parse(
-                extraction_prompt,
-                crate::utils::semantic_parser::METADATA_EXTRACTION_SCHEMA.to_string(),
-            )
-            .await
-        {
-            Ok(parser_response) => {
-                if parser_response.success {
-                    if let Some(json) = parser_response.json {
-                        if let Some(extracted) = crate::utils::semantic_parser::parse_metadata_from_json(&json) {
-                            all_user_identities.extend(extracted.user_identities);
-                            all_api_keys.extend(extracted.api_keys);
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                common::log_debug!(
-                    "{}: Semantic parser request failed for {}: {}",
+        if content_len > METADATA_BATCH_CHAR_THRESHOLD {
+            //
+            // First, send any pending batch.
+            //
+
+            if !current_batch.is_empty() {
+                process_metadata_batch(
+                    &semantic_client,
                     agent_name,
-                    item.path,
-                    e
-                );
+                    &current_batch,
+                    batch_count,
+                    &mut all_user_identities,
+                    &mut all_api_keys,
+                )
+                .await;
+                current_batch.clear();
+                batch_count = 0;
             }
+
+            //
+            // Send this large file alone.
+            //
+
+            process_metadata_batch(
+                &semantic_client,
+                agent_name,
+                &config_content,
+                1,
+                &mut all_user_identities,
+                &mut all_api_keys,
+            )
+            .await;
+            continue;
         }
+
+        //
+        // If adding this file would exceed threshold, send current batch first.
+        //
+
+        if !current_batch.is_empty() && current_batch.len() + content_len > METADATA_BATCH_CHAR_THRESHOLD {
+            process_metadata_batch(
+                &semantic_client,
+                agent_name,
+                &current_batch,
+                batch_count,
+                &mut all_user_identities,
+                &mut all_api_keys,
+            )
+            .await;
+            current_batch.clear();
+            batch_count = 0;
+        }
+
+        //
+        // Add to current batch.
+        //
+
+        current_batch.push_str(&config_content);
+        batch_count += 1;
+    }
+
+    //
+    // Send any remaining batch.
+    //
+
+    if !current_batch.is_empty() {
+        process_metadata_batch(
+            &semantic_client,
+            agent_name,
+            &current_batch,
+            batch_count,
+            &mut all_user_identities,
+            &mut all_api_keys,
+        )
+        .await;
     }
 
     //
@@ -536,4 +597,51 @@ pub async fn extract_metadata_from_configs(
     }
 
     None
+}
+
+//
+// Process a batch of config files through the semantic parser.
+//
+
+async fn process_metadata_batch(
+    semantic_client: &crate::utils::semantic_parser::SemanticParserClient,
+    agent_name: &str,
+    batch_content: &str,
+    file_count: usize,
+    all_user_identities: &mut Vec<String>,
+    all_api_keys: &mut Vec<String>,
+) {
+    common::log_debug!(
+        "{}: Processing metadata batch with {} files ({} chars)",
+        agent_name,
+        file_count,
+        batch_content.len()
+    );
+
+    let extraction_prompt = crate::utils::semantic_parser::build_metadata_extraction_prompt(batch_content);
+    match semantic_client
+        .parse(
+            extraction_prompt,
+            crate::utils::semantic_parser::METADATA_EXTRACTION_SCHEMA.to_string(),
+        )
+        .await
+    {
+        Ok(parser_response) => {
+            if parser_response.success {
+                if let Some(json) = parser_response.json {
+                    if let Some(extracted) = crate::utils::semantic_parser::parse_metadata_from_json(&json) {
+                        all_user_identities.extend(extracted.user_identities);
+                        all_api_keys.extend(extracted.api_keys);
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            common::log_debug!(
+                "{}: Semantic parser request failed for batch: {}",
+                agent_name,
+                e
+            );
+        }
+    }
 }

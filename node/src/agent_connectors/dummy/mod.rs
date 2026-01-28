@@ -247,7 +247,7 @@ impl Agent for DummyAgent {
 impl AgentRecon for DummyAgent {
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
         common::log_info!(
-            "DummyAgent: Performing recon (is_semantic={})",
+            "Performing recon (is_semantic={})",
             is_semantic
         );
 
@@ -267,7 +267,7 @@ impl AgentRecon for DummyAgent {
         // Internal tools - only with semantic recon.
         //
         if is_semantic {
-            common::log_info!("DummyAgent: Including internal tools in semantic recon");
+            common::log_info!("Including internal tools in semantic recon");
             tools.internal_tools = self.get_demo_internal_tools();
         }
 
@@ -277,7 +277,7 @@ impl AgentRecon for DummyAgent {
         let config = self.get_demo_config();
 
         common::log_info!(
-            "DummyAgent: Recon complete - {} MCP servers, {} skills, {} internal tools, {} config items",
+            "Recon complete - {} MCP servers, {} skills, {} internal tools, {} config items",
             tools.mcp_servers.len(),
             tools.skills.len(),
             tools.internal_tools.len(),

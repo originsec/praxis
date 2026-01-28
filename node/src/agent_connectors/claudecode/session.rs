@@ -140,6 +140,6 @@ impl AgentSession for ClaudeCodeSession {
         //
         // Claude Code sessions don't need explicit cleanup (atomic execution).
         //
-        common::log_info!("ClaudeCodeSession: Session closed");
+        common::log_info!("Session closed");
     }
 }

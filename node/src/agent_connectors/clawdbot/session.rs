@@ -54,12 +54,12 @@ impl ClawdbotSession {
         let internal_session_id = Uuid::new_v4();
         let external_session_id = Uuid::new_v4().to_string();
 
-        common::log_info!("ClawdbotSession: Creating session {}", external_session_id);
+        common::log_info!("Creating session {}", external_session_id);
 
         //
         // Start the gateway to ensure it's running.
         //
-        common::log_info!("ClawdbotSession: Ensuring gateway is started");
+        common::log_info!("Ensuring gateway is started");
         let gateway_result = Command::new(&binary)
             .args(["gateway", "start"])
             .output();
@@ -67,21 +67,21 @@ impl ClawdbotSession {
         match gateway_result {
             Ok(output) => {
                 if output.status.success() {
-                    common::log_info!("ClawdbotSession: Gateway start command succeeded");
+                    common::log_info!("Gateway start command succeeded");
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     //
                     // "already running" is expected and fine.
                     //
                     if stderr.contains("already") || stderr.contains("running") {
-                        common::log_info!("ClawdbotSession: Gateway already running");
+                        common::log_info!("Gateway already running");
                     } else {
-                        common::log_warn!("ClawdbotSession: Gateway start returned: {}", stderr);
+                        common::log_warn!("Gateway start returned: {}", stderr);
                     }
                 }
             }
             Err(e) => {
-                common::log_warn!("ClawdbotSession: Failed to start gateway: {}", e);
+                common::log_warn!("Failed to start gateway: {}", e);
             }
         }
 
@@ -110,7 +110,7 @@ impl AgentSession for ClawdbotSession {
         }
 
         common::log_info!(
-            "ClawdbotSession: Transacting with session {} prompt length={}",
+            "Transacting with session {} prompt length={}",
             self.external_session_id,
             prompt.len()
         );
@@ -174,7 +174,7 @@ impl AgentSession for ClawdbotSession {
         }
 
         common::log_info!(
-            "ClawdbotSession: Transaction complete, response length={}",
+            "Transaction complete, response length={}",
             result_text.len()
         );
 
@@ -182,7 +182,7 @@ impl AgentSession for ClawdbotSession {
     }
 
     fn close(&self) {
-        common::log_info!("ClawdbotSession: Closing session {}", self.external_session_id);
+        common::log_info!("Closing session {}", self.external_session_id);
         self.is_closed.store(true, Ordering::SeqCst);
         //
         // Note: We do NOT stop the gateway on session close per requirements.

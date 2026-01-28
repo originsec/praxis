@@ -18,7 +18,7 @@ use std::sync::Arc;
 impl AgentRecon for ClaudeCodeAgent {
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
         common::log_info!(
-            "ClaudeCodeAgent: Performing recon (is_semantic={})",
+            "Performing recon (is_semantic={})",
             is_semantic
         );
 
@@ -34,7 +34,7 @@ impl AgentRecon for ClaudeCodeAgent {
                 (config, data.sessions, data.project_paths)
             }
             Err(e) => {
-                common::log_warn!("ClaudeCodeAgent: Enumeration failed: {}", e);
+                common::log_warn!("Enumeration failed: {}", e);
                 (ReconConfig::default(), Vec::new(), Vec::new())
             }
         };
@@ -55,7 +55,7 @@ impl AgentRecon for ClaudeCodeAgent {
         // Internal tools - only with semantic recon.
         //
         if is_semantic {
-            common::log_info!("ClaudeCodeAgent: Including internal tools in semantic recon");
+            common::log_info!("Including internal tools in semantic recon");
             tools.internal_tools = self.discover_internal_tools_semantically().await;
         }
 
@@ -70,7 +70,7 @@ impl AgentRecon for ClaudeCodeAgent {
         };
 
         common::log_info!(
-            "ClaudeCodeAgent: Recon complete - {} MCP servers, {} skills, {} internal tools, {} config items, {} sessions, {} projects, metadata={}",
+            "Recon complete - {} MCP servers, {} skills, {} internal tools, {} config items, {} sessions, {} projects, metadata={}",
             tools.mcp_servers.len(),
             tools.skills.len(),
             tools.internal_tools.len(),
@@ -101,13 +101,13 @@ impl ClaudeCodeAgent {
         let mut servers = Vec::new();
 
         common::log_info!(
-            "ClaudeCodeAgent: Parsing MCP servers from {} config items",
+            "Parsing MCP servers from {} config items",
             config_items.len()
         );
 
         for item in config_items {
             common::log_info!(
-                "ClaudeCodeAgent: Config item type='{}' path='{}'",
+                "Config item type='{}' path='{}'",
                 item.config_type, item.path
             );
 
@@ -123,7 +123,7 @@ impl ClaudeCodeAgent {
                             // MCP servers are under the "projects" key.
                             //
                             if let Some(projects) = json.get("projects").and_then(|p| p.as_object()) {
-                                common::log_info!("ClaudeCodeAgent: preferences has {} projects", projects.len());
+                                common::log_info!("preferences has {} projects", projects.len());
                                 for (context_path, context_config) in projects {
                                     if let Some(mcp_servers) = context_config.get("mcpServers") {
                                         let parsed = self.parse_mcp_servers_object(
@@ -132,7 +132,7 @@ impl ClaudeCodeAgent {
                                         );
                                         if !parsed.is_empty() {
                                             common::log_info!(
-                                                "ClaudeCodeAgent: Found {} servers in context '{}'",
+                                                "Found {} servers in context '{}'",
                                                 parsed.len(), context_path
                                             );
                                         }
@@ -140,11 +140,11 @@ impl ClaudeCodeAgent {
                                     }
                                 }
                             } else {
-                                common::log_info!("ClaudeCodeAgent: preferences has no 'projects' key");
+                                common::log_info!("preferences has no 'projects' key");
                             }
                         }
                         Err(e) => {
-                            common::log_warn!("ClaudeCodeAgent: Failed to parse preferences JSON: {}", e);
+                            common::log_warn!("Failed to parse preferences JSON: {}", e);
                         }
                     }
                 }
@@ -159,16 +159,16 @@ impl ClaudeCodeAgent {
                             if let Some(mcp_servers) = json.get("mcpServers") {
                                 let parsed = self.parse_mcp_servers_object(mcp_servers, None);
                                 common::log_info!(
-                                    "ClaudeCodeAgent: Found {} servers in global_settings",
+                                    "Found {} servers in global_settings",
                                     parsed.len()
                                 );
                                 servers.extend(parsed);
                             } else {
-                                common::log_info!("ClaudeCodeAgent: global_settings has no mcpServers key");
+                                common::log_info!("global_settings has no mcpServers key");
                             }
                         }
                         Err(e) => {
-                            common::log_warn!("ClaudeCodeAgent: Failed to parse global_settings JSON: {}", e);
+                            common::log_warn!("Failed to parse global_settings JSON: {}", e);
                         }
                     }
                 }
@@ -193,13 +193,13 @@ impl ClaudeCodeAgent {
                                     }
                                 }
                                 common::log_info!(
-                                    "ClaudeCodeAgent: Found {} servers in project_mcp '{:?}'",
+                                    "Found {} servers in project_mcp '{:?}'",
                                     count, context_path
                                 );
                             }
                         }
                         Err(e) => {
-                            common::log_warn!("ClaudeCodeAgent: Failed to parse project_mcp JSON: {}", e);
+                            common::log_warn!("Failed to parse project_mcp JSON: {}", e);
                         }
                     }
                 }
@@ -216,14 +216,14 @@ impl ClaudeCodeAgent {
                             if let Some(mcp_servers) = json.get("mcpServers") {
                                 let parsed = self.parse_mcp_servers_object(mcp_servers, context_path.clone());
                                 common::log_info!(
-                                    "ClaudeCodeAgent: Found {} servers in project_settings '{:?}'",
+                                    "Found {} servers in project_settings '{:?}'",
                                     parsed.len(), context_path
                                 );
                                 servers.extend(parsed);
                             }
                         }
                         Err(e) => {
-                            common::log_warn!("ClaudeCodeAgent: Failed to parse project_settings JSON: {}", e);
+                            common::log_warn!("Failed to parse project_settings JSON: {}", e);
                         }
                     }
                 }
@@ -242,7 +242,7 @@ impl ClaudeCodeAgent {
         });
 
         common::log_info!(
-            "ClaudeCodeAgent: Parsed {} MCP servers from config files",
+            "Parsed {} MCP servers from config files",
             servers.len()
         );
 
@@ -253,7 +253,7 @@ impl ClaudeCodeAgent {
         let tool_count: usize = servers_with_tools.iter().map(|s| s.tools.len()).sum();
 
         common::log_info!(
-            "ClaudeCodeAgent: Discovered {} MCP servers with {} tools total",
+            "Discovered {} MCP servers with {} tools total",
             servers_with_tools.len(),
             tool_count
         );
@@ -354,7 +354,7 @@ impl ClaudeCodeAgent {
         let binary_path = match self.process_path.get() {
             Some(path) => path.clone(),
             None => {
-                common::log_warn!("ClaudeCodeAgent: No binary path available for internal tools discovery");
+                common::log_warn!("No binary path available for internal tools discovery");
                 return Vec::new();
             }
         };
@@ -365,7 +365,7 @@ impl ClaudeCodeAgent {
         {
             let mut guard = self.session.write().unwrap();
             if let Some(session) = guard.as_ref() {
-                common::log_info!("ClaudeCodeAgent: Closing existing session for internal tools discovery");
+                common::log_info!("Closing existing session for internal tools discovery");
                 session.close();
             }
             *guard = None;
@@ -409,7 +409,7 @@ impl ClaudeCodeAgent {
         }
 
         common::log_info!(
-            "ClaudeCodeAgent: Extracting metadata from {} config files",
+            "Extracting metadata from {} config files",
             config.items.len()
         );
 
@@ -429,7 +429,7 @@ impl ClaudeCodeAgent {
         let semantic_client = match semantic_parser::get_client() {
             Some(client) => client,
             None => {
-                common::log_warn!("ClaudeCodeAgent: Semantic parser client not available for metadata extraction");
+                common::log_warn!("Semantic parser client not available for metadata extraction");
                 return None;
             }
         };
@@ -451,7 +451,7 @@ impl ClaudeCodeAgent {
 
                             if has_identities || has_keys {
                                 common::log_info!(
-                                    "ClaudeCodeAgent: Extracted {} user identities, {} API keys",
+                                    "Extracted {} user identities, {} API keys",
                                     extracted.user_identities.len(),
                                     extracted.api_keys.len()
                                 );
@@ -473,13 +473,13 @@ impl ClaudeCodeAgent {
                     }
                 }
                 common::log_warn!(
-                    "ClaudeCodeAgent: Semantic parser failed for metadata extraction: {:?}",
+                    "Semantic parser failed for metadata extraction: {:?}",
                     parser_response.error
                 );
             }
             Err(e) => {
                 common::log_warn!(
-                    "ClaudeCodeAgent: Semantic parser request failed for metadata extraction: {}",
+                    "Semantic parser request failed for metadata extraction: {}",
                     e
                 );
             }

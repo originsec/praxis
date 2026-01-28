@@ -1,5 +1,6 @@
 mod enumeration;
 mod intercept;
+mod mcp;
 mod recon;
 mod session;
 
