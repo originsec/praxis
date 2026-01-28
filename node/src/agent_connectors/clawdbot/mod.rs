@@ -8,10 +8,10 @@ mod session;
 
 pub use session::ClawdbotSession;
 
-use crate::agent_connectors::traits::{Agent, AgentSession};
+use crate::agent_connectors::traits::{Agent, AgentRecon, AgentSession};
 use crate::agent_connectors::utils;
 use async_trait::async_trait;
-use common::{ReconResult, SessionContext};
+use common::SessionContext;
 use once_cell::sync::OnceCell;
 use std::sync::RwLock;
 use std::sync::Arc;
@@ -133,6 +133,10 @@ impl Agent for ClawdbotAgent {
         AGENT_SHORTNAME
     }
 
+    fn as_recon(&self) -> Option<&dyn AgentRecon> {
+        Some(self)
+    }
+
     async fn do_fingerprint(&self) -> bool {
         self.do_fingerprint_sync()
     }
@@ -161,9 +165,5 @@ impl Agent for ClawdbotAgent {
             session.close();
         }
         *guard = None;
-    }
-
-    async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
-        self.perform_recon(is_semantic).await
     }
 }

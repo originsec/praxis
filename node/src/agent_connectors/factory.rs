@@ -9,11 +9,9 @@ use super::m365copilot::M365CopilotAgent;
 use super::traits::Agent;
 use std::sync::Arc;
 
-/// Factory for creating agent instances.
 pub struct AgentFactory;
 
 impl AgentFactory {
-    /// Create a new agent factory.
     pub fn new() -> Self {
         Self
     }

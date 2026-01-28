@@ -1,8 +1,11 @@
 use crate::agent_connectors::dynamic::DynamicAgent;
+use crate::agent_connectors::traits::AgentRecon;
+use async_trait::async_trait;
 use common::{ReconResult, ReconTools};
 
-impl DynamicAgent {
-    pub async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
+#[async_trait]
+impl AgentRecon for DynamicAgent {
+    async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
         //
         // Only run semantic recon if requested.
         //

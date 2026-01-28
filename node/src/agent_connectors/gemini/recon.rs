@@ -1,6 +1,7 @@
 use super::{GeminiAgent, GeminiSession};
-use crate::agent_connectors::traits::AgentSession;
+use crate::agent_connectors::traits::{AgentRecon, AgentSession};
 use crate::utils::mcp::fetch_all_mcp_server_tools;
+use async_trait::async_trait;
 use common::{
     AgentTool, ConfigItem, McpServer, McpTransport, ReconConfig, ReconResult, ReconTools,
     SessionContext,
@@ -8,12 +9,9 @@ use common::{
 use serde_json::Value;
 use std::sync::Arc;
 
-impl GeminiAgent {
-    //
-    // Perform reconnaissance on the agent to discover tools, config, and
-    // project paths.
-    //
-    pub async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
+#[async_trait]
+impl AgentRecon for GeminiAgent {
+    async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
         common::log_info!(
             "GeminiAgent: Performing recon (is_semantic={})",
             is_semantic
@@ -73,7 +71,9 @@ impl GeminiAgent {
             metadata: None,
         })
     }
+}
 
+impl GeminiAgent {
     //
     // Parse MCP servers from config files and fetch their tools.
     //

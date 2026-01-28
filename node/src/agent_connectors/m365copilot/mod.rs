@@ -13,7 +13,7 @@ mod uiautomation_adapter;
 
 pub use session::M365CopilotSession;
 
-use crate::agent_connectors::traits::{Agent, AgentIntercept, AgentMode, AgentSession};
+use crate::agent_connectors::traits::{Agent, AgentIntercept, AgentMode, AgentRecon, AgentSession};
 use crate::utils;
 use crate::utils::semantic_parser::{
     self, build_internal_tools_prompt, parse_internal_tools_from_json, INTERNAL_TOOLS_SCHEMA,
@@ -111,6 +111,10 @@ impl Agent for M365CopilotAgent {
         Some(self)
     }
 
+    fn as_recon(&self) -> Option<&dyn AgentRecon> {
+        Some(self)
+    }
+
     //
     // Custom fingerprinting for M365 Copilot (Windows package management).
     //
@@ -186,7 +190,10 @@ impl Agent for M365CopilotAgent {
         }
         *guard = None;
     }
+}
 
+#[async_trait]
+impl AgentRecon for M365CopilotAgent {
     async fn perform_recon(&self, is_semantic: bool) -> Option<common::ReconResult> {
         use common::{ReconMetadata, ReconResult};
 

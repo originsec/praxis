@@ -1,11 +1,12 @@
 use super::ClaudeCodeAgent;
 use super::ClaudeCodeSession;
-use crate::agent_connectors::traits::AgentSession;
+use crate::agent_connectors::traits::{AgentRecon, AgentSession};
 use crate::utils::mcp::fetch_all_mcp_server_tools;
 use crate::utils::semantic_parser::{
     self, build_metadata_extraction_prompt, parse_metadata_from_json,
     METADATA_EXTRACTION_SCHEMA,
 };
+use async_trait::async_trait;
 use common::{
     AgentTool, ConfigItem, McpServer, McpTransport, ReconConfig, ReconMetadata, ReconResult,
     ReconTools, SessionContext,
@@ -13,12 +14,9 @@ use common::{
 use serde_json::Value;
 use std::sync::Arc;
 
-impl ClaudeCodeAgent {
-    //
-    // Perform reconnaissance on the agent to discover tools, config, sessions,
-    // and project paths.
-    //
-    pub async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
+#[async_trait]
+impl AgentRecon for ClaudeCodeAgent {
+    async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
         common::log_info!(
             "ClaudeCodeAgent: Performing recon (is_semantic={})",
             is_semantic
@@ -90,7 +88,9 @@ impl ClaudeCodeAgent {
             metadata,
         })
     }
+}
 
+impl ClaudeCodeAgent {
     //
     // Parse MCP servers from config files and fetch their tools.
     // Extracts MCP servers from:

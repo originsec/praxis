@@ -2,7 +2,7 @@ mod session;
 
 pub use session::DummySession;
 
-use crate::agent_connectors::traits::{Agent, AgentSession};
+use crate::agent_connectors::traits::{Agent, AgentRecon, AgentSession};
 use async_trait::async_trait;
 use common::{AgentTool, ConfigItem, McpServer, McpTransport, ReconConfig, ReconResult, ReconTools};
 use std::sync::{Arc, RwLock};
@@ -213,6 +213,10 @@ impl Agent for DummyAgent {
         AGENT_SHORTNAME
     }
 
+    fn as_recon(&self) -> Option<&dyn AgentRecon> {
+        Some(self)
+    }
+
     async fn do_fingerprint(&self) -> bool {
         //
         // Dummy is always "available".
@@ -237,7 +241,10 @@ impl Agent for DummyAgent {
         }
         *guard = None;
     }
+}
 
+#[async_trait]
+impl AgentRecon for DummyAgent {
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
         common::log_info!(
             "DummyAgent: Performing recon (is_semantic={})",

@@ -5,10 +5,9 @@ mod session;
 
 pub use session::GeminiSession;
 
-use crate::agent_connectors::traits::{Agent, AgentIntercept, AgentSession};
+use crate::agent_connectors::traits::{Agent, AgentIntercept, AgentRecon, AgentSession};
 use crate::agent_connectors::utils;
 use async_trait::async_trait;
-use common::ReconResult;
 use once_cell::sync::OnceCell;
 use std::sync::{Arc, RwLock};
 
@@ -46,6 +45,10 @@ impl Agent for GeminiAgent {
     }
 
     fn as_intercept(&self) -> Option<&dyn AgentIntercept> {
+        Some(self)
+    }
+
+    fn as_recon(&self) -> Option<&dyn AgentRecon> {
         Some(self)
     }
 
@@ -142,9 +145,5 @@ impl Agent for GeminiAgent {
             session.close();
         }
         *guard = None;
-    }
-
-    async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
-        self.perform_recon(is_semantic).await
     }
 }

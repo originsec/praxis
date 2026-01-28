@@ -722,7 +722,7 @@ async fn execute_tool(
                         .unwrap_or(false);
 
                     let context = SessionContext {
-                        project_path: project_path.clone(),
+                        working_dir: project_path.clone(),
                         yolo_mode,
                     };
 

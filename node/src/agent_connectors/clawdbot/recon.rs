@@ -1,20 +1,18 @@
 use super::{ClawdbotAgent, ClawdbotSession};
-use crate::agent_connectors::traits::AgentSession;
+use crate::agent_connectors::traits::{AgentRecon, AgentSession};
 use crate::utils::semantic_parser::{
     self, build_metadata_extraction_prompt, parse_metadata_from_json,
     METADATA_EXTRACTION_SCHEMA,
 };
+use async_trait::async_trait;
 use common::{
     AgentTool, ReconConfig, ReconMetadata, ReconResult, ReconTools, SessionContext,
 };
 use std::sync::Arc;
 
-impl ClawdbotAgent {
-    //
-    // Perform reconnaissance on the agent to discover tools, config, sessions,
-    // and project paths.
-    //
-    pub async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
+#[async_trait]
+impl AgentRecon for ClawdbotAgent {
+    async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
         common::log_info!(
             "ClawdbotAgent: Performing recon (is_semantic={})",
             is_semantic
@@ -74,7 +72,9 @@ impl ClawdbotAgent {
             metadata,
         })
     }
+}
 
+impl ClawdbotAgent {
     //
     // Extract metadata (user identities, API keys) from config files using the
     // semantic parser.

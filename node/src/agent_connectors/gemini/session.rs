@@ -54,7 +54,7 @@ impl GeminiSession {
         let mut cmd = utils::build_command(path);
         cmd.arg("--list-sessions");
 
-        let output = utils::utils::run_command_silent(&mut cmd)?;
+        let output = utils::run_command_silent(&mut cmd)?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -141,6 +141,8 @@ impl GeminiSession {
 
             let _ = cmd.output();
         }
+
+        common::log_info!("GeminiSession: Session closed");
     }
 }
 
@@ -167,7 +169,6 @@ impl AgentSession for GeminiSession {
 
     fn close(&self) {
         self.delete_session();
-        common::log_info!("GeminiSession: Session closed");
     }
 
     fn as_any(&self) -> &dyn Any {

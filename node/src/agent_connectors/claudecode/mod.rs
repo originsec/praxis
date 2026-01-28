@@ -5,10 +5,10 @@ mod session;
 
 pub use session::ClaudeCodeSession;
 
-use crate::agent_connectors::traits::{Agent, AgentIntercept, AgentSession};
+use crate::agent_connectors::traits::{Agent, AgentIntercept, AgentRecon, AgentSession};
 use crate::agent_connectors::utils;
 use async_trait::async_trait;
-use common::{ReconResult, SessionContext};
+use common::SessionContext;
 use once_cell::sync::OnceCell;
 use std::sync::{Arc, RwLock};
 
@@ -117,6 +117,10 @@ impl Agent for ClaudeCodeAgent {
         Some(self)
     }
 
+    fn as_recon(&self) -> Option<&dyn AgentRecon> {
+        Some(self)
+    }
+
     async fn do_fingerprint(&self) -> bool {
         self.do_fingerprint_sync()
     }
@@ -145,9 +149,5 @@ impl Agent for ClaudeCodeAgent {
             session.close();
         }
         *guard = None;
-    }
-
-    async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
-        self.perform_recon(is_semantic).await
     }
 }

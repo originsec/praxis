@@ -8,7 +8,7 @@ mod session;
 
 pub use session::DynamicAgentSession;
 
-use crate::agent_connectors::traits::{Agent, AgentIntercept, AgentSession};
+use crate::agent_connectors::traits::{Agent, AgentIntercept, AgentRecon, AgentSession};
 use async_trait::async_trait;
 use common::{DiscoveredLlmEndpoint, SessionContext};
 use std::sync::{Arc, RwLock};
@@ -60,6 +60,10 @@ impl Agent for DynamicAgent {
         } else {
             None
         }
+    }
+
+    fn as_recon(&self) -> Option<&dyn AgentRecon> {
+        Some(self)
     }
 
     async fn do_fingerprint(&self) -> bool {
@@ -118,9 +122,5 @@ impl Agent for DynamicAgent {
             session.close();
         }
         *guard = None;
-    }
-
-    async fn perform_recon(&self, is_semantic: bool) -> Option<common::ReconResult> {
-        self.perform_recon(is_semantic).await
     }
 }
