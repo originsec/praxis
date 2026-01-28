@@ -625,9 +625,8 @@ async fn send_node_information_update(
                     short_name: a.short_name().to_string(),
                     session_id: session.as_ref().map(|s| s.session_id().to_string()),
                     process_name,
-                    running_pid: session.as_ref().and_then(|s| s.running_pid()),
-                    yolo_mode: a.is_yolo_mode(),
-                    project_path: session.as_ref().and_then(|s| s.project_path()),
+                    yolo_mode: false,
+                    working_dir: session.as_ref().and_then(|s| s.working_dir()),
                 })
             }
             None => None,

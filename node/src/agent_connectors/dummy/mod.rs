@@ -3,18 +3,18 @@ mod session;
 pub use session::DummySession;
 
 use crate::agent_connectors::traits::{Agent, AgentSession};
-use anyhow::Result;
 use async_trait::async_trait;
 use common::{AgentTool, ConfigItem, McpServer, McpTransport, ReconConfig, ReconResult, ReconTools};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
+
+const AGENT_NAME: &str = "Dummy Agent";
+const AGENT_SHORTNAME: &str = "dummy";
 
 /// A dummy agent that doesn't require any external processes.
 /// Useful for testing and validating agent abstractions.
 #[allow(dead_code)]
 pub struct DummyAgent {
     session: RwLock<Option<Arc<dyn AgentSession>>>,
-    yolo_mode: AtomicBool,
 }
 
 #[allow(dead_code)]
@@ -22,7 +22,6 @@ impl DummyAgent {
     pub fn new() -> Self {
         Self {
             session: RwLock::new(None),
-            yolo_mode: AtomicBool::new(false),
         }
     }
 
@@ -207,11 +206,11 @@ impl Default for DummyAgent {
 #[async_trait]
 impl Agent for DummyAgent {
     fn name(&self) -> &str {
-        "Dummy Agent"
+        AGENT_NAME
     }
 
     fn short_name(&self) -> &str {
-        "dummy"
+        AGENT_SHORTNAME
     }
 
     async fn do_fingerprint(&self) -> bool {
@@ -222,10 +221,9 @@ impl Agent for DummyAgent {
     }
 
     fn create_session(&self, _context: &common::SessionContext) -> Option<Arc<dyn AgentSession>> {
-        let session: Arc<dyn AgentSession> = Arc::new(DummySession::new());
-        let mut guard = self.session.write().unwrap();
-        *guard = Some(session.clone());
-        Some(session)
+        let session_arc = Arc::new(DummySession::new()) as Arc<dyn AgentSession>;
+        *self.session.write().unwrap() = Some(Arc::clone(&session_arc));
+        Some(session_arc)
     }
 
     fn get_session(&self) -> Option<Arc<dyn AgentSession>> {
@@ -238,15 +236,6 @@ impl Agent for DummyAgent {
             session.close();
         }
         *guard = None;
-    }
-
-    fn set_yolo_mode(&self, enabled: bool) -> Result<()> {
-        self.yolo_mode.store(enabled, Ordering::SeqCst);
-        Ok(())
-    }
-
-    fn is_yolo_mode(&self) -> bool {
-        self.yolo_mode.load(Ordering::SeqCst)
     }
 
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {

@@ -149,23 +149,6 @@ pub async fn handle_agent_command(
                 },
             }
         }
-        AgentCommand::SetYolo { enabled } => {
-            let locked = selected_agent.lock().unwrap();
-            match locked.as_ref() {
-                Some(agent) => match agent.set_yolo_mode(enabled) {
-                    Ok(_) => {
-                        common::log_info!("YOLO mode {} for agent {}", if enabled { "enabled" } else { "disabled" }, agent.short_name());
-                        NodeCommandResult::Agent(AgentCommandResult::YoloSet { enabled })
-                    }
-                    Err(e) => NodeCommandResult::Error {
-                        message: format!("Failed to set YOLO mode: {}", e),
-                    },
-                },
-                None => NodeCommandResult::Error {
-                    message: "No agent selected".to_string(),
-                },
-            }
-        }
         AgentCommand::UpdateConfigFile { path, contents } => {
             //
             // Validate path is within home directory for security.

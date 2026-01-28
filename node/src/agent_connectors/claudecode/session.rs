@@ -18,10 +18,8 @@ pub struct ClaudeCodeSession {
     first_transaction: Mutex<bool>,
     /// YOLO mode - skip permission prompts
     yolo_mode: bool,
-    /// Working directory for the session
+    /// Working directory for the session (None if using home directory)
     working_dir: Option<String>,
-    /// Original project path from context (None if using home directory)
-    project_path: Option<String>,
 }
 
 impl ClaudeCodeSession {
@@ -37,15 +35,9 @@ impl ClaudeCodeSession {
         let external_session_id = Some(Uuid::new_v4().to_string());
 
         //
-        // Store the original project_path from context.
+        // Determine working directory from context, or use home directory.
         //
-        let project_path = context.project_path.clone();
-
-        //
-        // Determine working directory: use context.project_path if provided,
-        // otherwise default to home directory.
-        //
-        let working_dir = project_path.clone()
+        let working_dir = context.working_dir.clone()
             .or_else(|| dirs::home_dir().map(|p| p.to_string_lossy().to_string()));
 
         Ok(Self {
@@ -55,7 +47,6 @@ impl ClaudeCodeSession {
             first_transaction: Mutex::new(true),
             yolo_mode: context.yolo_mode,
             working_dir,
-            project_path,
         })
     }
 
@@ -133,15 +124,8 @@ impl AgentSession for ClaudeCodeSession {
         self.process_path.clone()
     }
 
-    fn running_pid(&self) -> Option<String> {
-        //
-        // No persistent process, so no running PID.
-        //
-        None
-    }
-
-    fn project_path(&self) -> Option<String> {
-        self.project_path.clone()
+    fn working_dir(&self) -> Option<String> {
+        self.working_dir.clone()
     }
 
     fn mode(&self) -> AgentMode {

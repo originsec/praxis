@@ -10,6 +10,7 @@ pub mod m365copilot;
 pub mod modes;
 
 mod factory;
+pub mod recon;
 mod registry;
 mod traits;
 pub mod utils;

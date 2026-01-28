@@ -62,8 +62,8 @@ pub async fn handle_session_command(
                 Some(session) => {
                     let session_id = session.session_id().to_string();
                     common::log_info!(
-                        "Created session: {} (yolo_mode={}, project_path={:?})",
-                        session_id, context.yolo_mode, context.project_path
+                        "Created session: {} (yolo_mode={}, working_dir={:?})",
+                        session_id, context.yolo_mode, context.working_dir
                     );
                     NodeCommandResult::Session(SessionCommandResult::Created { session_id })
                 }

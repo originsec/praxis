@@ -2,15 +2,15 @@
 // Dynamic Agent - An agent created from a discovered OpenAI-compatible endpoint.
 //
 
+mod intercept;
+mod recon;
 mod session;
 
 pub use session::DynamicAgentSession;
 
 use crate::agent_connectors::traits::{Agent, AgentIntercept, AgentSession};
-use anyhow::Result;
 use async_trait::async_trait;
 use common::{DiscoveredLlmEndpoint, SessionContext};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 /// A dynamic agent created from a discovered OpenAI-compatible LLM endpoint.
@@ -23,8 +23,6 @@ pub struct DynamicAgent {
     endpoint: DiscoveredLlmEndpoint,
     /// Current session
     session: RwLock<Option<Arc<dyn AgentSession>>>,
-    /// YOLO mode flag
-    yolo_mode: AtomicBool,
 }
 
 impl DynamicAgent {
@@ -39,7 +37,6 @@ impl DynamicAgent {
             short_name,
             endpoint,
             session: RwLock::new(None),
-            yolo_mode: AtomicBool::new(false),
         }
     }
 }
@@ -54,15 +51,11 @@ impl Agent for DynamicAgent {
         &self.short_name
     }
 
-    fn supports_intercept(&self) -> bool {
+    fn as_intercept(&self) -> Option<&dyn AgentIntercept> {
         //
         // Dynamic agents support interception for their endpoint domain.
         //
-        self.endpoint.domain.is_some()
-    }
-
-    fn as_intercept(&self) -> Option<&dyn AgentIntercept> {
-        if self.supports_intercept() {
+        if self.endpoint.domain.is_some() {
             Some(self)
         } else {
             None
@@ -81,6 +74,7 @@ impl Agent for DynamicAgent {
         //
         // Check if we have an API key for this endpoint.
         //
+
         let api_key = match &self.endpoint.api_key {
             Some(key) => key.clone(),
             None => {
@@ -95,6 +89,7 @@ impl Agent for DynamicAgent {
         //
         // Get the first available model, or use a default.
         //
+
         let model = self
             .endpoint
             .models
@@ -102,16 +97,15 @@ impl Agent for DynamicAgent {
             .cloned()
             .unwrap_or_else(|| "gpt-3.5-turbo".to_string());
 
-        let session: Arc<dyn AgentSession> = Arc::new(DynamicAgentSession::new(
+        let session_arc = Arc::new(DynamicAgentSession::new(
             api_key,
             self.endpoint.base_url.clone(),
             model,
             context.yolo_mode,
-        ));
+        )) as Arc<dyn AgentSession>;
 
-        let mut guard = self.session.write().unwrap();
-        *guard = Some(session.clone());
-        Some(session)
+        *self.session.write().unwrap() = Some(Arc::clone(&session_arc));
+        Some(session_arc)
     }
 
     fn get_session(&self) -> Option<Arc<dyn AgentSession>> {
@@ -126,31 +120,7 @@ impl Agent for DynamicAgent {
         *guard = None;
     }
 
-    fn set_yolo_mode(&self, enabled: bool) -> Result<()> {
-        self.yolo_mode.store(enabled, Ordering::SeqCst);
-        Ok(())
-    }
-
-    fn is_yolo_mode(&self) -> bool {
-        self.yolo_mode.load(Ordering::SeqCst)
-    }
-}
-
-impl AgentIntercept for DynamicAgent {
-    fn intercept_domains(&self) -> Vec<&str> {
-        //
-        // Intercept traffic to the endpoint domain if available.
-        //
-        match &self.endpoint.domain {
-            Some(domain) => vec![domain.as_str()],
-            None => vec![],
-        }
-    }
-
-    fn intercept_url_pattern(&self) -> Option<&str> {
-        //
-        // Intercept all traffic to /v1/ endpoints.
-        //
-        Some("/v1/")
+    async fn perform_recon(&self, is_semantic: bool) -> Option<common::ReconResult> {
+        self.perform_recon(is_semantic).await
     }
 }

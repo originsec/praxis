@@ -534,7 +534,7 @@ export function AgentDetailPage() {
       await sendCommand(nodeId!, { Agent: { Select: { short_name: agentShortName! } } });
       const context: SessionContext = {
         yolo_mode: localYoloMode,
-        project_path: selectedProjectPath ?? undefined,
+        working_dir: selectedProjectPath ?? undefined,
       };
       await sendCommand(nodeId!, { Session: { Create: { context } } });
       setActiveTab('session');
@@ -824,8 +824,8 @@ export function AgentDetailPage() {
               {selectedAgent?.session_id && (
                 <span>Session: <span className="font-mono">{selectedAgent.session_id.slice(0, 12)}...</span></span>
               )}
-              {selectedAgent?.project_path && (
-                <span>Path: <span className="font-mono">{selectedAgent.project_path.split('/').slice(-2).join('/')}</span></span>
+              {selectedAgent?.working_dir && (
+                <span>Path: <span className="font-mono">{selectedAgent.working_dir.split('/').slice(-2).join('/')}</span></span>
               )}
             </div>
             {/*

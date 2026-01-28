@@ -43,6 +43,14 @@ impl M365CopilotSession {
             }
         }
     }
+
+    /// Get the running process ID (if available).
+    pub fn running_pid(&self) -> Option<String> {
+        match self {
+            M365CopilotSession::UIAutomation(s) => s.running_pid(),
+            M365CopilotSession::DevTools(s) => s.running_pid(),
+        }
+    }
 }
 
 impl AgentSession for M365CopilotSession {
@@ -57,13 +65,6 @@ impl AgentSession for M365CopilotSession {
         match self {
             M365CopilotSession::UIAutomation(s) => s.process_path(),
             M365CopilotSession::DevTools(s) => s.process_path(),
-        }
-    }
-
-    fn running_pid(&self) -> Option<String> {
-        match self {
-            M365CopilotSession::UIAutomation(s) => s.running_pid(),
-            M365CopilotSession::DevTools(s) => s.running_pid(),
         }
     }
 

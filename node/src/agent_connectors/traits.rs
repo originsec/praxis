@@ -29,10 +29,7 @@ pub trait AgentSession: Send + Sync {
     fn process_path(&self) -> Option<String> {
         None
     }
-    fn running_pid(&self) -> Option<String> {
-        None
-    }
-    fn project_path(&self) -> Option<String> {
+    fn working_dir(&self) -> Option<String> {
         None
     }
 
@@ -66,11 +63,6 @@ pub trait Agent: Send + Sync {
     fn name(&self) -> &str;
     fn short_name(&self) -> &str;
 
-    #[allow(dead_code)]
-    fn supports_intercept(&self) -> bool {
-        false
-    }
-
     fn as_intercept(&self) -> Option<&dyn AgentIntercept> {
         None
     }
@@ -83,11 +75,6 @@ pub trait Agent: Send + Sync {
     fn has_session(&self) -> bool {
         self.get_session().is_some()
     }
-
-    fn set_yolo_mode(&self, enabled: bool) -> Result<()>;
-
-    #[allow(dead_code)]
-    fn is_yolo_mode(&self) -> bool;
 
     /// Perform reconnaissance on the agent to discover tools, config, sessions, and project paths.
     /// - is_semantic=false: Static discovery (MCP servers, skills, config, sessions, project_paths)

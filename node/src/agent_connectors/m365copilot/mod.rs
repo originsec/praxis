@@ -6,6 +6,7 @@
 pub const USE_HIDDEN_DESKTOP: bool = true;
 
 mod devtools_adapter;
+mod intercept;
 mod session;
 mod ui_operations;
 mod uiautomation_adapter;
@@ -19,16 +20,17 @@ use crate::utils::semantic_parser::{
 };
 use anyhow::Result;
 use async_trait::async_trait;
-use common::{AgentTool, ReconTools, SessionContext};
+use common::{AgentTool, ReconTools};
 use once_cell::sync::OnceCell;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
+
+const AGENT_NAME: &str = "Microsoft 365 Copilot";
+const AGENT_SHORTNAME: &str = "m365copilot";
 
 /// M365 Copilot agent implementation for Windows.
 pub struct M365CopilotAgent {
     process_path: OnceCell<String>,
     session: RwLock<Option<Arc<dyn AgentSession>>>,
-    yolo_mode: AtomicBool,
 }
 
 impl M365CopilotAgent {
@@ -36,7 +38,6 @@ impl M365CopilotAgent {
         Self {
             process_path: OnceCell::new(),
             session: RwLock::new(None),
-            yolo_mode: AtomicBool::new(false),
         }
     }
 }
@@ -51,6 +52,7 @@ impl M365CopilotAgent {
     //
     // Use semantic parser to convert internal tools response to structured data.
     //
+
 
     async fn parse_internal_tools_response(&self, response: &str) -> Vec<AgentTool> {
         let semantic_client = match semantic_parser::get_client() {
@@ -98,39 +100,28 @@ impl M365CopilotAgent {
 #[async_trait]
 impl Agent for M365CopilotAgent {
     fn name(&self) -> &str {
-        "Microsoft 365 Copilot"
+        AGENT_NAME
     }
 
     fn short_name(&self) -> &str {
-        "m365copilot"
-    }
-
-    fn supports_intercept(&self) -> bool {
-        true
+        AGENT_SHORTNAME
     }
 
     fn as_intercept(&self) -> Option<&dyn AgentIntercept> {
         Some(self)
     }
 
-    fn set_yolo_mode(&self, enabled: bool) -> Result<()> {
-        self.yolo_mode.store(enabled, Ordering::SeqCst);
-        Ok(())
-    }
-
-    fn is_yolo_mode(&self) -> bool {
-        self.yolo_mode.load(Ordering::SeqCst)
-    }
-
     //
     // Custom fingerprinting for M365 Copilot (Windows package management).
     //
+
     async fn do_fingerprint(&self) -> bool {
         let process_name = "M365Copilot.exe";
 
         //
         // (1) Check for resident process.
         //
+
         if let Some(path) = utils::get_running_process_path(process_name) {
             let _ = self.process_path.set(path);
             return true;
@@ -139,6 +130,7 @@ impl Agent for M365CopilotAgent {
         //
         // (2) Find in Windows package install location.
         //
+
         let package_path =
             utils::get_package_install_path("Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe")
                 .unwrap_or_default();
@@ -155,12 +147,14 @@ impl Agent for M365CopilotAgent {
     //
     // Custom session management using M365CopilotSession.
     //
+
     fn create_session(&self, _context: &SessionContext) -> Option<Arc<dyn AgentSession>> {
-        common::log_info!("M365CopilotAgent: Creating new session");
+        common::log_info!("{}: Creating new session", AGENT_NAME);
 
         //
         // Default to DevTools mode for M365 Copilot.
         //
+
         let mode = AgentMode::DevTools;
 
         let result = tokio::task::block_in_place(|| {
@@ -170,13 +164,12 @@ impl Agent for M365CopilotAgent {
 
         match result {
             Ok(session) => {
-                let session: Arc<dyn AgentSession> = Arc::new(session);
-                let mut guard = self.session.write().unwrap();
-                *guard = Some(session.clone());
-                Some(session)
+                let session_arc = Arc::new(session) as Arc<dyn AgentSession>;
+                *self.session.write().unwrap() = Some(Arc::clone(&session_arc));
+                Some(session_arc)
             }
             Err(e) => {
-                common::log_error!("M365CopilotAgent: Failed to create session: {}", e);
+                common::log_error!("{}: Failed to create session: {}", AGENT_NAME, e);
                 None
             }
         }
@@ -200,6 +193,7 @@ impl Agent for M365CopilotAgent {
         //
         // Only run recon for semantic mode.
         //
+
 
         if !is_semantic {
             return None;
@@ -225,6 +219,7 @@ impl Agent for M365CopilotAgent {
         //
         // Execute JS to get user profile from nestedAppAuthService.
         //
+
 
         let js = r#"
             const profile =
@@ -258,7 +253,7 @@ impl Agent for M365CopilotAgent {
         // Send the prompt to list internal tools.
         //
 
-        let prompt = "List all your internal/built-in tools with their descriptions. Do NOT include MCP tools - only internal tools that are part of your core functionality.";
+        let prompt = crate::agent_connectors::utils::INTERNAL_TOOLS_DISCOVERY_PROMPT;
         common::log_info!("M365CopilotAgent: Sending internal tools discovery prompt");
         let internal_tools = match temp_session.transact(prompt) {
             Ok(response) => {
@@ -308,19 +303,5 @@ impl Agent for M365CopilotAgent {
             },
             ..Default::default()
         })
-    }
-}
-
-/// Implement the AgentIntercept trait for M365 Copilot.
-impl AgentIntercept for M365CopilotAgent {
-    fn intercept_domains(&self) -> Vec<&str> {
-        vec!["substrate.office.com"]
-    }
-
-    fn intercept_url_pattern(&self) -> Option<&str> {
-        //
-        // Only collect traffic for Copilot chat hub WebSocket.
-        //
-        Some(r"m365Copilot/Chathub")
     }
 }

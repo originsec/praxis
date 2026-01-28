@@ -1,32 +1,8 @@
+use crate::agent_connectors::utils::SKIP_DIRS;
 use common::ConfigItem;
 use std::collections::HashSet;
 use std::fs;
 use walkdir::WalkDir;
-
-/// Directories to skip during recursive scanning
-const SKIP_DIRS: &[&str] = &[
-    "node_modules",
-    ".git",
-    "__pycache__",
-    "target",
-    "build",
-    "dist",
-    ".venv",
-    "venv",
-    ".cache",
-    ".local",
-    ".config",
-    ".npm",
-    ".cargo",
-    ".rustup",
-    "Library",
-    "Applications",
-    ".Trash",
-    "Pictures",
-    "Music",
-    "Movies",
-    "Downloads",
-];
 
 /// Result of enumeration containing configs and project paths.
 pub struct EnumerationData {
