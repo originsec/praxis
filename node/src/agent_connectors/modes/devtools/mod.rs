@@ -383,11 +383,6 @@ impl<A: DevToolsAdapter + 'static> AgentSession for GenericDevToolsSession<A> {
 }
 
 impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
-    /// Get the running process ID (if available).
-    pub fn running_pid(&self) -> Option<String> {
-        self.process_id.map(|pid| pid.to_string())
-    }
-
     /// Execute JavaScript on the page and return the result as JSON.
     pub fn execute_js(&self, js: &str) -> Result<serde_json::Value> {
         let page_guard = self.page.lock().unwrap();

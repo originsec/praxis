@@ -164,6 +164,7 @@ impl WintunManager {
 
     /// Shutdown the session to unblock any blocking reads
     /// This should be called before waiting for the packet engine to stop
+    #[allow(dead_code)]
     pub fn shutdown_session(&self) {
         if let Some(session) = &self.session {
             common::log_debug!("Shutting down wintun session to unblock readers");

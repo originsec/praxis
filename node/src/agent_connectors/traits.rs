@@ -9,7 +9,7 @@ use uuid::Uuid;
 //
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // Used on Windows (m365copilot), appears unused on Linux
+#[allow(dead_code)]
 pub enum AgentMode {
     UIAutomation,
     DevTools,
@@ -30,7 +30,7 @@ pub trait AgentSession: Send + Sync {
         None
     }
 
-    #[allow(dead_code)] // Used on Windows (m365copilot), appears unused on Linux
+    #[allow(dead_code)]
     fn mode(&self) -> AgentMode;
     fn transact(&self, prompt: &str) -> Result<String>;
     fn close(&self);

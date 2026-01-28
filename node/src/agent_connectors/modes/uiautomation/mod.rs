@@ -75,11 +75,6 @@ impl<A: UIAutomationAdapter> GenericUIAutomationSession<A> {
             process_path,
         }
     }
-
-    /// Get the running process ID (if available).
-    pub fn running_pid(&self) -> Option<String> {
-        self.process_id.map(|pid| pid.to_string())
-    }
 }
 
 impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSession<A> {
