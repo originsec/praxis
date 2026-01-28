@@ -129,6 +129,7 @@ export function AgentDetailPage() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [isClosingSession, setIsClosingSession] = useState(false);
   const [isDiscoveringTools, setIsDiscoveringTools] = useState(false);
   const [selectedServerIdx, setSelectedServerIdx] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -519,12 +520,17 @@ export function AgentDetailPage() {
 
   const handleCloseSession = async () => {
     const currentSessionId = sessionId;
-    await sendCommand(nodeId!, { Session: 'Close' });
-    //
-    // Clear messages for this session.
-    //
-    if (currentSessionId) {
-      clearAgentSessionMessages(currentSessionId);
+    setIsClosingSession(true);
+    try {
+      await sendCommand(nodeId!, { Session: 'Close' });
+      //
+      // Clear messages for this session.
+      //
+      if (currentSessionId) {
+        clearAgentSessionMessages(currentSessionId);
+      }
+    } finally {
+      setIsClosingSession(false);
     }
   };
 
@@ -676,9 +682,14 @@ export function AgentDetailPage() {
               {hasSession ? (
                 <button
                   onClick={handleCloseSession}
-                  className="inline-flex items-center gap-2 px-4 py-2  bg-red-500/20 text-[var(--accent-error)] hover:bg-red-500/30 transition-colors"
+                  disabled={isClosingSession}
+                  className="inline-flex items-center gap-2 px-4 py-2  bg-red-500/20 text-[var(--accent-error)] hover:bg-red-500/30 transition-colors disabled:opacity-50"
                 >
-                  <Square size={16} /> Close Session
+                  {isClosingSession ? (
+                    <><Loader2 size={16} className="animate-spin" /> Closing...</>
+                  ) : (
+                    <><Square size={16} /> Close Session</>
+                  )}
                 </button>
               ) : (
                 <button

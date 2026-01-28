@@ -70,6 +70,7 @@ export function NodeDetailPage() {
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [isCreatingTerminal, setIsCreatingTerminal] = useState(false);
   const [creatingSessionFor, setCreatingSessionFor] = useState<string | null>(null);
+  const [closingSessionFor, setClosingSessionFor] = useState<string | null>(null);
 
   //
   // Intercept traffic state.
@@ -156,8 +157,13 @@ export function NodeDetailPage() {
   };
 
   const handleCloseSession = async (shortName: string) => {
-    await handleSelectAgent(shortName);
-    await sendCommand(node.node_id, { Session: 'Close' });
+    setClosingSessionFor(shortName);
+    try {
+      await handleSelectAgent(shortName);
+      await sendCommand(node.node_id, { Session: 'Close' });
+    } finally {
+      setClosingSessionFor(null);
+    }
   };
 
   const handleCreateTerminal = async () => {
@@ -338,9 +344,14 @@ export function NodeDetailPage() {
                           {hasSession ? (
                             <button
                               onClick={() => handleCloseSession(agent.short_name)}
-                              className="inline-flex items-center gap-2 px-3 py-1.5 bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors"
+                              disabled={closingSessionFor === agent.short_name}
+                              className="inline-flex items-center gap-2 px-3 py-1.5 bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors disabled:opacity-50"
                             >
-                              <Square size={14} /> Close Session
+                              {closingSessionFor === agent.short_name ? (
+                                <><Loader2 size={14} className="animate-spin" /> Closing...</>
+                              ) : (
+                                <><Square size={14} /> Close Session</>
+                              )}
                             </button>
                           ) : (
                             <button
