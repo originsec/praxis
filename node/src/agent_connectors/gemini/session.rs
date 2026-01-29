@@ -95,6 +95,10 @@ impl GeminiSession {
 
         let mut cmd = utils::build_command(path);
 
+        if let Some(ref dir) = self.working_dir {
+            cmd.current_dir(dir);
+        }
+
         if self.yolo_mode {
             cmd.arg("-y");
         }
@@ -122,7 +126,6 @@ impl GeminiSession {
 
         if self.external_session_id.get().is_none() {
             if let Ok(session_id) = self.get_latest_session_id_from_list() {
-                common::log_info!("Session initialized via lazy discovery: {}", session_id);
                 let _ = self.external_session_id.set(session_id);
             }
         }
@@ -169,6 +172,10 @@ impl AgentSession for GeminiSession {
 
     fn close(&self) {
         self.delete_session();
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

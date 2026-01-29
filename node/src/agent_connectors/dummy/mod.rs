@@ -1,3 +1,4 @@
+mod fingerprint;
 mod session;
 
 pub use session::DummySession;
@@ -218,10 +219,7 @@ impl Agent for DummyAgent {
     }
 
     async fn do_fingerprint(&self) -> bool {
-        //
-        // Dummy is always "available".
-        //
-        true
+        self.do_fingerprint_impl().await
     }
 
     fn create_session(&self, _context: &common::SessionContext) -> Option<Arc<dyn AgentSession>> {

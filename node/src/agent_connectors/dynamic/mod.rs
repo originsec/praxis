@@ -1,7 +1,4 @@
-//
-// Dynamic Agent - An agent created from a discovered OpenAI-compatible endpoint.
-//
-
+mod fingerprint;
 mod intercept;
 mod recon;
 mod session;
@@ -13,20 +10,14 @@ use async_trait::async_trait;
 use common::{DiscoveredLlmEndpoint, SessionContext};
 use std::sync::{Arc, RwLock};
 
-/// A dynamic agent created from a discovered OpenAI-compatible LLM endpoint.
 pub struct DynamicAgent {
-    /// Display name for this agent
     name: String,
-    /// Short identifier (used for selection)
     short_name: String,
-    /// The discovered endpoint information
     endpoint: DiscoveredLlmEndpoint,
-    /// Current session
     session: RwLock<Option<Arc<dyn AgentSession>>>,
 }
 
 impl DynamicAgent {
-    /// Create a new dynamic agent from a discovered endpoint
     pub fn new(name: String, short_name: String, endpoint: DiscoveredLlmEndpoint) -> Self {
         common::log_info!(
             "Creating dynamic agent '{}' ({}) from endpoint {}",
@@ -67,11 +58,7 @@ impl Agent for DynamicAgent {
     }
 
     async fn do_fingerprint(&self) -> bool {
-        //
-        // Dynamic agents are always "available" since they were created from a
-        // discovered endpoint.
-        //
-        true
+        self.do_fingerprint_impl().await
     }
 
     fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>> {

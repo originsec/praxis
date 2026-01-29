@@ -19,7 +19,7 @@ fn discover_skills() -> Vec<AgentTool> {
 impl AgentRecon for GeminiAgent {
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
         common::log_info!(
-            "GeminiAgent: Performing recon (is_semantic={})",
+            "Performing recon (is_semantic={})",
             is_semantic
         );
 
@@ -52,7 +52,7 @@ impl AgentRecon for GeminiAgent {
         .await;
 
         common::log_info!(
-            "GeminiAgent: Recon complete - {} MCP servers, {} skills, {} internal tools, {} config items, {} projects",
+            "Recon complete - {} MCP servers, {} skills, {} internal tools, {} config items, {} projects",
             tools.mcp_servers.len(),
             tools.skills.len(),
             tools.internal_tools.len(),
@@ -71,13 +71,11 @@ impl AgentRecon for GeminiAgent {
 }
 
 impl GeminiAgent {
-    //
-    // Discover internal tools by querying the agent via a temporary session.
-    //
     async fn discover_internal_tools_semantically(&self) -> Vec<AgentTool> {
         //
         // Close any existing session.
         //
+
         {
             let mut guard = self.session.write().unwrap();
             if let Some(session) = guard.as_ref() {
@@ -87,9 +85,6 @@ impl GeminiAgent {
             *guard = None;
         }
 
-        //
-        // Use shared recon function to discover internal tools.
-        //
         crate::agent_connectors::utils::discover_internal_tools_semantically(
             "GeminiAgent",
             || {

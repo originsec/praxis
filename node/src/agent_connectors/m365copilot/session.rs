@@ -1,8 +1,3 @@
-//
-// M365 Copilot session wrapper - delegates to either UIAutomation or DevTools
-// session based on configured mode.
-//
-
 use crate::agent_connectors::modes::devtools::GenericDevToolsSession;
 use crate::agent_connectors::modes::uiautomation::GenericUIAutomationSession;
 use crate::agent_connectors::traits::{AgentMode, AgentSession};
@@ -20,6 +15,11 @@ pub enum M365CopilotSession {
 
 impl M365CopilotSession {
     pub async fn new(process_path: Option<String>, mode: AgentMode) -> anyhow::Result<Self> {
+        //
+        // Delegates to either UIAutomation or DevTools
+        // session based on configured mode.
+        //
+
         match mode {
             AgentMode::DevTools => {
                 let adapter = M365DevToolsAdapter::new(process_path);
@@ -33,7 +33,10 @@ impl M365CopilotSession {
         }
     }
 
-    /// Execute JavaScript on the page (DevTools mode only).
+    //
+    // Execute JavaScript on the page (DevTools mode only).
+    //
+
     pub fn execute_js(&self, js: &str) -> anyhow::Result<serde_json::Value> {
         match self {
             M365CopilotSession::DevTools(s) => s.execute_js(js),
@@ -78,5 +81,9 @@ impl AgentSession for M365CopilotSession {
             M365CopilotSession::UIAutomation(s) => s.close(),
             M365CopilotSession::DevTools(s) => s.close(),
         }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
