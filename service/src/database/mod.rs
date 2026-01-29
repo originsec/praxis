@@ -52,6 +52,17 @@ impl Database {
         let conn = Connection::open(path)?;
 
         //
+        // Configure SQLite for network file systems (Azure Files, SMB/CIFS).
+        // Use WAL mode for better concurrency and set appropriate locking.
+        //
+        conn.execute_batch("
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = NORMAL;
+            PRAGMA busy_timeout = 5000;
+            PRAGMA locking_mode = NORMAL;
+        ")?;
+
+        //
         // Initialize all schemas.
         //
         Self::init_operations_schema(&conn)?;
