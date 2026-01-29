@@ -418,6 +418,7 @@ deploy_praxis() {
 
         #
         # Now add volume mount using YAML update.
+        # Must include full container specification including image.
         #
         info "Adding persistent storage volume..."
         TEMP_YAML=$(mktemp)
@@ -430,6 +431,17 @@ properties:
       storageName: $STORAGE_NAME
     containers:
     - name: $PRAXIS_APP
+      image: $IMAGE_TAG
+      resources:
+        cpu: 1
+        memory: 2Gi
+      env:
+      - name: PRAXIS_RABBITMQ_URL
+        value: $RABBITMQ_URL
+      - name: PRAXIS_DB_PATH
+        value: /app/data/.praxis_operations.db
+      - name: RUST_LOG
+        value: info
       volumeMounts:
       - volumeName: praxis-data-volume
         mountPath: /app/data
