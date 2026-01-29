@@ -643,11 +643,15 @@ impl ChainExecutor {
                     let client = create_ai_client(provider, api_key)?;
 
                     //
-                    // Build the conversation - system prompt with user data.
+                    // Build the conversation - input data first, then prompt.
                     //
+                    let user_content = if merged_input.is_empty() {
+                        prompt.clone()
+                    } else {
+                        format!("{}\n\n{}", merged_input, prompt)
+                    };
                     let messages = vec![
-                        Message::system(prompt.clone()),
-                        Message::user(merged_input.clone()),
+                        Message::user(user_content),
                     ];
 
                     //
@@ -808,12 +812,15 @@ impl ChainExecutor {
                             let client = create_ai_client(provider, api_key)?;
 
                             //
-                            // Build the conversation - system prompt with user
-                            // data.
+                            // Build the conversation - input data first, then prompt.
                             //
+                            let user_content = if merged_input.is_empty() {
+                                prompt.clone()
+                            } else {
+                                format!("{}\n\n{}", merged_input, prompt)
+                            };
                             let messages = vec![
-                                Message::system(prompt.clone()),
-                                Message::user(merged_input.clone()),
+                                Message::user(user_content),
                             ];
 
                             //
