@@ -340,9 +340,9 @@ deploy_praxis() {
     else
         info "Configuring Azure Files storage in Container App Environment..."
         az containerapp env storage set \
-            --storage-name "$STORAGE_NAME" \
-            --environment-name "$CONTAINER_APP_ENV" \
+            --name "$CONTAINER_APP_ENV" \
             --resource-group "$RESOURCE_GROUP" \
+            --storage-name "$STORAGE_NAME" \
             --storage-type AzureFile \
             --azure-file-account-name "$STORAGE_ACCOUNT_LOWER" \
             --azure-file-account-key "$STORAGE_KEY" \
