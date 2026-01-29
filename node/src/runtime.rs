@@ -297,49 +297,36 @@ async fn listen_to_queues(
 
     //
     // Spawn task to forward event log entries to service via dedicated queue.
+    // Note: This task uses tracing::* directly instead of common::log_* to avoid
+    // recursion - using common::log_* would send to the event log channel, which
+    // this task processes, creating an infinite loop on failures.
     //
     let channel_for_event_log = channel.clone();
     tokio::spawn(async move {
-        common::log_info!("Event log forwarder task started");
+        tracing::info!("Event log forwarder task started");
         let mut consecutive_failures = 0u32;
-        let mut last_error_log_time = std::time::Instant::now();
 
         while let Some(entry) = event_log_rx.recv().await {
             match publish_json(&channel_for_event_log, NODE_EVENT_LOG_QUEUE, &entry).await {
                 Ok(_) => {
-                    //
-                    // Success - reset failure counter and log recovery if needed.
-                    //
                     if consecutive_failures > 0 {
-                        common::log_info!(
+                        tracing::info!(
                             "Event log forwarder recovered after {} failures",
                             consecutive_failures
                         );
                         consecutive_failures = 0;
                     }
                 }
-                Err(e) => {
+                Err(_) => {
+                    //
+                    // Silently increment failure counter. We don't log here to
+                    // avoid recursion and because event log failures shouldn't
+                    // disrupt normal operation.
+                    //
                     consecutive_failures += 1;
 
                     //
-                    // Only log errors if:
-                    // 1. It's one of the first 3 failures, OR
-                    // 2. More than 10 seconds since last error log.
-                    //
-                    let should_log = consecutive_failures <= 3
-                        || last_error_log_time.elapsed().as_secs() >= 10;
-
-                    if should_log {
-                        common::log_error!(
-                            "Failed to send event log entry (failure #{}): {}",
-                            consecutive_failures,
-                            e
-                        );
-                        last_error_log_time = std::time::Instant::now();
-                    }
-
-                    //
-                    // Add small delay after failures to avoid tight error loops.
+                    // Add delay after repeated failures to avoid tight loops.
                     //
                     if consecutive_failures > 3 {
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -347,7 +334,7 @@ async fn listen_to_queues(
                 }
             }
         }
-        common::log_info!("Event log forwarder task ended");
+        tracing::info!("Event log forwarder task ended");
     });
 
     //
