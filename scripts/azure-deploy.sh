@@ -392,63 +392,52 @@ deploy_praxis() {
         info "Creating Praxis Container App with persistent storage..."
 
         #
-        # Create temporary YAML file for volume mount configuration.
+        # Create app without volumes first using standard CLI parameters.
         #
+        az containerapp create \
+            --name "$PRAXIS_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --environment "$CONTAINER_APP_ENV" \
+            --image "$IMAGE_TAG" \
+            --registry-server "$ACR_LOGIN_SERVER" \
+            --registry-username "$ACR_NAME" \
+            --registry-password "$ACR_PASSWORD" \
+            --target-port 8080 \
+            --ingress external \
+            --cpu 1 \
+            --memory 2Gi \
+            --min-replicas 1 \
+            --max-replicas 1 \
+            --env-vars \
+                PRAXIS_RABBITMQ_URL="$RABBITMQ_URL" \
+                PRAXIS_DB_PATH=/app/data/.praxis_operations.db \
+                RUST_LOG=info \
+            --output none
+
+        success "Created Praxis Container App"
+
+        #
+        # Now add volume mount using YAML update.
+        #
+        info "Adding persistent storage volume..."
         TEMP_YAML=$(mktemp)
-        cat > "$TEMP_YAML" <<'EOF'
+        cat > "$TEMP_YAML" <<EOF
 properties:
   template:
     volumes:
     - name: praxis-data-volume
       storageType: AzureFile
-      storageName: STORAGE_NAME_PLACEHOLDER
+      storageName: $STORAGE_NAME
     containers:
-    - name: PRAXIS_APP_PLACEHOLDER
-      image: IMAGE_TAG_PLACEHOLDER
-      resources:
-        cpu: 1
-        memory: 2Gi
-      env:
-      - name: PRAXIS_RABBITMQ_URL
-        value: RABBITMQ_URL_PLACEHOLDER
-      - name: PRAXIS_DB_PATH
-        value: /app/data/.praxis_operations.db
-      - name: RUST_LOG
-        value: info
+    - name: $PRAXIS_APP
       volumeMounts:
       - volumeName: praxis-data-volume
         mountPath: /app/data
-    scale:
-      minReplicas: 1
-      maxReplicas: 1
-  configuration:
-    ingress:
-      external: true
-      targetPort: 8080
-    registries:
-    - server: ACR_LOGIN_SERVER_PLACEHOLDER
-      username: ACR_NAME_PLACEHOLDER
-      passwordSecretRef: registry-password
-    secrets:
-    - name: registry-password
-      value: ACR_PASSWORD_PLACEHOLDER
 EOF
 
-        #
-        # Replace placeholders with actual values.
-        #
-        sed -i "s|STORAGE_NAME_PLACEHOLDER|$STORAGE_NAME|g" "$TEMP_YAML"
-        sed -i "s|PRAXIS_APP_PLACEHOLDER|$PRAXIS_APP|g" "$TEMP_YAML"
-        sed -i "s|IMAGE_TAG_PLACEHOLDER|$IMAGE_TAG|g" "$TEMP_YAML"
-        sed -i "s|RABBITMQ_URL_PLACEHOLDER|$RABBITMQ_URL|g" "$TEMP_YAML"
-        sed -i "s|ACR_LOGIN_SERVER_PLACEHOLDER|$ACR_LOGIN_SERVER|g" "$TEMP_YAML"
-        sed -i "s|ACR_NAME_PLACEHOLDER|$ACR_NAME|g" "$TEMP_YAML"
-        sed -i "s|ACR_PASSWORD_PLACEHOLDER|$ACR_PASSWORD|g" "$TEMP_YAML"
-
-        az containerapp create \
+        az containerapp update \
             --name "$PRAXIS_APP" \
             --resource-group "$RESOURCE_GROUP" \
-            --environment "$CONTAINER_APP_ENV" \
             --yaml "$TEMP_YAML" \
             --output none
 
