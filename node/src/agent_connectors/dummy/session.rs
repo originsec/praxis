@@ -1,6 +1,6 @@
 use crate::agent_connectors::traits::{AgentMode, AgentSession};
 use anyhow::Result;
-use std::any::Any;
+
 use uuid::Uuid;
 
 /// A simple dummy session that returns canned responses
@@ -61,7 +61,7 @@ impl AgentSession for DummySession {
         //
     }
 
-    fn as_any(&self) -> &dyn Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }

@@ -467,6 +467,16 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
+    /// Request stored recon result for a node+agent
+    pub async fn get_recon(&self, node_id: String, agent_short_name: String) -> Result<()> {
+        let message = ClientSignalMessage::ReconGet {
+            client_id: self.state.client_id.clone(),
+            node_id,
+            agent_short_name,
+        };
+        self.publish_signal(message).await
+    }
+
     /// Send an event log entry to the service via dedicated queue
     pub async fn send_event_log(&self, entry: common::ApplicationLogEntry) -> Result<()> {
         publish_json(&self.channel, WEB_EVENT_LOG_QUEUE, &entry).await?;
@@ -604,7 +614,7 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::CommandResponse(response) => {
                 //
-                // Store for Skynet if it's a pending command.
+                // Store for Nexus if it's a pending command.
                 //
                 self.state.store_command_response(response.command_id.clone(), response.result.clone()).await;
                 self.state.broadcast(ServerMessage::CommandResponse { response });
@@ -614,14 +624,14 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::SemanticOpQueued { operation_id, queue_position, request_id } => {
                 //
-                // Store for Skynet if it's a pending request.
+                // Store for Nexus if it's a pending request.
                 //
                 self.state.store_semantic_op_response(request_id.clone(), operation_id.clone()).await;
                 self.state.broadcast(ServerMessage::SemanticOpQueued { operation_id, queue_position, request_id });
             }
             ClientDirectMessage::SemanticOpUpdate(update) => {
                 //
-                // Store in state for Skynet access.
+                // Store in state for Nexus access.
                 //
                 self.state.update_operation(update.clone()).await;
                 self.state.broadcast(ServerMessage::SemanticOpUpdate { update });
@@ -647,7 +657,7 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::OpDefListResponse { definitions } => {
                 //
-                // Store operation definitions for Skynet access.
+                // Store operation definitions for Nexus access.
                 //
                 self.state.update_operation_definitions(definitions.clone()).await;
                 self.state.broadcast(ServerMessage::OpDefList { definitions });
@@ -673,7 +683,7 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::TrafficSearchResponse { entries, total_count } => {
                 //
-                // Store for Skynet to pick up.
+                // Store for Nexus to pick up.
                 //
                 self.state.store_traffic_search_response(entries.clone(), total_count).await;
                 self.state.broadcast(ServerMessage::TrafficSearchResponse { entries, total_count });
@@ -766,6 +776,13 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::ApplicationLogCleared { deleted_count } => {
                 self.state.broadcast(ServerMessage::ApplicationLogCleared { deleted_count });
+            }
+
+            //
+            // Recon responses.
+            //
+            ClientDirectMessage::ReconGetResponse { node_id, agent_short_name, recon_result, performed_at, is_semantic } => {
+                self.state.broadcast(ServerMessage::ReconGetResponse { node_id, agent_short_name, recon_result, performed_at, is_semantic });
             }
         }
 

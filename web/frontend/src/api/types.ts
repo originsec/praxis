@@ -24,9 +24,8 @@ export interface SelectedAgent {
   short_name: string;
   session_id: string | null;
   process_name: string | null;
-  running_pid: string | null;
   yolo_mode: boolean;
-  project_path: string | null;
+  working_dir: string | null;
 }
 
 //
@@ -95,13 +94,14 @@ export interface AgentSessionInfo {
   session_file: string;
   last_modified: string;
   message_count: number;
+  content?: string;
 }
 
 //
 // Session Context for creating sessions with specific parameters.
 //
 export interface SessionContext {
-  project_path?: string;
+  working_dir?: string;
   yolo_mode?: boolean;
 }
 
@@ -120,12 +120,11 @@ export type AgentCommand =
   | 'Recon'
   | 'ReconSemantic'
   | { Select: { short_name: string } }
-  | { SetYolo: { enabled: boolean } }
-  | { UpdateConfigFile: { path: string; contents: string } };
+  | { UpdateConfigFile: { path: string; contents: string } }
+  | { GetSessionContent: { session_file: string } };
 
 export type SessionCommand =
   | { Create: { context: SessionContext } }
-  | 'Info'
   | 'Close'
   | { Prompt: { text: string; transaction_id: string } }
   | { CancelTransaction: { transaction_id: string } };
@@ -174,7 +173,6 @@ export type AgentCommandResult =
 
 export type SessionCommandResult =
   | { Created: { session_id: string } }
-  | { Info: { data: Record<string, string> } }
   | 'Closed'
   | { PromptResponse: { transaction_id: string; response: string } }
   | { TransactionCancelled: { transaction_id: string } };
@@ -423,7 +421,7 @@ export interface ChainExecutionUpdate {
 }
 
 //
-// Skynet Plan types.
+// Nexus Plan types.
 //
 export type PlanStepStatus = 'not_started' | 'in_progress' | 'done';
 
@@ -432,7 +430,7 @@ export interface PlanStep {
   status: PlanStepStatus;
 }
 
-export interface SkynetPlan {
+export interface NexusPlan {
   steps: PlanStep[];
   summary?: string;
   current_step_description?: string;
@@ -554,10 +552,10 @@ export type BrowserMessage =
   | { type: 'op_def_list' }
   | { type: 'op_def_delete'; full_name: string }
   | { type: 'op_def_get'; full_name: string }
-  | { type: 'skynet_start' }
-  | { type: 'skynet_prompt'; message: string }
-  | { type: 'skynet_stop' }
-  | { type: 'skynet_cancel' }
+  | { type: 'nexus_start' }
+  | { type: 'nexus_prompt'; message: string }
+  | { type: 'nexus_stop' }
+  | { type: 'nexus_cancel' }
   //
   // Traffic interception messages.
   //
@@ -595,7 +593,11 @@ export type BrowserMessage =
   // Node event log messages.
   //
   | { type: 'application_log_request'; node_id: string; level_filter: string[] | null; regex_filter: string | null; limit: number; offset: number }
-  | { type: 'application_log_clear'; node_id: string | null };
+  | { type: 'application_log_clear'; node_id: string | null }
+  //
+  // Recon messages.
+  //
+  | { type: 'recon_get'; node_id: string; agent_short_name: string };
 
 //
 // WebSocket Messages (Server -> Browser).
@@ -617,15 +619,15 @@ export type ServerMessage =
   | { type: 'op_def_added'; full_name: string }
   | { type: 'op_def_deleted'; full_name: string; success: boolean }
   | { type: 'op_def_error'; message: string }
-  | { type: 'skynet_started' }
-  | { type: 'skynet_content'; content: string }
-  | { type: 'skynet_tool_executing'; name: string; input?: string }
-  | { type: 'skynet_tool_executed'; name: string; display: string; success: boolean; result: string }
-  | { type: 'skynet_plan_updated'; plan: SkynetPlan }
-  | { type: 'skynet_done' }
-  | { type: 'skynet_stopped' }
-  | { type: 'skynet_error'; message: string }
-  | { type: 'skynet_token_usage'; prompt_tokens: number; completion_tokens: number; total_tokens: number }
+  | { type: 'nexus_started' }
+  | { type: 'nexus_content'; content: string }
+  | { type: 'nexus_tool_executing'; name: string; input?: string }
+  | { type: 'nexus_tool_executed'; name: string; display: string; success: boolean; result: string }
+  | { type: 'nexus_plan_updated'; plan: NexusPlan }
+  | { type: 'nexus_done' }
+  | { type: 'nexus_stopped' }
+  | { type: 'nexus_error'; message: string }
+  | { type: 'nexus_token_usage'; prompt_tokens: number; completion_tokens: number; total_tokens: number }
   //
   // Traffic interception messages.
   //
@@ -661,4 +663,8 @@ export type ServerMessage =
   // Node event log messages.
   //
   | { type: 'application_log_response'; node_id: string; entries: ApplicationLogEntry[]; total_count: number }
-  | { type: 'application_log_cleared'; deleted_count: number };
+  | { type: 'application_log_cleared'; deleted_count: number }
+  //
+  // Recon messages.
+  //
+  | { type: 'recon_get_response'; node_id: string; agent_short_name: string; recon_result: ReconResult | null; performed_at: string | null; is_semantic: boolean | null };

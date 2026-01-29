@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import {
@@ -14,10 +14,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
-  Save,
 } from 'lucide-react';
-import { Modal } from '../components/common/Modal';
-import { Tooltip } from '../components/common/Tooltip';
+import { ConfigModal, type ConfigItem } from '../components/common/ConfigModal';
 import type {
   InterceptRule,
   TrafficLogFilters,
@@ -542,7 +540,7 @@ function MatchesTab() {
 }
 
 function RulesTab() {
-  const { state, updateInterceptRule, deleteInterceptRule, requestInterceptRules } = useApp();
+  const { state, updateInterceptRule, deleteInterceptRule } = useApp();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingRule, setEditingRule] = useState<InterceptRule | null>(null);
   const [ruleToDelete, setRuleToDelete] = useState<InterceptRule | null>(null);
@@ -574,10 +572,10 @@ function RulesTab() {
       <div className="flex items-center justify-end gap-4">
         <button
           onClick={() => setShowCreateModal(true)}
-          className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors"
+          className="inline-flex items-center gap-2 px-3 py-1.5 text-xs tracking-wider bg-[var(--accent-success)]/20 text-[var(--accent-success)] border border-dim hover:border-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors"
         >
           <Plus size={14} />
-          Add Rule
+          Add
         </button>
       </div>
 
@@ -717,202 +715,179 @@ function formatScope(scope: RuleScope): string {
 
 function RuleModal({ rule, onClose }: { rule: InterceptRule | null; onClose: () => void }) {
   const { state, createInterceptRule, updateInterceptRule } = useApp();
-  const [name, setName] = useState(rule?.name ?? '');
-  const [regexPattern, setRegexPattern] = useState(rule?.regex_pattern ?? '');
-  const [targetDirection, setTargetDirection] = useState<TargetDirection>(rule?.target_direction ?? 'both');
-  const [summarizationPrompt, setSummarizationPrompt] = useState(rule?.summarization_prompt ?? '');
 
   const ruleScope = rule?.scope;
-  const [scopeType, setScopeType] = useState<'all' | 'node' | 'agent'>(
-    ruleScope === 'all' ? 'all' : (ruleScope && 'node' in ruleScope) ? 'node' : (ruleScope && 'agent' in ruleScope) ? 'agent' : 'all'
-  );
-  const [scopeNodeId, setScopeNodeId] = useState<string>(
-    ruleScope && ruleScope !== 'all' && 'node' in ruleScope ? ruleScope.node.node_id : ''
-  );
-  const [scopeAgentNodeId, setScopeAgentNodeId] = useState<string>(
-    ruleScope && ruleScope !== 'all' && 'agent' in ruleScope ? ruleScope.agent.node_id : ''
-  );
-  const [scopeAgentName, setScopeAgentName] = useState<string>(
-    ruleScope && ruleScope !== 'all' && 'agent' in ruleScope ? ruleScope.agent.agent_short_name : ''
-  );
+  const [values, setValues] = useState({
+    name: rule?.name ?? '',
+    regex_pattern: rule?.regex_pattern ?? '',
+    target_direction: rule?.target_direction ?? 'both',
+    summarization_prompt: rule?.summarization_prompt ?? '',
+    scope_type: ruleScope === 'all' ? 'all' : (ruleScope && 'node' in ruleScope) ? 'node' : (ruleScope && 'agent' in ruleScope) ? 'agent' : 'all',
+    scope_node_id: ruleScope && ruleScope !== 'all' && 'node' in ruleScope ? ruleScope.node.node_id : '',
+    scope_agent_node_id: ruleScope && ruleScope !== 'all' && 'agent' in ruleScope ? ruleScope.agent.node_id : '',
+    scope_agent_name: ruleScope && ruleScope !== 'all' && 'agent' in ruleScope ? ruleScope.agent.agent_short_name : '',
+  });
 
   const nodes = state.systemState?.nodes ?? [];
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleChange = (name: string, value: any) => {
+    setValues(prev => ({ ...prev, [name]: value }));
+  };
 
+  const handleSubmit = () => {
     let scope: RuleScope = 'all';
-    if (scopeType === 'node' && scopeNodeId) {
-      scope = { node: { node_id: scopeNodeId } };
-    } else if (scopeType === 'agent' && scopeAgentNodeId && scopeAgentName) {
-      scope = { agent: { node_id: scopeAgentNodeId, agent_short_name: scopeAgentName } };
+    if (values.scope_type === 'node' && values.scope_node_id) {
+      scope = { node: { node_id: values.scope_node_id } };
+    } else if (values.scope_type === 'agent' && values.scope_agent_node_id && values.scope_agent_name) {
+      scope = { agent: { node_id: values.scope_agent_node_id, agent_short_name: values.scope_agent_name } };
     }
 
-    const promptValue = summarizationPrompt.trim() || null;
+    const promptValue = values.summarization_prompt.trim() || null;
 
     if (rule && rule.id !== null) {
       updateInterceptRule(rule.id, {
-        name,
-        regex_pattern: regexPattern,
-        target_direction: targetDirection,
+        name: values.name,
+        regex_pattern: values.regex_pattern,
+        target_direction: values.target_direction as TargetDirection,
         scope,
         summarization_prompt: promptValue,
       });
     } else {
-      createInterceptRule(name, regexPattern, targetDirection, scope, promptValue);
+      createInterceptRule(
+        values.name,
+        values.regex_pattern,
+        values.target_direction as TargetDirection,
+        scope,
+        promptValue
+      );
     }
 
     onClose();
   };
 
+  const nodeOptions = useMemo(() => [
+    { value: '', label: 'Select Node...' },
+    ...nodes.map(node => ({
+      value: node.node_id,
+      label: node.machine_name || node.node_id.slice(0, 8)
+    }))
+  ], [nodes]);
+
+  const config: ConfigItem[] = [
+    {
+      type: 'section',
+      fields: [
+        {
+          name: 'name',
+          label: 'Name',
+          type: 'text',
+          placeholder: 'Rule name',
+          required: true,
+          span: 'full',
+        },
+        {
+          name: 'regex_pattern',
+          label: 'Regex Pattern',
+          type: 'text',
+          placeholder: '.*api\\.example\\.com.*',
+          required: true,
+          span: 'full',
+          help: 'Pattern will match against all request/response headers and content',
+        },
+        {
+          name: 'target_direction',
+          label: 'Target Direction',
+          type: 'select',
+          options: [
+            { value: 'both', label: 'Both' },
+            { value: 'send', label: 'Send Only' },
+            { value: 'receive', label: 'Receive Only' },
+          ],
+          span: 'half',
+        },
+        {
+          name: 'scope_type',
+          label: 'Scope',
+          type: 'select',
+          options: [
+            { value: 'all', label: 'All Nodes & Agents' },
+            { value: 'node', label: 'Specific Node' },
+            { value: 'agent', label: 'Specific Agent' },
+          ],
+          span: 'half',
+        },
+      ],
+    },
+  ];
+
+  if (values.scope_type === 'node') {
+    config.push({
+      type: 'section',
+      fields: [
+        {
+          name: 'scope_node_id',
+          label: 'Select Node',
+          type: 'select',
+          options: nodeOptions,
+          span: 'full',
+        },
+      ],
+    });
+  }
+
+  if (values.scope_type === 'agent') {
+    config.push({
+      type: 'section',
+      fields: [
+        {
+          name: 'scope_agent_node_id',
+          label: 'Select Node',
+          type: 'select',
+          options: nodeOptions,
+          span: 'half',
+        },
+        {
+          name: 'scope_agent_name',
+          label: 'Agent Short Name',
+          type: 'text',
+          placeholder: 'Agent short name...',
+          span: 'half',
+        },
+      ],
+    });
+  }
+
+  config.push(
+    { type: 'divider' },
+    {
+      type: 'section',
+      fields: [
+        {
+          name: 'summarization_prompt',
+          label: 'Summarization Prompt',
+          type: 'textarea',
+          rows: 4,
+          placeholder: 'e.g., Extract key information from this API response including user IDs, timestamps, and any error codes...',
+          span: 'full',
+          help: 'Optional. If provided, matched traffic will be summarized using the LLM. Return "NONE" to skip displaying a summary.',
+        },
+      ],
+    }
+  );
+
   return (
-    <Modal
+    <ConfigModal
       isOpen={true}
       onClose={onClose}
       title={rule ? 'Edit Rule' : 'New Rule'}
       size="lg"
-    >
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium mb-1">Name</label>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
-            required
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            <Tooltip content="Pattern will match against all request/response headers and content">
-              <span className="border-b border-dotted border-current">Regex Pattern</span>
-            </Tooltip>
-          </label>
-          <input
-            type="text"
-            value={regexPattern}
-            onChange={(e) => setRegexPattern(e.target.value)}
-            className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm font-mono focus:outline-none focus:border-[var(--border-active)]"
-            placeholder=".*api\.example\.com.*"
-            required
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Target Direction</label>
-            <select
-              value={targetDirection}
-              onChange={(e) => setTargetDirection(e.target.value as TargetDirection)}
-              className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
-            >
-              <option value="both">Both</option>
-              <option value="send">Send Only</option>
-              <option value="receive">Receive Only</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-1">Scope</label>
-            <select
-              value={scopeType}
-              onChange={(e) => setScopeType(e.target.value as 'all' | 'node' | 'agent')}
-              className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
-            >
-              <option value="all">All Nodes & Agents</option>
-              <option value="node">Specific Node</option>
-              <option value="agent">Specific Agent</option>
-            </select>
-          </div>
-        </div>
-
-        {scopeType === 'node' && (
-          <div>
-            <label className="block text-sm font-medium mb-1">Select Node</label>
-            <select
-              value={scopeNodeId}
-              onChange={(e) => setScopeNodeId(e.target.value)}
-              className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
-            >
-              <option value="">Select Node...</option>
-              {nodes.map((node) => (
-                <option key={node.node_id} value={node.node_id}>
-                  {node.machine_name || node.node_id.slice(0, 8)}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        {scopeType === 'agent' && (
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Select Node</label>
-              <select
-                value={scopeAgentNodeId}
-                onChange={(e) => setScopeAgentNodeId(e.target.value)}
-                className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
-              >
-                <option value="">Select Node...</option>
-                {nodes.map((node) => (
-                  <option key={node.node_id} value={node.node_id}>
-                    {node.machine_name || node.node_id.slice(0, 8)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Agent Short Name</label>
-              <input
-                type="text"
-                value={scopeAgentName}
-                onChange={(e) => setScopeAgentName(e.target.value)}
-                placeholder="Agent short name..."
-                className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
-              />
-            </div>
-          </div>
-        )}
-
-        <div>
-          <label className="block text-sm font-medium mb-1">Summarization Prompt</label>
-          <textarea
-            value={summarizationPrompt}
-            onChange={(e) => setSummarizationPrompt(e.target.value)}
-            className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm font-mono focus:outline-none focus:border-[var(--border-active)]"
-            rows={4}
-            placeholder="e.g., Extract key information from this API response including user IDs, timestamps, and any error codes..."
-          />
-          <p className="text-xs text-muted mt-1">
-            Optional. If provided, matched traffic will be summarized using the LLM. Return "NONE" to skip displaying a summary.
-          </p>
-        </div>
-
-        {state.intercept.ruleError && (
-          <div className="p-3 bg-[var(--accent-error)]/10 text-[var(--accent-error)] text-sm">
-            {state.intercept.ruleError}
-          </div>
-        )}
-
-        <div className="flex justify-end gap-3 pt-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-sm border border-subtle hover:bg-[var(--bg-tertiary)] transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/30 transition-colors"
-          >
-            <Save size={16} />
-            {rule ? 'Save' : 'Create'}
-          </button>
-        </div>
-      </form>
-    </Modal>
+      config={config}
+      values={values}
+      onChange={handleChange}
+      onSubmit={handleSubmit}
+      submitLabel={rule ? 'Save' : 'Create'}
+      submitVariant="info"
+      error={state.intercept.ruleError}
+    />
   );
 }

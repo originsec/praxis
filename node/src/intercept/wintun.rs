@@ -7,8 +7,6 @@ use std::fs;
 use std::path::PathBuf;
 #[cfg(target_os = "windows")]
 use std::sync::Arc;
-#[cfg(target_os = "windows")]
-#[cfg(not(target_os = "windows"))]
 
 /// Embedded wintun.dll for AMD64 Windows
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
@@ -166,6 +164,7 @@ impl WintunManager {
 
     /// Shutdown the session to unblock any blocking reads
     /// This should be called before waiting for the packet engine to stop
+    #[allow(dead_code)]
     pub fn shutdown_session(&self) {
         if let Some(session) = &self.session {
             common::log_debug!("Shutting down wintun session to unblock readers");

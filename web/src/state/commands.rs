@@ -2,7 +2,7 @@ use super::AppState;
 
 impl AppState {
     //
-    // --- Command tracking for Skynet ---.
+    // --- Command tracking for Nexus ---.
     //
 
     /// Add a pending command ID

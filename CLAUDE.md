@@ -28,3 +28,7 @@
 - Even within a component, favour identifying opportunities for shared code and sensible abstractions.
 - A sensible abstraction is one where it is likely that there could be an expansion over a single consumer of any subcomponent/interface.
 
+## Logging
+
+- Never use `common::log_*` macros in `node/src/runtime.rs` event log forwarder task. These macros send to the event log channel, which the forwarder processes, creating an infinite recursion loop when RabbitMQ fails. Use `tracing::*` directly instead.
+

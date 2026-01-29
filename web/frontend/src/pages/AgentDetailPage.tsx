@@ -30,7 +30,9 @@ import {
   GitBranch,
   Download,
   ChevronRight,
+  ChevronDown,
   FileText,
+  History,
 } from 'lucide-react';
 import { useApp, type AgentSessionMessage } from '../context/AppContext';
 import { generateUUID } from '../utils/uuid';
@@ -51,7 +53,7 @@ import { exportAgentSession, downloadTextFile } from '../utils/export';
 
 type Tab = 'session' | 'ops' | 'recon' | 'intercept';
 type ToolsSubTab = 'mcp' | 'skills' | 'internal';
-type ReconSubTab = 'tools' | 'config';
+type ReconSubTab = 'tools' | 'config' | 'sessions';
 
 export function AgentDetailPage() {
   const { nodeId, agentShortName } = useParams<{ nodeId: string; agentShortName: string }>();
@@ -113,9 +115,11 @@ export function AgentDetailPage() {
   };
 
   //
-  // reconSubTab: 'tools' if sub is any tools-related value, otherwise 'config'.
+  // reconSubTab: 'sessions' if sub is sessions, 'tools' if sub is any tools-related value, otherwise 'config'.
   //
-  const reconSubTab: ReconSubTab = (subParam === 'tools' || subParam === 'mcp' || subParam === 'skills' || subParam === 'internal') ? 'tools' : 'config';
+  const reconSubTab: ReconSubTab =
+    (subParam === 'sessions') ? 'sessions' :
+    (subParam === 'tools' || subParam === 'mcp' || subParam === 'skills' || subParam === 'internal') ? 'tools' : 'config';
   const setReconSubTab = (sub: ReconSubTab) => {
     updateSearchParams({ sub });
   };
@@ -129,6 +133,7 @@ export function AgentDetailPage() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [isClosingSession, setIsClosingSession] = useState(false);
   const [isDiscoveringTools, setIsDiscoveringTools] = useState(false);
   const [selectedServerIdx, setSelectedServerIdx] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -138,6 +143,8 @@ export function AgentDetailPage() {
   // Recon state.
   //
   const [reconResult, setReconResult] = useState<ReconResult | null>(null);
+  const [reconPerformedAt, setReconPerformedAt] = useState<string | null>(null);
+  const [reconIsSemantic, setReconIsSemantic] = useState<boolean | null>(null);
   const [isLoadingRecon, setIsLoadingRecon] = useState(false);
 
   //
@@ -161,6 +168,18 @@ export function AgentDetailPage() {
   const [selectedConfigIdx, setSelectedConfigIdx] = useState<number | null>(null);
 
   //
+  // Selected session in sessions view.
+  //
+  const [selectedSessionIdx, setSelectedSessionIdx] = useState<number | null>(null);
+
+  //
+  // Session content fetching state.
+  //
+  const [sessionContent, setSessionContent] = useState<string | null>(null);
+  const [isLoadingSessionContent, setIsLoadingSessionContent] = useState(false);
+  const [sessionContentError, setSessionContentError] = useState<string | null>(null);
+
+  //
   // Config file editing state.
   //
   const [editingConfigIdx, setEditingConfigIdx] = useState<number | null>(null);
@@ -172,6 +191,11 @@ export function AgentDetailPage() {
   // Expanded config directory groups.
   //
   const [expandedConfigDirs, setExpandedConfigDirs] = useState<Set<string>>(new Set());
+
+  //
+  // Metadata section (Identities/API Keys) collapsed state.
+  //
+  const [metadataCollapsed, setMetadataCollapsed] = useState(false);
 
   //
   // Expanded MCP server context groups.
@@ -240,31 +264,76 @@ export function AgentDetailPage() {
   }, [showRunChainModal, requestChainDefList]);
 
   //
-  // Fetch recon data when agent is selected and we have a node
+  // Fetch recon data from service when viewing an agent page.
+  // If no stored recon exists, trigger node recon and poll service until data arrives.
   // Note: This must be before early returns to follow Rules of Hooks.
   //
   useEffect(() => {
-    if (selectedAgent && nodeId) {
-      //
-      // Inline recon fetch to avoid dependency on handleRecon.
-      //
-      const fetchRecon = async () => {
-        setIsLoadingRecon(true);
-        try {
-          const response = await sendCommand(nodeId, { Agent: 'Recon' });
-          if ('Agent' in response.result &&
-              typeof response.result.Agent === 'object' &&
-              response.result.Agent !== null &&
-              'ReconComplete' in response.result.Agent) {
-            setReconResult(response.result.Agent.ReconComplete.result);
-          }
-        } finally {
+    const agent = discoveredAgent || selectedAgent;
+    if (!agent || !nodeId || !agentShortName) return;
+
+    let isCancelled = false;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    let reconTriggered = false;
+
+    const requestRecon = () => {
+      send({ type: 'recon_get', node_id: nodeId, agent_short_name: agentShortName });
+    };
+
+    //
+    // Listen for service responses. The listener removes itself once data is
+    // loaded to avoid interfering with manual refresh (handleRecon).
+    //
+    const handleWsMessage = (event: Event) => {
+      if (isCancelled) return;
+      const customEvent = event as CustomEvent;
+      const message = customEvent.detail;
+      if (message.type === 'recon_get_response' &&
+          message.node_id === nodeId &&
+          message.agent_short_name === agentShortName) {
+        if (message.recon_result) {
+          //
+          // Found stored recon - use it, stop polling, remove listener.
+          //
+          setReconResult(message.recon_result);
+          setReconPerformedAt(message.performed_at);
+          setReconIsSemantic(message.is_semantic);
           setIsLoadingRecon(false);
+          if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+          }
+          window.removeEventListener('ws-message', handleWsMessage);
+        } else if (!reconTriggered) {
+          //
+          // No stored recon - trigger node to perform recon, then poll.
+          //
+          reconTriggered = true;
+          sendCommand(nodeId, { Agent: 'Recon' }).catch(() => {});
+          pollInterval = setInterval(() => {
+            if (!isCancelled) {
+              requestRecon();
+            }
+          }, 1000);
         }
-      };
-      fetchRecon();
-    }
-  }, [selectedAgent?.short_name, nodeId, sendCommand]);
+      }
+    };
+
+    //
+    // Initial request.
+    //
+    setIsLoadingRecon(true);
+    window.addEventListener('ws-message', handleWsMessage);
+    requestRecon();
+
+    return () => {
+      isCancelled = true;
+      window.removeEventListener('ws-message', handleWsMessage);
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+    };
+  }, [discoveredAgent?.short_name, selectedAgent?.short_name, nodeId, agentShortName, send, sendCommand]);
 
   //
   // Extract project paths from recon result (recon now includes sessions and
@@ -275,6 +344,61 @@ export function AgentDetailPage() {
       setProjectPaths(reconResult.project_paths || []);
     }
   }, [reconResult, hasSession]);
+
+  //
+  // Fetch session content when a session is selected.
+  // Note: This must be before early returns to follow Rules of Hooks.
+  //
+  useEffect(() => {
+    if (selectedSessionIdx === null || !reconResult?.sessions) {
+      setSessionContent(null);
+      setSessionContentError(null);
+      return;
+    }
+    const session = reconResult.sessions[selectedSessionIdx];
+    if (!session?.session_file || !nodeId) return;
+
+    //
+    // Fetch session content from node.
+    //
+    let isCancelled = false;
+    setIsLoadingSessionContent(true);
+    setSessionContentError(null);
+    setSessionContent(null);
+
+    sendCommand(nodeId, {
+      Agent: { GetSessionContent: { session_file: session.session_file } },
+    }).then(response => {
+      if (isCancelled) return;
+      if (
+        'Agent' in response.result &&
+        typeof response.result.Agent === 'object' &&
+        response.result.Agent !== null &&
+        'SessionContent' in response.result.Agent
+      ) {
+        const result = (response.result.Agent as { SessionContent: { session_file: string; content?: string; error?: string } }).SessionContent;
+        if (result.content) {
+          setSessionContent(result.content);
+        } else if (result.error) {
+          setSessionContentError(result.error);
+        }
+      } else if ('Error' in response.result) {
+        setSessionContentError((response.result as { Error: { message: string } }).Error.message);
+      }
+    }).catch(error => {
+      if (!isCancelled) {
+        setSessionContentError(String(error));
+      }
+    }).finally(() => {
+      if (!isCancelled) {
+        setIsLoadingSessionContent(false);
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedSessionIdx, reconResult?.sessions, nodeId, sendCommand]);
 
   //
   // Get available (non-disabled) operation definitions.
@@ -341,15 +465,31 @@ export function AgentDetailPage() {
   }, [selectedChainExec, requestChain]);
 
   //
-  // Derive chain definition from state.
+  // Use cached chain definition or current chain from state.
   //
   const selectedChainDef = useMemo((): ChainDefinitionFull | null => {
     if (!selectedChainExec) return null;
+    //
+    // First check the cache for the chain definition.
+    //
+    const cached = state.chains.chainDefinitionsCache[selectedChainExec.chain_id];
+    if (cached) return cached;
+    //
+    // Fall back to current chain if it matches.
+    //
     if (state.chains.currentChain?.id === selectedChainExec.chain_id) {
       return state.chains.currentChain;
     }
     return null;
-  }, [selectedChainExec, state.chains.currentChain]);
+  }, [selectedChainExec, state.chains.chainDefinitionsCache, state.chains.currentChain]);
+
+  //
+  // Check if chain is currently loading.
+  //
+  const isChainLoading = useMemo(() => {
+    if (!selectedChainExec) return false;
+    return state.chains.loadingChains.has(selectedChainExec.chain_id);
+  }, [selectedChainExec, state.chains.loadingChains]);
 
   //
   // Show loading state while system state is being fetched.
@@ -404,20 +544,77 @@ export function AgentDetailPage() {
     setActiveTab('ops');
   };
 
-  const handleRecon = async (semantic: boolean) => {
-    setIsLoadingRecon(true);
-    try {
-      const command = semantic ? 'ReconSemantic' : 'Recon';
-      const response = await sendCommand(nodeId!, { Agent: command });
-      if ('Agent' in response.result &&
-          typeof response.result.Agent === 'object' &&
-          response.result.Agent !== null &&
-          'ReconComplete' in response.result.Agent) {
-        setReconResult(response.result.Agent.ReconComplete.result);
+  const handleRecon = (semantic: boolean): Promise<void> => {
+    return new Promise((resolve) => {
+      if (!nodeId || !agentShortName) {
+        resolve();
+        return;
       }
-    } finally {
-      setIsLoadingRecon(false);
-    }
+
+      setIsLoadingRecon(true);
+
+      //
+      // Capture the current performed_at - we'll wait until it changes.
+      // This avoids clock sync issues since we compare service times against service times.
+      //
+      const previousPerformedAt = reconPerformedAt;
+
+      //
+      // Trigger node to perform recon (fire and forget).
+      //
+      const command = semantic ? 'ReconSemantic' : 'Recon';
+      sendCommand(nodeId, { Agent: command }).catch(() => {});
+
+      //
+      // Poll service until performed_at changes (meaning new data arrived).
+      //
+      const pollInterval = setInterval(() => {
+        send({ type: 'recon_get', node_id: nodeId, agent_short_name: agentShortName });
+      }, 1000);
+
+      //
+      // Timeout after 60 seconds to prevent infinite polling.
+      //
+      const timeout = setTimeout(() => {
+        clearInterval(pollInterval);
+        window.removeEventListener('ws-message', handleWsMessage);
+        setIsLoadingRecon(false);
+        resolve();
+      }, 60000);
+
+      const handleWsMessage = (event: Event) => {
+        const customEvent = event as CustomEvent;
+        const message = customEvent.detail;
+        if (message.type === 'recon_get_response' &&
+            message.node_id === nodeId &&
+            message.agent_short_name === agentShortName) {
+          if (message.recon_result && message.performed_at) {
+            //
+            // Only accept if performed_at has changed from what we had before.
+            //
+            if (message.performed_at !== previousPerformedAt) {
+              setReconResult(message.recon_result);
+              setReconPerformedAt(message.performed_at);
+              setReconIsSemantic(message.is_semantic);
+              setIsLoadingRecon(false);
+              clearInterval(pollInterval);
+              clearTimeout(timeout);
+              window.removeEventListener('ws-message', handleWsMessage);
+              resolve();
+            }
+          }
+        }
+      };
+
+      window.addEventListener('ws-message', handleWsMessage);
+
+      //
+      // Initial poll request (in case the node is very fast).
+      //
+      setTimeout(() => {
+        send({ type: 'recon_get', node_id: nodeId, agent_short_name: agentShortName });
+      }, 500);
+    });
   };
 
   const handleSaveConfig = async () => {
@@ -519,12 +716,17 @@ export function AgentDetailPage() {
 
   const handleCloseSession = async () => {
     const currentSessionId = sessionId;
-    await sendCommand(nodeId!, { Session: 'Close' });
-    //
-    // Clear messages for this session.
-    //
-    if (currentSessionId) {
-      clearAgentSessionMessages(currentSessionId);
+    setIsClosingSession(true);
+    try {
+      await sendCommand(nodeId!, { Session: 'Close' });
+      //
+      // Clear messages for this session.
+      //
+      if (currentSessionId) {
+        clearAgentSessionMessages(currentSessionId);
+      }
+    } finally {
+      setIsClosingSession(false);
     }
   };
 
@@ -534,7 +736,7 @@ export function AgentDetailPage() {
       await sendCommand(nodeId!, { Agent: { Select: { short_name: agentShortName! } } });
       const context: SessionContext = {
         yolo_mode: localYoloMode,
-        project_path: selectedProjectPath ?? undefined,
+        working_dir: selectedProjectPath ?? undefined,
       };
       await sendCommand(nodeId!, { Session: { Create: { context } } });
       setActiveTab('session');
@@ -676,9 +878,14 @@ export function AgentDetailPage() {
               {hasSession ? (
                 <button
                   onClick={handleCloseSession}
-                  className="inline-flex items-center gap-2 px-4 py-2  bg-red-500/20 text-[var(--accent-error)] hover:bg-red-500/30 transition-colors"
+                  disabled={isClosingSession}
+                  className="inline-flex items-center gap-2 px-4 py-2  bg-red-500/20 text-[var(--accent-error)] hover:bg-red-500/30 transition-colors disabled:opacity-50"
                 >
-                  <Square size={16} /> Close Session
+                  {isClosingSession ? (
+                    <><Loader2 size={16} className="animate-spin" /> Closing...</>
+                  ) : (
+                    <><Square size={16} /> Close Session</>
+                  )}
                 </button>
               ) : (
                 <button
@@ -824,8 +1031,8 @@ export function AgentDetailPage() {
               {selectedAgent?.session_id && (
                 <span>Session: <span className="font-mono">{selectedAgent.session_id.slice(0, 12)}...</span></span>
               )}
-              {selectedAgent?.project_path && (
-                <span>Path: <span className="font-mono">{selectedAgent.project_path.split('/').slice(-2).join('/')}</span></span>
+              {selectedAgent?.working_dir && (
+                <span>Path: <span className="font-mono">{selectedAgent.working_dir.split('/').slice(-2).join('/')}</span></span>
               )}
             </div>
             {/*
@@ -848,20 +1055,20 @@ export function AgentDetailPage() {
                     className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                   >
                     <div
-                      className={`max-w-[80%] ascii-box px-4 py-3 ${
+                      className={`max-w-[80%] px-4 py-3 ${
                         msg.role === 'user'
-                          ? 'bg-[var(--accent-info)]/20 text-[var(--text-primary)]'
-                          : 'bg-[var(--bg-secondary)] text-[var(--text-primary)]'
+                          ? ''
+                          : 'bg-[var(--bg-secondary)]'
                       }`}
                     >
                       {msg.role === 'user' ? (
-                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                        <p className="whitespace-pre-wrap text-[var(--accent-info)]">{msg.content}</p>
                       ) : (
-                        <div className="prose prose-invert prose-sm max-w-none break-words prose-table:border-collapse prose-th:border prose-th:border-subtle prose-th:px-3 prose-th:py-2 prose-th:bg-[var(--bg-tertiary)] prose-td:border prose-td:border-subtle prose-td:px-3 prose-td:py-2">
+                        <div className="prose prose-invert prose-sm max-w-none break-words text-[var(--text-secondary)] prose-table:border-collapse prose-th:border prose-th:border-subtle prose-th:px-3 prose-th:py-2 prose-th:bg-[var(--bg-tertiary)] prose-td:border prose-td:border-subtle prose-td:px-3 prose-td:py-2 prose-headings:text-[var(--text-secondary)] prose-p:text-[var(--text-secondary)] prose-li:text-[var(--text-secondary)] prose-code:text-[var(--text-secondary)]">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                         </div>
                       )}
-                      <p className="text-xs text-muted mt-2">
+                      <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
                         {msg.timestamp.toLocaleTimeString()}
                       </p>
                     </div>
@@ -1024,7 +1231,7 @@ export function AgentDetailPage() {
 
 
         {activeTab === 'recon' && (
-          <div className="bg-card ascii-box border border-subtle h-full flex flex-col overflow-hidden">
+          <div className="bg-card ascii-box border border-subtle h-full flex flex-col">
             {/*
             //
             // Recon subtabs.
@@ -1043,6 +1250,11 @@ export function AgentDetailPage() {
                   <span className="flex items-center gap-2">
                     <Settings size={14} />
                     Config
+                    {(reconResult?.config?.items?.length ?? 0) > 0 && (
+                      <span className="text-[10px] opacity-70">
+                        {reconResult?.config?.items?.length}
+                      </span>
+                    )}
                   </span>
                 </button>
                 <button
@@ -1056,33 +1268,81 @@ export function AgentDetailPage() {
                   <span className="flex items-center gap-2">
                     <Wrench size={14} />
                     Tools
+                    {(() => {
+                      const toolsCount = (reconResult?.tools?.mcp_servers?.length ?? 0) +
+                        (reconResult?.tools?.skills?.length ?? 0) +
+                        (reconResult?.tools?.internal_tools?.length ?? 0);
+                      return toolsCount > 0 ? (
+                        <span className="text-[10px] opacity-70">{toolsCount}</span>
+                      ) : null;
+                    })()}
+                  </span>
+                </button>
+                <button
+                  onClick={() => setReconSubTab('sessions')}
+                  className={`px-3 py-1.5 text-sm  transition-colors ${
+                    reconSubTab === 'sessions'
+                      ? 'bg-[var(--highlight)] text-title'
+                      : 'text-muted hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <History size={14} />
+                    Sessions
+                    {(reconResult?.sessions?.length ?? 0) > 0 && (
+                      <span className="text-[10px] opacity-70">
+                        {reconResult?.sessions?.length}
+                      </span>
+                    )}
                   </span>
                 </button>
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleDiscoverTools}
-                  disabled={isDiscoveringTools || !selectedAgent}
-                  className="inline-flex items-center gap-2 px-3 py-1.5  bg-[var(--accent-info)]/20 text-[var(--accent-info)] text-sm hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50"
-                >
-                  {isDiscoveringTools ? (
-                    <>
-                      <Loader2 size={14} className="animate-spin" /> Discovering...
-                    </>
-                  ) : (
-                    <>
-                      <Search size={14} /> Discover
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={() => handleRecon(false)}
-                  disabled={isLoadingRecon || !selectedAgent}
-                  className="inline-flex items-center gap-2 px-3 py-1.5  bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] text-sm hover:bg-[var(--accent-purple)]/30 transition-colors disabled:opacity-50"
-                >
-                  <RefreshCw size={14} className={isLoadingRecon ? 'animate-spin' : ''} />
-                  {isLoadingRecon ? 'Refreshing...' : 'Refresh'}
-                </button>
+              <div className="flex items-center gap-3">
+                {reconPerformedAt && (
+                  <Tooltip content={`Last ${reconIsSemantic ? 'semantic ' : ''}recon: ${new Date(reconPerformedAt).toLocaleString()}`}>
+                    <span className="text-xs text-muted flex items-center gap-1">
+                      <Clock size={12} />
+                      {(() => {
+                        const date = new Date(reconPerformedAt);
+                        const now = new Date();
+                        const diffMs = now.getTime() - date.getTime();
+                        const diffMins = Math.floor(diffMs / 60000);
+                        const diffHours = Math.floor(diffMins / 60);
+                        const diffDays = Math.floor(diffHours / 24);
+                        if (diffMins < 1) return 'just now';
+                        if (diffMins < 60) return `${diffMins}m ago`;
+                        if (diffHours < 24) return `${diffHours}h ago`;
+                        return `${diffDays}d ago`;
+                      })()}
+                      {reconIsSemantic && <Sparkles size={10} className="text-[var(--accent-info)]" />}
+                    </span>
+                  </Tooltip>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleDiscoverTools}
+                    disabled={isDiscoveringTools || !selectedAgent}
+                    className="inline-flex items-center gap-2 px-3 py-1.5  bg-[var(--accent-info)]/20 text-[var(--accent-info)] text-sm hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50"
+                  >
+                    {isDiscoveringTools ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" /> Discovering...
+                      </>
+                    ) : (
+                      <>
+                        <Search size={14} /> Discover
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => handleRecon(false)}
+                    disabled={isLoadingRecon || !selectedAgent}
+                    className="inline-flex items-center gap-2 px-3 py-1.5  bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] text-sm hover:bg-[var(--accent-purple)]/30 transition-colors disabled:opacity-50"
+                  >
+                    <RefreshCw size={14} className={isLoadingRecon ? 'animate-spin' : ''} />
+                    {isLoadingRecon ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1410,71 +1670,83 @@ export function AgentDetailPage() {
               <div className="flex-1 min-h-0 flex flex-col">
                 {/*
                 //
-                // Compact metadata section.
+                // Compact metadata section - collapsible.
                 //
                 */}
                 {(reconResult?.metadata?.user_identities?.length || reconResult?.metadata?.api_keys?.length) ? (
-                  <div className="mx-4 mt-4 mb-2 p-2 bg-[var(--bg-secondary)] rounded border border-subtle text-xs flex-shrink-0">
-                    {reconResult?.metadata?.user_identities?.length ? (
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-muted flex items-center gap-1">
-                          <User size={12} />
-                          Identities:
-                          <Tooltip content="Semantically extracted using AI">
-                            <svg
-                              width="11"
-                              height="11"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="var(--accent-info)"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              className="ml-0.5 opacity-30"
-                            >
-                              <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
-                              <path d="M20 3v4" />
-                              <path d="M22 5h-4" />
-                              <path d="M4 17v2" />
-                              <path d="M5 18H3" />
-                            </svg>
-                          </Tooltip>
-                        </span>
-                        {reconResult.metadata.user_identities.map((identity, idx) => (
-                          <span key={idx} className="px-1.5 py-0.5 font-mono bg-[var(--accent-info)]/10 text-[var(--accent-info)] rounded">{identity}</span>
-                        ))}
+                  <div className="mx-4 mt-4 mb-2 bg-[var(--bg-secondary)] rounded border border-subtle flex-shrink-0">
+                    {/*
+                    //
+                    // Header with toggle.
+                    //
+                    */}
+                    <button
+                      onClick={() => setMetadataCollapsed(!metadataCollapsed)}
+                      className="w-full px-2 py-1.5 flex items-center gap-2 hover:bg-[var(--bg-tertiary)] transition-colors text-xs"
+                    >
+                      {metadataCollapsed ? (
+                        <ChevronRight size={14} className="text-muted" />
+                      ) : (
+                        <ChevronDown size={14} className="text-muted" />
+                      )}
+                      <Tooltip content="Semantically extracted using AI">
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="var(--text-muted)"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="opacity-40"
+                        >
+                          <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+                          <path d="M20 3v4" />
+                          <path d="M22 5h-4" />
+                          <path d="M4 17v2" />
+                          <path d="M5 18H3" />
+                        </svg>
+                      </Tooltip>
+                      <span className="text-muted font-medium">
+                        Extracted Metadata
+                      </span>
+                      <span className="text-[10px] text-muted ml-auto">
+                        {(reconResult?.metadata?.user_identities?.length || 0) + (reconResult?.metadata?.api_keys?.length || 0)} items
+                      </span>
+                    </button>
+
+                    {/*
+                    //
+                    // Content - shown when not collapsed.
+                    //
+                    */}
+                    {!metadataCollapsed && (
+                      <div className="px-2 pb-2 text-xs border-t border-subtle max-h-40 overflow-y-auto scrollbar-on-hover">
+                        {reconResult?.metadata?.user_identities?.length ? (
+                          <div className="flex items-center gap-2 flex-wrap mt-2">
+                            <span className="text-muted flex items-center gap-1">
+                              <User size={12} />
+                              Identities:
+                            </span>
+                            {reconResult.metadata.user_identities.map((identity, idx) => (
+                              <span key={idx} className="px-1.5 py-0.5 font-mono bg-[var(--accent-info)]/10 text-[var(--accent-info)] rounded break-all max-w-full">{identity}</span>
+                            ))}
+                          </div>
+                        ) : null}
+                        {reconResult?.metadata?.api_keys?.length ? (
+                          <div className={`flex items-center gap-2 flex-wrap ${reconResult?.metadata?.user_identities?.length ? 'mt-1.5' : 'mt-2'}`}>
+                            <span className="text-muted flex items-center gap-1">
+                              <Key size={12} />
+                              API Keys:
+                            </span>
+                            {reconResult.metadata.api_keys.map((key, idx) => (
+                              <span key={idx} className="px-1.5 py-0.5 font-mono bg-[var(--accent-warning)]/10 text-[var(--accent-warning)] rounded break-all max-w-full">{key}</span>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
-                    ) : null}
-                    {reconResult?.metadata?.api_keys?.length ? (
-                      <div className={`flex items-center gap-2 flex-wrap ${reconResult?.metadata?.user_identities?.length ? 'mt-1.5' : ''}`}>
-                        <span className="text-muted flex items-center gap-1">
-                          <Key size={12} />
-                          API Keys:
-                          <Tooltip content="Semantically extracted using AI">
-                            <svg
-                              width="11"
-                              height="11"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="var(--accent-warning)"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              className="ml-0.5 opacity-30"
-                            >
-                              <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
-                              <path d="M20 3v4" />
-                              <path d="M22 5h-4" />
-                              <path d="M4 17v2" />
-                              <path d="M5 18H3" />
-                            </svg>
-                          </Tooltip>
-                        </span>
-                        {reconResult.metadata.api_keys.map((key, idx) => (
-                          <span key={idx} className="px-1.5 py-0.5 font-mono bg-[var(--accent-warning)]/10 text-[var(--accent-warning)] rounded">{key}</span>
-                        ))}
-                      </div>
-                    ) : null}
+                    )}
                   </div>
                 ) : null}
 
@@ -1688,6 +1960,201 @@ export function AgentDetailPage() {
               </div>
             )}
 
+            {/*
+            //
+            // Sessions subtab.
+            //
+            */}
+            {reconSubTab === 'sessions' && (
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                {!reconResult?.sessions || reconResult.sessions.length === 0 ? (
+                  <div className="flex-1 flex items-center justify-center p-8">
+                    <div className="text-center">
+                      <History size={48} className="mx-auto mb-4 text-muted opacity-50" />
+                      <p className="text-muted">No sessions discovered</p>
+                      <p className="text-muted text-sm mt-2">Click "Refresh" to scan for session files</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-1 flex min-h-0 p-4 pt-2 gap-4 overflow-hidden">
+                    {/*
+                    //
+                    // Left panel: Session list.
+                    //
+                    */}
+                    <div className="w-64 flex-shrink-0 flex flex-col border border-subtle rounded overflow-hidden bg-[var(--bg-secondary)]">
+                      <div className="px-3 py-2 border-b border-subtle bg-[var(--bg-tertiary)]">
+                        <span className="text-[10px] text-muted uppercase tracking-wider">
+                          {reconResult.sessions.length} session{reconResult.sessions.length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <div className="flex-1 overflow-y-auto scrollbar-on-hover">
+                        {reconResult.sessions.map((session, idx) => {
+                          const isSelected = selectedSessionIdx === idx;
+                          const shortId = session.session_id.slice(0, 8);
+                          return (
+                            <button
+                              key={session.session_id}
+                              onClick={() => setSelectedSessionIdx(idx)}
+                              className={`w-full px-3 py-2 text-left transition-colors border-b border-dim last:border-0 ${
+                                isSelected
+                                  ? 'bg-[var(--accent-info)]/10 border-l-2 border-l-[var(--accent-info)]'
+                                  : 'hover:bg-[var(--bg-tertiary)]'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <History size={12} className={isSelected ? 'text-[var(--accent-info)]' : 'text-muted'} />
+                                <span className={`text-[11px] font-mono ${isSelected ? 'text-[var(--accent-info)]' : ''}`}>
+                                  {shortId}
+                                </span>
+                                <span className="text-[10px] text-muted ml-auto">
+                                  {session.message_count}
+                                </span>
+                              </div>
+                              {session.last_modified && (
+                                <div className="mt-1 text-[9px] text-muted truncate">
+                                  {session.last_modified}
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/*
+                    //
+                    // Right panel: Session content.
+                    //
+                    */}
+                    <div className="flex-1 flex flex-col min-w-0 min-h-0 border border-subtle rounded overflow-hidden">
+                      {selectedSessionIdx === null ? (
+                        <div className="flex-1 flex items-center justify-center text-muted text-sm">
+                          Select a session to view contents
+                        </div>
+                      ) : isLoadingSessionContent ? (
+                        <div className="flex-1 flex items-center justify-center">
+                          <Loader2 size={24} className="animate-spin text-muted" />
+                        </div>
+                      ) : sessionContentError ? (
+                        <div className="flex-1 flex items-center justify-center p-4">
+                          <div className="text-center">
+                            <X size={24} className="mx-auto mb-2 text-[var(--accent-danger)]" />
+                            <p className="text-[var(--accent-danger)] text-sm">{sessionContentError}</p>
+                          </div>
+                        </div>
+                      ) : (() => {
+                        const session = reconResult.sessions[selectedSessionIdx];
+
+                        //
+                        // Parse session content - handle both JSONL (Claude Code) and
+                        // JSON formats (Gemini).
+                        //
+                        type ParsedMessage = { type?: string; role?: string; content?: string; timestamp?: string };
+                        let messages: ParsedMessage[] = [];
+
+                        if (sessionContent) {
+                          //
+                          // Try JSONL first (each line is a JSON object).
+                          //
+                          const lines = sessionContent.split('\n').filter(l => l.trim());
+                          if (lines.length > 0) {
+                            try {
+                              //
+                              // Check if first line is valid JSON object.
+                              //
+                              const firstParsed = JSON.parse(lines[0]);
+                              if (typeof firstParsed === 'object' && !Array.isArray(firstParsed)) {
+                                //
+                                // Likely JSONL format.
+                                //
+                                messages = lines.map(line => {
+                                  try {
+                                    return JSON.parse(line) as ParsedMessage;
+                                  } catch {
+                                    return { content: line };
+                                  }
+                                });
+                              }
+                            } catch {
+                              //
+                              // Try single JSON object with messages array.
+                              //
+                              try {
+                                const parsed = JSON.parse(sessionContent);
+                                messages = parsed.messages || [];
+                              } catch {
+                                //
+                                // Plain text fallback.
+                                //
+                                messages = [{ content: sessionContent }];
+                              }
+                            }
+                          }
+                        }
+
+                        return (
+                          <>
+                            <div className="px-4 py-2 border-b border-subtle bg-[var(--bg-tertiary)] flex items-center justify-between flex-shrink-0">
+                              <span className="text-xs font-mono text-muted truncate">
+                                {session.session_id}
+                              </span>
+                              <span className="text-[10px] text-muted">
+                                {messages.length} entries
+                              </span>
+                            </div>
+                            <div className="flex-1 overflow-y-auto scrollbar-on-hover">
+                              {messages.length === 0 ? (
+                                <div className="p-4 text-muted text-sm">No content in this session</div>
+                              ) : (
+                                <div className="p-3 space-y-3">
+                                  {messages.map((msg, idx) => {
+                                    const msgType = msg.type || msg.role || 'unknown';
+                                    const isUser = msgType === 'user' || msgType === 'human';
+                                    const isAssistant = msgType === 'assistant' || msgType === 'gemini' || msgType === 'model';
+                                    return (
+                                      <div
+                                        key={idx}
+                                        className={`p-3 rounded text-xs ${
+                                          isUser
+                                            ? 'bg-[var(--accent-info)]/10 border-l-2 border-l-[var(--accent-info)]'
+                                            : isAssistant
+                                            ? 'bg-[var(--bg-secondary)] border-l-2 border-l-[var(--accent-purple)]'
+                                            : 'bg-[var(--bg-tertiary)] border-l-2 border-l-[var(--border-subtle)]'
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-2 mb-1">
+                                          <span className={`text-[10px] font-medium uppercase ${
+                                            isUser ? 'text-[var(--accent-info)]' :
+                                            isAssistant ? 'text-[var(--accent-purple)]' :
+                                            'text-muted'
+                                          }`}>
+                                            {msgType}
+                                          </span>
+                                          {msg.timestamp && (
+                                            <span className="text-[9px] text-muted">
+                                              {new Date(msg.timestamp).toLocaleString()}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="whitespace-pre-wrap break-words font-mono text-[11px]">
+                                          {typeof msg.content === 'string' ? msg.content : JSON.stringify(msg, null, 2)}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
           </div>
         )}
 
@@ -1803,6 +2270,7 @@ export function AgentDetailPage() {
       <ChainExecutionModal
         execution={selectedChainExec}
         chain={selectedChainDef}
+        isLoading={isChainLoading}
         onClose={() => setSelectedChainExecId(null)}
       />
     </div>

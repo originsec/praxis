@@ -119,7 +119,7 @@ pub async fn create_session(
     // Service creates sessions without project context.
     //
     let context = SessionContext {
-        project_path: None,
+        working_dir: None,
         yolo_mode,
     };
 

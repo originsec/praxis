@@ -9,7 +9,7 @@ set -e
 # Configuration
 PRAXIS_HOME="${PRAXIS_HOME:-$HOME/.praxis}"
 PRAXIS_BIN="$PRAXIS_HOME/bin"
-PRAXIS_REPO="https://github.com/preludeorg/praxis"
+PRAXIS_REPO="https://github.com/originsec/praxis"
 PRAXIS_BRANCH="${PRAXIS_BRANCH:-main}"
 
 # Colors

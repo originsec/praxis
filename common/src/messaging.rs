@@ -266,6 +266,9 @@ pub struct AgentSessionInfo {
     pub last_modified: String,
     /// Number of messages/entries in the session
     pub message_count: usize,
+    /// Raw session content (JSON string)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
 }
 
 /// Configuration discovered during agent reconnaissance
@@ -332,11 +335,10 @@ pub struct SelectedAgent {
     pub short_name: String,
     pub session_id: Option<String>,
     pub process_name: Option<String>,
-    pub running_pid: Option<String>,
     /// Whether YOLO mode is enabled for this agent
     pub yolo_mode: bool,
-    /// Project path context for the session
-    pub project_path: Option<String>,
+    /// Working directory context for the session
+    pub working_dir: Option<String>,
     //
     // Note: Tools and config are now retrieved via Recon/ReconSemantic
     // commands.
@@ -412,8 +414,6 @@ pub enum AgentCommand {
     Update,
     /// Select an agent by short_name (only one can be selected at a time)
     Select { short_name: String },
-    /// Set YOLO mode (autonomous operation, fire-and-forget)
-    SetYolo { enabled: bool },
     /// Perform reconnaissance on the selected agent (static discovery)
     /// Returns MCP servers, skills, and config
     Recon,
@@ -422,6 +422,8 @@ pub enum AgentCommand {
     ReconSemantic,
     /// Update a config file's contents
     UpdateConfigFile { path: String, contents: String },
+    /// Get the content of a session file (for viewing session history)
+    GetSessionContent { session_file: String },
 }
 
 /// Unique identifier for tracking session transactions
@@ -432,7 +434,7 @@ pub type TransactionId = String;
 pub struct SessionContext {
     /// Working directory for the session (absolute path)
     /// If None, defaults to user's home directory
-    pub project_path: Option<String>,
+    pub working_dir: Option<String>,
     /// YOLO mode - skip permission prompts and auto-approve actions
     #[serde(default)]
     pub yolo_mode: bool,
@@ -446,8 +448,6 @@ pub enum SessionCommand {
         #[serde(default)]
         context: SessionContext,
     },
-    /// Get information about the current session
-    Info,
     /// Close the current session
     Close,
     /// Send a prompt to the session and get a response
@@ -556,18 +556,22 @@ pub struct CommandRequest {
 pub enum AgentCommandResult {
     UpdateSent,
     Selected { short_name: String },
-    YoloSet { enabled: bool },
     /// Reconnaissance completed with discovered tools and config
     ReconComplete { result: ReconResult },
     /// Config file update result
     ConfigFileUpdated { success: bool, error: Option<String> },
+    /// Session content response
+    SessionContent {
+        session_file: String,
+        content: Option<String>,
+        error: Option<String>,
+    },
 }
 
 /// Result of a session command
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum SessionCommandResult {
     Created { session_id: String },
-    Info { data: HashMap<String, String> },
     Closed,
     /// Response to a prompt, includes transaction_id for matching
     PromptResponse { transaction_id: TransactionId, response: String },
@@ -1241,6 +1245,16 @@ pub enum ClientSignalMessage {
         client_id: String,
         node_id: Option<String>,
     },
+
+    //
+    // Recon results.
+    //
+    /// Request stored recon result for a node+agent
+    ReconGet {
+        client_id: String,
+        node_id: String,
+        agent_short_name: String,
+    },
 }
 
 /// Messages broadcast from server to all clients via CLIENT_BROADCAST_QUEUE
@@ -1427,6 +1441,21 @@ pub enum ClientDirectMessage {
     /// Application log cleared
     ApplicationLogCleared {
         deleted_count: u32,
+    },
+
+    //
+    // Recon result responses.
+    //
+    /// Stored recon result response
+    ReconGetResponse {
+        node_id: String,
+        agent_short_name: String,
+        /// The recon result if found
+        recon_result: Option<ReconResult>,
+        /// When the recon was performed (ISO 8601)
+        performed_at: Option<String>,
+        /// Whether this was a semantic recon
+        is_semantic: Option<bool>,
     },
 }
 
@@ -1684,6 +1713,13 @@ pub enum NodeSignalMessage {
     InterceptStatusUpdate(InterceptStatus),
     /// Discovered LLM endpoint from agent discovery
     DiscoveredLlmEndpoint(DiscoveredLlmEndpoint),
+    /// Recon result update from node
+    ReconResultUpdate {
+        node_id: String,
+        agent_short_name: String,
+        recon_result: ReconResult,
+        is_semantic: bool,
+    },
 }
 
 //

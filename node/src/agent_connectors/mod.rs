@@ -1,4 +1,5 @@
 #[cfg(not(windows))]
+#[allow(dead_code)]
 pub mod clawdbot;
 pub mod claudecode;
 pub mod dummy;
@@ -36,4 +37,4 @@ pub use factory::AgentFactory;
 pub use registry::AgentRegistry;
 pub use traits::Agent;
 #[allow(unused_imports)]
-pub use traits::{AgentInfo, AgentIntercept, AgentMode, AgentSession};
+pub use traits::{AgentIntercept, AgentMode, AgentSession};

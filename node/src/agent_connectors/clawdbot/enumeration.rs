@@ -5,7 +5,6 @@
 use anyhow::Result;
 use common::{AgentSessionInfo, ConfigItem};
 use std::fs;
-use std::path::PathBuf;
 
 /// Data discovered during enumeration.
 pub struct EnumerationData {
@@ -96,6 +95,7 @@ pub fn enumerate() -> Result<EnumerationData> {
                                 session_file: path.to_string_lossy().to_string(),
                                 last_modified,
                                 message_count,
+                                content: Some(contents.clone()),
                             });
 
                             //
@@ -176,16 +176,4 @@ pub fn enumerate() -> Result<EnumerationData> {
         sessions,
         project_paths,
     })
-}
-
-/// Get the paths that Clawdbot uses.
-pub fn get_clawdbot_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    
-    if let Some(home) = dirs::home_dir() {
-        paths.push(home.join(".clawdbot"));
-        paths.push(home.join("clawd"));
-    }
-    
-    paths
 }

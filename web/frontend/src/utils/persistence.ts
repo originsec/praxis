@@ -1,9 +1,9 @@
-import type { SkynetMessage, SkynetState } from '../context/skynetTypes';
+import type { NexusMessage, NexusState } from '../context/nexusTypes';
 
-const SKYNET_SESSION_STORAGE_KEY = 'praxis_skynet_session';
+const NEXUS_SESSION_STORAGE_KEY = 'praxis_nexus_session';
 const RECENT_NODES_STORAGE_KEY = 'praxis_recent_nodes';
 
-function serializeSkynetState(state: SkynetState): string {
+function serializeNexusState(state: NexusState): string {
   return JSON.stringify({
     ...state,
     messages: state.messages.map((msg) => ({
@@ -13,12 +13,12 @@ function serializeSkynetState(state: SkynetState): string {
   });
 }
 
-function deserializeSkynetState(json: string): SkynetState | null {
+function deserializeNexusState(json: string): NexusState | null {
   try {
     const parsed = JSON.parse(json);
     return {
       ...parsed,
-      messages: parsed.messages.map((msg: SkynetMessage & { timestamp: string }) => ({
+      messages: parsed.messages.map((msg: NexusMessage & { timestamp: string }) => ({
         ...msg,
         timestamp: new Date(msg.timestamp),
       })),
@@ -28,11 +28,11 @@ function deserializeSkynetState(json: string): SkynetState | null {
   }
 }
 
-export function loadPersistedSkynetState(initial: SkynetState): SkynetState {
+export function loadPersistedNexusState(initial: NexusState): NexusState {
   try {
-    const stored = sessionStorage.getItem(SKYNET_SESSION_STORAGE_KEY);
+    const stored = sessionStorage.getItem(NEXUS_SESSION_STORAGE_KEY);
     if (stored) {
-      const state = deserializeSkynetState(stored);
+      const state = deserializeNexusState(stored);
       if (state) {
         //
         // Reset transient states that shouldn't persist across page loads.
@@ -54,15 +54,15 @@ export function loadPersistedSkynetState(initial: SkynetState): SkynetState {
   return initial;
 }
 
-export function persistSkynetState(state: SkynetState): void {
+export function persistNexusState(state: NexusState): void {
   try {
     if (state.sessionActive) {
-      sessionStorage.setItem(SKYNET_SESSION_STORAGE_KEY, serializeSkynetState(state));
+      sessionStorage.setItem(NEXUS_SESSION_STORAGE_KEY, serializeNexusState(state));
     } else {
       //
       // Clear storage when session is stopped.
       //
-      sessionStorage.removeItem(SKYNET_SESSION_STORAGE_KEY);
+      sessionStorage.removeItem(NEXUS_SESSION_STORAGE_KEY);
     }
   } catch {
     //

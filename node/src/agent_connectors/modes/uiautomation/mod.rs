@@ -7,11 +7,9 @@ mod adapter;
 
 pub use adapter::{UIAutomationAdapter, UIAutomationConfig};
 
-use crate::agent_connectors::traits::{AgentInfo, AgentMode, AgentSession};
+use crate::agent_connectors::traits::{AgentMode, AgentSession};
 use crate::utils;
 use anyhow::Result;
-use std::any::Any;
-use std::collections::HashMap;
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -88,10 +86,6 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
         self.process_path.clone()
     }
 
-    fn running_pid(&self) -> Option<String> {
-        self.process_id.map(|pid| pid.to_string())
-    }
-
     fn mode(&self) -> AgentMode {
         AgentMode::UIAutomation
     }
@@ -99,7 +93,7 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
     fn transact(&self, prompt: &str) -> Result<String> {
         let ctrl_guard = self.automation_ctrl.lock().unwrap();
         let ctrl = ctrl_guard.as_ref().ok_or_else(|| {
-            common::log_error!("GenericUIAutomationSession transact: Automation control not initialized");
+            common::log_error!("Automation control not initialized");
             anyhow::anyhow!("Automation control not initialized")
         })?;
 
@@ -109,7 +103,7 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
 
         if let Err(e) = ctrl.focus_window() {
             common::log_error!(
-                "GenericUIAutomationSession transact: Failed to focus window: {}",
+                "Failed to focus window: {}",
                 e
             );
             return Err(e.into());
@@ -128,7 +122,7 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
             std::thread::sleep(std::time::Duration::from_secs(1));
         }
         if !input_ready {
-            common::log_error!("GenericUIAutomationSession transact: Input element not ready after waiting");
+            common::log_error!("Input element not ready after waiting");
             anyhow::bail!("Input element not ready");
         }
 
@@ -144,7 +138,7 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
 
         if let Err(e) = self.adapter.send_prompt(ctrl, prompt) {
             common::log_error!(
-                "GenericUIAutomationSession transact: Failed to send prompt: {}",
+                "Failed to send prompt: {}",
                 e
             );
             return Err(e);
@@ -156,7 +150,7 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
 
         if let Err(e) = self.adapter.submit_prompt(ctrl) {
             common::log_error!(
-                "GenericUIAutomationSession transact: Failed to submit prompt: {}",
+                "Failed to submit prompt: {}",
                 e
             );
             return Err(e);
@@ -181,7 +175,7 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
             }
         }
 
-        common::log_error!("GenericUIAutomationSession transact: Timed out waiting for response");
+        common::log_error!("Timed out waiting for response");
         anyhow::bail!("Timed out waiting for response")
     }
 
@@ -191,21 +185,7 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
         }
     }
 
-    fn get_info(&self) -> Option<HashMap<AgentInfo, String>> {
-        let prompt = self.adapter.info_prompt()?;
-
-        let response = match self.transact(prompt) {
-            Ok(r) => r,
-            Err(_) => return None,
-        };
-
-        let mut info = HashMap::new();
-        info.insert(AgentInfo::AvailableTools, response);
-
-        Some(info)
-    }
-
-    fn as_any(&self) -> &dyn Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
     }
 }

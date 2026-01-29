@@ -65,11 +65,6 @@ pub trait DevToolsAdapter: Send + Sync {
         initial_count: usize,
     ) -> impl Future<Output = Result<Option<String>>> + Send;
 
-    /// Optional prompt to use for get_info(). Returns None if get_info is not supported.
-    fn info_prompt(&self) -> Option<&str> {
-        None
-    }
-
     /// Called after text is inserted but before submit. Adapters can use this
     /// to wait for submit button to be ready, etc. Default does nothing.
     fn wait_for_submit_ready(

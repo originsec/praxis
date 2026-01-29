@@ -1,67 +1,38 @@
 use crate::agent_connectors::traits::{AgentMode, AgentSession};
-use crate::agent_connectors::utils::{build_command, run_command};
+use crate::agent_connectors::utils;
 use anyhow::{anyhow, Result};
 use common::SessionContext;
-use std::any::Any;
-use std::sync::Mutex;
+use once_cell::sync::OnceCell;
 use uuid::Uuid;
 
-/// Claude Code session implementation.
 pub struct ClaudeCodeSession {
-    /// Internal session ID
     internal_id: Uuid,
-    /// External session ID (used with --session-id / --resume)
-    external_session_id: Mutex<Option<String>>,
-    /// Path to the Claude CLI executable
+    external_session_id: OnceCell<String>,  // External session ID (set after first transaction)
     process_path: Option<String>,
-    /// Whether this is the first transaction
-    first_transaction: Mutex<bool>,
-    /// YOLO mode - skip permission prompts
     yolo_mode: bool,
-    /// Working directory for the session
     working_dir: Option<String>,
-    /// Original project path from context (None if using home directory)
-    project_path: Option<String>,
 }
 
 impl ClaudeCodeSession {
-    /// Create a new Claude Code session.
     pub fn new(process_path: Option<String>, context: &SessionContext) -> Result<Self> {
         let _ = process_path
             .as_ref()
             .ok_or_else(|| anyhow!("No process path provided"))?;
 
-        //
-        // Generate a session ID upfront for flags-based session management.
-        //
-        let external_session_id = Some(Uuid::new_v4().to_string());
-
-        //
-        // Store the original project_path from context.
-        //
-        let project_path = context.project_path.clone();
-
-        //
-        // Determine working directory: use context.project_path if provided,
-        // otherwise default to home directory.
-        //
-        let working_dir = project_path.clone()
+        let working_dir = context.working_dir.clone()
             .or_else(|| dirs::home_dir().map(|p| p.to_string_lossy().to_string()));
 
         Ok(Self {
             internal_id: Uuid::new_v4(),
-            external_session_id: Mutex::new(external_session_id),
+            external_session_id: OnceCell::new(),
             process_path,
-            first_transaction: Mutex::new(true),
             yolo_mode: context.yolo_mode,
             working_dir,
-            project_path,
         })
     }
 
-    /// Get the external session ID if available.
-    fn get_external_session_id(&self) -> Option<String> {
-        self.external_session_id.lock().ok().and_then(|g| g.clone())
+    fn get_external_session_id(&self) -> Option<&str> {
+        self.external_session_id.get().map(|s| s.as_str())
     }
 
     /// Execute the agent with the given prompt and return the response.
@@ -71,56 +42,36 @@ impl ClaudeCodeSession {
             .as_ref()
             .ok_or_else(|| anyhow!("No process path configured"))?;
 
-        let mut cmd = build_command(path);
+        let mut cmd = utils::build_command(path);
 
-        //
-        // Set working directory if specified.
-        //
         if let Some(ref dir) = self.working_dir {
             cmd.current_dir(dir);
         }
 
-        //
-        // Determine if this is the first transaction.
-        //
-        let is_first = {
-            let mut first = self
-                .first_transaction
-                .lock()
-                .map_err(|_| anyhow!("Failed to lock first_transaction"))?;
-            let was_first = *first;
-            if was_first {
-                *first = false;
-            }
-            was_first
-        };
-
-        //
-        // Handle session args: use --session-id for first, --resume for
-        // subsequent.
-        //
-        if let Some(session_id) = self.get_external_session_id() {
-            if is_first {
-                cmd.arg("--session-id").arg(&session_id);
-            } else {
-                cmd.arg("--resume").arg(&session_id);
-            }
-        }
-
-        //
-        // Add YOLO mode args if enabled.
-        //
         if self.yolo_mode {
             cmd.arg("--dangerously-skip-permissions");
             cmd.arg("--add-dir").arg("/");
         }
 
         //
+        // Handle session args: use --session-id for first, --resume for subsequent.
+        //
+
+        if let Some(session_id) = self.get_external_session_id() {
+            cmd.arg("--resume").arg(session_id);
+        } else {
+            let session_id = Uuid::new_v4().to_string();
+            cmd.arg("--session-id").arg(&session_id);
+            let _ = self.external_session_id.set(session_id);
+        }
+
+        //
         // Add prompt with -p prefix.
         //
+
         cmd.arg("-p").arg(prompt);
 
-        run_command(&mut cmd)
+        utils::run_command(&mut cmd)
     }
 }
 
@@ -133,15 +84,8 @@ impl AgentSession for ClaudeCodeSession {
         self.process_path.clone()
     }
 
-    fn running_pid(&self) -> Option<String> {
-        //
-        // No persistent process, so no running PID.
-        //
-        None
-    }
-
-    fn project_path(&self) -> Option<String> {
-        self.project_path.clone()
+    fn working_dir(&self) -> Option<String> {
+        self.working_dir.clone()
     }
 
     fn mode(&self) -> AgentMode {
@@ -153,13 +97,16 @@ impl AgentSession for ClaudeCodeSession {
     }
 
     fn close(&self) {
-        //
-        // Claude Code sessions don't need explicit cleanup (atomic execution).
-        //
-        common::log_info!("ClaudeCodeSession: Session closed");
+        common::log_info!("Session closed");
     }
 
-    fn as_any(&self) -> &dyn Any {
+    fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+impl Drop for ClaudeCodeSession {
+    fn drop(&mut self) {
+        self.close();
     }
 }

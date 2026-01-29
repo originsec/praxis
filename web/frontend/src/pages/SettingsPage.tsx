@@ -5,17 +5,17 @@ import { useApp } from '../context/AppContext';
 
 type Tab = 'llm_providers' | 'service' | 'about';
 type LLMTab = 'model_definitions' | 'feature_selection';
-type FeatureId = 'skynet' | 'semanticOps' | 'semanticParser' | 'trafficParser';
+type FeatureId = 'nexus' | 'semanticOps' | 'semanticParser' | 'trafficParser';
 
 const providers = [
   { value: 'anthropic', label: 'Anthropic (Claude)' },
-  { value: 'openai', label: 'OpenAI' },
+  { value: 'cerebras', label: 'Cerebras' },
+  { value: 'gemini', label: 'Google Gemini' },
   { value: 'groq', label: 'Groq' },
   { value: 'mistral', label: 'Mistral' },
-  { value: 'xai', label: 'xAI (Grok)' },
-  { value: 'gemini', label: 'Google Gemini' },
-  { value: 'cerebras', label: 'Cerebras' },
   { value: 'ollama', label: 'Ollama (Local)' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'xai', label: 'xAI (Grok)' },
 ];
 
 //
@@ -35,7 +35,7 @@ interface ModelDefinition {
 // Feature assignments.
 //
 interface FeatureAssignments {
-  skynet: string | null;
+  nexus: string | null;
   semanticOps: string | null;
   semanticParser: string | null;
   trafficParser: string | null;
@@ -45,8 +45,8 @@ interface FeatureAssignments {
 // Feature-specific settings.
 //
 interface FeatureSettings {
-  skynetPrompt: string;
-  skynetMaxTokens: string;
+  nexusPrompt: string;
+  nexusMaxTokens: string;
   semanticOpPrompt: string;
 }
 
@@ -103,7 +103,7 @@ export function SettingsPage() {
   // Feature assignments state.
   //
   const [featureAssignments, setFeatureAssignments] = useState<FeatureAssignments>({
-    skynet: null,
+    nexus: null,
     semanticOps: null,
     semanticParser: null,
     trafficParser: null,
@@ -113,15 +113,15 @@ export function SettingsPage() {
   // Feature-specific settings.
   //
   const [featureSettings, setFeatureSettings] = useState<FeatureSettings>({
-    skynetPrompt: '',
-    skynetMaxTokens: '25000',
+    nexusPrompt: '',
+    nexusMaxTokens: '25000',
     semanticOpPrompt: '',
   });
 
   //
   // Default prompts from server.
   //
-  const [defaultPrompts, setDefaultPrompts] = useState<{ skynet: string; semantic_op: string } | null>(null);
+  const [defaultPrompts, setDefaultPrompts] = useState<{ nexus: string; semantic_op: string } | null>(null);
 
   //
   // Save states.
@@ -143,13 +143,13 @@ export function SettingsPage() {
   //
   // File input refs.
   //
-  const skynetFileInputRef = useRef<HTMLInputElement>(null);
+  const nexusFileInputRef = useRef<HTMLInputElement>(null);
   const semanticOpFileInputRef = useRef<HTMLInputElement>(null);
 
   //
-  // Selected feature in feature selection tab.
+  // Selected feature in feature configuration tab.
   //
-  const [selectedFeature, setSelectedFeature] = useState<FeatureId>('skynet');
+  const [selectedFeature, setSelectedFeature] = useState<FeatureId>('semanticOps');
 
   //
   // Node downloads state.
@@ -161,7 +161,7 @@ export function SettingsPage() {
   // Feature definitions for the list.
   //
   const features: { id: FeatureId; label: string; description: string }[] = [
-    { id: 'skynet', label: 'Skynet', description: 'Interactive AI assistant' },
+    // { id: 'nexus', label: 'Nexus', description: 'Interactive AI assistant' },  // Hidden - feature not ready
     { id: 'semanticOps', label: 'Semantic Operations', description: 'Default model for ops' },
     { id: 'semanticParser', label: 'Semantic Parser', description: 'Tool call parsing' },
     { id: 'trafficParser', label: 'Traffic Parser', description: 'Traffic summarization' },
@@ -169,17 +169,17 @@ export function SettingsPage() {
 
   //
   // Load config on mount
-  // All llm_* keys go to Service (not starting with skynet_).
+  // All llm_* keys go to Service (not starting with nexus_).
   //
   useEffect(() => {
     getConfig([
       'llm_model_definitions',
-      'llm_feature_skynet',
+      'llm_feature_nexus',
       'llm_feature_semantic_ops',
       'llm_feature_semantic_parser',
       'llm_feature_traffic_parser',
-      'llm_skynet_prompt',
-      'llm_skynet_max_tokens',
+      'llm_nexus_prompt',
+      'llm_nexus_max_tokens',
       'llm_semantic_op_prompt',
     ]);
 
@@ -230,7 +230,7 @@ export function SettingsPage() {
     // Load feature assignments (all stored on Service via llm_* keys).
     //
     setFeatureAssignments({
-      skynet: cfg.llm_feature_skynet || null,
+      nexus: cfg.llm_feature_nexus || null,
       semanticOps: cfg.llm_feature_semantic_ops || null,
       semanticParser: cfg.llm_feature_semantic_parser || null,
       trafficParser: cfg.llm_feature_traffic_parser || null,
@@ -241,8 +241,8 @@ export function SettingsPage() {
     // Use default prompts if no config value is set.
     //
     setFeatureSettings({
-      skynetPrompt: cfg.llm_skynet_prompt || (defaultPrompts?.skynet ?? ''),
-      skynetMaxTokens: cfg.llm_skynet_max_tokens || '25000',
+      nexusPrompt: cfg.llm_nexus_prompt || (defaultPrompts?.nexus ?? ''),
+      nexusMaxTokens: cfg.llm_nexus_max_tokens || '25000',
       semanticOpPrompt: cfg.llm_semantic_op_prompt || (defaultPrompts?.semantic_op ?? ''),
     });
   }, [state.config, defaultPrompts]);
@@ -309,7 +309,7 @@ export function SettingsPage() {
     //
     if (newName !== oldName) {
       const updatedAssignments = { ...featureAssignments };
-      if (updatedAssignments.skynet === oldName) updatedAssignments.skynet = newName;
+      if (updatedAssignments.nexus === oldName) updatedAssignments.nexus = newName;
       if (updatedAssignments.semanticOps === oldName) updatedAssignments.semanticOps = newName;
       if (updatedAssignments.semanticParser === oldName) updatedAssignments.semanticParser = newName;
       if (updatedAssignments.trafficParser === oldName) updatedAssignments.trafficParser = newName;
@@ -332,7 +332,7 @@ export function SettingsPage() {
     // Clear feature assignments using this model.
     //
     const updatedAssignments = { ...featureAssignments };
-    if (updatedAssignments.skynet === name) updatedAssignments.skynet = null;
+    if (updatedAssignments.nexus === name) updatedAssignments.nexus = null;
     if (updatedAssignments.semanticOps === name) updatedAssignments.semanticOps = null;
     if (updatedAssignments.semanticParser === name) updatedAssignments.semanticParser = null;
     if (updatedAssignments.trafficParser === name) updatedAssignments.trafficParser = null;
@@ -361,12 +361,12 @@ export function SettingsPage() {
   const handleSaveFeatures = () => {
     setIsSavingFeatures(true);
     setConfig({
-      llm_feature_skynet: featureAssignments.skynet || '',
+      llm_feature_nexus: featureAssignments.nexus || '',
       llm_feature_semantic_ops: featureAssignments.semanticOps || '',
       llm_feature_semantic_parser: featureAssignments.semanticParser || '',
       llm_feature_traffic_parser: featureAssignments.trafficParser || '',
-      llm_skynet_prompt: featureSettings.skynetPrompt,
-      llm_skynet_max_tokens: featureSettings.skynetMaxTokens,
+      llm_nexus_prompt: featureSettings.nexusPrompt,
+      llm_nexus_max_tokens: featureSettings.nexusMaxTokens,
       llm_semantic_op_prompt: featureSettings.semanticOpPrompt,
     });
     setTimeout(() => {
@@ -377,7 +377,7 @@ export function SettingsPage() {
       //
       getConfig([
         'llm_model_definitions',
-        'llm_feature_skynet',
+        'llm_feature_nexus',
         'llm_feature_semantic_ops',
         'llm_feature_semantic_parser',
         'llm_feature_traffic_parser',
@@ -509,7 +509,7 @@ export function SettingsPage() {
               <div className="flex gap-2 border-b border-subtle">
                 {[
                   { id: 'model_definitions' as LLMTab, label: 'Model Definitions' },
-                  { id: 'feature_selection' as LLMTab, label: 'Feature Selection' },
+                  { id: 'feature_selection' as LLMTab, label: 'Feature Configuration' },
                 ].map((tab) => (
                   <button
                     key={tab.id}
@@ -551,7 +551,7 @@ export function SettingsPage() {
                   //
                   */}
                   {isAddingModel && (
-                    <div className="p-4 bg-[var(--bg-secondary)] border border-subtle rounded space-y-4">
+                    <div className="p-4 bg-[var(--bg-secondary)] border border-dim space-y-4">
                       <div className="flex items-center justify-between">
                         <h4 className="font-semibold text-highlight">New Model Definition</h4>
                         <button
@@ -564,11 +564,11 @@ export function SettingsPage() {
 
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-medium mb-1 text-muted">Provider</label>
+                          <label className="block text-xs tracking-wider text-muted mb-1.5">Provider</label>
                           <select
                             value={newModel.provider}
                             onChange={(e) => setNewModel(m => ({ ...m, provider: e.target.value }))}
-                            className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                            className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                           >
                             {providers.map((p) => (
                               <option key={p.value} value={p.value}>{p.label}</option>
@@ -577,25 +577,25 @@ export function SettingsPage() {
                         </div>
 
                         <div>
-                          <label className="block text-xs font-medium mb-1 text-muted">API Key</label>
+                          <label className="block text-xs tracking-wider text-muted mb-1.5">API Key</label>
                           <input
                             type="text"
                             value={newModel.apiKey}
                             onChange={(e) => setNewModel(m => ({ ...m, apiKey: e.target.value }))}
                             placeholder="sk-..."
-                            className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                            className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                           />
                         </div>
 
                         <div className="col-span-2">
-                          <label className="block text-xs font-medium mb-1 text-muted">Model</label>
+                          <label className="block text-xs tracking-wider text-muted mb-1.5">Model</label>
                           <div className="flex gap-2">
                             <input
                               type="text"
                               value={newModel.model}
                               onChange={(e) => setNewModel(m => ({ ...m, model: e.target.value }))}
                               placeholder="e.g., claude-sonnet-4-20250514"
-                              className="flex-1 bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                              className="flex-1 bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                             />
                             <button
                               onClick={() => {
@@ -622,7 +622,7 @@ export function SettingsPage() {
                         <button
                           onClick={handleAddModel}
                           disabled={!newModel.model.trim()}
-                          className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] rounded hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50"
+                          className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors disabled:opacity-50"
                         >
                           <Plus size={14} />
                           Add
@@ -653,7 +653,7 @@ export function SettingsPage() {
                       {modelDefinitions.map((model) => (
                         <div
                           key={model.name}
-                          className="p-4 bg-[var(--bg-secondary)] border border-subtle rounded"
+                          className="p-4 bg-[var(--bg-secondary)] border border-dim"
                         >
                           {editingModel?.name === model.name ? (
                             //
@@ -662,11 +662,11 @@ export function SettingsPage() {
                             <div className="space-y-4">
                               <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                  <label className="block text-xs font-medium mb-1 text-muted">Provider</label>
+                                  <label className="block text-xs tracking-wider text-muted mb-1.5">Provider</label>
                                   <select
                                     value={editingModel.provider}
                                     onChange={(e) => setEditingModel({ ...editingModel, provider: e.target.value })}
-                                    className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                                   >
                                     {providers.map((p) => (
                                       <option key={p.value} value={p.value}>{p.label}</option>
@@ -675,24 +675,24 @@ export function SettingsPage() {
                                 </div>
 
                                 <div>
-                                  <label className="block text-xs font-medium mb-1 text-muted">API Key</label>
+                                  <label className="block text-xs tracking-wider text-muted mb-1.5">API Key</label>
                                   <input
                                     type="text"
                                     value={editingModel.apiKey}
                                     onChange={(e) => setEditingModel({ ...editingModel, apiKey: e.target.value })}
                                     placeholder="sk-..."
-                                    className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                                   />
                                 </div>
 
                                 <div className="col-span-2">
-                                  <label className="block text-xs font-medium mb-1 text-muted">Model</label>
+                                  <label className="block text-xs tracking-wider text-muted mb-1.5">Model</label>
                                   <div className="flex gap-2">
                                     <input
                                       type="text"
                                       value={editingModel.model}
                                       onChange={(e) => setEditingModel({ ...editingModel, model: e.target.value })}
-                                      className="flex-1 bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                                      className="flex-1 bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                                     />
                                     <button
                                       onClick={() => {
@@ -711,7 +711,7 @@ export function SettingsPage() {
                               <div className="flex gap-2">
                                 <button
                                   onClick={handleUpdateModel}
-                                  className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] rounded hover:bg-[var(--accent-info)]/30 transition-colors"
+                                  className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors"
                                 >
                                   <Check size={14} />
                                   Update
@@ -767,7 +767,7 @@ export function SettingsPage() {
                     <button
                       onClick={handleSaveModels}
                       disabled={isSavingModels}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] rounded hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50"
+                      className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors disabled:opacity-50"
                     >
                       {showModelsSaved ? (
                         <>
@@ -787,7 +787,7 @@ export function SettingsPage() {
 
               {/*
               //
-              // Feature Selection Tab.
+              // Feature Configuration Tab.
               //
               */}
               {activeLLMTab === 'feature_selection' && (
@@ -835,27 +835,27 @@ export function SettingsPage() {
                       // Right pane - Feature configuration.
                       //
                       */}
-                      <div className="flex-1 p-4 bg-[var(--bg-secondary)] border border-subtle rounded">
+                      <div className="flex-1 p-4 bg-[var(--bg-secondary)] border border-dim">
                         {/*
                         //
-                        // Skynet config.
+                        // Nexus config.
                         //
                         */}
-                        {selectedFeature === 'skynet' && (
+                        {selectedFeature === 'nexus' && (
                           <div className="space-y-4">
                             <div>
-                              <h4 className="font-semibold text-highlight">Skynet</h4>
+                              <h4 className="font-semibold text-highlight">Nexus</h4>
                               <p className="text-xs text-muted">Interactive AI assistant for red teaming orchestration</p>
                             </div>
 
                             <div className="space-y-4">
                               <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                  <label className="block text-xs font-medium mb-1 text-muted">Model Definition</label>
+                                  <label className="block text-xs tracking-wider text-muted mb-1.5">Model Definition</label>
                                   <select
-                                    value={featureAssignments.skynet || ''}
-                                    onChange={(e) => setFeatureAssignments(a => ({ ...a, skynet: e.target.value || null }))}
-                                    className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                                    value={featureAssignments.nexus || ''}
+                                    onChange={(e) => setFeatureAssignments(a => ({ ...a, nexus: e.target.value || null }))}
+                                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                                   >
                                     <option value="">Select a model...</option>
                                     {modelDefinitions.map((m) => (
@@ -865,15 +865,15 @@ export function SettingsPage() {
                                 </div>
 
                                 <div>
-                                  <label className="block text-xs font-medium mb-1 text-muted">Max Tokens</label>
+                                  <label className="block text-xs tracking-wider text-muted mb-1.5">Max Tokens</label>
                                   <input
                                     type="number"
-                                    value={featureSettings.skynetMaxTokens}
-                                    onChange={(e) => setFeatureSettings(s => ({ ...s, skynetMaxTokens: e.target.value }))}
+                                    value={featureSettings.nexusMaxTokens}
+                                    onChange={(e) => setFeatureSettings(s => ({ ...s, nexusMaxTokens: e.target.value }))}
                                     placeholder="25000"
                                     min="1000"
                                     max="100000"
-                                    className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                                   />
                                 </div>
                               </div>
@@ -884,14 +884,14 @@ export function SettingsPage() {
                                   <div>
                                     <input
                                       type="file"
-                                      ref={skynetFileInputRef}
+                                      ref={nexusFileInputRef}
                                       accept=".txt,.md,.prompt"
                                       onChange={(e) => {
                                         const file = e.target.files?.[0];
                                         if (file) {
                                           const reader = new FileReader();
                                           reader.onload = (event) => {
-                                            setFeatureSettings(s => ({ ...s, skynetPrompt: event.target?.result as string || '' }));
+                                            setFeatureSettings(s => ({ ...s, nexusPrompt: event.target?.result as string || '' }));
                                           };
                                           reader.readAsText(file);
                                         }
@@ -899,8 +899,8 @@ export function SettingsPage() {
                                       className="hidden"
                                     />
                                     <button
-                                      onClick={() => skynetFileInputRef.current?.click()}
-                                      className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-[var(--bg-primary)] border border-subtle rounded hover:bg-[var(--bg-tertiary)] transition-colors"
+                                      onClick={() => nexusFileInputRef.current?.click()}
+                                      className="inline-flex items-center gap-1 px-2 py-1 text-xs tracking-wider bg-[var(--bg-primary)] border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
                                     >
                                       <Upload size={12} />
                                       Load from file
@@ -908,14 +908,14 @@ export function SettingsPage() {
                                   </div>
                                 </div>
                                 <textarea
-                                  value={featureSettings.skynetPrompt}
-                                  onChange={(e) => setFeatureSettings(s => ({ ...s, skynetPrompt: e.target.value }))}
-                                  placeholder="Enter the system prompt for Skynet..."
+                                  value={featureSettings.nexusPrompt}
+                                  onChange={(e) => setFeatureSettings(s => ({ ...s, nexusPrompt: e.target.value }))}
+                                  placeholder="Enter the system prompt for Nexus..."
                                   rows={10}
-                                  className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-[var(--border-active)] resize-y"
+                                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm font-mono text-highlight focus:outline-none focus:border-subtle transition-colors resize-y"
                                 />
                                 <p className="text-xs text-muted mt-1">
-                                  {featureSettings.skynetPrompt.length} characters
+                                  {featureSettings.nexusPrompt.length} characters
                                 </p>
                               </div>
                             </div>
@@ -931,16 +931,16 @@ export function SettingsPage() {
                           <div className="space-y-4">
                             <div>
                               <h4 className="font-semibold text-highlight">Semantic Operations</h4>
-                              <p className="text-xs text-muted">Default model for automated operation execution. Individual operations and chains can override this.</p>
+                              <p className="text-xs text-muted">Default model for ops</p>
                             </div>
 
                             <div className="space-y-4">
                               <div>
-                                <label className="block text-xs font-medium mb-1 text-muted">Model Definition</label>
+                                <label className="block text-xs tracking-wider text-muted mb-1.5">Model Definition</label>
                                 <select
                                   value={featureAssignments.semanticOps || ''}
                                   onChange={(e) => setFeatureAssignments(a => ({ ...a, semanticOps: e.target.value || null }))}
-                                  className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                                 >
                                   <option value="">Select a model...</option>
                                   {modelDefinitions.map((m) => (
@@ -971,7 +971,7 @@ export function SettingsPage() {
                                     />
                                     <button
                                       onClick={() => semanticOpFileInputRef.current?.click()}
-                                      className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-[var(--bg-primary)] border border-subtle rounded hover:bg-[var(--bg-tertiary)] transition-colors"
+                                      className="inline-flex items-center gap-1 px-2 py-1 text-xs tracking-wider bg-[var(--bg-primary)] border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
                                     >
                                       <Upload size={12} />
                                       Load from file
@@ -983,7 +983,7 @@ export function SettingsPage() {
                                   onChange={(e) => setFeatureSettings(s => ({ ...s, semanticOpPrompt: e.target.value }))}
                                   placeholder="Enter the system prompt for semantic operations..."
                                   rows={10}
-                                  className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-[var(--border-active)] resize-y"
+                                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm font-mono text-highlight focus:outline-none focus:border-subtle transition-colors resize-y"
                                 />
                                 <p className="text-xs text-muted mt-1">
                                   {featureSettings.semanticOpPrompt.length} characters
@@ -1006,11 +1006,11 @@ export function SettingsPage() {
                             </div>
 
                             <div>
-                              <label className="block text-xs font-medium mb-1 text-muted">Model Definition</label>
+                              <label className="block text-xs tracking-wider text-muted mb-1.5">Model Definition</label>
                               <select
                                 value={featureAssignments.semanticParser || ''}
                                 onChange={(e) => setFeatureAssignments(a => ({ ...a, semanticParser: e.target.value || null }))}
-                                className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                                className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                               >
                                 <option value="">Select a model...</option>
                                 {modelDefinitions.map((m) => (
@@ -1034,11 +1034,11 @@ export function SettingsPage() {
                             </div>
 
                             <div>
-                              <label className="block text-xs font-medium mb-1 text-muted">Model Definition</label>
+                              <label className="block text-xs tracking-wider text-muted mb-1.5">Model Definition</label>
                               <select
                                 value={featureAssignments.trafficParser || ''}
                                 onChange={(e) => setFeatureAssignments(a => ({ ...a, trafficParser: e.target.value || null }))}
-                                className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                                className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                               >
                                 <option value="">Select a model...</option>
                                 {modelDefinitions.map((m) => (
@@ -1062,7 +1062,7 @@ export function SettingsPage() {
                       <button
                         onClick={handleSaveFeatures}
                         disabled={isSavingFeatures}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] rounded hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50"
+                        className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors disabled:opacity-50"
                       >
                         {showFeaturesSaved ? (
                           <>
@@ -1114,7 +1114,7 @@ export function SettingsPage() {
                   <label className="block text-sm font-medium mb-2">WebSocket URL</label>
                   <input
                     type="text"
-                    value={`ws://${window.location.host}/ws`}
+                    value={`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`}
                     disabled
                     className="w-full bg-[var(--bg-secondary)] border border-subtle px-4 py-2.5 text-muted"
                   />
@@ -1162,7 +1162,7 @@ export function SettingsPage() {
                           <a
                             href={`/api/downloads/node/${node.platform}`}
                             download={node.filename}
-                            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] rounded hover:bg-[var(--accent-info)]/30 transition-colors"
+                            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors"
                           >
                             <Download size={14} />
                             Download
@@ -1197,14 +1197,14 @@ export function SettingsPage() {
                     <a href="https://originhq.com" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-info)]/70 hover:text-[var(--accent-info)] hover:underline">Origin</a> is an endpoint security company building protection for the semantic era of computing. As AI agents become integral to enterprise workflows, Origin provides the visibility and control organizations need to safely grant agents the permissions they require.
                   </p>
                   <p className="text-sm text-muted mb-8">
-                    <a href="https://github.com/originhq/praxis" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-info)]/70 hover:text-[var(--accent-info)] hover:underline">Praxis</a> is Origin's experimental research platform for exploring the adversarial boundaries of legitimate semantic tools. By understanding how computer-use agents and their underlying capabilities can be leveraged offensively, we build better defenses for the endpoints they operate on.
+                    <a href="https://github.com/originsec/praxis" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-info)]/70 hover:text-[var(--accent-info)] hover:underline">Praxis</a> is Origin's experimental research platform for exploring the adversarial boundaries of legitimate semantic tools. By understanding how computer-use agents and their underlying capabilities can be leveraged offensively, we build better defenses for the endpoints they operate on.
                   </p>
                   <div className="flex gap-4">
                     <a
                       href="https://originhq.com"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] rounded hover:bg-[var(--accent-info)]/30 transition-colors"
+                      className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors"
                     >
                       <ExternalLink size={14} />
                       originhq.com

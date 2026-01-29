@@ -124,18 +124,31 @@ export function OperationsPage() {
   }, [selectedChainExec, requestChain]);
 
   //
-  // Use the current chain from state as the definition.
+  // Use the cached chain definition or current chain from state.
   //
   const selectedChainDef = useMemo((): ChainDefinitionFull | null => {
     if (!selectedChainExec) return null;
     //
-    // Return the current chain if it matches the selected execution's chain.
+    // First check the cache for the chain definition.
+    //
+    const cached = state.chains.chainDefinitionsCache[selectedChainExec.chain_id];
+    if (cached) return cached;
+    //
+    // Fall back to current chain if it matches.
     //
     if (state.chains.currentChain?.id === selectedChainExec.chain_id) {
       return state.chains.currentChain;
     }
     return null;
-  }, [selectedChainExec, state.chains.currentChain]);
+  }, [selectedChainExec, state.chains.chainDefinitionsCache, state.chains.currentChain]);
+
+  //
+  // Check if chain is currently loading.
+  //
+  const isChainLoading = useMemo(() => {
+    if (!selectedChainExec) return false;
+    return state.chains.loadingChains.has(selectedChainExec.chain_id);
+  }, [selectedChainExec, state.chains.loadingChains]);
 
   const formatDuration = (start: string, end: string | null) => {
     const startTime = new Date(start).getTime();
@@ -550,6 +563,7 @@ export function OperationsPage() {
       <ChainExecutionModal
         execution={selectedChainExec}
         chain={selectedChainDef}
+        isLoading={isChainLoading}
         onClose={() => setSelectedChainExecId(null)}
         onEditChain={() => {
           setSelectedChainExecId(null);

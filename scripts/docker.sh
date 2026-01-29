@@ -7,7 +7,7 @@
 set -e
 
 PRAXIS_DIR="${PRAXIS_DIR:-$HOME/.praxis-docker}"
-PRAXIS_RAW="https://raw.githubusercontent.com/preludeorg/praxis/main"
+PRAXIS_RAW="https://raw.githubusercontent.com/originsec/praxis/main"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -81,7 +81,7 @@ setup_files() {
         #
         # Download directory contents via GitHub API.
         #
-        curl -fsSL "https://api.github.com/repos/preludeorg/praxis/contents/$dir?ref=main" | \
+        curl -fsSL "https://api.github.com/repos/originsec/praxis/contents/$dir?ref=main" | \
             grep '"download_url"' | \
             sed 's/.*"download_url": "\([^"]*\)".*/\1/' | \
             while read -r url; do
@@ -105,7 +105,7 @@ clone_repo() {
         git pull --ff-only
     else
         rm -rf "$PRAXIS_DIR"
-        git clone --depth 1 https://github.com/preludeorg/praxis.git "$PRAXIS_DIR"
+        git clone --depth 1 https://github.com/originsec/praxis.git "$PRAXIS_DIR"
         cd "$PRAXIS_DIR"
     fi
 

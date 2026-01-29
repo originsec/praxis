@@ -474,8 +474,8 @@ th {
   opacity: 0;
   position: absolute;
   bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%) translateY(-6px);
+  left: 0;
+  transform: translateY(-6px);
   background: var(--bg-secondary);
   color: var(--accent-info);
   padding: 6px 10px;
@@ -483,7 +483,7 @@ th {
   font-size: 10px;
   white-space: nowrap;
   pointer-events: none;
-  z-index: 1000;
+  z-index: 99999;
   border: 1px solid var(--border-hover);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.8), 0 0 0 1px var(--border-color);
   transition: opacity 0.2s ease, visibility 0.2s ease;
@@ -495,8 +495,7 @@ th {
   content: '';
   position: absolute;
   top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 12px;
   border: 4px solid transparent;
   border-top-color: var(--border-hover);
 }
@@ -506,7 +505,25 @@ th {
   opacity: 1;
 }
 
-/* Markdown prose styling for Skynet */
+/* Floating tooltip that follows mouse cursor */
+.tooltip-content-floating {
+  position: fixed;
+  background: var(--bg-secondary);
+  color: var(--accent-info);
+  padding: 6px 10px;
+  border-radius: 3px;
+  font-size: 10px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 99999;
+  border: 1px solid var(--border-hover);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.8), 0 0 0 1px var(--border-color);
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  transform: translateX(-50%);
+}
+
+/* Markdown prose styling for Nexus */
 .prose {
   line-height: 1.6;
 }

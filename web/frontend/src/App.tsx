@@ -8,7 +8,8 @@ import { Dashboard } from './pages/Dashboard';
 import { NodesPage } from './pages/NodesPage';
 import { NodeDetailPage } from './pages/NodeDetailPage';
 import { AgentDetailPage } from './pages/AgentDetailPage';
-import { SkynetPage } from './pages/SkynetPage';
+// import { NexusPage } from './pages/NexusPage';  // Hidden - feature not ready
+import { NexusComingSoonPage } from './pages/NexusComingSoonPage';
 import { ToolkitPage } from './pages/ToolkitPage';
 import { OperationsPage } from './pages/OperationsPage';
 import { EventsPage } from './pages/EventsPage';
@@ -37,7 +38,7 @@ export default function App() {
               <Route path="/nodes" element={<NodesPage />} />
               <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
               <Route path="/nodes/:nodeId/agents/:agentShortName" element={<AgentDetailPage />} />
-              <Route path="/skynet" element={<SkynetPage />} />
+              <Route path="/nexus" element={<NexusComingSoonPage />} />
               <Route path="/toolkit" element={<ToolkitPage />} />
               <Route path="/operations" element={<OperationsPage />} />
               <Route path="/events" element={<EventsPage />} />

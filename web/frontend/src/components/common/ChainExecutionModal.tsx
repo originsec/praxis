@@ -7,11 +7,12 @@ import type { ChainExecutionUpdate, ChainDefinitionFull } from '../../api/types'
 interface ChainExecutionModalProps {
   execution: ChainExecutionUpdate | null;
   chain: ChainDefinitionFull | null;
+  isLoading?: boolean;
   onClose: () => void;
   onEditChain?: (chainId: string) => void;
 }
 
-export function ChainExecutionModal({ execution, chain, onClose, onEditChain }: ChainExecutionModalProps) {
+export function ChainExecutionModal({ execution, chain, isLoading, onClose, onEditChain }: ChainExecutionModalProps) {
   const handleExport = () => {
     if (!execution) return;
     const content = exportChainExecution(execution);
@@ -41,6 +42,7 @@ export function ChainExecutionModal({ execution, chain, onClose, onEditChain }: 
           <ChainExecutionViewer
             execution={execution}
             chain={chain}
+            isLoading={isLoading}
             onEditChain={onEditChain}
           />
         </div>

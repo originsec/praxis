@@ -9,7 +9,7 @@ use common::{
     TargetDirection, TrafficSearchFilters,
 };
 
-/// Status of a Skynet plan step
+/// Status of a Nexus plan step
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum PlanStepStatus {
@@ -18,16 +18,16 @@ pub enum PlanStepStatus {
     Done,
 }
 
-/// A step in the Skynet execution plan
+/// A step in the Nexus execution plan
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanStep {
     pub description: String,
     pub status: PlanStepStatus,
 }
 
-/// The current plan being executed by Skynet
+/// The current plan being executed by Nexus
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SkynetPlan {
+pub struct NexusPlan {
     pub steps: Vec<PlanStep>,
     pub summary: Option<String>,
     pub current_step_description: Option<String>,
@@ -102,16 +102,16 @@ pub enum BrowserMessage {
     OpDefGet {
         full_name: String,
     },
-    /// Start a new Skynet session
-    SkynetStart,
-    /// Send a prompt to Skynet
-    SkynetPrompt {
+    /// Start a new Nexus session
+    NexusStart,
+    /// Send a prompt to Nexus
+    NexusPrompt {
         message: String,
     },
-    /// Stop/interrupt Skynet session
-    SkynetStop,
-    /// Cancel current Skynet inference (keeps session active)
-    SkynetCancel,
+    /// Stop/interrupt Nexus session
+    NexusStop,
+    /// Cancel current Nexus inference (keeps session active)
+    NexusCancel,
 
     //
     // Traffic interception messages.
@@ -252,6 +252,15 @@ pub enum BrowserMessage {
     ApplicationLogClear {
         node_id: Option<String>,
     },
+
+    //
+    // Recon messages.
+    //
+    /// Request stored recon result for a node+agent
+    ReconGet {
+        node_id: String,
+        agent_short_name: String,
+    },
 }
 
 /// Messages sent from web server to browser
@@ -321,38 +330,38 @@ pub enum ServerMessage {
     OpDefError {
         message: String,
     },
-    /// Skynet session started
-    SkynetStarted,
-    /// Skynet streaming text content
-    SkynetContent {
+    /// Nexus session started
+    NexusStarted,
+    /// Nexus streaming text content
+    NexusContent {
         content: String,
     },
-    /// Skynet started executing a tool
-    SkynetToolExecuting {
+    /// Nexus started executing a tool
+    NexusToolExecuting {
         name: String,
         input: Option<String>,
     },
-    /// Skynet finished executing a tool
-    SkynetToolExecuted {
+    /// Nexus finished executing a tool
+    NexusToolExecuted {
         name: String,
         display: String,
         success: bool,
         result: String,
     },
-    /// Skynet plan updated
-    SkynetPlanUpdated {
-        plan: SkynetPlan,
+    /// Nexus plan updated
+    NexusPlanUpdated {
+        plan: NexusPlan,
     },
-    /// Skynet response complete
-    SkynetDone,
-    /// Skynet session stopped
-    SkynetStopped,
-    /// Skynet error
-    SkynetError {
+    /// Nexus response complete
+    NexusDone,
+    /// Nexus session stopped
+    NexusStopped,
+    /// Nexus error
+    NexusError {
         message: String,
     },
-    /// Skynet token usage update
-    SkynetTokenUsage {
+    /// Nexus token usage update
+    NexusTokenUsage {
         prompt_tokens: u32,
         completion_tokens: u32,
         total_tokens: u32,
@@ -482,5 +491,17 @@ pub enum ServerMessage {
     /// Node event log cleared
     ApplicationLogCleared {
         deleted_count: u32,
+    },
+
+    //
+    // Recon messages.
+    //
+    /// Stored recon result response
+    ReconGetResponse {
+        node_id: String,
+        agent_short_name: String,
+        recon_result: Option<common::ReconResult>,
+        performed_at: Option<String>,
+        is_semantic: Option<bool>,
     },
 }

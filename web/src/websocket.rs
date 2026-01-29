@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::config::ConfigManager;
 use crate::messages::ServerMessage;
 use crate::rabbitmq::RabbitMqClient;
-use crate::skynet::{self, SkynetEvent, SkynetSession};
+use crate::nexus::{self, NexusEvent, NexusSession};
 use crate::state::AppState;
 
 mod handlers;
@@ -27,8 +27,8 @@ pub struct WsState {
     pub app_state: Arc<AppState>,
     pub rabbitmq: Arc<RabbitMqClient>,
     pub config: Arc<ConfigManager>,
-    /// Active Skynet sessions keyed by connection ID
-    pub skynet_sessions: RwLock<HashMap<String, SkynetSession>>,
+    /// Active Nexus sessions keyed by connection ID
+    pub nexus_sessions: RwLock<HashMap<String, NexusSession>>,
 }
 
 impl WsState {
@@ -37,7 +37,7 @@ impl WsState {
             app_state,
             rabbitmq,
             config,
-            skynet_sessions: RwLock::new(HashMap::new()),
+            nexus_sessions: RwLock::new(HashMap::new()),
         }
     }
 }
@@ -187,16 +187,16 @@ async fn handle_incoming(
     }
 
     //
-    // Clean up Skynet session when connection closes.
+    // Clean up Nexus session when connection closes.
     //
-    let mut sessions = state.skynet_sessions.write().await;
+    let mut sessions = state.nexus_sessions.write().await;
     if let Some(session) = sessions.remove(&connection_id) {
         session.stop();
     }
 }
 
-/// Handle SkynetStart message - create a new Skynet session for this connection
-pub(super) async fn handle_skynet_start(
+/// Handle NexusStart message - create a new Nexus session for this connection
+pub(super) async fn handle_nexus_start(
     state: &Arc<WsState>,
     connection_id: &str,
 ) -> anyhow::Result<()> {
@@ -204,14 +204,14 @@ pub(super) async fn handle_skynet_start(
     // Stop any existing session first.
     //
     {
-        let mut sessions = state.skynet_sessions.write().await;
+        let mut sessions = state.nexus_sessions.write().await;
         if let Some(session) = sessions.remove(connection_id) {
             session.stop();
         }
     }
 
     //
-    // Fetch operation definitions so they're available for Skynet tools.
+    // Fetch operation definitions so they're available for Nexus tools.
     //
     let _ = state.rabbitmq.list_op_defs().await;
 
@@ -220,9 +220,9 @@ pub(super) async fn handle_skynet_start(
     //
     let _ = state.rabbitmq.get_config(vec![
         "llm_model_definitions".to_string(),
-        "llm_feature_skynet".to_string(),
-        "llm_skynet_prompt".to_string(),
-        "llm_skynet_max_tokens".to_string(),
+        "llm_feature_nexus".to_string(),
+        "llm_nexus_prompt".to_string(),
+        "llm_nexus_max_tokens".to_string(),
     ]).await;
     //
     // Wait briefly for config response.
@@ -232,12 +232,12 @@ pub(super) async fn handle_skynet_start(
     //
     // Create event channel for this session.
     //
-    let (event_tx, mut event_rx) = mpsc::channel::<SkynetEvent>(100);
+    let (event_tx, mut event_rx) = mpsc::channel::<NexusEvent>(100);
 
     //
-    // Start the Skynet session.
+    // Start the Nexus session.
     //
-    let session = match skynet::start_skynet_session(
+    let session = match nexus::start_nexus_session(
         Arc::clone(&state.app_state),
         Arc::clone(&state.rabbitmq),
         Arc::clone(&state.config),
@@ -245,7 +245,7 @@ pub(super) async fn handle_skynet_start(
     ).await {
         Ok(s) => s,
         Err(e) => {
-            state.app_state.broadcast(ServerMessage::SkynetError { message: e });
+            state.app_state.broadcast(ServerMessage::NexusError { message: e });
             return Ok(());
         }
     };
@@ -254,32 +254,32 @@ pub(super) async fn handle_skynet_start(
     // Store the session.
     //
     {
-        let mut sessions = state.skynet_sessions.write().await;
+        let mut sessions = state.nexus_sessions.write().await;
         sessions.insert(connection_id.to_string(), session);
     }
 
     //
     // Send started message via broadcast.
     //
-    state.app_state.broadcast(ServerMessage::SkynetStarted);
+    state.app_state.broadcast(ServerMessage::NexusStarted);
 
     //
-    // Spawn task to forward Skynet events to the browser.
+    // Spawn task to forward Nexus events to the browser.
     //
     let state_clone = Arc::clone(state);
     tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
             let msg = match event {
-                SkynetEvent::Content(content) => ServerMessage::SkynetContent { content },
-                SkynetEvent::Done => ServerMessage::SkynetDone,
-                SkynetEvent::Error(message) => ServerMessage::SkynetError { message },
-                SkynetEvent::ToolExecuting { name, input } => ServerMessage::SkynetToolExecuting { name, input },
-                SkynetEvent::ToolExecuted { name, display, success, result } => {
-                    ServerMessage::SkynetToolExecuted { name, display, success, result }
+                NexusEvent::Content(content) => ServerMessage::NexusContent { content },
+                NexusEvent::Done => ServerMessage::NexusDone,
+                NexusEvent::Error(message) => ServerMessage::NexusError { message },
+                NexusEvent::ToolExecuting { name, input } => ServerMessage::NexusToolExecuting { name, input },
+                NexusEvent::ToolExecuted { name, display, success, result } => {
+                    ServerMessage::NexusToolExecuted { name, display, success, result }
                 }
-                SkynetEvent::PlanUpdated(plan) => ServerMessage::SkynetPlanUpdated { plan },
-                SkynetEvent::TokenUsage { prompt_tokens, completion_tokens, total_tokens } => {
-                    ServerMessage::SkynetTokenUsage { prompt_tokens, completion_tokens, total_tokens }
+                NexusEvent::PlanUpdated(plan) => ServerMessage::NexusPlanUpdated { plan },
+                NexusEvent::TokenUsage { prompt_tokens, completion_tokens, total_tokens } => {
+                    ServerMessage::NexusTokenUsage { prompt_tokens, completion_tokens, total_tokens }
                 }
             };
             state_clone.app_state.broadcast(msg);
@@ -289,54 +289,54 @@ pub(super) async fn handle_skynet_start(
     Ok(())
 }
 
-/// Handle SkynetPrompt message - send a prompt to the active Skynet session
-pub(super) async fn handle_skynet_prompt(
+/// Handle NexusPrompt message - send a prompt to the active Nexus session
+pub(super) async fn handle_nexus_prompt(
     state: &Arc<WsState>,
     connection_id: &str,
     message: &str,
 ) -> anyhow::Result<()> {
-    let sessions = state.skynet_sessions.read().await;
+    let sessions = state.nexus_sessions.read().await;
     if let Some(session) = sessions.get(connection_id) {
         if let Err(e) = session.prompt_tx.send(message.to_string()).await {
-            common::log_warn!("Failed to send prompt to Skynet session: {}", e);
-            state.app_state.broadcast(ServerMessage::SkynetError {
+            common::log_warn!("Failed to send prompt to Nexus session: {}", e);
+            state.app_state.broadcast(ServerMessage::NexusError {
                 message: format!("Failed to send prompt: {}", e),
             });
         }
     } else {
-        common::log_warn!("No active Skynet session for connection {}", connection_id);
-        state.app_state.broadcast(ServerMessage::SkynetError {
-            message: "No active Skynet session. Click 'New Session' to start.".to_string(),
+        common::log_warn!("No active Nexus session for connection {}", connection_id);
+        state.app_state.broadcast(ServerMessage::NexusError {
+            message: "No active Nexus session. Click 'New Session' to start.".to_string(),
         });
     }
     Ok(())
 }
 
-/// Handle SkynetStop message - stop the Skynet session for this connection
-pub(super) async fn handle_skynet_stop(
+/// Handle NexusStop message - stop the Nexus session for this connection
+pub(super) async fn handle_nexus_stop(
     state: &Arc<WsState>,
     connection_id: &str,
 ) -> anyhow::Result<()> {
-    let mut sessions = state.skynet_sessions.write().await;
+    let mut sessions = state.nexus_sessions.write().await;
     if let Some(session) = sessions.remove(connection_id) {
         session.stop();
     }
-    state.app_state.broadcast(ServerMessage::SkynetStopped);
+    state.app_state.broadcast(ServerMessage::NexusStopped);
     Ok(())
 }
 
-/// Handle SkynetCancel message - cancel current inference but keep session alive
-pub(super) async fn handle_skynet_cancel(
+/// Handle NexusCancel message - cancel current inference but keep session alive
+pub(super) async fn handle_nexus_cancel(
     state: &Arc<WsState>,
     connection_id: &str,
 ) -> anyhow::Result<()> {
-    let sessions = state.skynet_sessions.read().await;
+    let sessions = state.nexus_sessions.read().await;
     if let Some(session) = sessions.get(connection_id) {
         session.cancel();
     }
     //
     // Broadcast Done to finalize any streaming content (session stays active).
     //
-    state.app_state.broadcast(ServerMessage::SkynetDone);
+    state.app_state.broadcast(ServerMessage::NexusDone);
     Ok(())
 }

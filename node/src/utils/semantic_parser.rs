@@ -14,40 +14,6 @@ use uuid::Uuid;
 // MCP Discovery Utilities.
 //
 
-/// JSON schema for MCP server discovery via semantic parser.
-/// This schema extracts MCP server details only (not tools).
-pub const MCP_SERVERS_SCHEMA: &str = r#"{
-    "type": "object",
-    "properties": {
-        "mcp_servers": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": { "type": "string", "description": "Name of the MCP server" },
-                    "transport": { "type": "string", "enum": ["stdio", "sse", "websocket"], "description": "Transport type" },
-                    "address": { "type": "string", "description": "URL/address for network transports (optional)" },
-                    "command": { "type": "string", "description": "Command for stdio transport (optional)" }
-                },
-                "required": ["name", "transport"]
-            }
-        }
-    },
-    "required": ["mcp_servers"]
-}"#;
-
-/// Discovery prompt for extracting MCP server information from unstructured text.
-pub const MCP_SERVERS_PROMPT: &str = "Extract all MCP (Model Context Protocol) servers from the following text. \
-For each server, identify the name, transport type (stdio, sse, or websocket), \
-and the address (for network transports) or command (for stdio transport). \
-Do not include tools - only extract server metadata. \
-DO NOT LIST ANY SERVERS THAT DO NOT EXIST IN THE TEXT.";
-
-/// Build a prompt for MCP discovery from unstructured text.
-pub fn build_mcp_servers_prompt(text: &str) -> String {
-    format!("{}\n\n**TEXT**:\n{}", MCP_SERVERS_PROMPT, text)
-}
-
 /// JSON schema for combined MCP server and tools discovery via semantic parser.
 /// This schema extracts both servers AND their tools in a single pass.
 #[allow(dead_code)]
@@ -188,49 +154,6 @@ DO NOT LIST ANY SERVERS THAT DO NOT EXIST IN THE TEXT.";
 #[allow(dead_code)]
 pub fn build_mcp_server_info_prompt(text: &str) -> String {
     format!("{}\n\n**TEXT**:\n{}", MCP_SERVER_INFO_PROMPT, text)
-}
-
-/// Parse JSON response from semantic parser into a Vec of McpServer.
-/// Returns None if parsing fails. Note: This parses servers without tools.
-pub fn parse_mcp_servers_from_json(json: &str) -> Option<Vec<McpServer>> {
-    let parsed: serde_json::Value = serde_json::from_str(json).ok()?;
-    let servers = parsed.get("mcp_servers")?.as_array()?;
-
-    let mcp_servers: Vec<McpServer> = servers
-        .iter()
-        .filter_map(|s| {
-            let name = s.get("name")?.as_str()?.to_string();
-            let transport_str = s.get("transport")?.as_str()?;
-            let transport = match transport_str {
-                "stdio" => McpTransport::Stdio,
-                "sse" => McpTransport::Sse,
-                "websocket" => McpTransport::WebSocket,
-                _ => return None,
-            };
-            let address = s
-                .get("address")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let command = s
-                .get("command")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-
-            //
-            // Tools are no longer included in the server schema.
-            //
-            Some(McpServer {
-                name,
-                transport,
-                address,
-                command,
-                tools: Vec::new(),
-                ..Default::default()
-            })
-        })
-        .collect();
-
-    Some(mcp_servers)
 }
 
 /// Parse JSON response from semantic parser into a Vec of McpServer with tools.
