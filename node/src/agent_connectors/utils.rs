@@ -300,6 +300,15 @@ pub fn scan_directories_for_config_files_multi(
                 let name = e.file_name().to_string_lossy();
 
                 //
+                // Skip .claude/plugins/marketplaces* directories.
+                //
+
+                let path_str = e.path().to_string_lossy();
+                if path_str.contains(".claude/plugins/marketplaces") {
+                    return false;
+                }
+
+                //
                 // Skip hidden directories except those we're looking for.
                 //
 
