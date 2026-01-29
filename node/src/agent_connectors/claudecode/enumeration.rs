@@ -1,47 +1,85 @@
-use crate::agent_connectors::utils::SKIP_DIRS;
+use crate::agent_connectors::utils::{enumerate_user_homes, SKIP_DIRS};
 use common::{AgentSessionInfo, ConfigItem};
 use chrono::{DateTime, Utc};
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-/// Result of enumeration containing configs, sessions, and project paths.
 pub struct EnumerationData {
     pub config_items: Vec<ConfigItem>,
     pub sessions: Vec<AgentSessionInfo>,
     pub project_paths: Vec<String>,
 }
 
-/// Enumerate Claude Code configurations and sessions.
 pub fn enumerate() -> anyhow::Result<EnumerationData> {
-    common::log_info!("Enumerating Claude Code configurations and sessions");
-
-    let home = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?;
+    common::log_info!("Enumerating Claude Code configurations across all users");
 
     let mut config_items = Vec::new();
     let mut sessions = Vec::new();
     let mut project_paths_set = HashSet::new();
 
     //
-    // Global configuration files.
+    // Collect from all user homes.
     //
-    collect_config_file(&home.join(".claude/settings.json"), "global_settings", &mut config_items);
-    collect_config_file(&home.join(".claude.json"), "preferences", &mut config_items);
-    collect_config_file(&home.join(".claude/CLAUDE.md"), "global_instructions", &mut config_items);
+
+    let user_homes = enumerate_user_homes();
+    let user_homes_set: HashSet<&Path> = user_homes.iter().map(|p| p.as_path()).collect();
+
+    for home in &user_homes {
+        //
+        // Global configuration files.
+        //
+
+        collect_config_file(&home.join(".claude/settings.json"), "global_settings", &mut config_items);
+        collect_config_file(&home.join(".claude.json"), "preferences", &mut config_items);
+        collect_config_file(&home.join(".claude/CLAUDE.md"), "global_instructions", &mut config_items);
+
+        //
+        // Discover sessions.
+        //
+
+        discover_sessions(home, &mut sessions)?;
+    }
 
     //
-    // Discover sessions.
+    // Use walkdir to scan from each user home for .claude directories.
     //
-    discover_sessions(&home, &mut sessions)?;
+
+    common::log_debug!("Scanning for project configs from user home directories...");
+
+    for home in &user_homes {
+        scan_home_for_projects(home, &user_homes_set, &mut config_items, &mut project_paths_set);
+    }
 
     //
-    // Use walkdir to scan from HOME for .claude directories.
+    // Convert project_paths to sorted vec.
     //
-    common::log_info!("Scanning for project configs from home directory...");
 
-    let walker = WalkDir::new(&home)
+    let mut project_paths: Vec<String> = project_paths_set.into_iter().collect();
+    project_paths.sort();
+
+    common::log_info!(
+        "Claude Code enumeration complete: {} configs, {} sessions, {} projects",
+        config_items.len(),
+        sessions.len(),
+        project_paths.len()
+    );
+
+    Ok(EnumerationData {
+        config_items,
+        sessions,
+        project_paths,
+    })
+}
+
+fn scan_home_for_projects(
+    home: &PathBuf,
+    user_homes_set: &HashSet<&Path>,
+    config_items: &mut Vec<ConfigItem>,
+    project_paths_set: &mut HashSet<String>,
+) {
+    let walker = WalkDir::new(home)
         .follow_links(false)
         .into_iter()
         .filter_entry(|e| {
@@ -70,16 +108,16 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
                 let project_path = project_dir.to_string_lossy().to_string();
 
                 //
-                // Skip the global ~/.claude directory.
+                // Skip any user home's ~/.claude directory.
                 //
-                if project_dir == home {
+                if user_homes_set.contains(project_dir) {
                     continue;
                 }
 
                 //
                 // Collect project-level configs.
                 //
-                collect_project_configs(project_dir, path, &project_path, &mut config_items);
+                collect_project_configs(project_dir, path, &project_path, config_items);
                 project_paths_set.insert(project_path);
             }
         }
@@ -94,9 +132,9 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
                     let project_path = parent.to_string_lossy().to_string();
 
                     //
-                    // Skip home directory.
+                    // Skip any user home directory.
                     //
-                    if parent == home {
+                    if user_homes_set.contains(parent) {
                         continue;
                     }
 
@@ -123,25 +161,6 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
             }
         }
     }
-
-    //
-    // Convert project_paths to sorted vec.
-    //
-    let mut project_paths: Vec<String> = project_paths_set.into_iter().collect();
-    project_paths.sort();
-
-    common::log_info!(
-        "Claude Code enumeration complete: {} configs, {} sessions, {} projects",
-        config_items.len(),
-        sessions.len(),
-        project_paths.len()
-    );
-
-    Ok(EnumerationData {
-        config_items,
-        sessions,
-        project_paths,
-    })
 }
 
 fn collect_config_file(path: &Path, config_type: &str, config_items: &mut Vec<ConfigItem>) {

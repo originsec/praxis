@@ -1,4 +1,5 @@
 #[cfg(not(windows))]
+#[allow(dead_code)]
 pub mod clawdbot;
 pub mod claudecode;
 pub mod dummy;
