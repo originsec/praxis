@@ -2,7 +2,7 @@ use super::GeminiAgent;
 use crate::agent_connectors::traits::{Agent, AgentRecon};
 use async_trait::async_trait;
 use common::{
-    AgentSessionInfo, AgentTool, ReconConfig, ReconResult, ReconTools,
+    SessionItem, AgentTool, ConfigItem, ReconResult, ReconTools,
     SessionContext,
 };
 
@@ -23,20 +23,15 @@ impl AgentRecon for GeminiAgent {
             is_semantic
         );
 
-        let (config, project_paths, sessions) = match super::enumeration::enumerate() {
+        let (config_items, project_paths, sessions) = match super::enumeration::enumerate() {
             Ok(data) => {
-                let config = ReconConfig {
-                    items: data.config_items,
-                };
-
                 //
-                // Map enumeration sessions to AgentSessionInfo. Content is not
+                // Map enumeration sessions to SessionItem. Content is not
                 // included to avoid exceeding RabbitMQ message size limits.
                 //
-
-                let sessions: Vec<AgentSessionInfo> = data.sessions
+                let sessions: Vec<SessionItem> = data.sessions
                     .into_iter()
-                    .map(|s| AgentSessionInfo {
+                    .map(|s| SessionItem {
                         session_id: s.session_id,
                         context_path: s.project_hash,
                         session_file: s.file_path,
@@ -46,17 +41,17 @@ impl AgentRecon for GeminiAgent {
                     })
                     .collect();
 
-                (config, data.project_paths, sessions)
+                (data.config_items, data.project_paths, sessions)
             }
             Err(e) => {
                 common::log_warn!("Enumeration failed: {}", e);
-                (ReconConfig::default(), Vec::new(), Vec::new())
+                (Vec::new(), Vec::new(), Vec::new())
             }
         };
 
         let mut tools = ReconTools::default();
 
-        tools.mcp_servers = super::mcp::discover_mcp_servers_from_configs(&config.items).await;
+        tools.mcp_servers = super::mcp::discover_mcp_servers_from_configs(&config_items).await;
         tools.skills = discover_skills();
 
         if is_semantic {
@@ -64,8 +59,8 @@ impl AgentRecon for GeminiAgent {
         }
 
         let metadata = crate::agent_connectors::utils::extract_metadata_from_configs(
-            "GeminiAgent",
-            &config.items,
+            self.name(),
+            &config_items,
         )
         .await;
 
@@ -74,10 +69,19 @@ impl AgentRecon for GeminiAgent {
             tools.mcp_servers.len(),
             tools.skills.len(),
             tools.internal_tools.len(),
-            config.items.len(),
+            config_items.len(),
             project_paths.len(),
             sessions.len()
         );
+
+        //
+        // Strip contents from config items before returning. Contents are fetched
+        // on-demand to avoid exceeding RabbitMQ message size limits.
+        //
+        let config: Vec<ConfigItem> = config_items.into_iter().map(|mut item| {
+            item.contents = None;
+            item
+        }).collect();
 
         Some(ReconResult {
             tools,
@@ -105,7 +109,7 @@ impl GeminiAgent {
         }
 
         let result = crate::agent_connectors::utils::discover_internal_tools_semantically(
-            "GeminiAgent",
+            self.name(),
             || {
                 let temp_context = SessionContext::default();
                 self.create_session(&temp_context)

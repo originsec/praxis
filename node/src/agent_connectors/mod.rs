@@ -16,7 +16,7 @@ mod traits;
 pub mod utils;
 
 #[allow(unused_imports)]
-pub use common::{AgentTool, McpServer, McpTransport, ReconConfig, ReconResult, ReconTools};
+pub use common::{AgentTool, McpServer, McpTransport, ReconResult, ReconTools};
 
 #[cfg(not(windows))]
 #[allow(unused_imports)]

@@ -95,7 +95,8 @@ pub async fn discover_mcp_servers_from_configs(config_items: &[ConfigItem]) -> V
             //
 
             "system_defaults" | "user_settings" | "global_settings" | "system_settings" => {
-                serde_json::from_str::<Value>(&item.contents)
+                let Some(contents) = &item.contents else { continue };
+                serde_json::from_str::<Value>(contents)
                     .ok()
                     .and_then(|json| {
                         json.get("mcpServers")
@@ -111,7 +112,8 @@ pub async fn discover_mcp_servers_from_configs(config_items: &[ConfigItem]) -> V
             //
 
             config_type if config_type.starts_with("project_settings:") => {
-                serde_json::from_str::<Value>(&item.contents)
+                let Some(contents) = &item.contents else { continue };
+                serde_json::from_str::<Value>(contents)
                     .ok()
                     .and_then(|json| {
                         json.get("mcpServers")

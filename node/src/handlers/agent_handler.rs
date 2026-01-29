@@ -38,7 +38,7 @@ pub async fn handle_agent_command(
                                     "Recon complete: {} MCP servers, {} skills, {} config items",
                                     recon_result.tools.mcp_servers.len(),
                                     recon_result.tools.skills.len(),
-                                    recon_result.config.items.len()
+                                    recon_result.config.len()
                                 );
                                 NodeCommandResult::Agent(AgentCommandResult::ReconComplete {
                                     result: recon_result,
@@ -88,7 +88,7 @@ pub async fn handle_agent_command(
                                     recon_result.tools.mcp_servers.len(),
                                     recon_result.tools.skills.len(),
                                     recon_result.tools.internal_tools.len(),
-                                    recon_result.config.items.len()
+                                    recon_result.config.len()
                                 );
                                 NodeCommandResult::Agent(AgentCommandResult::ReconComplete {
                                     result: recon_result,
@@ -274,6 +274,63 @@ pub async fn handle_agent_command(
                     common::log_warn!("Failed to read session file {}: {}", session_file, e);
                     NodeCommandResult::Agent(AgentCommandResult::SessionContent {
                         session_file,
+                        content: None,
+                        error: Some(format!("Failed to read file: {}", e)),
+                    })
+                }
+            }
+        }
+        AgentCommand::GetConfigContent { config_path } => {
+            //
+            // Validate path is within home directory for security.
+            //
+            let home_dir = match dirs::home_dir() {
+                Some(h) => h,
+                None => {
+                    return NodeCommandResult::Agent(AgentCommandResult::ConfigContent {
+                        config_path,
+                        content: None,
+                        error: Some("Could not determine home directory".to_string()),
+                    });
+                }
+            };
+
+            let target_path = std::path::Path::new(&config_path);
+            let canonical_path = match target_path.canonicalize() {
+                Ok(p) => p,
+                Err(e) => {
+                    return NodeCommandResult::Agent(AgentCommandResult::ConfigContent {
+                        config_path,
+                        content: None,
+                        error: Some(format!("Invalid path: {}", e)),
+                    });
+                }
+            };
+
+            if !canonical_path.starts_with(&home_dir) {
+                return NodeCommandResult::Agent(AgentCommandResult::ConfigContent {
+                    config_path,
+                    content: None,
+                    error: Some("Path must be within home directory".to_string()),
+                });
+            }
+
+            //
+            // Read the config file.
+            //
+            match std::fs::read_to_string(&config_path) {
+                Ok(content) => {
+                    common::log_info!("Read config file: {}", config_path);
+                    NodeCommandResult::Agent(AgentCommandResult::ConfigContent {
+                        config_path,
+                        content: Some(content),
+                        error: None,
+                    })
+                }
+                Err(e) => {
+                    common::log_warn!("Failed to read config file {}: {}", config_path, e);
+                    NodeCommandResult::Agent(AgentCommandResult::ConfigContent {
+                        config_path,
                         content: None,
                         error: Some(format!("Failed to read file: {}", e)),
                     })
