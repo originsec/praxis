@@ -1,101 +1,22 @@
 use super::M365CopilotAgent;
-use crate::agent_connectors::traits::{AgentMode, AgentRecon};
+use crate::agent_connectors::traits::{Agent, AgentRecon};
 use crate::agent_connectors::utils;
-use crate::utils::semantic_parser::{
-    build_internal_tools_prompt, parse_internal_tools_from_json, INTERNAL_TOOLS_SCHEMA,
-};
 use async_trait::async_trait;
-use common::{AgentTool, ReconMetadata, ReconResult, ReconTools};
+use common::{AgentTool, ReconMetadata, ReconResult, ReconTools, SessionContext};
 
 #[async_trait]
 impl AgentRecon for M365CopilotAgent {
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
-        //
-        // Only run recon for semantic mode.
-        //
-
         if !is_semantic {
+            //
+            // Only run recon for semantic mode.
+            //
+
             return None;
         }
 
-        //
-        // Create a temporary session for recon.
-        //
-
-        common::log_info!("Creating temporary session for recon");
-        let mode = AgentMode::DevTools;
-        let temp_session = match tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(super::M365CopilotSession::new(self.process_path.get().cloned(), mode))
-        }) {
-            Ok(s) => s,
-            Err(e) => {
-                common::log_error!("Failed to create temp session for recon: {}", e);
-                return None;
-            }
-        };
-
-        //
-        // Execute JS to get user profile from nestedAppAuthService.
-        //
-
-        let js = r#"
-            const profile =
-                Object.entries(window)
-                    .filter(([k]) => /nestedAppAuthService/i.test(k))[0][1].user.profile;
-            profile
-        "#;
-
-        let mut identities = Vec::new();
-        match temp_session.execute_js(js) {
-            Ok(profile) => {
-                if !profile.is_null() {
-                    if let Some(upn) = profile.get("upn").and_then(|v| v.as_str()) {
-                        identities.push(upn.to_string());
-                    }
-                    if let Some(name) = profile.get("displayName").and_then(|v| v.as_str()) {
-                        identities.push(name.to_string());
-                    }
-                }
-            }
-            Err(e) => {
-                common::log_warn!("Failed to get profile (continuing): {}", e);
-            }
-        }
-
-        if !identities.is_empty() {
-            common::log_info!("Found identities: {:?}", identities);
-        }
-
-        //
-        // Send the prompt to list internal tools.
-        //
-
-        let prompt = utils::INTERNAL_TOOLS_DISCOVERY_PROMPT;
-        common::log_info!("Sending internal tools discovery prompt");
-        let internal_tools = match temp_session.transact(prompt) {
-            Ok(response) => {
-                parse_internal_tools_response(&response).await
-            }
-            Err(e) => {
-                common::log_warn!(
-                    "Failed to get internal tools list from agent: {}",
-                    e
-                );
-                Vec::new()
-            }
-        };
-
-        //
-        // Close the temporary session.
-        //
-
-        temp_session.close();
-        common::log_info!("Temporary recon session closed");
-
-        //
-        // Build the result.
-        //
+        let identities = self.discover_user_identities().await;
+        let internal_tools = self.discover_internal_tools_semantically().await;
 
         let has_identities = !identities.is_empty();
 
@@ -123,48 +44,101 @@ impl AgentRecon for M365CopilotAgent {
     }
 }
 
-//
-// Use semantic parser to convert internal tools response to structured data.
-//
+impl M365CopilotAgent {
+    //
+    // Discover user identities by executing JS in a temporary session.
+    //
 
-async fn parse_internal_tools_response(response: &str) -> Vec<AgentTool> {
-    let semantic_client = match crate::utils::semantic_parser::get_client() {
-        Some(c) => c,
-        None => {
-            common::log_warn!("No semantic parser client available");
+    async fn discover_user_identities(&self) -> Vec<String> {
+        //
+        // Close any existing session.
+        //
+
+        {
+            let mut guard = self.session.write().unwrap();
+            if let Some(session) = guard.as_ref() {
+                common::log_debug!("Closing existing session for identity discovery");
+                session.close();
+            }
+            *guard = None;
+        }
+
+        //
+        // Create a temporary session for identity discovery.
+        //
+
+        common::log_info!("Creating temporary session for identity discovery");
+        let temp_context = SessionContext::default();
+        let temp_session = match self.create_session(&temp_context) {
+            Some(s) => s,
+            None => return Vec::new(),
+        };
+
+        if temp_session.mode() != crate::agent_connectors::traits::AgentMode::DevTools {
+            temp_session.close();
             return Vec::new();
         }
-    };
 
-    let discovery_prompt = build_internal_tools_prompt(response);
-    match semantic_client
-        .parse(discovery_prompt, INTERNAL_TOOLS_SCHEMA.to_string())
-        .await
-    {
-        Ok(parser_response) => {
-            if parser_response.success {
-                if let Some(json) = parser_response.json {
-                    if let Some(internal_tools) = parse_internal_tools_from_json(&json) {
-                        common::log_info!(
-                            "Discovered {} internal tools",
-                            internal_tools.len()
-                        );
-                        return internal_tools;
-                    }
+        //
+        // Discovery is done via injecting JS via DevTools.
+        //
+
+        let js = r#"
+            const profile =
+                Object.entries(window)
+                    .filter(([k]) => /nestedAppAuthService/i.test(k))[0][1].user.profile;
+            profile
+        "#;
+
+        let identities: Vec<String> = temp_session
+            .as_any()
+            .downcast_ref::<super::M365CopilotSession>()
+            .and_then(|s| s.execute_js(js).ok())
+            .filter(|p| !p.is_null())
+            .map(|profile| {
+                let mut ids = Vec::new();
+                if let Some(upn) = profile.get("upn").and_then(|v| v.as_str()) {
+                    ids.push(upn.to_string());
                 }
-            }
-            common::log_warn!(
-                "Semantic parser failed for internal tools: {:?}",
-                parser_response.error
-            );
+                if let Some(name) = profile.get("displayName").and_then(|v| v.as_str()) {
+                    ids.push(name.to_string());
+                }
+                ids
+            })
+            .unwrap_or_default();
+
+        temp_session.close();
+
+        if !identities.is_empty() {
+            common::log_info!("Found identities: {:?}", identities);
         }
-        Err(e) => {
-            common::log_warn!(
-                "Semantic parser request failed for internal tools: {}",
-                e
-            );
-        }
+
+        identities
     }
 
-    Vec::new()
+    //
+    // Discover internal tools by querying the agent via a temporary session.
+    //
+
+    async fn discover_internal_tools_semantically(&self) -> Vec<AgentTool> {
+        //
+        // Close any existing session.
+        //
+
+        {
+            let mut guard = self.session.write().unwrap();
+            if let Some(session) = guard.as_ref() {
+                common::log_debug!("Closing existing session for internal tools discovery");
+                session.close();
+            }
+            *guard = None;
+        }
+
+        utils::discover_internal_tools_semantically("M365CopilotAgent", || {
+            let temp_context = SessionContext::default();
+            self.create_session(&temp_context)
+                .ok_or_else(|| anyhow::anyhow!("Failed to create session"))
+        })
+        .await
+    }
 }

@@ -65,7 +65,7 @@ impl Agent for ClaudeCodeAgent {
                 Some(session_arc)
             }
             Err(e) => {
-                common::log_warn!("{}: Failed to create session: {}", AGENT_NAME, e);
+                common::log_error!("{}: Failed to create session: {}", AGENT_NAME, e);
                 None
             }
         }

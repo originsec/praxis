@@ -128,4 +128,8 @@ impl AgentSession for DynamicAgentSession {
         history.clear();
         common::log_debug!("Session {} closed", self.session_id);
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

@@ -34,6 +34,9 @@ pub trait AgentSession: Send + Sync {
     fn mode(&self) -> AgentMode;
     fn transact(&self, prompt: &str) -> Result<String>;
     fn close(&self);
+
+    #[allow(dead_code)]
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 //

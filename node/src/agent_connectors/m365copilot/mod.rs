@@ -65,6 +65,7 @@ impl Agent for M365CopilotAgent {
 
         //
         // Default to DevTools mode for M365 Copilot.
+        // (Note UIAutomation mode kinda works-ish but is very flaky and abandoned for now.)
         //
 
         let mode = AgentMode::DevTools;

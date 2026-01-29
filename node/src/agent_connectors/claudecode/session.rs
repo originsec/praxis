@@ -99,6 +99,10 @@ impl AgentSession for ClaudeCodeSession {
     fn close(&self) {
         common::log_info!("Session closed");
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl Drop for ClaudeCodeSession {

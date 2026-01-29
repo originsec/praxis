@@ -2,11 +2,6 @@ use super::M365CopilotAgent;
 use crate::utils;
 
 impl M365CopilotAgent {
-    //
-    // Perform fingerprinting to detect if M365 Copilot is available.
-    // Uses Windows package management to find the M365Copilot.exe process.
-    //
-
     pub(super) async fn do_fingerprint_impl(&self) -> bool {
         let process_name = "M365Copilot.exe";
 
@@ -32,6 +27,11 @@ impl M365CopilotAgent {
                 .set(format!("{}\\{}", package_path, process_name));
             return true;
         }
+        
+        //
+        // (Note: There are other/better/more straight-forward ways to 
+        // fingerprint but seems sufficient for now.)
+        //
 
         false
     }

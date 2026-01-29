@@ -188,4 +188,8 @@ impl AgentSession for ClawdbotSession {
         // Note: We do NOT stop the gateway on session close per requirements.
         //
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

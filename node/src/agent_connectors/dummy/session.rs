@@ -60,4 +60,8 @@ impl AgentSession for DummySession {
         // Nothing to clean up for dummy session.
         //
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
