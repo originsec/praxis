@@ -398,22 +398,22 @@ deploy_praxis() {
         # Create temporary YAML file for volume mount configuration.
         #
         TEMP_YAML=$(mktemp)
-        cat > "$TEMP_YAML" <<EOF
+        cat > "$TEMP_YAML" <<'EOF'
 properties:
   template:
     volumes:
     - name: praxis-data-volume
       storageType: AzureFile
-      storageName: $STORAGE_NAME
+      storageName: STORAGE_NAME_PLACEHOLDER
     containers:
-    - name: $PRAXIS_APP
-      image: $IMAGE_TAG
+    - name: PRAXIS_APP_PLACEHOLDER
+      image: IMAGE_TAG_PLACEHOLDER
       resources:
-        cpu: 1.0
-        memory: 2.0Gi
+        cpu: 1
+        memory: 2Gi
       env:
       - name: PRAXIS_RABBITMQ_URL
-        value: $RABBITMQ_URL
+        value: RABBITMQ_URL_PLACEHOLDER
       - name: PRAXIS_DB_PATH
         value: /app/data/.praxis_operations.db
       - name: RUST_LOG
@@ -429,13 +429,24 @@ properties:
       external: true
       targetPort: 8080
     registries:
-    - server: $ACR_LOGIN_SERVER
-      username: $ACR_NAME
+    - server: ACR_LOGIN_SERVER_PLACEHOLDER
+      username: ACR_NAME_PLACEHOLDER
       passwordSecretRef: registry-password
     secrets:
     - name: registry-password
-      value: $ACR_PASSWORD
+      value: ACR_PASSWORD_PLACEHOLDER
 EOF
+
+        #
+        # Replace placeholders with actual values.
+        #
+        sed -i "s|STORAGE_NAME_PLACEHOLDER|$STORAGE_NAME|g" "$TEMP_YAML"
+        sed -i "s|PRAXIS_APP_PLACEHOLDER|$PRAXIS_APP|g" "$TEMP_YAML"
+        sed -i "s|IMAGE_TAG_PLACEHOLDER|$IMAGE_TAG|g" "$TEMP_YAML"
+        sed -i "s|RABBITMQ_URL_PLACEHOLDER|$RABBITMQ_URL|g" "$TEMP_YAML"
+        sed -i "s|ACR_LOGIN_SERVER_PLACEHOLDER|$ACR_LOGIN_SERVER|g" "$TEMP_YAML"
+        sed -i "s|ACR_NAME_PLACEHOLDER|$ACR_NAME|g" "$TEMP_YAML"
+        sed -i "s|ACR_PASSWORD_PLACEHOLDER|$ACR_PASSWORD|g" "$TEMP_YAML"
 
         az containerapp create \
             --name "$PRAXIS_APP" \
