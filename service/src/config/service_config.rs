@@ -4,21 +4,6 @@ use std::sync::Arc;
 use crate::database::Database;
 
 //
-// Semantic parser config keys.
-//
-pub const SEMANTIC_PARSER_API_KEY: &str = "semantic_parser_api_key";
-pub const SEMANTIC_PARSER_PROVIDER: &str = "semantic_parser_provider";
-pub const SEMANTIC_PARSER_MODEL: &str = "semantic_parser_model";
-
-//
-// Semantic ops config keys (for running semantic operations).
-//
-pub const SEMANTIC_OP_API_KEY: &str = "semantic_op_api_key";
-pub const SEMANTIC_OP_PROVIDER: &str = "semantic_op_provider";
-pub const SEMANTIC_OP_MODEL: &str = "semantic_op_model";
-pub const SEMANTIC_OP_SYSTEM_PROMPT: &str = "semantic_op_system_prompt";
-
-//
 // LLM model definitions config key (JSON array of model definitions).
 //
 pub const LLM_MODEL_DEFINITIONS: &str = "llm_model_definitions";
@@ -32,7 +17,7 @@ pub const LLM_FEATURE_SEMANTIC_OPS: &str = "llm_feature_semantic_ops";
 pub const LLM_FEATURE_NEXUS: &str = "llm_feature_nexus";
 
 /// A model definition stored in config
-#[derive(serde::Deserialize, Clone)]
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelDefinition {
     pub name: String,
@@ -78,49 +63,6 @@ impl ServiceConfig {
     pub async fn remove(&mut self, key: &str) -> anyhow::Result<Option<String>> {
         self.db.delete_config(key).await?;
         Ok(self.cache.remove(key))
-    }
-
-    /// Get semantic parser API key
-    pub fn semantic_parser_api_key(&self) -> Option<&String> {
-        self.get(SEMANTIC_PARSER_API_KEY)
-    }
-
-    /// Get semantic parser provider (defaults to "anthropic")
-    pub fn semantic_parser_provider(&self) -> String {
-        self.get(SEMANTIC_PARSER_PROVIDER)
-            .cloned()
-            .unwrap_or_else(|| "anthropic".to_string())
-    }
-
-    /// Get semantic parser model (defaults to "claude-haiku-4-5-20241022")
-    pub fn semantic_parser_model(&self) -> String {
-        self.get(SEMANTIC_PARSER_MODEL)
-            .cloned()
-            .unwrap_or_else(|| "claude-haiku-4-5-20241022".to_string())
-    }
-
-    /// Get semantic ops API key
-    pub fn semantic_op_api_key(&self) -> Option<&String> {
-        self.get(SEMANTIC_OP_API_KEY)
-    }
-
-    /// Get semantic ops provider (defaults to "anthropic")
-    pub fn semantic_op_provider(&self) -> String {
-        self.get(SEMANTIC_OP_PROVIDER)
-            .cloned()
-            .unwrap_or_else(|| "anthropic".to_string())
-    }
-
-    /// Get semantic ops model (defaults to "claude-haiku-4-5")
-    pub fn semantic_op_model(&self) -> String {
-        self.get(SEMANTIC_OP_MODEL)
-            .cloned()
-            .unwrap_or_else(|| "claude-haiku-4-5".to_string())
-    }
-
-    /// Get semantic ops system prompt (optional)
-    pub fn semantic_op_system_prompt(&self) -> Option<&String> {
-        self.get(SEMANTIC_OP_SYSTEM_PROMPT)
     }
 
     /// Get LLM model definitions from config

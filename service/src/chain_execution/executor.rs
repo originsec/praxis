@@ -622,48 +622,17 @@ impl ChainExecutor {
                     //
 
                     //
-                    // Resolve model configuration.
+                    // Resolve model configuration from model definitions.
                     //
                     let config_guard = config.read().await;
-                    let (provider_str, model_name, api_key) = if let Some(mref) = model_ref {
-                        //
-                        // Try to find the model definition in config.
-                        //
-                        if let Some(model_def) = config_guard.find_model_definition(mref) {
-                            (model_def.provider, model_def.model, model_def.api_key)
-                        } else {
-                            //
-                            // Fallback: Parse model_ref format
-                            // "provider::model".
-                            //
-                            let parts: Vec<&str> = mref.splitn(2, "::").collect();
-                            if parts.len() == 2 {
-                                let key = config_guard
-                                    .semantic_op_api_key()
-                                    .ok_or_else(|| anyhow::anyhow!("No API key configured for model_ref '{}'", mref))?
-                                    .clone();
-                                (parts[0].to_string(), parts[1].to_string(), key)
-                            } else {
-                                //
-                                // Fall back to semantic ops default.
-                                //
-                                let key = config_guard
-                                    .semantic_op_api_key()
-                                    .ok_or_else(|| anyhow::anyhow!("No API key configured for transform"))?
-                                    .clone();
-                                (config_guard.semantic_op_provider(), config_guard.semantic_op_model(), key)
-                            }
-                        }
+                    let model_def = if let Some(mref) = model_ref {
+                        config_guard.find_model_definition(mref)
+                            .ok_or_else(|| anyhow::anyhow!("Model '{}' not found. Configure in Settings > LLM Providers.", mref))?
                     } else {
-                        //
-                        // Use semantic ops default configuration.
-                        //
-                        let key = config_guard
-                            .semantic_op_api_key()
-                            .ok_or_else(|| anyhow::anyhow!("No API key configured for transform. Configure in Settings > LLM Providers."))?
-                            .clone();
-                        (config_guard.semantic_op_provider(), config_guard.semantic_op_model(), key)
+                        config_guard.get_semantic_ops_model_def()
+                            .ok_or_else(|| anyhow::anyhow!("No LLM configured for transform. Configure in Settings > LLM Providers."))?
                     };
+                    let (provider_str, model_name, api_key) = (model_def.provider, model_def.model, model_def.api_key);
                     drop(config_guard);
 
                     //
@@ -818,48 +787,17 @@ impl ChainExecutor {
                             //
 
                             //
-                            // Resolve model configuration.
+                            // Resolve model configuration from model definitions.
                             //
                             let config_guard = config.read().await;
-                            let (provider_str, model_name, api_key) = if let Some(mref) = model_ref {
-                                //
-                                // Try to find the model definition in config.
-                                //
-                                if let Some(model_def) = config_guard.find_model_definition(mref) {
-                                    (model_def.provider, model_def.model, model_def.api_key)
-                                } else {
-                                    //
-                                    // Fallback: Parse model_ref format
-                                    // "provider::model".
-                                    //
-                                    let parts: Vec<&str> = mref.splitn(2, "::").collect();
-                                    if parts.len() == 2 {
-                                        let key = config_guard
-                                            .semantic_op_api_key()
-                                            .ok_or_else(|| anyhow::anyhow!("No API key configured for model_ref '{}'", mref))?
-                                            .clone();
-                                        (parts[0].to_string(), parts[1].to_string(), key)
-                                    } else {
-                                        //
-                                        // Fall back to semantic ops default.
-                                        //
-                                        let key = config_guard
-                                            .semantic_op_api_key()
-                                            .ok_or_else(|| anyhow::anyhow!("No API key configured for semantic output"))?
-                                            .clone();
-                                        (config_guard.semantic_op_provider(), config_guard.semantic_op_model(), key)
-                                    }
-                                }
+                            let model_def = if let Some(mref) = model_ref {
+                                config_guard.find_model_definition(mref)
+                                    .ok_or_else(|| anyhow::anyhow!("Model '{}' not found. Configure in Settings > LLM Providers.", mref))?
                             } else {
-                                //
-                                // Use semantic ops default configuration.
-                                //
-                                let key = config_guard
-                                    .semantic_op_api_key()
-                                    .ok_or_else(|| anyhow::anyhow!("No API key configured for semantic output. Configure in Settings > LLM Providers."))?
-                                    .clone();
-                                (config_guard.semantic_op_provider(), config_guard.semantic_op_model(), key)
+                                config_guard.get_semantic_ops_model_def()
+                                    .ok_or_else(|| anyhow::anyhow!("No LLM configured for semantic output. Configure in Settings > LLM Providers."))?
                             };
+                            let (provider_str, model_name, api_key) = (model_def.provider, model_def.model, model_def.api_key);
                             drop(config_guard);
 
                             //

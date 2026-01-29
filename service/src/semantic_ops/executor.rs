@@ -339,53 +339,18 @@ pub async fn execute_agent_mode(
     let config = config.read().await;
 
     //
-    // Load AI configuration from service config, with optional model_ref
-    // override.
+    // Load AI configuration from model definitions.
     //
-    let (provider_str, model, api_key) = if let Some(ref model_ref) = spec.model_ref {
-        //
-        // Try to find the model definition in config.
-        //
-        if let Some(model_def) = config.find_model_definition(model_ref) {
-            (model_def.provider, model_def.model, model_def.api_key)
-        } else {
-            //
-            // Fallback: Parse model_ref format "provider::model" and use
-            // default API key.
-            //
-            let parts: Vec<&str> = model_ref.splitn(2, "::").collect();
-            if parts.len() == 2 {
-                let api_key = config
-                    .semantic_op_api_key()
-                    .ok_or_else(|| anyhow::anyhow!("No API key configured for model_ref '{}'. Configure in Settings > LLM Providers.", model_ref))?
-                    .clone();
-                (parts[0].to_string(), parts[1].to_string(), api_key)
-            } else {
-                //
-                // Fallback to config defaults if format is invalid.
-                //
-                let api_key = config
-                    .semantic_op_api_key()
-                    .ok_or_else(|| anyhow::anyhow!("No API key configured. Configure in Settings > LLM Providers."))?
-                    .clone();
-                (config.semantic_op_provider(), config.semantic_op_model(), api_key)
-            }
-        }
+    let model_def = if let Some(ref model_ref) = spec.model_ref {
+        config.find_model_definition(model_ref)
+            .ok_or_else(|| anyhow::anyhow!("Model '{}' not found. Configure in Settings > LLM Providers.", model_ref))?
     } else {
-        //
-        // Use service config defaults.
-        //
-        let api_key = config
-            .semantic_op_api_key()
-            .ok_or_else(|| anyhow::anyhow!("No API key configured. Configure in Settings > LLM Providers."))?
-            .clone();
-        (config.semantic_op_provider(), config.semantic_op_model(), api_key)
+        config.get_semantic_ops_model_def()
+            .ok_or_else(|| anyhow::anyhow!("No LLM configured for Semantic Ops. Configure in Settings > LLM Providers."))?
     };
 
-    let agent_prompt = config
-        .semantic_op_system_prompt()
-        .map(|s| s.as_str())
-        .unwrap_or("You are a security operations agent.");
+    let (provider_str, model, api_key) = (model_def.provider, model_def.model, model_def.api_key);
+    let agent_prompt = "You are a security operations agent.";
 
     //
     // Parse provider string.
