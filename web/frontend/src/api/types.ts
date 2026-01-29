@@ -45,12 +45,8 @@ export interface ReconTools {
 
 export interface ConfigItem {
   path: string;
-  contents: string;
+  contents?: string;
   config_type: string;
-}
-
-export interface ReconConfig {
-  items: ConfigItem[];
 }
 
 export interface ReconMetadata {
@@ -60,8 +56,8 @@ export interface ReconMetadata {
 
 export interface ReconResult {
   tools: ReconTools;
-  config: ReconConfig;
-  sessions: AgentSessionInfo[];
+  config: ConfigItem[];
+  sessions: SessionItem[];
   project_paths: string[];
   metadata?: ReconMetadata;
 }
@@ -86,9 +82,9 @@ export interface SystemState {
 }
 
 //
-// Agent Session info (for recon).
+// Session item (for recon).
 //
-export interface AgentSessionInfo {
+export interface SessionItem {
   session_id: string;
   context_path: string;
   session_file: string;
@@ -121,7 +117,8 @@ export type AgentCommand =
   | 'ReconSemantic'
   | { Select: { short_name: string } }
   | { UpdateConfigFile: { path: string; contents: string } }
-  | { GetSessionContent: { session_file: string } };
+  | { GetSessionContent: { session_file: string } }
+  | { GetConfigContent: { config_path: string } };
 
 export type SessionCommand =
   | { Create: { context: SessionContext } }
@@ -169,7 +166,9 @@ export type AgentCommandResult =
   | { ReconComplete: { result: ReconResult } }
   | { Selected: { short_name: string } }
   | { YoloSet: { enabled: boolean } }
-  | { ConfigFileUpdated: { success: boolean; error?: string } };
+  | { ConfigFileUpdated: { success: boolean; error?: string } }
+  | { SessionContent: { session_file: string; content?: string; error?: string } }
+  | { ConfigContent: { config_path: string; content?: string; error?: string } };
 
 export type SessionCommandResult =
   | { Created: { session_id: string } }

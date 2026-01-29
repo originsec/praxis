@@ -3,13 +3,13 @@
 //!
 
 use anyhow::Result;
-use common::{AgentSessionInfo, ConfigItem};
+use common::{SessionItem, ConfigItem};
 use std::fs;
 
 /// Data discovered during enumeration.
 pub struct EnumerationData {
     pub config_items: Vec<ConfigItem>,
-    pub sessions: Vec<AgentSessionInfo>,
+    pub sessions: Vec<SessionItem>,
     pub project_paths: Vec<String>,
 }
 
@@ -41,7 +41,7 @@ pub fn enumerate() -> Result<EnumerationData> {
                 config_items.push(ConfigItem {
                     config_type: "main_config".to_string(),
                     path: config_json.to_string_lossy().to_string(),
-                    contents,
+                    contents: Some(contents),
                 });
             }
         }
@@ -55,7 +55,7 @@ pub fn enumerate() -> Result<EnumerationData> {
                 config_items.push(ConfigItem {
                     config_type: "legacy_config".to_string(),
                     path: config_yaml.to_string_lossy().to_string(),
-                    contents,
+                    contents: Some(contents),
                 });
             }
         }
@@ -89,7 +89,7 @@ pub fn enumerate() -> Result<EnumerationData> {
                         if let Ok(contents) = fs::read_to_string(&path) {
                             let message_count = contents.lines().filter(|l| !l.trim().is_empty()).count();
 
-                            sessions.push(AgentSessionInfo {
+                            sessions.push(SessionItem {
                                 session_id: session_id.clone(),
                                 context_path: String::new(),
                                 session_file: path.to_string_lossy().to_string(),
@@ -109,7 +109,7 @@ pub fn enumerate() -> Result<EnumerationData> {
                             config_items.push(ConfigItem {
                                 config_type: format!("session:{}", session_id),
                                 path: path.to_string_lossy().to_string(),
-                                contents: truncated,
+                                contents: Some(truncated),
                             });
                         }
                     }
@@ -143,7 +143,7 @@ pub fn enumerate() -> Result<EnumerationData> {
                     config_items.push(ConfigItem {
                         config_type: config_type.to_string(),
                         path: file_path.to_string_lossy().to_string(),
-                        contents,
+                        contents: Some(contents),
                     });
                 }
             }
@@ -162,7 +162,7 @@ pub fn enumerate() -> Result<EnumerationData> {
                             config_items.push(ConfigItem {
                                 config_type: format!("daily_memory:{}", path.file_name().unwrap_or_default().to_string_lossy()),
                                 path: path.to_string_lossy().to_string(),
-                                contents,
+                                contents: Some(contents),
                             });
                         }
                     }

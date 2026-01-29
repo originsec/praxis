@@ -193,7 +193,7 @@ where
                             let config_type = config_type_fn(&path.to_path_buf());
                             config_items.push(common::ConfigItem {
                                 path: path.to_string_lossy().to_string(),
-                                contents,
+                                contents: Some(contents),
                                 config_type,
                             });
                         }
@@ -234,7 +234,7 @@ pub fn collect_global_config_files(
             if let Ok(contents) = fs::read_to_string(&file_path) {
                 config_items.push(common::ConfigItem {
                     path: file_path.to_string_lossy().to_string(),
-                    contents,
+                    contents: Some(contents),
                     config_type: pattern.config_type.to_string(),
                 });
             }
@@ -393,7 +393,7 @@ pub fn scan_directories_for_config_files_multi(
 
                     config_items.push(common::ConfigItem {
                         path: path.to_string_lossy().to_string(),
-                        contents,
+                        contents: Some(contents),
                         config_type: format!("{}:{}", pattern.config_type_prefix, project_path),
                     });
                 }
@@ -678,10 +678,18 @@ pub async fn extract_metadata_from_configs(
 
     for item in config_items {
         //
+        // Skip items without contents (lazy-loaded).
+        //
+        let contents = match &item.contents {
+            Some(c) => c,
+            None => continue,
+        };
+
+        //
         // Format this config file.
         //
 
-        let config_content = format!("=== {} ({}) ===\n{}\n\n", item.path, item.config_type, item.contents);
+        let config_content = format!("=== {} ({}) ===\n{}\n\n", item.path, item.config_type, contents);
         let content_len = config_content.len();
 
         //

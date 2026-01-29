@@ -5,7 +5,7 @@ pub use session::DummySession;
 
 use crate::agent_connectors::traits::{Agent, AgentRecon, AgentSession};
 use async_trait::async_trait;
-use common::{AgentTool, ConfigItem, McpServer, McpTransport, ReconConfig, ReconResult, ReconTools};
+use common::{AgentTool, ConfigItem, McpServer, McpTransport, ReconResult, ReconTools};
 use std::sync::{Arc, RwLock};
 
 const AGENT_NAME: &str = "Dummy Agent";
@@ -162,39 +162,24 @@ impl DummyAgent {
     }
 
     /// Generate demo config items
-    fn get_demo_config(&self) -> ReconConfig {
-        ReconConfig {
-            items: vec![
-                ConfigItem {
-                    path: "~/.dummy/settings.json".to_string(),
-                    contents: r#"{
-  "timeout_ms": 5000,
-  "max_retries": 3,
-  "verbose": false,
-  "debug_mode": true
-}"#.to_string(),
-                    config_type: "settings".to_string(),
-                },
-                ConfigItem {
-                    path: "~/.dummy/CLAUDE.md".to_string(),
-                    contents: r#"# Dummy Agent Instructions
-
-This is a dummy agent for testing purposes.
-
-## Guidelines
-- Always respond helpfully
-- Use tools when appropriate
-- Follow best practices
-"#.to_string(),
-                    config_type: "instructions".to_string(),
-                },
-                ConfigItem {
-                    path: "~/project/.dummy/local.json".to_string(),
-                    contents: r#"{"project_specific": true}"#.to_string(),
-                    config_type: "project".to_string(),
-                },
-            ],
-        }
+    fn get_demo_config(&self) -> Vec<ConfigItem> {
+        vec![
+            ConfigItem {
+                path: "~/.dummy/settings.json".to_string(),
+                contents: None, // Contents fetched on-demand
+                config_type: "settings".to_string(),
+            },
+            ConfigItem {
+                path: "~/.dummy/CLAUDE.md".to_string(),
+                contents: None, // Contents fetched on-demand
+                config_type: "instructions".to_string(),
+            },
+            ConfigItem {
+                path: "~/project/.dummy/local.json".to_string(),
+                contents: None, // Contents fetched on-demand
+                config_type: "project".to_string(),
+            },
+        ]
     }
 }
 
@@ -270,7 +255,7 @@ impl AgentRecon for DummyAgent {
         }
 
         //
-        // Config - always included.
+        // Config - always included (contents fetched on-demand).
         //
         let config = self.get_demo_config();
 
@@ -279,7 +264,7 @@ impl AgentRecon for DummyAgent {
             tools.mcp_servers.len(),
             tools.skills.len(),
             tools.internal_tools.len(),
-            config.items.len()
+            config.len()
         );
 
         Some(ReconResult {

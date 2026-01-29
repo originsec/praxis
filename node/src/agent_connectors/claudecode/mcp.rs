@@ -116,7 +116,8 @@ pub async fn discover_mcp_servers_from_configs(config_items: &[ConfigItem]) -> V
             //
 
             "preferences" => {
-                match serde_json::from_str::<Value>(&item.contents) {
+                let Some(contents) = &item.contents else { continue };
+                match serde_json::from_str::<Value>(contents) {
                     Ok(json) => {
                         if let Some(projects) = json.get("projects").and_then(|p| p.as_object()) {
                             common::log_info!("preferences has {} projects", projects.len());
@@ -151,7 +152,8 @@ pub async fn discover_mcp_servers_from_configs(config_items: &[ConfigItem]) -> V
             //
 
             "global_settings" => {
-                match serde_json::from_str::<Value>(&item.contents) {
+                let Some(contents) = &item.contents else { continue };
+                match serde_json::from_str::<Value>(contents) {
                     Ok(json) => {
                         if let Some(mcp_servers) = json.get("mcpServers") {
                             let parsed = parse_mcp_servers_object(mcp_servers, None);
@@ -177,8 +179,9 @@ pub async fn discover_mcp_servers_from_configs(config_items: &[ConfigItem]) -> V
             //
 
             config_type if config_type.starts_with("project_mcp:") => {
+                let Some(contents) = &item.contents else { continue };
                 let context_path = config_type.strip_prefix("project_mcp:").map(String::from);
-                match serde_json::from_str::<Value>(&item.contents) {
+                match serde_json::from_str::<Value>(contents) {
                     Ok(json) => {
                         if let Some(obj) = json.as_object() {
                             let mut count = 0;
@@ -209,8 +212,9 @@ pub async fn discover_mcp_servers_from_configs(config_items: &[ConfigItem]) -> V
             //
 
             config_type if config_type.starts_with("project_settings:") => {
+                let Some(contents) = &item.contents else { continue };
                 let context_path = config_type.strip_prefix("project_settings:").map(String::from);
-                match serde_json::from_str::<Value>(&item.contents) {
+                match serde_json::from_str::<Value>(contents) {
                     Ok(json) => {
                         if let Some(mcp_servers) = json.get("mcpServers") {
                             let parsed = parse_mcp_servers_object(mcp_servers, context_path.clone());

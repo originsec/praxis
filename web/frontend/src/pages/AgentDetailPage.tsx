@@ -180,6 +180,13 @@ export function AgentDetailPage() {
   const [sessionContentError, setSessionContentError] = useState<string | null>(null);
 
   //
+  // Config content fetching state.
+  //
+  const [configContent, setConfigContent] = useState<string | null>(null);
+  const [isLoadingConfigContent, setIsLoadingConfigContent] = useState(false);
+  const [configContentError, setConfigContentError] = useState<string | null>(null);
+
+  //
   // Config file editing state.
   //
   const [editingConfigIdx, setEditingConfigIdx] = useState<number | null>(null);
@@ -401,6 +408,75 @@ export function AgentDetailPage() {
   }, [selectedSessionIdx, reconResult?.sessions, nodeId, sendCommand]);
 
   //
+  // Fetch config content when selected config changes.
+  //
+  useEffect(() => {
+    if (selectedConfigIdx === null || !reconResult?.config) {
+      setConfigContent(null);
+      setConfigContentError(null);
+      return;
+    }
+    const configItem = reconResult.config[selectedConfigIdx];
+    if (!configItem?.path || !nodeId) return;
+
+    //
+    // If content is already loaded in the recon result, use it.
+    //
+    if (configItem.contents) {
+      setConfigContent(configItem.contents);
+      setConfigContentError(null);
+      setIsLoadingConfigContent(false);
+      return;
+    }
+
+    //
+    // Fetch content from node.
+    //
+    let isCancelled = false;
+    setIsLoadingConfigContent(true);
+    setConfigContent(null);
+
+    sendCommand(nodeId, {
+      Agent: { GetConfigContent: { config_path: configItem.path } },
+    }).then(response => {
+      if (isCancelled) return;
+      if (
+        'Agent' in response.result &&
+        typeof response.result.Agent === 'object' &&
+        response.result.Agent !== null &&
+        'ConfigContent' in response.result.Agent
+      ) {
+        const result = response.result.Agent.ConfigContent;
+        if (result.content) {
+          setConfigContent(result.content);
+          //
+          // Update the recon result with the loaded content so we don't re-fetch.
+          //
+          const updatedConfig = [...reconResult.config];
+          updatedConfig[selectedConfigIdx] = { ...configItem, contents: result.content };
+          setReconResult({ ...reconResult, config: updatedConfig });
+        } else if (result.error) {
+          setConfigContentError(result.error);
+        }
+      } else if ('Error' in response.result) {
+        setConfigContentError(response.result.Error.message);
+      }
+    }).catch(error => {
+      if (!isCancelled) {
+        setConfigContentError(String(error));
+      }
+    }).finally(() => {
+      if (!isCancelled) {
+        setIsLoadingConfigContent(false);
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedConfigIdx, reconResult?.config, nodeId, sendCommand]);
+
+  //
   // Get available (non-disabled) operation definitions.
   //
   const operationDefs = state.operationDefs.filter(def => !def.disabled);
@@ -619,7 +695,7 @@ export function AgentDetailPage() {
 
   const handleSaveConfig = async () => {
     if (editingConfigIdx === null || !reconResult || !nodeId) return;
-    const item = reconResult.config.items[editingConfigIdx];
+    const item = reconResult.config[editingConfigIdx];
     setIsSavingConfig(true);
     setConfigSaveError(null);
 
@@ -639,9 +715,9 @@ export function AgentDetailPage() {
           //
           // Update local state with new content.
           //
-          const updatedItems = [...reconResult.config.items];
+          const updatedItems = [...reconResult.config];
           updatedItems[editingConfigIdx] = { ...item, contents: editingConfigContent };
-          setReconResult({ ...reconResult, config: { items: updatedItems } });
+          setReconResult({ ...reconResult, config: updatedItems });
           setEditingConfigIdx(null);
           setEditingConfigContent('');
         } else {
@@ -1250,9 +1326,9 @@ export function AgentDetailPage() {
                   <span className="flex items-center gap-2">
                     <Settings size={14} />
                     Config
-                    {(reconResult?.config?.items?.length ?? 0) > 0 && (
+                    {(reconResult?.config?.length ?? 0) > 0 && (
                       <span className="text-[10px] opacity-70">
-                        {reconResult?.config?.items?.length}
+                        {reconResult?.config?.length}
                       </span>
                     )}
                   </span>
@@ -1750,7 +1826,7 @@ export function AgentDetailPage() {
                   </div>
                 ) : null}
 
-                {!reconResult?.config.items?.length ? (
+                {!reconResult?.config?.length ? (
                   <div className="flex-1 flex items-center justify-center">
                     <div className="text-center">
                       <Settings size={48} className="mx-auto mb-4 text-muted opacity-50" />
@@ -1768,7 +1844,7 @@ export function AgentDetailPage() {
                     <div className="w-64 flex-shrink-0 flex flex-col border border-subtle rounded overflow-hidden bg-[var(--bg-secondary)]">
                       <div className="px-3 py-2 border-b border-subtle bg-[var(--bg-tertiary)]">
                         <span className="text-[10px] text-muted uppercase tracking-wider">
-                          {reconResult.config.items.length} file{reconResult.config.items.length !== 1 ? 's' : ''}
+                          {reconResult.config.length} file{reconResult.config.length !== 1 ? 's' : ''}
                         </span>
                       </div>
                       <div className="flex-1 overflow-y-auto scrollbar-on-hover">
@@ -1776,14 +1852,14 @@ export function AgentDetailPage() {
                           //
                           // Group files by directory.
                           //
-                          const grouped = reconResult.config.items.reduce((acc, item, idx) => {
+                          const grouped = reconResult.config.reduce((acc, item, idx) => {
                             const parts = item.path.split('/');
                             const filename = parts.pop() || item.path;
                             const dir = parts.join('/') || '/';
                             if (!acc[dir]) acc[dir] = [];
                             acc[dir].push({ item, idx, filename });
                             return acc;
-                          }, {} as Record<string, { item: typeof reconResult.config.items[0]; idx: number; filename: string }[]>);
+                          }, {} as Record<string, { item: typeof reconResult.config[0]; idx: number; filename: string }[]>);
 
                           const dirs = Object.keys(grouped).sort();
                           const toggleDir = (dir: string) => {
@@ -1890,12 +1966,12 @@ export function AgentDetailPage() {
                           <div className="px-4 py-2 border-b border-subtle bg-[var(--bg-tertiary)] flex items-center justify-between flex-shrink-0">
                             <div className="flex items-center gap-2 min-w-0">
                               <span className="font-mono text-sm truncate text-[var(--accent-info)]">
-                                {reconResult.config.items[selectedConfigIdx].path}
+                                {reconResult.config[selectedConfigIdx].path}
                               </span>
                             </div>
-                            {editingConfigIdx !== selectedConfigIdx && (
+                            {editingConfigIdx !== selectedConfigIdx && !isLoadingConfigContent && (configContent || reconResult.config[selectedConfigIdx].contents) && (
                               <button
-                                onClick={() => handleStartConfigEdit(selectedConfigIdx, reconResult.config.items[selectedConfigIdx].contents)}
+                                onClick={() => handleStartConfigEdit(selectedConfigIdx, configContent ?? reconResult.config[selectedConfigIdx].contents ?? '')}
                                 className="p-1.5 text-muted hover:text-[var(--accent-info)] hover:bg-[var(--accent-info)]/10 rounded transition-colors flex-shrink-0"
                                 title="Edit config file"
                               >
@@ -1946,9 +2022,17 @@ export function AgentDetailPage() {
                                   </button>
                                 </div>
                               </div>
+                            ) : isLoadingConfigContent ? (
+                              <div className="flex-1 flex items-center justify-center">
+                                <Loader2 size={24} className="animate-spin text-muted" />
+                              </div>
+                            ) : configContentError ? (
+                              <div className="p-4 text-[var(--accent-error)] text-sm">
+                                Error loading config: {configContentError}
+                              </div>
                             ) : (
                               <pre className="p-4 text-xs font-mono whitespace-pre-wrap text-muted">
-                                {reconResult.config.items[selectedConfigIdx].contents}
+                                {configContent ?? reconResult.config[selectedConfigIdx].contents ?? 'No content available'}
                               </pre>
                             )}
                           </div>

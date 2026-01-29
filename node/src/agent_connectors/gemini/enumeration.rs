@@ -200,7 +200,7 @@ fn collect_environment_variables() -> Option<ConfigItem> {
 
     Some(ConfigItem {
         path: "environment:gemini".to_string(),
-        contents: env_lines.join("\n"),
+        contents: Some(env_lines.join("\n")),
         config_type: "env_vars".to_string(),
     })
 }
@@ -367,7 +367,7 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
         if let Ok(contents) = fs::read_to_string(&system_defaults_path) {
             config_items.push(ConfigItem {
                 path: system_defaults_path.to_string_lossy().to_string(),
-                contents,
+                contents: Some(contents),
                 config_type: "system_defaults".to_string(),
             });
             common::log_debug!("Found system defaults: {}", system_defaults_path.display());
@@ -429,8 +429,10 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
 
     for item in &config_items {
         if item.config_type.starts_with("project_settings:") {
-            for filename in extract_context_filenames(&item.contents) {
-                context_filenames_set.insert(filename);
+            if let Some(contents) = &item.contents {
+                for filename in extract_context_filenames(contents) {
+                    context_filenames_set.insert(filename);
+                }
             }
         }
     }
@@ -470,7 +472,7 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
         if let Ok(contents) = fs::read_to_string(&system_settings_path) {
             config_items.push(ConfigItem {
                 path: system_settings_path.to_string_lossy().to_string(),
-                contents,
+                contents: Some(contents),
                 config_type: "system_settings".to_string(),
             });
         }
@@ -487,7 +489,7 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
             if let Ok(contents) = fs::read_to_string(&context_path) {
                 config_items.push(ConfigItem {
                     path: context_path.to_string_lossy().to_string(),
-                    contents,
+                    contents: Some(contents),
                     config_type: "user_context".to_string(),
                 });
             }
@@ -525,7 +527,7 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
                 if let Ok(contents) = fs::read_to_string(&system_md_path) {
                     config_items.push(ConfigItem {
                         path: system_md_path.to_string_lossy().to_string(),
-                        contents,
+                        contents: Some(contents),
                         config_type: format!("system_prompt_override:{}", project_path),
                     });
                     common::log_debug!(
@@ -543,7 +545,7 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
             if let Ok(contents) = fs::read_to_string(&system_prompt_path) {
                 config_items.push(ConfigItem {
                     path: system_prompt_path.to_string_lossy().to_string(),
-                    contents,
+                    contents: Some(contents),
                     config_type: "system_prompt_override".to_string(),
                 });
                 common::log_debug!(

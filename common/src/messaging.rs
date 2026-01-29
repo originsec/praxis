@@ -247,15 +247,16 @@ impl ReconTools {
 pub struct ConfigItem {
     /// Path to the configuration file
     pub path: String,
-    /// Contents of the file
-    pub contents: String,
+    /// Contents of the file (fetched on-demand, not included in recon)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contents: Option<String>,
     /// Type/category of config (e.g., "settings", "preferences", "instructions")
     pub config_type: String,
 }
 
-/// Information about an agent session that can be discovered/manipulated
+/// Information about a session that can be discovered/manipulated
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct AgentSessionInfo {
+pub struct SessionItem {
     /// Session identifier
     pub session_id: String,
     /// Context/project path if applicable
@@ -269,19 +270,6 @@ pub struct AgentSessionInfo {
     /// Raw session content (JSON string)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
-}
-
-/// Configuration discovered during agent reconnaissance
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct ReconConfig {
-    /// Configuration items discovered
-    pub items: Vec<ConfigItem>,
-}
-
-impl ReconConfig {
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
-    }
 }
 
 /// Metadata extracted from agent configuration during reconnaissance
@@ -307,11 +295,12 @@ impl ReconMetadata {
 pub struct ReconResult {
     /// Tools discovered (MCP servers, skills, internal tools)
     pub tools: ReconTools,
-    /// Configuration discovered
-    pub config: ReconConfig,
+    /// Configuration items discovered (contents fetched on-demand)
+    #[serde(default)]
+    pub config: Vec<ConfigItem>,
     /// Sessions discovered (from enumeration)
     #[serde(default)]
-    pub sessions: Vec<AgentSessionInfo>,
+    pub sessions: Vec<SessionItem>,
     /// Discovered project paths (directories containing agent configs)
     #[serde(default)]
     pub project_paths: Vec<String>,
@@ -424,6 +413,8 @@ pub enum AgentCommand {
     UpdateConfigFile { path: String, contents: String },
     /// Get the content of a session file (for viewing session history)
     GetSessionContent { session_file: String },
+    /// Get the content of a config file (for viewing config contents)
+    GetConfigContent { config_path: String },
 }
 
 /// Unique identifier for tracking session transactions
@@ -563,6 +554,12 @@ pub enum AgentCommandResult {
     /// Session content response
     SessionContent {
         session_file: String,
+        content: Option<String>,
+        error: Option<String>,
+    },
+    /// Config file content response
+    ConfigContent {
+        config_path: String,
         content: Option<String>,
         error: Option<String>,
     },

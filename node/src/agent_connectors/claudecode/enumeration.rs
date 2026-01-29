@@ -2,7 +2,7 @@ use crate::agent_connectors::utils::{
     collect_global_config_files, enumerate_user_homes, scan_directories_for_config_files_multi,
     ConfigFilePattern, GlobalConfigPattern,
 };
-use common::{AgentSessionInfo, ConfigItem};
+use common::{SessionItem, ConfigItem};
 use chrono::{DateTime, Utc};
 use std::collections::HashSet;
 use std::fs;
@@ -25,7 +25,7 @@ const PROJECT_CONFIG_PATTERNS: &[ConfigFilePattern] = &[
 
 pub struct EnumerationData {
     pub config_items: Vec<ConfigItem>,
-    pub sessions: Vec<AgentSessionInfo>,
+    pub sessions: Vec<SessionItem>,
     pub project_paths: Vec<String>,
 }
 
@@ -79,7 +79,7 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
     })
 }
 
-fn discover_sessions(home: &Path, sessions: &mut Vec<AgentSessionInfo>) -> anyhow::Result<()> {
+fn discover_sessions(home: &Path, sessions: &mut Vec<SessionItem>) -> anyhow::Result<()> {
     let projects_dir = home.join(".claude/projects");
     if !projects_dir.exists() {
         return Ok(());
@@ -124,7 +124,7 @@ fn discover_sessions(home: &Path, sessions: &mut Vec<AgentSessionInfo>) -> anyho
     Ok(())
 }
 
-fn parse_session_file(path: &Path, project_hash: &str) -> Option<AgentSessionInfo> {
+fn parse_session_file(path: &Path, project_hash: &str) -> Option<SessionItem> {
     let file_name = path.file_stem()?.to_string_lossy().to_string();
 
     //
@@ -153,7 +153,7 @@ fn parse_session_file(path: &Path, project_hash: &str) -> Option<AgentSessionInf
         0
     };
 
-    Some(AgentSessionInfo {
+    Some(SessionItem {
         session_id: file_name,
         context_path: project_hash.to_string(),
         session_file: path.to_string_lossy().to_string(),
