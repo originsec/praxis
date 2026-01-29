@@ -501,7 +501,7 @@ impl Database {
                     .bind(&chain.description)
                     .bind(&chain.category)
                     .bind(&definition_json)
-                    .bind(if chain.disabled { 1i32 } else { 0i32 })
+                    .bind(if chain.disabled { 1i16 } else { 0i16 })
                     .bind(chain.created_at.to_rfc3339())
                     .bind(chain.updated_at.to_rfc3339())
                     .execute(pool)

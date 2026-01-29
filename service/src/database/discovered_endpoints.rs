@@ -54,7 +54,7 @@ impl Database {
                     .bind(&endpoint.ip_address)
                     .bind(&endpoint.domain)
                     .bind(endpoint.port as i32)
-                    .bind(endpoint.is_https)
+                    .bind(if endpoint.is_https { 1i16 } else { 0i16 })
                     .bind(&models_json)
                     .bind(&endpoint.base_url)
                     .bind(&endpoint.api_key)

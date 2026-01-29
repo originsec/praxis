@@ -42,7 +42,7 @@ impl Database {
             }
             DatabasePool::Postgres(pool) => {
                 let sql_returning = "INSERT INTO intercept_rules (name, regex_pattern, target_direction, scope_type, scope_node_id, scope_agent, enabled, summarization_prompt, created_at, updated_at)
-                     VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, $9) RETURNING id";
+                     VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8, $9) RETURNING id";
 
                 let row = sqlx::query(sql_returning)
                     .bind(name)
@@ -164,7 +164,7 @@ impl Database {
                     query = match val {
                         BindValue::String(s) => query.bind(s),
                         BindValue::OptionString(s) => query.bind(s),
-                        BindValue::Bool(b) => query.bind(*b),
+                        BindValue::Bool(b) => query.bind(if *b { 1i16 } else { 0i16 }),
                     };
                 }
                 query.bind(id).execute(pool).await?;
@@ -238,7 +238,7 @@ impl Database {
              FROM intercept_rules WHERE enabled = 1 ORDER BY created_at DESC";
 
         let sql_postgres = "SELECT id, name, regex_pattern, target_direction, scope_type, scope_node_id, scope_agent, enabled, summarization_prompt, created_at, updated_at
-             FROM intercept_rules WHERE enabled = true ORDER BY created_at DESC";
+             FROM intercept_rules WHERE enabled = 1 ORDER BY created_at DESC";
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {

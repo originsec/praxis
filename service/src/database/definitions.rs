@@ -336,8 +336,8 @@ impl Database {
                     .bind(&definition.mode)
                     .bind(definition.agent_iterations as i64)
                     .bind("[]") // DEPRECATED: operation_chain is always empty now
-                    .bind(definition.disabled)
-                    .bind(definition.yolo_mode)
+                    .bind(if definition.disabled { 1i16 } else { 0i16 })
+                    .bind(if definition.yolo_mode { 1i16 } else { 0i16 })
                     .bind(&definition.model_ref)
                     .bind(definition.created_at.to_rfc3339())
                     .bind(definition.updated_at.to_rfc3339())

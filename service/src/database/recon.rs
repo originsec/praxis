@@ -81,7 +81,7 @@ impl Database {
                     .bind(&id)
                     .bind(node_id)
                     .bind(agent_short_name)
-                    .bind(is_semantic as i32)
+                    .bind(if is_semantic { 1i16 } else { 0i16 })
                     .bind(&tools_json)
                     .bind(&config_json)
                     .bind(&sessions_json)
