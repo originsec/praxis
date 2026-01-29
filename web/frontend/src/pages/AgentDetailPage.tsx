@@ -346,6 +346,61 @@ export function AgentDetailPage() {
   }, [reconResult, hasSession]);
 
   //
+  // Fetch session content when a session is selected.
+  // Note: This must be before early returns to follow Rules of Hooks.
+  //
+  useEffect(() => {
+    if (selectedSessionIdx === null || !reconResult?.sessions) {
+      setSessionContent(null);
+      setSessionContentError(null);
+      return;
+    }
+    const session = reconResult.sessions[selectedSessionIdx];
+    if (!session?.session_file || !nodeId) return;
+
+    //
+    // Fetch session content from node.
+    //
+    let isCancelled = false;
+    setIsLoadingSessionContent(true);
+    setSessionContentError(null);
+    setSessionContent(null);
+
+    sendCommand(nodeId, {
+      Agent: { GetSessionContent: { session_file: session.session_file } },
+    }).then(response => {
+      if (isCancelled) return;
+      if (
+        'Agent' in response.result &&
+        typeof response.result.Agent === 'object' &&
+        response.result.Agent !== null &&
+        'SessionContent' in response.result.Agent
+      ) {
+        const result = (response.result.Agent as { SessionContent: { session_file: string; content?: string; error?: string } }).SessionContent;
+        if (result.content) {
+          setSessionContent(result.content);
+        } else if (result.error) {
+          setSessionContentError(result.error);
+        }
+      } else if ('Error' in response.result) {
+        setSessionContentError((response.result as { Error: { message: string } }).Error.message);
+      }
+    }).catch(error => {
+      if (!isCancelled) {
+        setSessionContentError(String(error));
+      }
+    }).finally(() => {
+      if (!isCancelled) {
+        setIsLoadingSessionContent(false);
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedSessionIdx, reconResult?.sessions, nodeId, sendCommand]);
+
+  //
   // Get available (non-disabled) operation definitions.
   //
   const operationDefs = state.operationDefs.filter(def => !def.disabled);
@@ -617,58 +672,6 @@ export function AgentDetailPage() {
     //
     setSelectedConfigIdx(idx);
   };
-
-  //
-  // Fetch session content from node when session is selected.
-  //
-  const fetchSessionContent = async (sessionFile: string) => {
-    if (!nodeId) return;
-    setIsLoadingSessionContent(true);
-    setSessionContentError(null);
-    setSessionContent(null);
-
-    try {
-      const response = await sendCommand(nodeId, {
-        Agent: { GetSessionContent: { session_file: sessionFile } },
-      });
-
-      if (
-        'Agent' in response.result &&
-        typeof response.result.Agent === 'object' &&
-        response.result.Agent !== null &&
-        'SessionContent' in response.result.Agent
-      ) {
-        const result = (response.result.Agent as { SessionContent: { session_file: string; content?: string; error?: string } }).SessionContent;
-        if (result.content) {
-          setSessionContent(result.content);
-        } else if (result.error) {
-          setSessionContentError(result.error);
-        }
-      } else if ('Error' in response.result) {
-        setSessionContentError((response.result as { Error: { message: string } }).Error.message);
-      }
-    } catch (error) {
-      setSessionContentError(String(error));
-    } finally {
-      setIsLoadingSessionContent(false);
-    }
-  };
-
-  //
-  // Clear session content when selection changes, and fetch new content.
-  //
-  useEffect(() => {
-    if (selectedSessionIdx === null || !reconResult?.sessions) {
-      setSessionContent(null);
-      setSessionContentError(null);
-      return;
-    }
-    const session = reconResult.sessions[selectedSessionIdx];
-    if (session?.session_file) {
-      fetchSessionContent(session.session_file);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSessionIdx, nodeId]);
 
   const handleSendMessage = async () => {
     if (!input.trim() || isLoading || !sessionId) return;
