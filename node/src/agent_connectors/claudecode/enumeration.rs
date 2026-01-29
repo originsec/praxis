@@ -36,10 +36,6 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
     let mut sessions = Vec::new();
     let mut project_paths_set = HashSet::new();
 
-    //
-    // Collect from all user homes.
-    //
-
     let user_homes = enumerate_user_homes();
     let user_homes_set: HashSet<&Path> = user_homes.iter().map(|p| p.as_path()).collect();
 
@@ -54,7 +50,7 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
     }
 
     //
-    // Scan for project-level config files.
+    // Collect project-level config files.
     //
 
     let project_configs = scan_directories_for_config_files_multi(
@@ -92,6 +88,7 @@ fn discover_sessions(home: &Path, sessions: &mut Vec<AgentSessionInfo>) -> anyho
     //
     // Iterate over project directories (hashed names).
     //
+
     for entry in fs::read_dir(&projects_dir)? {
         let entry = entry?;
         let project_path = entry.path();
@@ -107,11 +104,13 @@ fn discover_sessions(home: &Path, sessions: &mut Vec<AgentSessionInfo>) -> anyho
         //
         // Extract project hash from directory name.
         //
+
         let project_hash = entry.file_name().to_string_lossy().to_string();
 
         //
         // Look for session files.
         //
+
         for session_entry in fs::read_dir(&sessions_dir)? {
             let session_entry = session_entry?;
             let session_path = session_entry.path();
@@ -124,9 +123,6 @@ fn discover_sessions(home: &Path, sessions: &mut Vec<AgentSessionInfo>) -> anyho
         }
     }
 
-    //
-    // Sort by last modified (most recent first).
-    //
     sessions.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
 
     Ok(())
@@ -138,6 +134,7 @@ fn parse_session_file(path: &Path, project_hash: &str) -> Option<AgentSessionInf
     //
     // Get file metadata for last modified.
     //
+
     let metadata = fs::metadata(path).ok()?;
     let last_modified = metadata.modified().ok()?;
     let last_modified_dt: DateTime<Utc> = last_modified.into();
@@ -145,6 +142,7 @@ fn parse_session_file(path: &Path, project_hash: &str) -> Option<AgentSessionInf
     //
     // Count lines (messages) in the JSONL file.
     //
+
     let content = fs::read_to_string(path).ok()?;
     let message_count = content.lines().filter(|l| !l.trim().is_empty()).count();
 

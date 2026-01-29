@@ -1,22 +1,16 @@
 use super::GeminiAgent;
 use crate::agent_connectors::utils;
 
-const AGENT_NAME: &str = "Gemini CLI";
-
 impl GeminiAgent {
-    //
-    // Perform fingerprinting to detect if Gemini CLI is available.
-    //
-
     pub(super) async fn do_fingerprint_impl(&self) -> bool {
         let set_found_path = |path: String| -> bool {
-            common::log_info!("{}: Found at path: {}", AGENT_NAME, path);
+            common::log_info!("Found at path: {}", path);
             let _ = self.process_path.set(path);
             true
         };
 
         //
-        // Check PATH for gemini executable.
+        // Check PATH for executable.
         //
 
         let paths = crate::utils::find_all_executables_in_path("gemini");

@@ -95,6 +95,10 @@ impl GeminiSession {
 
         let mut cmd = utils::build_command(path);
 
+        if let Some(ref dir) = self.working_dir {
+            cmd.current_dir(dir);
+        }
+
         if self.yolo_mode {
             cmd.arg("-y");
         }

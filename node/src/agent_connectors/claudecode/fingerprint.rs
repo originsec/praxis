@@ -2,11 +2,22 @@ use super::ClaudeCodeAgent;
 use crate::agent_connectors::utils;
 
 impl ClaudeCodeAgent {
-    //
-    // Perform fingerprinting to detect if Claude Code is available.
-    //
-
     pub(super) async fn do_fingerprint_impl(&self) -> bool {
+        let set_found_path = |path: String| -> bool {
+            common::log_info!("Found at path: {}", path);
+            let _ = self.process_path.set(path);
+            true
+        };
+
+        //
+        // Check PATH for executable.
+        //
+
+        for path in crate::utils::find_all_executables_in_path("claude") {
+            if self.verify_binary(&path) {
+                return set_found_path(path);
+            }
+        }
         //
         // Check explicit paths.
         //
@@ -21,24 +32,8 @@ impl ClaudeCodeAgent {
             ]
         };
 
-        for path in paths {
-            if std::path::Path::new(&path).exists() && self.verify_binary(&path) {
-                common::log_info!("Found binary at path: {}", path);
-                let _ = self.process_path.set(path);
-                return true;
-            }
-        }
-
-        //
-        // Try which/where command.
-        //
-
-        if let Some(path) = crate::utils::find_executable_in_path("claude") {
-            if self.verify_binary(&path) {
-                common::log_info!("Found binary via which: {}", path);
-                let _ = self.process_path.set(path);
-                return true;
-            }
+        if let Some(path) = paths.into_iter().find(|p| std::path::Path::new(p).exists() && self.verify_binary(p)) {
+            return set_found_path(path);
         }
 
         false
