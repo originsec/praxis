@@ -1,4 +1,7 @@
-use crate::agent_connectors::utils::{enumerate_user_homes, scan_directories_for_config_files};
+use crate::agent_connectors::utils::{
+    enumerate_user_homes, scan_directories_for_config_files, scan_directories_for_config_files_multi,
+    ConfigFilePattern,
+};
 use common::ConfigItem;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -6,6 +9,10 @@ use std::fs;
 use std::path::PathBuf;
 
 const MAX_SCAN_DEPTH: usize = 7;
+
+const PROJECT_SETTINGS_PATTERN: &[ConfigFilePattern] = &[
+    ConfigFilePattern { filename: "settings.json", parent_dir: Some(".gemini"), config_type_prefix: "project_settings" },
+];
 
 pub struct EnumerationData {
     pub config_items: Vec<ConfigItem>,
@@ -328,26 +335,14 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
     // Scan for project-level settings.json in .gemini directories.
     //
 
-    let settings_configs = scan_directories_for_config_files(
+    let settings_configs = scan_directories_for_config_files_multi(
         &user_homes,
-        "settings.json",
-        |path| {
-            if let Some(parent) = path.parent() {
-                if parent.file_name().map_or(false, |n| n == ".gemini") {
-                    if let Some(project_dir) = parent.parent() {
-                        if !user_homes_set.contains(project_dir) {
-                            let project_path = project_dir.to_string_lossy().to_string();
-                            project_paths_set.insert(project_path.clone());
-                            return format!("project_settings:{}", project_path);
-                        }
-                    }
-                }
-            }
-            String::new()
-        },
+        PROJECT_SETTINGS_PATTERN,
+        &user_homes_set,
+        &mut project_paths_set,
         MAX_SCAN_DEPTH,
     );
-    config_items.extend(settings_configs.into_iter().filter(|item| !item.config_type.is_empty()));
+    config_items.extend(settings_configs);
 
     //
     // Extract context filenames from project settings we just found.

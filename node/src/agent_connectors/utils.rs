@@ -207,6 +207,159 @@ where
 }
 
 //
+// Pattern for scanning config files.
+// - filename: The file to search for.
+// - parent_dir: If Some, file must be inside this directory (e.g., ".claude").
+//               If None, file must NOT be inside a dot-directory.
+// - config_type_prefix: Prefix for the config_type (project path will be appended).
+//
+
+pub struct ConfigFilePattern<'a> {
+    pub filename: &'a str,
+    pub parent_dir: Option<&'a str>,
+    pub config_type_prefix: &'a str,
+}
+
+//
+// Scan multiple base directories for multiple config file patterns in a single pass.
+// More efficient than calling scan_directories_for_config_files multiple times.
+//
+// Returns config items and populates project_paths_set with discovered projects.
+//
+
+pub fn scan_directories_for_config_files_multi(
+    base_dirs: &[PathBuf],
+    patterns: &[ConfigFilePattern],
+    user_homes_set: &std::collections::HashSet<&std::path::Path>,
+    project_paths_set: &mut std::collections::HashSet<String>,
+    max_depth: usize,
+) -> Vec<common::ConfigItem> {
+    use walkdir::WalkDir;
+
+    let mut config_items = Vec::new();
+
+    //
+    // Build a set of filenames we're looking for.
+    //
+
+    let filenames: std::collections::HashSet<&str> = patterns.iter().map(|p| p.filename).collect();
+
+    //
+    // Build a set of parent directories we need to allow through the filter.
+    //
+
+    let allowed_dotdirs: std::collections::HashSet<&str> = patterns
+        .iter()
+        .filter_map(|p| p.parent_dir)
+        .collect();
+
+    for base_dir in base_dirs {
+        let walker = WalkDir::new(base_dir)
+            .follow_links(false)
+            .max_depth(max_depth)
+            .into_iter()
+            .filter_entry(|e| {
+                let name = e.file_name().to_string_lossy();
+
+                //
+                // Skip hidden directories except those we're looking for.
+                //
+
+                if name.starts_with('.') {
+                    if !allowed_dotdirs.contains(name.as_ref()) && !filenames.contains(name.as_ref()) {
+                        return false;
+                    }
+                }
+                !SKIP_DIRS.contains(&name.as_ref())
+            });
+
+        for entry in walker.filter_map(|e| e.ok()) {
+            let path = entry.path();
+
+            if !path.is_file() {
+                continue;
+            }
+
+            let file_name = match path.file_name() {
+                Some(n) => n.to_string_lossy(),
+                None => continue,
+            };
+
+            //
+            // Check if this file matches any of our patterns.
+            //
+
+            for pattern in patterns {
+                if file_name != pattern.filename {
+                    continue;
+                }
+
+                let parent = match path.parent() {
+                    Some(p) => p,
+                    None => continue,
+                };
+
+                //
+                // Determine project directory based on pattern.
+                //
+
+                let project_dir = if let Some(required_parent) = pattern.parent_dir {
+                    //
+                    // File must be inside the specified directory.
+                    //
+
+                    let parent_name = parent.file_name().map(|n| n.to_string_lossy());
+                    if parent_name.as_deref() != Some(required_parent) {
+                        continue;
+                    }
+
+                    match parent.parent() {
+                        Some(p) => p,
+                        None => continue,
+                    }
+                } else {
+                    //
+                    // File must NOT be inside a dot-directory.
+                    //
+
+                    if parent.file_name().map_or(false, |n| n.to_string_lossy().starts_with('.')) {
+                        continue;
+                    }
+                    parent
+                };
+
+                //
+                // Skip user home directories.
+                //
+
+                if user_homes_set.contains(project_dir) {
+                    continue;
+                }
+
+                //
+                // Read file and create config item.
+                //
+
+                if let Ok(contents) = fs::read_to_string(path) {
+                    let project_path = project_dir.to_string_lossy().to_string();
+                    project_paths_set.insert(project_path.clone());
+
+                    config_items.push(common::ConfigItem {
+                        path: path.to_string_lossy().to_string(),
+                        contents,
+                        config_type: format!("{}:{}", pattern.config_type_prefix, project_path),
+                    });
+                }
+
+                break;
+            }
+        }
+    }
+
+    config_items
+}
+
+//
 // Expand environment variables in a path template.
 //
 

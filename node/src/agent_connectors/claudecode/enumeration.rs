@@ -1,4 +1,6 @@
-use crate::agent_connectors::utils::{enumerate_user_homes, scan_directories_for_config_files};
+use crate::agent_connectors::utils::{
+    enumerate_user_homes, scan_directories_for_config_files_multi, ConfigFilePattern,
+};
 use common::{AgentSessionInfo, ConfigItem};
 use chrono::{DateTime, Utc};
 use std::collections::HashSet;
@@ -6,6 +8,13 @@ use std::fs;
 use std::path::Path;
 
 const MAX_SCAN_DEPTH: usize = 7;
+
+const PROJECT_CONFIG_PATTERNS: &[ConfigFilePattern] = &[
+    ConfigFilePattern { filename: "settings.json", parent_dir: Some(".claude"), config_type_prefix: "project_settings" },
+    ConfigFilePattern { filename: "settings.local.json", parent_dir: Some(".claude"), config_type_prefix: "project_settings_local" },
+    ConfigFilePattern { filename: "CLAUDE.md", parent_dir: None, config_type_prefix: "project_instructions" },
+    ConfigFilePattern { filename: ".mcp.json", parent_dir: None, config_type_prefix: "project_mcp" },
+];
 
 pub struct EnumerationData {
     pub config_items: Vec<ConfigItem>,
@@ -36,101 +45,17 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
     }
 
     //
-    // Scan for project-level settings.json in .claude directories.
+    // Scan for project-level config files.
     //
 
-    let settings_configs = scan_directories_for_config_files(
+    let project_configs = scan_directories_for_config_files_multi(
         &user_homes,
-        "settings.json",
-        |path| {
-            if let Some(parent) = path.parent() {
-                if parent.file_name().map_or(false, |n| n == ".claude") {
-                    if let Some(project_dir) = parent.parent() {
-                        if !user_homes_set.contains(project_dir) {
-                            let project_path = project_dir.to_string_lossy().to_string();
-                            project_paths_set.insert(project_path.clone());
-                            return format!("project_settings:{}", project_path);
-                        }
-                    }
-                }
-            }
-            String::new()
-        },
+        PROJECT_CONFIG_PATTERNS,
+        &user_homes_set,
+        &mut project_paths_set,
         MAX_SCAN_DEPTH,
     );
-    config_items.extend(settings_configs.into_iter().filter(|item| !item.config_type.is_empty()));
-
-    //
-    // Scan for project-level settings.local.json in .claude directories.
-    //
-
-    let local_settings_configs = scan_directories_for_config_files(
-        &user_homes,
-        "settings.local.json",
-        |path| {
-            if let Some(parent) = path.parent() {
-                if parent.file_name().map_or(false, |n| n == ".claude") {
-                    if let Some(project_dir) = parent.parent() {
-                        if !user_homes_set.contains(project_dir) {
-                            let project_path = project_dir.to_string_lossy().to_string();
-                            project_paths_set.insert(project_path.clone());
-                            return format!("project_settings_local:{}", project_path);
-                        }
-                    }
-                }
-            }
-            String::new()
-        },
-        MAX_SCAN_DEPTH,
-    );
-    config_items.extend(local_settings_configs.into_iter().filter(|item| !item.config_type.is_empty()));
-
-    //
-    // Scan for CLAUDE.md files.
-    //
-
-    let instructions_configs = scan_directories_for_config_files(
-        &user_homes,
-        "CLAUDE.md",
-        |path| {
-            if let Some(parent) = path.parent() {
-                if user_homes_set.contains(parent) {
-                    return String::new();
-                }
-                if parent.file_name().map_or(false, |n| n == ".claude") {
-                    return String::new();
-                }
-                let project_path = parent.to_string_lossy().to_string();
-                project_paths_set.insert(project_path.clone());
-                return format!("project_instructions:{}", project_path);
-            }
-            String::new()
-        },
-        MAX_SCAN_DEPTH,
-    );
-    config_items.extend(instructions_configs.into_iter().filter(|item| !item.config_type.is_empty()));
-
-    //
-    // Scan for .mcp.json files.
-    //
-
-    let mcp_configs = scan_directories_for_config_files(
-        &user_homes,
-        ".mcp.json",
-        |path| {
-            if let Some(parent) = path.parent() {
-                if user_homes_set.contains(parent) {
-                    return String::new();
-                }
-                let project_path = parent.to_string_lossy().to_string();
-                project_paths_set.insert(project_path.clone());
-                return format!("project_mcp:{}", project_path);
-            }
-            String::new()
-        },
-        MAX_SCAN_DEPTH,
-    );
-    config_items.extend(mcp_configs.into_iter().filter(|item| !item.config_type.is_empty()));
+    config_items.extend(project_configs);
 
     let mut project_paths: Vec<String> = project_paths_set.into_iter().collect();
     project_paths.sort();
