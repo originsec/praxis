@@ -139,8 +139,19 @@ fn parse_session_file(path: &Path, project_hash: &str) -> Option<AgentSessionInf
     // Count lines (messages) in the JSONL file.
     //
 
-    let content = fs::read_to_string(path).ok()?;
-    let message_count = content.lines().filter(|l| !l.trim().is_empty()).count();
+    //
+    // Count lines without loading entire file into memory. Session files can be
+    // very large and including content would exceed RabbitMQ message limits.
+    //
+
+    let message_count = if let Ok(file) = std::fs::File::open(path) {
+        std::io::BufRead::lines(std::io::BufReader::new(file))
+            .filter_map(|l| l.ok())
+            .filter(|l| !l.trim().is_empty())
+            .count()
+    } else {
+        0
+    };
 
     Some(AgentSessionInfo {
         session_id: file_name,
@@ -148,6 +159,6 @@ fn parse_session_file(path: &Path, project_hash: &str) -> Option<AgentSessionInf
         session_file: path.to_string_lossy().to_string(),
         last_modified: last_modified_dt.to_rfc3339(),
         message_count,
-        content: Some(content),
+        content: None,
     })
 }

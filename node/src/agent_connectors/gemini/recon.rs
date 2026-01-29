@@ -30,7 +30,8 @@ impl AgentRecon for GeminiAgent {
                 };
 
                 //
-                // Map enumeration sessions to AgentSessionInfo.
+                // Map enumeration sessions to AgentSessionInfo. Content is not
+                // included to avoid exceeding RabbitMQ message size limits.
                 //
 
                 let sessions: Vec<AgentSessionInfo> = data.sessions
@@ -41,7 +42,7 @@ impl AgentRecon for GeminiAgent {
                         session_file: s.file_path,
                         last_modified: s.last_updated.unwrap_or_default(),
                         message_count: s.message_count,
-                        content: Some(s.content),
+                        content: None,
                     })
                     .collect();
 
