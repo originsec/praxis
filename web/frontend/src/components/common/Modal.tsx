@@ -67,13 +67,13 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', headerAct
         // Header.
         //
         */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-subtle">
+        <div className="flex items-center justify-between px-4 py-2.5 border-b border-subtle bg-[var(--bg-tertiary)]">
           <h2 className="text-highlight font-semibold text-lg">{title}</h2>
           <div className="flex items-center gap-1">
             {headerActions}
             <button
               onClick={onClose}
-              className="p-1 hover:bg-[var(--bg-tertiary)] text-muted hover:text-[var(--text-primary)] transition-colors"
+              className="p-1 hover:bg-[var(--bg-secondary)] text-muted hover:text-[var(--text-primary)] transition-colors"
             >
               <X size={20} />
             </button>
@@ -85,7 +85,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', headerAct
         // Content.
         //
         */}
-        <div className={`flex-1 overflow-auto ${noPadding ? '' : 'p-6'}`}>{children}</div>
+        <div className={`flex-1 overflow-auto ${noPadding ? '' : 'p-4'}`}>{children}</div>
       </div>
     </div>
   );
