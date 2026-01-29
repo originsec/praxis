@@ -964,7 +964,7 @@ pub async fn run() -> Result<()> {
                                             &node_id[..8.min(node_id.len())],
                                             agent_short_name,
                                             recon_result.tools.mcp_servers.len() + recon_result.tools.skills.len() + recon_result.tools.internal_tools.len(),
-                                            recon_result.config.items.len(),
+                                            recon_result.config.len(),
                                             recon_result.sessions.len()
                                         );
 
