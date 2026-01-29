@@ -19,6 +19,7 @@ import type { Node, Edge, Connection, NodeTypes, OnSelectionChangeParams } from 
 import '@xyflow/react/dist/style.css';
 import { Play, Zap, X, Save, CircleStop, FileOutput, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users } from 'lucide-react';
 import { Modal } from '../common/Modal';
+import { ConfigModal, type ConfigItem } from '../common/ConfigModal';
 import type {
   ChainDefinitionFull,
   ChainDefinitionInput,
@@ -415,18 +416,20 @@ function PaletteItem({ type, icon, label, disabled, onClick }: PaletteItemProps)
 
   return (
     <div
-      className={`flex flex-col items-center gap-1 p-2 rounded transition-colors group ${
+      className={`flex flex-col items-center gap-2 py-3 px-2 transition-all group ${
         disabled
-          ? 'opacity-40 cursor-not-allowed'
-          : 'cursor-grab hover:bg-[var(--bg-secondary)]'
+          ? 'opacity-30 cursor-not-allowed'
+          : 'cursor-grab hover:bg-[var(--bg-primary)]/50 active:scale-95'
       }`}
       draggable={!disabled}
       onDragStart={(e) => onDragStart(e, type)}
       onClick={disabled ? undefined : onClick}
       title={disabled ? `${label} (already added)` : label}
     >
-      {icon}
-      <span className="text-[10px] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">{label}</span>
+      <div className={`transition-transform ${disabled ? '' : 'group-hover:scale-110'}`}>
+        {icon}
+      </div>
+      <span className="text-[10px] tracking-widest text-[var(--text-secondary)] group-hover:text-highlight transition-colors" style={{ letterSpacing: '0.08em' }}>{label}</span>
     </div>
   );
 }
@@ -1121,15 +1124,15 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
       // Header.
       //
       */}
-      <div className="flex items-center justify-between p-3 border-b border-subtle bg-[var(--bg-secondary)]">
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-subtle bg-[var(--bg-tertiary)]">
         <div className="flex items-center gap-3">
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Chain name *"
-            className={`bg-[var(--bg-tertiary)] border rounded px-3 py-1.5 text-sm font-mono w-40 ${
-              name.trim() ? 'border-subtle' : 'border-[var(--accent-error)]'
+            className={`bg-[var(--bg-primary)] border px-3 py-1.5 text-sm text-highlight w-40 focus:outline-none transition-colors ${
+              name.trim() ? 'border-dim focus:border-subtle' : 'border-[var(--accent-error)]'
             }`}
           />
           <input
@@ -1137,36 +1140,36 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Description"
-            className="bg-[var(--bg-tertiary)] border border-subtle rounded px-3 py-1.5 text-sm font-mono flex-1 min-w-[150px]"
+            className="bg-[var(--bg-primary)] border border-dim px-3 py-1.5 text-sm text-highlight flex-1 min-w-[150px] focus:outline-none focus:border-subtle transition-colors"
           />
-          <div className="flex items-center gap-1">
-            <label className="text-xs text-muted">Timeout:</label>
+          <div className="flex items-center gap-1.5">
+            <label className="text-xs tracking-wider text-[var(--text-secondary)]">Timeout:</label>
             <input
               type="number"
               value={timeout}
               onChange={(e) => setTimeout(parseInt(e.target.value) || 300)}
               min={1}
-              className="bg-[var(--bg-tertiary)] border border-subtle rounded px-2 py-1.5 text-sm font-mono w-20 text-center"
+              className="bg-[var(--bg-primary)] border border-dim px-2 py-1.5 text-sm text-highlight w-20 text-center focus:outline-none focus:border-subtle transition-colors"
             />
-            <span className="text-xs text-muted">s</span>
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>s</span>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={handleSave}
-            disabled={!canSave}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            title={!canSave ? 'Chain name is required' : undefined}
-          >
-            <Save size={16} />
-            Save
-          </button>
-          <button
             onClick={onCancel}
-            className="flex items-center gap-1 px-3 py-1.5 bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded text-sm hover:bg-[var(--bg-secondary)] transition-colors"
+            className="flex items-center gap-2 px-4 py-2 text-xs tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
           >
             <X size={14} />
             Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!canSave}
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs tracking-wider border border-dim bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:border-[var(--accent-info)] hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            title={!canSave ? 'Chain name is required' : undefined}
+          >
+            <Save size={14} />
+            Save
           </button>
         </div>
       </div>
@@ -1239,9 +1242,9 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           //
           */}
           <Panel position="top-left" className="!m-2">
-            <div className="ascii-box bg-[var(--bg-primary)] p-2 flex flex-col gap-1">
-              <div className="text-[10px] text-[var(--text-secondary)] text-center mb-1 font-mono">ELEMENTS</div>
-              <div className="border-t border-[var(--border-active)] pt-1 flex flex-col gap-1">
+            <div className="ascii-box bg-[var(--bg-secondary)] p-3 flex flex-col gap-0.5">
+              <div className="text-[11px] tracking-widest text-[var(--text-secondary)] mb-2 px-1" style={{ letterSpacing: '0.1em' }}>ELEMENTS</div>
+              <div className="flex flex-col gap-0.5">
                 <PaletteItem
                   type="trigger"
                   icon={<Play size={20} className={hasTrigger ? "text-[var(--text-secondary)]" : "text-[var(--accent-success)]"} />}
@@ -1285,13 +1288,13 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           */}
           {canGroupSelection && (
             <Panel position="top-center" className="!m-2">
-              <div className="ascii-box bg-[var(--bg-primary)] p-2 flex items-center gap-2">
-                <span className="text-xs text-[var(--text-secondary)]">
+              <div className="ascii-box bg-[var(--bg-secondary)] p-2.5 flex items-center gap-2">
+                <span className="text-xs tracking-wider text-[var(--text-secondary)]">
                   {groupableSelectedNodes.length} nodes selected
                 </span>
                 <button
                   onClick={handleGroupIntoSession}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/30 rounded text-xs transition-colors"
+                  className="flex items-center gap-2 px-3 py-1.5 text-xs tracking-wider border border-dim bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] hover:border-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/30 transition-colors"
                   title="Group selected nodes into a shared session"
                 >
                   <Users size={12} />
@@ -1308,10 +1311,10 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           */}
           {groupableSelectedNodes.length > 0 && groupableSelectedNodes.some(n => extraData.sessionGroups.has(n.id)) && (
             <Panel position="top-center" className="!m-2 !mt-14">
-              <div className="ascii-box bg-[var(--bg-primary)] p-2 flex items-center gap-2">
+              <div className="ascii-box bg-[var(--bg-secondary)] p-2.5 flex items-center gap-2">
                 <button
                   onClick={handleUngroupSelection}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] rounded text-xs transition-colors"
+                  className="flex items-center gap-2 px-3 py-1.5 text-xs tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
                   title="Remove selected nodes from their session group"
                 >
                   <GitMerge size={12} />
@@ -1327,7 +1330,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           //
           */}
           <Panel position="bottom-left" className="!m-2">
-            <div className="text-[10px] text-[var(--text-secondary)] bg-[var(--bg-primary)]/80 px-2 py-1 rounded">
+            <div className="text-[10px] tracking-wide border border-dim bg-[var(--bg-secondary)]/95 px-2.5 py-1.5" style={{ color: 'var(--text-muted)' }}>
               Drag from handles to connect • Ctrl+Click to multi-select • Delete to remove
             </div>
           </Panel>
@@ -1339,7 +1342,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
       // Operation Selection Modal.
       //
       */}
-      <Modal
+      <ConfigModal
         isOpen={showOperationModal}
         onClose={() => {
           setShowOperationModal(false);
@@ -1348,51 +1351,35 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
         }}
         title="Select Operation"
         size="sm"
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-muted">
-            Select an operation to add to the chain.
-          </p>
-
-          <div>
-            <label className="block text-xs text-muted uppercase tracking-wider mb-1.5">Operation</label>
-            <select
-              value={selectedOperation}
-              onChange={(e) => setSelectedOperation(e.target.value)}
-              className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
-              autoFocus
-            >
-              <option value="">Select an operation...</option>
-              {operationDefs.map((op) => (
-                <option key={op.full_name} value={op.full_name}>
-                  {op.name} ({op.full_name})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              onClick={() => {
-                setShowOperationModal(false);
-                setPendingPosition(null);
-                setSelectedOperation('');
-              }}
-              className="px-4 py-2 text-sm border border-subtle hover:bg-[var(--bg-tertiary)] transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleOperationSelect}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50"
-              disabled={!selectedOperation}
-            >
-              <Cpu size={16} />
-              Add
-            </button>
-          </div>
-        </div>
-      </Modal>
+        config={[
+          {
+            type: 'section',
+            fields: [
+              {
+                name: 'operation',
+                label: 'Operation',
+                type: 'select',
+                required: true,
+                span: 'full',
+                options: [
+                  { value: '', label: 'Select an operation...' },
+                  ...operationDefs.map((op) => ({
+                    value: op.full_name,
+                    label: `${op.name} (${op.full_name})`,
+                  })),
+                ],
+              },
+            ],
+          },
+        ]}
+        values={{ operation: selectedOperation }}
+        onChange={(name, value) => setSelectedOperation(value)}
+        onSubmit={handleOperationSelect}
+        submitLabel="Add"
+        submitIcon={<Cpu size={14} />}
+        submitVariant="info"
+        submitDisabled={!selectedOperation}
+      />
 
       {/*
       //
@@ -1408,22 +1395,23 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           setTerminationModel('');
         }}
         title="Configure Output"
-        size="sm"
+        size="md"
       >
-        <div className="space-y-4">
-          <p className="text-sm text-muted">
-            Configure the chain output node.
-          </p>
-
-          <div>
-            <label className="block text-xs text-muted uppercase tracking-wider mb-1.5">Type</label>
+        <div className="space-y-0">
+          {/*
+          //
+          // Type selector section.
+          //
+          */}
+          <div className="p-2.5 bg-[var(--bg-secondary)]">
+            <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Type</label>
             <div className="flex gap-2">
               <button
                 onClick={() => setTerminationType('Raw')}
                 className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 text-sm border transition-colors ${
                   terminationType === 'Raw'
                     ? 'bg-[var(--accent-success)]/20 text-[var(--accent-success)] border-[var(--accent-success)]'
-                    : 'bg-[var(--bg-secondary)] border-subtle hover:border-[var(--text-secondary)]'
+                    : 'bg-[var(--bg-primary)] border-dim hover:border-subtle'
                 }`}
               >
                 <FileOutput size={14} />
@@ -1434,14 +1422,14 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
                 className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 text-sm border transition-colors ${
                   terminationType === 'Semantic'
                     ? 'bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] border-[var(--accent-purple)]'
-                    : 'bg-[var(--bg-secondary)] border-subtle hover:border-[var(--text-secondary)]'
+                    : 'bg-[var(--bg-primary)] border-dim hover:border-subtle'
                 }`}
               >
                 <Zap size={14} />
                 Semantic
               </button>
             </div>
-            <p className="text-xs text-muted mt-2">
+            <p className="text-xs mt-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
               {terminationType === 'Raw'
                 ? 'Raw outputs the accumulated data directly without processing'
                 : 'Semantic processes the data with an LLM using the prompt below'}
@@ -1455,12 +1443,12 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           */}
           {terminationType === 'Semantic' && (
             <>
-              <div>
-                <label className="block text-xs text-muted uppercase tracking-wider mb-1.5">Model</label>
+              <div className="p-2.5 bg-[var(--bg-secondary)]">
+                <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Model</label>
                 <select
                   value={terminationModel}
                   onChange={(e) => setTerminationModel(e.target.value)}
-                  className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm font-mono focus:outline-none focus:border-[var(--border-active)]"
+                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                 >
                   <option value="">Use default model</option>
                   {modelDefs.map((m) => (
@@ -1469,43 +1457,53 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
                     </option>
                   ))}
                 </select>
-                <p className="text-xs text-muted mt-1">
+                <p className="text-xs mt-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
                   {modelDefs.length === 0
                     ? 'No models configured. Configure models in Settings.'
                     : 'Select a model or use the default semantic operations model.'}
                 </p>
               </div>
-              <div>
-                <label className="block text-xs text-muted uppercase tracking-wider mb-1.5">Prompt</label>
+              <div className="p-2.5 bg-[var(--bg-secondary)]">
+                <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">
+                  Prompt<span className="text-[var(--accent-error)]/70"> *</span>
+                </label>
                 <textarea
                   value={terminationPrompt}
                   onChange={(e) => setTerminationPrompt(e.target.value)}
                   placeholder="Enter the prompt for processing the accumulated data..."
-                  className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm font-mono min-h-[100px] resize-y focus:outline-none focus:border-[var(--border-active)]"
+                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight font-mono min-h-[100px] resize-none focus:outline-none focus:border-subtle transition-colors"
                 />
               </div>
             </>
           )}
 
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              onClick={() => {
-                setShowTerminationModal(false);
-                setPendingPosition(null);
-                setTerminationPrompt('');
-                setTerminationModel('');
-              }}
-              className="px-4 py-2 text-sm border border-subtle hover:bg-[var(--bg-tertiary)] transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleTerminationConfirm}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors"
-            >
-              <CircleStop size={16} />
-              Add
-            </button>
+          {/*
+          //
+          // Actions.
+          //
+          */}
+          <div className="p-2.5 bg-[var(--bg-secondary)]">
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowTerminationModal(false);
+                  setPendingPosition(null);
+                  setTerminationPrompt('');
+                  setTerminationModel('');
+                }}
+                className="px-4 py-2 text-xs tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleTerminationConfirm}
+                disabled={terminationType === 'Semantic' && !terminationPrompt.trim()}
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs tracking-wider border border-dim bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:border-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <CircleStop size={14} />
+                Add
+              </button>
+            </div>
           </div>
         </div>
       </Modal>
@@ -1515,7 +1513,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
       // Transform Configuration Modal.
       //
       */}
-      <Modal
+      <ConfigModal
         isOpen={showTransformModal}
         onClose={() => {
           setShowTransformModal(false);
@@ -1525,76 +1523,57 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
         }}
         title="Configure Transform"
         size="sm"
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-muted">
-            Configure the LLM transform node.
-          </p>
-
-          <div>
-            <label className="block text-xs text-muted uppercase tracking-wider mb-1.5">Model</label>
-            <select
-              value={transformModel}
-              onChange={(e) => setTransformModel(e.target.value)}
-              className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm font-mono focus:outline-none focus:border-[var(--border-active)]"
-            >
-              <option value="">Use default model</option>
-              {modelDefs.map((m) => (
-                <option key={m.name} value={m.name}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-muted mt-1">
-              {modelDefs.length === 0
-                ? 'No models configured. Configure models in Settings.'
-                : 'Select a model or use the default semantic operations model.'}
-            </p>
-          </div>
-          <div>
-            <label className="block text-xs text-muted uppercase tracking-wider mb-1.5">Prompt *</label>
-            <textarea
-              value={transformPrompt}
-              onChange={(e) => setTransformPrompt(e.target.value)}
-              placeholder="Enter the prompt for transforming the input data..."
-              className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm font-mono min-h-[100px] resize-y focus:outline-none focus:border-[var(--border-active)]"
-              autoFocus
-            />
-            <p className="text-xs text-muted mt-1">
-              The LLM will process the input with this prompt and pass the result forward.
-            </p>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              onClick={() => {
-                setShowTransformModal(false);
-                setPendingPosition(null);
-                setTransformPrompt('');
-                setTransformModel('');
-              }}
-              className="px-4 py-2 text-sm border border-subtle hover:bg-[var(--bg-tertiary)] transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleTransformConfirm}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/30 transition-colors disabled:opacity-50"
-              disabled={!transformPrompt.trim()}
-            >
-              <Sparkles size={16} />
-              Add
-            </button>
-          </div>
-        </div>
-      </Modal>
+        config={[
+          {
+            type: 'section',
+            fields: [
+              {
+                name: 'model',
+                label: 'Model',
+                type: 'select',
+                options: [
+                  { value: '', label: 'Use default model' },
+                  ...modelDefs.map((m) => ({ value: m.name, label: m.name })),
+                ],
+                span: 'full',
+                help: modelDefs.length === 0
+                  ? 'No models configured. Configure models in Settings.'
+                  : 'Select a model or use the default semantic operations model.',
+              },
+              {
+                name: 'prompt',
+                label: 'Prompt',
+                type: 'textarea',
+                required: true,
+                rows: 6,
+                placeholder: 'Enter the prompt for transforming the input data...',
+                span: 'full',
+                help: 'The LLM will process the input with this prompt and pass the result forward.',
+              },
+            ],
+          },
+        ]}
+        values={{
+          model: transformModel,
+          prompt: transformPrompt,
+        }}
+        onChange={(name, value) => {
+          if (name === 'model') setTransformModel(value);
+          if (name === 'prompt') setTransformPrompt(value);
+        }}
+        onSubmit={handleTransformConfirm}
+        submitLabel="Add"
+        submitIcon={<Sparkles size={14} />}
+        submitVariant="warning"
+        submitDisabled={!transformPrompt.trim()}
+      />
 
       {/*
       //
       // Generic Prompt Configuration Modal.
       //
       */}
-      <Modal
+      <ConfigModal
         isOpen={showGenericPromptModal}
         onClose={() => {
           setShowGenericPromptModal(false);
@@ -1603,48 +1582,31 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
         }}
         title="Configure Prompt"
         size="sm"
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-muted">
-            Configure the prompt to send to the agent.
-          </p>
-
-          <div>
-            <label className="block text-xs text-muted uppercase tracking-wider mb-1.5">Prompt *</label>
-            <textarea
-              value={genericPromptText}
-              onChange={(e) => setGenericPromptText(e.target.value)}
-              placeholder="Enter the prompt to send to the agent..."
-              className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm font-mono min-h-[100px] resize-y focus:outline-none focus:border-[var(--border-active)]"
-              autoFocus
-            />
-            <p className="text-xs text-muted mt-1">
-              This prompt will be sent to the agent via the session. If first in a session group, input data will be included.
-            </p>
-          </div>
-
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              onClick={() => {
-                setShowGenericPromptModal(false);
-                setPendingPosition(null);
-                setGenericPromptText('');
-              }}
-              className="px-4 py-2 text-sm border border-subtle hover:bg-[var(--bg-tertiary)] transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleGenericPromptConfirm}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/30 transition-colors disabled:opacity-50"
-              disabled={!genericPromptText.trim()}
-            >
-              <MessageSquare size={16} />
-              Add
-            </button>
-          </div>
-        </div>
-      </Modal>
+        config={[
+          {
+            type: 'section',
+            fields: [
+              {
+                name: 'prompt',
+                label: 'Prompt',
+                type: 'textarea',
+                placeholder: 'Enter the prompt to send to the agent...',
+                required: true,
+                rows: 6,
+                span: 'full',
+                help: 'This prompt will be sent to the agent via the session. If first in a session group, input data will be included.',
+              },
+            ],
+          },
+        ]}
+        values={{ prompt: genericPromptText }}
+        onChange={(name, value) => setGenericPromptText(value)}
+        onSubmit={handleGenericPromptConfirm}
+        submitLabel="Add"
+        submitIcon={<MessageSquare size={14} />}
+        submitVariant="purple"
+        submitDisabled={!genericPromptText.trim()}
+      />
     </div>
   );
 }

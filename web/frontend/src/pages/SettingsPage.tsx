@@ -551,7 +551,7 @@ export function SettingsPage() {
                   //
                   */}
                   {isAddingModel && (
-                    <div className="p-4 bg-[var(--bg-secondary)] border border-subtle rounded space-y-4">
+                    <div className="p-4 bg-[var(--bg-secondary)] border border-dim space-y-4">
                       <div className="flex items-center justify-between">
                         <h4 className="font-semibold text-highlight">New Model Definition</h4>
                         <button
@@ -564,11 +564,11 @@ export function SettingsPage() {
 
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-xs font-medium mb-1 text-muted">Provider</label>
+                          <label className="block text-xs tracking-wider text-muted mb-1.5">Provider</label>
                           <select
                             value={newModel.provider}
                             onChange={(e) => setNewModel(m => ({ ...m, provider: e.target.value }))}
-                            className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                            className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                           >
                             {providers.map((p) => (
                               <option key={p.value} value={p.value}>{p.label}</option>
@@ -577,25 +577,25 @@ export function SettingsPage() {
                         </div>
 
                         <div>
-                          <label className="block text-xs font-medium mb-1 text-muted">API Key</label>
+                          <label className="block text-xs tracking-wider text-muted mb-1.5">API Key</label>
                           <input
                             type="text"
                             value={newModel.apiKey}
                             onChange={(e) => setNewModel(m => ({ ...m, apiKey: e.target.value }))}
                             placeholder="sk-..."
-                            className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                            className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                           />
                         </div>
 
                         <div className="col-span-2">
-                          <label className="block text-xs font-medium mb-1 text-muted">Model</label>
+                          <label className="block text-xs tracking-wider text-muted mb-1.5">Model</label>
                           <div className="flex gap-2">
                             <input
                               type="text"
                               value={newModel.model}
                               onChange={(e) => setNewModel(m => ({ ...m, model: e.target.value }))}
                               placeholder="e.g., claude-sonnet-4-20250514"
-                              className="flex-1 bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                              className="flex-1 bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                             />
                             <button
                               onClick={() => {
@@ -622,7 +622,7 @@ export function SettingsPage() {
                         <button
                           onClick={handleAddModel}
                           disabled={!newModel.model.trim()}
-                          className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] rounded hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50"
+                          className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors disabled:opacity-50"
                         >
                           <Plus size={14} />
                           Add
@@ -653,7 +653,7 @@ export function SettingsPage() {
                       {modelDefinitions.map((model) => (
                         <div
                           key={model.name}
-                          className="p-4 bg-[var(--bg-secondary)] border border-subtle rounded"
+                          className="p-4 bg-[var(--bg-secondary)] border border-dim"
                         >
                           {editingModel?.name === model.name ? (
                             //
@@ -662,11 +662,11 @@ export function SettingsPage() {
                             <div className="space-y-4">
                               <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                  <label className="block text-xs font-medium mb-1 text-muted">Provider</label>
+                                  <label className="block text-xs tracking-wider text-muted mb-1.5">Provider</label>
                                   <select
                                     value={editingModel.provider}
                                     onChange={(e) => setEditingModel({ ...editingModel, provider: e.target.value })}
-                                    className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                                   >
                                     {providers.map((p) => (
                                       <option key={p.value} value={p.value}>{p.label}</option>
@@ -675,24 +675,24 @@ export function SettingsPage() {
                                 </div>
 
                                 <div>
-                                  <label className="block text-xs font-medium mb-1 text-muted">API Key</label>
+                                  <label className="block text-xs tracking-wider text-muted mb-1.5">API Key</label>
                                   <input
                                     type="text"
                                     value={editingModel.apiKey}
                                     onChange={(e) => setEditingModel({ ...editingModel, apiKey: e.target.value })}
                                     placeholder="sk-..."
-                                    className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                                   />
                                 </div>
 
                                 <div className="col-span-2">
-                                  <label className="block text-xs font-medium mb-1 text-muted">Model</label>
+                                  <label className="block text-xs tracking-wider text-muted mb-1.5">Model</label>
                                   <div className="flex gap-2">
                                     <input
                                       type="text"
                                       value={editingModel.model}
                                       onChange={(e) => setEditingModel({ ...editingModel, model: e.target.value })}
-                                      className="flex-1 bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                                      className="flex-1 bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                                     />
                                     <button
                                       onClick={() => {
@@ -711,7 +711,7 @@ export function SettingsPage() {
                               <div className="flex gap-2">
                                 <button
                                   onClick={handleUpdateModel}
-                                  className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] rounded hover:bg-[var(--accent-info)]/30 transition-colors"
+                                  className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors"
                                 >
                                   <Check size={14} />
                                   Update
@@ -767,7 +767,7 @@ export function SettingsPage() {
                     <button
                       onClick={handleSaveModels}
                       disabled={isSavingModels}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] rounded hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50"
+                      className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors disabled:opacity-50"
                     >
                       {showModelsSaved ? (
                         <>
@@ -835,7 +835,7 @@ export function SettingsPage() {
                       // Right pane - Feature configuration.
                       //
                       */}
-                      <div className="flex-1 p-4 bg-[var(--bg-secondary)] border border-subtle rounded">
+                      <div className="flex-1 p-4 bg-[var(--bg-secondary)] border border-dim">
                         {/*
                         //
                         // Nexus config.
@@ -851,11 +851,11 @@ export function SettingsPage() {
                             <div className="space-y-4">
                               <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                  <label className="block text-xs font-medium mb-1 text-muted">Model Definition</label>
+                                  <label className="block text-xs tracking-wider text-muted mb-1.5">Model Definition</label>
                                   <select
                                     value={featureAssignments.nexus || ''}
                                     onChange={(e) => setFeatureAssignments(a => ({ ...a, nexus: e.target.value || null }))}
-                                    className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                                   >
                                     <option value="">Select a model...</option>
                                     {modelDefinitions.map((m) => (
@@ -865,7 +865,7 @@ export function SettingsPage() {
                                 </div>
 
                                 <div>
-                                  <label className="block text-xs font-medium mb-1 text-muted">Max Tokens</label>
+                                  <label className="block text-xs tracking-wider text-muted mb-1.5">Max Tokens</label>
                                   <input
                                     type="number"
                                     value={featureSettings.nexusMaxTokens}
@@ -873,7 +873,7 @@ export function SettingsPage() {
                                     placeholder="25000"
                                     min="1000"
                                     max="100000"
-                                    className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                                   />
                                 </div>
                               </div>
@@ -900,7 +900,7 @@ export function SettingsPage() {
                                     />
                                     <button
                                       onClick={() => nexusFileInputRef.current?.click()}
-                                      className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-[var(--bg-primary)] border border-subtle rounded hover:bg-[var(--bg-tertiary)] transition-colors"
+                                      className="inline-flex items-center gap-1 px-2 py-1 text-xs tracking-wider bg-[var(--bg-primary)] border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
                                     >
                                       <Upload size={12} />
                                       Load from file
@@ -912,7 +912,7 @@ export function SettingsPage() {
                                   onChange={(e) => setFeatureSettings(s => ({ ...s, nexusPrompt: e.target.value }))}
                                   placeholder="Enter the system prompt for Nexus..."
                                   rows={10}
-                                  className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-[var(--border-active)] resize-y"
+                                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm font-mono text-highlight focus:outline-none focus:border-subtle transition-colors resize-y"
                                 />
                                 <p className="text-xs text-muted mt-1">
                                   {featureSettings.nexusPrompt.length} characters
@@ -936,11 +936,11 @@ export function SettingsPage() {
 
                             <div className="space-y-4">
                               <div>
-                                <label className="block text-xs font-medium mb-1 text-muted">Model Definition</label>
+                                <label className="block text-xs tracking-wider text-muted mb-1.5">Model Definition</label>
                                 <select
                                   value={featureAssignments.semanticOps || ''}
                                   onChange={(e) => setFeatureAssignments(a => ({ ...a, semanticOps: e.target.value || null }))}
-                                  className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                                 >
                                   <option value="">Select a model...</option>
                                   {modelDefinitions.map((m) => (
@@ -971,7 +971,7 @@ export function SettingsPage() {
                                     />
                                     <button
                                       onClick={() => semanticOpFileInputRef.current?.click()}
-                                      className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-[var(--bg-primary)] border border-subtle rounded hover:bg-[var(--bg-tertiary)] transition-colors"
+                                      className="inline-flex items-center gap-1 px-2 py-1 text-xs tracking-wider bg-[var(--bg-primary)] border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
                                     >
                                       <Upload size={12} />
                                       Load from file
@@ -983,7 +983,7 @@ export function SettingsPage() {
                                   onChange={(e) => setFeatureSettings(s => ({ ...s, semanticOpPrompt: e.target.value }))}
                                   placeholder="Enter the system prompt for semantic operations..."
                                   rows={10}
-                                  className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-[var(--border-active)] resize-y"
+                                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm font-mono text-highlight focus:outline-none focus:border-subtle transition-colors resize-y"
                                 />
                                 <p className="text-xs text-muted mt-1">
                                   {featureSettings.semanticOpPrompt.length} characters
@@ -1006,11 +1006,11 @@ export function SettingsPage() {
                             </div>
 
                             <div>
-                              <label className="block text-xs font-medium mb-1 text-muted">Model Definition</label>
+                              <label className="block text-xs tracking-wider text-muted mb-1.5">Model Definition</label>
                               <select
                                 value={featureAssignments.semanticParser || ''}
                                 onChange={(e) => setFeatureAssignments(a => ({ ...a, semanticParser: e.target.value || null }))}
-                                className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                                className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                               >
                                 <option value="">Select a model...</option>
                                 {modelDefinitions.map((m) => (
@@ -1034,11 +1034,11 @@ export function SettingsPage() {
                             </div>
 
                             <div>
-                              <label className="block text-xs font-medium mb-1 text-muted">Model Definition</label>
+                              <label className="block text-xs tracking-wider text-muted mb-1.5">Model Definition</label>
                               <select
                                 value={featureAssignments.trafficParser || ''}
                                 onChange={(e) => setFeatureAssignments(a => ({ ...a, trafficParser: e.target.value || null }))}
-                                className="w-full bg-[var(--bg-primary)] border border-subtle rounded px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)]"
+                                className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                               >
                                 <option value="">Select a model...</option>
                                 {modelDefinitions.map((m) => (
@@ -1062,7 +1062,7 @@ export function SettingsPage() {
                       <button
                         onClick={handleSaveFeatures}
                         disabled={isSavingFeatures}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] rounded hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50"
+                        className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors disabled:opacity-50"
                       >
                         {showFeaturesSaved ? (
                           <>
@@ -1162,7 +1162,7 @@ export function SettingsPage() {
                           <a
                             href={`/api/downloads/node/${node.platform}`}
                             download={node.filename}
-                            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] rounded hover:bg-[var(--accent-info)]/30 transition-colors"
+                            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors"
                           >
                             <Download size={14} />
                             Download
@@ -1204,7 +1204,7 @@ export function SettingsPage() {
                       href="https://originhq.com"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] rounded hover:bg-[var(--accent-info)]/30 transition-colors"
+                      className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors"
                     >
                       <ExternalLink size={14} />
                       originhq.com

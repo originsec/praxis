@@ -865,20 +865,20 @@ export function AgentDetailPage() {
                     className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                   >
                     <div
-                      className={`max-w-[80%] ascii-box px-4 py-3 ${
+                      className={`max-w-[80%] px-4 py-3 ${
                         msg.role === 'user'
-                          ? 'bg-[var(--accent-info)]/20 text-[var(--text-primary)]'
-                          : 'bg-[var(--bg-secondary)] text-[var(--text-primary)]'
+                          ? ''
+                          : 'bg-[var(--bg-secondary)]'
                       }`}
                     >
                       {msg.role === 'user' ? (
-                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                        <p className="whitespace-pre-wrap text-[var(--accent-info)]">{msg.content}</p>
                       ) : (
-                        <div className="prose prose-invert prose-sm max-w-none break-words prose-table:border-collapse prose-th:border prose-th:border-subtle prose-th:px-3 prose-th:py-2 prose-th:bg-[var(--bg-tertiary)] prose-td:border prose-td:border-subtle prose-td:px-3 prose-td:py-2">
+                        <div className="prose prose-invert prose-sm max-w-none break-words text-[var(--text-secondary)] prose-table:border-collapse prose-th:border prose-th:border-subtle prose-th:px-3 prose-th:py-2 prose-th:bg-[var(--bg-tertiary)] prose-td:border prose-td:border-subtle prose-td:px-3 prose-td:py-2 prose-headings:text-[var(--text-secondary)] prose-p:text-[var(--text-secondary)] prose-li:text-[var(--text-secondary)] prose-code:text-[var(--text-secondary)]">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                         </div>
                       )}
-                      <p className="text-xs text-muted mt-2">
+                      <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
                         {msg.timestamp.toLocaleTimeString()}
                       </p>
                     </div>

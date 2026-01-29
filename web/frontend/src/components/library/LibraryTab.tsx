@@ -561,7 +561,7 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
         <div className="relative" ref={addMenuRef}>
           <button
             onClick={() => setShowAddMenu(!showAddMenu)}
-            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors"
+            className="inline-flex items-center gap-2 px-3 py-1.5 text-xs tracking-wider bg-[var(--accent-success)]/20 text-[var(--accent-success)] border border-dim hover:border-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors"
           >
             <Plus size={14} />
             Add
@@ -569,27 +569,27 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
           </button>
 
           {showAddMenu && (
-            <div className="absolute right-0 mt-1 w-48 bg-[var(--bg-secondary)] border border-subtle shadow-lg z-50">
+            <div className="absolute right-0 mt-1 w-48 bg-[var(--bg-secondary)] border border-dim z-50">
               <button
                 onClick={handleAddOperation}
-                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-left hover:bg-[var(--bg-tertiary)] transition-colors"
+                className="flex items-center gap-2 w-full px-3 py-2.5 text-xs tracking-wider text-highlight border-b border-dim last:border-0 hover:bg-[var(--highlight)] transition-colors text-left"
               >
-                <Zap size={14} />
+                <Zap size={14} className="text-[var(--accent-purple)]" />
                 New Operation
               </button>
               <button
                 onClick={handleAddChain}
-                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-left hover:bg-[var(--bg-tertiary)] transition-colors"
+                className="flex items-center gap-2 w-full px-3 py-2.5 text-xs tracking-wider text-highlight border-b border-dim last:border-0 hover:bg-[var(--highlight)] transition-colors text-left"
               >
-                <GitBranch size={14} />
+                <GitBranch size={14} className="text-[var(--accent-info)]" />
                 New Chain
               </button>
-              <div className="border-t border-subtle" />
+              <div className="border-t border-dim" />
               <button
                 onClick={handleImport}
-                className="flex items-center gap-2 w-full px-3 py-2 text-sm text-left hover:bg-[var(--bg-tertiary)] transition-colors"
+                className="flex items-center gap-2 w-full px-3 py-2.5 text-xs tracking-wider text-highlight hover:bg-[var(--highlight)] transition-colors text-left"
               >
-                <Upload size={14} />
+                <Upload size={14} className="text-muted" />
                 Import JSON
               </button>
             </div>
@@ -801,180 +801,232 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
         size="xl"
       >
         {editDef && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Name</label>
-                <input
-                  type="text"
-                  value={editDef.name}
-                  onChange={(e) => updateEditDef('name', e.target.value)}
-                  disabled={isEditing}
-                  className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)] disabled:opacity-50"
-                />
+          <div className="space-y-0">
+            {/*
+            //
+            // Basic Information.
+            //
+            */}
+            <div className="space-y-3 p-4 bg-[var(--bg-secondary)]">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">
+                    Name {isNewOperation && <span className="text-[var(--accent-error)]/70">*</span>}
+                  </label>
+                  <input
+                    type="text"
+                    value={editDef.name}
+                    onChange={(e) => updateEditDef('name', e.target.value)}
+                    disabled={isEditing}
+                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                    placeholder="Display name for operation"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">
+                    Short Name {isNewOperation && <span className="text-[var(--accent-error)]/70">*</span>}
+                  </label>
+                  <input
+                    type="text"
+                    value={editDef.short_name}
+                    onChange={(e) => updateEditDef('short_name', e.target.value)}
+                    disabled={!isNewOperation || isEditing}
+                    className={`w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle ${
+                      !isNewOperation ? 'opacity-50 cursor-not-allowed' : ''
+                    } disabled:opacity-50 transition-colors`}
+                    placeholder="unique_identifier"
+                  />
+                  {!isNewOperation && <p className="text-xs text-muted mt-1.5">Cannot be changed</p>}
+                </div>
               </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">
+                    Category {isNewOperation && <span className="text-[var(--accent-error)]/70">*</span>}
+                  </label>
+                  <input
+                    type="text"
+                    value={editDef.category}
+                    onChange={(e) => updateEditDef('category', e.target.value)}
+                    disabled={!isNewOperation || isEditing}
+                    className={`w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle ${
+                      !isNewOperation ? 'opacity-50 cursor-not-allowed' : ''
+                    } disabled:opacity-50 transition-colors`}
+                    placeholder="recon, exfiltration, etc."
+                  />
+                  {!isNewOperation && <p className="text-xs text-muted mt-1.5">Cannot be changed</p>}
+                </div>
+                <div>
+                  <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Mode</label>
+                  <select
+                    value={editDef.mode}
+                    onChange={(e) => updateEditDef('mode', e.target.value)}
+                    disabled={isEditing}
+                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                  >
+                    <option value="one-shot">one-shot</option>
+                    <option value="agent">agent</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Timeout (seconds)</label>
+                  <input
+                    type="number"
+                    value={editDef.timeout}
+                    onChange={(e) => updateEditDef('timeout', parseInt(e.target.value) || 60)}
+                    disabled={isEditing}
+                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Agent Iterations</label>
+                  <input
+                    type="number"
+                    value={editDef.agent_iterations}
+                    onChange={(e) => updateEditDef('agent_iterations', parseInt(e.target.value) || 5)}
+                    disabled={isEditing}
+                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                  />
+                </div>
+              </div>
+
               <div>
-                <label className="block text-sm font-medium mb-1">Short Name</label>
+                <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Description</label>
                 <input
                   type="text"
-                  value={editDef.short_name}
-                  onChange={(e) => updateEditDef('short_name', e.target.value)}
-                  disabled={!isNewOperation || isEditing}
-                  className={`w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)] ${
-                    !isNewOperation ? 'opacity-50 cursor-not-allowed' : ''
-                  } disabled:opacity-50`}
+                  value={editDef.description}
+                  onChange={(e) => updateEditDef('description', e.target.value)}
+                  disabled={isEditing}
+                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                  placeholder="Brief description of what this operation does"
                 />
-                {!isNewOperation && <p className="text-xs text-muted mt-1">Cannot be changed</p>}
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            {/*
+            //
+            // Divider.
+            //
+            */}
+            <div className="border-t border-dim"></div>
+
+            {/*
+            //
+            // Prompt Configuration.
+            //
+            */}
+            <div className="space-y-3 p-4 bg-[var(--bg-secondary)]">
               <div>
-                <label className="block text-sm font-medium mb-1">Category</label>
-                <input
-                  type="text"
-                  value={editDef.category}
-                  onChange={(e) => updateEditDef('category', e.target.value)}
-                  disabled={!isNewOperation || isEditing}
-                  className={`w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)] ${
-                    !isNewOperation ? 'opacity-50 cursor-not-allowed' : ''
-                  } disabled:opacity-50`}
-                />
-                {!isNewOperation && <p className="text-xs text-muted mt-1">Cannot be changed</p>}
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Mode</label>
-                <select
-                  value={editDef.mode}
-                  onChange={(e) => updateEditDef('mode', e.target.value)}
+                <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Agent Info</label>
+                <p className="text-xs mb-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+                  Optional. Technical context for AI agents to understand when and how to use this operation. Used by autonomous agents like Nexus for decision-making.
+                </p>
+                <textarea
+                  value={editDef.agent_info}
+                  onChange={(e) => updateEditDef('agent_info', e.target.value)}
                   disabled={isEditing}
-                  className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)] disabled:opacity-50"
+                  rows={3}
+                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm font-mono text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors resize-none"
+                  placeholder="e.g., Searches for emails through communication channels, contact lists, and directory services. Useful for mapping organizational structure."
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">
+                  Operation Prompt <span className="text-[var(--accent-error)]/70">*</span>
+                </label>
+                <textarea
+                  value={editDef.operation_prompt}
+                  onChange={(e) => updateEditDef('operation_prompt', e.target.value)}
+                  disabled={isEditing}
+                  rows={6}
+                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm font-mono text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors resize-none"
+                  placeholder="The actual instructions given to the agent when executing this operation"
+                />
+              </div>
+            </div>
+
+            {/*
+            //
+            // Divider.
+            //
+            */}
+            <div className="border-t border-dim"></div>
+
+            {/*
+            //
+            // Toggles & Actions.
+            //
+            */}
+            <div className="p-4 bg-[var(--bg-secondary)]">
+              <div className="flex items-center gap-6 mb-4">
+                <button
+                  onClick={() => updateEditDef('yolo_mode', !editDef.yolo_mode)}
+                  disabled={isEditing}
+                  className="flex items-center gap-2 disabled:opacity-50 hover:opacity-80 transition-opacity"
+                  type="button"
                 >
-                  <option value="one-shot">one-shot</option>
-                  <option value="agent">agent</option>
-                </select>
-              </div>
-            </div>
+                  {editDef.yolo_mode ? (
+                    <ToggleLeft size={20} className="text-muted/60" />
+                  ) : (
+                    <ToggleRight size={20} className="text-muted" />
+                  )}
+                  <span className={`text-xs tracking-wider ${editDef.yolo_mode ? 'text-muted/60' : 'text-muted'}`}>
+                    YOLO Mode
+                  </span>
+                </button>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">Timeout (seconds)</label>
-                <input
-                  type="number"
-                  value={editDef.timeout}
-                  onChange={(e) => updateEditDef('timeout', parseInt(e.target.value) || 60)}
+                <button
+                  onClick={() => updateEditDef('disabled', !editDef.disabled)}
                   disabled={isEditing}
-                  className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)] disabled:opacity-50"
-                />
+                  className="flex items-center gap-2 disabled:opacity-50 hover:opacity-80 transition-opacity"
+                  type="button"
+                >
+                  {editDef.disabled ? (
+                    <ToggleLeft size={20} className="text-muted/60" />
+                  ) : (
+                    <ToggleRight size={20} className="text-muted" />
+                  )}
+                  <span className={`text-xs tracking-wider ${editDef.disabled ? 'text-muted/60' : 'text-muted'}`}>
+                    Disabled
+                  </span>
+                </button>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Agent Iterations</label>
-                <input
-                  type="number"
-                  value={editDef.agent_iterations}
-                  onChange={(e) => updateEditDef('agent_iterations', parseInt(e.target.value) || 5)}
+
+              {opDefError && (
+                <div className="mb-4 p-3 bg-[var(--accent-error)]/10 border border-[var(--accent-error)]/30 text-[var(--accent-error)] text-xs">
+                  {opDefError}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => {
+                    setShowEditOpModal(false);
+                    setEditDef(null);
+                    setIsEditing(false);
+                    setIsNewOperation(false);
+                    clearOpDefStatus();
+                  }}
                   disabled={isEditing}
-                  className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)] disabled:opacity-50"
-                />
+                  className="px-4 py-2 text-xs tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveOp}
+                  disabled={isEditing || (isNewOperation && (!editDef?.short_name || !editDef?.category))}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-xs tracking-wider bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors disabled:opacity-50"
+                >
+                  {isEditing && <Loader2 size={14} className="animate-spin" />}
+                  <Save size={14} />
+                  {isEditing ? 'Saving...' : isNewOperation ? 'Create' : 'Save'}
+                </button>
               </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">Description</label>
-              <input
-                type="text"
-                value={editDef.description}
-                onChange={(e) => updateEditDef('description', e.target.value)}
-                disabled={isEditing}
-                className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm focus:outline-none focus:border-[var(--border-active)] disabled:opacity-50"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">Agent Info</label>
-              <textarea
-                value={editDef.agent_info}
-                onChange={(e) => updateEditDef('agent_info', e.target.value)}
-                disabled={isEditing}
-                rows={3}
-                className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm font-mono focus:outline-none focus:border-[var(--border-active)] disabled:opacity-50"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">Operation Prompt</label>
-              <textarea
-                value={editDef.operation_prompt}
-                onChange={(e) => updateEditDef('operation_prompt', e.target.value)}
-                disabled={isEditing}
-                rows={6}
-                className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm font-mono focus:outline-none focus:border-[var(--border-active)] disabled:opacity-50"
-              />
-            </div>
-
-            <div className="flex items-center gap-6">
-              <button
-                onClick={() => updateEditDef('yolo_mode', !editDef.yolo_mode)}
-                disabled={isEditing}
-                className="flex items-center gap-2 disabled:opacity-50"
-                type="button"
-              >
-                {editDef.yolo_mode ? (
-                  <ToggleRight size={24} className="text-[var(--accent-warning)]" />
-                ) : (
-                  <ToggleLeft size={24} className="text-muted" />
-                )}
-                <span className={`text-sm ${editDef.yolo_mode ? 'text-[var(--accent-warning)] font-medium' : 'text-muted'}`}>
-                  YOLO Mode
-                </span>
-              </button>
-
-              <button
-                onClick={() => updateEditDef('disabled', !editDef.disabled)}
-                disabled={isEditing}
-                className="flex items-center gap-2 disabled:opacity-50"
-                type="button"
-              >
-                {editDef.disabled ? (
-                  <ToggleRight size={24} className="text-[var(--accent-error)]" />
-                ) : (
-                  <ToggleLeft size={24} className="text-muted" />
-                )}
-                <span className={`text-sm ${editDef.disabled ? 'text-[var(--accent-error)] font-medium' : 'text-muted'}`}>
-                  Disabled
-                </span>
-              </button>
-            </div>
-
-            {opDefError && (
-              <div className="p-3 bg-[var(--accent-error)]/10 text-[var(--accent-error)] text-sm">
-                {opDefError}
-              </div>
-            )}
-
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                onClick={() => {
-                  setShowEditOpModal(false);
-                  setEditDef(null);
-                  setIsEditing(false);
-                  setIsNewOperation(false);
-                  clearOpDefStatus();
-                }}
-                disabled={isEditing}
-                className="px-4 py-2 text-sm border border-subtle hover:bg-[var(--bg-tertiary)] transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveOp}
-                disabled={isEditing || (isNewOperation && (!editDef?.short_name || !editDef?.category))}
-                className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50"
-              >
-                {isEditing && <Loader2 size={16} className="animate-spin" />}
-                <Save size={16} />
-                {isEditing ? 'Saving...' : isNewOperation ? 'Create' : 'Save'}
-              </button>
             </div>
           </div>
         )}
