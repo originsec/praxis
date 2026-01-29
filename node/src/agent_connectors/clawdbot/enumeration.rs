@@ -95,6 +95,7 @@ pub fn enumerate() -> Result<EnumerationData> {
                                 session_file: path.to_string_lossy().to_string(),
                                 last_modified,
                                 message_count,
+                                content: Some(contents.clone()),
                             });
 
                             //

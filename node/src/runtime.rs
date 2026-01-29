@@ -11,8 +11,8 @@ use chrono::Utc;
 use common::{
     publish_json, CommandRequest, CommandResponse, DiscoveredAgent, DiscoveredLlmEndpoint,
     InterceptedTrafficEntry, NODE_BROADCAST_QUEUE, NODE_SIGNAL_QUEUE, NODE_EVENT_LOG_QUEUE,
-    NodeBroadcastMessage, NodeCommand, NodeDirectMessage, NodeInformationUpdate, NodeSignalMessage,
-    SelectedAgent, TerminalCommand, TerminalOutput,
+    NodeBroadcastMessage, NodeCommand, NodeCommandResult, NodeDirectMessage, NodeInformationUpdate,
+    NodeSignalMessage, SelectedAgent, TerminalCommand, TerminalOutput,
 };
 use futures::StreamExt;
 use lapin::{options::*, types::FieldTable, Channel};
@@ -607,8 +607,41 @@ async fn handle_command(
         NodeCommand::Terminal(TerminalCommand::Write { .. }) | NodeCommand::Config(_)
     );
 
-    let result = match request.command {
-        NodeCommand::Agent(cmd) => handle_agent_command(cmd, registry, selected_agent).await,
+    let result = match request.command.clone() {
+        NodeCommand::Agent(cmd) => {
+            let is_recon = matches!(cmd, common::AgentCommand::Recon | common::AgentCommand::ReconSemantic);
+            let is_semantic = matches!(cmd, common::AgentCommand::ReconSemantic);
+            let result = handle_agent_command(cmd, registry, selected_agent).await;
+
+            //
+            // If this was a recon command, also send the result to the service for persistence.
+            //
+            if is_recon {
+                if let NodeCommandResult::Agent(common::AgentCommandResult::ReconComplete { result: ref recon_res }) = result {
+                    let agent_name = selected_agent
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .map(|a| a.short_name().to_string())
+                        .unwrap_or_default();
+
+                    let signal = NodeSignalMessage::ReconResultUpdate {
+                        node_id: node_id.to_string(),
+                        agent_short_name: agent_name,
+                        recon_result: recon_res.clone(),
+                        is_semantic,
+                    };
+
+                    if let Err(e) = publish_json(channel, NODE_SIGNAL_QUEUE, &signal).await {
+                        common::log_error!("Failed to send recon result to service: {}", e);
+                    } else {
+                        common::log_debug!("Sent recon result to service for persistence");
+                    }
+                }
+            }
+
+            result
+        }
         NodeCommand::Session(cmd) => {
             handle_session_command(cmd, selected_agent, transaction_manager).await
         }

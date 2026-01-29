@@ -252,6 +252,15 @@ pub enum BrowserMessage {
     ApplicationLogClear {
         node_id: Option<String>,
     },
+
+    //
+    // Recon messages.
+    //
+    /// Request stored recon result for a node+agent
+    ReconGet {
+        node_id: String,
+        agent_short_name: String,
+    },
 }
 
 /// Messages sent from web server to browser
@@ -482,5 +491,17 @@ pub enum ServerMessage {
     /// Node event log cleared
     ApplicationLogCleared {
         deleted_count: u32,
+    },
+
+    //
+    // Recon messages.
+    //
+    /// Stored recon result response
+    ReconGetResponse {
+        node_id: String,
+        agent_short_name: String,
+        recon_result: Option<common::ReconResult>,
+        performed_at: Option<String>,
+        is_semantic: Option<bool>,
     },
 }

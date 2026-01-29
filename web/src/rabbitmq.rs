@@ -467,6 +467,16 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
+    /// Request stored recon result for a node+agent
+    pub async fn get_recon(&self, node_id: String, agent_short_name: String) -> Result<()> {
+        let message = ClientSignalMessage::ReconGet {
+            client_id: self.state.client_id.clone(),
+            node_id,
+            agent_short_name,
+        };
+        self.publish_signal(message).await
+    }
+
     /// Send an event log entry to the service via dedicated queue
     pub async fn send_event_log(&self, entry: common::ApplicationLogEntry) -> Result<()> {
         publish_json(&self.channel, WEB_EVENT_LOG_QUEUE, &entry).await?;
@@ -766,6 +776,13 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::ApplicationLogCleared { deleted_count } => {
                 self.state.broadcast(ServerMessage::ApplicationLogCleared { deleted_count });
+            }
+
+            //
+            // Recon responses.
+            //
+            ClientDirectMessage::ReconGetResponse { node_id, agent_short_name, recon_result, performed_at, is_semantic } => {
+                self.state.broadcast(ServerMessage::ReconGetResponse { node_id, agent_short_name, recon_result, performed_at, is_semantic });
             }
         }
 

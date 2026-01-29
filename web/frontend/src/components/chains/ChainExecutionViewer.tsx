@@ -262,10 +262,11 @@ function chainToFlowWithStatus(
 interface ChainExecutionViewerInnerProps {
   execution: ChainExecutionUpdate;
   chain: ChainDefinitionFull | null;
+  isLoading?: boolean;
   onEditChain?: (chainId: string) => void;
 }
 
-function ChainExecutionViewerInner({ execution, chain, onEditChain }: ChainExecutionViewerInnerProps) {
+function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }: ChainExecutionViewerInnerProps) {
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const { fitView } = useReactFlow();
 
@@ -505,8 +506,15 @@ function ChainExecutionViewerInner({ execution, chain, onEditChain }: ChainExecu
             </Panel>
           </ReactFlow>
         ) : (
-          <div className="h-full flex items-center justify-center text-muted text-sm">
-            Chain definition not available
+          <div className="h-full flex items-center justify-center text-muted text-sm gap-2">
+            {isLoading ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                <span>Loading chain definition...</span>
+              </>
+            ) : (
+              <span>Chain definition not available</span>
+            )}
           </div>
         )}
       </div>
@@ -718,6 +726,7 @@ function ChainExecutionViewerInner({ execution, chain, onEditChain }: ChainExecu
 interface ChainExecutionViewerProps {
   execution: ChainExecutionUpdate;
   chain: ChainDefinitionFull | null;
+  isLoading?: boolean;
   onEditChain?: (chainId: string) => void;
 }
 

@@ -3,8 +3,10 @@ use crate::agent_connectors::utils;
 use anyhow::{anyhow, Result};
 use common::SessionContext;
 use once_cell::sync::OnceCell;
-use regex::Regex;
+use sha2::{Digest, Sha256};
 
+use std::fs;
+use std::path::PathBuf;
 use std::process::Stdio;
 use uuid::Uuid;
 
@@ -38,53 +40,73 @@ impl GeminiSession {
         self.external_session_id.get().map(|s| s.as_str())
     }
 
-    fn get_latest_session_id_from_list(&self) -> Result<String> {
+    fn get_latest_session_id_from_storage(&self) -> Result<String> {
         //
-        // To determine the id for our session, we run --list-sessions and grab
-        // the last UUID.
-        // 
-        // TODO: Discover a better way of doing this!!
+        // Read session ID directly from Gemini's session storage.
+        // Sessions are stored in ~/.gemini/tmp/<project_hash>/chats/
+        // where project_hash is SHA256 of the working directory path.
         //
 
-        let path = self
-            .process_path
+        let working_dir = self
+            .working_dir
             .as_ref()
-            .ok_or_else(|| anyhow!("No process path configured"))?;
+            .ok_or_else(|| anyhow!("No working directory configured"))?;
 
-        let mut cmd = utils::build_command(path);
-        cmd.arg("--list-sessions");
+        let mut hasher = Sha256::new();
+        hasher.update(working_dir.as_bytes());
+        let project_hash = format!("{:x}", hasher.finalize());
 
-        let output = utils::run_command_silent(&mut cmd)?;
+        let gemini_dir = dirs::home_dir()
+            .ok_or_else(|| anyhow!("Could not determine home directory"))?;
+        let chats_dir: PathBuf = gemini_dir
+            .join(".gemini")
+            .join("tmp")
+            .join(&project_hash)
+            .join("chats");
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            common::log_error!("List sessions command failed: {}", stderr);
-            return Err(anyhow!(
-                "List sessions failed with status {}: {}",
-                output.status,
-                stderr
-            ));
+        if !chats_dir.exists() {
+            return Err(anyhow!("Gemini chats directory does not exist: {:?}", chats_dir));
         }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let combined_output = format!("{}\n{}", stdout, stderr);
+        //
+        // Find the most recently modified session file.
+        //
 
-        let uuid_re = Regex::new(
-            r"\[([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\]",
-        )
-        .expect("Invalid regex pattern");
+        let mut latest_file: Option<(PathBuf, std::time::SystemTime)> = None;
 
-        let mut last_uuid: Option<String> = None;
-        for caps in uuid_re.captures_iter(&combined_output) {
-            let uuid = caps.get(1).unwrap().as_str().to_string();
-            last_uuid = Some(uuid);
+        for entry in fs::read_dir(&chats_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.is_file() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with("session-") && name.ends_with(".json") {
+                        if let Ok(metadata) = entry.metadata() {
+                            if let Ok(modified) = metadata.modified() {
+                                if latest_file.is_none() || modified > latest_file.as_ref().unwrap().1 {
+                                    latest_file = Some((path, modified));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        last_uuid.ok_or_else(|| {
-            common::log_error!("No session found in list output:\n{}", combined_output);
-            anyhow!("No session found in list sessions output")
-        })
+        let (session_path, _) = latest_file
+            .ok_or_else(|| anyhow!("No session files found in {:?}", chats_dir))?;
+
+        //
+        // Parse the session JSON to extract sessionId.
+        //
+
+        let content = fs::read_to_string(&session_path)?;
+        let json: serde_json::Value = serde_json::from_str(&content)?;
+
+        json["sessionId"]
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| anyhow!("No sessionId field in session file"))
     }
 
     fn execute_prompt(&self, prompt: &str) -> Result<String> {
@@ -125,7 +147,7 @@ impl GeminiSession {
         //
 
         if self.external_session_id.get().is_none() {
-            if let Ok(session_id) = self.get_latest_session_id_from_list() {
+            if let Ok(session_id) = self.get_latest_session_id_from_storage() {
                 let _ = self.external_session_id.set(session_id);
             }
         }

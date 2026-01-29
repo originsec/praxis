@@ -32,6 +32,7 @@ import {
   ChevronRight,
   ChevronDown,
   FileText,
+  History,
 } from 'lucide-react';
 import { useApp, type AgentSessionMessage } from '../context/AppContext';
 import { generateUUID } from '../utils/uuid';
@@ -52,7 +53,7 @@ import { exportAgentSession, downloadTextFile } from '../utils/export';
 
 type Tab = 'session' | 'ops' | 'recon' | 'intercept';
 type ToolsSubTab = 'mcp' | 'skills' | 'internal';
-type ReconSubTab = 'tools' | 'config';
+type ReconSubTab = 'tools' | 'config' | 'sessions';
 
 export function AgentDetailPage() {
   const { nodeId, agentShortName } = useParams<{ nodeId: string; agentShortName: string }>();
@@ -114,9 +115,11 @@ export function AgentDetailPage() {
   };
 
   //
-  // reconSubTab: 'tools' if sub is any tools-related value, otherwise 'config'.
+  // reconSubTab: 'sessions' if sub is sessions, 'tools' if sub is any tools-related value, otherwise 'config'.
   //
-  const reconSubTab: ReconSubTab = (subParam === 'tools' || subParam === 'mcp' || subParam === 'skills' || subParam === 'internal') ? 'tools' : 'config';
+  const reconSubTab: ReconSubTab =
+    (subParam === 'sessions') ? 'sessions' :
+    (subParam === 'tools' || subParam === 'mcp' || subParam === 'skills' || subParam === 'internal') ? 'tools' : 'config';
   const setReconSubTab = (sub: ReconSubTab) => {
     updateSearchParams({ sub });
   };
@@ -140,6 +143,8 @@ export function AgentDetailPage() {
   // Recon state.
   //
   const [reconResult, setReconResult] = useState<ReconResult | null>(null);
+  const [reconPerformedAt, setReconPerformedAt] = useState<string | null>(null);
+  const [reconIsSemantic, setReconIsSemantic] = useState<boolean | null>(null);
   const [isLoadingRecon, setIsLoadingRecon] = useState(false);
 
   //
@@ -161,6 +166,11 @@ export function AgentDetailPage() {
   // Selected config file in config view (for split-view).
   //
   const [selectedConfigIdx, setSelectedConfigIdx] = useState<number | null>(null);
+
+  //
+  // Selected session in sessions view.
+  //
+  const [selectedSessionIdx, setSelectedSessionIdx] = useState<number | null>(null);
 
   //
   // Config file editing state.
@@ -247,31 +257,76 @@ export function AgentDetailPage() {
   }, [showRunChainModal, requestChainDefList]);
 
   //
-  // Fetch recon data when agent is selected and we have a node
+  // Fetch recon data from service when viewing an agent page.
+  // If no stored recon exists, trigger node recon and poll service until data arrives.
   // Note: This must be before early returns to follow Rules of Hooks.
   //
   useEffect(() => {
-    if (selectedAgent && nodeId) {
-      //
-      // Inline recon fetch to avoid dependency on handleRecon.
-      //
-      const fetchRecon = async () => {
-        setIsLoadingRecon(true);
-        try {
-          const response = await sendCommand(nodeId, { Agent: 'Recon' });
-          if ('Agent' in response.result &&
-              typeof response.result.Agent === 'object' &&
-              response.result.Agent !== null &&
-              'ReconComplete' in response.result.Agent) {
-            setReconResult(response.result.Agent.ReconComplete.result);
-          }
-        } finally {
+    const agent = discoveredAgent || selectedAgent;
+    if (!agent || !nodeId || !agentShortName) return;
+
+    let isCancelled = false;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    let reconTriggered = false;
+
+    const requestRecon = () => {
+      send({ type: 'recon_get', node_id: nodeId, agent_short_name: agentShortName });
+    };
+
+    //
+    // Listen for service responses. The listener removes itself once data is
+    // loaded to avoid interfering with manual refresh (handleRecon).
+    //
+    const handleWsMessage = (event: Event) => {
+      if (isCancelled) return;
+      const customEvent = event as CustomEvent;
+      const message = customEvent.detail;
+      if (message.type === 'recon_get_response' &&
+          message.node_id === nodeId &&
+          message.agent_short_name === agentShortName) {
+        if (message.recon_result) {
+          //
+          // Found stored recon - use it, stop polling, remove listener.
+          //
+          setReconResult(message.recon_result);
+          setReconPerformedAt(message.performed_at);
+          setReconIsSemantic(message.is_semantic);
           setIsLoadingRecon(false);
+          if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+          }
+          window.removeEventListener('ws-message', handleWsMessage);
+        } else if (!reconTriggered) {
+          //
+          // No stored recon - trigger node to perform recon, then poll.
+          //
+          reconTriggered = true;
+          sendCommand(nodeId, { Agent: 'Recon' }).catch(() => {});
+          pollInterval = setInterval(() => {
+            if (!isCancelled) {
+              requestRecon();
+            }
+          }, 1000);
         }
-      };
-      fetchRecon();
-    }
-  }, [selectedAgent?.short_name, nodeId, sendCommand]);
+      }
+    };
+
+    //
+    // Initial request.
+    //
+    setIsLoadingRecon(true);
+    window.addEventListener('ws-message', handleWsMessage);
+    requestRecon();
+
+    return () => {
+      isCancelled = true;
+      window.removeEventListener('ws-message', handleWsMessage);
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+    };
+  }, [discoveredAgent?.short_name, selectedAgent?.short_name, nodeId, agentShortName, send, sendCommand]);
 
   //
   // Extract project paths from recon result (recon now includes sessions and
@@ -348,15 +403,31 @@ export function AgentDetailPage() {
   }, [selectedChainExec, requestChain]);
 
   //
-  // Derive chain definition from state.
+  // Use cached chain definition or current chain from state.
   //
   const selectedChainDef = useMemo((): ChainDefinitionFull | null => {
     if (!selectedChainExec) return null;
+    //
+    // First check the cache for the chain definition.
+    //
+    const cached = state.chains.chainDefinitionsCache[selectedChainExec.chain_id];
+    if (cached) return cached;
+    //
+    // Fall back to current chain if it matches.
+    //
     if (state.chains.currentChain?.id === selectedChainExec.chain_id) {
       return state.chains.currentChain;
     }
     return null;
-  }, [selectedChainExec, state.chains.currentChain]);
+  }, [selectedChainExec, state.chains.chainDefinitionsCache, state.chains.currentChain]);
+
+  //
+  // Check if chain is currently loading.
+  //
+  const isChainLoading = useMemo(() => {
+    if (!selectedChainExec) return false;
+    return state.chains.loadingChains.has(selectedChainExec.chain_id);
+  }, [selectedChainExec, state.chains.loadingChains]);
 
   //
   // Show loading state while system state is being fetched.
@@ -411,20 +482,77 @@ export function AgentDetailPage() {
     setActiveTab('ops');
   };
 
-  const handleRecon = async (semantic: boolean) => {
-    setIsLoadingRecon(true);
-    try {
-      const command = semantic ? 'ReconSemantic' : 'Recon';
-      const response = await sendCommand(nodeId!, { Agent: command });
-      if ('Agent' in response.result &&
-          typeof response.result.Agent === 'object' &&
-          response.result.Agent !== null &&
-          'ReconComplete' in response.result.Agent) {
-        setReconResult(response.result.Agent.ReconComplete.result);
+  const handleRecon = (semantic: boolean): Promise<void> => {
+    return new Promise((resolve) => {
+      if (!nodeId || !agentShortName) {
+        resolve();
+        return;
       }
-    } finally {
-      setIsLoadingRecon(false);
-    }
+
+      setIsLoadingRecon(true);
+
+      //
+      // Capture the current performed_at - we'll wait until it changes.
+      // This avoids clock sync issues since we compare service times against service times.
+      //
+      const previousPerformedAt = reconPerformedAt;
+
+      //
+      // Trigger node to perform recon (fire and forget).
+      //
+      const command = semantic ? 'ReconSemantic' : 'Recon';
+      sendCommand(nodeId, { Agent: command }).catch(() => {});
+
+      //
+      // Poll service until performed_at changes (meaning new data arrived).
+      //
+      const pollInterval = setInterval(() => {
+        send({ type: 'recon_get', node_id: nodeId, agent_short_name: agentShortName });
+      }, 1000);
+
+      //
+      // Timeout after 60 seconds to prevent infinite polling.
+      //
+      const timeout = setTimeout(() => {
+        clearInterval(pollInterval);
+        window.removeEventListener('ws-message', handleWsMessage);
+        setIsLoadingRecon(false);
+        resolve();
+      }, 60000);
+
+      const handleWsMessage = (event: Event) => {
+        const customEvent = event as CustomEvent;
+        const message = customEvent.detail;
+        if (message.type === 'recon_get_response' &&
+            message.node_id === nodeId &&
+            message.agent_short_name === agentShortName) {
+          if (message.recon_result && message.performed_at) {
+            //
+            // Only accept if performed_at has changed from what we had before.
+            //
+            if (message.performed_at !== previousPerformedAt) {
+              setReconResult(message.recon_result);
+              setReconPerformedAt(message.performed_at);
+              setReconIsSemantic(message.is_semantic);
+              setIsLoadingRecon(false);
+              clearInterval(pollInterval);
+              clearTimeout(timeout);
+              window.removeEventListener('ws-message', handleWsMessage);
+              resolve();
+            }
+          }
+        }
+      };
+
+      window.addEventListener('ws-message', handleWsMessage);
+
+      //
+      // Initial poll request (in case the node is very fast).
+      //
+      setTimeout(() => {
+        send({ type: 'recon_get', node_id: nodeId, agent_short_name: agentShortName });
+      }, 500);
+    });
   };
 
   const handleSaveConfig = async () => {
@@ -1060,6 +1188,11 @@ export function AgentDetailPage() {
                   <span className="flex items-center gap-2">
                     <Settings size={14} />
                     Config
+                    {(reconResult?.config?.items?.length ?? 0) > 0 && (
+                      <span className="text-[10px] opacity-70">
+                        {reconResult?.config?.items?.length}
+                      </span>
+                    )}
                   </span>
                 </button>
                 <button
@@ -1073,33 +1206,81 @@ export function AgentDetailPage() {
                   <span className="flex items-center gap-2">
                     <Wrench size={14} />
                     Tools
+                    {(() => {
+                      const toolsCount = (reconResult?.tools?.mcp_servers?.length ?? 0) +
+                        (reconResult?.tools?.skills?.length ?? 0) +
+                        (reconResult?.tools?.internal_tools?.length ?? 0);
+                      return toolsCount > 0 ? (
+                        <span className="text-[10px] opacity-70">{toolsCount}</span>
+                      ) : null;
+                    })()}
+                  </span>
+                </button>
+                <button
+                  onClick={() => setReconSubTab('sessions')}
+                  className={`px-3 py-1.5 text-sm  transition-colors ${
+                    reconSubTab === 'sessions'
+                      ? 'bg-[var(--highlight)] text-title'
+                      : 'text-muted hover:text-[var(--text-primary)]'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <History size={14} />
+                    Sessions
+                    {(reconResult?.sessions?.length ?? 0) > 0 && (
+                      <span className="text-[10px] opacity-70">
+                        {reconResult?.sessions?.length}
+                      </span>
+                    )}
                   </span>
                 </button>
               </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleDiscoverTools}
-                  disabled={isDiscoveringTools || !selectedAgent}
-                  className="inline-flex items-center gap-2 px-3 py-1.5  bg-[var(--accent-info)]/20 text-[var(--accent-info)] text-sm hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50"
-                >
-                  {isDiscoveringTools ? (
-                    <>
-                      <Loader2 size={14} className="animate-spin" /> Discovering...
-                    </>
-                  ) : (
-                    <>
-                      <Search size={14} /> Discover
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={() => handleRecon(false)}
-                  disabled={isLoadingRecon || !selectedAgent}
-                  className="inline-flex items-center gap-2 px-3 py-1.5  bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] text-sm hover:bg-[var(--accent-purple)]/30 transition-colors disabled:opacity-50"
-                >
-                  <RefreshCw size={14} className={isLoadingRecon ? 'animate-spin' : ''} />
-                  {isLoadingRecon ? 'Refreshing...' : 'Refresh'}
-                </button>
+              <div className="flex items-center gap-3">
+                {reconPerformedAt && (
+                  <Tooltip content={`Last ${reconIsSemantic ? 'semantic ' : ''}recon: ${new Date(reconPerformedAt).toLocaleString()}`}>
+                    <span className="text-xs text-muted flex items-center gap-1">
+                      <Clock size={12} />
+                      {(() => {
+                        const date = new Date(reconPerformedAt);
+                        const now = new Date();
+                        const diffMs = now.getTime() - date.getTime();
+                        const diffMins = Math.floor(diffMs / 60000);
+                        const diffHours = Math.floor(diffMins / 60);
+                        const diffDays = Math.floor(diffHours / 24);
+                        if (diffMins < 1) return 'just now';
+                        if (diffMins < 60) return `${diffMins}m ago`;
+                        if (diffHours < 24) return `${diffHours}h ago`;
+                        return `${diffDays}d ago`;
+                      })()}
+                      {reconIsSemantic && <Sparkles size={10} className="text-[var(--accent-info)]" />}
+                    </span>
+                  </Tooltip>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleDiscoverTools}
+                    disabled={isDiscoveringTools || !selectedAgent}
+                    className="inline-flex items-center gap-2 px-3 py-1.5  bg-[var(--accent-info)]/20 text-[var(--accent-info)] text-sm hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50"
+                  >
+                    {isDiscoveringTools ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" /> Discovering...
+                      </>
+                    ) : (
+                      <>
+                        <Search size={14} /> Discover
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => handleRecon(false)}
+                    disabled={isLoadingRecon || !selectedAgent}
+                    className="inline-flex items-center gap-2 px-3 py-1.5  bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] text-sm hover:bg-[var(--accent-purple)]/30 transition-colors disabled:opacity-50"
+                  >
+                    <RefreshCw size={14} className={isLoadingRecon ? 'animate-spin' : ''} />
+                    {isLoadingRecon ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1717,6 +1898,144 @@ export function AgentDetailPage() {
               </div>
             )}
 
+            {/*
+            //
+            // Sessions subtab.
+            //
+            */}
+            {reconSubTab === 'sessions' && (
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                {!reconResult?.sessions || reconResult.sessions.length === 0 ? (
+                  <div className="flex-1 flex items-center justify-center p-8">
+                    <div className="text-center">
+                      <History size={48} className="mx-auto mb-4 text-muted opacity-50" />
+                      <p className="text-muted">No sessions discovered</p>
+                      <p className="text-muted text-sm mt-2">Click "Refresh" to scan for session files</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-1 flex min-h-0 p-4 pt-2 gap-4 overflow-hidden">
+                    {/*
+                    //
+                    // Left panel: Session list.
+                    //
+                    */}
+                    <div className="w-64 flex-shrink-0 flex flex-col border border-subtle rounded overflow-hidden bg-[var(--bg-secondary)]">
+                      <div className="px-3 py-2 border-b border-subtle bg-[var(--bg-tertiary)]">
+                        <span className="text-[10px] text-muted uppercase tracking-wider">
+                          {reconResult.sessions.length} session{reconResult.sessions.length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      <div className="flex-1 overflow-y-auto scrollbar-on-hover">
+                        {reconResult.sessions.map((session, idx) => {
+                          const isSelected = selectedSessionIdx === idx;
+                          const shortId = session.session_id.slice(0, 8);
+                          return (
+                            <button
+                              key={session.session_id}
+                              onClick={() => setSelectedSessionIdx(idx)}
+                              className={`w-full px-3 py-2 text-left transition-colors border-b border-dim last:border-0 ${
+                                isSelected
+                                  ? 'bg-[var(--accent-info)]/10 border-l-2 border-l-[var(--accent-info)]'
+                                  : 'hover:bg-[var(--bg-tertiary)]'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <History size={12} className={isSelected ? 'text-[var(--accent-info)]' : 'text-muted'} />
+                                <span className={`text-[11px] font-mono ${isSelected ? 'text-[var(--accent-info)]' : ''}`}>
+                                  {shortId}
+                                </span>
+                                <span className="text-[10px] text-muted ml-auto">
+                                  {session.message_count}
+                                </span>
+                              </div>
+                              {session.last_modified && (
+                                <div className="mt-1 text-[9px] text-muted truncate">
+                                  {session.last_modified}
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/*
+                    //
+                    // Right panel: Session content.
+                    //
+                    */}
+                    <div className="flex-1 flex flex-col min-w-0 min-h-0 border border-subtle rounded overflow-hidden">
+                      {selectedSessionIdx === null ? (
+                        <div className="flex-1 flex items-center justify-center text-muted text-sm">
+                          Select a session to view contents
+                        </div>
+                      ) : (() => {
+                        const session = reconResult.sessions[selectedSessionIdx];
+                        let messages: Array<{ type?: string; content?: string; timestamp?: string }> = [];
+                        try {
+                          const parsed = JSON.parse(session.content || '{}');
+                          messages = parsed.messages || [];
+                        } catch {
+                          // Ignore parse errors
+                        }
+                        return (
+                          <>
+                            <div className="px-4 py-2 border-b border-subtle bg-[var(--bg-tertiary)] flex items-center justify-between flex-shrink-0">
+                              <span className="text-xs font-mono text-muted truncate">
+                                {session.session_id}
+                              </span>
+                              <span className="text-[10px] text-muted">
+                                {messages.length} messages
+                              </span>
+                            </div>
+                            <div className="flex-1 overflow-y-auto scrollbar-on-hover">
+                              {messages.length === 0 ? (
+                                <div className="p-4 text-muted text-sm">No messages in this session</div>
+                              ) : (
+                                <div className="p-3 space-y-3">
+                                  {messages.map((msg, idx) => (
+                                    <div
+                                      key={idx}
+                                      className={`p-3 rounded text-xs ${
+                                        msg.type === 'user'
+                                          ? 'bg-[var(--accent-info)]/10 border-l-2 border-l-[var(--accent-info)]'
+                                          : msg.type === 'gemini'
+                                          ? 'bg-[var(--bg-secondary)] border-l-2 border-l-[var(--accent-purple)]'
+                                          : 'bg-[var(--bg-tertiary)] border-l-2 border-l-[var(--border-subtle)]'
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <span className={`text-[10px] font-medium uppercase ${
+                                          msg.type === 'user' ? 'text-[var(--accent-info)]' :
+                                          msg.type === 'gemini' ? 'text-[var(--accent-purple)]' :
+                                          'text-muted'
+                                        }`}>
+                                          {msg.type || 'unknown'}
+                                        </span>
+                                        {msg.timestamp && (
+                                          <span className="text-[9px] text-muted">
+                                            {new Date(msg.timestamp).toLocaleString()}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="whitespace-pre-wrap break-words font-mono text-[11px]">
+                                        {msg.content || '(no content)'}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
           </div>
         )}
 
@@ -1832,6 +2151,7 @@ export function AgentDetailPage() {
       <ChainExecutionModal
         execution={selectedChainExec}
         chain={selectedChainDef}
+        isLoading={isChainLoading}
         onClose={() => setSelectedChainExecId(null)}
       />
     </div>

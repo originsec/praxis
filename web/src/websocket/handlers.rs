@@ -246,6 +246,13 @@ pub async fn handle_browser_message(
         BrowserMessage::ApplicationLogClear { node_id } => {
             state.rabbitmq.clear_node_event_log(node_id).await?;
         }
+
+        //
+        // Recon messages.
+        //
+        BrowserMessage::ReconGet { node_id, agent_short_name } => {
+            state.rabbitmq.get_recon(node_id, agent_short_name).await?;
+        }
     }
 
     Ok(())

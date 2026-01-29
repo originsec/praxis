@@ -152,5 +152,6 @@ fn parse_session_file(path: &Path, project_hash: &str) -> Option<AgentSessionInf
         session_file: path.to_string_lossy().to_string(),
         last_modified: last_modified_dt.to_rfc3339(),
         message_count,
+        content: Some(content),
     })
 }
