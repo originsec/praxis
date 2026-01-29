@@ -1041,7 +1041,7 @@ export function AgentDetailPage() {
 
 
         {activeTab === 'recon' && (
-          <div className="bg-card ascii-box border border-subtle h-full flex flex-col overflow-hidden">
+          <div className="bg-card ascii-box border border-subtle h-full flex flex-col">
             {/*
             //
             // Recon subtabs.
@@ -1446,6 +1446,25 @@ export function AgentDetailPage() {
                       ) : (
                         <ChevronDown size={14} className="text-muted" />
                       )}
+                      <Tooltip content="Semantically extracted using AI">
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="var(--text-muted)"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="opacity-40"
+                        >
+                          <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+                          <path d="M20 3v4" />
+                          <path d="M22 5h-4" />
+                          <path d="M4 17v2" />
+                          <path d="M5 18H3" />
+                        </svg>
+                      </Tooltip>
                       <span className="text-muted font-medium">
                         Extracted Metadata
                       </span>
@@ -1466,25 +1485,6 @@ export function AgentDetailPage() {
                             <span className="text-muted flex items-center gap-1">
                               <User size={12} />
                               Identities:
-                              <Tooltip content="Semantically extracted using AI">
-                                <svg
-                                  width="11"
-                                  height="11"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="var(--accent-info)"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  className="ml-0.5 opacity-30"
-                                >
-                                  <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
-                                  <path d="M20 3v4" />
-                                  <path d="M22 5h-4" />
-                                  <path d="M4 17v2" />
-                                  <path d="M5 18H3" />
-                                </svg>
-                              </Tooltip>
                             </span>
                             {reconResult.metadata.user_identities.map((identity, idx) => (
                               <span key={idx} className="px-1.5 py-0.5 font-mono bg-[var(--accent-info)]/10 text-[var(--accent-info)] rounded break-all max-w-full">{identity}</span>
@@ -1492,29 +1492,10 @@ export function AgentDetailPage() {
                           </div>
                         ) : null}
                         {reconResult?.metadata?.api_keys?.length ? (
-                          <div className={`flex items-center gap-2 flex-wrap ${reconResult?.metadata?.user_identities?.length ? 'mt-1.5' : ''}`}>
+                          <div className={`flex items-center gap-2 flex-wrap ${reconResult?.metadata?.user_identities?.length ? 'mt-1.5' : 'mt-2'}`}>
                             <span className="text-muted flex items-center gap-1">
                               <Key size={12} />
                               API Keys:
-                              <Tooltip content="Semantically extracted using AI">
-                                <svg
-                                  width="11"
-                                  height="11"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="var(--accent-warning)"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  className="ml-0.5 opacity-30"
-                                >
-                                  <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
-                                  <path d="M20 3v4" />
-                                  <path d="M22 5h-4" />
-                                  <path d="M4 17v2" />
-                                  <path d="M5 18H3" />
-                                </svg>
-                              </Tooltip>
                             </span>
                             {reconResult.metadata.api_keys.map((key, idx) => (
                               <span key={idx} className="px-1.5 py-0.5 font-mono bg-[var(--accent-warning)]/10 text-[var(--accent-warning)] rounded break-all max-w-full">{key}</span>
