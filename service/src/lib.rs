@@ -490,7 +490,7 @@ pub async fn run() -> Result<()> {
         _ => {}
     }
 
-    let service_config = Arc::new(RwLock::new(config::ServiceConfig::load()?));
+    let service_config = Arc::new(RwLock::new(config::ServiceConfig::new(database.clone()).await?));
     let response_tracker = Arc::new(ResponseTracker::new());
 
     let semantic_ops_channel = connection.create_channel().await?;
@@ -1249,17 +1249,21 @@ pub async fn run() -> Result<()> {
                                         info!("Received ServiceConfigSet from client {} with {} values", &client_id[..8.min(client_id.len())], values.len());
 
                                         //
-                                        // Update in-memory config and save to disk.
+                                        // Update config in database.
                                         //
                                         {
                                             let mut config = service_config.write().await;
+                                            let mut save_error = None;
                                             for (key, value) in values {
-                                                config.set(key, value);
+                                                if let Err(e) = config.set(key, value).await {
+                                                    save_error = Some(e);
+                                                    break;
+                                                }
                                             }
-                                            if let Err(e) = config.save() {
+                                            if let Some(e) = save_error {
                                                 error!("Failed to save config: {}", e);
                                             } else {
-                                                info!("Service config saved (in-memory and disk)");
+                                                info!("Service config saved to database");
                                                 let message = ClientDirectMessage::ServiceConfigSaved;
                                                 if let Err(e) = send_to_client(&client_publish_channel, &client_id, message).await {
                                                     error!("Failed to send config saved confirmation to client {}: {}", client_id, e);

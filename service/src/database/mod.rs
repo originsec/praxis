@@ -8,6 +8,7 @@ mod chain_executions;
 mod discovered_endpoints;
 mod event_log;
 mod recon;
+mod service_config;
 pub mod config;
 mod queries;
 
