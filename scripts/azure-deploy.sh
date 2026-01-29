@@ -26,7 +26,8 @@ LOCATION="${AZURE_LOCATION:-eastus}"
 ACR_NAME="${AZURE_ACR_NAME:-praxisacr}"
 CONTAINER_APP_ENV="${AZURE_CONTAINER_APP_ENV:-praxis-env}"
 STORAGE_ACCOUNT="${AZURE_STORAGE_ACCOUNT:-praxisstorage}"
-FILE_SHARE_NAME="rabbitmq-data"
+RABBITMQ_FILE_SHARE="rabbitmq-data"
+PRAXIS_FILE_SHARE="praxis-data"
 
 #
 # Container App Names
@@ -119,6 +120,27 @@ build_and_push_image() {
     echo ""
 }
 
+push_rabbitmq_image() {
+    info "Pulling and pushing RabbitMQ image to ACR..."
+
+    ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
+    RABBITMQ_PUBLIC_IMAGE="rabbitmq:3-management"
+    RABBITMQ_ACR_IMAGE="${ACR_LOGIN_SERVER}/rabbitmq:3-management"
+
+    az acr login --name "$ACR_NAME"
+
+    info "Pulling RabbitMQ image from Docker Hub..."
+    docker pull "$RABBITMQ_PUBLIC_IMAGE"
+    success "Pulled RabbitMQ image"
+
+    info "Tagging and pushing RabbitMQ image to ACR..."
+    docker tag "$RABBITMQ_PUBLIC_IMAGE" "$RABBITMQ_ACR_IMAGE"
+    docker push "$RABBITMQ_ACR_IMAGE"
+    success "Pushed RabbitMQ image to ACR"
+
+    echo ""
+}
+
 create_storage() {
     info "Creating storage account for persistent data..."
 
@@ -153,16 +175,32 @@ create_storage() {
 
     info "Creating file share for RabbitMQ..."
     if az storage share show \
-        --name "$FILE_SHARE_NAME" \
+        --name "$RABBITMQ_FILE_SHARE" \
         --account-name "$STORAGE_ACCOUNT_LOWER" \
         --account-key "$STORAGE_KEY" &> /dev/null; then
         success "File share already exists"
     else
         az storage share create \
-            --name "$FILE_SHARE_NAME" \
+            --name "$RABBITMQ_FILE_SHARE" \
             --account-name "$STORAGE_ACCOUNT_LOWER" \
             --account-key "$STORAGE_KEY" \
             --quota 10 \
+            --output none
+        success "Created file share"
+    fi
+
+    info "Creating file share for Praxis data..."
+    if az storage share show \
+        --name "$PRAXIS_FILE_SHARE" \
+        --account-name "$STORAGE_ACCOUNT_LOWER" \
+        --account-key "$STORAGE_KEY" &> /dev/null; then
+        success "File share already exists"
+    else
+        az storage share create \
+            --name "$PRAXIS_FILE_SHARE" \
+            --account-name "$STORAGE_ACCOUNT_LOWER" \
+            --account-key "$STORAGE_KEY" \
+            --quota 5 \
             --output none
         success "Created file share"
     fi
@@ -254,7 +292,7 @@ deploy_rabbitmq() {
         --dns-name-label "praxis-rabbitmq-${LOCATION}" \
         --azure-file-volume-account-name "$STORAGE_ACCOUNT_LOWER" \
         --azure-file-volume-account-key "$STORAGE_KEY" \
-        --azure-file-volume-share-name "$FILE_SHARE_NAME" \
+        --azure-file-volume-share-name "$RABBITMQ_FILE_SHARE" \
         --azure-file-volume-mount-path /mnt/data \
         --environment-variables \
             RABBITMQ_DEFAULT_USER=praxis \
@@ -278,6 +316,43 @@ deploy_praxis() {
         --output tsv)
 
     #
+    # Get storage account details for persistent database storage.
+    #
+    SUBSCRIPTION_ID=$(az account show --query id --output tsv)
+    HASH_SUFFIX=$(echo -n "$SUBSCRIPTION_ID" | md5sum | cut -c1-8)
+    STORAGE_ACCOUNT_LOWER=$(echo "${STORAGE_ACCOUNT}${HASH_SUFFIX}" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]' | cut -c1-24)
+
+    STORAGE_KEY=$(az storage account keys list \
+        --resource-group "$RESOURCE_GROUP" \
+        --account-name "$STORAGE_ACCOUNT_LOWER" \
+        --query '[0].value' \
+        --output tsv)
+
+    #
+    # Configure Azure Files storage in Container App Environment.
+    #
+    STORAGE_NAME="praxis-db-storage"
+    if az containerapp env storage show \
+        --name "$STORAGE_NAME" \
+        --environment-name "$CONTAINER_APP_ENV" \
+        --resource-group "$RESOURCE_GROUP" &> /dev/null; then
+        info "Storage already configured in environment"
+    else
+        info "Configuring Azure Files storage in Container App Environment..."
+        az containerapp env storage set \
+            --name "$STORAGE_NAME" \
+            --environment-name "$CONTAINER_APP_ENV" \
+            --resource-group "$RESOURCE_GROUP" \
+            --storage-type AzureFile \
+            --azure-file-account-name "$STORAGE_ACCOUNT_LOWER" \
+            --azure-file-account-key "$STORAGE_KEY" \
+            --azure-file-share-name "$PRAXIS_FILE_SHARE" \
+            --access-mode ReadWrite \
+            --output none
+        success "Configured storage in environment"
+    fi
+
+    #
     # Get RabbitMQ FQDN from Azure Container Instance.
     #
     RABBITMQ_FQDN=$(az container show \
@@ -298,6 +373,7 @@ deploy_praxis() {
             --image "$IMAGE_TAG" \
             --set-env-vars \
                 PRAXIS_RABBITMQ_URL="$RABBITMQ_URL" \
+                PRAXIS_DB_PATH="/app/data/.praxis_operations.db" \
                 RUST_LOG=info \
             --output none
 
@@ -316,24 +392,59 @@ deploy_praxis() {
             --revision "$REVISION" \
             --output none
     else
+        info "Creating Praxis Container App with persistent storage..."
+
+        #
+        # Create temporary YAML file for volume mount configuration.
+        #
+        TEMP_YAML=$(mktemp)
+        cat > "$TEMP_YAML" <<EOF
+properties:
+  template:
+    volumes:
+    - name: praxis-data-volume
+      storageType: AzureFile
+      storageName: $STORAGE_NAME
+    containers:
+    - name: $PRAXIS_APP
+      image: $IMAGE_TAG
+      resources:
+        cpu: 1.0
+        memory: 2.0Gi
+      env:
+      - name: PRAXIS_RABBITMQ_URL
+        value: $RABBITMQ_URL
+      - name: PRAXIS_DB_PATH
+        value: /app/data/.praxis_operations.db
+      - name: RUST_LOG
+        value: info
+      volumeMounts:
+      - volumeName: praxis-data-volume
+        mountPath: /app/data
+    scale:
+      minReplicas: 1
+      maxReplicas: 1
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8080
+    registries:
+    - server: $ACR_LOGIN_SERVER
+      username: $ACR_NAME
+      passwordSecretRef: registry-password
+    secrets:
+    - name: registry-password
+      value: $ACR_PASSWORD
+EOF
+
         az containerapp create \
             --name "$PRAXIS_APP" \
             --resource-group "$RESOURCE_GROUP" \
             --environment "$CONTAINER_APP_ENV" \
-            --image "$IMAGE_TAG" \
-            --registry-server "$ACR_LOGIN_SERVER" \
-            --registry-username "$ACR_NAME" \
-            --registry-password "$ACR_PASSWORD" \
-            --target-port 8080 \
-            --ingress external \
-            --min-replicas 1 \
-            --max-replicas 1 \
-            --cpu 1.0 \
-            --memory 2.0Gi \
-            --env-vars \
-                PRAXIS_RABBITMQ_URL="$RABBITMQ_URL" \
-                RUST_LOG=info \
+            --yaml "$TEMP_YAML" \
             --output none
+
+        rm -f "$TEMP_YAML"
     fi
 
     success "Deployed Praxis"
@@ -486,6 +597,7 @@ deploy() {
     create_resource_group
     create_acr
     build_and_push_image
+    push_rabbitmq_image
     create_storage
     create_container_app_environment
     deploy_rabbitmq

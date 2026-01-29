@@ -455,10 +455,14 @@ pub async fn run() -> Result<()> {
 
     //
     // Initialize semantic operations components.
+    // Use PRAXIS_DB_PATH env var if set, otherwise default to home directory.
     //
-    let db_path = dirs::home_dir()
-        .expect("Failed to get home directory")
-        .join(".praxis_operations.db");
+    let db_path = match std::env::var("PRAXIS_DB_PATH") {
+        Ok(path) => std::path::PathBuf::from(path),
+        Err(_) => dirs::home_dir()
+            .expect("Failed to get home directory")
+            .join(".praxis_operations.db"),
+    };
     let database = Arc::new(Database::new(&db_path)?);
 
     //
