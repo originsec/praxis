@@ -1,12 +1,32 @@
 #
 # Praxis Docker Image
-# Multi-stage build for minimal runtime image.
+# Multi-stage build for minimal runtime image with dependency caching.
 #
 
 # ==============================================================================
-# Stage 1: Build the Rust binaries and frontend
+# Stage 1: Prepare recipe for cargo-chef
 # ==============================================================================
-FROM rust:1.88-bookworm AS builder
+FROM rust:1.88-bookworm AS chef
+RUN cargo install cargo-chef
+WORKDIR /build
+
+# ==============================================================================
+# Stage 2: Analyze dependencies
+# ==============================================================================
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock ./
+COPY common ./common
+COPY node ./node
+COPY semantic_parser ./semantic_parser
+COPY semantic_ops ./semantic_ops
+COPY service ./service
+COPY web ./web
+RUN cargo chef prepare --recipe-path recipe.json
+
+# ==============================================================================
+# Stage 3: Build dependencies (cached layer)
+# ==============================================================================
+FROM chef AS builder
 
 RUN apt-get update && apt-get install -y \
     nodejs \
@@ -16,14 +36,8 @@ RUN apt-get update && apt-get install -y \
     mingw-w64 \
     && rm -rf /var/lib/apt/lists/*
 
-#
-# Add Windows cross-compilation target.
-#
 RUN rustup target add x86_64-pc-windows-gnu
 
-#
-# Configure cargo for Windows cross-compilation.
-#
 RUN mkdir -p /root/.cargo && echo '\
 [target.x86_64-pc-windows-gnu]\n\
 linker = "x86_64-w64-mingw32-gcc"\n\
@@ -31,6 +45,17 @@ linker = "x86_64-w64-mingw32-gcc"\n\
 
 WORKDIR /build
 
+#
+# Build dependencies only - this layer is cached until Cargo.toml/Cargo.lock changes.
+#
+COPY --from=planner /build/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json -p praxis_node && \
+    cargo chef cook --release --recipe-path recipe.json -p praxis_node --target x86_64-pc-windows-gnu && \
+    cargo chef cook --release --recipe-path recipe.json -p praxis_service -p praxis_web
+
+# ==============================================================================
+# Stage 4: Build application (only recompiles on source changes)
+# ==============================================================================
 COPY Cargo.toml Cargo.lock ./
 COPY common ./common
 COPY node ./node
