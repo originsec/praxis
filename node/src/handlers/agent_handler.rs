@@ -223,5 +223,62 @@ pub async fn handle_agent_command(
                 }
             }
         }
+        AgentCommand::GetSessionContent { session_file } => {
+            //
+            // Validate path is within home directory for security.
+            //
+            let home_dir = match dirs::home_dir() {
+                Some(h) => h,
+                None => {
+                    return NodeCommandResult::Agent(AgentCommandResult::SessionContent {
+                        session_file,
+                        content: None,
+                        error: Some("Could not determine home directory".to_string()),
+                    });
+                }
+            };
+
+            let target_path = std::path::Path::new(&session_file);
+            let canonical_path = match target_path.canonicalize() {
+                Ok(p) => p,
+                Err(e) => {
+                    return NodeCommandResult::Agent(AgentCommandResult::SessionContent {
+                        session_file,
+                        content: None,
+                        error: Some(format!("Invalid path: {}", e)),
+                    });
+                }
+            };
+
+            if !canonical_path.starts_with(&home_dir) {
+                return NodeCommandResult::Agent(AgentCommandResult::SessionContent {
+                    session_file,
+                    content: None,
+                    error: Some("Path must be within home directory".to_string()),
+                });
+            }
+
+            //
+            // Read the session file.
+            //
+            match std::fs::read_to_string(&session_file) {
+                Ok(content) => {
+                    common::log_info!("Read session file: {}", session_file);
+                    NodeCommandResult::Agent(AgentCommandResult::SessionContent {
+                        session_file,
+                        content: Some(content),
+                        error: None,
+                    })
+                }
+                Err(e) => {
+                    common::log_warn!("Failed to read session file {}: {}", session_file, e);
+                    NodeCommandResult::Agent(AgentCommandResult::SessionContent {
+                        session_file,
+                        content: None,
+                        error: Some(format!("Failed to read file: {}", e)),
+                    })
+                }
+            }
+        }
     }
 }

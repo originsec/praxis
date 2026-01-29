@@ -173,6 +173,13 @@ export function AgentDetailPage() {
   const [selectedSessionIdx, setSelectedSessionIdx] = useState<number | null>(null);
 
   //
+  // Session content fetching state.
+  //
+  const [sessionContent, setSessionContent] = useState<string | null>(null);
+  const [isLoadingSessionContent, setIsLoadingSessionContent] = useState(false);
+  const [sessionContentError, setSessionContentError] = useState<string | null>(null);
+
+  //
   // Config file editing state.
   //
   const [editingConfigIdx, setEditingConfigIdx] = useState<number | null>(null);
@@ -610,6 +617,58 @@ export function AgentDetailPage() {
     //
     setSelectedConfigIdx(idx);
   };
+
+  //
+  // Fetch session content from node when session is selected.
+  //
+  const fetchSessionContent = async (sessionFile: string) => {
+    if (!nodeId) return;
+    setIsLoadingSessionContent(true);
+    setSessionContentError(null);
+    setSessionContent(null);
+
+    try {
+      const response = await sendCommand(nodeId, {
+        Agent: { GetSessionContent: { session_file: sessionFile } },
+      });
+
+      if (
+        'Agent' in response.result &&
+        typeof response.result.Agent === 'object' &&
+        response.result.Agent !== null &&
+        'SessionContent' in response.result.Agent
+      ) {
+        const result = (response.result.Agent as { SessionContent: { session_file: string; content?: string; error?: string } }).SessionContent;
+        if (result.content) {
+          setSessionContent(result.content);
+        } else if (result.error) {
+          setSessionContentError(result.error);
+        }
+      } else if ('Error' in response.result) {
+        setSessionContentError((response.result as { Error: { message: string } }).Error.message);
+      }
+    } catch (error) {
+      setSessionContentError(String(error));
+    } finally {
+      setIsLoadingSessionContent(false);
+    }
+  };
+
+  //
+  // Clear session content when selection changes, and fetch new content.
+  //
+  useEffect(() => {
+    if (selectedSessionIdx === null || !reconResult?.sessions) {
+      setSessionContent(null);
+      setSessionContentError(null);
+      return;
+    }
+    const session = reconResult.sessions[selectedSessionIdx];
+    if (session?.session_file) {
+      fetchSessionContent(session.session_file);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSessionIdx, nodeId]);
 
   const handleSendMessage = async () => {
     if (!input.trim() || isLoading || !sessionId) return;
@@ -1970,15 +2029,67 @@ export function AgentDetailPage() {
                         <div className="flex-1 flex items-center justify-center text-muted text-sm">
                           Select a session to view contents
                         </div>
+                      ) : isLoadingSessionContent ? (
+                        <div className="flex-1 flex items-center justify-center">
+                          <Loader2 size={24} className="animate-spin text-muted" />
+                        </div>
+                      ) : sessionContentError ? (
+                        <div className="flex-1 flex items-center justify-center p-4">
+                          <div className="text-center">
+                            <X size={24} className="mx-auto mb-2 text-[var(--accent-danger)]" />
+                            <p className="text-[var(--accent-danger)] text-sm">{sessionContentError}</p>
+                          </div>
+                        </div>
                       ) : (() => {
                         const session = reconResult.sessions[selectedSessionIdx];
-                        let messages: Array<{ type?: string; content?: string; timestamp?: string }> = [];
-                        try {
-                          const parsed = JSON.parse(session.content || '{}');
-                          messages = parsed.messages || [];
-                        } catch {
-                          // Ignore parse errors
+
+                        //
+                        // Parse session content - handle both JSONL (Claude Code) and
+                        // JSON formats (Gemini).
+                        //
+                        type ParsedMessage = { type?: string; role?: string; content?: string; timestamp?: string };
+                        let messages: ParsedMessage[] = [];
+
+                        if (sessionContent) {
+                          //
+                          // Try JSONL first (each line is a JSON object).
+                          //
+                          const lines = sessionContent.split('\n').filter(l => l.trim());
+                          if (lines.length > 0) {
+                            try {
+                              //
+                              // Check if first line is valid JSON object.
+                              //
+                              const firstParsed = JSON.parse(lines[0]);
+                              if (typeof firstParsed === 'object' && !Array.isArray(firstParsed)) {
+                                //
+                                // Likely JSONL format.
+                                //
+                                messages = lines.map(line => {
+                                  try {
+                                    return JSON.parse(line) as ParsedMessage;
+                                  } catch {
+                                    return { content: line };
+                                  }
+                                });
+                              }
+                            } catch {
+                              //
+                              // Try single JSON object with messages array.
+                              //
+                              try {
+                                const parsed = JSON.parse(sessionContent);
+                                messages = parsed.messages || [];
+                              } catch {
+                                //
+                                // Plain text fallback.
+                                //
+                                messages = [{ content: sessionContent }];
+                              }
+                            }
+                          }
                         }
+
                         return (
                           <>
                             <div className="px-4 py-2 border-b border-subtle bg-[var(--bg-tertiary)] flex items-center justify-between flex-shrink-0">
@@ -1986,44 +2097,49 @@ export function AgentDetailPage() {
                                 {session.session_id}
                               </span>
                               <span className="text-[10px] text-muted">
-                                {messages.length} messages
+                                {messages.length} entries
                               </span>
                             </div>
                             <div className="flex-1 overflow-y-auto scrollbar-on-hover">
                               {messages.length === 0 ? (
-                                <div className="p-4 text-muted text-sm">No messages in this session</div>
+                                <div className="p-4 text-muted text-sm">No content in this session</div>
                               ) : (
                                 <div className="p-3 space-y-3">
-                                  {messages.map((msg, idx) => (
-                                    <div
-                                      key={idx}
-                                      className={`p-3 rounded text-xs ${
-                                        msg.type === 'user'
-                                          ? 'bg-[var(--accent-info)]/10 border-l-2 border-l-[var(--accent-info)]'
-                                          : msg.type === 'gemini'
-                                          ? 'bg-[var(--bg-secondary)] border-l-2 border-l-[var(--accent-purple)]'
-                                          : 'bg-[var(--bg-tertiary)] border-l-2 border-l-[var(--border-subtle)]'
-                                      }`}
-                                    >
-                                      <div className="flex items-center gap-2 mb-1">
-                                        <span className={`text-[10px] font-medium uppercase ${
-                                          msg.type === 'user' ? 'text-[var(--accent-info)]' :
-                                          msg.type === 'gemini' ? 'text-[var(--accent-purple)]' :
-                                          'text-muted'
-                                        }`}>
-                                          {msg.type || 'unknown'}
-                                        </span>
-                                        {msg.timestamp && (
-                                          <span className="text-[9px] text-muted">
-                                            {new Date(msg.timestamp).toLocaleString()}
+                                  {messages.map((msg, idx) => {
+                                    const msgType = msg.type || msg.role || 'unknown';
+                                    const isUser = msgType === 'user' || msgType === 'human';
+                                    const isAssistant = msgType === 'assistant' || msgType === 'gemini' || msgType === 'model';
+                                    return (
+                                      <div
+                                        key={idx}
+                                        className={`p-3 rounded text-xs ${
+                                          isUser
+                                            ? 'bg-[var(--accent-info)]/10 border-l-2 border-l-[var(--accent-info)]'
+                                            : isAssistant
+                                            ? 'bg-[var(--bg-secondary)] border-l-2 border-l-[var(--accent-purple)]'
+                                            : 'bg-[var(--bg-tertiary)] border-l-2 border-l-[var(--border-subtle)]'
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-2 mb-1">
+                                          <span className={`text-[10px] font-medium uppercase ${
+                                            isUser ? 'text-[var(--accent-info)]' :
+                                            isAssistant ? 'text-[var(--accent-purple)]' :
+                                            'text-muted'
+                                          }`}>
+                                            {msgType}
                                           </span>
-                                        )}
+                                          {msg.timestamp && (
+                                            <span className="text-[9px] text-muted">
+                                              {new Date(msg.timestamp).toLocaleString()}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="whitespace-pre-wrap break-words font-mono text-[11px]">
+                                          {typeof msg.content === 'string' ? msg.content : JSON.stringify(msg, null, 2)}
+                                        </div>
                                       </div>
-                                      <div className="whitespace-pre-wrap break-words font-mono text-[11px]">
-                                        {msg.content || '(no content)'}
-                                      </div>
-                                    </div>
-                                  ))}
+                                    );
+                                  })}
                                 </div>
                               )}
                             </div>

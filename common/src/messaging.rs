@@ -422,6 +422,8 @@ pub enum AgentCommand {
     ReconSemantic,
     /// Update a config file's contents
     UpdateConfigFile { path: String, contents: String },
+    /// Get the content of a session file (for viewing session history)
+    GetSessionContent { session_file: String },
 }
 
 /// Unique identifier for tracking session transactions
@@ -558,6 +560,12 @@ pub enum AgentCommandResult {
     ReconComplete { result: ReconResult },
     /// Config file update result
     ConfigFileUpdated { success: bool, error: Option<String> },
+    /// Session content response
+    SessionContent {
+        session_file: String,
+        content: Option<String>,
+        error: Option<String>,
+    },
 }
 
 /// Result of a session command

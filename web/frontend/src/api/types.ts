@@ -120,7 +120,8 @@ export type AgentCommand =
   | 'Recon'
   | 'ReconSemantic'
   | { Select: { short_name: string } }
-  | { UpdateConfigFile: { path: string; contents: string } };
+  | { UpdateConfigFile: { path: string; contents: string } }
+  | { GetSessionContent: { session_file: string } };
 
 export type SessionCommand =
   | { Create: { context: SessionContext } }
