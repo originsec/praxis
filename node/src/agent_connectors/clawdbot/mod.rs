@@ -49,7 +49,7 @@ impl Agent for ClawdbotAgent {
     }
 
     async fn do_fingerprint(&self) -> bool {
-        self.do_fingerprint_sync()
+        self.do_fingerprint_impl().await
     }
 
     fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>> {

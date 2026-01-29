@@ -6,7 +6,7 @@ impl ClawdbotAgent {
     // Perform fingerprinting to detect if Clawdbot is available.
     //
 
-    pub(super) fn do_fingerprint_sync(&self) -> bool {
+    pub(super) async fn do_fingerprint_impl(&self) -> bool {
         //
         // Check explicit paths.
         //

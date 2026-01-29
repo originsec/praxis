@@ -9,7 +9,6 @@ pub use session::ClaudeCodeSession;
 
 use crate::agent_connectors::traits::{Agent, AgentIntercept, AgentRecon, AgentSession};
 use async_trait::async_trait;
-use common::SessionContext;
 use once_cell::sync::OnceCell;
 use std::sync::{Arc, RwLock};
 
@@ -55,10 +54,10 @@ impl Agent for ClaudeCodeAgent {
     }
 
     async fn do_fingerprint(&self) -> bool {
-        self.do_fingerprint_sync()
+        self.do_fingerprint_impl().await
     }
 
-    fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>> {
+    fn create_session(&self, context: &common::SessionContext) -> Option<Arc<dyn AgentSession>> {
         match ClaudeCodeSession::new(self.process_path.get().cloned(), context) {
             Ok(session) => {
                 let session_arc = Arc::new(session) as Arc<dyn AgentSession>;

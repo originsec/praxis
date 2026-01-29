@@ -6,7 +6,7 @@ impl DummyAgent {
     // Dummy agent is always "available" for testing purposes.
     //
 
-    pub(super) fn do_fingerprint_impl(&self) -> bool {
+    pub(super) async fn do_fingerprint_impl(&self) -> bool {
         true
     }
 }

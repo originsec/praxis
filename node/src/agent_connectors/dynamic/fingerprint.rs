@@ -7,7 +7,7 @@ impl DynamicAgent {
     // discovered endpoint.
     //
 
-    pub(super) fn do_fingerprint_impl(&self) -> bool {
+    pub(super) async fn do_fingerprint_impl(&self) -> bool {
         true
     }
 }
