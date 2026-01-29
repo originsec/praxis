@@ -1,10 +1,11 @@
-use crate::agent_connectors::utils::{enumerate_user_homes, SKIP_DIRS};
+use crate::agent_connectors::utils::{enumerate_user_homes, scan_directories_for_config_files};
 use common::{AgentSessionInfo, ConfigItem};
 use chrono::{DateTime, Utc};
 use std::collections::HashSet;
 use std::fs;
-use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
+use std::path::Path;
+
+const MAX_SCAN_DEPTH: usize = 7;
 
 pub struct EnumerationData {
     pub config_items: Vec<ConfigItem>,
@@ -13,7 +14,7 @@ pub struct EnumerationData {
 }
 
 pub fn enumerate() -> anyhow::Result<EnumerationData> {
-    common::log_info!("Enumerating Claude Code configurations across all users");
+    common::log_debug!("Enumerating Claude Code configurations across all users");
 
     let mut config_items = Vec::new();
     let mut sessions = Vec::new();
@@ -27,34 +28,109 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
     let user_homes_set: HashSet<&Path> = user_homes.iter().map(|p| p.as_path()).collect();
 
     for home in &user_homes {
-        //
-        // Global configuration files.
-        //
-
         collect_config_file(&home.join(".claude/settings.json"), "global_settings", &mut config_items);
         collect_config_file(&home.join(".claude.json"), "preferences", &mut config_items);
         collect_config_file(&home.join(".claude/CLAUDE.md"), "global_instructions", &mut config_items);
-
-        //
-        // Discover sessions.
-        //
 
         discover_sessions(home, &mut sessions)?;
     }
 
     //
-    // Use walkdir to scan from each user home for .claude directories.
+    // Scan for project-level settings.json in .claude directories.
     //
 
-    common::log_debug!("Scanning for project configs from user home directories...");
-
-    for home in &user_homes {
-        scan_home_for_projects(home, &user_homes_set, &mut config_items, &mut project_paths_set);
-    }
+    let settings_configs = scan_directories_for_config_files(
+        &user_homes,
+        "settings.json",
+        |path| {
+            if let Some(parent) = path.parent() {
+                if parent.file_name().map_or(false, |n| n == ".claude") {
+                    if let Some(project_dir) = parent.parent() {
+                        if !user_homes_set.contains(project_dir) {
+                            let project_path = project_dir.to_string_lossy().to_string();
+                            project_paths_set.insert(project_path.clone());
+                            return format!("project_settings:{}", project_path);
+                        }
+                    }
+                }
+            }
+            String::new()
+        },
+        MAX_SCAN_DEPTH,
+    );
+    config_items.extend(settings_configs.into_iter().filter(|item| !item.config_type.is_empty()));
 
     //
-    // Convert project_paths to sorted vec.
+    // Scan for project-level settings.local.json in .claude directories.
     //
+
+    let local_settings_configs = scan_directories_for_config_files(
+        &user_homes,
+        "settings.local.json",
+        |path| {
+            if let Some(parent) = path.parent() {
+                if parent.file_name().map_or(false, |n| n == ".claude") {
+                    if let Some(project_dir) = parent.parent() {
+                        if !user_homes_set.contains(project_dir) {
+                            let project_path = project_dir.to_string_lossy().to_string();
+                            project_paths_set.insert(project_path.clone());
+                            return format!("project_settings_local:{}", project_path);
+                        }
+                    }
+                }
+            }
+            String::new()
+        },
+        MAX_SCAN_DEPTH,
+    );
+    config_items.extend(local_settings_configs.into_iter().filter(|item| !item.config_type.is_empty()));
+
+    //
+    // Scan for CLAUDE.md files.
+    //
+
+    let instructions_configs = scan_directories_for_config_files(
+        &user_homes,
+        "CLAUDE.md",
+        |path| {
+            if let Some(parent) = path.parent() {
+                if user_homes_set.contains(parent) {
+                    return String::new();
+                }
+                if parent.file_name().map_or(false, |n| n == ".claude") {
+                    return String::new();
+                }
+                let project_path = parent.to_string_lossy().to_string();
+                project_paths_set.insert(project_path.clone());
+                return format!("project_instructions:{}", project_path);
+            }
+            String::new()
+        },
+        MAX_SCAN_DEPTH,
+    );
+    config_items.extend(instructions_configs.into_iter().filter(|item| !item.config_type.is_empty()));
+
+    //
+    // Scan for .mcp.json files.
+    //
+
+    let mcp_configs = scan_directories_for_config_files(
+        &user_homes,
+        ".mcp.json",
+        |path| {
+            if let Some(parent) = path.parent() {
+                if user_homes_set.contains(parent) {
+                    return String::new();
+                }
+                let project_path = parent.to_string_lossy().to_string();
+                project_paths_set.insert(project_path.clone());
+                return format!("project_mcp:{}", project_path);
+            }
+            String::new()
+        },
+        MAX_SCAN_DEPTH,
+    );
+    config_items.extend(mcp_configs.into_iter().filter(|item| !item.config_type.is_empty()));
 
     let mut project_paths: Vec<String> = project_paths_set.into_iter().collect();
     project_paths.sort();
@@ -73,164 +149,12 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
     })
 }
 
-fn scan_home_for_projects(
-    home: &PathBuf,
-    user_homes_set: &HashSet<&Path>,
-    config_items: &mut Vec<ConfigItem>,
-    project_paths_set: &mut HashSet<String>,
-) {
-    let walker = WalkDir::new(home)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|e| {
-            let name = e.file_name().to_string_lossy();
-            //
-            // Skip hidden directories (except .claude which we're looking for)
-            // and skip known non-project directories.
-            //
-            if name.starts_with('.') && name != ".claude" {
-                return false;
-            }
-            !SKIP_DIRS.contains(&name.as_ref())
-        });
-
-    for entry in walker.filter_map(|e| e.ok()) {
-        let path = entry.path();
-
-        //
-        // We're looking for .claude directories.
-        //
-        if path.is_dir() && path.file_name().map_or(false, |n| n == ".claude") {
-            //
-            // The project path is the parent of .claude.
-            //
-            if let Some(project_dir) = path.parent() {
-                let project_path = project_dir.to_string_lossy().to_string();
-
-                //
-                // Skip any user home's ~/.claude directory.
-                //
-                if user_homes_set.contains(project_dir) {
-                    continue;
-                }
-
-                //
-                // Collect project-level configs.
-                //
-                collect_project_configs(project_dir, path, &project_path, config_items);
-                project_paths_set.insert(project_path);
-            }
-        }
-
-        //
-        // Also check for standalone CLAUDE.md or .mcp.json without .claude dir.
-        //
-        if path.is_file() {
-            let file_name = path.file_name().map(|n| n.to_string_lossy().to_string());
-            if let (Some(name), Some(parent)) = (file_name, path.parent()) {
-                if (name == "CLAUDE.md" || name == ".mcp.json") && !parent.join(".claude").exists() {
-                    let project_path = parent.to_string_lossy().to_string();
-
-                    //
-                    // Skip any user home directory.
-                    //
-                    if user_homes_set.contains(parent) {
-                        continue;
-                    }
-
-                    if name == "CLAUDE.md" {
-                        if let Ok(contents) = fs::read_to_string(path) {
-                            config_items.push(ConfigItem {
-                                path: path.to_string_lossy().to_string(),
-                                contents,
-                                config_type: format!("project_instructions:{}", project_path),
-                            });
-                            project_paths_set.insert(project_path);
-                        }
-                    } else if name == ".mcp.json" {
-                        if let Ok(contents) = fs::read_to_string(path) {
-                            config_items.push(ConfigItem {
-                                path: path.to_string_lossy().to_string(),
-                                contents,
-                                config_type: format!("project_mcp:{}", project_path),
-                            });
-                            project_paths_set.insert(project_path);
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 fn collect_config_file(path: &Path, config_type: &str, config_items: &mut Vec<ConfigItem>) {
     if let Ok(contents) = fs::read_to_string(path) {
         config_items.push(ConfigItem {
             path: path.to_string_lossy().to_string(),
             contents,
             config_type: config_type.to_string(),
-        });
-    }
-}
-
-fn collect_project_configs(
-    project_dir: &Path,
-    claude_dir: &Path,
-    project_path: &str,
-    config_items: &mut Vec<ConfigItem>,
-) {
-    //
-    // .claude/settings.json.
-    //
-    if let Ok(contents) = fs::read_to_string(claude_dir.join("settings.json")) {
-        config_items.push(ConfigItem {
-            path: claude_dir.join("settings.json").to_string_lossy().to_string(),
-            contents,
-            config_type: format!("project_settings:{}", project_path),
-        });
-    }
-
-    //
-    // .claude/settings.local.json.
-    //
-    if let Ok(contents) = fs::read_to_string(claude_dir.join("settings.local.json")) {
-        config_items.push(ConfigItem {
-            path: claude_dir.join("settings.local.json").to_string_lossy().to_string(),
-            contents,
-            config_type: format!("project_settings_local:{}", project_path),
-        });
-    }
-
-    //
-    // CLAUDE.md (in project root).
-    //
-    if let Ok(contents) = fs::read_to_string(project_dir.join("CLAUDE.md")) {
-        config_items.push(ConfigItem {
-            path: project_dir.join("CLAUDE.md").to_string_lossy().to_string(),
-            contents,
-            config_type: format!("project_instructions:{}", project_path),
-        });
-    }
-
-    //
-    // .claude/CLAUDE.md.
-    //
-    if let Ok(contents) = fs::read_to_string(claude_dir.join("CLAUDE.md")) {
-        config_items.push(ConfigItem {
-            path: claude_dir.join("CLAUDE.md").to_string_lossy().to_string(),
-            contents,
-            config_type: format!("project_instructions:{}", project_path),
-        });
-    }
-
-    //
-    // .mcp.json (in project root).
-    //
-    if let Ok(contents) = fs::read_to_string(project_dir.join(".mcp.json")) {
-        config_items.push(ConfigItem {
-            path: project_dir.join(".mcp.json").to_string_lossy().to_string(),
-            contents,
-            config_type: format!("project_mcp:{}", project_path),
         });
     }
 }
