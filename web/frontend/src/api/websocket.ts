@@ -11,7 +11,14 @@ export class WebSocketClient {
   private reconnectDelay = 1000;
   private isConnecting = false;
 
-  constructor(url: string = `ws://${window.location.host}/ws`) {
+  constructor(url?: string) {
+    //
+    // Use wss:// for HTTPS and ws:// for HTTP.
+    //
+    if (!url) {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      url = `${protocol}//${window.location.host}/ws`;
+    }
     this.url = url;
   }
 

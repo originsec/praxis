@@ -190,6 +190,9 @@ async fn listen_to_queues(
     let node_id_for_terminal = node_id.clone();
     tokio::spawn(async move {
         common::log_info!("Terminal output forwarder task started");
+        let mut consecutive_failures = 0u32;
+        let mut last_error_log_time = std::time::Instant::now();
+
         while let Some(event) = terminal_output_rx.recv().await {
             if event.closed {
                 common::log_info!("Terminal {} closed event received", event.terminal_id);
@@ -206,11 +209,35 @@ async fn listen_to_queues(
                 };
 
                 let message = NodeSignalMessage::TerminalOutput(output);
-                if let Err(e) = publish_json(&channel_for_terminal, NODE_SIGNAL_QUEUE, &message).await
-                {
-                    common::log_error!("Failed to send terminal output: {}", e);
-                } else {
-                    common::log_info!("Terminal output sent to server successfully");
+                match publish_json(&channel_for_terminal, NODE_SIGNAL_QUEUE, &message).await {
+                    Ok(_) => {
+                        common::log_info!("Terminal output sent to server successfully");
+                        if consecutive_failures > 0 {
+                            common::log_info!(
+                                "Terminal forwarder recovered after {} failures",
+                                consecutive_failures
+                            );
+                            consecutive_failures = 0;
+                        }
+                    }
+                    Err(e) => {
+                        consecutive_failures += 1;
+                        let should_log = consecutive_failures <= 3
+                            || last_error_log_time.elapsed().as_secs() >= 10;
+
+                        if should_log {
+                            common::log_error!(
+                                "Failed to send terminal output (failure #{}): {}",
+                                consecutive_failures,
+                                e
+                            );
+                            last_error_log_time = std::time::Instant::now();
+                        }
+
+                        if consecutive_failures > 3 {
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        }
+                    }
                 }
             }
         }
@@ -223,6 +250,9 @@ async fn listen_to_queues(
     let channel_for_traffic = channel.clone();
     tokio::spawn(async move {
         common::log_info!("Traffic forwarder task started");
+        let mut consecutive_failures = 0u32;
+        let mut last_error_log_time = std::time::Instant::now();
+
         while let Some(entry) = traffic_rx.recv().await {
             common::log_info!(
                 "Forwarding intercepted traffic: {} {} to {}",
@@ -232,9 +262,34 @@ async fn listen_to_queues(
             );
 
             let message = NodeSignalMessage::InterceptedTraffic(entry);
-            if let Err(e) = publish_json(&channel_for_traffic, NODE_SIGNAL_QUEUE, &message).await
-            {
-                common::log_error!("Failed to send intercepted traffic: {}", e);
+            match publish_json(&channel_for_traffic, NODE_SIGNAL_QUEUE, &message).await {
+                Ok(_) => {
+                    if consecutive_failures > 0 {
+                        common::log_info!(
+                            "Traffic forwarder recovered after {} failures",
+                            consecutive_failures
+                        );
+                        consecutive_failures = 0;
+                    }
+                }
+                Err(e) => {
+                    consecutive_failures += 1;
+                    let should_log = consecutive_failures <= 3
+                        || last_error_log_time.elapsed().as_secs() >= 10;
+
+                    if should_log {
+                        common::log_error!(
+                            "Failed to send intercepted traffic (failure #{}): {}",
+                            consecutive_failures,
+                            e
+                        );
+                        last_error_log_time = std::time::Instant::now();
+                    }
+
+                    if consecutive_failures > 3 {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+                }
             }
         }
         common::log_info!("Traffic forwarder task ended");
@@ -246,13 +301,50 @@ async fn listen_to_queues(
     let channel_for_event_log = channel.clone();
     tokio::spawn(async move {
         common::log_info!("Event log forwarder task started");
+        let mut consecutive_failures = 0u32;
+        let mut last_error_log_time = std::time::Instant::now();
+
         while let Some(entry) = event_log_rx.recv().await {
-            if let Err(e) = publish_json(&channel_for_event_log, NODE_EVENT_LOG_QUEUE, &entry).await
-            {
-                //
-                // Use tracing directly here to avoid infinite recursion.
-                //
-                common::log_error!("Failed to send event log entry: {}", e);
+            match publish_json(&channel_for_event_log, NODE_EVENT_LOG_QUEUE, &entry).await {
+                Ok(_) => {
+                    //
+                    // Success - reset failure counter and log recovery if needed.
+                    //
+                    if consecutive_failures > 0 {
+                        common::log_info!(
+                            "Event log forwarder recovered after {} failures",
+                            consecutive_failures
+                        );
+                        consecutive_failures = 0;
+                    }
+                }
+                Err(e) => {
+                    consecutive_failures += 1;
+
+                    //
+                    // Only log errors if:
+                    // 1. It's one of the first 3 failures, OR
+                    // 2. More than 10 seconds since last error log.
+                    //
+                    let should_log = consecutive_failures <= 3
+                        || last_error_log_time.elapsed().as_secs() >= 10;
+
+                    if should_log {
+                        common::log_error!(
+                            "Failed to send event log entry (failure #{}): {}",
+                            consecutive_failures,
+                            e
+                        );
+                        last_error_log_time = std::time::Instant::now();
+                    }
+
+                    //
+                    // Add small delay after failures to avoid tight error loops.
+                    //
+                    if consecutive_failures > 3 {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+                }
             }
         }
         common::log_info!("Event log forwarder task ended");
