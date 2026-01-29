@@ -30,7 +30,7 @@ use tracing::{error, info, warn};
 // Import from new modules.
 //
 use chain_execution::ChainExecutor;
-use database::{Database, OperationDefinition};
+use database::{Database, DatabaseConfig, OperationDefinition};
 use handlers::{ClientMessageHandler, NodeMessageHandler};
 use semantic_ops::{SemanticOpsManager, ResponseTracker};
 use state::{NodeRegistry, ClientRegistry, PendingCommands};
@@ -454,32 +454,41 @@ pub async fn run() -> Result<()> {
     let client_handler = Arc::new(ClientMessageHandler::new(client_publish_channel.clone(), client_registry.clone(), node_registry.clone()));
 
     //
-    // Initialize semantic operations components.
-    // Use PRAXIS_DB_PATH env var if set, otherwise default to home directory.
+    // Initialize database with configuration from environment.
+    // Supports SQLite (default) or PostgreSQL via PRAXIS_DATABASE_URL.
     //
-    let db_path = match std::env::var("PRAXIS_DB_PATH") {
-        Ok(path) => std::path::PathBuf::from(path),
-        Err(_) => dirs::home_dir()
-            .expect("Failed to get home directory")
-            .join(".praxis_operations.db"),
-    };
-    let database = Arc::new(Database::new(&db_path)?);
+    let db_config = DatabaseConfig::from_env();
+    info!("Database configuration: {}", db_config.display_name());
+
+    let database = Arc::new(Database::new(&db_config).await?);
 
     //
     // Mark any running operations as failed (service restart).
+    // Non-critical - log warning and continue if this fails.
     //
-    let failed_count = database.mark_running_as_failed()?;
-    if failed_count > 0 {
-        info!("Marked {} running operations as failed due to service restart", failed_count);
-            }
+    match database.mark_running_as_failed().await {
+        Ok(failed_count) if failed_count > 0 => {
+            info!("Marked {} running operations as failed due to service restart", failed_count);
+        }
+        Err(e) => {
+            warn!("Failed to mark running operations as failed: {} (continuing anyway)", e);
+        }
+        _ => {}
+    }
 
     //
     // Mark any running chain executions as failed (service restart).
+    // Non-critical - log warning and continue if this fails.
     //
-    let failed_chains = database.mark_running_chain_executions_as_failed()?;
-    if failed_chains > 0 {
-        info!("Marked {} running chain executions as failed due to service restart", failed_chains);
-            }
+    match database.mark_running_chain_executions_as_failed().await {
+        Ok(failed_chains) if failed_chains > 0 => {
+            info!("Marked {} running chain executions as failed due to service restart", failed_chains);
+        }
+        Err(e) => {
+            warn!("Failed to mark running chain executions as failed: {} (continuing anyway)", e);
+        }
+        _ => {}
+    }
 
     let service_config = Arc::new(RwLock::new(config::ServiceConfig::load()?));
     let response_tracker = Arc::new(ResponseTracker::new());
@@ -495,7 +504,7 @@ pub async fn run() -> Result<()> {
         response_tracker.clone(),
     ));
 
-    info!("Initialized semantic operations manager with database at {:?}", db_path);
+    info!("Initialized semantic operations manager");
 
     //
     // Initialize chain executor.
@@ -515,7 +524,7 @@ pub async fn run() -> Result<()> {
     let event_log_database = database.clone();
     tokio::spawn(async move {
         while let Some(entry) = event_log_rx.recv().await {
-            if let Err(e) = event_log_database.insert_event_log(&entry) {
+            if let Err(e) = event_log_database.insert_event_log(&entry).await {
                 error!("Failed to insert event log entry: {}", e);
             }
         }
@@ -576,7 +585,7 @@ pub async fn run() -> Result<()> {
                 Ok(delivery) => {
                     match serde_json::from_slice::<common::ApplicationLogEntry>(&delivery.data) {
                         Ok(entry) => {
-                            if let Err(e) = database_for_web_logs.insert_event_log(&entry) {
+                            if let Err(e) = database_for_web_logs.insert_event_log(&entry).await {
                                 error!("Failed to insert web event log: {}", e);
                             }
                         }
@@ -603,7 +612,7 @@ pub async fn run() -> Result<()> {
                 Ok(delivery) => {
                     match serde_json::from_slice::<common::ApplicationLogEntry>(&delivery.data) {
                         Ok(entry) => {
-                            if let Err(e) = database_for_node_logs.insert_event_log(&entry) {
+                            if let Err(e) = database_for_node_logs.insert_event_log(&entry).await {
                                 error!("Failed to insert node event log: {}", e);
                             }
                         }
@@ -703,7 +712,7 @@ pub async fn run() -> Result<()> {
             // we need to
             // broadcast regardless of has_running status).
             //
-            let updates = match ops_manager_broadcast.get_all_updates() {
+            let updates = match ops_manager_broadcast.get_all_updates().await {
                 Ok(u) => u,
                 Err(e) => {
                     error!("Failed to get operation updates: {}", e);
@@ -871,14 +880,14 @@ pub async fn run() -> Result<()> {
                                         // Store intercepted traffic in database
                                         // and check for rule matches.
                                         //
-                                        match database.insert_traffic(&entry) {
+                                        match database.insert_traffic(&entry).await {
                                             Ok(traffic_id) => {
                                                 info!("Stored traffic entry id={} for {}", traffic_id, entry.url);
                                                 //
                                                 // Check against rules and
                                                 // insert matches.
                                                 //
-                                                match database.check_and_insert_matches(traffic_id, &entry) {
+                                                match database.check_and_insert_matches(traffic_id, &entry).await {
                                                     Ok(matches) => {
                                                         //
                                                         // Process summarization
@@ -904,7 +913,7 @@ pub async fn run() -> Result<()> {
                                                                     ).await;
                                                                     if result.success {
                                                                         if let Some(summary) = result.summary {
-                                                                            if let Err(e) = db.update_match_summary(match_id, &summary) {
+                                                                            if let Err(e) = db.update_match_summary(match_id, &summary).await {
                                                                                 error!("Failed to update match summary: {}", e);
                                                                             }
                                                                         }
@@ -923,7 +932,7 @@ pub async fn run() -> Result<()> {
                                                 // Periodically prune old
                                                 // traffic (7-day retention).
                                                 //
-                                                let _ = database.prune_old_traffic();
+                                                let _ = database.prune_old_traffic().await;
                                             }
                                             Err(e) => {
                                                 error!("Failed to store intercepted traffic: {}", e);
@@ -958,7 +967,7 @@ pub async fn run() -> Result<()> {
                                         //
                                         // Store in database.
                                         //
-                                        if let Err(e) = database.upsert_discovered_endpoint(&endpoint) {
+                                        if let Err(e) = database.upsert_discovered_endpoint(&endpoint).await {
                                             error!("Failed to store discovered endpoint: {}", e);
                                         }
                                     }
@@ -975,7 +984,7 @@ pub async fn run() -> Result<()> {
                                         //
                                         // Store in database.
                                         //
-                                        if let Err(e) = database.upsert_recon_result(&node_id, &agent_short_name, &recon_result, is_semantic) {
+                                        if let Err(e) = database.upsert_recon_result(&node_id, &agent_short_name, &recon_result, is_semantic).await {
                                             error!("Failed to store recon result: {}", e);
                                         }
                                     }
@@ -1071,7 +1080,7 @@ pub async fn run() -> Result<()> {
                                                 // Broadcast immediate update to
                                                 // all clients.
                                                 //
-                                                if let Ok(Some(update)) = semantic_ops_manager.get_operation_update(&operation_id) {
+                                                if let Ok(Some(update)) = semantic_ops_manager.get_operation_update(&operation_id).await {
                                                     let clients = client_registry.list().await;
                                                     let message = ClientDirectMessage::SemanticOpUpdate(update);
                                                     for client in clients {
@@ -1090,12 +1099,12 @@ pub async fn run() -> Result<()> {
                                         match semantic_ops_manager.cancel_operation(&operation_id).await {
                                             Ok(()) => {
                                                 info!("Cancelled operation {}", operation_id.get(..8).unwrap_or(&operation_id));
-                                                
+
                                                 //
                                                 // Broadcast update to all
                                                 // clients.
                                                 //
-                                                if let Ok(Some(update)) = semantic_ops_manager.get_operation_update(&operation_id) {
+                                                if let Ok(Some(update)) = semantic_ops_manager.get_operation_update(&operation_id).await {
                                                     let clients = client_registry.list().await;
                                                     let message = ClientDirectMessage::SemanticOpUpdate(update);
                                                     for client in clients {
@@ -1111,10 +1120,10 @@ pub async fn run() -> Result<()> {
                                     ClientSignalMessage::SemanticOpRemove { operation_id } => {
                                         info!("Received SemanticOpRemove for operation {}", &operation_id[..8.min(operation_id.len())]);
 
-                                        match semantic_ops_manager.remove_operation(&operation_id) {
+                                        match semantic_ops_manager.remove_operation(&operation_id).await {
                                             Ok(()) => {
                                                 info!("Removed operation {}", &operation_id[..8.min(operation_id.len())]);
-                                                
+
                                                 //
                                                 // Broadcast update to all
                                                 // clients - operation is now
@@ -1127,7 +1136,7 @@ pub async fn run() -> Result<()> {
                                                     // refresh by requesting all
                                                     // updates.
                                                     //
-                                                    if let Ok(updates) = semantic_ops_manager.get_all_updates() {
+                                                    if let Ok(updates) = semantic_ops_manager.get_all_updates().await {
                                                         let message = ClientDirectMessage::SemanticOpList(updates);
                                                         let _ = send_to_client(&client_publish_channel, &client.id, message).await;
                                                     }
@@ -1146,7 +1155,7 @@ pub async fn run() -> Result<()> {
                                         //
                                         // Clear finished operations.
                                         //
-                                        match semantic_ops_manager.clear_finished_operations() {
+                                        match semantic_ops_manager.clear_finished_operations().await {
                                             Ok(count) => {
                                                 info!("Cleared {} finished operation(s)", count);
                                                 total_cleared += count;
@@ -1165,7 +1174,7 @@ pub async fn run() -> Result<()> {
                                             .map(|n| n.id.clone())
                                             .collect();
 
-                                        match semantic_ops_manager.clear_orphaned_queued_operations(&active_node_ids) {
+                                        match semantic_ops_manager.clear_orphaned_queued_operations(&active_node_ids).await {
                                             Ok(count) => {
                                                 if count > 0 {
                                                     info!("Cleared {} orphaned queued operation(s)", count);
@@ -1183,7 +1192,7 @@ pub async fn run() -> Result<()> {
                                         //
                                         let clients = client_registry.list().await;
                                         for client in clients {
-                                            if let Ok(updates) = semantic_ops_manager.get_all_updates() {
+                                            if let Ok(updates) = semantic_ops_manager.get_all_updates().await {
                                                 let message = ClientDirectMessage::SemanticOpList(updates);
                                                 let _ = send_to_client(&client_publish_channel, &client.id, message).await;
                                             }
@@ -1192,7 +1201,7 @@ pub async fn run() -> Result<()> {
                                     ClientSignalMessage::SemanticOpListRequest => {
                                         info!("Received SemanticOpListRequest");
 
-                                        match semantic_ops_manager.get_all_updates() {
+                                        match semantic_ops_manager.get_all_updates().await {
                                             Ok(updates) => {
                                                 //
                                                 // We need to extract the
@@ -1278,7 +1287,7 @@ pub async fn run() -> Result<()> {
                                         match parse_result {
                                             Ok(definition) => {
                                                 let full_name = definition.full_name.clone();
-                                                match database.upsert_operation_definition(&definition) {
+                                                match database.upsert_operation_definition(&definition).await {
                                                     Ok(()) => {
                                                         info!("Added/updated operation definition: {}", full_name);
                                                                                                                 let message = ClientDirectMessage::OpDefAdded { full_name };
@@ -1303,7 +1312,7 @@ pub async fn run() -> Result<()> {
                                     ClientSignalMessage::OpDefList { client_id } => {
                                         info!("Received OpDefList from client {}", &client_id[..8.min(client_id.len())]);
 
-                                        match database.list_operation_definitions() {
+                                        match database.list_operation_definitions().await {
                                             Ok(definitions) => {
                                                 info!("Found {} operation definitions in database", definitions.len());
                                                 let infos: Vec<_> = definitions.iter().map(|d| d.to_info()).collect();
@@ -1322,7 +1331,7 @@ pub async fn run() -> Result<()> {
                                     ClientSignalMessage::OpDefDelete { client_id, full_name } => {
                                         info!("Received OpDefDelete for {} from client {}", full_name, &client_id[..8.min(client_id.len())]);
 
-                                        match database.delete_operation_definition(&full_name) {
+                                        match database.delete_operation_definition(&full_name).await {
                                             Ok(success) => {
                                                 if success {
                                                     info!("Deleted operation definition: {}", full_name);
@@ -1342,7 +1351,7 @@ pub async fn run() -> Result<()> {
                                     ClientSignalMessage::OpDefGet { client_id, full_name } => {
                                         info!("Received OpDefGet for {} from client {}", full_name, &client_id[..8.min(client_id.len())]);
 
-                                        match database.get_operation_definition(&full_name) {
+                                        match database.get_operation_definition(&full_name).await {
                                             Ok(definition) => {
                                                 let info = definition.map(|d| d.to_info());
                                                 let message = ClientDirectMessage::OpDefGetResponse { definition: info };
@@ -1364,7 +1373,7 @@ pub async fn run() -> Result<()> {
                                     ClientSignalMessage::TrafficLogRequest { client_id, filters } => {
                                         info!("Received TrafficLogRequest from client {}", &client_id[..8.min(client_id.len())]);
 
-                                        match database.query_traffic(&filters) {
+                                        match database.query_traffic(&filters).await {
                                             Ok((entries, total_count)) => {
                                                 let message = ClientDirectMessage::TrafficLogResponse { entries, total_count };
                                                 if let Err(e) = send_to_client(&client_publish_channel, &client_id, message).await {
@@ -1379,7 +1388,7 @@ pub async fn run() -> Result<()> {
                                     ClientSignalMessage::TrafficMatchesRequest { client_id, rule_id, limit, offset } => {
                                         info!("Received TrafficMatchesRequest from client {}", &client_id[..8.min(client_id.len())]);
 
-                                        match database.query_matches(rule_id, limit, offset) {
+                                        match database.query_matches(rule_id, limit, offset).await {
                                             Ok((matches, total_count)) => {
                                                 let message = ClientDirectMessage::TrafficMatchesResponse { matches, total_count };
                                                 if let Err(e) = send_to_client(&client_publish_channel, &client_id, message).await {
@@ -1394,7 +1403,7 @@ pub async fn run() -> Result<()> {
                                     ClientSignalMessage::TrafficClear { client_id } => {
                                         info!("Received TrafficClear from client {}", &client_id[..8.min(client_id.len())]);
 
-                                        match database.clear_all_traffic() {
+                                        match database.clear_all_traffic().await {
                                             Ok(deleted_count) => {
                                                 info!("Cleared {} traffic entries", deleted_count);
                                                                                                 let message = ClientDirectMessage::TrafficCleared { deleted_count };
@@ -1410,7 +1419,7 @@ pub async fn run() -> Result<()> {
                                     ClientSignalMessage::TrafficSearchRequest { client_id, filters } => {
                                         info!("Received TrafficSearchRequest from client {} with pattern: {}", &client_id[..8.min(client_id.len())], filters.regex_pattern);
 
-                                        match database.search_traffic(&filters) {
+                                        match database.search_traffic(&filters).await {
                                             Ok((entries, total_count)) => {
                                                 info!("Traffic search found {} matches", total_count);
                                                 let message = ClientDirectMessage::TrafficSearchResponse { entries, total_count };
@@ -1426,7 +1435,7 @@ pub async fn run() -> Result<()> {
                                     ClientSignalMessage::InterceptRuleCreate { client_id, name, regex_pattern, target_direction, scope, summarization_prompt } => {
                                         info!("Received InterceptRuleCreate from client {}: {}", &client_id[..8.min(client_id.len())], name);
 
-                                        match database.insert_rule(&name, &regex_pattern, &target_direction, &scope, summarization_prompt.as_deref()) {
+                                        match database.insert_rule(&name, &regex_pattern, &target_direction, &scope, summarization_prompt.as_deref()).await {
                                             Ok(rule) => {
                                                 info!("Created intercept rule: {} (id={})", name, rule.id);
                                                                                                 let message = ClientDirectMessage::InterceptRuleCreated { rule };
@@ -1445,7 +1454,7 @@ pub async fn run() -> Result<()> {
                                         info!("Received InterceptRuleUpdate from client {} for rule {}", &client_id[..8.min(client_id.len())], id);
 
                                         let sp_ref = summarization_prompt.as_ref().map(|opt| opt.as_deref());
-                                        match database.update_rule(id, name.as_deref(), regex_pattern.as_deref(), target_direction.as_ref(), scope.as_ref(), enabled, sp_ref) {
+                                        match database.update_rule(id, name.as_deref(), regex_pattern.as_deref(), target_direction.as_ref(), scope.as_ref(), enabled, sp_ref).await {
                                             Ok(Some(rule)) => {
                                                 info!("Updated intercept rule: {}", id);
                                                                                                 let message = ClientDirectMessage::InterceptRuleUpdated { rule };
@@ -1467,7 +1476,7 @@ pub async fn run() -> Result<()> {
                                     ClientSignalMessage::InterceptRuleDelete { client_id, id } => {
                                         info!("Received InterceptRuleDelete from client {} for rule {}", &client_id[..8.min(client_id.len())], id);
 
-                                        match database.delete_rule(id) {
+                                        match database.delete_rule(id).await {
                                             Ok(success) => {
                                                 if success {
                                                     info!("Deleted intercept rule: {}", id);
@@ -1487,7 +1496,7 @@ pub async fn run() -> Result<()> {
                                     ClientSignalMessage::InterceptRuleList { client_id } => {
                                         info!("Received InterceptRuleList from client {}", &client_id[..8.min(client_id.len())]);
 
-                                        match database.list_rules() {
+                                        match database.list_rules().await {
                                             Ok(rules) => {
                                                 let message = ClientDirectMessage::InterceptRuleListResponse { rules };
                                                 if let Err(e) = send_to_client(&client_publish_channel, &client_id, message).await {
@@ -1617,9 +1626,9 @@ pub async fn run() -> Result<()> {
                                         info!("Received DiscoveredEndpointsList from client {}", &client_id[..8.min(client_id.len())]);
 
                                         let endpoints = if let Some(node_id) = node_id {
-                                            database.get_discovered_endpoints(&node_id).unwrap_or_default()
+                                            database.get_discovered_endpoints(&node_id).await.unwrap_or_default()
                                         } else {
-                                            database.get_all_discovered_endpoints().unwrap_or_default()
+                                            database.get_all_discovered_endpoints().await.unwrap_or_default()
                                         };
 
                                         let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::DiscoveredEndpointsListResponse { endpoints }).await;
@@ -1689,7 +1698,7 @@ pub async fn run() -> Result<()> {
                                             regex_filter.as_deref(),
                                             limit,
                                             offset,
-                                        ) {
+                                        ).await {
                                             Ok((entries, total_count)) => {
                                                 let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::ApplicationLogResponse {
                                                     node_id,
@@ -1705,7 +1714,7 @@ pub async fn run() -> Result<()> {
                                     ClientSignalMessage::ApplicationLogClear { client_id, node_id } => {
                                         info!("Received ApplicationLogClear from client {}", &client_id[..8.min(client_id.len())]);
 
-                                        match database.clear_event_log(node_id.as_deref()) {
+                                        match database.clear_event_log(node_id.as_deref()).await {
                                             Ok(deleted_count) => {
                                                 let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::ApplicationLogCleared {
                                                     deleted_count,
@@ -1725,7 +1734,7 @@ pub async fn run() -> Result<()> {
                                             &client_id[..8.min(client_id.len())],
                                             &node_id[..8.min(node_id.len())],
                                             agent_short_name);
-                                        match database.get_recon_result(&node_id, &agent_short_name) {
+                                        match database.get_recon_result(&node_id, &agent_short_name).await {
                                             Ok(Some(stored)) => {
                                                 common::log_info!("ReconGet response: found recon for {} {} (performed_at: {}, semantic: {})",
                                                     &node_id[..8.min(node_id.len())],
@@ -1771,7 +1780,7 @@ pub async fn run() -> Result<()> {
                                     //
                                     ClientSignalMessage::ChainDefList { client_id } => {
                                         info!("Received ChainDefList from client {}", &client_id[..8.min(client_id.len())]);
-                                        let chains = database.list_chains().unwrap_or_default();
+                                        let chains = database.list_chains().await.unwrap_or_default();
                                         let chain_infos: Vec<common::ChainDefinitionInfo> = chains.into_iter().map(|c| {
                                             common::ChainDefinitionInfo {
                                                 id: c.id,
@@ -1790,7 +1799,7 @@ pub async fn run() -> Result<()> {
                                     }
                                     ClientSignalMessage::ChainGet { client_id, chain_id } => {
                                         info!("Received ChainGet from client {} for chain {}", &client_id[..8.min(client_id.len())], chain_id);
-                                        let chain = database.get_chain(&chain_id).ok().flatten();
+                                        let chain = database.get_chain(&chain_id).await.ok().flatten();
                                         let chain_full = chain.map(|c| common::ChainDefinitionFull {
                                             id: c.id,
                                             name: c.name,
@@ -1841,7 +1850,7 @@ pub async fn run() -> Result<()> {
                                             let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::ChainError { message: e }).await;
                                         } else {
                                             let operation_count = db_chain.elements.iter().filter(|e| matches!(e, database::ChainElement::Operation { .. })).count();
-                                            match database.upsert_chain(&db_chain) {
+                                            match database.upsert_chain(&db_chain).await {
                                                 Ok(_) => {
                                                     let info = common::ChainDefinitionInfo {
                                                         id: db_chain.id,
@@ -1869,7 +1878,7 @@ pub async fn run() -> Result<()> {
                                         // Get existing chain to preserve
                                         // created_at.
                                         //
-                                        let existing = database.get_chain(&chain_id).ok().flatten();
+                                        let existing = database.get_chain(&chain_id).await.ok().flatten();
                                         let created_at = existing.map(|c| c.created_at).unwrap_or_else(chrono::Utc::now);
 
                                         let db_chain = database::ChainDefinition {
@@ -1898,7 +1907,7 @@ pub async fn run() -> Result<()> {
                                             let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::ChainError { message: e }).await;
                                         } else {
                                             let operation_count = db_chain.elements.iter().filter(|e| matches!(e, database::ChainElement::Operation { .. })).count();
-                                            match database.upsert_chain(&db_chain) {
+                                            match database.upsert_chain(&db_chain).await {
                                                 Ok(_) => {
                                                     let info = common::ChainDefinitionInfo {
                                                         id: db_chain.id,
@@ -1922,7 +1931,7 @@ pub async fn run() -> Result<()> {
                                     }
                                     ClientSignalMessage::ChainDelete { client_id, chain_id } => {
                                         info!("Received ChainDelete from client {} for chain {}", &client_id[..8.min(client_id.len())], chain_id);
-                                        let success = database.delete_chain(&chain_id).unwrap_or(false);
+                                        let success = database.delete_chain(&chain_id).await.unwrap_or(false);
                                         let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::ChainDeleted { chain_id, success }).await;
                                     }
                                     ClientSignalMessage::ChainRun { client_id, chain_id, node_id, agent_short_name } => {
@@ -1931,7 +1940,7 @@ pub async fn run() -> Result<()> {
                                         //
                                         // Get the chain definition.
                                         //
-                                        match database.get_chain(&chain_id) {
+                                        match database.get_chain(&chain_id).await {
                                             Ok(Some(chain)) => {
                                                 //
                                                 // Execute the chain.
@@ -1978,7 +1987,7 @@ pub async fn run() -> Result<()> {
                                         // Fetch from database to get historical
                                         // executions.
                                         //
-                                        let executions = match database.list_chain_executions(100) {
+                                        let executions = match database.list_chain_executions(100).await {
                                             Ok(records) => records.into_iter().map(|r| r.to_update()).collect(),
                                             Err(e) => {
                                                 error!("Failed to list chain executions: {}", e);
@@ -1993,7 +2002,7 @@ pub async fn run() -> Result<()> {
                                     }
                                     ClientSignalMessage::ChainExecutionRemove { execution_id } => {
                                         info!("Received ChainExecutionRemove for {}", &execution_id[..8.min(execution_id.len())]);
-                                        if let Err(e) = database.delete_chain_execution(&execution_id) {
+                                        if let Err(e) = database.delete_chain_execution(&execution_id).await {
                                             error!("Failed to delete chain execution: {}", e);
                                         }
                                         //
@@ -2004,7 +2013,7 @@ pub async fn run() -> Result<()> {
                                     }
                                     ClientSignalMessage::ChainExecutionClear => {
                                         info!("Received ChainExecutionClear");
-                                        match database.clear_finished_chain_executions() {
+                                        match database.clear_finished_chain_executions().await {
                                             Ok(count) => {
                                                 info!("Cleared {} finished chain executions", count);
                                             }

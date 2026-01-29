@@ -90,7 +90,7 @@ impl SemanticOpsManager {
         //
         // Look up the operation definition from the database.
         //
-        let definition = self.database.get_operation_definition(&operation_name)?
+        let definition = self.database.get_operation_definition(&operation_name).await?
             .ok_or_else(|| anyhow::anyhow!("Operation definition not found: {}", operation_name))?;
 
         //
@@ -152,7 +152,7 @@ impl SemanticOpsManager {
                 chain_execution_id: None,
             };
 
-            self.database.insert_operation(&record)?;
+            self.database.insert_operation(&record).await?;
 
             //
             // Update op_to_node mapping.
@@ -182,7 +182,7 @@ impl SemanticOpsManager {
                 chain_execution_id: None,
             };
 
-            self.database.insert_operation(&record)?;
+            self.database.insert_operation(&record).await?;
 
             //
             // Update op_to_node mapping.
@@ -252,7 +252,7 @@ impl SemanticOpsManager {
                 SemanticOpStatus::Cancelled,
                 Some(Utc::now()),
                 Some("Cancelled by user".to_string()),
-            )?;
+            ).await?;
 
             return Ok(());
         }
@@ -281,7 +281,7 @@ impl SemanticOpsManager {
                 SemanticOpStatus::Cancelled,
                 Some(Utc::now()),
                 Some("Cancelled by user".to_string()),
-            )?;
+            ).await?;
 
             //
             // Clean up op_to_node mapping.
@@ -295,11 +295,11 @@ impl SemanticOpsManager {
     }
 
     /// Remove an operation from the database (finished or queued, but not running)
-    pub fn remove_operation(&self, operation_id: &str) -> Result<()> {
+    pub async fn remove_operation(&self, operation_id: &str) -> Result<()> {
         //
         // Check if operation exists.
         //
-        let operation = self.database.get_operation(operation_id)
+        let operation = self.database.get_operation(operation_id).await
             .context("Failed to query operation")?
             .ok_or_else(|| anyhow::anyhow!("Operation not found"))?;
 
@@ -321,25 +321,33 @@ impl SemanticOpsManager {
 
                 if let Some(node_id) = node_id {
                     //
-                    // Remove from queue.
+                    // Remove from queue. Collect position updates first to avoid
+                    // holding lock across await.
                     //
-                    let mut removed = false;
-                    {
+                    let (removed, position_updates): (bool, Vec<(String, usize)>) = {
                         let mut queues_guard = self.queues.write().unwrap();
                         if let Some(node_queue) = queues_guard.get_mut(&node_id) {
                             if let Some(pos) = node_queue.iter().position(|op| op.operation_id == operation_id) {
                                 node_queue.remove(pos);
-                                removed = true;
-
-                                //
-                                // Update queue positions for remaining
-                                // operations.
-                                //
-                                for (idx, op) in node_queue.iter().enumerate() {
-                                    let _ = self.database.update_queue_position(&op.operation_id, Some(idx));
-                                }
+                                let updates: Vec<(String, usize)> = node_queue
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(idx, op)| (op.operation_id.clone(), idx))
+                                    .collect();
+                                (true, updates)
+                            } else {
+                                (false, Vec::new())
                             }
+                        } else {
+                            (false, Vec::new())
                         }
+                    };
+
+                    //
+                    // Update queue positions for remaining operations.
+                    //
+                    for (op_id, idx) in position_updates {
+                        let _ = self.database.update_queue_position(&op_id, Some(idx)).await;
                     }
 
                     if removed {
@@ -353,7 +361,7 @@ impl SemanticOpsManager {
                 //
                 // Delete from database.
                 //
-                self.database.delete_operation(operation_id)
+                self.database.delete_operation(operation_id).await
                     .context("Failed to delete operation")?;
             }
             _ => {
@@ -361,7 +369,7 @@ impl SemanticOpsManager {
                 // Finished operation (Completed, Failed, Cancelled)
                 // Just delete from database.
                 //
-                self.database.delete_operation(operation_id)
+                self.database.delete_operation(operation_id).await
                     .context("Failed to delete operation")?;
             }
         }
@@ -370,19 +378,19 @@ impl SemanticOpsManager {
     }
 
     /// Clear all finished operations (completed, failed, cancelled)
-    pub fn clear_finished_operations(&self) -> Result<usize> {
-        let count = self.database.clear_finished_operations()
+    pub async fn clear_finished_operations(&self) -> Result<usize> {
+        let count = self.database.clear_finished_operations().await
             .context("Failed to clear finished operations")?;
         Ok(count)
     }
 
     /// Clear queued operations for nodes that no longer exist
     /// Returns the number of operations cleared
-    pub fn clear_orphaned_queued_operations(&self, active_node_ids: &[String]) -> Result<usize> {
+    pub async fn clear_orphaned_queued_operations(&self, active_node_ids: &[String]) -> Result<usize> {
         //
         // Get all queued operations from database.
         //
-        let queued_ops = self.database.list_by_status(SemanticOpStatus::Queued)?;
+        let queued_ops = self.database.list_by_status(SemanticOpStatus::Queued).await?;
 
         let mut cleared_count = 0;
         for op in queued_ops {
@@ -413,12 +421,12 @@ impl SemanticOpsManager {
                     SemanticOpStatus::Cancelled,
                     Some(Utc::now()),
                     Some("Node no longer exists".to_string()),
-                )?;
+                ).await?;
 
                 //
                 // Then remove from database.
                 //
-                self.database.delete_operation(&op.operation_id)?;
+                self.database.delete_operation(&op.operation_id).await?;
 
                 cleared_count += 1;
             }
@@ -435,11 +443,11 @@ impl SemanticOpsManager {
     }
 
     /// Get all operation updates (for broadcasting and client requests)
-    pub fn get_all_updates(&self) -> Result<Vec<SemanticOpUpdate>> {
+    pub async fn get_all_updates(&self) -> Result<Vec<SemanticOpUpdate>> {
         //
         // Get recent operations from database.
         //
-        let records = self.database.list_operations(100)?;
+        let records = self.database.list_operations(100).await?;
 
         //
         // Convert to updates.
@@ -451,15 +459,15 @@ impl SemanticOpsManager {
 
     /// Get operation updates for a specific node
     #[allow(dead_code)]
-    pub fn get_node_updates(&self, node_id: &str) -> Result<Vec<SemanticOpUpdate>> {
-        let records = self.database.list_by_node(node_id)?;
+    pub async fn get_node_updates(&self, node_id: &str) -> Result<Vec<SemanticOpUpdate>> {
+        let records = self.database.list_by_node(node_id).await?;
         let updates: Vec<SemanticOpUpdate> = records.iter().map(|r| r.to_update()).collect();
         Ok(updates)
     }
 
     /// Get a specific operation update
-    pub fn get_operation_update(&self, operation_id: &str) -> Result<Option<SemanticOpUpdate>> {
-        if let Some(record) = self.database.get_operation(operation_id)? {
+    pub async fn get_operation_update(&self, operation_id: &str) -> Result<Option<SemanticOpUpdate>> {
+        if let Some(record) = self.database.get_operation(operation_id).await? {
             Ok(Some(record.to_update()))
         } else {
             Ok(None)
@@ -500,7 +508,7 @@ impl SemanticOpsManager {
         //
         // Update database to Running status.
         //
-        let _ = self.database.update_status(&operation_id, SemanticOpStatus::Running, None, None);
+        let _ = self.database.update_status(&operation_id, SemanticOpStatus::Running, None, None).await;
 
         //
         // Clone necessary references for the task.
@@ -551,13 +559,13 @@ impl SemanticOpsManager {
         //
         // Log the start of op execution with session management.
         //
-        let _ = database.append_output(&operation_id, &format!("Setting up session for agent '{}' on node {}...\n", agent_short_name, &node_id[..8.min(node_id.len())]));
+        let _ = database.append_output(&operation_id, &format!("Setting up session for agent '{}' on node {}...\n", agent_short_name, &node_id[..8.min(node_id.len())])).await;
 
         //
         // Step 1: Select the agent.
         //
         if let Err(e) = crate::semantic_ops::executor::select_agent(&node_id, &agent_short_name, &rabbitmq_channel, response_tracker.clone()).await {
-            let _ = database.update_status(&operation_id, SemanticOpStatus::Failed, Some(Utc::now()), Some(format!("Failed to select agent: {}", e)));
+            let _ = database.update_status(&operation_id, SemanticOpStatus::Failed, Some(Utc::now()), Some(format!("Failed to select agent: {}", e))).await;
             //
             // Clean up and continue to next op.
             //
@@ -565,18 +573,18 @@ impl SemanticOpsManager {
             op_to_node.write().unwrap().remove(&operation_id);
             return;
         }
-        let _ = database.append_output(&operation_id, &format!("Agent '{}' selected.\n", agent_short_name));
+        let _ = database.append_output(&operation_id, &format!("Agent '{}' selected.\n", agent_short_name)).await;
 
         //
         // Step 2: Create session (with YOLO mode from operation spec).
         //
         if let Err(e) = crate::semantic_ops::executor::create_session(&node_id, spec.yolo_mode, &rabbitmq_channel, response_tracker.clone()).await {
-            let _ = database.update_status(&operation_id, SemanticOpStatus::Failed, Some(Utc::now()), Some(format!("Failed to create session: {}", e)));
+            let _ = database.update_status(&operation_id, SemanticOpStatus::Failed, Some(Utc::now()), Some(format!("Failed to create session: {}", e))).await;
             running.write().unwrap().remove(&node_id);
             op_to_node.write().unwrap().remove(&operation_id);
             return;
         }
-        let _ = database.append_output(&operation_id, "Session created.\n");
+        let _ = database.append_output(&operation_id, "Session created.\n").await;
 
         //
         // Step 3: Execute operation (LLM config comes from service config)
@@ -620,7 +628,7 @@ impl SemanticOpsManager {
         // Step 4: Close session (always, regardless of result).
         //
         let _ = crate::semantic_ops::executor::close_session(&node_id, &rabbitmq_channel).await;
-        let _ = database.append_output(&operation_id, "Session closed.\n");
+        let _ = database.append_output(&operation_id, "Session closed.\n").await;
 
         //
         // Update database with result.
@@ -637,7 +645,7 @@ impl SemanticOpsManager {
             }
         };
 
-        let _ = database.update_status(&operation_id, status, Some(Utc::now()), result_text);
+        let _ = database.update_status(&operation_id, status, Some(Utc::now()), result_text).await;
 
         //
         // Remove from running.
@@ -666,15 +674,19 @@ impl SemanticOpsManager {
 
         if let Some(next_queued_op) = next_op {
             //
-            // Update queue positions for remaining operations.
+            // Update queue positions for remaining operations. Collect IDs first
+            // to avoid holding lock across await.
             //
-            {
+            let position_updates: Vec<(String, usize)> = {
                 let queues_guard = queues.read().unwrap();
                 if let Some(node_queue) = queues_guard.get(&node_id) {
-                    for (idx, op) in node_queue.iter().enumerate() {
-                        let _ = database.update_queue_position(&op.operation_id, Some(idx));
-                    }
+                    node_queue.iter().enumerate().map(|(idx, op)| (op.operation_id.clone(), idx)).collect()
+                } else {
+                    Vec::new()
                 }
+            };
+            for (op_id, idx) in position_updates {
+                let _ = database.update_queue_position(&op_id, Some(idx)).await;
             }
 
             let next_op_id = next_queued_op.operation_id.clone();
@@ -685,8 +697,8 @@ impl SemanticOpsManager {
             //
             // Update database to Running.
             //
-            let _ = database.update_status(&next_op_id, SemanticOpStatus::Running, None, None);
-            let _ = database.update_queue_position(&next_op_id, None);
+            let _ = database.update_status(&next_op_id, SemanticOpStatus::Running, None, None).await;
+            let _ = database.update_queue_position(&next_op_id, None).await;
 
             //
             // Create cancel channel for next operation.

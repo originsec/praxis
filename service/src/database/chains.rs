@@ -1,8 +1,9 @@
+use anyhow::Result;
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Result as SqliteResult};
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
 
-use super::Database;
+use super::{Database, DatabasePool};
 
 /// Maximum number of chain definitions to store
 const MAX_CHAINS: usize = 200;
@@ -465,129 +466,126 @@ fn migrate_chain_json(json: &str) -> Option<String> {
 }
 
 impl Database {
-    /// Initialize the chains schema
-    pub fn init_chains_schema(conn: &rusqlite::Connection) -> SqliteResult<()> {
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS operation_chains (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                description TEXT NOT NULL,
-                category TEXT NOT NULL,
-                definition TEXT NOT NULL,
-                disabled INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )",
-            [],
-        )?;
-
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_chains_category ON operation_chains(category)",
-            [],
-        )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_chains_name ON operation_chains(name)",
-            [],
-        )?;
-
-        Ok(())
-    }
-
     /// Insert or update a chain definition
-    pub fn upsert_chain(&self, chain: &ChainDefinition) -> SqliteResult<()> {
-        let conn = self.conn().lock().unwrap();
+    pub async fn upsert_chain(&self, chain: &ChainDefinition) -> Result<()> {
+        let definition_json = serde_json::to_string(&chain)?;
 
-        let definition_json = serde_json::to_string(&chain)
-            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-
-        conn.execute(
-            "INSERT INTO operation_chains (id, name, description, category, definition, disabled, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        let sql = "INSERT INTO operation_chains (id, name, description, category, definition, disabled, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              ON CONFLICT(id) DO UPDATE SET
                  name = excluded.name,
                  description = excluded.description,
                  category = excluded.category,
                  definition = excluded.definition,
                  disabled = excluded.disabled,
-                 updated_at = excluded.updated_at",
-            params![
-                chain.id,
-                chain.name,
-                chain.description,
-                chain.category,
-                definition_json,
-                if chain.disabled { 1 } else { 0 },
-                chain.created_at.to_rfc3339(),
-                chain.updated_at.to_rfc3339(),
-            ],
-        )?;
+                 updated_at = excluded.updated_at";
 
-        drop(conn);
-        self.prune_old_chains()?;
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query(sql)
+                    .bind(&chain.id)
+                    .bind(&chain.name)
+                    .bind(&chain.description)
+                    .bind(&chain.category)
+                    .bind(&definition_json)
+                    .bind(if chain.disabled { 1i32 } else { 0i32 })
+                    .bind(chain.created_at.to_rfc3339())
+                    .bind(chain.updated_at.to_rfc3339())
+                    .execute(pool)
+                    .await?;
+            }
+            DatabasePool::Postgres(pool) => {
+                sqlx::query(sql)
+                    .bind(&chain.id)
+                    .bind(&chain.name)
+                    .bind(&chain.description)
+                    .bind(&chain.category)
+                    .bind(&definition_json)
+                    .bind(if chain.disabled { 1i32 } else { 0i32 })
+                    .bind(chain.created_at.to_rfc3339())
+                    .bind(chain.updated_at.to_rfc3339())
+                    .execute(pool)
+                    .await?;
+            }
+        }
+
+        self.prune_old_chains().await?;
 
         Ok(())
     }
 
     /// Get a chain definition by ID
     /// Automatically migrates old format (SessionBox, positions) to new format
-    pub fn get_chain(&self, id: &str) -> SqliteResult<Option<ChainDefinition>> {
-        let conn = self.conn().lock().unwrap();
+    pub async fn get_chain(&self, id: &str) -> Result<Option<ChainDefinition>> {
+        let sql = "SELECT definition FROM operation_chains WHERE id = $1";
 
-        let mut stmt = conn.prepare(
-            "SELECT definition FROM operation_chains WHERE id = ?1",
-        )?;
+        let json_opt: Option<String> = match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let row = sqlx::query(sql)
+                    .bind(id)
+                    .fetch_optional(pool)
+                    .await?;
+                row.map(|r| r.get(0))
+            }
+            DatabasePool::Postgres(pool) => {
+                let row = sqlx::query(sql)
+                    .bind(id)
+                    .fetch_optional(pool)
+                    .await?;
+                row.map(|r| r.get(0))
+            }
+        };
 
-        let result = match stmt.query_row(params![id], |row| {
-            let definition_json: String = row.get(0)?;
-            Ok(definition_json)
-        }) {
-            Ok(json) => {
+        match json_opt {
+            Some(json) => {
                 //
                 // Try to deserialize directly first.
                 //
                 match serde_json::from_str::<ChainDefinition>(&json) {
-                    Ok(chain) => Some(chain),
+                    Ok(chain) => Ok(Some(chain)),
                     Err(_) => {
                         //
                         // Try migration for old format.
                         //
                         if let Some(migrated_json) = migrate_chain_json(&json) {
-                            let chain: ChainDefinition = serde_json::from_str(&migrated_json)
-                                .map_err(|e| rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e)))?;
-                            Some(chain)
+                            let chain: ChainDefinition = serde_json::from_str(&migrated_json)?;
+                            Ok(Some(chain))
                         } else {
                             //
                             // Migration failed, try original error.
                             //
-                            let chain: ChainDefinition = serde_json::from_str(&json)
-                                .map_err(|e| rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e)))?;
-                            Some(chain)
+                            let chain: ChainDefinition = serde_json::from_str(&json)?;
+                            Ok(Some(chain))
                         }
                     }
                 }
             }
-            Err(rusqlite::Error::QueryReturnedNoRows) => None,
-            Err(e) => return Err(e),
-        };
-
-        Ok(result)
+            None => Ok(None),
+        }
     }
 
     /// List all chain definitions (returns summary info)
     /// Automatically handles migration of old format chains
-    pub fn list_chains(&self) -> SqliteResult<Vec<ChainDefinitionInfo>> {
-        let conn = self.conn().lock().unwrap();
+    pub async fn list_chains(&self) -> Result<Vec<ChainDefinitionInfo>> {
+        let sql = "SELECT definition FROM operation_chains ORDER BY category, name";
 
-        let mut stmt = conn.prepare(
-            "SELECT definition FROM operation_chains ORDER BY category, name",
-        )?;
+        let rows: Vec<String> = match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let rows = sqlx::query(sql)
+                    .fetch_all(pool)
+                    .await?;
+                rows.iter().map(|r| r.get(0)).collect()
+            }
+            DatabasePool::Postgres(pool) => {
+                let rows = sqlx::query(sql)
+                    .fetch_all(pool)
+                    .await?;
+                rows.iter().map(|r| r.get(0)).collect()
+            }
+        };
 
-        let chains = stmt
-            .query_map([], |row| {
-                let definition_json: String = row.get(0)?;
-                Ok(definition_json)
-            })?
-            .filter_map(|r| r.ok())
+        let chains: Vec<ChainDefinitionInfo> = rows
+            .into_iter()
             .filter_map(|json| {
                 //
                 // Try direct deserialization first.
@@ -611,19 +609,28 @@ impl Database {
     /// List chain definitions by category
     /// Automatically handles migration of old format chains
     #[allow(dead_code)]
-    pub fn list_chains_by_category(&self, category: &str) -> SqliteResult<Vec<ChainDefinitionInfo>> {
-        let conn = self.conn().lock().unwrap();
+    pub async fn list_chains_by_category(&self, category: &str) -> Result<Vec<ChainDefinitionInfo>> {
+        let sql = "SELECT definition FROM operation_chains WHERE category = $1 ORDER BY name";
 
-        let mut stmt = conn.prepare(
-            "SELECT definition FROM operation_chains WHERE category = ?1 ORDER BY name",
-        )?;
+        let rows: Vec<String> = match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let rows = sqlx::query(sql)
+                    .bind(category)
+                    .fetch_all(pool)
+                    .await?;
+                rows.iter().map(|r| r.get(0)).collect()
+            }
+            DatabasePool::Postgres(pool) => {
+                let rows = sqlx::query(sql)
+                    .bind(category)
+                    .fetch_all(pool)
+                    .await?;
+                rows.iter().map(|r| r.get(0)).collect()
+            }
+        };
 
-        let chains = stmt
-            .query_map(params![category], |row| {
-                let definition_json: String = row.get(0)?;
-                Ok(definition_json)
-            })?
-            .filter_map(|r| r.ok())
+        let chains: Vec<ChainDefinitionInfo> = rows
+            .into_iter()
             .filter_map(|json| {
                 //
                 // Try direct deserialization first.
@@ -645,49 +652,79 @@ impl Database {
     }
 
     /// Delete a chain definition by ID
-    pub fn delete_chain(&self, id: &str) -> SqliteResult<bool> {
-        let conn = self.conn().lock().unwrap();
+    pub async fn delete_chain(&self, id: &str) -> Result<bool> {
+        let sql = "DELETE FROM operation_chains WHERE id = $1";
 
-        let count = conn.execute(
-            "DELETE FROM operation_chains WHERE id = ?1",
-            params![id],
-        )?;
+        let count = match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query(sql)
+                    .bind(id)
+                    .execute(pool)
+                    .await?
+                    .rows_affected()
+            }
+            DatabasePool::Postgres(pool) => {
+                sqlx::query(sql)
+                    .bind(id)
+                    .execute(pool)
+                    .await?
+                    .rows_affected()
+            }
+        };
 
         Ok(count > 0)
     }
 
     /// Count chain definitions
-    pub fn count_chains(&self) -> SqliteResult<usize> {
-        let conn = self.conn().lock().unwrap();
+    pub async fn count_chains(&self) -> Result<usize> {
+        let sql = "SELECT COUNT(*) FROM operation_chains";
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM operation_chains",
-            [],
-            |row| row.get(0),
-        )?;
+        let count: i64 = match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let row = sqlx::query(sql).fetch_one(pool).await?;
+                row.get(0)
+            }
+            DatabasePool::Postgres(pool) => {
+                let row = sqlx::query(sql).fetch_one(pool).await?;
+                row.get(0)
+            }
+        };
 
         Ok(count as usize)
     }
 
     /// Prune old chain definitions (keep only MAX_CHAINS)
-    fn prune_old_chains(&self) -> SqliteResult<usize> {
-        let count = self.count_chains()?;
+    async fn prune_old_chains(&self) -> Result<usize> {
+        let count = self.count_chains().await?;
 
         if count <= MAX_CHAINS {
             return Ok(0);
         }
 
         let to_delete = count - MAX_CHAINS;
-        let conn = self.conn().lock().unwrap();
 
-        let deleted = conn.execute(
-            "DELETE FROM operation_chains WHERE id IN (
+        let sql = "DELETE FROM operation_chains WHERE id IN (
                 SELECT id FROM operation_chains
-                ORDER BY updated_at ASC LIMIT ?1
-            )",
-            params![to_delete],
-        )?;
+                ORDER BY updated_at ASC LIMIT $1
+            )";
 
-        Ok(deleted)
+        let deleted = match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query(sql)
+                    .bind(to_delete as i64)
+                    .execute(pool)
+                    .await?
+                    .rows_affected()
+            }
+            DatabasePool::Postgres(pool) => {
+                sqlx::query(sql)
+                    .bind(to_delete as i64)
+                    .execute(pool)
+                    .await?
+                    .rows_affected()
+            }
+        };
+
+        Ok(deleted as usize)
     }
 }

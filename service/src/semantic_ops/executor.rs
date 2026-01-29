@@ -208,7 +208,7 @@ pub async fn execute_one_shot(
     //
     // Log the prompt being sent.
     //
-    let _ = database.append_output(operation_id, &fmt_outgoing("Sending prompt to agent", &spec.operation_prompt));
+    let _ = database.append_output(operation_id, &fmt_outgoing("Sending prompt to agent", &spec.operation_prompt)).await;
 
     //
     // Log to event log.
@@ -254,18 +254,18 @@ pub async fn execute_one_shot(
                             //
                             // Log the response.
                             //
-                            let _ = database.append_output(operation_id, &fmt_incoming("Agent response", &response));
+                            let _ = database.append_output(operation_id, &fmt_incoming("Agent response", &response)).await;
                             let response_preview: String = response.chars().take(100).collect();
                             common::log_info!("SemanticResponseReceived: op={} len={} response={}", &operation_id[..8], response.len(), response_preview);
                             Ok(response)
                         }
                         common::NodeCommandResult::Session(common::SessionCommandResult::TransactionCancelled { .. }) => {
-                            let _ = database.append_output(operation_id, &fmt_error("Transaction cancelled"));
+                            let _ = database.append_output(operation_id, &fmt_error("Transaction cancelled")).await;
                             common::log_error!("SemanticResponseError: op={} error=cancelled", &operation_id[..8]);
                             Err(anyhow::anyhow!("Transaction cancelled"))
                         }
                         common::NodeCommandResult::Error { message } => {
-                            let _ = database.append_output(operation_id, &fmt_error(&format!("Error: {}", message)));
+                            let _ = database.append_output(operation_id, &fmt_error(&format!("Error: {}", message))).await;
                             common::log_error!("SemanticResponseError: op={} error={}", &operation_id[..8], message);
                             Err(anyhow::anyhow!("Node error: {}", message))
                         }
@@ -274,7 +274,7 @@ pub async fn execute_one_shot(
                 }
                 Ok(Err(_)) => Err(anyhow::anyhow!("Response channel closed")),
                 Err(_) => {
-                    let _ = database.append_output(operation_id, &fmt_error(&format!("Operation timed out after {} seconds", spec.timeout)));
+                    let _ = database.append_output(operation_id, &fmt_error(&format!("Operation timed out after {} seconds", spec.timeout))).await;
                     common::log_error!("SemanticResponseError: op={} error=timeout", &operation_id[..8]);
                     //
                     // Close session if we created it.
@@ -287,7 +287,7 @@ pub async fn execute_one_shot(
             }
         }
         _ = &mut cancel_rx => {
-            let _ = database.append_output(operation_id, &fmt_error("Operation cancelled"));
+            let _ = database.append_output(operation_id, &fmt_error("Operation cancelled")).await;
             common::log_error!("SemanticResponseError: op={} error=cancelled", &operation_id[..8]);
             //
             // Close session if we created it.
@@ -440,9 +440,9 @@ pub async fn execute_agent_mode(
     //
     // Log the start of agent mode.
     //
-    let _ = database.append_output(operation_id, &fmt_agent_start(&provider_str, &model, spec.agent_iterations as usize));
+    let _ = database.append_output(operation_id, &fmt_agent_start(&provider_str, &model, spec.agent_iterations as usize)).await;
 
-    let _ = database.append_output(operation_id, &fmt_outgoing("Task", &spec.operation_prompt));
+    let _ = database.append_output(operation_id, &fmt_outgoing("Task", &spec.operation_prompt)).await;
 
     //
     // Agent iteration loop.
@@ -468,7 +468,7 @@ pub async fn execute_agent_mode(
         // Check for cancellation.
         //
         if cancel_rx.try_recv().is_ok() {
-            let _ = database.append_output(operation_id, &fmt_error("Operation cancelled"));
+            let _ = database.append_output(operation_id, &fmt_error("Operation cancelled")).await;
             //
             // Close session if we created it.
             //
@@ -481,7 +481,7 @@ pub async fn execute_agent_mode(
         //
         // Log iteration start.
         //
-        let _ = database.append_output(operation_id, &fmt_iteration(iteration as usize, spec.agent_iterations as usize));
+        let _ = database.append_output(operation_id, &fmt_iteration(iteration as usize, spec.agent_iterations as usize)).await;
 
         //
         // Build and execute AI request.
@@ -505,7 +505,7 @@ pub async fn execute_agent_mode(
         //
         // Log AI response.
         //
-        let _ = database.append_output(operation_id, &fmt_incoming("AI Response", &text_content));
+        let _ = database.append_output(operation_id, &fmt_incoming("AI Response", &text_content)).await;
 
         //
         // Check for completion signal first.
@@ -523,7 +523,7 @@ pub async fn execute_agent_mode(
                 //
                 // Log completion.
                 //
-                let _ = database.append_output(operation_id, &fmt_complete(&final_summary));
+                let _ = database.append_output(operation_id, &fmt_complete(&final_summary)).await;
 
                 //
                 // Add final assistant message to history.
@@ -560,7 +560,7 @@ pub async fn execute_agent_mode(
                 //
                 // Log tool call.
                 //
-                let _ = database.append_output(operation_id, &fmt_outgoing("Tool call: session_prompt", prompt_text));
+                let _ = database.append_output(operation_id, &fmt_outgoing("Tool call: session_prompt", prompt_text)).await;
 
                 //
                 // Send prompt to the remote agent.
@@ -579,18 +579,18 @@ pub async fn execute_agent_mode(
                         //
                         // Log tool result.
                         //
-                        let _ = database.append_output(operation_id, &fmt_incoming("Tool result", &response));
+                        let _ = database.append_output(operation_id, &fmt_incoming("Tool result", &response)).await;
                         response
                     }
                     Err(e) => {
                         let error_msg = format!("Tool error: {}", e);
-                        let _ = database.append_output(operation_id, &fmt_error(&error_msg));
+                        let _ = database.append_output(operation_id, &fmt_error(&error_msg)).await;
                         error_msg
                     }
                 }
             } else {
                 let error_msg = format!("Unknown tool: {}", tool_name);
-                let _ = database.append_output(operation_id, &fmt_error(&error_msg));
+                let _ = database.append_output(operation_id, &fmt_error(&error_msg)).await;
                 error_msg
             };
 

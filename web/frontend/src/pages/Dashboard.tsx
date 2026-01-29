@@ -117,8 +117,27 @@ export function Dashboard() {
         <StatCard
           icon={<Activity size={20} />}
           label="System Status"
-          value={state.connected ? 'Online' : 'Offline'}
-          color={state.connected ? 'text-[var(--accent-success)]' : 'text-[var(--accent-error)]'}
+          value={
+            !isConnected
+              ? 'Offline'
+              : state.systemState
+                ? 'Online'
+                : 'Connecting...'
+          }
+          subtext={
+            !isConnected
+              ? 'WebSocket disconnected'
+              : !state.systemState
+                ? 'Waiting for service'
+                : undefined
+          }
+          color={
+            !isConnected
+              ? 'text-[var(--accent-error)]'
+              : state.systemState
+                ? 'text-[var(--accent-success)]'
+                : 'text-[var(--accent-warning)]'
+          }
         />
       </div>
 
@@ -230,13 +249,24 @@ export function Dashboard() {
       // Connection warning.
       //
       */}
-      {!state.connected && (
+      {!isConnected && (
         <div className="bg-red-500/10 border border-red-500/30 p-4 flex items-center gap-3 ascii-box">
           <AlertCircle className="text-[var(--accent-error)]" size={20} />
           <div>
             <p className="text-xs font-medium text-[var(--accent-error)]">CONNECTION LOST</p>
             <p className="text-xs text-muted">
-              Attempting to reconnect to the Praxis service...
+              Attempting to reconnect to the Praxis web server...
+            </p>
+          </div>
+        </div>
+      )}
+      {isConnected && !state.systemState && (
+        <div className="bg-yellow-500/10 border border-yellow-500/30 p-4 flex items-center gap-3 ascii-box">
+          <AlertCircle className="text-[var(--accent-warning)]" size={20} />
+          <div>
+            <p className="text-xs font-medium text-[var(--accent-warning)]">SERVICE UNAVAILABLE</p>
+            <p className="text-xs text-muted">
+              Connected to web server but the Praxis service is not responding...
             </p>
           </div>
         </div>

@@ -101,7 +101,7 @@ impl ChainExecutor {
                 ended_at: s.ended_at,
                 created_at: Utc::now(),
             };
-            if let Err(e) = database.insert_chain_execution(&record) {
+            if let Err(e) = database.insert_chain_execution(&record).await {
                 common::log_error!("Failed to persist chain execution to database: {}", e);
             }
         }
@@ -157,7 +157,7 @@ impl ChainExecutor {
                     &exec_id,
                     ChainExecutionStatus::Running,
                     None,
-                ) {
+                ).await {
                     common::log_error!("Failed to update chain execution to Running: {}", e);
                 }
             }
@@ -219,14 +219,17 @@ impl ChainExecutor {
             // Persist final state to database (skip for implicit chains).
             //
             if !is_implicit {
-                let s = state_clone.read().unwrap();
+                let (status, elements, outputs, ended_at) = {
+                    let s = state_clone.read().unwrap();
+                    (s.status.clone(), s.elements.clone(), s.outputs.clone(), s.ended_at)
+                };
                 if let Err(e) = database_clone.update_chain_execution(
                     &exec_id,
-                    s.status.clone(),
-                    &s.elements,
-                    &s.outputs,
-                    s.ended_at,
-                ) {
+                    status,
+                    &elements,
+                    &outputs,
+                    ended_at,
+                ).await {
                     common::log_error!("Failed to persist final chain execution state: {}", e);
                 }
             }
@@ -474,6 +477,7 @@ impl ChainExecutor {
                     //
                     let op_def = database
                         .get_operation_definition(operation_name)
+                        .await
                         .ok()
                         .flatten()
                         .ok_or_else(|| {
@@ -538,7 +542,7 @@ impl ChainExecutor {
                         output: Some(format!("[Chain: {} | Element: {}]\n", execution_id, element_id)),
                         chain_execution_id: Some(execution_id.clone()),
                     };
-                    if let Err(e) = database.insert_operation(&op_record) {
+                    if let Err(e) = database.insert_operation(&op_record).await {
                         common::log_warn!("Failed to record chain operation to database: {}", e);
                     }
 
@@ -595,7 +599,7 @@ impl ChainExecutor {
                                 SemanticOpStatus::Completed,
                                 Some(end_time),
                                 Some(output.clone()),
-                            );
+                            ).await;
                         }
                         Err(e) => {
                             let _ = database.update_status(
@@ -603,7 +607,7 @@ impl ChainExecutor {
                                 SemanticOpStatus::Failed,
                                 Some(end_time),
                                 Some(e.to_string()),
-                            );
+                            ).await;
                         }
                     }
 

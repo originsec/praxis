@@ -8,10 +8,14 @@ mod chain_executions;
 mod discovered_endpoints;
 mod event_log;
 mod recon;
+pub mod config;
+mod queries;
 
-use rusqlite::{Connection, Result as SqliteResult};
-use std::path::Path;
-use std::sync::{Arc, Mutex};
+use anyhow::{anyhow, Result};
+use sqlx::{Pool, Sqlite, Postgres};
+use std::time::Duration;
+
+pub use config::DatabaseConfig;
 
 //
 // Re-export types that are used externally.
@@ -41,344 +45,194 @@ const TRAFFIC_RETENTION_DAYS: i64 = 7;
 /// Maximum number of traffic entries to return in a single query
 const MAX_TRAFFIC_QUERY_LIMIT: usize = 1000;
 
-/// Thread-safe SQLite database for service persistence
+//
+// Include SQL schema files at compile time.
+//
+const SQLITE_SCHEMA: &str = include_str!("schema/sqlite.sql");
+const POSTGRES_SCHEMA: &str = include_str!("schema/postgresql.sql");
+
+/// Database pool supporting multiple backends
+#[derive(Clone)]
+pub enum DatabasePool {
+    Sqlite(Pool<Sqlite>),
+    Postgres(Pool<Postgres>),
+}
+
+/// Thread-safe database for service persistence
+#[derive(Clone)]
 pub struct Database {
-    conn: Arc<Mutex<Connection>>,
+    pool: DatabasePool,
 }
 
 impl Database {
     /// Create a new database connection and initialize schema
-    pub fn new(path: &Path) -> SqliteResult<Self> {
-        let conn = Connection::open(path)?;
+    pub async fn new(config: &DatabaseConfig) -> Result<Self> {
+        let pool = match config {
+            DatabaseConfig::Sqlite { path } => {
+                //
+                // Ensure parent directory exists.
+                //
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+
+                let url = format!("sqlite://{}?mode=rwc", path.display());
+                let pool = sqlx::sqlite::SqlitePoolOptions::new()
+                    .max_connections(1)
+                    .acquire_timeout(Duration::from_secs(5))
+                    .connect(&url)
+                    .await?;
+
+                //
+                // Configure SQLite for network file systems (Azure Files, SMB/CIFS).
+                //
+                sqlx::query("PRAGMA journal_mode = WAL")
+                    .execute(&pool)
+                    .await?;
+                sqlx::query("PRAGMA synchronous = NORMAL")
+                    .execute(&pool)
+                    .await?;
+                sqlx::query("PRAGMA busy_timeout = 5000")
+                    .execute(&pool)
+                    .await?;
+                sqlx::query("PRAGMA locking_mode = NORMAL")
+                    .execute(&pool)
+                    .await?;
+
+                DatabasePool::Sqlite(pool)
+            }
+            DatabaseConfig::Postgres { url } => {
+                //
+                // Retry connection with backoff for cloud environments where the
+                // database may still be starting up.
+                //
+                let mut last_error = None;
+                let mut pool_opt = None;
+
+                for attempt in 1..=30 {
+                    match sqlx::postgres::PgPoolOptions::new()
+                        .max_connections(10)
+                        .acquire_timeout(Duration::from_secs(10))
+                        .connect(url)
+                        .await
+                    {
+                        Ok(pool) => {
+                            tracing::info!("Connected to PostgreSQL (attempt {})", attempt);
+                            pool_opt = Some(pool);
+                            break;
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "PostgreSQL connection attempt {}/30 failed: {}",
+                                attempt, e
+                            );
+                            last_error = Some(e);
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                        }
+                    }
+                }
+
+                let pool = pool_opt.ok_or_else(|| {
+                    anyhow!(
+                        "Failed to connect to PostgreSQL after 30 attempts: {}",
+                        last_error.map(|e| e.to_string()).unwrap_or_default()
+                    )
+                })?;
+
+                DatabasePool::Postgres(pool)
+            }
+        };
+
+        let db = Self { pool };
 
         //
-        // Configure SQLite for network file systems (Azure Files, SMB/CIFS).
-        // Use WAL mode for better concurrency and set appropriate locking.
+        // Initialize schema.
         //
-        conn.execute_batch("
-            PRAGMA journal_mode = WAL;
-            PRAGMA synchronous = NORMAL;
-            PRAGMA busy_timeout = 5000;
-            PRAGMA locking_mode = NORMAL;
-        ")?;
+        db.init_schema().await?;
 
-        //
-        // Initialize all schemas.
-        //
-        Self::init_operations_schema(&conn)?;
-        Self::init_transactions_schema(&conn)?;
-        Self::init_definitions_schema(&conn)?;
-        Self::init_traffic_schema(&conn)?;
-        Self::init_rules_schema(&conn)?;
-        Self::init_chains_schema(&conn)?;
-        Self::init_chain_executions_schema(&conn)?;
-        Self::init_discovered_endpoints_schema(&conn)?;
-        Self::init_event_log_schema(&conn)?;
-        Self::init_recon_schema(&conn)?;
-
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-        })
+        Ok(db)
     }
 
-    /// Get a reference to the connection (for use by sub-modules)
-    pub(crate) fn conn(&self) -> &Arc<Mutex<Connection>> {
-        &self.conn
-    }
+    /// Initialize database schema based on backend
+    async fn init_schema(&self) -> Result<()> {
+        //
+        // Helper to strip leading comment lines from a SQL statement.
+        //
+        fn strip_comments(stmt: &str) -> &str {
+            let mut result = stmt.trim();
+            while result.starts_with("--") {
+                if let Some(newline_pos) = result.find('\n') {
+                    result = result[newline_pos + 1..].trim();
+                } else {
+                    return "";
+                }
+            }
+            result
+        }
 
-    fn init_operations_schema(conn: &Connection) -> SqliteResult<()> {
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS operations (
-                operation_id TEXT PRIMARY KEY,
-                node_id TEXT NOT NULL,
-                agent_short_name TEXT NOT NULL DEFAULT '',
-                operation_spec TEXT NOT NULL,
-                status TEXT NOT NULL,
-                start_time TEXT NOT NULL,
-                end_time TEXT,
-                result TEXT,
-                queue_position INTEGER,
-                created_at TEXT NOT NULL,
-                output TEXT,
-                chain_execution_id TEXT
-            )",
-            [],
-        )?;
-
-        //
-        // Migrations for existing databases.
-        //
-        let _ = conn.execute("ALTER TABLE operations ADD COLUMN output TEXT", []);
-        let _ = conn.execute("ALTER TABLE operations ADD COLUMN agent_short_name TEXT NOT NULL DEFAULT ''", []);
-        let _ = conn.execute("ALTER TABLE operations ADD COLUMN chain_execution_id TEXT", []);
-
-        //
-        // Create indexes.
-        //
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_operations_node_id ON operations(node_id)",
-            [],
-        )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_operations_status ON operations(status)",
-            [],
-        )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_operations_created_at ON operations(created_at)",
-            [],
-        )?;
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                //
+                // Execute each statement separately (SQLite).
+                //
+                for statement in SQLITE_SCHEMA.split(';') {
+                    let stmt = strip_comments(statement);
+                    if !stmt.is_empty() {
+                        sqlx::query(stmt)
+                            .execute(pool)
+                            .await
+                            .map_err(|e| anyhow!("SQLite schema error: {} in statement: {}", e, stmt))?;
+                    }
+                }
+            }
+            DatabasePool::Postgres(pool) => {
+                //
+                // Execute each statement separately (PostgreSQL).
+                //
+                for statement in POSTGRES_SCHEMA.split(';') {
+                    let stmt = strip_comments(statement);
+                    if !stmt.is_empty() {
+                        sqlx::query(stmt)
+                            .execute(pool)
+                            .await
+                            .map_err(|e| anyhow!("PostgreSQL schema error: {} in statement: {}", e, stmt))?;
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
 
-    fn init_transactions_schema(conn: &Connection) -> SqliteResult<()> {
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS session_transactions (
-                transaction_id TEXT PRIMARY KEY,
-                node_id TEXT NOT NULL,
-                prompt_text TEXT NOT NULL,
-                request_sent_at TEXT NOT NULL,
-                response_received_at TEXT,
-                response_text TEXT,
-                status TEXT NOT NULL
-            )",
-            [],
-        )?;
-
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_transactions_node_id ON session_transactions(node_id)",
-            [],
-        )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_transactions_request_sent_at ON session_transactions(request_sent_at)",
-            [],
-        )?;
-
-        Ok(())
+    /// Check if using PostgreSQL backend
+    pub fn is_postgres(&self) -> bool {
+        matches!(self.pool, DatabasePool::Postgres(_))
     }
 
-    fn init_definitions_schema(conn: &Connection) -> SqliteResult<()> {
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS operation_definitions (
-                full_name TEXT PRIMARY KEY,
-                category TEXT NOT NULL,
-                short_name TEXT NOT NULL,
-                name TEXT NOT NULL,
-                description TEXT NOT NULL,
-                agent_info TEXT NOT NULL,
-                timeout INTEGER NOT NULL,
-                operation_prompt TEXT NOT NULL,
-                mode TEXT NOT NULL,
-                agent_iterations INTEGER NOT NULL,
-                operation_chain TEXT NOT NULL,
-                disabled INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )",
-            [],
-        )?;
-
-        //
-        // Migrations for existing databases.
-        //
-        let _ = conn.execute("ALTER TABLE operation_definitions ADD COLUMN agent_info TEXT NOT NULL DEFAULT ''", []);
-        let _ = conn.execute("ALTER TABLE operation_definitions ADD COLUMN timeout INTEGER NOT NULL DEFAULT 60", []);
-        let _ = conn.execute("ALTER TABLE operation_definitions ADD COLUMN operation_prompt TEXT NOT NULL DEFAULT ''", []);
-        let _ = conn.execute("ALTER TABLE operation_definitions ADD COLUMN mode TEXT NOT NULL DEFAULT 'one-shot'", []);
-        let _ = conn.execute("ALTER TABLE operation_definitions ADD COLUMN agent_iterations INTEGER NOT NULL DEFAULT 5", []);
-        let _ = conn.execute("ALTER TABLE operation_definitions ADD COLUMN operation_chain TEXT NOT NULL DEFAULT '[]'", []);
-        let _ = conn.execute("ALTER TABLE operation_definitions ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0", []);
-        let _ = conn.execute("ALTER TABLE operation_definitions ADD COLUMN yolo_mode INTEGER NOT NULL DEFAULT 0", []);
-        let _ = conn.execute("ALTER TABLE operation_definitions ADD COLUMN model_ref TEXT", []);
-
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_op_defs_category ON operation_definitions(category)",
-            [],
-        )?;
-
-        Ok(())
+    /// Check if using SQLite backend
+    pub fn is_sqlite(&self) -> bool {
+        matches!(self.pool, DatabasePool::Sqlite(_))
     }
 
-    fn init_traffic_schema(conn: &Connection) -> SqliteResult<()> {
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS intercepted_traffic (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                node_id TEXT NOT NULL,
-                agent_short_name TEXT NOT NULL,
-                intercept_method TEXT NOT NULL DEFAULT 'proxy',
-                direction TEXT NOT NULL,
-                method TEXT,
-                url TEXT NOT NULL,
-                host TEXT NOT NULL,
-                request_headers TEXT,
-                request_body BLOB,
-                response_status INTEGER,
-                response_headers TEXT,
-                response_body BLOB,
-                created_at TEXT NOT NULL
-            )",
-            [],
-        )?;
+    //
+    // Helper methods to get pool references for submodules.
+    //
 
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_traffic_node_id ON intercepted_traffic(node_id)",
-            [],
-        )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_traffic_agent ON intercepted_traffic(agent_short_name)",
-            [],
-        )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_traffic_timestamp ON intercepted_traffic(timestamp)",
-            [],
-        )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_traffic_host ON intercepted_traffic(host)",
-            [],
-        )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_traffic_created_at ON intercepted_traffic(created_at)",
-            [],
-        )?;
-
-        //
-        // Migration: Add intercept_method column if it doesn't exist (for
-        // existing databases).
-        //
-        let _ = conn.execute(
-            "ALTER TABLE intercepted_traffic ADD COLUMN intercept_method TEXT NOT NULL DEFAULT 'proxy'",
-            [],
-        );
-
-        Ok(())
+    pub(crate) fn sqlite_pool(&self) -> Option<&Pool<Sqlite>> {
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => Some(pool),
+            _ => None,
+        }
     }
 
-    fn init_rules_schema(conn: &Connection) -> SqliteResult<()> {
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS intercept_rules (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                regex_pattern TEXT NOT NULL,
-                target_direction TEXT NOT NULL,
-                scope_type TEXT NOT NULL,
-                scope_node_id TEXT,
-                scope_agent TEXT,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                summarization_prompt TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )",
-            [],
-        )?;
-
-        //
-        // Migration: add summarization_prompt column if it doesn't exist.
-        //
-        let _ = conn.execute(
-            "ALTER TABLE intercept_rules ADD COLUMN summarization_prompt TEXT",
-            [],
-        );
-
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_rules_enabled ON intercept_rules(enabled)",
-            [],
-        )?;
-
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS traffic_matches (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                traffic_id INTEGER NOT NULL,
-                rule_id INTEGER NOT NULL,
-                matched_at TEXT NOT NULL,
-                summary TEXT,
-                FOREIGN KEY (traffic_id) REFERENCES intercepted_traffic(id) ON DELETE CASCADE,
-                FOREIGN KEY (rule_id) REFERENCES intercept_rules(id) ON DELETE CASCADE
-            )",
-            [],
-        )?;
-
-        //
-        // Migration: add summary column if it doesn't exist.
-        //
-        let _ = conn.execute(
-            "ALTER TABLE traffic_matches ADD COLUMN summary TEXT",
-            [],
-        );
-
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_matches_traffic ON traffic_matches(traffic_id)",
-            [],
-        )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_matches_rule ON traffic_matches(rule_id)",
-            [],
-        )?;
-
-        Ok(())
+    pub(crate) fn postgres_pool(&self) -> Option<&Pool<Postgres>> {
+        match &self.pool {
+            DatabasePool::Postgres(pool) => Some(pool),
+            _ => None,
+        }
     }
 
-    fn init_chain_executions_schema(conn: &Connection) -> SqliteResult<()> {
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS chain_executions (
-                execution_id TEXT PRIMARY KEY,
-                chain_id TEXT NOT NULL,
-                chain_name TEXT NOT NULL,
-                node_id TEXT NOT NULL,
-                agent_short_name TEXT NOT NULL,
-                status TEXT NOT NULL,
-                elements TEXT NOT NULL,
-                outputs TEXT NOT NULL,
-                started_at TEXT NOT NULL,
-                ended_at TEXT,
-                created_at TEXT NOT NULL
-            )",
-            [],
-        )?;
-
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_chain_exec_status ON chain_executions(status)",
-            [],
-        )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_chain_exec_chain_id ON chain_executions(chain_id)",
-            [],
-        )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_chain_exec_created_at ON chain_executions(created_at)",
-            [],
-        )?;
-
-        Ok(())
-    }
-
-    fn init_discovered_endpoints_schema(conn: &Connection) -> SqliteResult<()> {
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS discovered_endpoints (
-                id TEXT PRIMARY KEY,
-                node_id TEXT NOT NULL,
-                ip_address TEXT NOT NULL,
-                domain TEXT,
-                port INTEGER NOT NULL,
-                is_https INTEGER NOT NULL,
-                models TEXT NOT NULL,
-                base_url TEXT NOT NULL,
-                api_key TEXT,
-                discovered_at TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )",
-            [],
-        )?;
-
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_discovered_node ON discovered_endpoints(node_id)",
-            [],
-        )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_discovered_at ON discovered_endpoints(discovered_at)",
-            [],
-        )?;
-
-        Ok(())
+    pub(crate) fn pool(&self) -> &DatabasePool {
+        &self.pool
     }
 }
