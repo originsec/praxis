@@ -24,13 +24,22 @@ COPY web ./web
 RUN cargo chef prepare --recipe-path recipe.json
 
 # ==============================================================================
-# Stage 3: Build dependencies (cached layer)
+# Stage 3: Build frontend with Node 22
+# ==============================================================================
+FROM node:22-bookworm-slim AS frontend
+
+WORKDIR /build/web/frontend
+COPY web/frontend/package*.json ./
+RUN npm ci
+COPY web/frontend ./
+RUN npm run build
+
+# ==============================================================================
+# Stage 4: Build Rust dependencies (cached layer)
 # ==============================================================================
 FROM chef AS builder
 
 RUN apt-get update && apt-get install -y \
-    nodejs \
-    npm \
     pkg-config \
     libssl-dev \
     mingw-w64 \
@@ -54,7 +63,7 @@ RUN cargo chef cook --release --recipe-path recipe.json -p praxis_node && \
     cargo chef cook --release --recipe-path recipe.json -p praxis_service -p praxis_web
 
 # ==============================================================================
-# Stage 4: Build application (only recompiles on source changes)
+# Stage 5: Build application (only recompiles on source changes)
 # ==============================================================================
 COPY Cargo.toml Cargo.lock ./
 COPY common ./common
@@ -65,25 +74,23 @@ COPY service ./service
 COPY web ./web
 
 #
-# Build praxis_node for Linux and Windows first (before frontend, as requested).
+# Copy pre-built frontend from frontend stage.
+#
+COPY --from=frontend /build/web/frontend/dist ./web/frontend/dist
+
+#
+# Build praxis_node for Linux and Windows.
 #
 RUN cargo build --release -p praxis_node && \
     cargo build --release -p praxis_node --target x86_64-pc-windows-gnu
 
 #
-# Build frontend (npm install + build).
-#
-WORKDIR /build/web/frontend
-RUN npm ci && npm run build
-
-#
 # Build service and web binaries.
 #
-WORKDIR /build
 RUN cargo build --release -p praxis_service -p praxis_web
 
 # ==============================================================================
-# Stage 2: Runtime image
+# Stage 6: Runtime image
 # ==============================================================================
 FROM debian:bookworm-slim
 
