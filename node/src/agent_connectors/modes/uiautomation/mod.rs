@@ -184,6 +184,10 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
             utils::terminate_process(pid);
         }
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl<A: UIAutomationAdapter> Drop for GenericUIAutomationSession<A> {

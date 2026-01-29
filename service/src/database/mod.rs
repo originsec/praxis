@@ -7,6 +7,7 @@ mod chains;
 mod chain_executions;
 mod discovered_endpoints;
 mod event_log;
+mod recon;
 
 use rusqlite::{Connection, Result as SqliteResult};
 use std::path::Path;
@@ -25,6 +26,7 @@ pub use chains::{
     TriggerType, TerminationType, ElementId, ModelRef, SessionGroup,
 };
 pub use chain_executions::ChainExecutionRecord;
+pub use recon::StoredReconResult;
 
 //
 // Constants.
@@ -61,6 +63,7 @@ impl Database {
         Self::init_chain_executions_schema(&conn)?;
         Self::init_discovered_endpoints_schema(&conn)?;
         Self::init_event_log_schema(&conn)?;
+        Self::init_recon_schema(&conn)?;
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),

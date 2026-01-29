@@ -2,7 +2,7 @@ use super::GeminiAgent;
 use crate::agent_connectors::traits::{Agent, AgentRecon};
 use async_trait::async_trait;
 use common::{
-    AgentTool, ReconConfig, ReconResult, ReconTools,
+    AgentSessionInfo, AgentTool, ReconConfig, ReconResult, ReconTools,
     SessionContext,
 };
 
@@ -23,16 +23,34 @@ impl AgentRecon for GeminiAgent {
             is_semantic
         );
 
-        let (config, project_paths) = match super::enumeration::enumerate() {
+        let (config, project_paths, sessions) = match super::enumeration::enumerate() {
             Ok(data) => {
                 let config = ReconConfig {
                     items: data.config_items,
                 };
-                (config, data.project_paths)
+
+                //
+                // Map enumeration sessions to AgentSessionInfo. Content is not
+                // included to avoid exceeding RabbitMQ message size limits.
+                //
+
+                let sessions: Vec<AgentSessionInfo> = data.sessions
+                    .into_iter()
+                    .map(|s| AgentSessionInfo {
+                        session_id: s.session_id,
+                        context_path: s.project_hash,
+                        session_file: s.file_path,
+                        last_modified: s.last_updated.unwrap_or_default(),
+                        message_count: s.message_count,
+                        content: None,
+                    })
+                    .collect();
+
+                (config, data.project_paths, sessions)
             }
             Err(e) => {
                 common::log_warn!("Enumeration failed: {}", e);
-                (ReconConfig::default(), Vec::new())
+                (ReconConfig::default(), Vec::new(), Vec::new())
             }
         };
 
@@ -52,18 +70,19 @@ impl AgentRecon for GeminiAgent {
         .await;
 
         common::log_info!(
-            "Recon complete - {} MCP servers, {} skills, {} internal tools, {} config items, {} projects",
+            "Recon complete - {} MCP servers, {} skills, {} internal tools, {} config items, {} projects, {} sessions",
             tools.mcp_servers.len(),
             tools.skills.len(),
             tools.internal_tools.len(),
             config.items.len(),
-            project_paths.len()
+            project_paths.len(),
+            sessions.len()
         );
 
         Some(ReconResult {
             tools,
             config,
-            sessions: Vec::new(),
+            sessions,
             project_paths,
             metadata,
         })
@@ -85,7 +104,7 @@ impl GeminiAgent {
             *guard = None;
         }
 
-        crate::agent_connectors::utils::discover_internal_tools_semantically(
+        let result = crate::agent_connectors::utils::discover_internal_tools_semantically(
             "GeminiAgent",
             || {
                 let temp_context = SessionContext::default();
@@ -93,6 +112,19 @@ impl GeminiAgent {
                     .ok_or_else(|| anyhow::anyhow!("Failed to create session"))
             }
         )
-        .await
+        .await;
+
+        //
+        // Clear the temporary session created during discovery. The utility
+        // function calls close() on the session, but self.session still holds
+        // a reference from create_session().
+        //
+
+        {
+            let mut guard = self.session.write().unwrap();
+            *guard = None;
+        }
+
+        result
     }
 }

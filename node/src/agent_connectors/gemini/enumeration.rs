@@ -6,7 +6,7 @@ use common::ConfigItem;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const MAX_SCAN_DEPTH: usize = 7;
 
@@ -20,9 +20,20 @@ const PROJECT_SETTINGS_PATTERN: &[ConfigFilePattern] = &[
     ConfigFilePattern { filename: "settings.json", parent_dir: Some(".gemini"), config_type_prefix: "project_settings" },
 ];
 
+pub struct SessionInfo {
+    pub session_id: String,
+    pub project_hash: String,
+    pub start_time: Option<String>,
+    pub last_updated: Option<String>,
+    pub message_count: usize,
+    pub file_path: String,
+    pub content: String,
+}
+
 pub struct EnumerationData {
     pub config_items: Vec<ConfigItem>,
     pub project_paths: Vec<String>,
+    pub sessions: Vec<SessionInfo>,
 }
 
 //
@@ -197,6 +208,109 @@ fn collect_environment_variables() -> Option<ConfigItem> {
 //
 // System prompt override mode from GEMINI_SYSTEM_MD environment variable.
 //
+
+//
+// Discover all session files from Gemini's session storage.
+// Sessions are stored in ~/.gemini/tmp/<project_hash>/chats/session-*.json
+//
+
+fn discover_sessions(home: &Path) -> Vec<SessionInfo> {
+    let mut sessions = Vec::new();
+
+    let gemini_tmp = home.join(".gemini").join("tmp");
+    if !gemini_tmp.exists() {
+        return sessions;
+    }
+
+    let Ok(project_dirs) = fs::read_dir(&gemini_tmp) else {
+        return sessions;
+    };
+
+    for project_entry in project_dirs.flatten() {
+        let project_path = project_entry.path();
+
+        //
+        // Skip non-directories and special directories like 'bin'.
+        //
+
+        if !project_path.is_dir() {
+            continue;
+        }
+
+        let Some(project_hash) = project_path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+
+        //
+        // Project hashes are 64 hex characters (SHA256).
+        //
+
+        if project_hash.len() != 64 || !project_hash.chars().all(|c| c.is_ascii_hexdigit()) {
+            continue;
+        }
+
+        let chats_dir = project_path.join("chats");
+        if !chats_dir.exists() {
+            continue;
+        }
+
+        let Ok(chat_entries) = fs::read_dir(&chats_dir) else {
+            continue;
+        };
+
+        for chat_entry in chat_entries.flatten() {
+            let chat_path = chat_entry.path();
+
+            let Some(filename) = chat_path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+
+            if !filename.starts_with("session-") || !filename.ends_with(".json") {
+                continue;
+            }
+
+            //
+            // Parse the session file to extract metadata.
+            //
+
+            let Ok(contents) = fs::read_to_string(&chat_path) else {
+                continue;
+            };
+
+            let Ok(json) = serde_json::from_str::<Value>(&contents) else {
+                continue;
+            };
+
+            let session_id = json["sessionId"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+
+            if session_id.is_empty() {
+                continue;
+            }
+
+            let start_time = json["startTime"].as_str().map(|s| s.to_string());
+            let last_updated = json["lastUpdated"].as_str().map(|s| s.to_string());
+            let message_count = json["messages"]
+                .as_array()
+                .map(|arr| arr.len())
+                .unwrap_or(0);
+
+            sessions.push(SessionInfo {
+                session_id,
+                project_hash: project_hash.to_string(),
+                start_time,
+                last_updated,
+                message_count,
+                file_path: chat_path.to_string_lossy().to_string(),
+                content: contents,
+            });
+        }
+    }
+
+    sessions
+}
 
 enum SystemPromptMode {
     Disabled,
@@ -440,15 +554,26 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
         }
     }
 
+    //
+    // Discover session files from all user homes.
+    //
+
+    let mut sessions = Vec::new();
+    for home in &user_homes {
+        sessions.extend(discover_sessions(home));
+    }
+
     common::log_info!(
-        "Gemini enumeration complete: {} configs, {} projects",
+        "Gemini enumeration complete: {} configs, {} projects, {} sessions",
         config_items.len(),
-        project_paths.len()
+        project_paths.len(),
+        sessions.len()
     );
 
     Ok(EnumerationData {
         config_items,
         project_paths,
+        sessions,
     })
 }
 

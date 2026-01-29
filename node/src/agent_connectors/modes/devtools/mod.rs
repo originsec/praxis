@@ -380,6 +380,10 @@ impl<A: DevToolsAdapter + 'static> AgentSession for GenericDevToolsSession<A> {
             let _ = self.hidden_desktop.lock().unwrap().take();
         }
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 impl<A: DevToolsAdapter> GenericDevToolsSession<A> {

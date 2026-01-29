@@ -19,7 +19,7 @@ import type { Node, Edge, Connection, NodeTypes, OnSelectionChangeParams } from 
 import '@xyflow/react/dist/style.css';
 import { Play, Zap, X, Save, CircleStop, FileOutput, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users } from 'lucide-react';
 import { Modal } from '../common/Modal';
-import { ConfigModal, type ConfigItem } from '../common/ConfigModal';
+import { ConfigModal } from '../common/ConfigModal';
 import type {
   ChainDefinitionFull,
   ChainDefinitionInput,
@@ -1373,7 +1373,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           },
         ]}
         values={{ operation: selectedOperation }}
-        onChange={(name, value) => setSelectedOperation(value)}
+        onChange={(_name, value) => setSelectedOperation(value)}
         onSubmit={handleOperationSelect}
         submitLabel="Add"
         submitIcon={<Cpu size={14} />}
@@ -1600,7 +1600,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           },
         ]}
         values={{ prompt: genericPromptText }}
-        onChange={(name, value) => setGenericPromptText(value)}
+        onChange={(_name, value) => setGenericPromptText(value)}
         onSubmit={handleGenericPromptConfirm}
         submitLabel="Add"
         submitIcon={<MessageSquare size={14} />}

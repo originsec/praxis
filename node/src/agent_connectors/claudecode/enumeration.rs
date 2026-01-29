@@ -96,11 +96,6 @@ fn discover_sessions(home: &Path, sessions: &mut Vec<AgentSessionInfo>) -> anyho
             continue;
         }
 
-        let sessions_dir = project_path.join("sessions");
-        if !sessions_dir.exists() {
-            continue;
-        }
-
         //
         // Extract project hash from directory name.
         //
@@ -108,10 +103,11 @@ fn discover_sessions(home: &Path, sessions: &mut Vec<AgentSessionInfo>) -> anyho
         let project_hash = entry.file_name().to_string_lossy().to_string();
 
         //
-        // Look for session files.
+        // Look for session files directly in the project directory.
+        // Claude Code stores sessions as *.jsonl files in the project dir.
         //
 
-        for session_entry in fs::read_dir(&sessions_dir)? {
+        for session_entry in fs::read_dir(&project_path)? {
             let session_entry = session_entry?;
             let session_path = session_entry.path();
 
@@ -143,8 +139,19 @@ fn parse_session_file(path: &Path, project_hash: &str) -> Option<AgentSessionInf
     // Count lines (messages) in the JSONL file.
     //
 
-    let content = fs::read_to_string(path).ok()?;
-    let message_count = content.lines().filter(|l| !l.trim().is_empty()).count();
+    //
+    // Count lines without loading entire file into memory. Session files can be
+    // very large and including content would exceed RabbitMQ message limits.
+    //
+
+    let message_count = if let Ok(file) = std::fs::File::open(path) {
+        std::io::BufRead::lines(std::io::BufReader::new(file))
+            .filter_map(|l| l.ok())
+            .filter(|l| !l.trim().is_empty())
+            .count()
+    } else {
+        0
+    };
 
     Some(AgentSessionInfo {
         session_id: file_name,
@@ -152,5 +159,6 @@ fn parse_session_file(path: &Path, project_hash: &str) -> Option<AgentSessionInf
         session_file: path.to_string_lossy().to_string(),
         last_modified: last_modified_dt.to_rfc3339(),
         message_count,
+        content: None,
     })
 }

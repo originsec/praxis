@@ -9,13 +9,13 @@ type FeatureId = 'nexus' | 'semanticOps' | 'semanticParser' | 'trafficParser';
 
 const providers = [
   { value: 'anthropic', label: 'Anthropic (Claude)' },
-  { value: 'openai', label: 'OpenAI' },
+  { value: 'cerebras', label: 'Cerebras' },
+  { value: 'gemini', label: 'Google Gemini' },
   { value: 'groq', label: 'Groq' },
   { value: 'mistral', label: 'Mistral' },
-  { value: 'xai', label: 'xAI (Grok)' },
-  { value: 'gemini', label: 'Google Gemini' },
-  { value: 'cerebras', label: 'Cerebras' },
   { value: 'ollama', label: 'Ollama (Local)' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'xai', label: 'xAI (Grok)' },
 ];
 
 //
@@ -1114,7 +1114,7 @@ export function SettingsPage() {
                   <label className="block text-sm font-medium mb-2">WebSocket URL</label>
                   <input
                     type="text"
-                    value={`ws://${window.location.host}/ws`}
+                    value={`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`}
                     disabled
                     className="w-full bg-[var(--bg-secondary)] border border-subtle px-4 py-2.5 text-muted"
                   />

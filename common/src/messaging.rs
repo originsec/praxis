@@ -266,6 +266,9 @@ pub struct AgentSessionInfo {
     pub last_modified: String,
     /// Number of messages/entries in the session
     pub message_count: usize,
+    /// Raw session content (JSON string)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
 }
 
 /// Configuration discovered during agent reconnaissance
@@ -419,6 +422,8 @@ pub enum AgentCommand {
     ReconSemantic,
     /// Update a config file's contents
     UpdateConfigFile { path: String, contents: String },
+    /// Get the content of a session file (for viewing session history)
+    GetSessionContent { session_file: String },
 }
 
 /// Unique identifier for tracking session transactions
@@ -555,6 +560,12 @@ pub enum AgentCommandResult {
     ReconComplete { result: ReconResult },
     /// Config file update result
     ConfigFileUpdated { success: bool, error: Option<String> },
+    /// Session content response
+    SessionContent {
+        session_file: String,
+        content: Option<String>,
+        error: Option<String>,
+    },
 }
 
 /// Result of a session command
@@ -1234,6 +1245,16 @@ pub enum ClientSignalMessage {
         client_id: String,
         node_id: Option<String>,
     },
+
+    //
+    // Recon results.
+    //
+    /// Request stored recon result for a node+agent
+    ReconGet {
+        client_id: String,
+        node_id: String,
+        agent_short_name: String,
+    },
 }
 
 /// Messages broadcast from server to all clients via CLIENT_BROADCAST_QUEUE
@@ -1420,6 +1441,21 @@ pub enum ClientDirectMessage {
     /// Application log cleared
     ApplicationLogCleared {
         deleted_count: u32,
+    },
+
+    //
+    // Recon result responses.
+    //
+    /// Stored recon result response
+    ReconGetResponse {
+        node_id: String,
+        agent_short_name: String,
+        /// The recon result if found
+        recon_result: Option<ReconResult>,
+        /// When the recon was performed (ISO 8601)
+        performed_at: Option<String>,
+        /// Whether this was a semantic recon
+        is_semantic: Option<bool>,
     },
 }
 
@@ -1677,6 +1713,13 @@ pub enum NodeSignalMessage {
     InterceptStatusUpdate(InterceptStatus),
     /// Discovered LLM endpoint from agent discovery
     DiscoveredLlmEndpoint(DiscoveredLlmEndpoint),
+    /// Recon result update from node
+    ReconResultUpdate {
+        node_id: String,
+        agent_short_name: String,
+        recon_result: ReconResult,
+        is_semantic: bool,
+    },
 }
 
 //

@@ -1,6 +1,5 @@
 use super::ClaudeCodeAgent;
-use super::ClaudeCodeSession;
-use crate::agent_connectors::traits::{AgentRecon, AgentSession};
+use crate::agent_connectors::traits::{Agent, AgentRecon};
 use crate::utils::semantic_parser::{
     self, build_metadata_extraction_prompt, parse_metadata_from_json,
     METADATA_EXTRACTION_SCHEMA,
@@ -9,7 +8,6 @@ use async_trait::async_trait;
 use common::{
     AgentTool, ReconConfig, ReconMetadata, ReconResult, ReconTools, SessionContext,
 };
-use std::sync::Arc;
 
 #[async_trait]
 impl AgentRecon for ClaudeCodeAgent {
@@ -92,14 +90,6 @@ impl ClaudeCodeAgent {
     // Discover internal tools by querying the agent via a temporary session.
     //
     async fn discover_internal_tools_semantically(&self) -> Vec<AgentTool> {
-        let binary_path = match self.process_path.get() {
-            Some(path) => path.clone(),
-            None => {
-                common::log_warn!("No binary path available for internal tools discovery");
-                return Vec::new();
-            }
-        };
-
         //
         // Close any existing session.
         //
@@ -115,15 +105,28 @@ impl ClaudeCodeAgent {
         //
         // Use shared recon function to discover internal tools.
         //
-        crate::agent_connectors::utils::discover_internal_tools_semantically(
+        let result = crate::agent_connectors::utils::discover_internal_tools_semantically(
             "ClaudeCodeAgent",
             || {
                 let temp_context = SessionContext::default();
-                let session = ClaudeCodeSession::new(Some(binary_path.clone()), &temp_context)?;
-                Ok(Arc::new(session) as Arc<dyn AgentSession>)
+                self.create_session(&temp_context)
+                    .ok_or_else(|| anyhow::anyhow!("Failed to create session"))
             }
         )
-        .await
+        .await;
+
+        //
+        // Clear the temporary session created during discovery. The utility
+        // function calls close() on the session, but self.session still holds
+        // a reference from create_session().
+        //
+
+        {
+            let mut guard = self.session.write().unwrap();
+            *guard = None;
+        }
+
+        result
     }
 
     //

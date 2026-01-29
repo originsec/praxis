@@ -94,6 +94,7 @@ export interface AgentSessionInfo {
   session_file: string;
   last_modified: string;
   message_count: number;
+  content?: string;
 }
 
 //
@@ -119,7 +120,8 @@ export type AgentCommand =
   | 'Recon'
   | 'ReconSemantic'
   | { Select: { short_name: string } }
-  | { UpdateConfigFile: { path: string; contents: string } };
+  | { UpdateConfigFile: { path: string; contents: string } }
+  | { GetSessionContent: { session_file: string } };
 
 export type SessionCommand =
   | { Create: { context: SessionContext } }
@@ -591,7 +593,11 @@ export type BrowserMessage =
   // Node event log messages.
   //
   | { type: 'application_log_request'; node_id: string; level_filter: string[] | null; regex_filter: string | null; limit: number; offset: number }
-  | { type: 'application_log_clear'; node_id: string | null };
+  | { type: 'application_log_clear'; node_id: string | null }
+  //
+  // Recon messages.
+  //
+  | { type: 'recon_get'; node_id: string; agent_short_name: string };
 
 //
 // WebSocket Messages (Server -> Browser).
@@ -657,4 +663,8 @@ export type ServerMessage =
   // Node event log messages.
   //
   | { type: 'application_log_response'; node_id: string; entries: ApplicationLogEntry[]; total_count: number }
-  | { type: 'application_log_cleared'; deleted_count: number };
+  | { type: 'application_log_cleared'; deleted_count: number }
+  //
+  // Recon messages.
+  //
+  | { type: 'recon_get_response'; node_id: string; agent_short_name: string; recon_result: ReconResult | null; performed_at: string | null; is_semantic: boolean | null };

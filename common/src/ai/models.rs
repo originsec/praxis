@@ -217,7 +217,7 @@ pub async fn fetch_ollama_models() -> Result<Vec<String>, String> {
 
 /// Fetch models for a given provider
 pub async fn fetch_models_for_provider(provider: &str, api_key: &str) -> Result<Vec<String>, String> {
-    match provider {
+    let mut models = match provider {
         "anthropic" => fetch_anthropic_models(api_key).await,
         "openai" => {
             fetch_openai_compatible_models("https://api.openai.com/v1", api_key).await
@@ -237,5 +237,11 @@ pub async fn fetch_models_for_provider(provider: &str, api_key: &str) -> Result<
         }
         "ollama" => fetch_ollama_models().await,
         _ => Err(format!("Unknown or unsupported provider: {}", provider)),
-    }
+    }?;
+
+    //
+    // Sort models alphabetically before returning.
+    //
+    models.sort();
+    Ok(models)
 }

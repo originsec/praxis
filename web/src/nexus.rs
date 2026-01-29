@@ -619,14 +619,14 @@ async fn execute_tool(
                                 "mcp_tools_count": mcp_tools_count,
                                 "skills_count": result.tools.skills.len(),
                                 "skills": result.tools.skills,
-                                "config_items_count": result.config.items.len(),
+                                "config_items_count": result.config.len(),
                                 "sessions_count": result.sessions.len(),
                                 "project_paths": result.project_paths,
                                 "display": format!("Recon complete: {} MCP servers ({} tools), {} skills, {} configs, {} sessions, {} projects",
                                     result.tools.mcp_servers.len(),
                                     mcp_tools_count,
                                     result.tools.skills.len(),
-                                    result.config.items.len(),
+                                    result.config.len(),
                                     result.sessions.len(),
                                     result.project_paths.len())
                             }).to_string()
@@ -663,7 +663,7 @@ async fn execute_tool(
                                 "skills": result.tools.skills,
                                 "internal_tools_count": result.tools.internal_tools.len(),
                                 "internal_tools": result.tools.internal_tools,
-                                "config_items_count": result.config.items.len(),
+                                "config_items_count": result.config.len(),
                                 "sessions_count": result.sessions.len(),
                                 "project_paths": result.project_paths,
                                 "display": format!("Semantic recon complete: {} MCP servers ({} tools), {} skills, {} internal tools, {} configs, {} sessions, {} projects",
@@ -671,7 +671,7 @@ async fn execute_tool(
                                     mcp_tools_count,
                                     result.tools.skills.len(),
                                     result.tools.internal_tools.len(),
-                                    result.config.items.len(),
+                                    result.config.len(),
                                     result.sessions.len(),
                                     result.project_paths.len())
                             }).to_string()

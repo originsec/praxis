@@ -86,6 +86,8 @@ const initialInterceptState: InterceptState = {
 interface ChainState {
   chains: ChainDefinitionInfo[];
   currentChain: ChainDefinitionFull | null;
+  chainDefinitionsCache: Record<string, ChainDefinitionFull>;
+  loadingChains: Set<string>;
   executions: ChainExecutionUpdate[];
   chainError: string | null;
   chainSuccess: string | null;
@@ -94,6 +96,8 @@ interface ChainState {
 const initialChainState: ChainState = {
   chains: [],
   currentChain: null,
+  chainDefinitionsCache: {},
+  loadingChains: new Set(),
   executions: [],
   chainError: null,
   chainSuccess: null,
@@ -230,6 +234,7 @@ type Action =
   //
   | { type: 'SET_CHAINS'; chains: ChainDefinitionInfo[] }
   | { type: 'SET_CURRENT_CHAIN'; chain: ChainDefinitionFull | null }
+  | { type: 'REQUEST_CHAIN'; chain_id: string }
   | { type: 'ADD_CHAIN'; chain: ChainDefinitionInfo }
   | { type: 'UPDATE_CHAIN'; chain: ChainDefinitionInfo }
   | { type: 'DELETE_CHAIN'; chain_id: string }
@@ -587,8 +592,28 @@ function reduceChains(state: AppState, action: Action): AppState | null {
   switch (action.type) {
     case 'SET_CHAINS':
       return { ...state, chains: { ...state.chains, chains: action.chains } };
-    case 'SET_CURRENT_CHAIN':
-      return { ...state, chains: { ...state.chains, currentChain: action.chain } };
+    case 'REQUEST_CHAIN': {
+      const newLoadingChains = new Set(state.chains.loadingChains);
+      newLoadingChains.add(action.chain_id);
+      return { ...state, chains: { ...state.chains, loadingChains: newLoadingChains } };
+    }
+    case 'SET_CURRENT_CHAIN': {
+      if (!action.chain) {
+        return { ...state, chains: { ...state.chains, currentChain: null } };
+      }
+      const newLoadingChains = new Set(state.chains.loadingChains);
+      newLoadingChains.delete(action.chain.id);
+      const newCache = { ...state.chains.chainDefinitionsCache, [action.chain.id]: action.chain };
+      return {
+        ...state,
+        chains: {
+          ...state.chains,
+          currentChain: action.chain,
+          chainDefinitionsCache: newCache,
+          loadingChains: newLoadingChains,
+        },
+      };
+    }
     case 'ADD_CHAIN':
       return { ...state, chains: { ...state.chains, chains: [...state.chains.chains, action.chain] } };
     case 'UPDATE_CHAIN': {
@@ -1017,6 +1042,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           //
           window.dispatchEvent(new CustomEvent('ws-message', { detail: message }));
           break;
+
+        //
+        // Recon messages.
+        //
+        case 'recon_get_response':
+          //
+          // Dispatch as custom event for AgentDetailPage to catch.
+          //
+          window.dispatchEvent(new CustomEvent('ws-message', { detail: message }));
+          break;
       }
     };
 
@@ -1263,6 +1298,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const requestChain = useCallback((chainId: string) => {
+    dispatch({ type: 'REQUEST_CHAIN', chain_id: chainId });
     wsClient.send({ type: 'chain_get', chain_id: chainId });
   }, []);
 
