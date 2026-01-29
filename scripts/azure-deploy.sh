@@ -252,56 +252,53 @@ deploy_rabbitmq() {
     if az container show \
         --name "$RABBITMQ_APP" \
         --resource-group "$RESOURCE_GROUP" &> /dev/null; then
-        info "RabbitMQ container already exists, deleting and recreating..."
-        az container delete \
+        success "RabbitMQ container already exists, skipping deployment"
+    else
+        info "Creating RabbitMQ container..."
+
+        #
+        # Deploy RabbitMQ with persistent storage and TCP ports.
+        # Use ACR image to avoid Docker Hub rate limits.
+        #
+        ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
+        ACR_PASSWORD=$(az acr credential show \
+            --name "$ACR_NAME" \
+            --query 'passwords[0].value' \
+            --output tsv)
+
+        #
+        # Mount Azure File Share to /mnt/data instead of /var/lib/rabbitmq to avoid
+        # permission issues with .erlang.cookie file. Configure RabbitMQ to use
+        # /mnt/data for persistent data while keeping cookie in container filesystem.
+        #
+        az container create \
             --name "$RABBITMQ_APP" \
             --resource-group "$RESOURCE_GROUP" \
-            --yes \
+            --location "$LOCATION" \
+            --image "${ACR_LOGIN_SERVER}/rabbitmq:3-management" \
+            --registry-login-server "$ACR_LOGIN_SERVER" \
+            --registry-username "$ACR_NAME" \
+            --registry-password "$ACR_PASSWORD" \
+            --os-type Linux \
+            --cpu 1 \
+            --memory 2 \
+            --ports 5672 15672 \
+            --protocol TCP \
+            --ip-address Public \
+            --dns-name-label "praxis-rabbitmq-${LOCATION}" \
+            --azure-file-volume-account-name "$STORAGE_ACCOUNT_LOWER" \
+            --azure-file-volume-account-key "$STORAGE_KEY" \
+            --azure-file-volume-share-name "$RABBITMQ_FILE_SHARE" \
+            --azure-file-volume-mount-path /mnt/data \
+            --environment-variables \
+                RABBITMQ_DEFAULT_USER=praxis \
+                RABBITMQ_DEFAULT_PASS=praxis \
+                RABBITMQ_MNESIA_BASE=/mnt/data/mnesia \
+                RABBITMQ_LOG_BASE=/mnt/data/log \
             --output none
+
+        success "Deployed RabbitMQ as Azure Container Instance"
     fi
-
-    #
-    # Deploy RabbitMQ with persistent storage and TCP ports.
-    # Use ACR image to avoid Docker Hub rate limits.
-    #
-    ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
-    ACR_PASSWORD=$(az acr credential show \
-        --name "$ACR_NAME" \
-        --query 'passwords[0].value' \
-        --output tsv)
-
-    #
-    # Mount Azure File Share to /mnt/data instead of /var/lib/rabbitmq to avoid
-    # permission issues with .erlang.cookie file. Configure RabbitMQ to use
-    # /mnt/data for persistent data while keeping cookie in container filesystem.
-    #
-    az container create \
-        --name "$RABBITMQ_APP" \
-        --resource-group "$RESOURCE_GROUP" \
-        --location "$LOCATION" \
-        --image "${ACR_LOGIN_SERVER}/rabbitmq:3-management" \
-        --registry-login-server "$ACR_LOGIN_SERVER" \
-        --registry-username "$ACR_NAME" \
-        --registry-password "$ACR_PASSWORD" \
-        --os-type Linux \
-        --cpu 1 \
-        --memory 2 \
-        --ports 5672 15672 \
-        --protocol TCP \
-        --ip-address Public \
-        --dns-name-label "praxis-rabbitmq-${LOCATION}" \
-        --azure-file-volume-account-name "$STORAGE_ACCOUNT_LOWER" \
-        --azure-file-volume-account-key "$STORAGE_KEY" \
-        --azure-file-volume-share-name "$RABBITMQ_FILE_SHARE" \
-        --azure-file-volume-mount-path /mnt/data \
-        --environment-variables \
-            RABBITMQ_DEFAULT_USER=praxis \
-            RABBITMQ_DEFAULT_PASS=praxis \
-            RABBITMQ_MNESIA_BASE=/mnt/data/mnesia \
-            RABBITMQ_LOG_BASE=/mnt/data/log \
-        --output none
-
-    success "Deployed RabbitMQ as Azure Container Instance"
     echo ""
 }
 
