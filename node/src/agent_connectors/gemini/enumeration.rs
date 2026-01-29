@@ -1,6 +1,6 @@
 use crate::agent_connectors::utils::{
-    enumerate_user_homes, scan_directories_for_config_files, scan_directories_for_config_files_multi,
-    ConfigFilePattern,
+    collect_global_config_files, enumerate_user_homes, scan_directories_for_config_files,
+    scan_directories_for_config_files_multi, ConfigFilePattern, GlobalConfigPattern,
 };
 use common::ConfigItem;
 use serde_json::Value;
@@ -9,6 +9,12 @@ use std::fs;
 use std::path::PathBuf;
 
 const MAX_SCAN_DEPTH: usize = 7;
+
+const GLOBAL_CONFIG_PATTERNS: &[GlobalConfigPattern] = &[
+    GlobalConfigPattern { path: ".gemini/settings.json", config_type: "user_settings" },
+    GlobalConfigPattern { path: ".gemini/google_accounts.json", config_type: "user_google_accounts" },
+    GlobalConfigPattern { path: ".gemini/oauth_creds.json", config_type: "user_oauth_creds" },
+];
 
 const PROJECT_SETTINGS_PATTERN: &[ConfigFilePattern] = &[
     ConfigFilePattern { filename: "settings.json", parent_dir: Some(".gemini"), config_type_prefix: "project_settings" },
@@ -264,48 +270,7 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
         .map(|p| p.as_path())
         .collect();
 
-    for home in &user_homes {
-        let gemini_dir = home.join(".gemini");
-
-        //
-        // Collect settings.json.
-        //
-
-        let global_settings = gemini_dir.join("settings.json");
-        if let Ok(contents) = fs::read_to_string(&global_settings) {
-            config_items.push(ConfigItem {
-                path: global_settings.to_string_lossy().to_string(),
-                contents,
-                config_type: "user_settings".to_string(),
-            });
-        }
-
-        //
-        // Collect google_accounts.json.
-        //
-
-        let google_accounts = gemini_dir.join("google_accounts.json");
-        if let Ok(contents) = fs::read_to_string(&google_accounts) {
-            config_items.push(ConfigItem {
-                path: google_accounts.to_string_lossy().to_string(),
-                contents,
-                config_type: "user_google_accounts".to_string(),
-            });
-        }
-
-        //
-        // Collect oauth_creds.json.
-        //
-
-        let oauth_creds = gemini_dir.join("oauth_creds.json");
-        if let Ok(contents) = fs::read_to_string(&oauth_creds) {
-            config_items.push(ConfigItem {
-                path: oauth_creds.to_string_lossy().to_string(),
-                contents,
-                config_type: "user_oauth_creds".to_string(),
-            });
-        }
-    }
+    config_items.extend(collect_global_config_files(&user_homes, GLOBAL_CONFIG_PATTERNS));
 
     //
     // Discover context file names from all settings files.

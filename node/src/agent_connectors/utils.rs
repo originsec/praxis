@@ -207,6 +207,44 @@ where
 }
 
 //
+// Pattern for collecting global config files from user home directories.
+// - path: Relative path from home directory (e.g., ".claude/settings.json").
+// - config_type: The config_type to use for this file.
+//
+
+pub struct GlobalConfigPattern<'a> {
+    pub path: &'a str,
+    pub config_type: &'a str,
+}
+
+//
+// Collect global config files from all user home directories.
+// Returns config items for files that exist.
+//
+
+pub fn collect_global_config_files(
+    homes: &[PathBuf],
+    patterns: &[GlobalConfigPattern],
+) -> Vec<common::ConfigItem> {
+    let mut config_items = Vec::new();
+
+    for home in homes {
+        for pattern in patterns {
+            let file_path = home.join(pattern.path);
+            if let Ok(contents) = fs::read_to_string(&file_path) {
+                config_items.push(common::ConfigItem {
+                    path: file_path.to_string_lossy().to_string(),
+                    contents,
+                    config_type: pattern.config_type.to_string(),
+                });
+            }
+        }
+    }
+
+    config_items
+}
+
+//
 // Pattern for scanning config files.
 // - filename: The file to search for.
 // - parent_dir: If Some, file must be inside this directory (e.g., ".claude").

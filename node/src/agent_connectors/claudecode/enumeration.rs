@@ -1,5 +1,6 @@
 use crate::agent_connectors::utils::{
-    enumerate_user_homes, scan_directories_for_config_files_multi, ConfigFilePattern,
+    collect_global_config_files, enumerate_user_homes, scan_directories_for_config_files_multi,
+    ConfigFilePattern, GlobalConfigPattern,
 };
 use common::{AgentSessionInfo, ConfigItem};
 use chrono::{DateTime, Utc};
@@ -8,6 +9,12 @@ use std::fs;
 use std::path::Path;
 
 const MAX_SCAN_DEPTH: usize = 7;
+
+const GLOBAL_CONFIG_PATTERNS: &[GlobalConfigPattern] = &[
+    GlobalConfigPattern { path: ".claude/settings.json", config_type: "global_settings" },
+    GlobalConfigPattern { path: ".claude.json", config_type: "preferences" },
+    GlobalConfigPattern { path: ".claude/CLAUDE.md", config_type: "global_instructions" },
+];
 
 const PROJECT_CONFIG_PATTERNS: &[ConfigFilePattern] = &[
     ConfigFilePattern { filename: "settings.json", parent_dir: Some(".claude"), config_type_prefix: "project_settings" },
@@ -36,11 +43,13 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
     let user_homes = enumerate_user_homes();
     let user_homes_set: HashSet<&Path> = user_homes.iter().map(|p| p.as_path()).collect();
 
-    for home in &user_homes {
-        collect_config_file(&home.join(".claude/settings.json"), "global_settings", &mut config_items);
-        collect_config_file(&home.join(".claude.json"), "preferences", &mut config_items);
-        collect_config_file(&home.join(".claude/CLAUDE.md"), "global_instructions", &mut config_items);
+    //
+    // Collect global config files from all user homes.
+    //
 
+    config_items.extend(collect_global_config_files(&user_homes, GLOBAL_CONFIG_PATTERNS));
+
+    for home in &user_homes {
         discover_sessions(home, &mut sessions)?;
     }
 
@@ -72,16 +81,6 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
         sessions,
         project_paths,
     })
-}
-
-fn collect_config_file(path: &Path, config_type: &str, config_items: &mut Vec<ConfigItem>) {
-    if let Ok(contents) = fs::read_to_string(path) {
-        config_items.push(ConfigItem {
-            path: path.to_string_lossy().to_string(),
-            contents,
-            config_type: config_type.to_string(),
-        });
-    }
 }
 
 fn discover_sessions(home: &Path, sessions: &mut Vec<AgentSessionInfo>) -> anyhow::Result<()> {
