@@ -609,6 +609,15 @@ impl RabbitMqClient {
         match message {
             ClientDirectMessage::RegistrationAck(_) => {}
             ClientDirectMessage::StateUpdate(state) => {
+                //
+                // Debug: Log state update receipt.
+                //
+                if let Some(node) = state.nodes.iter().find(|n| n.selected_agent.is_some()) {
+                    common::log_info!(
+                        "[WEB] Received StateUpdate with selected_agent: {:?}",
+                        node.selected_agent
+                    );
+                }
                 self.state.update_state(state.clone()).await;
                 self.state.broadcast(ServerMessage::StateUpdate { state });
             }

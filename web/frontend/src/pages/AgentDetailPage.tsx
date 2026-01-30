@@ -78,6 +78,13 @@ export function AgentDetailPage() {
   const hasSession = !!selectedAgent?.session_id;
 
   //
+  // Debug: Log session detection.
+  //
+  console.log('[AgentDetailPage] nodeId:', nodeId, 'agentShortName:', agentShortName);
+  console.log('[AgentDetailPage] node?.selected_agent:', node?.selected_agent);
+  console.log('[AgentDetailPage] selectedAgent:', selectedAgent, 'hasSession:', hasSession);
+
+  //
   // Tab from URL or default based on session status.
   //
   const tabParam = searchParams.get('tab');
