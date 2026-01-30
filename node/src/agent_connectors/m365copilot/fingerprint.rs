@@ -10,7 +10,7 @@ impl M365CopilotAgent {
         //
 
         if let Some(path) = utils::get_running_process_path(process_name) {
-            let _ = self.process_path.set(path);
+            *self.process_path.write().unwrap() = Some(path);
             return true;
         }
 
@@ -22,14 +22,13 @@ impl M365CopilotAgent {
             utils::get_package_install_path("Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe")
                 .unwrap_or_default();
         if utils::find_file_in_path(process_name, &package_path) {
-            let _ = self
-                .process_path
-                .set(format!("{}\\{}", package_path, process_name));
+            *self.process_path.write().unwrap() =
+                Some(format!("{}\\{}", package_path, process_name));
             return true;
         }
-        
+
         //
-        // (Note: There are other/better/more straight-forward ways to 
+        // (Note: There are other/better/more straight-forward ways to
         // fingerprint but seems sufficient for now.)
         //
 

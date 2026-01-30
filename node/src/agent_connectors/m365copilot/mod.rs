@@ -12,21 +12,20 @@ pub use session::M365CopilotSession;
 use crate::agent_connectors::traits::{Agent, AgentIntercept, AgentMode, AgentRecon, AgentSession};
 use async_trait::async_trait;
 use common::SessionContext;
-use once_cell::sync::OnceCell;
 use std::sync::{Arc, RwLock};
 
 const AGENT_NAME: &str = "Microsoft 365 Copilot";
 const AGENT_SHORTNAME: &str = "m365copilot";
 
 pub struct M365CopilotAgent {
-    pub(crate) process_path: OnceCell<String>,
+    pub(crate) process_path: RwLock<Option<String>>,
     session: RwLock<Option<Arc<dyn AgentSession>>>,
 }
 
 impl M365CopilotAgent {
     pub fn new() -> Self {
         Self {
-            process_path: OnceCell::new(),
+            process_path: RwLock::new(None),
             session: RwLock::new(None),
         }
     }
@@ -64,6 +63,42 @@ impl Agent for M365CopilotAgent {
         common::log_info!("{}: Creating new session", AGENT_NAME);
 
         //
+        // Validate cached process path still exists. If not, try re-fingerprinting.
+        //
+
+        let process_path = {
+            let path_guard = self.process_path.read().unwrap();
+            if let Some(ref path) = *path_guard {
+                if std::path::Path::new(path).exists() {
+                    Some(path.clone())
+                } else {
+                    common::log_warn!(
+                        "{}: Cached process path no longer exists: {}",
+                        AGENT_NAME, path
+                    );
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        let process_path = if process_path.is_none() {
+            common::log_info!("{}: Re-fingerprinting to find process path", AGENT_NAME);
+            let found = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(self.do_fingerprint_impl())
+            });
+            if found {
+                self.process_path.read().unwrap().clone()
+            } else {
+                common::log_error!("{}: Re-fingerprinting failed", AGENT_NAME);
+                None
+            }
+        } else {
+            process_path
+        };
+
+        //
         // Default to DevTools mode for M365 Copilot.
         // (Note UIAutomation mode kinda works-ish but is very flaky and abandoned for now.)
         //
@@ -72,7 +107,7 @@ impl Agent for M365CopilotAgent {
 
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()
-                .block_on(M365CopilotSession::new(self.process_path.get().cloned(), mode))
+                .block_on(M365CopilotSession::new(process_path, mode))
         });
 
         match result {
