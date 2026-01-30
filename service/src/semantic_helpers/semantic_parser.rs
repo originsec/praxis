@@ -10,7 +10,7 @@ use crate::config::ServiceConfig;
 const MAX_RETRIES: usize = 3;
 
 /// System prompt for the semantic parser
-const SYSTEM_PROMPT: &str = r#"You are a semantic parser. Your task is to parse the provided text and extract structured data according to the JSON schema provided.
+const SYSTEM_PROMPT: &str = r#"You are a semantic parser. Your task is to parse the provided text (including any provided json) and extract structured data according to the JSON schema provided.
 
 IMPORTANT RULES:
 1. You MUST return ONLY valid JSON that matches the schema exactly

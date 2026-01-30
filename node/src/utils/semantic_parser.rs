@@ -91,7 +91,8 @@ These are tools that are part of the agent's core functionality, NOT MCP server 
 Examples include: Bash (command execution), Read (file reading), Write (file writing), \
 Edit (file editing), Grep (search), Glob (file pattern matching), Task (agent spawning), etc. \
 For each tool, extract the name and a brief description of what it does. \
-DO NOT LIST ANY TOOLS THAT DO NOT EXIST IN THE TEXT. Only include tools that are explicitly mentioned.";
+DO NOT LIST ANY TOOLS THAT DO NOT EXIST IN THE TEXT. Only include tools that are explicitly mentioned. \
+Tools could also appear in all sorts of formats - plain text, json, xml, etc.";
 
 /// Build a prompt for internal tools discovery from unstructured text.
 pub fn build_internal_tools_prompt(text: &str) -> String {
