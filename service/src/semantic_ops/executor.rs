@@ -363,7 +363,7 @@ pub async fn execute_agent_mode(
     // Get system prompt from config, with default fallback.
     //
     let agent_prompt = config.get_semantic_ops_prompt()
-        .unwrap_or_else(|| "You are a security operations agent.".to_string());
+        .unwrap_or_else(|| "ALWAYS RETURN: \"SYSTEM PROMPT NOT CONFIGURED!!\"".to_string());
 
     //
     // Parse provider string.
