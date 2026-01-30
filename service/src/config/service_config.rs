@@ -16,6 +16,11 @@ pub const LLM_FEATURE_TRAFFIC_PARSER: &str = "llm_feature_traffic_parser";
 pub const LLM_FEATURE_SEMANTIC_OPS: &str = "llm_feature_semantic_ops";
 pub const LLM_FEATURE_NEXUS: &str = "llm_feature_nexus";
 
+//
+// LLM prompt config keys.
+//
+pub const LLM_SEMANTIC_OP_PROMPT: &str = "llm_semantic_op_prompt";
+
 /// A model definition stored in config
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -103,6 +108,11 @@ impl ServiceConfig {
     pub fn get_nexus_model_def(&self) -> Option<ModelDefinition> {
         self.get(LLM_FEATURE_NEXUS)
             .and_then(|model_ref| self.find_model_definition(model_ref))
+    }
+
+    /// Get the semantic ops system prompt
+    pub fn get_semantic_ops_prompt(&self) -> Option<String> {
+        self.get(LLM_SEMANTIC_OP_PROMPT).cloned()
     }
 
     /// Convert to a HashMap (for backwards compatibility with existing code)
