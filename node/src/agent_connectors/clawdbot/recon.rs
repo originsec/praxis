@@ -102,6 +102,7 @@ impl ClawdbotAgent {
         //
         crate::agent_connectors::utils::discover_internal_tools_semantically(
             self.name(),
+            crate::agent_connectors::utils::ToolDiscoveryPrompt::ListInternalTools,
             || {
                 let temp_context = SessionContext::default();
                 let session = ClawdbotSession::new(Some(binary_path.clone()), &temp_context)?;

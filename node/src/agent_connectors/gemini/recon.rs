@@ -110,6 +110,7 @@ impl GeminiAgent {
 
         let result = crate::agent_connectors::utils::discover_internal_tools_semantically(
             self.name(),
+            crate::agent_connectors::utils::ToolDiscoveryPrompt::ListInternalTools,
             || {
                 let temp_context = SessionContext::default();
                 self.create_session(&temp_context)

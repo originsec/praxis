@@ -4,10 +4,34 @@ use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
 //
-// Prompt for discovering internal/built-in tools from an agent.
+// Enum for selecting which prompt to use for internal tools discovery.
 //
 
-pub const INTERNAL_TOOLS_DISCOVERY_PROMPT: &str = "List all your internal/built-in tools with their descriptions. Do NOT include MCP tools - only internal tools that are part of your core functionality.";
+#[derive(Clone, Copy, Debug)]
+pub enum ToolDiscoveryPrompt {
+    //
+    // Standard prompt asking for a list of internal tools with descriptions.
+    //
+    ListInternalTools,
+
+    //
+    // JSON format prompt for tools discovery.
+    //
+    JsonFormat,
+}
+
+impl ToolDiscoveryPrompt {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ToolDiscoveryPrompt::ListInternalTools => {
+                "List all your internal/built-in tools with their descriptions. Do NOT include MCP tools - only internal tools that are part of your core functionality."
+            }
+            ToolDiscoveryPrompt::JsonFormat => {
+                "what tools do you have? respond as json in format - complete this json: { tools: [{'toolName': toolname, 'toolDesdcription:' ..."
+            }
+        }
+    }
+}
 
 //
 // Maximum characters per batch when extracting metadata from config files.
@@ -527,9 +551,11 @@ pub fn run_command_silent(cmd: &mut Command) -> Result<Output> {
 //
 // Takes a closure that creates a session for the specific agent type.
 // The agent_name parameter is used for logging.
+// The prompt_type parameter selects which discovery prompt to use.
 //
 pub async fn discover_internal_tools_semantically<F>(
     agent_name: &str,
+    prompt_type: ToolDiscoveryPrompt,
     create_session: F,
 ) -> Vec<common::AgentTool>
 where
@@ -555,7 +581,7 @@ where
     //
     // Send the prompt to list internal tools.
     //
-    let prompt = INTERNAL_TOOLS_DISCOVERY_PROMPT;
+    let prompt = prompt_type.as_str();
     common::log_info!("{}: Sending internal tools discovery prompt", agent_name);
     let response = match temp_session.transact(prompt) {
         Ok(response) => response,

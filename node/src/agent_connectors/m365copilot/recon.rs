@@ -137,11 +137,15 @@ impl M365CopilotAgent {
             *guard = None;
         }
 
-        let tools = utils::discover_internal_tools_semantically("M365CopilotAgent", || {
-            let temp_context = SessionContext::default();
-            self.create_session(&temp_context)
-                .ok_or_else(|| anyhow::anyhow!("Failed to create session"))
-        })
+        let tools = utils::discover_internal_tools_semantically(
+            "M365CopilotAgent",
+            utils::ToolDiscoveryPrompt::JsonFormat,
+            || {
+                let temp_context = SessionContext::default();
+                self.create_session(&temp_context)
+                    .ok_or_else(|| anyhow::anyhow!("Failed to create session"))
+            },
+        )
         .await;
 
         //
