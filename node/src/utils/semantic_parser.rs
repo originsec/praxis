@@ -298,7 +298,14 @@ static SEMANTIC_PARSER_CLIENT: RwLock<Option<Arc<SemanticParserClient>>> =
 /// Initialize or update the global semantic parser client.
 /// Called on initial connection and on reconnection to update the channel.
 pub fn init_global_client(client: SemanticParserClient) {
-    *SEMANTIC_PARSER_CLIENT.write().unwrap() = Some(Arc::new(client));
+    let mut guard = SEMANTIC_PARSER_CLIENT.write().unwrap();
+    let is_update = guard.is_some();
+    *guard = Some(Arc::new(client));
+    if is_update {
+        common::log_info!("Semantic parser client updated with new channel (reconnection)");
+    } else {
+        common::log_info!("Semantic parser client initialized");
+    }
 }
 
 /// Get the global semantic parser client
