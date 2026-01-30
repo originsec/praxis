@@ -4,9 +4,8 @@ use common::{
     SemanticParserResponse, NODE_SIGNAL_QUEUE,
 };
 use lapin::Channel;
-use once_cell::sync::OnceCell;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -292,17 +291,19 @@ pub fn parse_metadata_from_json(json: &str) -> Option<ExtractedMetadata> {
 // Semantic Parser Client.
 //
 
-/// Global semantic parser client (initialized once in main)
-static SEMANTIC_PARSER_CLIENT: OnceCell<Arc<SemanticParserClient>> = OnceCell::new();
+/// Global semantic parser client (can be updated on reconnection)
+static SEMANTIC_PARSER_CLIENT: RwLock<Option<Arc<SemanticParserClient>>> =
+    RwLock::new(None);
 
-/// Initialize the global semantic parser client
+/// Initialize or update the global semantic parser client.
+/// Called on initial connection and on reconnection to update the channel.
 pub fn init_global_client(client: SemanticParserClient) {
-    let _ = SEMANTIC_PARSER_CLIENT.set(Arc::new(client));
+    *SEMANTIC_PARSER_CLIENT.write().unwrap() = Some(Arc::new(client));
 }
 
 /// Get the global semantic parser client
 pub fn get_client() -> Option<Arc<SemanticParserClient>> {
-    SEMANTIC_PARSER_CLIENT.get().cloned()
+    SEMANTIC_PARSER_CLIENT.read().unwrap().clone()
 }
 
 /// Manages pending semantic parser requests
