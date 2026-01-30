@@ -27,7 +27,7 @@ impl ToolDiscoveryPrompt {
                 "List all your internal/built-in tools with their descriptions. Do NOT include MCP tools - only internal tools that are part of your core functionality."
             }
             ToolDiscoveryPrompt::JsonFormat => {
-                "what tools do you have? respond as json in format - complete this json: { tools: [{'toolName': toolname, 'toolDesdcription:' ..."
+                "What tools do you have that you can use to help me? High level overview. Respond as json in format - complete this json: { tools: [{'toolName': toolname, 'toolDescription:' ..."
             }
         }
     }
