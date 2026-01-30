@@ -18,6 +18,11 @@ pub enum ToolDiscoveryPrompt {
     // JSON format prompt for tools discovery.
     //
     JsonFormat,
+
+    //
+    // High level overview prompt for tools discovery.
+    //
+    HighLevel,
 }
 
 impl ToolDiscoveryPrompt {
@@ -28,6 +33,9 @@ impl ToolDiscoveryPrompt {
             }
             ToolDiscoveryPrompt::JsonFormat => {
                 "What tools do you have that you can use to help me? High level overview. Respond as json in format - complete this json: { tools: [{'toolName': toolname, 'toolDescription:' ..."
+            }
+            ToolDiscoveryPrompt::HighLevel => {
+                "What tools do you have that you can use to help me? High level overview of tools with a name an description..."
             }
         }
     }

@@ -137,9 +137,9 @@ impl M365CopilotAgent {
             *guard = None;
         }
 
-        let tools = utils::discover_internal_tools_semantically(
+        let mut tools = utils::discover_internal_tools_semantically(
             "M365CopilotAgent",
-            utils::ToolDiscoveryPrompt::JsonFormat,
+            utils::ToolDiscoveryPrompt::HighLevel,
             || {
                 let temp_context = SessionContext::default();
                 self.create_session(&temp_context)
@@ -148,11 +148,28 @@ impl M365CopilotAgent {
         )
         .await;
 
+        *self.session.write().unwrap() = None;
+
         //
-        // Clear session reference (utility already called close() on it).
+        // If HighLevel prompt returned no tools, try JsonFormat as fallback.
         //
 
-        *self.session.write().unwrap() = None;
+        if tools.is_empty() {
+            common::log_info!("HighLevel prompt returned no tools, trying JsonFormat");
+
+            tools = utils::discover_internal_tools_semantically(
+                "M365CopilotAgent",
+                utils::ToolDiscoveryPrompt::JsonFormat,
+                || {
+                    let temp_context = SessionContext::default();
+                    self.create_session(&temp_context)
+                        .ok_or_else(|| anyhow::anyhow!("Failed to create session"))
+                },
+            )
+            .await;
+
+            *self.session.write().unwrap() = None;
+        }
 
         tools
     }
