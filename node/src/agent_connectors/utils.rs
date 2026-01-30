@@ -511,6 +511,7 @@ pub fn run_command(cmd: &mut Command) -> Result<String> {
 // Useful for internal commands like --list-sessions.
 //
 
+#[allow(dead_code)]
 pub fn run_command_silent(cmd: &mut Command) -> Result<Output> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())

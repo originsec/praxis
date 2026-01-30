@@ -31,6 +31,7 @@ pub use chains::{
     TriggerType, TerminationType, ElementId, ModelRef, SessionGroup,
 };
 pub use chain_executions::ChainExecutionRecord;
+#[allow(unused_imports)]
 pub use recon::StoredReconResult;
 
 //
@@ -206,11 +207,13 @@ impl Database {
     }
 
     /// Check if using PostgreSQL backend
+    #[allow(dead_code)]
     pub fn is_postgres(&self) -> bool {
         matches!(self.pool, DatabasePool::Postgres(_))
     }
 
     /// Check if using SQLite backend
+    #[allow(dead_code)]
     pub fn is_sqlite(&self) -> bool {
         matches!(self.pool, DatabasePool::Sqlite(_))
     }
@@ -219,6 +222,7 @@ impl Database {
     // Helper methods to get pool references for submodules.
     //
 
+    #[allow(dead_code)]
     pub(crate) fn sqlite_pool(&self) -> Option<&Pool<Sqlite>> {
         match &self.pool {
             DatabasePool::Sqlite(pool) => Some(pool),
@@ -226,6 +230,7 @@ impl Database {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn postgres_pool(&self) -> Option<&Pool<Postgres>> {
         match &self.pool {
             DatabasePool::Postgres(pool) => Some(pool),
@@ -233,6 +238,7 @@ impl Database {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn pool(&self) -> &DatabasePool {
         &self.pool
     }

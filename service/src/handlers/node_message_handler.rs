@@ -62,14 +62,14 @@ impl NodeMessageHandler {
         &self,
         update: NodeInformationUpdate,
     ) -> Result<()> {
-        let agents_summary: Vec<String> = update
+        let _agents_summary: Vec<String> = update
             .discovered_agents
             .iter()
             .map(|a| format!("{}({})", a.short_name, if a.available { "✔" } else { "✘" }))
             .collect();
 
-        let selected_name = update.selected_agent.as_ref().map(|a| a.short_name.as_str()).unwrap_or("none");
-        let session_id = update.selected_agent.as_ref().and_then(|a| a.session_id.as_deref()).unwrap_or("none");
+        let _selected_name = update.selected_agent.as_ref().map(|a| a.short_name.as_str()).unwrap_or("none");
+        let _session_id = update.selected_agent.as_ref().and_then(|a| a.session_id.as_deref()).unwrap_or("none");
 
         //
         // Update the node registry with the new information.

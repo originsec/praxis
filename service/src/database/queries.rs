@@ -10,6 +10,7 @@ use sqlx::Row;
 
 /// Execute a query that works across both SQLite and PostgreSQL
 /// Returns the number of rows affected
+#[allow(dead_code)]
 pub async fn execute_multi(pool: &DatabasePool, sqlite_sql: &str, postgres_sql: &str) -> Result<u64> {
     match pool {
         DatabasePool::Sqlite(p) => {
@@ -26,6 +27,7 @@ pub async fn execute_multi(pool: &DatabasePool, sqlite_sql: &str, postgres_sql: 
 /// Get the last inserted row ID for auto-increment columns
 /// For SQLite, this uses last_insert_rowid()
 /// For PostgreSQL, use RETURNING clause instead
+#[allow(dead_code)]
 pub async fn last_insert_id_sqlite(pool: &DatabasePool) -> Result<i64> {
     match pool {
         DatabasePool::Sqlite(p) => {
@@ -44,6 +46,7 @@ pub async fn last_insert_id_sqlite(pool: &DatabasePool) -> Result<i64> {
 }
 
 /// Count rows in a table
+#[allow(dead_code)]
 pub async fn count_rows(pool: &DatabasePool, table: &str) -> Result<i64> {
     let sql = format!("SELECT COUNT(*) FROM {}", table);
     match pool {
@@ -65,6 +68,7 @@ pub async fn count_rows(pool: &DatabasePool, table: &str) -> Result<i64> {
 /// Build an upsert SQL statement
 /// SQLite: INSERT OR REPLACE / ON CONFLICT
 /// PostgreSQL: ON CONFLICT DO UPDATE
+#[allow(dead_code)]
 pub struct UpsertBuilder {
     table: String,
     columns: Vec<String>,
@@ -72,6 +76,7 @@ pub struct UpsertBuilder {
     update_columns: Vec<String>,
 }
 
+#[allow(dead_code)]
 impl UpsertBuilder {
     pub fn new(table: &str) -> Self {
         Self {

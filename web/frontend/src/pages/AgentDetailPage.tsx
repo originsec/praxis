@@ -1397,7 +1397,7 @@ export function AgentDetailPage() {
                 <div className="flex gap-2">
                   <button
                     onClick={handleDiscoverTools}
-                    disabled={isDiscoveringTools || !selectedAgent}
+                    disabled={isDiscoveringTools || !discoveredAgent?.available}
                     className="inline-flex items-center gap-2 px-3 py-1.5  bg-[var(--accent-info)]/20 text-[var(--accent-info)] text-sm hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50"
                   >
                     {isDiscoveringTools ? (
@@ -1412,7 +1412,7 @@ export function AgentDetailPage() {
                   </button>
                   <button
                     onClick={() => handleRecon(false)}
-                    disabled={isLoadingRecon || !selectedAgent}
+                    disabled={isLoadingRecon || !discoveredAgent?.available}
                     className="inline-flex items-center gap-2 px-3 py-1.5  bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] text-sm hover:bg-[var(--accent-purple)]/30 transition-colors disabled:opacity-50"
                   >
                     <RefreshCw size={14} className={isLoadingRecon ? 'animate-spin' : ''} />

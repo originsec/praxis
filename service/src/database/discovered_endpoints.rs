@@ -127,6 +127,7 @@ impl Database {
     }
 
     /// Delete a discovered endpoint by ID
+    #[allow(dead_code)]
     pub async fn delete_discovered_endpoint(&self, id: &str) -> Result<bool> {
         let sql = "DELETE FROM discovered_endpoints WHERE id = $1";
 
@@ -147,6 +148,7 @@ impl Database {
     }
 
     /// Clear all discovered endpoints for a node
+    #[allow(dead_code)]
     pub async fn clear_discovered_endpoints(&self, node_id: &str) -> Result<usize> {
         let sql = "DELETE FROM discovered_endpoints WHERE node_id = $1";
 
@@ -167,6 +169,7 @@ impl Database {
     }
 
     /// Get a specific discovered endpoint by ID
+    #[allow(dead_code)]
     pub async fn get_discovered_endpoint(&self, id: &str) -> Result<Option<DiscoveredLlmEndpoint>> {
         let sql = "SELECT id, node_id, ip_address, domain, port, is_https,
                 models, base_url, api_key, discovered_at

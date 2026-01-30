@@ -80,17 +80,20 @@ impl DatabaseConfig {
     }
 
     /// Check if this is a PostgreSQL configuration
+    #[allow(dead_code)]
     pub fn is_postgres(&self) -> bool {
         matches!(self, DatabaseConfig::Postgres { .. })
     }
 
     /// Check if this is a SQLite configuration
+    #[allow(dead_code)]
     pub fn is_sqlite(&self) -> bool {
         matches!(self, DatabaseConfig::Sqlite { .. })
     }
 }
 
 /// Connection pool configuration
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct PoolConfig {
     /// Maximum number of connections in the pool
@@ -113,6 +116,7 @@ impl Default for PoolConfig {
 
 impl PoolConfig {
     /// Create pool config optimized for SQLite (single connection)
+    #[allow(dead_code)]
     pub fn sqlite() -> Self {
         Self {
             //
@@ -126,6 +130,7 @@ impl PoolConfig {
     }
 
     /// Create pool config for PostgreSQL
+    #[allow(dead_code)]
     pub fn postgres() -> Self {
         Self {
             max_connections: 10,

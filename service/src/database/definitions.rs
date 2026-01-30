@@ -226,6 +226,7 @@ impl OperationDefinition {
     // Export to JSON format (includes item_type for import detection).
     //
 
+    #[allow(dead_code)]
     pub fn to_json(&self) -> String {
         #[derive(serde::Serialize)]
         struct JsonExport {

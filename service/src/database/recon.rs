@@ -11,12 +11,16 @@ use super::{Database, DatabasePool};
 
 #[derive(Debug, Clone)]
 pub struct StoredReconResult {
+    #[allow(dead_code)]
     pub id: String,
+    #[allow(dead_code)]
     pub node_id: String,
+    #[allow(dead_code)]
     pub agent_short_name: String,
     pub is_semantic: bool,
     pub recon_result: ReconResult,
     pub performed_at: String,
+    #[allow(dead_code)]
     pub created_at: String,
 }
 
@@ -142,6 +146,7 @@ impl Database {
     // Get all recon results for a node.
     //
 
+    #[allow(dead_code)]
     pub async fn get_recon_results_for_node(&self, node_id: &str) -> Result<Vec<StoredReconResult>> {
         let sql = "SELECT id, node_id, agent_short_name, is_semantic,
                 tools_json, config_json, sessions_json, project_paths_json, metadata_json,
@@ -180,6 +185,7 @@ impl Database {
     // Delete recon result for a node+agent.
     //
 
+    #[allow(dead_code)]
     pub async fn delete_recon_result(&self, node_id: &str, agent_short_name: &str) -> Result<()> {
         let sql = "DELETE FROM recon_results WHERE node_id = $1 AND agent_short_name = $2";
 

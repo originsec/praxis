@@ -855,7 +855,7 @@ pub async fn run() -> Result<()> {
                                                                                 tokio::spawn(async move {
                                             let response = semantic_helpers::handle_semantic_parser_request(&config_clone, &request).await;
 
-                                            let success = response.success;
+                                            let _success = response.success;
                                             //
                                             // Send to the dedicated semantic
                                             // queue to avoid deadlocks.
@@ -1150,15 +1150,12 @@ pub async fn run() -> Result<()> {
                                     ClientSignalMessage::SemanticOpClear => {
                                         info!("Received SemanticOpClear");
 
-                                        let mut total_cleared = 0;
-
                                         //
                                         // Clear finished operations.
                                         //
                                         match semantic_ops_manager.clear_finished_operations().await {
                                             Ok(count) => {
                                                 info!("Cleared {} finished operation(s)", count);
-                                                total_cleared += count;
                                             }
                                             Err(e) => {
                                                 error!("Failed to clear finished operations: {}", e);
@@ -1178,7 +1175,6 @@ pub async fn run() -> Result<()> {
                                             Ok(count) => {
                                                 if count > 0 {
                                                     info!("Cleared {} orphaned queued operation(s)", count);
-                                                    total_cleared += count;
                                                 }
                                             }
                                             Err(e) => {
