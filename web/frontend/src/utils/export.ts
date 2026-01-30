@@ -334,3 +334,97 @@ export function downloadTextFile(content: string, filename: string): void {
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
+
+//
+// Download JSON as a file.
+//
+export function downloadJsonFile(content: unknown, filename: string): void {
+  const json = JSON.stringify(content, null, 2);
+  const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+//
+// Export chain definition to JSON (for import/export).
+// Excludes id, created_at, updated_at as they will be regenerated on import.
+//
+export function exportChainDefinition(chain: {
+  name: string;
+  description: string;
+  category: string;
+  elements: unknown[];
+  connections: unknown[];
+  disabled?: boolean;
+  timeout?: number;
+}): object {
+  return {
+    name: chain.name,
+    description: chain.description,
+    category: chain.category,
+    elements: chain.elements,
+    connections: chain.connections,
+    disabled: chain.disabled ?? false,
+    timeout: chain.timeout,
+  };
+}
+
+//
+// Validate imported chain definition structure.
+//
+export function validateChainImport(data: unknown): { valid: boolean; error?: string } {
+  if (!data || typeof data !== 'object') {
+    return { valid: false, error: 'Invalid JSON: expected an object' };
+  }
+
+  const chain = data as Record<string, unknown>;
+
+  if (typeof chain.name !== 'string' || !chain.name.trim()) {
+    return { valid: false, error: 'Missing or invalid "name" field' };
+  }
+
+  if (!Array.isArray(chain.elements)) {
+    return { valid: false, error: 'Missing or invalid "elements" field (expected array)' };
+  }
+
+  if (!Array.isArray(chain.connections)) {
+    return { valid: false, error: 'Missing or invalid "connections" field (expected array)' };
+  }
+
+  //
+  // Validate elements have required fields.
+  //
+  for (let i = 0; i < chain.elements.length; i++) {
+    const elem = chain.elements[i] as Record<string, unknown>;
+    if (!elem || typeof elem !== 'object') {
+      return { valid: false, error: `Element ${i} is not an object` };
+    }
+    if (!elem.element_type) {
+      return { valid: false, error: `Element ${i} missing "element_type"` };
+    }
+    if (!elem.id) {
+      return { valid: false, error: `Element ${i} missing "id"` };
+    }
+  }
+
+  //
+  // Validate connections have required fields.
+  //
+  for (let i = 0; i < chain.connections.length; i++) {
+    const conn = chain.connections[i] as Record<string, unknown>;
+    if (!conn || typeof conn !== 'object') {
+      return { valid: false, error: `Connection ${i} is not an object` };
+    }
+    if (!conn.from_element || !conn.to_element) {
+      return { valid: false, error: `Connection ${i} missing "from_element" or "to_element"` };
+    }
+  }
+
+  return { valid: true };
+}

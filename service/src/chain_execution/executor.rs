@@ -324,6 +324,13 @@ impl ChainExecutor {
             // Check if we're entering or exiting a session group.
             //
             let element_session_group_id = graph.get_session_group_id(element_id);
+            common::log_info!(
+                "Chain element {}: session_group_id={:?}, current_session_group_id={:?}, active_session={:?}",
+                &element_id[..8.min(element_id.len())],
+                element_session_group_id,
+                current_session_group_id,
+                active_session.as_ref().map(|s| &s[..8.min(s.len())])
+            );
             if element_session_group_id != current_session_group_id {
                 //
                 // Exiting a session group - close the session.
