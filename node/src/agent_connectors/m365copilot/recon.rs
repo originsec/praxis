@@ -78,7 +78,7 @@ impl M365CopilotAgent {
         };
 
         if temp_session.mode() != crate::agent_connectors::traits::AgentMode::DevTools {
-            temp_session.close();
+            self.close_session();
             return Vec::new();
         }
 
@@ -110,7 +110,7 @@ impl M365CopilotAgent {
             })
             .unwrap_or_default();
 
-        temp_session.close();
+        self.close_session();
 
         if !identities.is_empty() {
             common::log_info!("Found identities: {:?}", identities);
@@ -137,11 +137,19 @@ impl M365CopilotAgent {
             *guard = None;
         }
 
-        utils::discover_internal_tools_semantically("M365CopilotAgent", || {
+        let tools = utils::discover_internal_tools_semantically("M365CopilotAgent", || {
             let temp_context = SessionContext::default();
             self.create_session(&temp_context)
                 .ok_or_else(|| anyhow::anyhow!("Failed to create session"))
         })
-        .await
+        .await;
+
+        //
+        // Clear session reference (utility already called close() on it).
+        //
+
+        *self.session.write().unwrap() = None;
+
+        tools
     }
 }
