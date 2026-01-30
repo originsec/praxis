@@ -17,22 +17,21 @@ const RECONNECT_DELAY_SECS: u64 = 5;
 
 #[tokio::main]
 async fn main() {
-    #[cfg(debug_assertions)]
-    {
-        use tracing_subscriber::EnvFilter;
+    use tracing_subscriber::EnvFilter;
 
-        //
-        // Filter out noisy chromiumoxide deserialization errors.
-        //
+    //
+    // Initialize tracing in both debug and release builds.
+    // Filter out noisy chromiumoxide deserialization errors.
+    // Respects RUST_LOG environment variable (defaults to "info").
+    //
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"))
+        .add_directive("chromiumoxide::conn=off".parse().unwrap())
+        .add_directive("chromiumoxide::handler=off".parse().unwrap());
 
-        let filter = EnvFilter::new("info")
-            .add_directive("chromiumoxide::conn=off".parse().unwrap())
-            .add_directive("chromiumoxide::handler=off".parse().unwrap());
-
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .init();
-    }
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .init();
 
     //
     // Install the ring crypto provider for rustls.

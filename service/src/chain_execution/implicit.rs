@@ -17,6 +17,7 @@ use crate::database::{
 /// - Manual Trigger -> Operation -> Raw Termination
 ///
 /// The chain ID starts with "implicit_" to identify it as transient.
+#[allow(dead_code)]
 pub fn create_implicit_chain(
     operation_name: &str,
     operation_display_name: &str,

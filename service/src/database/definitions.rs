@@ -1,8 +1,9 @@
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use common::{SemanticOperationSpec, OperationDefinitionInfo};
-use rusqlite::{params, Result as SqliteResult};
+use sqlx::Row;
 
-use super::{Database, MAX_OPERATION_DEFINITIONS};
+use super::{Database, DatabasePool, MAX_OPERATION_DEFINITIONS};
 
 /// Database record for an operation definition (parsed from YAML)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -225,6 +226,7 @@ impl OperationDefinition {
     // Export to JSON format (includes item_type for import detection).
     //
 
+    #[allow(dead_code)]
     pub fn to_json(&self) -> String {
         #[derive(serde::Serialize)]
         struct JsonExport {
@@ -281,12 +283,9 @@ impl OperationDefinition {
 
 impl Database {
     /// Insert or update an operation definition
-    pub fn upsert_operation_definition(&self, definition: &OperationDefinition) -> SqliteResult<()> {
-        let conn = self.conn().lock().unwrap();
-
-        conn.execute(
-            "INSERT INTO operation_definitions (full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+    pub async fn upsert_operation_definition(&self, definition: &OperationDefinition) -> Result<()> {
+        let sql = "INSERT INTO operation_definitions (full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
              ON CONFLICT(full_name) DO UPDATE SET
                  category = excluded.category,
                  short_name = excluded.short_name,
@@ -301,163 +300,297 @@ impl Database {
                  disabled = excluded.disabled,
                  yolo_mode = excluded.yolo_mode,
                  model_ref = excluded.model_ref,
-                 updated_at = excluded.updated_at",
-            params![
-                definition.full_name,
-                definition.category,
-                definition.short_name,
-                definition.name,
-                definition.description,
-                definition.agent_info,
-                definition.timeout as i64,
-                definition.operation_prompt,
-                definition.mode,
-                definition.agent_iterations as i64,
-                //
-                // DEPRECATED: operation_chain is always empty now.
-                //
-                "[]",
-                if definition.disabled { 1 } else { 0 },
-                if definition.yolo_mode { 1 } else { 0 },
-                definition.model_ref,
-                definition.created_at.to_rfc3339(),
-                definition.updated_at.to_rfc3339(),
-            ],
-        )?;
+                 updated_at = excluded.updated_at";
 
-        drop(conn);
-        self.prune_old_definitions()?;
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query(sql)
+                    .bind(&definition.full_name)
+                    .bind(&definition.category)
+                    .bind(&definition.short_name)
+                    .bind(&definition.name)
+                    .bind(&definition.description)
+                    .bind(&definition.agent_info)
+                    .bind(definition.timeout as i64)
+                    .bind(&definition.operation_prompt)
+                    .bind(&definition.mode)
+                    .bind(definition.agent_iterations as i64)
+                    .bind("[]") // DEPRECATED: operation_chain is always empty now
+                    .bind(definition.disabled)
+                    .bind(definition.yolo_mode)
+                    .bind(&definition.model_ref)
+                    .bind(definition.created_at.to_rfc3339())
+                    .bind(definition.updated_at.to_rfc3339())
+                    .execute(pool)
+                    .await?;
+            }
+            DatabasePool::Postgres(pool) => {
+                sqlx::query(sql)
+                    .bind(&definition.full_name)
+                    .bind(&definition.category)
+                    .bind(&definition.short_name)
+                    .bind(&definition.name)
+                    .bind(&definition.description)
+                    .bind(&definition.agent_info)
+                    .bind(definition.timeout as i64)
+                    .bind(&definition.operation_prompt)
+                    .bind(&definition.mode)
+                    .bind(definition.agent_iterations as i64)
+                    .bind("[]") // DEPRECATED: operation_chain is always empty now
+                    .bind(if definition.disabled { 1i16 } else { 0i16 })
+                    .bind(if definition.yolo_mode { 1i16 } else { 0i16 })
+                    .bind(&definition.model_ref)
+                    .bind(definition.created_at.to_rfc3339())
+                    .bind(definition.updated_at.to_rfc3339())
+                    .execute(pool)
+                    .await?;
+            }
+        }
+
+        //
+        // Auto-prune old definitions.
+        //
+        self.prune_old_definitions().await?;
 
         Ok(())
     }
 
     /// Get an operation definition by full_name
-    pub fn get_operation_definition(&self, full_name: &str) -> SqliteResult<Option<OperationDefinition>> {
-        let conn = self.conn().lock().unwrap();
+    pub async fn get_operation_definition(&self, full_name: &str) -> Result<Option<OperationDefinition>> {
+        let sql = "SELECT full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, created_at, updated_at
+             FROM operation_definitions WHERE full_name = $1";
 
-        let mut stmt = conn.prepare(
-            "SELECT full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, created_at, updated_at
-             FROM operation_definitions WHERE full_name = ?1",
-        )?;
-
-        let result = match stmt.query_row(params![full_name], parse_definition_row) {
-            Ok(record) => Some(record),
-            Err(rusqlite::Error::QueryReturnedNoRows) => None,
-            Err(e) => return Err(e),
-        };
-
-        Ok(result)
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let row = sqlx::query(sql)
+                    .bind(full_name)
+                    .fetch_optional(pool)
+                    .await?;
+                match row {
+                    Some(row) => Ok(Some(parse_definition_row_sqlite(&row)?)),
+                    None => Ok(None),
+                }
+            }
+            DatabasePool::Postgres(pool) => {
+                let row = sqlx::query(sql)
+                    .bind(full_name)
+                    .fetch_optional(pool)
+                    .await?;
+                match row {
+                    Some(row) => Ok(Some(parse_definition_row_postgres(&row)?)),
+                    None => Ok(None),
+                }
+            }
+        }
     }
 
     /// List all operation definitions
-    pub fn list_operation_definitions(&self) -> SqliteResult<Vec<OperationDefinition>> {
-        let conn = self.conn().lock().unwrap();
+    pub async fn list_operation_definitions(&self) -> Result<Vec<OperationDefinition>> {
+        let sql = "SELECT full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, created_at, updated_at
+             FROM operation_definitions ORDER BY category, short_name";
 
-        let mut stmt = conn.prepare(
-            "SELECT full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, created_at, updated_at
-             FROM operation_definitions ORDER BY category, short_name",
-        )?;
-
-        let definitions = stmt
-            .query_map([], parse_definition_row)?
-            .collect::<SqliteResult<Vec<_>>>()?;
-
-        Ok(definitions)
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let rows = sqlx::query(sql)
+                    .fetch_all(pool)
+                    .await?;
+                let mut definitions = Vec::new();
+                for row in rows {
+                    definitions.push(parse_definition_row_sqlite(&row)?);
+                }
+                Ok(definitions)
+            }
+            DatabasePool::Postgres(pool) => {
+                let rows = sqlx::query(sql)
+                    .fetch_all(pool)
+                    .await?;
+                let mut definitions = Vec::new();
+                for row in rows {
+                    definitions.push(parse_definition_row_postgres(&row)?);
+                }
+                Ok(definitions)
+            }
+        }
     }
 
     /// List operation definitions by category
     #[allow(dead_code)]
-    pub fn list_operation_definitions_by_category(&self, category: &str) -> SqliteResult<Vec<OperationDefinition>> {
-        let conn = self.conn().lock().unwrap();
+    pub async fn list_operation_definitions_by_category(&self, category: &str) -> Result<Vec<OperationDefinition>> {
+        let sql = "SELECT full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, created_at, updated_at
+             FROM operation_definitions WHERE category = $1 ORDER BY short_name";
 
-        let mut stmt = conn.prepare(
-            "SELECT full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, created_at, updated_at
-             FROM operation_definitions WHERE category = ?1 ORDER BY short_name",
-        )?;
-
-        let definitions = stmt
-            .query_map(params![category], parse_definition_row)?
-            .collect::<SqliteResult<Vec<_>>>()?;
-
-        Ok(definitions)
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let rows = sqlx::query(sql)
+                    .bind(category)
+                    .fetch_all(pool)
+                    .await?;
+                let mut definitions = Vec::new();
+                for row in rows {
+                    definitions.push(parse_definition_row_sqlite(&row)?);
+                }
+                Ok(definitions)
+            }
+            DatabasePool::Postgres(pool) => {
+                let rows = sqlx::query(sql)
+                    .bind(category)
+                    .fetch_all(pool)
+                    .await?;
+                let mut definitions = Vec::new();
+                for row in rows {
+                    definitions.push(parse_definition_row_postgres(&row)?);
+                }
+                Ok(definitions)
+            }
+        }
     }
 
     /// Delete an operation definition by full_name
-    pub fn delete_operation_definition(&self, full_name: &str) -> SqliteResult<bool> {
-        let conn = self.conn().lock().unwrap();
+    pub async fn delete_operation_definition(&self, full_name: &str) -> Result<bool> {
+        let sql = "DELETE FROM operation_definitions WHERE full_name = $1";
 
-        let count = conn.execute(
-            "DELETE FROM operation_definitions WHERE full_name = ?1",
-            params![full_name],
-        )?;
+        let count = match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query(sql)
+                    .bind(full_name)
+                    .execute(pool)
+                    .await?
+                    .rows_affected()
+            }
+            DatabasePool::Postgres(pool) => {
+                sqlx::query(sql)
+                    .bind(full_name)
+                    .execute(pool)
+                    .await?
+                    .rows_affected()
+            }
+        };
 
         Ok(count > 0)
     }
 
     /// Count operation definitions
-    pub fn count_operation_definitions(&self) -> SqliteResult<usize> {
-        let conn = self.conn().lock().unwrap();
+    pub async fn count_operation_definitions(&self) -> Result<usize> {
+        let sql = "SELECT COUNT(*) FROM operation_definitions";
 
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM operation_definitions",
-            [],
-            |row| row.get(0),
-        )?;
+        let count: i64 = match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let row = sqlx::query(sql).fetch_one(pool).await?;
+                row.get(0)
+            }
+            DatabasePool::Postgres(pool) => {
+                let row = sqlx::query(sql).fetch_one(pool).await?;
+                row.get(0)
+            }
+        };
 
         Ok(count as usize)
     }
 
     /// Prune old operation definitions (keep only MAX_OPERATION_DEFINITIONS)
-    fn prune_old_definitions(&self) -> SqliteResult<usize> {
-        let count = self.count_operation_definitions()?;
+    async fn prune_old_definitions(&self) -> Result<usize> {
+        let count = self.count_operation_definitions().await?;
 
         if count <= MAX_OPERATION_DEFINITIONS {
             return Ok(0);
         }
 
         let to_delete = count - MAX_OPERATION_DEFINITIONS;
-        let conn = self.conn().lock().unwrap();
 
-        let deleted = conn.execute(
-            "DELETE FROM operation_definitions WHERE full_name IN (
+        let sql = "DELETE FROM operation_definitions WHERE full_name IN (
                 SELECT full_name FROM operation_definitions
-                ORDER BY updated_at ASC LIMIT ?1
-            )",
-            params![to_delete],
-        )?;
+                ORDER BY updated_at ASC LIMIT $1
+            )";
 
-        Ok(deleted)
+        let deleted = match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query(sql)
+                    .bind(to_delete as i64)
+                    .execute(pool)
+                    .await?
+                    .rows_affected()
+            }
+            DatabasePool::Postgres(pool) => {
+                sqlx::query(sql)
+                    .bind(to_delete as i64)
+                    .execute(pool)
+                    .await?
+                    .rows_affected()
+            }
+        };
+
+        Ok(deleted as usize)
     }
 }
 
-fn parse_definition_row(row: &rusqlite::Row) -> SqliteResult<OperationDefinition> {
-    let full_name: String = row.get(0)?;
-    let category: String = row.get(1)?;
-    let short_name: String = row.get(2)?;
-    let name: String = row.get(3)?;
-    let description: String = row.get(4)?;
-    let agent_info: String = row.get(5)?;
-    let timeout: i64 = row.get(6)?;
-    let operation_prompt: String = row.get(7)?;
-    let mode: String = row.get(8)?;
-    let agent_iterations: i64 = row.get(9)?;
-    //
-    // DEPRECATED: ignored.
-    //
-    let _operation_chain_json: String = row.get(10)?;
-    let disabled: i64 = row.get(11)?;
-    let yolo_mode: i64 = row.get(12)?;
-    let model_ref: Option<String> = row.get(13)?;
-    let created_at_str: String = row.get(14)?;
-    let updated_at_str: String = row.get(15)?;
+//
+// Helper functions.
+//
 
-    let created_at = DateTime::parse_from_rfc3339(&created_at_str)
-        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(14, rusqlite::types::Type::Text, Box::new(e)))?
-        .with_timezone(&Utc);
+fn parse_definition_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> Result<OperationDefinition> {
+    let full_name: String = row.get(0);
+    let category: String = row.get(1);
+    let short_name: String = row.get(2);
+    let name: String = row.get(3);
+    let description: String = row.get(4);
+    let agent_info: String = row.get(5);
+    let timeout: i64 = row.get(6);
+    let operation_prompt: String = row.get(7);
+    let mode: String = row.get(8);
+    let agent_iterations: i64 = row.get(9);
+    let _operation_chain_json: String = row.get(10); // DEPRECATED: ignored
+    let disabled: bool = row.get(11);
+    let yolo_mode: bool = row.get(12);
+    let model_ref: Option<String> = row.get(13);
+    let created_at_str: String = row.get(14);
+    let updated_at_str: String = row.get(15);
 
-    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)
-        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(15, rusqlite::types::Type::Text, Box::new(e)))?
-        .with_timezone(&Utc);
+    let created_at = DateTime::parse_from_rfc3339(&created_at_str)?.with_timezone(&Utc);
+    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)?.with_timezone(&Utc);
+
+    Ok(OperationDefinition {
+        full_name,
+        category,
+        short_name,
+        name,
+        description,
+        agent_info,
+        timeout: timeout as u64,
+        operation_prompt,
+        mode,
+        agent_iterations: agent_iterations as u32,
+        //
+        // DEPRECATED: always empty.
+        //
+        operation_chain: vec![],
+        disabled,
+        yolo_mode,
+        model_ref,
+        created_at,
+        updated_at,
+    })
+}
+
+fn parse_definition_row_postgres(row: &sqlx::postgres::PgRow) -> Result<OperationDefinition> {
+    let full_name: String = row.get(0);
+    let category: String = row.get(1);
+    let short_name: String = row.get(2);
+    let name: String = row.get(3);
+    let description: String = row.get(4);
+    let agent_info: String = row.get(5);
+    let timeout: i64 = row.get(6);
+    let operation_prompt: String = row.get(7);
+    let mode: String = row.get(8);
+    let agent_iterations: i64 = row.get(9);
+    let _operation_chain_json: String = row.get(10); // DEPRECATED: ignored
+    let disabled: i16 = row.get(11);
+    let yolo_mode: i16 = row.get(12);
+    let model_ref: Option<String> = row.get(13);
+    let created_at_str: String = row.get(14);
+    let updated_at_str: String = row.get(15);
+
+    let created_at = DateTime::parse_from_rfc3339(&created_at_str)?.with_timezone(&Utc);
+    let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)?.with_timezone(&Utc);
 
     Ok(OperationDefinition {
         full_name,

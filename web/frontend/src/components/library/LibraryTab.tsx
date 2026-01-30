@@ -92,6 +92,11 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<LibraryItem | null>(null);
 
+  //
+  // Chain export state - track which chain is being exported.
+  //
+  const [exportingChainId, setExportingChainId] = useState<string | null>(null);
+
   const addMenuRef = useRef<HTMLDivElement>(null);
 
   //
@@ -128,6 +133,38 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
       setShowChainBuilder(true);
     }
   }, [editingChainId, currentChain]);
+
+  //
+  // Export chain once full definition is loaded.
+  //
+  useEffect(() => {
+    if (exportingChainId && currentChain && currentChain.id === exportingChainId) {
+      const exportData = {
+        item_type: 'chain',
+        name: currentChain.name,
+        description: currentChain.description,
+        category: currentChain.category,
+        elements: currentChain.elements,
+        connections: currentChain.connections,
+        disabled: currentChain.disabled,
+        timeout: currentChain.timeout,
+      };
+      const content = JSON.stringify(exportData, null, 2);
+      const filename = `chain_${currentChain.name.toLowerCase().replace(/\s+/g, '_')}.json`;
+
+      const blob = new Blob([content], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setExportingChainId(null);
+    }
+  }, [exportingChainId, currentChain]);
 
   //
   // Handle success/error for chains.
@@ -342,9 +379,6 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
   };
 
   const handleExportItem = (item: LibraryItem) => {
-    let content: string;
-    let filename: string;
-
     if (item.type === 'operation') {
       const op = operationDefs.find((o) => o.full_name === item.id);
       if (!op) return;
@@ -364,47 +398,25 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
         yolo_mode: op.yolo_mode,
         ...(op.model_ref && { model_ref: op.model_ref }),
       };
-      content = JSON.stringify(exportData, null, 2);
-      filename = `${op.category}_${op.short_name}.json`;
+      const content = JSON.stringify(exportData, null, 2);
+      const filename = `${op.category}_${op.short_name}.json`;
+
+      const blob = new Blob([content], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     } else {
       //
-      // For chains, request full definition and export.
+      // For chains, request full definition and export via useEffect.
       //
-      const chain = chains.find((c) => c.id === item.id);
-      if (!chain) return;
-
-      //
-      // We need the full chain definition. Request it and wait for it to load.
-      // For now, export the summary info.
-      //
-      const exportData = {
-        item_type: 'chain',
-        id: chain.id,
-        name: chain.name,
-        description: chain.description,
-        category: chain.category,
-        disabled: chain.disabled,
-        timeout: chain.timeout,
-        //
-        // Note: Full elements/connections require fetching the full chain.
-        //
-      };
-      content = JSON.stringify(exportData, null, 2);
-      filename = `chain_${chain.name.toLowerCase().replace(/\s+/g, '_')}.json`;
+      setExportingChainId(item.id);
+      requestChain(item.id);
     }
-
-    //
-    // Download the file.
-    //
-    const blob = new Blob([content], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   };
 
   const handleRunFromModal = (itemId: string, nodeId: string, agentName: string) => {

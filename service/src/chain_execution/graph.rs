@@ -125,6 +125,23 @@ impl ExecutionGraph {
             }
         }
 
+        //
+        // Log session groups for debugging.
+        //
+        for (group_id, (sg, element_ids)) in &session_groups {
+            common::log_info!(
+                "Session group '{}' (color: {}, yolo: {}): elements={:?}",
+                group_id,
+                sg.color,
+                sg.yolo_mode,
+                element_ids.iter().map(|id| &id[..8.min(id.len())]).collect::<Vec<_>>()
+            );
+        }
+        common::log_info!(
+            "First in session elements: {:?}",
+            first_in_session.iter().map(|id| &id[..8.min(id.len())]).collect::<Vec<_>>()
+        );
+
         Ok(Self {
             nodes,
             trigger_id,

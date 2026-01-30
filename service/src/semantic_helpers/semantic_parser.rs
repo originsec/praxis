@@ -32,47 +32,33 @@ pub async fn handle_semantic_parser_request(
     let config = config.read().await;
 
     //
-    // Try to get credentials from the new model definition system first,
-    // then fall back to legacy config keys for backwards compatibility.
+    // Get credentials from model definition.
     //
-    let (api_key, provider, model) = if let Some(model_def) = config.get_semantic_parser_model_def() {
-        let provider = match Provider::from_str(&model_def.provider) {
-            Some(p) => p,
-            None => {
-                return SemanticParserResponse {
-                    request_id: request.request_id.clone(),
-                    success: false,
-                    json: None,
-                    error: Some(format!("Invalid provider in model definition: {}", model_def.provider)),
-                };
-            }
-        };
-        (model_def.api_key, provider, model_def.model)
-    } else if let Some(api_key) = config.semantic_parser_api_key() {
-        //
-        // Fall back to legacy config keys.
-        //
-        let provider_str = config.semantic_parser_provider();
-        let provider = match Provider::from_str(&provider_str) {
-            Some(p) => p,
-            None => {
-                return SemanticParserResponse {
-                    request_id: request.request_id.clone(),
-                    success: false,
-                    json: None,
-                    error: Some(format!("Invalid provider: {}", provider_str)),
-                };
-            }
-        };
-        (api_key.clone(), provider, config.semantic_parser_model())
-    } else {
-        return SemanticParserResponse {
-            request_id: request.request_id.clone(),
-            success: false,
-            json: None,
-            error: Some("Semantic parser not configured: no model definition assigned and no legacy API key set".to_string()),
-        };
+    let model_def = match config.get_semantic_parser_model_def() {
+        Some(def) => def,
+        None => {
+            return SemanticParserResponse {
+                request_id: request.request_id.clone(),
+                success: false,
+                json: None,
+                error: Some("No LLM configured for Semantic Parser. Configure in Settings > LLM Providers.".to_string()),
+            };
+        }
     };
+
+    let provider = match Provider::from_str(&model_def.provider) {
+        Some(p) => p,
+        None => {
+            return SemanticParserResponse {
+                request_id: request.request_id.clone(),
+                success: false,
+                json: None,
+                error: Some(format!("Invalid provider in model definition: {}", model_def.provider)),
+            };
+        }
+    };
+
+    let (api_key, model) = (model_def.api_key, model_def.model);
 
     //
     // Create AI client.

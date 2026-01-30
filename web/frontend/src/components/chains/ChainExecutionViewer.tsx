@@ -704,11 +704,17 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
                   <div className="mt-1 p-3 bg-[var(--bg-secondary)] rounded text-sm max-h-48 overflow-auto">
                     <pre className="whitespace-pre-wrap font-mono text-xs">{selectedElement.context.input}</pre>
                   </div>
-                  {selectedElement.context.session_id && (
-                    <div className="mt-1 text-xs text-muted">
-                      Session: <span className="font-mono">{selectedElement.context.session_id.slice(0, 8)}</span>
-                    </div>
-                  )}
+                </div>
+              )}
+
+              {/*
+              //
+              // Session ID - shown for any element with a session.
+              //
+              */}
+              {selectedElement.context?.session_id && (
+                <div className="text-xs text-muted">
+                  Session: <span className="font-mono">{selectedElement.context.session_id.slice(0, 8)}</span>
                 </div>
               )}
             </div>

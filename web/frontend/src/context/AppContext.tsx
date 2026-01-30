@@ -868,6 +868,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'SET_CONNECTED', connected: true, clientId: message.client_id, version: message.version });
           break;
         case 'state_update':
+          //
+          // Debug: Log selected_agent info from state updates.
+          //
+          if (message.state.nodes?.length > 0) {
+            const nodeWithSession = message.state.nodes.find(n => n.selected_agent?.session_id);
+            if (nodeWithSession) {
+              console.log('[state_update] Node with session:', nodeWithSession.node_id, 'selected_agent:', nodeWithSession.selected_agent);
+            }
+          }
           dispatch({ type: 'SET_STATE', state: message.state });
           break;
         case 'command_response': {

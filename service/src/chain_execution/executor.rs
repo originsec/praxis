@@ -101,7 +101,7 @@ impl ChainExecutor {
                 ended_at: s.ended_at,
                 created_at: Utc::now(),
             };
-            if let Err(e) = database.insert_chain_execution(&record) {
+            if let Err(e) = database.insert_chain_execution(&record).await {
                 common::log_error!("Failed to persist chain execution to database: {}", e);
             }
         }
@@ -157,7 +157,7 @@ impl ChainExecutor {
                     &exec_id,
                     ChainExecutionStatus::Running,
                     None,
-                ) {
+                ).await {
                     common::log_error!("Failed to update chain execution to Running: {}", e);
                 }
             }
@@ -219,14 +219,17 @@ impl ChainExecutor {
             // Persist final state to database (skip for implicit chains).
             //
             if !is_implicit {
-                let s = state_clone.read().unwrap();
+                let (status, elements, outputs, ended_at) = {
+                    let s = state_clone.read().unwrap();
+                    (s.status.clone(), s.elements.clone(), s.outputs.clone(), s.ended_at)
+                };
                 if let Err(e) = database_clone.update_chain_execution(
                     &exec_id,
-                    s.status.clone(),
-                    &s.elements,
-                    &s.outputs,
-                    s.ended_at,
-                ) {
+                    status,
+                    &elements,
+                    &outputs,
+                    ended_at,
+                ).await {
                     common::log_error!("Failed to persist final chain execution state: {}", e);
                 }
             }
@@ -321,6 +324,13 @@ impl ChainExecutor {
             // Check if we're entering or exiting a session group.
             //
             let element_session_group_id = graph.get_session_group_id(element_id);
+            common::log_info!(
+                "Chain element {}: session_group_id={:?}, current_session_group_id={:?}, active_session={:?}",
+                &element_id[..8.min(element_id.len())],
+                element_session_group_id,
+                current_session_group_id,
+                active_session.as_ref().map(|s| &s[..8.min(s.len())])
+            );
             if element_session_group_id != current_session_group_id {
                 //
                 // Exiting a session group - close the session.
@@ -474,6 +484,7 @@ impl ChainExecutor {
                     //
                     let op_def = database
                         .get_operation_definition(operation_name)
+                        .await
                         .ok()
                         .flatten()
                         .ok_or_else(|| {
@@ -538,7 +549,7 @@ impl ChainExecutor {
                         output: Some(format!("[Chain: {} | Element: {}]\n", execution_id, element_id)),
                         chain_execution_id: Some(execution_id.clone()),
                     };
-                    if let Err(e) = database.insert_operation(&op_record) {
+                    if let Err(e) = database.insert_operation(&op_record).await {
                         common::log_warn!("Failed to record chain operation to database: {}", e);
                     }
 
@@ -595,7 +606,7 @@ impl ChainExecutor {
                                 SemanticOpStatus::Completed,
                                 Some(end_time),
                                 Some(output.clone()),
-                            );
+                            ).await;
                         }
                         Err(e) => {
                             let _ = database.update_status(
@@ -603,7 +614,7 @@ impl ChainExecutor {
                                 SemanticOpStatus::Failed,
                                 Some(end_time),
                                 Some(e.to_string()),
-                            );
+                            ).await;
                         }
                     }
 
@@ -618,48 +629,17 @@ impl ChainExecutor {
                     //
 
                     //
-                    // Resolve model configuration.
+                    // Resolve model configuration from model definitions.
                     //
                     let config_guard = config.read().await;
-                    let (provider_str, model_name, api_key) = if let Some(mref) = model_ref {
-                        //
-                        // Try to find the model definition in config.
-                        //
-                        if let Some(model_def) = config_guard.find_model_definition(mref) {
-                            (model_def.provider, model_def.model, model_def.api_key)
-                        } else {
-                            //
-                            // Fallback: Parse model_ref format
-                            // "provider::model".
-                            //
-                            let parts: Vec<&str> = mref.splitn(2, "::").collect();
-                            if parts.len() == 2 {
-                                let key = config_guard
-                                    .semantic_op_api_key()
-                                    .ok_or_else(|| anyhow::anyhow!("No API key configured for model_ref '{}'", mref))?
-                                    .clone();
-                                (parts[0].to_string(), parts[1].to_string(), key)
-                            } else {
-                                //
-                                // Fall back to semantic ops default.
-                                //
-                                let key = config_guard
-                                    .semantic_op_api_key()
-                                    .ok_or_else(|| anyhow::anyhow!("No API key configured for transform"))?
-                                    .clone();
-                                (config_guard.semantic_op_provider(), config_guard.semantic_op_model(), key)
-                            }
-                        }
+                    let model_def = if let Some(mref) = model_ref {
+                        config_guard.find_model_definition(mref)
+                            .ok_or_else(|| anyhow::anyhow!("Model '{}' not found. Configure in Settings > LLM Providers.", mref))?
                     } else {
-                        //
-                        // Use semantic ops default configuration.
-                        //
-                        let key = config_guard
-                            .semantic_op_api_key()
-                            .ok_or_else(|| anyhow::anyhow!("No API key configured for transform. Configure in Settings > LLM Providers."))?
-                            .clone();
-                        (config_guard.semantic_op_provider(), config_guard.semantic_op_model(), key)
+                        config_guard.get_semantic_ops_model_def()
+                            .ok_or_else(|| anyhow::anyhow!("No LLM configured for transform. Configure in Settings > LLM Providers."))?
                     };
+                    let (provider_str, model_name, api_key) = (model_def.provider, model_def.model, model_def.api_key);
                     drop(config_guard);
 
                     //
@@ -670,11 +650,15 @@ impl ChainExecutor {
                     let client = create_ai_client(provider, api_key)?;
 
                     //
-                    // Build the conversation - system prompt with user data.
+                    // Build the conversation - input data first, then prompt.
                     //
+                    let user_content = if merged_input.is_empty() {
+                        prompt.clone()
+                    } else {
+                        format!("{}\n\n{}", merged_input, prompt)
+                    };
                     let messages = vec![
-                        Message::system(prompt.clone()),
-                        Message::user(merged_input.clone()),
+                        Message::user(user_content),
                     ];
 
                     //
@@ -814,48 +798,17 @@ impl ChainExecutor {
                             //
 
                             //
-                            // Resolve model configuration.
+                            // Resolve model configuration from model definitions.
                             //
                             let config_guard = config.read().await;
-                            let (provider_str, model_name, api_key) = if let Some(mref) = model_ref {
-                                //
-                                // Try to find the model definition in config.
-                                //
-                                if let Some(model_def) = config_guard.find_model_definition(mref) {
-                                    (model_def.provider, model_def.model, model_def.api_key)
-                                } else {
-                                    //
-                                    // Fallback: Parse model_ref format
-                                    // "provider::model".
-                                    //
-                                    let parts: Vec<&str> = mref.splitn(2, "::").collect();
-                                    if parts.len() == 2 {
-                                        let key = config_guard
-                                            .semantic_op_api_key()
-                                            .ok_or_else(|| anyhow::anyhow!("No API key configured for model_ref '{}'", mref))?
-                                            .clone();
-                                        (parts[0].to_string(), parts[1].to_string(), key)
-                                    } else {
-                                        //
-                                        // Fall back to semantic ops default.
-                                        //
-                                        let key = config_guard
-                                            .semantic_op_api_key()
-                                            .ok_or_else(|| anyhow::anyhow!("No API key configured for semantic output"))?
-                                            .clone();
-                                        (config_guard.semantic_op_provider(), config_guard.semantic_op_model(), key)
-                                    }
-                                }
+                            let model_def = if let Some(mref) = model_ref {
+                                config_guard.find_model_definition(mref)
+                                    .ok_or_else(|| anyhow::anyhow!("Model '{}' not found. Configure in Settings > LLM Providers.", mref))?
                             } else {
-                                //
-                                // Use semantic ops default configuration.
-                                //
-                                let key = config_guard
-                                    .semantic_op_api_key()
-                                    .ok_or_else(|| anyhow::anyhow!("No API key configured for semantic output. Configure in Settings > LLM Providers."))?
-                                    .clone();
-                                (config_guard.semantic_op_provider(), config_guard.semantic_op_model(), key)
+                                config_guard.get_semantic_ops_model_def()
+                                    .ok_or_else(|| anyhow::anyhow!("No LLM configured for semantic output. Configure in Settings > LLM Providers."))?
                             };
+                            let (provider_str, model_name, api_key) = (model_def.provider, model_def.model, model_def.api_key);
                             drop(config_guard);
 
                             //
@@ -866,12 +819,15 @@ impl ChainExecutor {
                             let client = create_ai_client(provider, api_key)?;
 
                             //
-                            // Build the conversation - system prompt with user
-                            // data.
+                            // Build the conversation - input data first, then prompt.
                             //
+                            let user_content = if merged_input.is_empty() {
+                                prompt.clone()
+                            } else {
+                                format!("{}\n\n{}", merged_input, prompt)
+                            };
                             let messages = vec![
-                                Message::system(prompt.clone()),
-                                Message::user(merged_input.clone()),
+                                Message::user(user_content),
                             ];
 
                             //

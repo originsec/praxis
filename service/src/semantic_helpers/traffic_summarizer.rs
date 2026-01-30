@@ -30,53 +30,32 @@ pub async fn summarize_traffic(
     let config = config.read().await;
 
     //
-    // Try to get model definition from the traffic parser feature assignment
-    // Falls back to semantic parser config for backwards compatibility.
+    // Get model definition from traffic parser feature assignment.
     //
-    let (api_key, provider, model) = if let Some(model_def) = config.get_traffic_parser_model_def() {
-        common::log_info!("Using traffic parser model: {} ({})", model_def.name, model_def.provider);
-        let provider = match Provider::from_str(&model_def.provider) {
-            Some(p) => p,
-            None => {
-                return SummarizationResult {
-                    success: false,
-                    summary: None,
-                    error: Some(format!("Invalid provider in model def: {}", model_def.provider)),
-                };
-            }
-        };
-        (model_def.api_key, provider, model_def.model)
-    } else {
-        //
-        // Fallback to legacy semantic parser config.
-        //
-        common::log_info!("No traffic parser model defined, falling back to semantic parser config");
-        let api_key = match config.semantic_parser_api_key() {
-            Some(key) => key.clone(),
-            None => {
-                return SummarizationResult {
-                    success: false,
-                    summary: None,
-                    error: Some("Summarization not available: no traffic parser model configured and no semantic parser API key".to_string()),
-                };
-            }
-        };
-
-        let provider_str = config.semantic_parser_provider();
-        let provider = match Provider::from_str(&provider_str) {
-            Some(p) => p,
-            None => {
-                return SummarizationResult {
-                    success: false,
-                    summary: None,
-                    error: Some(format!("Invalid provider: {}", provider_str)),
-                };
-            }
-        };
-
-        let model = config.semantic_parser_model();
-        (api_key, provider, model)
+    let model_def = match config.get_traffic_parser_model_def() {
+        Some(def) => def,
+        None => {
+            return SummarizationResult {
+                success: false,
+                summary: None,
+                error: Some("No LLM configured for Traffic Parser. Configure in Settings > LLM Providers.".to_string()),
+            };
+        }
     };
+
+    common::log_info!("Using traffic parser model: {} ({})", model_def.name, model_def.provider);
+    let provider = match Provider::from_str(&model_def.provider) {
+        Some(p) => p,
+        None => {
+            return SummarizationResult {
+                success: false,
+                summary: None,
+                error: Some(format!("Invalid provider in model def: {}", model_def.provider)),
+            };
+        }
+    };
+
+    let (api_key, model) = (model_def.api_key, model_def.model);
 
     //
     // Create AI client.

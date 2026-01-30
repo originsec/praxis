@@ -1,13 +1,10 @@
-//!
-//! Event log database operations.
-//!
-
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use common::ApplicationLogEntry;
-use rusqlite::{params, Result as SqliteResult};
 use regex::Regex;
+use sqlx::Row;
 
-use super::Database;
+use super::{Database, DatabasePool};
 
 /// Maximum number of event log entries to keep in total across all sources
 const MAX_EVENT_LOG_ENTRIES: usize = 1_000_000;
@@ -16,107 +13,85 @@ const MAX_EVENT_LOG_ENTRIES: usize = 1_000_000;
 const MAX_EVENT_LOG_QUERY_LIMIT: usize = 1000;
 
 impl Database {
-    /// Initialize the event log schema
-    pub(crate) fn init_event_log_schema(conn: &rusqlite::Connection) -> SqliteResult<()> {
-        //
-        // Migrate old table if it exists.
-        //
-        let table_exists: bool = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='node_event_log'",
-            [],
-            |row| {
-                let count: i64 = row.get(0)?;
-                Ok(count > 0)
-            },
-        )?;
-
-        if table_exists {
-            //
-            // Rename old table to new name.
-            //
-            conn.execute("ALTER TABLE node_event_log RENAME TO event_log", [])?;
-
-            //
-            // Rename column from node_id to source.
-            //
-            conn.execute("ALTER TABLE event_log RENAME COLUMN node_id TO source", [])?;
-        } else {
-            //
-            // Create new table with correct name.
-            //
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS event_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    source TEXT NOT NULL,
-                    level TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    target TEXT,
-                    timestamp TEXT NOT NULL,
-                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-                )",
-                [],
-            )?;
-        }
-
-        //
-        // Create indexes for efficient querying (drop old ones first).
-        //
-        let _ = conn.execute("DROP INDEX IF EXISTS idx_node_event_log_node_id", []);
-        let _ = conn.execute("DROP INDEX IF EXISTS idx_node_event_log_level", []);
-        let _ = conn.execute("DROP INDEX IF EXISTS idx_node_event_log_timestamp", []);
-
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_event_log_source ON event_log(source)",
-            [],
-        )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_event_log_level ON event_log(source, level)",
-            [],
-        )?;
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_event_log_timestamp ON event_log(timestamp DESC)",
-            [],
-        )?;
-
-        Ok(())
-    }
-
     /// Insert an event log entry
-    pub fn insert_event_log(&self, entry: &ApplicationLogEntry) -> SqliteResult<i64> {
-        let conn = self.conn.lock().unwrap();
+    pub async fn insert_event_log(&self, entry: &ApplicationLogEntry) -> Result<i64> {
+        let sql = "INSERT INTO event_log (source, level, message, target, timestamp)
+             VALUES ($1, $2, $3, $4, $5)";
 
-        conn.execute(
-            "INSERT INTO event_log (source, level, message, target, timestamp)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                entry.source,
-                entry.level,
-                entry.message,
-                entry.target,
-                entry.timestamp.to_rfc3339(),
-            ],
-        )?;
+        let id = match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query(sql)
+                    .bind(&entry.source)
+                    .bind(&entry.level)
+                    .bind(&entry.message)
+                    .bind(&entry.target)
+                    .bind(entry.timestamp.to_rfc3339())
+                    .execute(pool)
+                    .await?;
 
-        let id = conn.last_insert_rowid();
+                let row = sqlx::query("SELECT last_insert_rowid()")
+                    .fetch_one(pool)
+                    .await?;
+                row.get::<i64, _>(0)
+            }
+            DatabasePool::Postgres(pool) => {
+                let row = sqlx::query(
+                    "INSERT INTO event_log (source, level, message, target, timestamp)
+                     VALUES ($1, $2, $3, $4, $5)
+                     RETURNING id",
+                )
+                .bind(&entry.source)
+                .bind(&entry.level)
+                .bind(&entry.message)
+                .bind(&entry.target)
+                .bind(entry.timestamp.to_rfc3339())
+                .fetch_one(pool)
+                .await?;
+                row.get::<i64, _>(0)
+            }
+        };
 
         //
         // Prune old entries if we exceed the total limit across all sources.
         //
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM event_log",
-            [],
-            |row| row.get(0),
-        )?;
+
+        let count: i64 = match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let row = sqlx::query("SELECT COUNT(*) FROM event_log")
+                    .fetch_one(pool)
+                    .await?;
+                row.get(0)
+            }
+            DatabasePool::Postgres(pool) => {
+                let row = sqlx::query("SELECT COUNT(*) FROM event_log")
+                    .fetch_one(pool)
+                    .await?;
+                row.get(0)
+            }
+        };
 
         if count as usize > MAX_EVENT_LOG_ENTRIES {
-            let to_delete = count as usize - MAX_EVENT_LOG_ENTRIES;
-            conn.execute(
-                "DELETE FROM event_log WHERE id IN (
+            let to_delete = (count as usize - MAX_EVENT_LOG_ENTRIES) as i64;
+
+            let delete_sql = "DELETE FROM event_log WHERE id IN (
                     SELECT id FROM event_log
-                    ORDER BY timestamp ASC LIMIT ?1
-                )",
-                params![to_delete],
-            )?;
+                    ORDER BY timestamp ASC LIMIT $1
+                )";
+
+            match &self.pool {
+                DatabasePool::Sqlite(pool) => {
+                    sqlx::query(delete_sql)
+                        .bind(to_delete)
+                        .execute(pool)
+                        .await?;
+                }
+                DatabasePool::Postgres(pool) => {
+                    sqlx::query(delete_sql)
+                        .bind(to_delete)
+                        .execute(pool)
+                        .await?;
+                }
+            }
         }
 
         Ok(id)
@@ -124,149 +99,264 @@ impl Database {
 
     /// Query event log entries with optional filters
     /// If source_id is empty, returns logs from all sources
-    pub fn query_event_log(
+    pub async fn query_event_log(
         &self,
         source_id: &str,
         level_filter: Option<&[String]>,
         regex_filter: Option<&str>,
         limit: u32,
         offset: u32,
-    ) -> SqliteResult<(Vec<ApplicationLogEntry>, u32)> {
-        let conn = self.conn.lock().unwrap();
-
+    ) -> Result<(Vec<ApplicationLogEntry>, u32)> {
         let limit = (limit as usize).min(MAX_EVENT_LOG_QUERY_LIMIT) as u32;
 
         //
         // Build query based on filters - support querying all sources if source_id is empty.
         //
+
         let query_all_sources = source_id.is_empty();
 
         let mut sql = String::from(
-            "SELECT source, level, message, target, timestamp FROM event_log"
+            "SELECT source, level, message, target, timestamp FROM event_log",
         );
-        let mut count_sql = String::from(
-            "SELECT COUNT(*) FROM event_log"
-        );
+        let mut count_sql = String::from("SELECT COUNT(*) FROM event_log");
+
+        let mut param_idx = 1;
 
         if !query_all_sources {
-            sql.push_str(" WHERE source = ?1");
-            count_sql.push_str(" WHERE source = ?1");
+            sql.push_str(&format!(" WHERE source = ${}", param_idx));
+            count_sql.push_str(&format!(" WHERE source = ${}", param_idx));
+            param_idx += 1;
         }
 
         //
         // Add level filter if provided.
         //
-        let param_offset = if query_all_sources { 1 } else { 2 };
 
         if let Some(levels) = level_filter {
             if !levels.is_empty() {
-                let placeholders: Vec<String> = levels.iter().enumerate()
-                    .map(|(i, _)| format!("?{}", i + param_offset))
+                let placeholders: Vec<String> = levels
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| format!("${}", param_idx + i))
                     .collect();
-                let level_clause = format!("{} level IN ({})",
+                let level_clause = format!(
+                    "{} level IN ({})",
                     if query_all_sources { " WHERE" } else { " AND" },
                     placeholders.join(", ")
                 );
                 sql.push_str(&level_clause);
                 count_sql.push_str(&level_clause);
+                param_idx += levels.len();
             }
         }
 
-        let next_param = param_offset + level_filter.map(|l| l.len()).unwrap_or(0);
-        sql.push_str(&format!(" ORDER BY timestamp DESC LIMIT ?{} OFFSET ?{}", next_param, next_param + 1));
+        let limit_param = param_idx;
+        let offset_param = param_idx + 1;
+        sql.push_str(&format!(
+            " ORDER BY timestamp DESC LIMIT ${} OFFSET ${}",
+            limit_param, offset_param
+        ));
 
         //
         // Compile regex filter if provided.
         //
+
         let regex = regex_filter.and_then(|pattern| Regex::new(pattern).ok());
 
         //
-        // Execute count query.
+        // Execute queries based on backend.
         //
-        let total_count: u32 = {
-            let mut stmt = conn.prepare(&count_sql)?;
-            let mut params_vec: Vec<&dyn rusqlite::ToSql> = vec![];
 
-            if !query_all_sources {
-                params_vec.push(&source_id);
-            }
+        let (entries, total_count) = match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                //
+                // Execute count query.
+                //
 
-            if let Some(levels) = level_filter {
-                for level in levels {
-                    params_vec.push(level);
+                let total_count: i64 = {
+                    let mut query = sqlx::query(&count_sql);
+                    if !query_all_sources {
+                        query = query.bind(source_id);
+                    }
+                    if let Some(levels) = level_filter {
+                        for level in levels {
+                            query = query.bind(level);
+                        }
+                    }
+                    let row = query.fetch_one(pool).await?;
+                    row.get(0)
+                };
+
+                //
+                // Execute main query.
+                //
+
+                let rows = {
+                    let mut query = sqlx::query(&sql);
+                    if !query_all_sources {
+                        query = query.bind(source_id);
+                    }
+                    if let Some(levels) = level_filter {
+                        for level in levels {
+                            query = query.bind(level);
+                        }
+                    }
+                    query = query.bind(limit as i64).bind(offset as i64);
+                    query.fetch_all(pool).await?
+                };
+
+                let mut entries = Vec::new();
+                for row in rows {
+                    let entry = parse_event_log_row_sqlite(&row)?;
+
+                    //
+                    // Apply regex filter if provided.
+                    //
+
+                    if let Some(ref re) = regex {
+                        if !re.is_match(&entry.message) {
+                            continue;
+                        }
+                    }
+                    entries.push(entry);
                 }
-            }
 
-            stmt.query_row(rusqlite::params_from_iter(params_vec), |row| row.get(0))?
+                (entries, total_count as u32)
+            }
+            DatabasePool::Postgres(pool) => {
+                //
+                // Execute count query.
+                //
+
+                let total_count: i64 = {
+                    let mut query = sqlx::query(&count_sql);
+                    if !query_all_sources {
+                        query = query.bind(source_id);
+                    }
+                    if let Some(levels) = level_filter {
+                        for level in levels {
+                            query = query.bind(level);
+                        }
+                    }
+                    let row = query.fetch_one(pool).await?;
+                    row.get(0)
+                };
+
+                //
+                // Execute main query.
+                //
+
+                let rows = {
+                    let mut query = sqlx::query(&sql);
+                    if !query_all_sources {
+                        query = query.bind(source_id);
+                    }
+                    if let Some(levels) = level_filter {
+                        for level in levels {
+                            query = query.bind(level);
+                        }
+                    }
+                    query = query.bind(limit as i64).bind(offset as i64);
+                    query.fetch_all(pool).await?
+                };
+
+                let mut entries = Vec::new();
+                for row in rows {
+                    let entry = parse_event_log_row_postgres(&row)?;
+
+                    //
+                    // Apply regex filter if provided.
+                    //
+
+                    if let Some(ref re) = regex {
+                        if !re.is_match(&entry.message) {
+                            continue;
+                        }
+                    }
+                    entries.push(entry);
+                }
+
+                (entries, total_count as u32)
+            }
         };
-
-        //
-        // Execute main query.
-        //
-        let mut stmt = conn.prepare(&sql)?;
-        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![];
-
-        if !query_all_sources {
-            params_vec.push(Box::new(source_id.to_string()));
-        }
-
-        if let Some(levels) = level_filter {
-            for level in levels {
-                params_vec.push(Box::new(level.clone()));
-            }
-        }
-        params_vec.push(Box::new(limit));
-        params_vec.push(Box::new(offset));
-
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
-
-        let rows = stmt.query_map(rusqlite::params_from_iter(params_refs), |row| {
-            let timestamp_str: String = row.get(4)?;
-            let timestamp = DateTime::parse_from_rfc3339(&timestamp_str)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now());
-
-            Ok(ApplicationLogEntry {
-                source: row.get(0)?,
-                level: row.get(1)?,
-                message: row.get(2)?,
-                target: row.get(3)?,
-                timestamp,
-            })
-        })?;
-
-        let mut entries = Vec::new();
-        for row in rows {
-            let entry = row?;
-
-            //
-            // Apply regex filter if provided.
-            //
-            if let Some(ref re) = regex {
-                if !re.is_match(&entry.message) {
-                    continue;
-                }
-            }
-
-            entries.push(entry);
-        }
 
         Ok((entries, total_count))
     }
 
     /// Clear event log entries
-    pub fn clear_event_log(&self, source_id: Option<&str>) -> SqliteResult<u32> {
-        let conn = self.conn.lock().unwrap();
-
+    pub async fn clear_event_log(&self, source_id: Option<&str>) -> Result<u32> {
         let deleted = if let Some(source_id) = source_id {
-            conn.execute(
-                "DELETE FROM event_log WHERE source = ?1",
-                [source_id],
-            )?
+            let sql = "DELETE FROM event_log WHERE source = $1";
+            match &self.pool {
+                DatabasePool::Sqlite(pool) => {
+                    sqlx::query(sql)
+                        .bind(source_id)
+                        .execute(pool)
+                        .await?
+                        .rows_affected()
+                }
+                DatabasePool::Postgres(pool) => {
+                    sqlx::query(sql)
+                        .bind(source_id)
+                        .execute(pool)
+                        .await?
+                        .rows_affected()
+                }
+            }
         } else {
-            conn.execute("DELETE FROM event_log", [])?
+            let sql = "DELETE FROM event_log";
+            match &self.pool {
+                DatabasePool::Sqlite(pool) => sqlx::query(sql).execute(pool).await?.rows_affected(),
+                DatabasePool::Postgres(pool) => {
+                    sqlx::query(sql).execute(pool).await?.rows_affected()
+                }
+            }
         };
 
         Ok(deleted as u32)
     }
+}
+
+//
+// Helper functions.
+//
+
+fn parse_event_log_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> Result<ApplicationLogEntry> {
+    let source: String = row.get(0);
+    let level: String = row.get(1);
+    let message: String = row.get(2);
+    let target: Option<String> = row.get(3);
+    let timestamp_str: String = row.get(4);
+
+    let timestamp = DateTime::parse_from_rfc3339(&timestamp_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+
+    Ok(ApplicationLogEntry {
+        source,
+        level,
+        message,
+        target,
+        timestamp,
+    })
+}
+
+fn parse_event_log_row_postgres(row: &sqlx::postgres::PgRow) -> Result<ApplicationLogEntry> {
+    let source: String = row.get(0);
+    let level: String = row.get(1);
+    let message: String = row.get(2);
+    let target: Option<String> = row.get(3);
+    let timestamp_str: String = row.get(4);
+
+    let timestamp = DateTime::parse_from_rfc3339(&timestamp_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+
+    Ok(ApplicationLogEntry {
+        source,
+        level,
+        message,
+        target,
+        timestamp,
+    })
 }

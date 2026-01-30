@@ -1,29 +1,52 @@
 #
 # Praxis Docker Image
-# Multi-stage build for minimal runtime image.
+# Multi-stage build for minimal runtime image with dependency caching.
 #
 
 # ==============================================================================
-# Stage 1: Build the Rust binaries and frontend
+# Stage 1: Prepare recipe for cargo-chef
 # ==============================================================================
-FROM rust:1.88-bookworm AS builder
+FROM rust:1.88-bookworm AS chef
+RUN cargo install cargo-chef
+WORKDIR /build
+
+# ==============================================================================
+# Stage 2: Analyze dependencies
+# ==============================================================================
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock ./
+COPY common ./common
+COPY node ./node
+COPY semantic_parser ./semantic_parser
+COPY semantic_ops ./semantic_ops
+COPY service ./service
+COPY web ./web
+RUN cargo chef prepare --recipe-path recipe.json
+
+# ==============================================================================
+# Stage 3: Build frontend with Node 22
+# ==============================================================================
+FROM node:22-bookworm-slim AS frontend
+
+WORKDIR /build/web/frontend
+COPY web/frontend/package*.json ./
+RUN npm ci
+COPY web/frontend ./
+RUN npm run build
+
+# ==============================================================================
+# Stage 4: Build Rust dependencies (cached layer)
+# ==============================================================================
+FROM chef AS builder
 
 RUN apt-get update && apt-get install -y \
-    nodejs \
-    npm \
     pkg-config \
     libssl-dev \
     mingw-w64 \
     && rm -rf /var/lib/apt/lists/*
 
-#
-# Add Windows cross-compilation target.
-#
 RUN rustup target add x86_64-pc-windows-gnu
 
-#
-# Configure cargo for Windows cross-compilation.
-#
 RUN mkdir -p /root/.cargo && echo '\
 [target.x86_64-pc-windows-gnu]\n\
 linker = "x86_64-w64-mingw32-gcc"\n\
@@ -31,6 +54,17 @@ linker = "x86_64-w64-mingw32-gcc"\n\
 
 WORKDIR /build
 
+#
+# Build dependencies only - this layer is cached until Cargo.toml/Cargo.lock changes.
+#
+COPY --from=planner /build/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json -p praxis_node && \
+    cargo chef cook --release --recipe-path recipe.json -p praxis_node --target x86_64-pc-windows-gnu && \
+    cargo chef cook --release --recipe-path recipe.json -p praxis_service -p praxis_web
+
+# ==============================================================================
+# Stage 5: Build application (only recompiles on source changes)
+# ==============================================================================
 COPY Cargo.toml Cargo.lock ./
 COPY common ./common
 COPY node ./node
@@ -40,25 +74,23 @@ COPY service ./service
 COPY web ./web
 
 #
-# Build praxis_node for Linux and Windows first (before frontend, as requested).
+# Copy pre-built frontend from frontend stage.
+#
+COPY --from=frontend /build/web/frontend/dist ./web/frontend/dist
+
+#
+# Build praxis_node for Linux and Windows.
 #
 RUN cargo build --release -p praxis_node && \
     cargo build --release -p praxis_node --target x86_64-pc-windows-gnu
 
 #
-# Build frontend (npm install + build).
-#
-WORKDIR /build/web/frontend
-RUN npm ci && npm run build
-
-#
 # Build service and web binaries.
 #
-WORKDIR /build
 RUN cargo build --release -p praxis_service -p praxis_web
 
 # ==============================================================================
-# Stage 2: Runtime image
+# Stage 6: Runtime image
 # ==============================================================================
 FROM debian:bookworm-slim
 

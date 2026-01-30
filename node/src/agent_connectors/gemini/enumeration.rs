@@ -23,10 +23,12 @@ const PROJECT_SETTINGS_PATTERN: &[ConfigFilePattern] = &[
 pub struct SessionInfo {
     pub session_id: String,
     pub project_hash: String,
+    #[allow(dead_code)]
     pub start_time: Option<String>,
     pub last_updated: Option<String>,
     pub message_count: usize,
     pub file_path: String,
+    #[allow(dead_code)]
     pub content: String,
 }
 
