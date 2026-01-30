@@ -607,6 +607,12 @@ where
     temp_session.close();
 
     //
+    // Strip "Generating response" text that some agents prepend.
+    //
+
+    let response = response.replace("Generating response", "");
+
+    //
     // Parse the response through the semantic parser.
     //
     common::log_info!(
