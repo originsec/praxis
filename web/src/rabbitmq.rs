@@ -623,7 +623,7 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::CommandResponse(response) => {
                 //
-                // Store for Nexus if it's a pending command.
+                // Store for Atlas if it's a pending command.
                 //
                 self.state.store_command_response(response.command_id.clone(), response.result.clone()).await;
                 self.state.broadcast(ServerMessage::CommandResponse { response });
@@ -633,14 +633,14 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::SemanticOpQueued { operation_id, queue_position, request_id } => {
                 //
-                // Store for Nexus if it's a pending request.
+                // Store for Atlas if it's a pending request.
                 //
                 self.state.store_semantic_op_response(request_id.clone(), operation_id.clone()).await;
                 self.state.broadcast(ServerMessage::SemanticOpQueued { operation_id, queue_position, request_id });
             }
             ClientDirectMessage::SemanticOpUpdate(update) => {
                 //
-                // Store in state for Nexus access.
+                // Store in state for Atlas access.
                 //
                 self.state.update_operation(update.clone()).await;
                 self.state.broadcast(ServerMessage::SemanticOpUpdate { update });
@@ -666,7 +666,7 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::OpDefListResponse { definitions } => {
                 //
-                // Store operation definitions for Nexus access.
+                // Store operation definitions for Atlas access.
                 //
                 self.state.update_operation_definitions(definitions.clone()).await;
                 self.state.broadcast(ServerMessage::OpDefList { definitions });
@@ -692,7 +692,7 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::TrafficSearchResponse { entries, total_count } => {
                 //
-                // Store for Nexus to pick up.
+                // Store for Atlas to pick up.
                 //
                 self.state.store_traffic_search_response(entries.clone(), total_count).await;
                 self.state.broadcast(ServerMessage::TrafficSearchResponse { entries, total_count });

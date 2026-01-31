@@ -1,9 +1,9 @@
-import type { NexusMessage, NexusState } from '../context/nexusTypes';
+import type { AtlasMessage, AtlasState } from '../context/atlasTypes';
 
-const NEXUS_SESSION_STORAGE_KEY = 'praxis_nexus_session';
+const ATLAS_SESSION_STORAGE_KEY = 'praxis_atlas_session';
 const RECENT_NODES_STORAGE_KEY = 'praxis_recent_nodes';
 
-function serializeNexusState(state: NexusState): string {
+function serializeAtlasState(state: AtlasState): string {
   return JSON.stringify({
     ...state,
     messages: state.messages.map((msg) => ({
@@ -13,12 +13,12 @@ function serializeNexusState(state: NexusState): string {
   });
 }
 
-function deserializeNexusState(json: string): NexusState | null {
+function deserializeAtlasState(json: string): AtlasState | null {
   try {
     const parsed = JSON.parse(json);
     return {
       ...parsed,
-      messages: parsed.messages.map((msg: NexusMessage & { timestamp: string }) => ({
+      messages: parsed.messages.map((msg: AtlasMessage & { timestamp: string }) => ({
         ...msg,
         timestamp: new Date(msg.timestamp),
       })),
@@ -28,11 +28,11 @@ function deserializeNexusState(json: string): NexusState | null {
   }
 }
 
-export function loadPersistedNexusState(initial: NexusState): NexusState {
+export function loadPersistedAtlasState(initial: AtlasState): AtlasState {
   try {
-    const stored = sessionStorage.getItem(NEXUS_SESSION_STORAGE_KEY);
+    const stored = sessionStorage.getItem(ATLAS_SESSION_STORAGE_KEY);
     if (stored) {
-      const state = deserializeNexusState(stored);
+      const state = deserializeAtlasState(stored);
       if (state) {
         //
         // Reset transient states that shouldn't persist across page loads.
@@ -54,15 +54,15 @@ export function loadPersistedNexusState(initial: NexusState): NexusState {
   return initial;
 }
 
-export function persistNexusState(state: NexusState): void {
+export function persistAtlasState(state: AtlasState): void {
   try {
     if (state.sessionActive) {
-      sessionStorage.setItem(NEXUS_SESSION_STORAGE_KEY, serializeNexusState(state));
+      sessionStorage.setItem(ATLAS_SESSION_STORAGE_KEY, serializeAtlasState(state));
     } else {
       //
       // Clear storage when session is stopped.
       //
-      sessionStorage.removeItem(NEXUS_SESSION_STORAGE_KEY);
+      sessionStorage.removeItem(ATLAS_SESSION_STORAGE_KEY);
     }
   } catch {
     //

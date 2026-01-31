@@ -5,7 +5,7 @@ import { useApp } from '../../context/AppContext';
 
 //
 // Features that require model assignments for full functionality.
-// Note: llm_feature_nexus excluded as Nexus is currently hidden.
+// Note: llm_feature_atlas excluded as Atlas is currently hidden.
 //
 const REQUIRED_FEATURES = [
   'llm_feature_semantic_ops',

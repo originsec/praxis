@@ -420,7 +420,7 @@ export interface ChainExecutionUpdate {
 }
 
 //
-// Nexus Plan types.
+// Atlas Plan types.
 //
 export type PlanStepStatus = 'not_started' | 'in_progress' | 'done';
 
@@ -429,7 +429,7 @@ export interface PlanStep {
   status: PlanStepStatus;
 }
 
-export interface NexusPlan {
+export interface AtlasPlan {
   steps: PlanStep[];
   summary?: string;
   current_step_description?: string;
@@ -551,10 +551,10 @@ export type BrowserMessage =
   | { type: 'op_def_list' }
   | { type: 'op_def_delete'; full_name: string }
   | { type: 'op_def_get'; full_name: string }
-  | { type: 'nexus_start' }
-  | { type: 'nexus_prompt'; message: string }
-  | { type: 'nexus_stop' }
-  | { type: 'nexus_cancel' }
+  | { type: 'atlas_start' }
+  | { type: 'atlas_prompt'; message: string }
+  | { type: 'atlas_stop' }
+  | { type: 'atlas_cancel' }
   //
   // Traffic interception messages.
   //
@@ -618,15 +618,15 @@ export type ServerMessage =
   | { type: 'op_def_added'; full_name: string }
   | { type: 'op_def_deleted'; full_name: string; success: boolean }
   | { type: 'op_def_error'; message: string }
-  | { type: 'nexus_started' }
-  | { type: 'nexus_content'; content: string }
-  | { type: 'nexus_tool_executing'; name: string; input?: string }
-  | { type: 'nexus_tool_executed'; name: string; display: string; success: boolean; result: string }
-  | { type: 'nexus_plan_updated'; plan: NexusPlan }
-  | { type: 'nexus_done' }
-  | { type: 'nexus_stopped' }
-  | { type: 'nexus_error'; message: string }
-  | { type: 'nexus_token_usage'; prompt_tokens: number; completion_tokens: number; total_tokens: number }
+  | { type: 'atlas_started' }
+  | { type: 'atlas_content'; content: string }
+  | { type: 'atlas_tool_executing'; name: string; input?: string }
+  | { type: 'atlas_tool_executed'; name: string; display: string; success: boolean; result: string }
+  | { type: 'atlas_plan_updated'; plan: AtlasPlan }
+  | { type: 'atlas_done' }
+  | { type: 'atlas_stopped' }
+  | { type: 'atlas_error'; message: string }
+  | { type: 'atlas_token_usage'; prompt_tokens: number; completion_tokens: number; total_tokens: number }
   //
   // Traffic interception messages.
   //

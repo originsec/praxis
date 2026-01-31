@@ -935,7 +935,7 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
               <div>
                 <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Agent Info</label>
                 <p className="text-xs mb-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-                  Optional. Technical context for AI agents to understand when and how to use this operation. Used by autonomous agents like Nexus for decision-making.
+                  Optional. Technical context for AI agents to understand when and how to use this operation. Used by autonomous agents like Atlas for decision-making.
                 </p>
                 <textarea
                   value={editDef.agent_info}

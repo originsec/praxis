@@ -19,9 +19,9 @@ import {
   ChevronDown,
   Download,
 } from 'lucide-react';
-import { exportNexusSession, downloadTextFile } from '../utils/export';
-import { useApp, type NexusMessage, type NexusToolExecution } from '../context/AppContext';
-import type { NexusPlan, PlanStep } from '../api/types';
+import { exportAtlasSession, downloadTextFile } from '../utils/export';
+import { useApp, type AtlasMessage, type AtlasToolExecution } from '../context/AppContext';
+import type { AtlasPlan, PlanStep } from '../api/types';
 
 //
 // Plan step status icon.
@@ -41,7 +41,7 @@ function PlanStepIcon({ status }: { status: PlanStep['status'] }) {
 //
 // Plan display component.
 //
-function PlanDisplay({ plan }: { plan: NexusPlan }) {
+function PlanDisplay({ plan }: { plan: AtlasPlan }) {
   const doneCount = plan.steps.filter((s) => s.status === 'done').length;
   const totalCount = plan.steps.length;
   const progressPercent = totalCount > 0 ? (doneCount / totalCount) * 100 : 0;
@@ -121,7 +121,7 @@ function PlanDisplay({ plan }: { plan: NexusPlan }) {
 //
 // Single tool execution item.
 //
-function ToolExecutionItem({ exec }: { exec: NexusToolExecution }) {
+function ToolExecutionItem({ exec }: { exec: AtlasToolExecution }) {
   const [expanded, setExpanded] = useState(false);
   const canExpand = !exec.executing && exec.result;
 
@@ -175,7 +175,7 @@ function ToolExecutionDisplay({
   executions,
   collapsible = false,
 }: {
-  executions: NexusToolExecution[];
+  executions: AtlasToolExecution[];
   collapsible?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -239,7 +239,7 @@ function ToolExecutionDisplay({
 //
 // Message component.
 //
-function ChatMessage({ message }: { message: NexusMessage }) {
+function ChatMessage({ message }: { message: AtlasMessage }) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
 
@@ -259,7 +259,7 @@ function ChatMessage({ message }: { message: NexusMessage }) {
         {!isUser && !isSystem && (
           <div className="flex items-center gap-2 mb-2 text-[var(--accent-success)]">
             <Bot size={16} />
-            <span className="text-xs font-medium">Nexus</span>
+            <span className="text-xs font-medium">Atlas</span>
           </div>
         )}
 
@@ -299,14 +299,14 @@ function StreamingMessage({
   toolExecutions,
 }: {
   content: string;
-  toolExecutions: NexusToolExecution[];
+  toolExecutions: AtlasToolExecution[];
 }) {
   return (
     <div className="flex justify-start">
       <div className="max-w-[85%] ascii-box px-4 py-3 bg-[var(--bg-secondary)] text-[var(--text-highlight)]/80">
         <div className="flex items-center gap-2 mb-2 text-[var(--accent-success)]">
           <Bot size={16} />
-          <span className="text-xs font-medium">Nexus</span>
+          <span className="text-xs font-medium">Atlas</span>
           <Loader2 size={12} className="animate-spin ml-auto" />
         </div>
 
@@ -329,18 +329,18 @@ function StreamingMessage({
   );
 }
 
-export function NexusPage() {
-  const { state, nexusStart, nexusStop, nexusCancel, nexusPrompt, getConfig } = useApp();
-  const { nexus } = state;
+export function AtlasPage() {
+  const { state, atlasStart, atlasStop, atlasCancel, atlasPrompt, getConfig } = useApp();
+  const { atlas } = state;
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   //
-  // Fetch config on mount to check if Nexus is configured.
+  // Fetch config on mount to check if Atlas is configured.
   //
   useEffect(() => {
-    getConfig(['llm_feature_nexus', 'llm_model_definitions']);
+    getConfig(['llm_feature_atlas', 'llm_model_definitions']);
   }, [getConfig]);
 
   const scrollToBottom = () => {
@@ -349,43 +349,43 @@ export function NexusPage() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [nexus.messages, nexus.streamingContent, nexus.currentToolExecutions]);
+  }, [atlas.messages, atlas.streamingContent, atlas.currentToolExecutions]);
 
   //
   // Focus input when loading completes.
   //
   useEffect(() => {
-    if (!nexus.isLoading && nexus.sessionActive) {
+    if (!atlas.isLoading && atlas.sessionActive) {
       inputRef.current?.focus();
     }
-  }, [nexus.isLoading, nexus.sessionActive]);
+  }, [atlas.isLoading, atlas.sessionActive]);
 
   const handleSendMessage = () => {
-    if (!input.trim() || nexus.isLoading) return;
-    nexusPrompt(input.trim());
+    if (!input.trim() || atlas.isLoading) return;
+    atlasPrompt(input.trim());
     setInput('');
   };
 
   const handleNewSession = () => {
-    nexusStart();
+    atlasStart();
   };
 
   const handleStopSession = () => {
-    nexusStop();
+    atlasStop();
   };
 
   const handleExport = () => {
-    if (nexus.messages.length === 0) return;
-    const content = exportNexusSession(nexus.messages, nexus.tokenUsage);
+    if (atlas.messages.length === 0) return;
+    const content = exportAtlasSession(atlas.messages, atlas.tokenUsage);
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    downloadTextFile(content, `nexus-session-${timestamp}.md`);
+    downloadTextFile(content, `atlas-session-${timestamp}.md`);
   };
 
   //
-  // Check if Nexus is configured via the LLM feature system.
+  // Check if Atlas is configured via the LLM feature system.
   //
-  const nexusConfig = (() => {
-    const selectedModelName = state.config.llm_feature_nexus;
+  const atlasConfig = (() => {
+    const selectedModelName = state.config.llm_feature_atlas;
     if (!selectedModelName) return null;
 
     const modelDefsRaw = state.config.llm_model_definitions;
@@ -403,7 +403,7 @@ export function NexusPage() {
     return null;
   })();
 
-  const isConfigured = !!nexusConfig;
+  const isConfigured = !!atlasConfig;
 
   return (
     <div className="h-full flex flex-col">
@@ -419,16 +419,16 @@ export function NexusPage() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-highlight">Nexus</h1>
+              <h1 className="text-2xl font-bold text-highlight">Atlas</h1>
               <span className="px-2 py-0.5 text-xs font-medium bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] rounded">
                 Experimental
               </span>
             </div>
             <p className="text-muted mt-1">
               AI-powered red teaming orchestration
-              {nexusConfig && (
+              {atlasConfig && (
                 <span className="ml-2 text-[var(--accent-info)]">
-                  · {nexusConfig.provider}/{nexusConfig.model}
+                  · {atlasConfig.provider}/{atlasConfig.model}
                 </span>
               )}
             </p>
@@ -443,14 +443,14 @@ export function NexusPage() {
           */}
           <button
             onClick={handleExport}
-            disabled={nexus.messages.length === 0}
+            disabled={atlas.messages.length === 0}
             className="flex items-center gap-2 px-3 py-2 bg-[var(--bg-secondary)] border border-subtle text-muted hover:text-[var(--text-primary)] hover:border-[var(--border-active)] transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             title="Export session transcript"
           >
             <Download size={16} />
           </button>
 
-          {nexus.sessionActive ? (
+          {atlas.sessionActive ? (
             <button
               onClick={handleStopSession}
               className="flex items-center gap-2 px-4 py-2 bg-[var(--accent-error)]/20 text-[var(--accent-error)]  hover:bg-[var(--accent-error)]/30 transition-colors text-sm"
@@ -461,10 +461,10 @@ export function NexusPage() {
           ) : (
             <button
               onClick={handleNewSession}
-              disabled={!isConfigured || nexus.isStarting}
+              disabled={!isConfigured || atlas.isStarting}
               className="flex items-center gap-2 px-4 py-2 bg-[var(--accent-purple)]/20 text-[var(--accent-purple)]  hover:bg-[var(--accent-purple)]/30 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {nexus.isStarting ? (
+              {atlas.isStarting ? (
                 <>
                   <Loader2 size={16} className="animate-spin" />
                   Starting...
@@ -490,10 +490,10 @@ export function NexusPage() {
           <AlertCircle size={20} className="text-[var(--accent-warning)] mt-0.5 flex-shrink-0" />
           <div>
             <p className="text-sm font-medium text-[var(--accent-warning)]">
-              Nexus Not Configured
+              Atlas Not Configured
             </p>
             <p className="text-xs text-muted mt-1">
-              Go to Settings &gt; Nexus to configure an LLM provider and API key.
+              Go to Settings &gt; Atlas to configure an LLM provider and API key.
             </p>
           </div>
         </div>
@@ -504,8 +504,8 @@ export function NexusPage() {
       // Plan display.
       //
       */}
-      {nexus.currentPlan && nexus.currentPlan.steps.length > 0 && (
-        <PlanDisplay plan={nexus.currentPlan} />
+      {atlas.currentPlan && atlas.currentPlan.steps.length > 0 && (
+        <PlanDisplay plan={atlas.currentPlan} />
       )}
 
       {/*
@@ -520,7 +520,7 @@ export function NexusPage() {
         //
         */}
         <div className="flex-1 overflow-auto p-6 space-y-4">
-          {nexus.messages.map((msg) => (
+          {atlas.messages.map((msg) => (
             <ChatMessage key={msg.id} message={msg} />
           ))}
 
@@ -529,10 +529,10 @@ export function NexusPage() {
           // Streaming content.
           //
           */}
-          {nexus.isLoading && (
+          {atlas.isLoading && (
             <StreamingMessage
-              content={nexus.streamingContent}
-              toolExecutions={nexus.currentToolExecutions}
+              content={atlas.streamingContent}
+              toolExecutions={atlas.currentToolExecutions}
             />
           )}
 
@@ -553,16 +553,16 @@ export function NexusPage() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
               placeholder={
-                nexus.sessionActive
-                  ? 'Ask Nexus anything...'
+                atlas.sessionActive
+                  ? 'Ask Atlas anything...'
                   : 'Start a session to begin chatting...'
               }
               className="flex-1 bg-[var(--bg-secondary)] border border-subtle  px-4 py-3 text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:outline-none focus:border-[var(--border-active)]"
-              disabled={!nexus.sessionActive || nexus.isLoading}
+              disabled={!atlas.sessionActive || atlas.isLoading}
             />
-            {nexus.isLoading ? (
+            {atlas.isLoading ? (
               <button
-                onClick={nexusCancel}
+                onClick={atlasCancel}
                 className="px-4 py-3 bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors"
                 title="Stop generation"
               >
@@ -571,7 +571,7 @@ export function NexusPage() {
             ) : (
               <button
                 onClick={handleSendMessage}
-                disabled={!input.trim() || !nexus.sessionActive}
+                disabled={!input.trim() || !atlas.sessionActive}
                 className="px-4 py-3 bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Send size={20} />
@@ -592,12 +592,12 @@ export function NexusPage() {
           <span>
             {state.operations.filter((op) => op.status === 'Running').length} operations running
           </span>
-          {nexus.sessionActive && (
-            <span className="text-[var(--accent-purple)]">Nexus session active</span>
+          {atlas.sessionActive && (
+            <span className="text-[var(--accent-purple)]">Atlas session active</span>
           )}
-          {nexus.tokenUsage && (
-            <span className="text-[var(--accent-info)]" title={`Prompt: ${nexus.tokenUsage.promptTokens.toLocaleString()} | Completion: ${nexus.tokenUsage.completionTokens.toLocaleString()}`}>
-              {nexus.tokenUsage.totalTokens.toLocaleString()} tokens
+          {atlas.tokenUsage && (
+            <span className="text-[var(--accent-info)]" title={`Prompt: ${atlas.tokenUsage.promptTokens.toLocaleString()} | Completion: ${atlas.tokenUsage.completionTokens.toLocaleString()}`}>
+              {atlas.tokenUsage.totalTokens.toLocaleString()} tokens
             </span>
           )}
         </div>
