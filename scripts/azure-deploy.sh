@@ -219,7 +219,7 @@ create_storage() {
 
 start_postgres_creation() {
     #
-    # Start PostgreSQL creation with --no-wait for parallel deployment.
+    # Start PostgreSQL creation in background for parallel deployment.
     #
     if az postgres flexible-server show \
         --name "$POSTGRES_SERVER_UNIQUE" \
@@ -239,8 +239,7 @@ start_postgres_creation() {
             --storage-size 32 \
             --version 16 \
             --public-access 0.0.0.0 \
-            --no-wait \
-            --output none
+            --output none &
         POSTGRES_CREATION_STARTED=true
         success "PostgreSQL creation initiated"
     fi
