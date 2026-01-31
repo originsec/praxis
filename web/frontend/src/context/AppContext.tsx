@@ -1,13 +1,13 @@
 import { createContext, useContext, useReducer, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { wsClient } from '../api/websocket';
 import { generateUUID } from '../utils/uuid';
-import type { NexusState } from './nexusTypes';
+import type { AtlasState } from './atlasTypes';
 
 //
-// Re-export Nexus types for consumers.
+// Re-export Atlas types for consumers.
 //
-export type { NexusMessage, NexusToolExecution } from './nexusTypes';
-import { loadPersistedNexusState, loadRecentNodes, persistRecentNodes, persistNexusState } from '../utils/persistence';
+export type { AtlasMessage, AtlasToolExecution } from './atlasTypes';
+import { loadPersistedAtlasState, loadRecentNodes, persistRecentNodes, persistAtlasState } from '../utils/persistence';
 import type {
   SystemState,
   NodeState,
@@ -19,7 +19,7 @@ import type {
   EventLogEntry,
   OperationDefinitionInfo,
   BrowserMessage,
-  NexusPlan,
+  AtlasPlan,
   InterceptedTrafficEntry,
   InterceptMethod,
   InterceptRule,
@@ -44,7 +44,7 @@ export interface AgentSessionMessage {
   timestamp: Date;
 }
 
-const initialNexusState: NexusState = {
+const initialAtlasState: AtlasState = {
   sessionActive: false,
   isStarting: false,
   messages: [],
@@ -145,7 +145,7 @@ interface AppState {
   config: Record<string, string>;
   opDefError: string | null;
   opDefSuccess: string | null;
-  nexus: NexusState;
+  atlas: AtlasState;
   intercept: InterceptState;
   chains: ChainState;
   discovery: DiscoveryState;
@@ -176,7 +176,7 @@ function createInitialState(): AppState {
     config: {},
     opDefError: null,
     opDefSuccess: null,
-    nexus: loadPersistedNexusState(initialNexusState),
+    atlas: loadPersistedAtlasState(initialAtlasState),
     intercept: initialInterceptState,
     chains: initialChainState,
     discovery: initialDiscoveryState,
@@ -199,19 +199,19 @@ type Action =
   | { type: 'SET_CONFIG'; values: Record<string, string> }
   | { type: 'SET_OP_DEF_ERROR'; error: string | null }
   | { type: 'SET_OP_DEF_SUCCESS'; fullName: string | null }
-  | { type: 'NEXUS_STARTING' }
-  | { type: 'NEXUS_STARTED' }
-  | { type: 'NEXUS_STOPPED' }
-  | { type: 'NEXUS_ADD_USER_MESSAGE'; message: string }
-  | { type: 'NEXUS_ADD_CONTENT'; content: string }
-  | { type: 'NEXUS_TOOL_EXECUTING'; name: string; input?: string }
-  | { type: 'NEXUS_TOOL_EXECUTED'; name: string; display: string; success: boolean; result: string }
-  | { type: 'NEXUS_PLAN_UPDATED'; plan: NexusPlan }
-  | { type: 'NEXUS_DONE' }
-  | { type: 'NEXUS_ERROR'; message: string }
-  | { type: 'NEXUS_CLEAR_MESSAGES' }
-  | { type: 'NEXUS_SET_LOADING'; loading: boolean }
-  | { type: 'NEXUS_TOKEN_USAGE'; promptTokens: number; completionTokens: number; totalTokens: number }
+  | { type: 'ATLAS_STARTING' }
+  | { type: 'ATLAS_STARTED' }
+  | { type: 'ATLAS_STOPPED' }
+  | { type: 'ATLAS_ADD_USER_MESSAGE'; message: string }
+  | { type: 'ATLAS_ADD_CONTENT'; content: string }
+  | { type: 'ATLAS_TOOL_EXECUTING'; name: string; input?: string }
+  | { type: 'ATLAS_TOOL_EXECUTED'; name: string; display: string; success: boolean; result: string }
+  | { type: 'ATLAS_PLAN_UPDATED'; plan: AtlasPlan }
+  | { type: 'ATLAS_DONE' }
+  | { type: 'ATLAS_ERROR'; message: string }
+  | { type: 'ATLAS_CLEAR_MESSAGES' }
+  | { type: 'ATLAS_SET_LOADING'; loading: boolean }
+  | { type: 'ATLAS_TOKEN_USAGE'; promptTokens: number; completionTokens: number; totalTokens: number }
   //
   // Intercept actions.
   //
@@ -293,47 +293,47 @@ function reduceCore(state: AppState, action: Action): AppState | null {
   }
 }
 
-function reduceNexus(state: AppState, action: Action): AppState | null {
+function reduceAtlas(state: AppState, action: Action): AppState | null {
   switch (action.type) {
-    case 'NEXUS_STARTING':
+    case 'ATLAS_STARTING':
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        atlas: {
+          ...state.atlas,
           isStarting: true,
         },
       };
-    case 'NEXUS_STARTED':
+    case 'ATLAS_STARTED':
       return {
         ...state,
-        nexus: {
-          ...initialNexusState,
+        atlas: {
+          ...initialAtlasState,
           sessionActive: true,
           isStarting: false,
           messages: [{
             id: generateUUID(),
             role: 'system',
-            content: 'Nexus session started.',
+            content: 'Atlas session started.',
             timestamp: new Date(),
           }],
         },
       };
-    case 'NEXUS_STOPPED':
+    case 'ATLAS_STOPPED':
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        atlas: {
+          ...state.atlas,
           sessionActive: false,
           isStarting: false,
           isLoading: false,
         },
       };
-    case 'NEXUS_ADD_USER_MESSAGE':
+    case 'ATLAS_ADD_USER_MESSAGE':
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
-          messages: [...state.nexus.messages, {
+        atlas: {
+          ...state.atlas,
+          messages: [...state.atlas.messages, {
             id: generateUUID(),
             role: 'user',
             content: action.message,
@@ -344,20 +344,20 @@ function reduceNexus(state: AppState, action: Action): AppState | null {
           currentToolExecutions: [],
         },
       };
-    case 'NEXUS_ADD_CONTENT':
+    case 'ATLAS_ADD_CONTENT':
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
-          streamingContent: state.nexus.streamingContent + action.content,
+        atlas: {
+          ...state.atlas,
+          streamingContent: state.atlas.streamingContent + action.content,
         },
       };
-    case 'NEXUS_TOOL_EXECUTING':
+    case 'ATLAS_TOOL_EXECUTING':
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
-          currentToolExecutions: [...state.nexus.currentToolExecutions, {
+        atlas: {
+          ...state.atlas,
+          currentToolExecutions: [...state.atlas.currentToolExecutions, {
             name: action.name,
             display: 'Executing...',
             success: true,
@@ -366,49 +366,49 @@ function reduceNexus(state: AppState, action: Action): AppState | null {
           }],
         },
       };
-    case 'NEXUS_TOOL_EXECUTED': {
-      const executions = state.nexus.currentToolExecutions.map((ex) =>
+    case 'ATLAS_TOOL_EXECUTED': {
+      const executions = state.atlas.currentToolExecutions.map((ex) =>
         ex.name === action.name && ex.executing
           ? { name: action.name, display: action.display, success: action.success, executing: false, input: ex.input, result: action.result }
           : ex
       );
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        atlas: {
+          ...state.atlas,
           currentToolExecutions: executions,
         },
       };
     }
-    case 'NEXUS_PLAN_UPDATED':
+    case 'ATLAS_PLAN_UPDATED':
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        atlas: {
+          ...state.atlas,
           currentPlan: action.plan,
         },
       };
-    case 'NEXUS_DONE': {
+    case 'ATLAS_DONE': {
       //
       // Finalize the current streaming content and tool executions into a
       // message.
       //
-      const newMessages = [...state.nexus.messages];
-      if (state.nexus.streamingContent || state.nexus.currentToolExecutions.length > 0) {
+      const newMessages = [...state.atlas.messages];
+      if (state.atlas.streamingContent || state.atlas.currentToolExecutions.length > 0) {
         newMessages.push({
           id: generateUUID(),
           role: 'assistant',
-          content: state.nexus.streamingContent,
+          content: state.atlas.streamingContent,
           timestamp: new Date(),
-          toolExecutions: state.nexus.currentToolExecutions.length > 0
-            ? [...state.nexus.currentToolExecutions]
+          toolExecutions: state.atlas.currentToolExecutions.length > 0
+            ? [...state.atlas.currentToolExecutions]
             : undefined,
         });
       }
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        atlas: {
+          ...state.atlas,
           messages: newMessages,
           isLoading: false,
           streamingContent: '',
@@ -416,8 +416,8 @@ function reduceNexus(state: AppState, action: Action): AppState | null {
         },
       };
     }
-    case 'NEXUS_ERROR': {
-      const newMessages = [...state.nexus.messages, {
+    case 'ATLAS_ERROR': {
+      const newMessages = [...state.atlas.messages, {
         id: generateUUID(),
         role: 'system' as const,
         content: `Error: ${action.message}`,
@@ -425,8 +425,8 @@ function reduceNexus(state: AppState, action: Action): AppState | null {
       }];
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        atlas: {
+          ...state.atlas,
           messages: newMessages,
           isStarting: false,
           isLoading: false,
@@ -435,28 +435,28 @@ function reduceNexus(state: AppState, action: Action): AppState | null {
         },
       };
     }
-    case 'NEXUS_CLEAR_MESSAGES':
+    case 'ATLAS_CLEAR_MESSAGES':
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        atlas: {
+          ...state.atlas,
           messages: [],
           currentPlan: null,
         },
       };
-    case 'NEXUS_SET_LOADING':
+    case 'ATLAS_SET_LOADING':
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        atlas: {
+          ...state.atlas,
           isLoading: action.loading,
         },
       };
-    case 'NEXUS_TOKEN_USAGE':
+    case 'ATLAS_TOKEN_USAGE':
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        atlas: {
+          ...state.atlas,
           tokenUsage: {
             promptTokens: action.promptTokens,
             completionTokens: action.completionTokens,
@@ -718,7 +718,7 @@ function reduceEventLogPanel(state: AppState, action: Action): AppState | null {
 function reducer(state: AppState, action: Action): AppState {
   return (
     reduceCore(state, action)
-    ?? reduceNexus(state, action)
+    ?? reduceAtlas(state, action)
     ?? reduceIntercept(state, action)
     ?? reduceAgentSessions(state, action)
     ?? reduceChains(state, action)
@@ -769,13 +769,13 @@ interface AppContextValue {
   //
   clearOpDefStatus: () => void;
   //
-  // Nexus.
+  // Atlas.
   //
-  nexusStart: () => void;
-  nexusStop: () => void;
-  nexusCancel: () => void;
-  nexusPrompt: (message: string) => void;
-  nexusClearMessages: () => void;
+  atlasStart: () => void;
+  atlasStop: () => void;
+  atlasCancel: () => void;
+  atlasPrompt: (message: string) => void;
+  atlasClearMessages: () => void;
   //
   // Generic send.
   //
@@ -852,11 +852,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [state.clientId]);
 
   //
-  // Persist Nexus state to sessionStorage whenever it changes.
+  // Persist Atlas state to sessionStorage whenever it changes.
   //
   useEffect(() => {
-    persistNexusState(state.nexus);
-  }, [state.nexus]);
+    persistAtlasState(state.atlas);
+  }, [state.atlas]);
 
   //
   // Handle WebSocket messages - only set up once.
@@ -914,35 +914,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'SET_OP_DEF_SUCCESS', fullName: message.full_name });
           break;
         //
-        // Nexus messages.
+        // Atlas messages.
         //
-        case 'nexus_started':
-          dispatch({ type: 'NEXUS_STARTED' });
+        case 'atlas_started':
+          dispatch({ type: 'ATLAS_STARTED' });
           break;
-        case 'nexus_stopped':
-          dispatch({ type: 'NEXUS_STOPPED' });
+        case 'atlas_stopped':
+          dispatch({ type: 'ATLAS_STOPPED' });
           break;
-        case 'nexus_content':
-          dispatch({ type: 'NEXUS_ADD_CONTENT', content: message.content });
+        case 'atlas_content':
+          dispatch({ type: 'ATLAS_ADD_CONTENT', content: message.content });
           break;
-        case 'nexus_tool_executing':
-          dispatch({ type: 'NEXUS_TOOL_EXECUTING', name: message.name, input: message.input });
+        case 'atlas_tool_executing':
+          dispatch({ type: 'ATLAS_TOOL_EXECUTING', name: message.name, input: message.input });
           break;
-        case 'nexus_tool_executed':
-          dispatch({ type: 'NEXUS_TOOL_EXECUTED', name: message.name, display: message.display, success: message.success, result: message.result });
+        case 'atlas_tool_executed':
+          dispatch({ type: 'ATLAS_TOOL_EXECUTED', name: message.name, display: message.display, success: message.success, result: message.result });
           break;
-        case 'nexus_plan_updated':
-          dispatch({ type: 'NEXUS_PLAN_UPDATED', plan: message.plan });
+        case 'atlas_plan_updated':
+          dispatch({ type: 'ATLAS_PLAN_UPDATED', plan: message.plan });
           break;
-        case 'nexus_done':
-          dispatch({ type: 'NEXUS_DONE' });
+        case 'atlas_done':
+          dispatch({ type: 'ATLAS_DONE' });
           break;
-        case 'nexus_error':
-          dispatch({ type: 'NEXUS_ERROR', message: message.message });
+        case 'atlas_error':
+          dispatch({ type: 'ATLAS_ERROR', message: message.message });
           break;
-        case 'nexus_token_usage':
+        case 'atlas_token_usage':
           dispatch({
-            type: 'NEXUS_TOKEN_USAGE',
+            type: 'ATLAS_TOKEN_USAGE',
             promptTokens: message.prompt_tokens,
             completionTokens: message.completion_tokens,
             totalTokens: message.total_tokens,
@@ -1192,30 +1192,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   //
-  // Nexus functions.
+  // Atlas functions.
   //
-  const nexusStart = useCallback(() => {
-    dispatch({ type: 'NEXUS_STARTING' });
-    wsClient.send({ type: 'nexus_start' });
+  const atlasStart = useCallback(() => {
+    dispatch({ type: 'ATLAS_STARTING' });
+    wsClient.send({ type: 'atlas_start' });
   }, []);
 
-  const nexusStop = useCallback(() => {
-    wsClient.send({ type: 'nexus_stop' });
-    dispatch({ type: 'NEXUS_STOPPED' });
+  const atlasStop = useCallback(() => {
+    wsClient.send({ type: 'atlas_stop' });
+    dispatch({ type: 'ATLAS_STOPPED' });
   }, []);
 
-  const nexusCancel = useCallback(() => {
-    wsClient.send({ type: 'nexus_cancel' });
-    dispatch({ type: 'NEXUS_DONE' });
+  const atlasCancel = useCallback(() => {
+    wsClient.send({ type: 'atlas_cancel' });
+    dispatch({ type: 'ATLAS_DONE' });
   }, []);
 
-  const nexusPrompt = useCallback((message: string) => {
-    dispatch({ type: 'NEXUS_ADD_USER_MESSAGE', message });
-    wsClient.send({ type: 'nexus_prompt', message });
+  const atlasPrompt = useCallback((message: string) => {
+    dispatch({ type: 'ATLAS_ADD_USER_MESSAGE', message });
+    wsClient.send({ type: 'atlas_prompt', message });
   }, []);
 
-  const nexusClearMessages = useCallback(() => {
-    dispatch({ type: 'NEXUS_CLEAR_MESSAGES' });
+  const atlasClearMessages = useCallback(() => {
+    dispatch({ type: 'ATLAS_CLEAR_MESSAGES' });
   }, []);
 
   //
@@ -1437,11 +1437,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     getConfig,
     setConfig,
     clearOpDefStatus,
-    nexusStart,
-    nexusStop,
-    nexusCancel,
-    nexusPrompt,
-    nexusClearMessages,
+    atlasStart,
+    atlasStop,
+    atlasCancel,
+    atlasPrompt,
+    atlasClearMessages,
     send,
     requestTrafficLog,
     requestTrafficMatches,

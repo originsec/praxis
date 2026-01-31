@@ -1,4 +1,4 @@
-import type { AgentSessionMessage, NexusMessage } from '../context/AppContext';
+import type { AgentSessionMessage, AtlasMessage } from '../context/AppContext';
 import type { SemanticOpUpdate, ChainExecutionUpdate, ElementExecutionStatus } from '../api/types';
 
 //
@@ -80,15 +80,15 @@ export function exportAgentSession(
 }
 
 //
-// Export Nexus session to Markdown.
+// Export Atlas session to Markdown.
 //
-export function exportNexusSession(
-  messages: NexusMessage[],
+export function exportAtlasSession(
+  messages: AtlasMessage[],
   tokenUsage?: { promptTokens: number; completionTokens: number; totalTokens: number } | null
 ): string {
   const lines: string[] = [];
 
-  lines.push('# Nexus Session Transcript');
+  lines.push('# Atlas Session Transcript');
   lines.push('');
   if (messages.length > 0) {
     lines.push(`**Started:** ${formatDate(messages[0].timestamp)}`);
@@ -103,7 +103,7 @@ export function exportNexusSession(
   lines.push('');
 
   for (const msg of messages) {
-    const role = msg.role === 'user' ? '**User**' : msg.role === 'assistant' ? '**Nexus**' : '**System**';
+    const role = msg.role === 'user' ? '**User**' : msg.role === 'assistant' ? '**Atlas**' : '**System**';
     lines.push(`### ${role} - ${formatDate(msg.timestamp)}`);
     lines.push('');
 

@@ -10,19 +10,19 @@ use common::{
     SessionCommandResult, SessionContext,
 };
 
-use crate::messages::{NexusPlan, PlanStep, PlanStepStatus};
+use crate::messages::{AtlasPlan, PlanStep, PlanStepStatus};
 use crate::state::AppState;
 use crate::rabbitmq::RabbitMqClient;
 
 #[derive(Default)]
-struct NexusContext {
+struct AtlasContext {
     selected_node_idx: usize,
     selected_agent_idx: usize,
 }
 
-/// Events from the Nexus handler
+/// Events from the Atlas handler
 #[derive(Debug, Clone)]
-pub enum NexusEvent {
+pub enum AtlasEvent {
     /// Partial content during streaming
     Content(String),
     /// Stream completed successfully
@@ -34,13 +34,13 @@ pub enum NexusEvent {
     /// Tool execution completed with display summary and result
     ToolExecuted { name: String, display: String, success: bool, result: String },
     /// Plan updated
-    PlanUpdated(NexusPlan),
+    PlanUpdated(AtlasPlan),
     /// Token usage update (prompt tokens, completion tokens, total tokens)
     TokenUsage { prompt_tokens: u32, completion_tokens: u32, total_tokens: u32 },
 }
 
-/// Nexus session state
-pub struct NexusSession {
+/// Atlas session state
+pub struct AtlasSession {
     /// Channel to send prompts to the handler
     pub prompt_tx: mpsc::Sender<String>,
     /// Handle to the background task
@@ -52,7 +52,7 @@ pub struct NexusSession {
     pub cancel_flag: Arc<std::sync::atomic::AtomicBool>,
 }
 
-impl NexusSession {
+impl AtlasSession {
     /// Signal the session to stop entirely
     pub fn stop(&self) {
         self.stop_flag.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -74,12 +74,12 @@ pub fn get_system_prompt(custom_prompt: Option<&str>) -> Option<String> {
     if let Some(prompt) = custom_prompt {
         let prompt = prompt.trim();
         if !prompt.is_empty() {
-            common::log_info!("Using custom nexus prompt ({} chars)", prompt.len());
+            common::log_info!("Using custom atlas prompt ({} chars)", prompt.len());
             return Some(prompt.to_string());
         }
     }
 
-    common::log_info!("No nexus prompt configured");
+    common::log_info!("No atlas prompt configured");
     None
 }
 
@@ -423,7 +423,7 @@ fn get_tool_definitions() -> Vec<Tool> {
 async fn execute_tool(
     app_state: &Arc<AppState>,
     rabbitmq: &Arc<RabbitMqClient>,
-    ctx: &mut NexusContext,
+    ctx: &mut AtlasContext,
     tool_name: &str,
     tool_input: &Value,
 ) -> String {
@@ -1497,7 +1497,7 @@ async fn execute_tool(
 }
 
 /// Get the selected node ID from context
-async fn get_selected_node_id(app_state: &Arc<AppState>, ctx: &NexusContext) -> Option<String> {
+async fn get_selected_node_id(app_state: &Arc<AppState>, ctx: &AtlasContext) -> Option<String> {
     if let Some(system_state) = app_state.get_state().await {
         system_state.nodes.get(ctx.selected_node_idx)
             .map(|n| n.node_id.clone())
@@ -1579,29 +1579,29 @@ async fn send_command_and_wait(
     Err(format!("Timeout waiting for response after {} seconds", timeout_secs))
 }
 
-/// Start a new Nexus session
-pub async fn start_nexus_session(
+/// Start a new Atlas session
+pub async fn start_atlas_session(
     app_state: Arc<AppState>,
     rabbitmq: Arc<RabbitMqClient>,
     _config_manager: Arc<crate::config::ConfigManager>,
-    event_tx: mpsc::Sender<NexusEvent>,
-) -> Result<NexusSession, String> {
+    event_tx: mpsc::Sender<AtlasEvent>,
+) -> Result<AtlasSession, String> {
     //
     // Get configuration from app_state cache (populated from Service via
     // RabbitMQ).
     //
     let config = app_state.get_config(&[
         "llm_model_definitions",
-        "llm_feature_nexus",
-        "llm_nexus_prompt",
-        "llm_nexus_max_tokens",
+        "llm_feature_atlas",
+        "llm_atlas_prompt",
+        "llm_atlas_max_tokens",
     ]).await;
 
     //
-    // Parse model definitions and find the selected Nexus model.
+    // Parse model definitions and find the selected Atlas model.
     //
     let model_defs_json = config.get("llm_model_definitions").cloned().unwrap_or_else(|| "[]".to_string());
-    let selected_model_name = config.get("llm_feature_nexus").cloned().unwrap_or_default();
+    let selected_model_name = config.get("llm_feature_atlas").cloned().unwrap_or_default();
 
     //
     // Parse model definitions.
@@ -1622,13 +1622,13 @@ pub async fn start_nexus_session(
     // Find the selected model definition.
     //
     let selected_def = model_defs.iter().find(|d| d.name == selected_model_name)
-        .ok_or_else(|| format!("No model selected for Nexus. Go to Settings > LLM Providers > Feature Selection to configure."))?;
+        .ok_or_else(|| format!("No model selected for Atlas. Go to Settings > LLM Providers > Feature Selection to configure."))?;
 
     let api_key = selected_def.api_key.clone();
     let provider_str = selected_def.provider.clone();
     let model = selected_def.model.clone();
-    let custom_prompt = config.get("llm_nexus_prompt").cloned();
-    let max_tokens: u32 = config.get("llm_nexus_max_tokens")
+    let custom_prompt = config.get("llm_atlas_prompt").cloned();
+    let max_tokens: u32 = config.get("llm_atlas_max_tokens")
         .and_then(|s| s.parse().ok())
         .unwrap_or(25000);
     //
@@ -1655,11 +1655,11 @@ pub async fn start_nexus_session(
     // Get system prompt - must be configured.
     //
     let base_prompt = get_system_prompt(custom_prompt.as_deref())
-        .ok_or_else(|| "No system prompt configured. Go to Settings > LLM Providers > Nexus to configure the system prompt.".to_string())?;
+        .ok_or_else(|| "No system prompt configured. Go to Settings > LLM Providers > Atlas to configure the system prompt.".to_string())?;
     let tools = get_tool_definitions();
     let system_prompt = get_system_prompt_with_tools(&base_prompt, &tools);
 
-    common::log_info!("Nexus session starting with provider {:?}, model {}, max_tokens {}, history_count {}", provider, model, max_tokens, history_count);
+    common::log_info!("Atlas session starting with provider {:?}, model {}, max_tokens {}, history_count {}", provider, model, max_tokens, history_count);
 
     //
     // Create communication channels.
@@ -1675,7 +1675,7 @@ pub async fn start_nexus_session(
     //
     let task_handle = tokio::spawn(async move {
         let mut conversation_history: Vec<Message> = Vec::new();
-        let mut ctx = NexusContext::default();
+        let mut ctx = AtlasContext::default();
 
         //
         // Add system message to conversation.
@@ -1695,7 +1695,7 @@ pub async fn start_nexus_session(
             //
             cancel_flag_clone.store(false, std::sync::atomic::Ordering::SeqCst);
 
-            common::log_info!("Nexus received prompt: {}...", &prompt[..prompt.len().min(50)]);
+            common::log_info!("Atlas received prompt: {}...", &prompt[..prompt.len().min(50)]);
 
             //
             // Add user message.
@@ -1742,7 +1742,7 @@ pub async fn start_nexus_session(
                     Err(e) => {
                         let err_msg = format!("AI request failed: {}", e);
                         common::log_error!("{}", err_msg);
-                        let _ = event_tx.send(NexusEvent::Error(err_msg)).await;
+                        let _ = event_tx.send(AtlasEvent::Error(err_msg)).await;
                         conversation_history.pop();
                         break;
                     }
@@ -1752,7 +1752,7 @@ pub async fn start_nexus_session(
                 // Send token usage update if available.
                 //
                 if let Some(usage) = usage {
-                    let _ = event_tx.send(NexusEvent::TokenUsage {
+                    let _ = event_tx.send(AtlasEvent::TokenUsage {
                         prompt_tokens: usage.prompt_tokens,
                         completion_tokens: usage.completion_tokens,
                         total_tokens: usage.total_tokens,
@@ -1773,7 +1773,7 @@ pub async fn start_nexus_session(
                         break;
                     }
 
-                    common::log_info!("Nexus executing tool: {}", tool_name);
+                    common::log_info!("Atlas executing tool: {}", tool_name);
 
                     //
                     // Extract input for display (e.g., prompt text for
@@ -1784,7 +1784,7 @@ pub async fn start_nexus_session(
                     } else {
                         None
                     };
-                    let _ = event_tx.send(NexusEvent::ToolExecuting { name: tool_name.clone(), input: tool_input_display }).await;
+                    let _ = event_tx.send(AtlasEvent::ToolExecuting { name: tool_name.clone(), input: tool_input_display }).await;
 
                     //
                     // Execute tool.
@@ -1808,14 +1808,14 @@ pub async fn start_nexus_session(
                     if tool_name == "report_plan" {
                         if let Ok(result_json) = serde_json::from_str::<Value>(&result) {
                             if let Some(plan_obj) = result_json.get("plan") {
-                                if let Ok(plan) = serde_json::from_value::<NexusPlan>(plan_obj.clone()) {
-                                    let _ = event_tx.send(NexusEvent::PlanUpdated(plan)).await;
+                                if let Ok(plan) = serde_json::from_value::<AtlasPlan>(plan_obj.clone()) {
+                                    let _ = event_tx.send(AtlasEvent::PlanUpdated(plan)).await;
                                 }
                             }
                         }
                     }
 
-                    let _ = event_tx.send(NexusEvent::ToolExecuted {
+                    let _ = event_tx.send(AtlasEvent::ToolExecuted {
                         name: tool_name.clone(),
                         display,
                         success,
@@ -1837,7 +1837,7 @@ pub async fn start_nexus_session(
                     //
                     let remaining = response_text.trim();
                     if !remaining.is_empty() {
-                        let _ = event_tx.send(NexusEvent::Content(remaining.to_string())).await;
+                        let _ = event_tx.send(AtlasEvent::Content(remaining.to_string())).await;
                     }
 
                     //
@@ -1861,7 +1861,7 @@ pub async fn start_nexus_session(
                 // No tool call - send response and complete.
                 //
                 if !full_response.is_empty() {
-                    let _ = event_tx.send(NexusEvent::Content(full_response.clone())).await;
+                    let _ = event_tx.send(AtlasEvent::Content(full_response.clone())).await;
                 }
 
                 conversation_history.push(Message::assistant(&full_response));
@@ -1869,11 +1869,11 @@ pub async fn start_nexus_session(
                 break;
             }
 
-            let _ = event_tx.send(NexusEvent::Done).await;
+            let _ = event_tx.send(AtlasEvent::Done).await;
         }
     });
 
-    Ok(NexusSession {
+    Ok(AtlasSession {
         prompt_tx,
         task_handle,
         stop_flag,

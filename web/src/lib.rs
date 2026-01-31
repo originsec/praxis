@@ -7,7 +7,7 @@ mod config;
 mod messages;
 mod prompts;
 mod rabbitmq;
-mod nexus;
+mod atlas;
 mod state;
 mod websocket;
 
@@ -175,13 +175,13 @@ struct ErrorResponse {
 
 #[derive(Serialize)]
 struct DefaultPromptsResponse {
-    nexus: String,
+    atlas: String,
     semantic_op: String,
 }
 
 async fn get_default_prompts() -> Json<DefaultPromptsResponse> {
     Json(DefaultPromptsResponse {
-        nexus: prompts::NEXUS_PROMPT.to_string(),
+        atlas: prompts::ATLAS_PROMPT.to_string(),
         semantic_op: prompts::SEMANTIC_OP_PROMPT.to_string(),
     })
 }

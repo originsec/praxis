@@ -15,7 +15,7 @@ pub const LLM_FEATURE_SEMANTIC_PARSER: &str = "llm_feature_semantic_parser";
 pub const LLM_FEATURE_TRAFFIC_PARSER: &str = "llm_feature_traffic_parser";
 pub const LLM_FEATURE_SEMANTIC_OPS: &str = "llm_feature_semantic_ops";
 #[allow(dead_code)]
-pub const LLM_FEATURE_NEXUS: &str = "llm_feature_nexus";
+pub const LLM_FEATURE_ATLAS: &str = "llm_feature_atlas";
 
 //
 // LLM prompt config keys.
@@ -106,10 +106,10 @@ impl ServiceConfig {
             .and_then(|model_ref| self.find_model_definition(model_ref))
     }
 
-    /// Get the model definition assigned to nexus feature
+    /// Get the model definition assigned to atlas feature
     #[allow(dead_code)]
-    pub fn get_nexus_model_def(&self) -> Option<ModelDefinition> {
-        self.get(LLM_FEATURE_NEXUS)
+    pub fn get_atlas_model_def(&self) -> Option<ModelDefinition> {
+        self.get(LLM_FEATURE_ATLAS)
             .and_then(|model_ref| self.find_model_definition(model_ref))
     }
 

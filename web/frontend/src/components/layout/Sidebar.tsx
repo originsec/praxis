@@ -23,7 +23,7 @@ export function Sidebar() {
     { to: '/operations', icon: Zap, label: 'OPERATIONS', end: false },
     { to: '/intercept', icon: Shield, label: 'INTERCEPT', end: false },
     // { to: '/discovery', icon: Radar, label: 'DISCOVERY', end: false },  // Hidden - feature not ready
-    { to: '/nexus', icon: Bot, label: 'NEXUS', end: false },
+    { to: '/atlas', icon: Bot, label: 'ATLAS', end: false },
     { to: '/toolkit', icon: Wrench, label: 'TOOLKIT', end: false },
     { to: '/settings', icon: Settings, label: 'SETTINGS', end: false },
   ];

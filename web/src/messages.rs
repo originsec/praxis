@@ -9,7 +9,7 @@ use common::{
     TargetDirection, TrafficSearchFilters,
 };
 
-/// Status of a Nexus plan step
+/// Status of an Atlas plan step
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum PlanStepStatus {
@@ -18,16 +18,16 @@ pub enum PlanStepStatus {
     Done,
 }
 
-/// A step in the Nexus execution plan
+/// A step in the Atlas execution plan
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanStep {
     pub description: String,
     pub status: PlanStepStatus,
 }
 
-/// The current plan being executed by Nexus
+/// The current plan being executed by Atlas
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct NexusPlan {
+pub struct AtlasPlan {
     pub steps: Vec<PlanStep>,
     pub summary: Option<String>,
     pub current_step_description: Option<String>,
@@ -102,16 +102,16 @@ pub enum BrowserMessage {
     OpDefGet {
         full_name: String,
     },
-    /// Start a new Nexus session
-    NexusStart,
-    /// Send a prompt to Nexus
-    NexusPrompt {
+    /// Start a new Atlas session
+    AtlasStart,
+    /// Send a prompt to Atlas
+    AtlasPrompt {
         message: String,
     },
-    /// Stop/interrupt Nexus session
-    NexusStop,
-    /// Cancel current Nexus inference (keeps session active)
-    NexusCancel,
+    /// Stop/interrupt Atlas session
+    AtlasStop,
+    /// Cancel current Atlas inference (keeps session active)
+    AtlasCancel,
 
     //
     // Traffic interception messages.
@@ -330,38 +330,38 @@ pub enum ServerMessage {
     OpDefError {
         message: String,
     },
-    /// Nexus session started
-    NexusStarted,
-    /// Nexus streaming text content
-    NexusContent {
+    /// Atlas session started
+    AtlasStarted,
+    /// Atlas streaming text content
+    AtlasContent {
         content: String,
     },
-    /// Nexus started executing a tool
-    NexusToolExecuting {
+    /// Atlas started executing a tool
+    AtlasToolExecuting {
         name: String,
         input: Option<String>,
     },
-    /// Nexus finished executing a tool
-    NexusToolExecuted {
+    /// Atlas finished executing a tool
+    AtlasToolExecuted {
         name: String,
         display: String,
         success: bool,
         result: String,
     },
-    /// Nexus plan updated
-    NexusPlanUpdated {
-        plan: NexusPlan,
+    /// Atlas plan updated
+    AtlasPlanUpdated {
+        plan: AtlasPlan,
     },
-    /// Nexus response complete
-    NexusDone,
-    /// Nexus session stopped
-    NexusStopped,
-    /// Nexus error
-    NexusError {
+    /// Atlas response complete
+    AtlasDone,
+    /// Atlas session stopped
+    AtlasStopped,
+    /// Atlas error
+    AtlasError {
         message: String,
     },
-    /// Nexus token usage update
-    NexusTokenUsage {
+    /// Atlas token usage update
+    AtlasTokenUsage {
         prompt_tokens: u32,
         completion_tokens: u32,
         total_tokens: u32,
