@@ -18,6 +18,7 @@ use futures::StreamExt;
 use lapin::{options::*, types::FieldTable, Channel};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, RwLock};
+use tokio_util::sync::CancellationToken;
 
 pub async fn run(
     channel: Arc<Channel>,
@@ -25,8 +26,9 @@ pub async fn run(
     node_queue: String,
     registry: Arc<RwLock<AgentRegistry>>,
     selected_agent: Arc<Mutex<Option<Arc<dyn Agent>>>>,
+    shutdown_token: CancellationToken,
 ) -> anyhow::Result<()> {
-    listen_to_queues(channel, node_id, node_queue, registry, selected_agent).await
+    listen_to_queues(channel, node_id, node_queue, registry, selected_agent, shutdown_token).await
 }
 
 async fn listen_to_queues(
@@ -35,6 +37,7 @@ async fn listen_to_queues(
     node_queue: String,
     registry: Arc<RwLock<AgentRegistry>>,
     selected_agent: Arc<Mutex<Option<Arc<dyn Agent>>>>,
+    shutdown_token: CancellationToken,
 ) -> anyhow::Result<()> {
     //
     // Create consumers for both the broadcast queue and the node-specific
@@ -371,35 +374,9 @@ async fn listen_to_queues(
 
     common::log_info!("Listening to queues: {}, {}", NODE_BROADCAST_QUEUE, node_queue);
 
-    //
-    // Set up shutdown signal handling.
-    //
-    let shutdown_signal = async {
-        #[cfg(unix)]
-        {
-            use tokio::signal::unix::{signal, SignalKind};
-            let mut sigterm =
-                signal(SignalKind::terminate()).expect("Failed to register SIGTERM handler");
-            let mut sigint =
-                signal(SignalKind::interrupt()).expect("Failed to register SIGINT handler");
-            tokio::select! {
-                _ = sigterm.recv() => common::log_info!("Received SIGTERM"),
-                _ = sigint.recv() => common::log_info!("Received SIGINT"),
-            }
-        }
-        #[cfg(windows)]
-        {
-            tokio::signal::ctrl_c()
-                .await
-                .expect("Failed to register Ctrl+C handler");
-            common::log_info!("Received Ctrl+C");
-        }
-    };
-    tokio::pin!(shutdown_signal);
-
     loop {
         tokio::select! {
-            _ = &mut shutdown_signal => {
+            _ = shutdown_token.cancelled() => {
                 common::log_info!("Shutdown signal received, cleaning up...");
 
                 //
@@ -673,7 +650,7 @@ async fn handle_command(
     }
 
     //
-    // Send an information update after every command.
+    // Send an information update after every command so the UI has fresh state.
     //
     if let Err(e) =
         send_node_information_update(channel, node_id, registry, selected_agent, node_state).await

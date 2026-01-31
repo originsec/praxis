@@ -23,10 +23,7 @@ impl NodeState {
             intercept_manager: NodeInterceptManager::new(node_id, traffic_tx, discovery_tx),
             terminal_manager: TerminalManager::new(),
             terminal_output_tx: Some(terminal_output_tx),
-            //
-            // Default 30 seconds.
-            //
-            report_interval_secs: Arc::new(std::sync::atomic::AtomicU64::new(30)),
+            report_interval_secs: Arc::new(std::sync::atomic::AtomicU64::new(60)),
         }
     }
 }

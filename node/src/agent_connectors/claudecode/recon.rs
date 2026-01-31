@@ -24,16 +24,18 @@ impl AgentRecon for ClaudeCodeAgent {
         tools.mcp_servers = super::mcp::discover_mcp_servers_from_configs(&config_items).await;
         tools.skills = self.discover_skills();
 
-        if is_semantic {
+        let metadata = if is_semantic {
             common::log_info!("Including internal tools in semantic recon");
             tools.internal_tools = self.discover_internal_tools_semantically().await;
-        }
 
-        let metadata = crate::agent_connectors::utils::extract_metadata_from_configs(
-            self.name(),
-            &config_items,
-        )
-        .await;
+            crate::agent_connectors::utils::extract_metadata_from_configs(
+                self.name(),
+                &config_items,
+            )
+            .await
+        } else {
+            None
+        };
 
         common::log_info!(
             "Recon complete - {} MCP servers, {} skills, {} internal tools, {} config items, {} sessions, {} projects, metadata={}",
