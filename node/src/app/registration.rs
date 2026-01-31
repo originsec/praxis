@@ -1,6 +1,7 @@
 use anyhow::Result;
 use futures::StreamExt;
 use lapin::{Channel, Connection, ConnectionProperties, options::*, types::FieldTable};
+use tokio_util::sync::CancellationToken;
 
 use crate::utils;
 use common::{
@@ -28,7 +29,14 @@ pub async fn publish_registration(channel: &Channel, node_id: &str) -> Result<()
     Ok(())
 }
 
-pub async fn wait_for_registration_ack(channel: &Channel, node_queue: &str) -> Result<()> {
+//
+// Returns Ok(true) on ack received, Ok(false) on shutdown, Err on error/timeout.
+//
+pub async fn wait_for_registration_ack(
+    channel: &Channel,
+    node_queue: &str,
+    shutdown_token: &CancellationToken,
+) -> Result<bool> {
     let consumer_tag = "node-registration-consumer";
     let mut consumer = channel
         .basic_consume(
@@ -41,25 +49,36 @@ pub async fn wait_for_registration_ack(channel: &Channel, node_queue: &str) -> R
 
     let ack_timeout_s = 30;
 
-    let timeout = tokio::time::timeout(std::time::Duration::from_secs(ack_timeout_s), async {
-        while let Some(delivery_result) = consumer.next().await {
-            match delivery_result {
-                Ok(delivery) => {
-                    if let Ok(NodeDirectMessage::RegistrationAck(_)) =
-                        serde_json::from_slice::<NodeDirectMessage>(&delivery.data)
-                    {
-                        delivery.ack(BasicAckOptions::default()).await.ok();
-                        return Ok(());
+    let result = tokio::select! {
+        timeout_result = tokio::time::timeout(std::time::Duration::from_secs(ack_timeout_s), async {
+            while let Some(delivery_result) = consumer.next().await {
+                match delivery_result {
+                    Ok(delivery) => {
+                        if let Ok(NodeDirectMessage::RegistrationAck(_)) =
+                            serde_json::from_slice::<NodeDirectMessage>(&delivery.data)
+                        {
+                            delivery.ack(BasicAckOptions::default()).await.ok();
+                            return Ok(true);
+                        }
+                    }
+                    Err(e) => {
+                        return Err(anyhow::anyhow!("Consumer error: {}", e));
                     }
                 }
-                Err(e) => {
-                    return Err(anyhow::anyhow!("Consumer error: {}", e));
-                }
+            }
+            Err(anyhow::anyhow!("Consumer closed unexpectedly"))
+        }) => {
+            match timeout_result {
+                Ok(result) => result,
+                Err(_) => Err(anyhow::anyhow!(
+                    "Timeout waiting for registration acknowledgment"
+                )),
             }
         }
-        Err(anyhow::anyhow!("Consumer closed unexpectedly"))
-    })
-    .await;
+        _ = shutdown_token.cancelled() => {
+            Ok(false)
+        }
+    };
 
     //
     // Cancel the consumer so messages aren't routed to it anymore.
@@ -69,34 +88,60 @@ pub async fn wait_for_registration_ack(channel: &Channel, node_queue: &str) -> R
         .await
         .ok();
 
-    match timeout {
-        Ok(result) => result,
-        Err(_) => Err(anyhow::anyhow!(
-            "Timeout waiting for registration acknowledgment"
-        )),
-    }
+    result
 }
 
 const RETRY_INTERVAL_SECS: u64 = 5;
 
-pub async fn register_with_service(node_id: String) -> Result<RegistrationResult> {
+//
+// Helper to sleep with shutdown check. Returns false if shutdown was requested.
+//
+async fn sleep_with_shutdown(secs: u64, shutdown_token: &CancellationToken) -> bool {
+    tokio::select! {
+        _ = tokio::time::sleep(std::time::Duration::from_secs(secs)) => true,
+        _ = shutdown_token.cancelled() => false,
+    }
+}
+
+//
+// Returns Ok(Some(result)) on success, Ok(None) on shutdown, Err on
+// unrecoverable error.
+//
+pub async fn register_with_service(
+    node_id: String,
+    shutdown_token: CancellationToken,
+) -> Result<Option<RegistrationResult>> {
     let node_queue = node_queue_name(&node_id);
     let url = rabbitmq_url();
 
     loop {
+        if shutdown_token.is_cancelled() {
+            return Ok(None);
+        }
+
         //
-        // Try to connect to RabbitMQ.
+        // Try to connect to RabbitMQ. Use select to allow cancellation during
+        // the connection attempt.
         //
         common::log_info!("Connecting to RabbitMQ at: {}", url);
-        let connection = match Connection::connect(&url, ConnectionProperties::default()).await {
-            Ok(conn) => conn,
-            Err(e) => {
-                common::log_warn!(
-                    "Failed to connect to RabbitMQ: {}. Retrying in {} seconds...",
-                    e, RETRY_INTERVAL_SECS
-                );
-                tokio::time::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECS)).await;
-                continue;
+        let connection = tokio::select! {
+            result = Connection::connect(&url, ConnectionProperties::default()) => {
+                match result {
+                    Ok(conn) => conn,
+                    Err(e) => {
+                        common::log_warn!(
+                            "Failed to connect to RabbitMQ: {}. Retrying in {} seconds...",
+                            e, RETRY_INTERVAL_SECS
+                        );
+                        if !sleep_with_shutdown(RETRY_INTERVAL_SECS, &shutdown_token).await {
+                            return Ok(None);
+                        }
+                        continue;
+                    }
+                }
+            }
+            _ = shutdown_token.cancelled() => {
+                return Ok(None);
             }
         };
 
@@ -107,7 +152,9 @@ pub async fn register_with_service(node_id: String) -> Result<RegistrationResult
                     "Failed to create channel: {}. Retrying in {} seconds...",
                     e, RETRY_INTERVAL_SECS
                 );
-                tokio::time::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECS)).await;
+                if !sleep_with_shutdown(RETRY_INTERVAL_SECS, &shutdown_token).await {
+                    return Ok(None);
+                }
                 continue;
             }
         };
@@ -128,7 +175,9 @@ pub async fn register_with_service(node_id: String) -> Result<RegistrationResult
                 "Failed to declare queue: {}. Retrying in {} seconds...",
                 e, RETRY_INTERVAL_SECS
             );
-            tokio::time::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECS)).await;
+            if !sleep_with_shutdown(RETRY_INTERVAL_SECS, &shutdown_token).await {
+                return Ok(None);
+            }
             continue;
         }
 
@@ -140,27 +189,34 @@ pub async fn register_with_service(node_id: String) -> Result<RegistrationResult
                 "Failed to publish registration: {}. Retrying in {} seconds...",
                 e, RETRY_INTERVAL_SECS
             );
-            tokio::time::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECS)).await;
+            if !sleep_with_shutdown(RETRY_INTERVAL_SECS, &shutdown_token).await {
+                return Ok(None);
+            }
             continue;
         }
 
         //
         // Wait for acknowledgment.
         //
-        match wait_for_registration_ack(&channel, &node_queue).await {
-            Ok(()) => {
-                return Ok(RegistrationResult {
+        match wait_for_registration_ack(&channel, &node_queue, &shutdown_token).await {
+            Ok(true) => {
+                return Ok(Some(RegistrationResult {
                     node_id,
                     node_queue,
                     channel,
-                });
+                }));
+            }
+            Ok(false) => {
+                return Ok(None);
             }
             Err(e) => {
                 common::log_warn!(
                     "Registration not acknowledged: {}. Retrying in {} seconds...",
                     e, RETRY_INTERVAL_SECS
                 );
-                tokio::time::sleep(std::time::Duration::from_secs(RETRY_INTERVAL_SECS)).await;
+                if !sleep_with_shutdown(RETRY_INTERVAL_SECS, &shutdown_token).await {
+                    return Ok(None);
+                }
                 continue;
             }
         }

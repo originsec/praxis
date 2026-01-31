@@ -7,23 +7,26 @@ use common::{AgentTool, ReconMetadata, ReconResult, ReconTools, SessionContext};
 #[async_trait]
 impl AgentRecon for M365CopilotAgent {
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
-        if !is_semantic {
-            //
-            // Only run recon for semantic mode.
-            //
-
-            return None;
-        }
+        //
+        // For non-semantic recon, just discover user identities.
+        // For semantic recon, also discover internal tools.
+        //
 
         let identities = self.discover_user_identities().await;
-        let internal_tools = self.discover_internal_tools_semantically().await;
+
+        let internal_tools = if is_semantic {
+            self.discover_internal_tools_semantically().await
+        } else {
+            Vec::new()
+        };
 
         let has_identities = !identities.is_empty();
 
         common::log_info!(
-            "Recon complete - {} identities, {} internal tools",
+            "Recon complete - {} identities, {} internal tools (semantic={})",
             identities.len(),
-            internal_tools.len()
+            internal_tools.len(),
+            is_semantic
         );
 
         Some(ReconResult {
@@ -75,7 +78,7 @@ impl M365CopilotAgent {
         };
 
         if temp_session.mode() != crate::agent_connectors::traits::AgentMode::DevTools {
-            temp_session.close();
+            self.close_session();
             return Vec::new();
         }
 
@@ -107,7 +110,7 @@ impl M365CopilotAgent {
             })
             .unwrap_or_default();
 
-        temp_session.close();
+        self.close_session();
 
         if !identities.is_empty() {
             common::log_info!("Found identities: {:?}", identities);
@@ -134,11 +137,40 @@ impl M365CopilotAgent {
             *guard = None;
         }
 
-        utils::discover_internal_tools_semantically("M365CopilotAgent", || {
-            let temp_context = SessionContext::default();
-            self.create_session(&temp_context)
-                .ok_or_else(|| anyhow::anyhow!("Failed to create session"))
-        })
-        .await
+        let mut tools = utils::discover_internal_tools_semantically(
+            "M365CopilotAgent",
+            utils::ToolDiscoveryPrompt::HighLevel,
+            || {
+                let temp_context = SessionContext::default();
+                self.create_session(&temp_context)
+                    .ok_or_else(|| anyhow::anyhow!("Failed to create session"))
+            },
+        )
+        .await;
+
+        *self.session.write().unwrap() = None;
+
+        //
+        // If HighLevel prompt returned no tools, try JsonFormat as fallback.
+        //
+
+        if tools.is_empty() {
+            common::log_info!("HighLevel prompt returned no tools, trying JsonFormat");
+
+            tools = utils::discover_internal_tools_semantically(
+                "M365CopilotAgent",
+                utils::ToolDiscoveryPrompt::JsonFormat,
+                || {
+                    let temp_context = SessionContext::default();
+                    self.create_session(&temp_context)
+                        .ok_or_else(|| anyhow::anyhow!("Failed to create session"))
+                },
+            )
+            .await;
+
+            *self.session.write().unwrap() = None;
+        }
+
+        tools
     }
 }

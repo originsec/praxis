@@ -4,9 +4,8 @@ use common::{
     SemanticParserResponse, NODE_SIGNAL_QUEUE,
 };
 use lapin::Channel;
-use once_cell::sync::OnceCell;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -92,7 +91,8 @@ These are tools that are part of the agent's core functionality, NOT MCP server 
 Examples include: Bash (command execution), Read (file reading), Write (file writing), \
 Edit (file editing), Grep (search), Glob (file pattern matching), Task (agent spawning), etc. \
 For each tool, extract the name and a brief description of what it does. \
-DO NOT LIST ANY TOOLS THAT DO NOT EXIST IN THE TEXT. Only include tools that are explicitly mentioned.";
+DO NOT LIST ANY TOOLS THAT DO NOT EXIST IN THE TEXT. Only include tools that are explicitly mentioned. \
+Tools could also appear in all sorts of formats - plain text, json, xml, etc.";
 
 /// Build a prompt for internal tools discovery from unstructured text.
 pub fn build_internal_tools_prompt(text: &str) -> String {
@@ -292,17 +292,26 @@ pub fn parse_metadata_from_json(json: &str) -> Option<ExtractedMetadata> {
 // Semantic Parser Client.
 //
 
-/// Global semantic parser client (initialized once in main)
-static SEMANTIC_PARSER_CLIENT: OnceCell<Arc<SemanticParserClient>> = OnceCell::new();
+/// Global semantic parser client (can be updated on reconnection)
+static SEMANTIC_PARSER_CLIENT: RwLock<Option<Arc<SemanticParserClient>>> =
+    RwLock::new(None);
 
-/// Initialize the global semantic parser client
+/// Initialize or update the global semantic parser client.
+/// Called on initial connection and on reconnection to update the channel.
 pub fn init_global_client(client: SemanticParserClient) {
-    let _ = SEMANTIC_PARSER_CLIENT.set(Arc::new(client));
+    let mut guard = SEMANTIC_PARSER_CLIENT.write().unwrap();
+    let is_update = guard.is_some();
+    *guard = Some(Arc::new(client));
+    if is_update {
+        common::log_info!("Semantic parser client updated with new channel (reconnection)");
+    } else {
+        common::log_info!("Semantic parser client initialized");
+    }
 }
 
 /// Get the global semantic parser client
 pub fn get_client() -> Option<Arc<SemanticParserClient>> {
-    SEMANTIC_PARSER_CLIENT.get().cloned()
+    SEMANTIC_PARSER_CLIENT.read().unwrap().clone()
 }
 
 /// Manages pending semantic parser requests

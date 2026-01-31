@@ -28,22 +28,17 @@ impl AgentRecon for ClawdbotAgent {
         //
         let mut tools = ReconTools::default();
 
-        //
-        // Semantic discovery: internal tools via agent query.
-        //
-        if is_semantic {
-            let internal_tools = self.discover_internal_tools_semantically().await;
-            tools.internal_tools = internal_tools;
-        }
+        let metadata = if is_semantic {
+            tools.internal_tools = self.discover_internal_tools_semantically().await;
 
-        //
-        // Extract metadata (user identities, API keys) from config files.
-        //
-        let metadata = crate::agent_connectors::utils::extract_metadata_from_configs(
-            self.name(),
-            &config_items,
-        )
-        .await;
+            crate::agent_connectors::utils::extract_metadata_from_configs(
+                self.name(),
+                &config_items,
+            )
+            .await
+        } else {
+            None
+        };
 
         common::log_info!(
             "Recon complete - {} config items, {} sessions, {} projects, metadata={}",
@@ -102,6 +97,7 @@ impl ClawdbotAgent {
         //
         crate::agent_connectors::utils::discover_internal_tools_semantically(
             self.name(),
+            crate::agent_connectors::utils::ToolDiscoveryPrompt::ListInternalTools,
             || {
                 let temp_context = SessionContext::default();
                 let session = ClawdbotSession::new(Some(binary_path.clone()), &temp_context)?;

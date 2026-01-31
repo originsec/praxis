@@ -25,6 +25,7 @@ impl AgentRecon for DynamicAgent {
 
         let internal_tools = crate::agent_connectors::utils::discover_internal_tools_semantically(
             &self.name,
+            crate::agent_connectors::utils::ToolDiscoveryPrompt::ListInternalTools,
             || {
                 //
                 // Create a temporary session for internal tools discovery.

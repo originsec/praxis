@@ -79,6 +79,11 @@ COPY web ./web
 COPY --from=frontend /build/web/frontend/dist ./web/frontend/dist
 
 #
+# Skip frontend build in build.rs since it's already built above.
+#
+ENV PRAXIS_SKIP_FRONTEND=1
+
+#
 # Build praxis_node for Linux and Windows.
 #
 RUN cargo build --release -p praxis_node && \
