@@ -13,8 +13,19 @@ pub enum M365CopilotSession {
     DevTools(GenericDevToolsSession<M365DevToolsAdapter>),
 }
 
+//
+// Valid working directory values for M365 Copilot.
+//
+
+pub const WORKING_DIR_WORK: &str = "Work";
+pub const WORKING_DIR_WEB: &str = "Web";
+
 impl M365CopilotSession {
-    pub async fn new(process_path: Option<String>, mode: AgentMode) -> anyhow::Result<Self> {
+    pub async fn new(
+        process_path: Option<String>,
+        mode: AgentMode,
+        working_dir: Option<String>,
+    ) -> anyhow::Result<Self> {
         //
         // Delegates to either UIAutomation or DevTools
         // session based on configured mode.
@@ -22,7 +33,7 @@ impl M365CopilotSession {
 
         match mode {
             AgentMode::DevTools => {
-                let adapter = M365DevToolsAdapter::new(process_path);
+                let adapter = M365DevToolsAdapter::new(process_path, working_dir);
                 let session = GenericDevToolsSession::new(adapter).await?;
                 Ok(M365CopilotSession::DevTools(session))
             }
@@ -59,6 +70,13 @@ impl AgentSession for M365CopilotSession {
         match self {
             M365CopilotSession::UIAutomation(s) => s.process_path(),
             M365CopilotSession::DevTools(s) => s.process_path(),
+        }
+    }
+
+    fn working_dir(&self) -> Option<String> {
+        match self {
+            M365CopilotSession::UIAutomation(_) => None,
+            M365CopilotSession::DevTools(s) => s.working_dir(),
         }
     }
 

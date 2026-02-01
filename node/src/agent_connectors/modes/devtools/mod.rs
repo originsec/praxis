@@ -144,8 +144,14 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
 
         let page = Self::connect_to_devtools(port).await?;
 
-        *self.page.lock().unwrap() = Some(page);
+        *self.page.lock().unwrap() = Some(page.clone());
         common::log_info!("Connected to DevTools");
+
+        //
+        // Call post-initialization hook for adapter-specific setup.
+        //
+
+        self.adapter.post_initialize(&page).await?;
 
         Ok(())
     }
@@ -356,6 +362,10 @@ impl<A: DevToolsAdapter + 'static> AgentSession for GenericDevToolsSession<A> {
 
     fn process_path(&self) -> Option<String> {
         self.process_path.clone()
+    }
+
+    fn working_dir(&self) -> Option<String> {
+        self.adapter.working_dir()
     }
 
     fn mode(&self) -> AgentMode {

@@ -6,13 +6,19 @@ use crate::agent_connectors::modes::devtools::{DevToolsAdapter, DevToolsConfig};
 use anyhow::Result;
 use chromiumoxide::page::Page;
 
+use super::session::{WORKING_DIR_WEB, WORKING_DIR_WORK};
+
 pub struct M365DevToolsAdapter {
     process_path: Option<String>,
+    working_dir: Option<String>,
 }
 
 impl M365DevToolsAdapter {
-    pub fn new(process_path: Option<String>) -> Self {
-        Self { process_path }
+    pub fn new(process_path: Option<String>, working_dir: Option<String>) -> Self {
+        Self {
+            process_path,
+            working_dir,
+        }
     }
 }
 
@@ -33,7 +39,11 @@ impl DevToolsAdapter for M365DevToolsAdapter {
     }
 
     fn message_selector(&self) -> &str {
-        ".fai-CopilotMessage__content"
+        r#"div[data-testid="markdown-reply"]"#
+    }
+
+    fn working_dir(&self) -> Option<String> {
+        self.working_dir.clone()
     }
 
     async fn check_response_complete(
@@ -49,7 +59,7 @@ impl DevToolsAdapter for M365DevToolsAdapter {
             .evaluate(
                 r#"
                 (function() {
-                    const contentElements = document.querySelectorAll('.fai-CopilotMessage__content');
+                    const contentElements = document.querySelectorAll('div[data-testid="markdown-reply"]');
 
                     let responseText = '';
                     if (contentElements.length > 0) {
@@ -122,6 +132,52 @@ impl DevToolsAdapter for M365DevToolsAdapter {
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
+        Ok(())
+    }
+
+    async fn post_initialize(&self, page: &Page) -> anyhow::Result<()> {
+        //
+        // If a working_dir is specified, try to click the corresponding toggle
+        // button. These buttons may not always be available, which is fine.
+        //
+
+        let Some(ref working_dir) = self.working_dir else {
+            return Ok(());
+        };
+
+        let selector = match working_dir.as_str() {
+            WORKING_DIR_WORK => r#"button[data-testid="toggle-work"]"#,
+            WORKING_DIR_WEB => r#"button[data-testid="toggle-web"]"#,
+            _ => {
+                common::log_warn!(
+                    "Unknown working_dir '{}', expected '{}' or '{}'",
+                    working_dir,
+                    WORKING_DIR_WORK,
+                    WORKING_DIR_WEB
+                );
+                return Ok(());
+            }
+        };
+
+        //
+        // Wait briefly for the button to appear, then click if available.
+        //
+
+        for _ in 0..30 {
+            if let Ok(button) = page.find_element(selector).await {
+                common::log_info!("Clicking {} toggle button", working_dir);
+                if let Err(e) = button.click().await {
+                    common::log_warn!("Failed to click {} toggle: {}", working_dir, e);
+                }
+                return Ok(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
+        common::log_debug!(
+            "{} toggle button not available, proceeding without it",
+            working_dir
+        );
         Ok(())
     }
 }

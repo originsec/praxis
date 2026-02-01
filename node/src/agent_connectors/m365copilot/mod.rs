@@ -59,7 +59,7 @@ impl Agent for M365CopilotAgent {
         self.do_fingerprint_impl().await
     }
 
-    fn create_session(&self, _context: &SessionContext) -> Option<Arc<dyn AgentSession>> {
+    fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>> {
         common::log_info!("{}: Creating new session", AGENT_NAME);
 
         //
@@ -104,10 +104,11 @@ impl Agent for M365CopilotAgent {
         //
 
         let mode = AgentMode::DevTools;
+        let working_dir = context.working_dir.clone();
 
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current()
-                .block_on(M365CopilotSession::new(process_path, mode))
+                .block_on(M365CopilotSession::new(process_path, mode, working_dir))
         });
 
         match result {
