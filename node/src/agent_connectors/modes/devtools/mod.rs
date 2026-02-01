@@ -158,19 +158,15 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
         // Minimize window now that session is fully ready (Windows only).
         // This happens after DevTools connection because WebView2 child processes
         // that own the actual windows may not exist until the app is fully loaded.
-        // Retry a few times since windows may still be initializing.
         //
 
         #[cfg(windows)]
         if should_minimize {
             if let Some(pid) = pid {
-                for attempt in 1..=10 {
-                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                    if utils::minimize_process_window(pid) {
-                        common::log_info!("Minimized process window on attempt {}", attempt);
-                        break;
-                    }
-                    common::log_debug!("Minimize attempt {} - no window found yet", attempt);
+                if utils::minimize_process_window(pid) {
+                    common::log_info!("Minimized process window");
+                } else {
+                    common::log_debug!("No window found to minimize");
                 }
             }
         }
