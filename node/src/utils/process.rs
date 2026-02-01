@@ -353,24 +353,27 @@ impl Drop for HiddenDesktop {
 #[cfg(windows)]
 pub fn minimize_process_window(pid: u32) -> bool {
     use std::sync::atomic::{AtomicIsize, Ordering};
-    use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
-    use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, ShowWindow, SW_MINIMIZE,
-    };
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, ShowWindow, SW_MINIMIZE};
 
     static FOUND_HWND: AtomicIsize = AtomicIsize::new(0);
     FOUND_HWND.store(0, Ordering::SeqCst);
 
-    unsafe extern "system" fn enum_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    unsafe extern "system" fn enum_callback(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
+        use windows::Win32::UI::WindowsAndMessaging::{GetWindowThreadProcessId, IsWindowVisible};
+
         let target_pid = lparam.0 as u32;
         let mut window_pid: u32 = 0;
-        GetWindowThreadProcessId(hwnd, Some(&mut window_pid));
 
-        if window_pid == target_pid && IsWindowVisible(hwnd).as_bool() {
-            FOUND_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
-            return BOOL(0); // Stop enumeration
+        unsafe {
+            GetWindowThreadProcessId(hwnd, Some(&mut window_pid));
+
+            if window_pid == target_pid && IsWindowVisible(hwnd).as_bool() {
+                FOUND_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
+                return windows::core::BOOL(0); // Stop enumeration
+            }
         }
-        BOOL(1) // Continue enumeration
+        windows::core::BOOL(1) // Continue enumeration
     }
 
     unsafe {
