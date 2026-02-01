@@ -173,8 +173,21 @@ impl DevToolsAdapter for M365DevToolsAdapter {
         }
 
         //
-        // Click the "New private chat" button to start a fresh conversation.
+        // Click the new chat menu button, then select "New private chat".
         //
+
+        let menu_selector = r#"button[data-automation-id="newPrivateChatMenuButton"]"#;
+        for _ in 0..30 {
+            if let Ok(button) = page.find_element(menu_selector).await {
+                common::log_info!("Clicking new private chat menu button");
+                if let Err(e) = button.click().await {
+                    common::log_warn!("Failed to click menu button: {}", e);
+                    return Ok(());
+                }
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
 
         let new_chat_selector = r#"div[data-automation-id="newPrivateChatButton"]"#;
         for _ in 0..30 {
