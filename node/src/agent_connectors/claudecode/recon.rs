@@ -19,6 +19,19 @@ impl AgentRecon for ClaudeCodeAgent {
             }
         };
 
+        //
+        // Prepend $HOME as "Home" to project paths list.
+        //
+
+        let project_paths = {
+            let mut paths = Vec::new();
+            if let Ok(home) = std::env::var("HOME") {
+                paths.push(home);
+            }
+            paths.extend(project_paths);
+            paths
+        };
+
         let mut tools = ReconTools::default();
 
         tools.mcp_servers = super::mcp::discover_mcp_servers_from_configs(&config_items).await;

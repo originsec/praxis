@@ -74,11 +74,11 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
         // on a hidden desktop so the window is invisible but fully functional.
         //
 
-        let pid = if let Some(ref path) = config.process_path {
+        let (pid, should_minimize) = if let Some(ref path) = config.process_path {
             let debug_arg = config.debug_port_format.replace("{}", &port.to_string());
 
             #[cfg(windows)]
-            let pid = {
+            let result = {
                 //
                 // Check both config and environment variable for hidden desktop.
                 // Config must enable it AND PRAXIS_NOT_HIDDEN must not be "1".
@@ -108,34 +108,18 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
                         .map_err(|e| anyhow!("Failed to spawn process: {}", e))?;
                     let pid = process.id();
                     common::log_info!(
-                        "Spawned process with PID: {} (will minimize)",
+                        "Spawned process with PID: {} (will minimize after ready)",
                         pid
                     );
                     (pid, true)
                 };
 
-                //
-                // Minimize the window after a short delay to let it appear.
-                //
-
-                if should_minimize {
-                    let minimize_pid = pid;
-                    tokio::spawn(async move {
-                        for _ in 0..50 {
-                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                            if utils::minimize_process_window(minimize_pid) {
-                                common::log_info!("Minimized process window");
-                                break;
-                            }
-                        }
-                    });
-                }
                 *self.hidden_desktop.lock().unwrap() = desktop;
-                pid
+                (Some(pid), should_minimize)
             };
 
             #[cfg(not(windows))]
-            let pid = {
+            let result = {
                 let process = std::process::Command::new(path)
                     .env(&config.debug_port_env_var, &debug_arg)
                     .spawn()
@@ -145,10 +129,10 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
                     "Spawned process with PID: {}",
                     pid
                 );
-                pid
+                (Some(pid), false)
             };
 
-            Some(pid)
+            result
         } else {
             return Err(anyhow!("No process path provided"));
         };
@@ -169,6 +153,30 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
         //
 
         self.adapter.post_initialize(&page).await?;
+
+        //
+        // Minimize window now that session is fully ready (Windows only).
+        // This happens after DevTools connection because WebView2 child processes
+        // that own the actual windows may not exist until the app is fully loaded.
+        // Retry a few times since windows may still be initializing.
+        //
+
+        #[cfg(windows)]
+        if should_minimize {
+            if let Some(pid) = pid {
+                for attempt in 1..=10 {
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    if utils::minimize_process_window(pid) {
+                        common::log_info!("Minimized process window on attempt {}", attempt);
+                        break;
+                    }
+                    common::log_debug!("Minimize attempt {} - no window found yet", attempt);
+                }
+            }
+        }
+
+        #[cfg(not(windows))]
+        let _ = should_minimize;
 
         Ok(())
     }

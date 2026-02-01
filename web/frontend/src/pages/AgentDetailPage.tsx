@@ -1004,16 +1004,15 @@ export function AgentDetailPage() {
                 <div className="flex items-center gap-1.5">
                   <FolderOpen size={14} className="text-muted" />
                   <select
-                    value={selectedProjectPath ?? ''}
+                    value={selectedProjectPath ?? projectPaths[0] ?? ''}
                     onChange={(e) => setSelectedProjectPath(e.target.value || null)}
                     disabled={hasSession}
                     className="bg-[var(--bg-secondary)] border border-subtle px-2 py-1 text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--border-active)] max-w-[200px] disabled:cursor-not-allowed"
                     title={hasSession ? "Close session to change project path" : "Select project directory for session"}
                   >
-                    <option value="">Home</option>
                     {projectPaths.map((path) => (
                       <option key={path} value={path}>
-                        {path.split('/').slice(-2).join('/')}
+                        {path}
                       </option>
                     ))}
                   </select>
