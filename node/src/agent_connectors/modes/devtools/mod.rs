@@ -102,13 +102,13 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
                     );
                     pid
                 } else {
-                    let process = std::process::Command::new(path)
-                        .env(&config.debug_port_env_var, &debug_arg)
-                        .spawn()
-                        .map_err(|e| anyhow!("Failed to spawn process: {}", e))?;
-                    let pid = process.id();
+                    let pid = utils::spawn_minimized(
+                        path,
+                        &config.debug_port_env_var,
+                        &debug_arg,
+                    )?;
                     common::log_info!(
-                        "Spawned process with PID: {} (no hidden desktop)",
+                        "Spawned process minimized with PID: {}",
                         pid
                     );
                     pid
@@ -119,11 +119,11 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
 
             #[cfg(not(windows))]
             let pid = {
-                let process = std::process::Command::new(path)
-                    .env(&config.debug_port_env_var, &debug_arg)
-                    .spawn()
-                    .map_err(|e| anyhow!("Failed to spawn process: {}", e))?;
-                let pid = process.id();
+                let pid = utils::spawn_minimized(
+                    path,
+                    &config.debug_port_env_var,
+                    &debug_arg,
+                )?;
                 common::log_info!(
                     "Spawned process with PID: {}",
                     pid

@@ -346,6 +346,79 @@ impl Drop for HiddenDesktop {
 }
 
 //
+// Spawn a process minimized. On Windows, uses CreateProcessW with
+// SW_SHOWMINIMIZED. On other platforms, just spawns normally.
+//
+
+#[cfg(windows)]
+pub fn spawn_minimized(path: &str, env_var: &str, env_value: &str) -> anyhow::Result<u32> {
+    use anyhow::anyhow;
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::System::Threading::{
+        CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW, STARTF_USESHOWWINDOW,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWMINIMIZED;
+    use windows::core::PWSTR;
+
+    // SAFETY: Setting env var before spawning, removing immediately after.
+    unsafe { std::env::set_var(env_var, env_value) };
+
+    let cmd_line = format!("\"{}\"", path);
+    let mut cmd_wide: Vec<u16> = OsStr::new(&cmd_line)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let mut si: STARTUPINFOW = unsafe { std::mem::zeroed() };
+    si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_SHOWMINIMIZED.0 as u16;
+
+    let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+
+    let result = unsafe {
+        CreateProcessW(
+            None,
+            Some(PWSTR(cmd_wide.as_mut_ptr())),
+            None,
+            None,
+            false,
+            Default::default(),
+            None,
+            None,
+            &si,
+            &mut pi,
+        )
+    };
+
+    // SAFETY: Removing the env var we just set.
+    unsafe { std::env::remove_var(env_var) };
+
+    match result {
+        Ok(_) => {
+            unsafe {
+                let _ = windows::Win32::Foundation::CloseHandle(pi.hProcess);
+                let _ = windows::Win32::Foundation::CloseHandle(pi.hThread);
+            }
+            Ok(pi.dwProcessId)
+        }
+        Err(e) => Err(anyhow!("CreateProcessW failed: {}", e)),
+    }
+}
+
+#[cfg(not(windows))]
+pub fn spawn_minimized(path: &str, env_var: &str, env_value: &str) -> anyhow::Result<u32> {
+    use anyhow::anyhow;
+
+    let process = std::process::Command::new(path)
+        .env(env_var, env_value)
+        .spawn()
+        .map_err(|e| anyhow!("Failed to spawn process: {}", e))?;
+    Ok(process.id())
+}
+
+//
 // Spawn a process on a hidden desktop. The process runs normally but on a
 // desktop that isn't displayed to the user.
 //
