@@ -137,15 +137,13 @@ impl DevToolsAdapter for M365DevToolsAdapter {
 
     async fn post_initialize(&self, page: &Page) -> anyhow::Result<()> {
         //
-        // If a working_dir is specified, try to click the corresponding toggle
-        // button. These buttons may not always be available, which is fine.
+        // Click the Work/Web toggle button. Defaults to "Work" if not specified.
+        // These buttons may not always be available, which is fine.
         //
 
-        let Some(ref working_dir) = self.working_dir else {
-            return Ok(());
-        };
+        let working_dir = self.working_dir.as_deref().unwrap_or(WORKING_DIR_WORK);
 
-        let selector = match working_dir.as_str() {
+        let selector = match working_dir {
             WORKING_DIR_WORK => r#"button[data-testid="toggle-work"]"#,
             WORKING_DIR_WEB => r#"button[data-testid="toggle-web"]"#,
             _ => {
