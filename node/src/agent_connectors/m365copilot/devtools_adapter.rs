@@ -167,15 +167,28 @@ impl DevToolsAdapter for M365DevToolsAdapter {
                 if let Err(e) = button.click().await {
                     common::log_warn!("Failed to click {} toggle: {}", working_dir, e);
                 }
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+
+        //
+        // Click the "New private chat" button to start a fresh conversation.
+        //
+
+        let new_chat_selector = r#"span[data-automation-id="newPrivateChatButton"]"#;
+        for _ in 0..30 {
+            if let Ok(button) = page.find_element(new_chat_selector).await {
+                common::log_info!("Clicking new private chat button");
+                if let Err(e) = button.click().await {
+                    common::log_warn!("Failed to click new private chat button: {}", e);
+                }
                 return Ok(());
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
 
-        common::log_debug!(
-            "{} toggle button not available, proceeding without it",
-            working_dir
-        );
+        common::log_debug!("New private chat button not available, proceeding without it");
         Ok(())
     }
 }
