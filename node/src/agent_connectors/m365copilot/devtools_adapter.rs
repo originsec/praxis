@@ -35,7 +35,7 @@ impl DevToolsAdapter for M365DevToolsAdapter {
     }
 
     fn input_selector(&self) -> &str {
-        r#"[class*="fai-EditorInput__input"]"#
+        r#"#m365-chat-editor-target-element"#
     }
 
     fn message_selector(&self) -> &str {
