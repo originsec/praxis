@@ -135,12 +135,11 @@ impl GeminiSession {
         }
 
         //
-        // Prompt is positional (at end of command).
+        // Gemini CLI reads prompts from stdin. Pipe the prompt via stdin
+        // to avoid issues with special characters in command line arguments.
         //
 
-        cmd.arg(prompt);
-
-        let result = utils::run_command(&mut cmd)?;
+        let result = utils::run_command_with_stdin(&mut cmd, prompt)?;
 
         //
         // For lazy discovery, get and store the session ID after first prompt.

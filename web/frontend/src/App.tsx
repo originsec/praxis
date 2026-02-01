@@ -17,6 +17,7 @@ import { InterceptPage } from './pages/InterceptPage';
 // import { DiscoveryPage } from './pages/DiscoveryPage';  // Hidden - feature not ready
 import { SettingsPage } from './pages/SettingsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import NexusPage from './pages/NexusPage';
 
 export default function App() {
   //
@@ -43,6 +44,7 @@ export default function App() {
               <Route path="/operations" element={<OperationsPage />} />
               <Route path="/events" element={<EventsPage />} />
               <Route path="/intercept" element={<InterceptPage />} />
+              <Route path="/nexus" element={<NexusPage />} />
               {/* <Route path="/discovery" element={<DiscoveryPage />} /> */}  {/* Hidden - feature not ready */}
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="*" element={<NotFoundPage />} />

@@ -63,7 +63,7 @@ pub enum DatabasePool {
 /// Thread-safe database for service persistence
 #[derive(Clone)]
 pub struct Database {
-    pool: DatabasePool,
+    pub(crate) pool: DatabasePool,
 }
 
 impl Database {

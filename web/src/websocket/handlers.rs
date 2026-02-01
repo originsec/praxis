@@ -253,6 +253,37 @@ pub async fn handle_browser_message(
         BrowserMessage::ReconGet { node_id, agent_short_name } => {
             state.rabbitmq.get_recon(node_id, agent_short_name).await?;
         }
+
+        //
+        // Nexus messages.
+        //
+        BrowserMessage::NexusStart { goal, yolo_mode } => {
+            state.rabbitmq.nexus_start(goal, yolo_mode).await?;
+        }
+        BrowserMessage::NexusStop { session_id } => {
+            state.rabbitmq.nexus_stop(session_id).await?;
+        }
+        BrowserMessage::NexusAddAgent { session_id, node_id, agent_short_name } => {
+            state.rabbitmq.nexus_add_agent(session_id, node_id, agent_short_name).await?;
+        }
+        BrowserMessage::NexusRemoveAgent { session_id, agent_id } => {
+            state.rabbitmq.nexus_remove_agent(session_id, agent_id).await?;
+        }
+        BrowserMessage::NexusReorderAgents { session_id, agent_ids } => {
+            state.rabbitmq.nexus_reorder_agents(session_id, agent_ids).await?;
+        }
+        BrowserMessage::NexusSendMessage { session_id, content, channel_id, recipient_nickname } => {
+            state.rabbitmq.nexus_send_message(session_id, content, channel_id, recipient_nickname).await?;
+        }
+        BrowserMessage::NexusJoinChannel { session_id, channel_name } => {
+            state.rabbitmq.nexus_join_channel(session_id, channel_name).await?;
+        }
+        BrowserMessage::NexusGetHistory { session_id, channel_id, limit } => {
+            state.rabbitmq.nexus_get_history(session_id, channel_id, limit).await?;
+        }
+        BrowserMessage::NexusGetState { session_id } => {
+            state.rabbitmq.nexus_get_state(session_id).await?;
+        }
     }
 
     Ok(())

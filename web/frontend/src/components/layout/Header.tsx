@@ -18,6 +18,7 @@ export function Header() {
     if (path.startsWith('/nodes/')) return 'NODE DETAILS';
     if (path === '/nodes') return 'NODES';
     if (path === '/atlas') return 'ATLAS';
+    if (path === '/nexus') return 'NEXUS';
     if (path === '/operations') return 'OPERATIONS';
     if (path === '/events') return 'EVENTS';
     if (path === '/settings') return 'SETTINGS';

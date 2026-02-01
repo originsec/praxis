@@ -261,6 +261,57 @@ pub enum BrowserMessage {
         node_id: String,
         agent_short_name: String,
     },
+
+    //
+    // Nexus messages.
+    //
+    /// Start a new Nexus session
+    NexusStart {
+        goal: Option<String>,
+        yolo_mode: bool,
+    },
+    /// Stop the current Nexus session
+    NexusStop {
+        session_id: String,
+    },
+    /// Add an agent to the Nexus session
+    NexusAddAgent {
+        session_id: String,
+        node_id: String,
+        agent_short_name: String,
+    },
+    /// Remove an agent from the Nexus session
+    NexusRemoveAgent {
+        session_id: String,
+        agent_id: String,
+    },
+    /// Reorder agents in the Nexus session
+    NexusReorderAgents {
+        session_id: String,
+        agent_ids: Vec<String>,
+    },
+    /// Send a message in Nexus
+    NexusSendMessage {
+        session_id: String,
+        content: String,
+        channel_id: Option<String>,
+        recipient_nickname: Option<String>,
+    },
+    /// Join or create a channel in Nexus
+    NexusJoinChannel {
+        session_id: String,
+        channel_name: String,
+    },
+    /// Get message history for a channel
+    NexusGetHistory {
+        session_id: String,
+        channel_id: Option<String>,
+        limit: u32,
+    },
+    /// Get current Nexus state
+    NexusGetState {
+        session_id: Option<String>,
+    },
 }
 
 /// Messages sent from web server to browser
@@ -503,5 +554,75 @@ pub enum ServerMessage {
         recon_result: Option<common::ReconResult>,
         performed_at: Option<String>,
         is_semantic: Option<bool>,
+    },
+
+    //
+    // Nexus messages.
+    //
+    /// Nexus session started
+    NexusSessionStarted {
+        session_id: String,
+        goal: Option<String>,
+    },
+    /// Nexus session stopped
+    NexusSessionStopped {
+        session_id: String,
+    },
+    /// Nexus agent added
+    NexusAgentAdded {
+        session_id: String,
+        agent: common::NexusAgentInfo,
+    },
+    /// Nexus agent removed
+    NexusAgentRemoved {
+        session_id: String,
+        agent_id: String,
+    },
+    /// Nexus agent status changed
+    NexusAgentStatusChanged {
+        session_id: String,
+        agent_id: String,
+        status: common::NexusAgentStatus,
+    },
+    /// Nexus channel created
+    NexusChannelCreated {
+        session_id: String,
+        channel: common::NexusChannelInfo,
+    },
+    /// Nexus channel updated
+    NexusChannelUpdated {
+        session_id: String,
+        channel: common::NexusChannelInfo,
+    },
+    /// Nexus agent joined channel
+    NexusAgentJoinedChannel {
+        session_id: String,
+        agent_id: String,
+        channel_id: String,
+    },
+    /// Nexus agent left channel
+    NexusAgentLeftChannel {
+        session_id: String,
+        agent_id: String,
+        channel_id: String,
+    },
+    /// Nexus message
+    NexusMessage {
+        session_id: String,
+        message: common::NexusMessageInfo,
+    },
+    /// Nexus state update
+    NexusStateUpdate {
+        session: common::NexusSessionState,
+    },
+    /// Nexus history response
+    NexusHistoryResponse {
+        session_id: String,
+        channel_id: Option<String>,
+        messages: Vec<common::NexusMessageInfo>,
+    },
+    /// Nexus error
+    NexusError {
+        message: String,
     },
 }

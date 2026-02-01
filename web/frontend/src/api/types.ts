@@ -534,6 +534,50 @@ export interface DiscoveredLlmEndpoint {
 }
 
 //
+// Nexus types - IRC-style multi-agent chat system.
+//
+export type NexusAgentStatus = 'Initializing' | 'Ready' | 'Waiting' | 'Prompting' | 'Disconnected';
+
+export interface NexusAgentInfo {
+  id: string;
+  node_id: string;
+  agent_short_name: string;
+  nickname: string;
+  precedence: number;
+  current_channel_id: string | null;
+  status: NexusAgentStatus;
+}
+
+export interface NexusChannelInfo {
+  id: string;
+  name: string;
+  topic: string | null;
+  member_count: number;
+  created_by: string;
+}
+
+export type NexusMessageType = 'Channel' | 'DirectMessage' | 'System' | 'CommandResult';
+
+export interface NexusMessageInfo {
+  id: number;
+  channel_id: string | null;
+  sender_nickname: string;
+  recipient_nickname: string | null;
+  message_type: NexusMessageType;
+  content: string;
+  timestamp: string;
+}
+
+export interface NexusSessionState {
+  id: string;
+  goal: string | null;
+  status: string;
+  agents: NexusAgentInfo[];
+  channels: NexusChannelInfo[];
+  created_at: string;
+}
+
+//
 // WebSocket Messages (Browser -> Server).
 //
 export type BrowserMessage =
@@ -596,7 +640,19 @@ export type BrowserMessage =
   //
   // Recon messages.
   //
-  | { type: 'recon_get'; node_id: string; agent_short_name: string };
+  | { type: 'recon_get'; node_id: string; agent_short_name: string }
+  //
+  // Nexus messages.
+  //
+  | { type: 'nexus_start'; goal: string | null }
+  | { type: 'nexus_stop'; session_id: string }
+  | { type: 'nexus_add_agent'; session_id: string; node_id: string; agent_short_name: string }
+  | { type: 'nexus_remove_agent'; session_id: string; agent_id: string }
+  | { type: 'nexus_reorder_agents'; session_id: string; agent_ids: string[] }
+  | { type: 'nexus_send_message'; session_id: string; content: string; channel_id: string | null; recipient_nickname: string | null }
+  | { type: 'nexus_join_channel'; session_id: string; channel_name: string }
+  | { type: 'nexus_get_history'; session_id: string; channel_id: string | null; limit: number }
+  | { type: 'nexus_get_state'; session_id: string | null };
 
 //
 // WebSocket Messages (Server -> Browser).
@@ -666,4 +722,20 @@ export type ServerMessage =
   //
   // Recon messages.
   //
-  | { type: 'recon_get_response'; node_id: string; agent_short_name: string; recon_result: ReconResult | null; performed_at: string | null; is_semantic: boolean | null };
+  | { type: 'recon_get_response'; node_id: string; agent_short_name: string; recon_result: ReconResult | null; performed_at: string | null; is_semantic: boolean | null }
+  //
+  // Nexus messages.
+  //
+  | { type: 'nexus_session_started'; session_id: string; goal: string | null }
+  | { type: 'nexus_session_stopped'; session_id: string }
+  | { type: 'nexus_agent_added'; session_id: string; agent: NexusAgentInfo }
+  | { type: 'nexus_agent_removed'; session_id: string; agent_id: string }
+  | { type: 'nexus_agent_status_changed'; session_id: string; agent_id: string; status: NexusAgentStatus }
+  | { type: 'nexus_channel_created'; session_id: string; channel: NexusChannelInfo }
+  | { type: 'nexus_channel_updated'; session_id: string; channel: NexusChannelInfo }
+  | { type: 'nexus_agent_joined_channel'; session_id: string; agent_id: string; channel_id: string }
+  | { type: 'nexus_agent_left_channel'; session_id: string; agent_id: string; channel_id: string }
+  | { type: 'nexus_message'; session_id: string; message: NexusMessageInfo }
+  | { type: 'nexus_state_update'; session: NexusSessionState }
+  | { type: 'nexus_history_response'; session_id: string; channel_id: string | null; messages: NexusMessageInfo[] }
+  | { type: 'nexus_error'; message: string };
