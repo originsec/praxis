@@ -176,7 +176,7 @@ impl DevToolsAdapter for M365DevToolsAdapter {
         // Click the "New private chat" button to start a fresh conversation.
         //
 
-        let new_chat_selector = r#"span[data-automation-id="newPrivateChatButton"]"#;
+        let new_chat_selector = r#"div[data-automation-id="newPrivateChatButton"]"#;
         for _ in 0..30 {
             if let Ok(button) = page.find_element(new_chat_selector).await {
                 common::log_info!("Clicking new private chat button");
