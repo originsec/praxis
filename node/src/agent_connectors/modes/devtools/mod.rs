@@ -205,11 +205,18 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
             while let Some(event) = handler.next().await {
                 if let Err(e) = event {
                     let err_str = e.to_string();
-                    // Suppress expected errors during shutdown
+
+                    //
+                    // Suppress expected/harmless errors.
+                    //
+
                     if err_str.contains("ResetWithoutClosingHandshake")
                         || err_str.contains("Connection reset")
                     {
                         common::log_debug!("Browser connection closed");
+                    } else if err_str.contains("did not match any variant") {
+                        // Chromiumoxide doesn't recognize some CDP messages - harmless
+                        common::log_debug!("Unrecognized CDP message (harmless)");
                     } else {
                         common::log_error!("Browser handler error: {}", e);
                     }
