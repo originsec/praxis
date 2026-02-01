@@ -89,7 +89,7 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
                     None
                 };
 
-                let pid = if let Some(ref d) = desktop {
+                let (pid, should_minimize) = if let Some(ref d) = desktop {
                     let pid = utils::spawn_on_hidden_desktop(
                         path,
                         &config.debug_port_env_var,
@@ -100,30 +100,47 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
                         "Spawned process on hidden desktop '{}' with PID: {}",
                         d.name, pid
                     );
-                    pid
+                    (pid, false)
                 } else {
-                    let pid = utils::spawn_minimized(
-                        path,
-                        &config.debug_port_env_var,
-                        &debug_arg,
-                    )?;
+                    let process = std::process::Command::new(path)
+                        .env(&config.debug_port_env_var, &debug_arg)
+                        .spawn()
+                        .map_err(|e| anyhow!("Failed to spawn process: {}", e))?;
+                    let pid = process.id();
                     common::log_info!(
-                        "Spawned process minimized with PID: {}",
+                        "Spawned process with PID: {} (will minimize)",
                         pid
                     );
-                    pid
+                    (pid, true)
                 };
+
+                //
+                // Minimize the window after a short delay to let it appear.
+                //
+
+                if should_minimize {
+                    let minimize_pid = pid;
+                    tokio::spawn(async move {
+                        for _ in 0..50 {
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            if utils::minimize_process_window(minimize_pid) {
+                                common::log_info!("Minimized process window");
+                                break;
+                            }
+                        }
+                    });
+                }
                 *self.hidden_desktop.lock().unwrap() = desktop;
                 pid
             };
 
             #[cfg(not(windows))]
             let pid = {
-                let pid = utils::spawn_minimized(
-                    path,
-                    &config.debug_port_env_var,
-                    &debug_arg,
-                )?;
+                let process = std::process::Command::new(path)
+                    .env(&config.debug_port_env_var, &debug_arg)
+                    .spawn()
+                    .map_err(|e| anyhow!("Failed to spawn process: {}", e))?;
+                let pid = process.id();
                 common::log_info!(
                     "Spawned process with PID: {}",
                     pid

@@ -346,76 +346,52 @@ impl Drop for HiddenDesktop {
 }
 
 //
-// Spawn a process minimized. On Windows, uses CreateProcessW with
-// SW_SHOWMINIMIZED. On other platforms, just spawns normally.
+// Minimize a process window by PID. On Windows, finds the main window and
+// minimizes it. Returns true if successful.
 //
 
 #[cfg(windows)]
-pub fn spawn_minimized(path: &str, env_var: &str, env_value: &str) -> anyhow::Result<u32> {
-    use anyhow::anyhow;
-    use std::ffi::OsStr;
-    use std::os::windows::ffi::OsStrExt;
-    use windows::Win32::System::Threading::{
-        CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW, STARTF_USESHOWWINDOW,
-    };
-    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWMINIMIZED;
-    use windows::core::PWSTR;
-
-    // SAFETY: Setting env var before spawning, removing immediately after.
-    unsafe { std::env::set_var(env_var, env_value) };
-
-    let cmd_line = format!("\"{}\"", path);
-    let mut cmd_wide: Vec<u16> = OsStr::new(&cmd_line)
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-
-    let mut si: STARTUPINFOW = unsafe { std::mem::zeroed() };
-    si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
-    si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_SHOWMINIMIZED.0 as u16;
-
-    let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
-
-    let result = unsafe {
-        CreateProcessW(
-            None,
-            Some(PWSTR(cmd_wide.as_mut_ptr())),
-            None,
-            None,
-            false,
-            Default::default(),
-            None,
-            None,
-            &si,
-            &mut pi,
-        )
+pub fn minimize_process_window(pid: u32) -> bool {
+    use std::sync::atomic::{AtomicIsize, Ordering};
+    use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, ShowWindow, SW_MINIMIZE,
     };
 
-    // SAFETY: Removing the env var we just set.
-    unsafe { std::env::remove_var(env_var) };
+    static FOUND_HWND: AtomicIsize = AtomicIsize::new(0);
+    FOUND_HWND.store(0, Ordering::SeqCst);
 
-    match result {
-        Ok(_) => {
-            unsafe {
-                let _ = windows::Win32::Foundation::CloseHandle(pi.hProcess);
-                let _ = windows::Win32::Foundation::CloseHandle(pi.hThread);
-            }
-            Ok(pi.dwProcessId)
+    unsafe extern "system" fn enum_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let target_pid = lparam.0 as u32;
+        let mut window_pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut window_pid));
+
+        if window_pid == target_pid && IsWindowVisible(hwnd).as_bool() {
+            FOUND_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
+            return BOOL(0); // Stop enumeration
         }
-        Err(e) => Err(anyhow!("CreateProcessW failed: {}", e)),
+        BOOL(1) // Continue enumeration
+    }
+
+    unsafe {
+        let _ = EnumWindows(Some(enum_callback), LPARAM(pid as isize));
+    }
+
+    let hwnd_value = FOUND_HWND.load(Ordering::SeqCst);
+    if hwnd_value != 0 {
+        let hwnd = HWND(hwnd_value as *mut _);
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_MINIMIZE);
+        }
+        true
+    } else {
+        false
     }
 }
 
 #[cfg(not(windows))]
-pub fn spawn_minimized(path: &str, env_var: &str, env_value: &str) -> anyhow::Result<u32> {
-    use anyhow::anyhow;
-
-    let process = std::process::Command::new(path)
-        .env(env_var, env_value)
-        .spawn()
-        .map_err(|e| anyhow!("Failed to spawn process: {}", e))?;
-    Ok(process.id())
+pub fn minimize_process_window(_pid: u32) -> bool {
+    false
 }
 
 //
