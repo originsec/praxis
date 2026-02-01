@@ -523,8 +523,22 @@ pub fn run_command(cmd: &mut Command) -> Result<String> {
         .output()
         .map_err(|e| anyhow!("Failed to execute command: {}", e))?;
 
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    //
+    // Log stderr if present (even on success, for debugging).
+    //
+    if !stderr.trim().is_empty() {
+        common::log_warn!("stderr: {}", stderr.trim());
+    }
+
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        common::log_error!(
+            "Command failed with status {}: {}",
+            output.status,
+            stderr.trim()
+        );
         return Err(anyhow!(
             "Command exited with status {}: {}",
             output.status,
@@ -532,8 +546,7 @@ pub fn run_command(cmd: &mut Command) -> Result<String> {
         ));
     }
 
-    let response = String::from_utf8_lossy(&output.stdout).to_string();
-    let trimmed = response.trim().to_string();
+    let trimmed = stdout.trim().to_string();
     common::log_info!("output: {}", trimmed);
     Ok(trimmed)
 }
@@ -551,6 +564,74 @@ pub fn run_command_silent(cmd: &mut Command) -> Result<Output> {
 
     cmd.output()
         .map_err(|e| anyhow!("Failed to execute command: {}", e))
+}
+
+//
+// Execute a command with input piped to stdin and return the trimmed stdout.
+// Used for CLIs that require input via stdin (e.g., Gemini CLI).
+//
+
+pub fn run_command_with_stdin(cmd: &mut Command, input: &str) -> Result<String> {
+    use std::io::Write;
+
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    //
+    // Log the full command line and prompt.
+    //
+    let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy()).collect();
+    common::log_info!(
+        "command: {} {} (with stdin: {})",
+        cmd.get_program().to_string_lossy(),
+        args.join(" "),
+        input.replace('\n', " | ")
+    );
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| anyhow!("Failed to spawn command: {}", e))?;
+
+    //
+    // Write input to stdin.
+    //
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(input.as_bytes())
+            .map_err(|e| anyhow!("Failed to write to stdin: {}", e))?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| anyhow!("Failed to wait for command: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    //
+    // Log stderr if present (even on success, for debugging).
+    //
+    if !stderr.trim().is_empty() {
+        common::log_warn!("stderr: {}", stderr.trim());
+    }
+
+    if !output.status.success() {
+        common::log_error!(
+            "Command failed with status {}: {}",
+            output.status,
+            stderr.trim()
+        );
+        return Err(anyhow!(
+            "Command exited with status {}: {}",
+            output.status,
+            stderr
+        ));
+    }
+
+    let trimmed = stdout.trim().to_string();
+    common::log_info!("output: {}", trimmed);
+    Ok(trimmed)
 }
 
 //

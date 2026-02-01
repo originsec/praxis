@@ -33,6 +33,11 @@ import type {
   ChainDefinitionInput,
   ChainExecutionUpdate,
   DiscoveredLlmEndpoint,
+  NexusAgentInfo,
+  NexusAgentStatus,
+  NexusChannelInfo,
+  NexusMessageInfo,
+  NexusSessionState,
 } from '../api/types';
 
 //
@@ -119,6 +124,25 @@ const initialDiscoveryState: DiscoveryState = {
 };
 
 //
+// Nexus state.
+//
+interface NexusState {
+  session: NexusSessionState | null;
+  currentChannelId: string | null;
+  messages: NexusMessageInfo[];
+  isLoading: boolean;
+  error: string | null;
+}
+
+const initialNexusState: NexusState = {
+  session: null,
+  currentChannelId: null,
+  messages: [],
+  isLoading: false,
+  error: null,
+};
+
+//
 // Event log panel UI state.
 //
 interface EventLogPanelState {
@@ -149,6 +173,7 @@ interface AppState {
   intercept: InterceptState;
   chains: ChainState;
   discovery: DiscoveryState;
+  nexus: NexusState;
   eventLogPanel: EventLogPanelState;
   //
   // Agent session messages keyed by session_id.
@@ -180,6 +205,7 @@ function createInitialState(): AppState {
     intercept: initialInterceptState,
     chains: initialChainState,
     discovery: initialDiscoveryState,
+    nexus: initialNexusState,
     eventLogPanel: initialEventLogPanelState,
     agentSessionMessages: {},
     recentlyAccessedNodeIds: loadRecentNodes(MAX_RECENT_NODES),
@@ -256,7 +282,26 @@ type Action =
   // Event log panel actions.
   //
   | { type: 'TOGGLE_EVENT_LOG_PANEL' }
-  | { type: 'SET_EVENT_LOG_PANEL_HEIGHT'; height: number };
+  | { type: 'SET_EVENT_LOG_PANEL_HEIGHT'; height: number }
+  //
+  // Nexus actions.
+  //
+  | { type: 'NEXUS_SESSION_STARTED'; sessionId: string; goal: string | null }
+  | { type: 'NEXUS_SESSION_STOPPED'; sessionId: string }
+  | { type: 'NEXUS_AGENT_ADDED'; sessionId: string; agent: NexusAgentInfo }
+  | { type: 'NEXUS_AGENT_REMOVED'; sessionId: string; agentId: string }
+  | { type: 'NEXUS_AGENT_STATUS_CHANGED'; sessionId: string; agentId: string; status: NexusAgentStatus }
+  | { type: 'NEXUS_CHANNEL_CREATED'; sessionId: string; channel: NexusChannelInfo }
+  | { type: 'NEXUS_CHANNEL_UPDATED'; sessionId: string; channel: NexusChannelInfo }
+  | { type: 'NEXUS_AGENT_JOINED_CHANNEL'; sessionId: string; agentId: string; channelId: string }
+  | { type: 'NEXUS_AGENT_LEFT_CHANNEL'; sessionId: string; agentId: string; channelId: string }
+  | { type: 'NEXUS_MESSAGE'; sessionId: string; message: NexusMessageInfo }
+  | { type: 'NEXUS_STATE_UPDATE'; session: NexusSessionState }
+  | { type: 'NEXUS_HISTORY_RESPONSE'; sessionId: string; channelId: string | null; messages: NexusMessageInfo[] }
+  | { type: 'NEXUS_ERROR'; message: string }
+  | { type: 'NEXUS_SET_CURRENT_CHANNEL'; channelId: string | null }
+  | { type: 'NEXUS_CLEAR_ERROR' }
+  | { type: 'NEXUS_SET_LOADING'; loading: boolean };
 
 function reduceCore(state: AppState, action: Action): AppState | null {
   switch (action.type) {
@@ -715,6 +760,196 @@ function reduceEventLogPanel(state: AppState, action: Action): AppState | null {
   }
 }
 
+function reduceNexus(state: AppState, action: Action): AppState | null {
+  switch (action.type) {
+    case 'NEXUS_SESSION_STARTED': {
+      const newSession: NexusSessionState = {
+        id: action.sessionId,
+        goal: action.goal,
+        status: 'active',
+        agents: [],
+        channels: [],
+        created_at: new Date().toISOString(),
+      };
+      return {
+        ...state,
+        nexus: {
+          ...state.nexus,
+          session: newSession,
+          messages: [],
+          error: null,
+        },
+      };
+    }
+    case 'NEXUS_SESSION_STOPPED':
+      return {
+        ...state,
+        nexus: {
+          ...initialNexusState,
+        },
+      };
+    case 'NEXUS_AGENT_ADDED':
+      if (!state.nexus.session || state.nexus.session.id !== action.sessionId) return state;
+      return {
+        ...state,
+        nexus: {
+          ...state.nexus,
+          session: {
+            ...state.nexus.session,
+            agents: [...state.nexus.session.agents, action.agent],
+          },
+        },
+      };
+    case 'NEXUS_AGENT_REMOVED':
+      if (!state.nexus.session || state.nexus.session.id !== action.sessionId) return state;
+      return {
+        ...state,
+        nexus: {
+          ...state.nexus,
+          session: {
+            ...state.nexus.session,
+            agents: state.nexus.session.agents.filter(a => a.id !== action.agentId),
+          },
+        },
+      };
+    case 'NEXUS_AGENT_STATUS_CHANGED':
+      if (!state.nexus.session || state.nexus.session.id !== action.sessionId) return state;
+      return {
+        ...state,
+        nexus: {
+          ...state.nexus,
+          session: {
+            ...state.nexus.session,
+            agents: state.nexus.session.agents.map(a =>
+              a.id === action.agentId ? { ...a, status: action.status } : a
+            ),
+          },
+        },
+      };
+    case 'NEXUS_CHANNEL_CREATED':
+      if (!state.nexus.session || state.nexus.session.id !== action.sessionId) return state;
+      return {
+        ...state,
+        nexus: {
+          ...state.nexus,
+          session: {
+            ...state.nexus.session,
+            channels: [...state.nexus.session.channels, action.channel],
+          },
+          //
+          // Auto-select the first channel if none selected.
+          //
+          currentChannelId: state.nexus.currentChannelId ?? action.channel.id,
+        },
+      };
+    case 'NEXUS_CHANNEL_UPDATED':
+      if (!state.nexus.session || state.nexus.session.id !== action.sessionId) return state;
+      return {
+        ...state,
+        nexus: {
+          ...state.nexus,
+          session: {
+            ...state.nexus.session,
+            channels: state.nexus.session.channels.map(c =>
+              c.id === action.channel.id ? action.channel : c
+            ),
+          },
+        },
+      };
+    case 'NEXUS_AGENT_JOINED_CHANNEL':
+      if (!state.nexus.session || state.nexus.session.id !== action.sessionId) return state;
+      return {
+        ...state,
+        nexus: {
+          ...state.nexus,
+          session: {
+            ...state.nexus.session,
+            agents: state.nexus.session.agents.map(a =>
+              a.id === action.agentId ? { ...a, current_channel_id: action.channelId } : a
+            ),
+          },
+        },
+      };
+    case 'NEXUS_AGENT_LEFT_CHANNEL':
+      if (!state.nexus.session || state.nexus.session.id !== action.sessionId) return state;
+      return {
+        ...state,
+        nexus: {
+          ...state.nexus,
+          session: {
+            ...state.nexus.session,
+            agents: state.nexus.session.agents.map(a =>
+              a.id === action.agentId && a.current_channel_id === action.channelId
+                ? { ...a, current_channel_id: null }
+                : a
+            ),
+          },
+        },
+      };
+    case 'NEXUS_MESSAGE':
+      if (!state.nexus.session || state.nexus.session.id !== action.sessionId) return state;
+      return {
+        ...state,
+        nexus: {
+          ...state.nexus,
+          messages: [...state.nexus.messages, action.message],
+        },
+      };
+    case 'NEXUS_STATE_UPDATE':
+      return {
+        ...state,
+        nexus: {
+          ...state.nexus,
+          session: action.session,
+          currentChannelId: state.nexus.currentChannelId ?? action.session.channels[0]?.id ?? null,
+        },
+      };
+    case 'NEXUS_HISTORY_RESPONSE':
+      return {
+        ...state,
+        nexus: {
+          ...state.nexus,
+          messages: action.messages,
+        },
+      };
+    case 'NEXUS_ERROR':
+      return {
+        ...state,
+        nexus: {
+          ...state.nexus,
+          error: action.message,
+          isLoading: false,
+        },
+      };
+    case 'NEXUS_SET_CURRENT_CHANNEL':
+      return {
+        ...state,
+        nexus: {
+          ...state.nexus,
+          currentChannelId: action.channelId,
+        },
+      };
+    case 'NEXUS_CLEAR_ERROR':
+      return {
+        ...state,
+        nexus: {
+          ...state.nexus,
+          error: null,
+        },
+      };
+    case 'NEXUS_SET_LOADING':
+      return {
+        ...state,
+        nexus: {
+          ...state.nexus,
+          isLoading: action.loading,
+        },
+      };
+    default:
+      return null;
+  }
+}
+
 function reducer(state: AppState, action: Action): AppState {
   return (
     reduceCore(state, action)
@@ -725,6 +960,7 @@ function reducer(state: AppState, action: Action): AppState {
     ?? reduceRecentNodes(state, action)
     ?? reduceDiscovery(state, action)
     ?? reduceEventLogPanel(state, action)
+    ?? reduceNexus(state, action)
     ?? state
   );
 }
@@ -830,6 +1066,20 @@ interface AppContextValue {
   //
   toggleEventLogPanel: () => void;
   setEventLogPanelHeight: (height: number) => void;
+  //
+  // Nexus.
+  //
+  nexusStart: (goal: string | null, yoloMode: boolean) => void;
+  nexusStop: () => void;
+  nexusAddAgent: (nodeId: string, agentShortName: string) => void;
+  nexusRemoveAgent: (agentId: string) => void;
+  nexusReorderAgents: (agentIds: string[]) => void;
+  nexusSendMessage: (content: string, channelId?: string, recipientNickname?: string) => void;
+  nexusJoinChannel: (channelName: string) => void;
+  nexusGetHistory: (channelId?: string, limit?: number) => void;
+  nexusGetState: () => void;
+  nexusSetCurrentChannel: (channelId: string | null) => void;
+  nexusClearError: () => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -1060,6 +1310,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // Dispatch as custom event for AgentDetailPage to catch.
           //
           window.dispatchEvent(new CustomEvent('ws-message', { detail: message }));
+          break;
+
+        //
+        // Nexus messages.
+        //
+        case 'nexus_session_started':
+          dispatch({ type: 'NEXUS_SESSION_STARTED', sessionId: message.session_id, goal: message.goal });
+          break;
+        case 'nexus_session_stopped':
+          dispatch({ type: 'NEXUS_SESSION_STOPPED', sessionId: message.session_id });
+          break;
+        case 'nexus_agent_added':
+          dispatch({ type: 'NEXUS_AGENT_ADDED', sessionId: message.session_id, agent: message.agent });
+          break;
+        case 'nexus_agent_removed':
+          dispatch({ type: 'NEXUS_AGENT_REMOVED', sessionId: message.session_id, agentId: message.agent_id });
+          break;
+        case 'nexus_agent_status_changed':
+          dispatch({ type: 'NEXUS_AGENT_STATUS_CHANGED', sessionId: message.session_id, agentId: message.agent_id, status: message.status });
+          break;
+        case 'nexus_channel_created':
+          dispatch({ type: 'NEXUS_CHANNEL_CREATED', sessionId: message.session_id, channel: message.channel });
+          break;
+        case 'nexus_channel_updated':
+          dispatch({ type: 'NEXUS_CHANNEL_UPDATED', sessionId: message.session_id, channel: message.channel });
+          break;
+        case 'nexus_agent_joined_channel':
+          dispatch({ type: 'NEXUS_AGENT_JOINED_CHANNEL', sessionId: message.session_id, agentId: message.agent_id, channelId: message.channel_id });
+          break;
+        case 'nexus_agent_left_channel':
+          dispatch({ type: 'NEXUS_AGENT_LEFT_CHANNEL', sessionId: message.session_id, agentId: message.agent_id, channelId: message.channel_id });
+          break;
+        case 'nexus_message':
+          dispatch({ type: 'NEXUS_MESSAGE', sessionId: message.session_id, message: message.message });
+          break;
+        case 'nexus_state_update':
+          dispatch({ type: 'NEXUS_STATE_UPDATE', session: message.session });
+          break;
+        case 'nexus_history_response':
+          dispatch({ type: 'NEXUS_HISTORY_RESPONSE', sessionId: message.session_id, channelId: message.channel_id, messages: message.messages });
+          break;
+        case 'nexus_error':
+          dispatch({ type: 'NEXUS_ERROR', message: message.message });
           break;
       }
     };
@@ -1422,6 +1715,99 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'SET_EVENT_LOG_PANEL_HEIGHT', height });
   }, []);
 
+  //
+  // Nexus functions.
+  //
+  const nexusStart = useCallback((goal: string | null, yoloMode: boolean) => {
+    dispatch({ type: 'NEXUS_SET_LOADING', loading: true });
+    wsClient.send({ type: 'nexus_start', goal, yolo_mode: yoloMode });
+  }, []);
+
+  const nexusStop = useCallback(() => {
+    if (state.nexus.session) {
+      wsClient.send({ type: 'nexus_stop', session_id: state.nexus.session.id });
+    }
+  }, [state.nexus.session]);
+
+  const nexusAddAgent = useCallback((nodeId: string, agentShortName: string) => {
+    if (state.nexus.session) {
+      wsClient.send({
+        type: 'nexus_add_agent',
+        session_id: state.nexus.session.id,
+        node_id: nodeId,
+        agent_short_name: agentShortName,
+      });
+    }
+  }, [state.nexus.session]);
+
+  const nexusRemoveAgent = useCallback((agentId: string) => {
+    if (state.nexus.session) {
+      wsClient.send({
+        type: 'nexus_remove_agent',
+        session_id: state.nexus.session.id,
+        agent_id: agentId,
+      });
+    }
+  }, [state.nexus.session]);
+
+  const nexusReorderAgents = useCallback((agentIds: string[]) => {
+    if (state.nexus.session) {
+      wsClient.send({
+        type: 'nexus_reorder_agents',
+        session_id: state.nexus.session.id,
+        agent_ids: agentIds,
+      });
+    }
+  }, [state.nexus.session]);
+
+  const nexusSendMessage = useCallback((content: string, channelId?: string, recipientNickname?: string) => {
+    if (state.nexus.session) {
+      wsClient.send({
+        type: 'nexus_send_message',
+        session_id: state.nexus.session.id,
+        content,
+        channel_id: channelId ?? state.nexus.currentChannelId ?? null,
+        recipient_nickname: recipientNickname ?? null,
+      });
+    }
+  }, [state.nexus.session, state.nexus.currentChannelId]);
+
+  const nexusJoinChannel = useCallback((channelName: string) => {
+    if (state.nexus.session) {
+      wsClient.send({
+        type: 'nexus_join_channel',
+        session_id: state.nexus.session.id,
+        channel_name: channelName,
+      });
+    }
+  }, [state.nexus.session]);
+
+  const nexusGetHistory = useCallback((channelId?: string, limit?: number) => {
+    if (state.nexus.session) {
+      wsClient.send({
+        type: 'nexus_get_history',
+        session_id: state.nexus.session.id,
+        channel_id: channelId ?? state.nexus.currentChannelId ?? null,
+        limit: limit ?? 100,
+      });
+    }
+  }, [state.nexus.session, state.nexus.currentChannelId]);
+
+  const nexusGetState = useCallback(() => {
+    wsClient.send({
+      type: 'nexus_get_state',
+      session_id: state.nexus.session?.id ?? null,
+    });
+  }, [state.nexus.session]);
+
+  const nexusSetCurrentChannel = useCallback((channelId: string | null) => {
+    dispatch({ type: 'NEXUS_SET_CURRENT_CHANNEL', channelId });
+  }, []);
+
+  const nexusClearError = useCallback(() => {
+    dispatch({ type: 'NEXUS_CLEAR_ERROR' });
+  }, []);
+
   const value: AppContextValue = {
     state,
     getNode,
@@ -1484,6 +1870,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     //
     toggleEventLogPanel,
     setEventLogPanelHeight,
+    //
+    // Nexus.
+    //
+    nexusStart,
+    nexusStop,
+    nexusAddAgent,
+    nexusRemoveAgent,
+    nexusReorderAgents,
+    nexusSendMessage,
+    nexusJoinChannel,
+    nexusGetHistory,
+    nexusGetState,
+    nexusSetCurrentChannel,
+    nexusClearError,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

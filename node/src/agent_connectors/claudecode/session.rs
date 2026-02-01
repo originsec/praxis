@@ -67,9 +67,12 @@ impl ClaudeCodeSession {
 
         //
         // Add prompt with -p prefix.
+        // Use "--" to prevent prompts starting with "-" from being interpreted as options.
         //
 
-        cmd.arg("-p").arg(prompt);
+        cmd.arg("-p");
+        cmd.arg("--");
+        cmd.arg(prompt);
 
         utils::run_command(&mut cmd)
     }

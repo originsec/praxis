@@ -477,6 +477,122 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
+    //
+    // Nexus methods.
+    //
+
+    /// Start a new Nexus session
+    pub async fn nexus_start(&self, goal: Option<String>, yolo_mode: bool) -> Result<()> {
+        let message = ClientSignalMessage::NexusStart {
+            client_id: self.state.client_id.clone(),
+            goal,
+            yolo_mode,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Stop the current Nexus session
+    pub async fn nexus_stop(&self, session_id: String) -> Result<()> {
+        let message = ClientSignalMessage::NexusStop {
+            client_id: self.state.client_id.clone(),
+            session_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Add an agent to the Nexus session
+    pub async fn nexus_add_agent(
+        &self,
+        session_id: String,
+        node_id: String,
+        agent_short_name: String,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::NexusAddAgent {
+            client_id: self.state.client_id.clone(),
+            session_id,
+            node_id,
+            agent_short_name,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Remove an agent from the Nexus session
+    pub async fn nexus_remove_agent(&self, session_id: String, agent_id: String) -> Result<()> {
+        let message = ClientSignalMessage::NexusRemoveAgent {
+            client_id: self.state.client_id.clone(),
+            session_id,
+            agent_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Reorder agents in the Nexus session
+    pub async fn nexus_reorder_agents(
+        &self,
+        session_id: String,
+        agent_ids: Vec<String>,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::NexusReorderAgents {
+            client_id: self.state.client_id.clone(),
+            session_id,
+            agent_ids,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Send a message in Nexus
+    pub async fn nexus_send_message(
+        &self,
+        session_id: String,
+        content: String,
+        channel_id: Option<String>,
+        recipient_nickname: Option<String>,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::NexusSendMessage {
+            client_id: self.state.client_id.clone(),
+            session_id,
+            content,
+            channel_id,
+            recipient_nickname,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Join or create a channel in Nexus
+    pub async fn nexus_join_channel(&self, session_id: String, channel_name: String) -> Result<()> {
+        let message = ClientSignalMessage::NexusJoinChannel {
+            client_id: self.state.client_id.clone(),
+            session_id,
+            channel_name,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Get message history for a channel
+    pub async fn nexus_get_history(
+        &self,
+        session_id: String,
+        channel_id: Option<String>,
+        limit: u32,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::NexusGetHistory {
+            client_id: self.state.client_id.clone(),
+            session_id,
+            channel_id,
+            limit,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Get current Nexus state
+    pub async fn nexus_get_state(&self, session_id: Option<String>) -> Result<()> {
+        let message = ClientSignalMessage::NexusGetState {
+            client_id: self.state.client_id.clone(),
+            session_id,
+        };
+        self.publish_signal(message).await
+    }
+
     /// Send an event log entry to the service via dedicated queue
     pub async fn send_event_log(&self, entry: common::ApplicationLogEntry) -> Result<()> {
         publish_json(&self.channel, WEB_EVENT_LOG_QUEUE, &entry).await?;
@@ -792,6 +908,49 @@ impl RabbitMqClient {
             //
             ClientDirectMessage::ReconGetResponse { node_id, agent_short_name, recon_result, performed_at, is_semantic } => {
                 self.state.broadcast(ServerMessage::ReconGetResponse { node_id, agent_short_name, recon_result, performed_at, is_semantic });
+            }
+
+            //
+            // Nexus responses.
+            //
+            ClientDirectMessage::NexusSessionStarted { session_id, goal } => {
+                self.state.broadcast(ServerMessage::NexusSessionStarted { session_id, goal });
+            }
+            ClientDirectMessage::NexusSessionStopped { session_id } => {
+                self.state.broadcast(ServerMessage::NexusSessionStopped { session_id });
+            }
+            ClientDirectMessage::NexusAgentAdded { session_id, agent } => {
+                self.state.broadcast(ServerMessage::NexusAgentAdded { session_id, agent });
+            }
+            ClientDirectMessage::NexusAgentRemoved { session_id, agent_id } => {
+                self.state.broadcast(ServerMessage::NexusAgentRemoved { session_id, agent_id });
+            }
+            ClientDirectMessage::NexusAgentStatusChanged { session_id, agent_id, status } => {
+                self.state.broadcast(ServerMessage::NexusAgentStatusChanged { session_id, agent_id, status });
+            }
+            ClientDirectMessage::NexusChannelCreated { session_id, channel } => {
+                self.state.broadcast(ServerMessage::NexusChannelCreated { session_id, channel });
+            }
+            ClientDirectMessage::NexusChannelUpdated { session_id, channel } => {
+                self.state.broadcast(ServerMessage::NexusChannelUpdated { session_id, channel });
+            }
+            ClientDirectMessage::NexusAgentJoinedChannel { session_id, agent_id, channel_id } => {
+                self.state.broadcast(ServerMessage::NexusAgentJoinedChannel { session_id, agent_id, channel_id });
+            }
+            ClientDirectMessage::NexusAgentLeftChannel { session_id, agent_id, channel_id } => {
+                self.state.broadcast(ServerMessage::NexusAgentLeftChannel { session_id, agent_id, channel_id });
+            }
+            ClientDirectMessage::NexusMessage { session_id, message } => {
+                self.state.broadcast(ServerMessage::NexusMessage { session_id, message });
+            }
+            ClientDirectMessage::NexusStateUpdate { session } => {
+                self.state.broadcast(ServerMessage::NexusStateUpdate { session });
+            }
+            ClientDirectMessage::NexusHistoryResponse { session_id, channel_id, messages } => {
+                self.state.broadcast(ServerMessage::NexusHistoryResponse { session_id, channel_id, messages });
+            }
+            ClientDirectMessage::NexusError { message } => {
+                self.state.broadcast(ServerMessage::NexusError { message });
             }
         }
 

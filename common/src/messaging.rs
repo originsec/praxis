@@ -1000,6 +1000,97 @@ pub struct SemanticOpUpdate {
 }
 
 //
+// Nexus - IRC-style multi-agent chat system.
+//
+
+/// Status of a Nexus agent in the session
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum NexusAgentStatus {
+    Initializing,
+    Ready,
+    Waiting,
+    Prompting,
+    Disconnected,
+}
+
+impl std::fmt::Display for NexusAgentStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NexusAgentStatus::Initializing => write!(f, "initializing"),
+            NexusAgentStatus::Ready => write!(f, "ready"),
+            NexusAgentStatus::Waiting => write!(f, "waiting"),
+            NexusAgentStatus::Prompting => write!(f, "prompting"),
+            NexusAgentStatus::Disconnected => write!(f, "disconnected"),
+        }
+    }
+}
+
+/// Information about a Nexus agent
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NexusAgentInfo {
+    pub id: String,
+    pub node_id: String,
+    pub agent_short_name: String,
+    pub nickname: String,
+    pub precedence: u32,
+    pub current_channel_id: Option<String>,
+    pub status: NexusAgentStatus,
+}
+
+/// Information about a Nexus channel
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NexusChannelInfo {
+    pub id: String,
+    pub name: String,
+    pub topic: Option<String>,
+    pub member_count: usize,
+    pub created_by: String,
+}
+
+/// Type of Nexus message
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum NexusMessageType {
+    Channel,
+    DirectMessage,
+    System,
+    CommandResult,
+}
+
+impl std::fmt::Display for NexusMessageType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NexusMessageType::Channel => write!(f, "channel"),
+            NexusMessageType::DirectMessage => write!(f, "dm"),
+            NexusMessageType::System => write!(f, "system"),
+            NexusMessageType::CommandResult => write!(f, "command_result"),
+        }
+    }
+}
+
+/// Information about a Nexus message
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NexusMessageInfo {
+    pub id: i64,
+    pub channel_id: Option<String>,
+    pub sender_nickname: String,
+    pub recipient_nickname: Option<String>,
+    pub message_type: NexusMessageType,
+    pub content: String,
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Complete state of a Nexus session
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NexusSessionState {
+    pub id: String,
+    pub goal: Option<String>,
+    pub status: String,
+    pub agents: Vec<NexusAgentInfo>,
+    pub channels: Vec<NexusChannelInfo>,
+    pub created_at: DateTime<Utc>,
+}
+
+//
 // Client Messages.
 //
 
@@ -1252,6 +1343,66 @@ pub enum ClientSignalMessage {
         node_id: String,
         agent_short_name: String,
     },
+
+    //
+    // Nexus - IRC-style multi-agent chat.
+    //
+    /// Start a new Nexus session
+    NexusStart {
+        client_id: String,
+        goal: Option<String>,
+        yolo_mode: bool,
+    },
+    /// Stop the current Nexus session
+    NexusStop {
+        client_id: String,
+        session_id: String,
+    },
+    /// Add an agent to the Nexus session
+    NexusAddAgent {
+        client_id: String,
+        session_id: String,
+        node_id: String,
+        agent_short_name: String,
+    },
+    /// Remove an agent from the Nexus session
+    NexusRemoveAgent {
+        client_id: String,
+        session_id: String,
+        agent_id: String,
+    },
+    /// Reorder agents in the Nexus session (set precedence order)
+    NexusReorderAgents {
+        client_id: String,
+        session_id: String,
+        agent_ids: Vec<String>,
+    },
+    /// Send a message to the Nexus session
+    NexusSendMessage {
+        client_id: String,
+        session_id: String,
+        content: String,
+        channel_id: Option<String>,
+        recipient_nickname: Option<String>,
+    },
+    /// Join a channel in the Nexus session
+    NexusJoinChannel {
+        client_id: String,
+        session_id: String,
+        channel_name: String,
+    },
+    /// Get message history from the Nexus session
+    NexusGetHistory {
+        client_id: String,
+        session_id: String,
+        channel_id: Option<String>,
+        limit: u32,
+    },
+    /// Get the current state of the Nexus session
+    NexusGetState {
+        client_id: String,
+        session_id: Option<String>,
+    },
 }
 
 /// Messages broadcast from server to all clients via CLIENT_BROADCAST_QUEUE
@@ -1453,6 +1604,76 @@ pub enum ClientDirectMessage {
         performed_at: Option<String>,
         /// Whether this was a semantic recon
         is_semantic: Option<bool>,
+    },
+
+    //
+    // Nexus responses.
+    //
+    /// Nexus session started
+    NexusSessionStarted {
+        session_id: String,
+        goal: Option<String>,
+    },
+    /// Nexus session stopped
+    NexusSessionStopped {
+        session_id: String,
+    },
+    /// Agent added to Nexus session
+    NexusAgentAdded {
+        session_id: String,
+        agent: NexusAgentInfo,
+    },
+    /// Agent removed from Nexus session
+    NexusAgentRemoved {
+        session_id: String,
+        agent_id: String,
+    },
+    /// Agent status changed in Nexus session
+    NexusAgentStatusChanged {
+        session_id: String,
+        agent_id: String,
+        status: NexusAgentStatus,
+    },
+    /// Channel created in Nexus session
+    NexusChannelCreated {
+        session_id: String,
+        channel: NexusChannelInfo,
+    },
+    /// Channel updated in Nexus session
+    NexusChannelUpdated {
+        session_id: String,
+        channel: NexusChannelInfo,
+    },
+    /// Agent joined a channel in Nexus session
+    NexusAgentJoinedChannel {
+        session_id: String,
+        agent_id: String,
+        channel_id: String,
+    },
+    /// Agent left a channel in Nexus session
+    NexusAgentLeftChannel {
+        session_id: String,
+        agent_id: String,
+        channel_id: String,
+    },
+    /// New message in Nexus session
+    NexusMessage {
+        session_id: String,
+        message: NexusMessageInfo,
+    },
+    /// Full Nexus session state update
+    NexusStateUpdate {
+        session: NexusSessionState,
+    },
+    /// History response for Nexus session
+    NexusHistoryResponse {
+        session_id: String,
+        channel_id: Option<String>,
+        messages: Vec<NexusMessageInfo>,
+    },
+    /// Nexus error
+    NexusError {
+        message: String,
     },
 }
 

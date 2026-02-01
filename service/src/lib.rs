@@ -4,6 +4,7 @@ mod chain_execution;
 mod config;
 mod database;
 mod handlers;
+mod nexus;
 mod semantic_helpers;
 mod semantic_ops;
 mod state;
@@ -32,6 +33,7 @@ use tracing::{error, info, warn};
 use chain_execution::ChainExecutor;
 use database::{Database, DatabaseConfig, OperationDefinition};
 use handlers::{ClientMessageHandler, NodeMessageHandler};
+use nexus::NexusManager;
 use semantic_ops::{SemanticOpsManager, ResponseTracker};
 use state::{NodeRegistry, ClientRegistry, PendingCommands};
 
@@ -513,6 +515,18 @@ pub async fn run() -> Result<()> {
     info!("Initialized chain executor");
 
     //
+    // Initialize Nexus manager.
+    //
+    let nexus_channel = connection.create_channel().await?;
+    let nexus_manager = Arc::new(NexusManager::new(
+        database.clone(),
+        nexus_channel,
+        node_registry.clone(),
+        pending_commands.clone(),
+    ));
+    info!("Initialized Nexus manager");
+
+    //
     // Initialize event logging system.
     //
     let (event_log_tx, mut event_log_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -819,14 +833,26 @@ pub async fn run() -> Result<()> {
                                                 error!("Failed to send command response to client {}: {}", pending.client_id, e);
                                             }
                                             info!("Forwarded command response {} to client {}", response.command_id, pending.client_id);
-                                                                                    } else {
+
+                                            //
+                                            // Check if this is a Nexus-related command.
+                                            //
+                                            if let Err(e) = nexus_manager.handle_command_response(
+                                                &pending.client_id,
+                                                &response.command_id,
+                                                &response.node_id,
+                                                &response.result,
+                                            ).await {
+                                                warn!("Nexus command response handling failed: {}", e);
+                                            }
+                                        } else {
                                             //
                                             // Command might be from semantic
                                             // operations (not tracked in
                                             // pending_commands).
                                             //
                                             info!("Received command response {} (possibly from semantic operation)", response.command_id);
-                                                                                    }
+                                        }
                                     }
                                     NodeSignalMessage::TerminalOutput(output) => {
                                         //
@@ -2020,6 +2046,104 @@ pub async fn run() -> Result<()> {
                                             Err(e) => {
                                                 error!("Failed to clear chain executions: {}", e);
                                             }
+                                        }
+                                    }
+
+                                    //
+                                    // Nexus messages.
+                                    //
+                                    ClientSignalMessage::NexusStart { client_id, goal, yolo_mode } => {
+                                        info!("Received NexusStart from client {} (yolo_mode: {})", client_id, yolo_mode);
+                                        match nexus_manager.start_session(&client_id, goal, yolo_mode).await {
+                                            Ok(session_id) => {
+                                                info!("Started Nexus session {}", session_id);
+                                            }
+                                            Err(e) => {
+                                                error!("Failed to start Nexus session: {}", e);
+                                                let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                                    message: e.to_string(),
+                                                }).await;
+                                            }
+                                        }
+                                    }
+                                    ClientSignalMessage::NexusStop { client_id, session_id } => {
+                                        info!("Received NexusStop from client {}", client_id);
+                                        if let Err(e) = nexus_manager.stop_session(&client_id, &session_id).await {
+                                            error!("Failed to stop Nexus session: {}", e);
+                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                                message: e.to_string(),
+                                            }).await;
+                                        }
+                                    }
+                                    ClientSignalMessage::NexusAddAgent { client_id, session_id, node_id, agent_short_name } => {
+                                        info!("Received NexusAddAgent from client {}", client_id);
+                                        match nexus_manager.add_agent(&client_id, &session_id, &node_id, &agent_short_name).await {
+                                            Ok(agent_id) => {
+                                                info!("Added agent {} to Nexus session", agent_id);
+                                            }
+                                            Err(e) => {
+                                                error!("Failed to add agent to Nexus: {}", e);
+                                                let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                                    message: e.to_string(),
+                                                }).await;
+                                            }
+                                        }
+                                    }
+                                    ClientSignalMessage::NexusRemoveAgent { client_id, session_id, agent_id } => {
+                                        info!("Received NexusRemoveAgent from client {}", client_id);
+                                        if let Err(e) = nexus_manager.remove_agent(&client_id, &session_id, &agent_id).await {
+                                            error!("Failed to remove agent from Nexus: {}", e);
+                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                                message: e.to_string(),
+                                            }).await;
+                                        }
+                                    }
+                                    ClientSignalMessage::NexusReorderAgents { client_id, session_id, agent_ids } => {
+                                        info!("Received NexusReorderAgents from client {}", client_id);
+                                        if let Err(e) = nexus_manager.reorder_agents(&client_id, &session_id, agent_ids).await {
+                                            error!("Failed to reorder Nexus agents: {}", e);
+                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                                message: e.to_string(),
+                                            }).await;
+                                        }
+                                    }
+                                    ClientSignalMessage::NexusSendMessage { client_id, session_id, content, channel_id, recipient_nickname } => {
+                                        info!("Received NexusSendMessage from client {}", client_id);
+                                        if let Err(e) = nexus_manager.send_message(&client_id, &session_id, &content, channel_id.as_deref(), recipient_nickname.as_deref()).await {
+                                            error!("Failed to send Nexus message: {}", e);
+                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                                message: e.to_string(),
+                                            }).await;
+                                        }
+                                    }
+                                    ClientSignalMessage::NexusJoinChannel { client_id, session_id, channel_name } => {
+                                        info!("Received NexusJoinChannel from client {}", client_id);
+                                        match nexus_manager.join_channel(&client_id, &session_id, &channel_name).await {
+                                            Ok(_) => {}
+                                            Err(e) => {
+                                                error!("Failed to join Nexus channel: {}", e);
+                                                let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                                    message: e.to_string(),
+                                                }).await;
+                                            }
+                                        }
+                                    }
+                                    ClientSignalMessage::NexusGetHistory { client_id, session_id, channel_id, limit } => {
+                                        info!("Received NexusGetHistory from client {}", client_id);
+                                        if let Err(e) = nexus_manager.get_history(&client_id, &session_id, channel_id.as_deref(), limit).await {
+                                            error!("Failed to get Nexus history: {}", e);
+                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                                message: e.to_string(),
+                                            }).await;
+                                        }
+                                    }
+                                    ClientSignalMessage::NexusGetState { client_id, session_id } => {
+                                        info!("Received NexusGetState from client {}", client_id);
+                                        if let Err(e) = nexus_manager.get_state(&client_id, session_id.as_deref()).await {
+                                            error!("Failed to get Nexus state: {}", e);
+                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                                message: e.to_string(),
+                                            }).await;
                                         }
                                     }
                                 }
