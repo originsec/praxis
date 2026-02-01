@@ -188,7 +188,6 @@ impl DevToolsAdapter for M365DevToolsAdapter {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
 
-        common::log_debug!("New private chat button not available, proceeding without it");
         Ok(())
     }
 }
