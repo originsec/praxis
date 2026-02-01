@@ -57,6 +57,11 @@ pub trait DevToolsAdapter: Send + Sync {
     /// CSS selector for message elements in the chat.
     fn message_selector(&self) -> &str;
 
+    /// Returns the working directory for this session, if any.
+    fn working_dir(&self) -> Option<String> {
+        None
+    }
+
     /// Check if the response is complete. Returns Some(text) if done, None if still generating.
     /// The page is provided so adapters can run JavaScript queries as needed.
     fn check_response_complete(
@@ -68,6 +73,16 @@ pub trait DevToolsAdapter: Send + Sync {
     /// Called after text is inserted but before submit. Adapters can use this
     /// to wait for submit button to be ready, etc. Default does nothing.
     fn wait_for_submit_ready(
+        &self,
+        _page: &Page,
+    ) -> impl Future<Output = Result<()>> + Send {
+        async { Ok(()) }
+    }
+
+    /// Called after the session is initialized (page connected, ready for use).
+    /// Adapters can use this to perform post-initialization tasks like clicking
+    /// mode toggle buttons. Default does nothing.
+    fn post_initialize(
         &self,
         _page: &Page,
     ) -> impl Future<Output = Result<()>> + Send {

@@ -346,6 +346,106 @@ impl Drop for HiddenDesktop {
 }
 
 //
+// Minimize a process window by PID. On Windows, finds visible windows belonging
+// to the process or any of its descendants and minimizes them.
+// Returns true if at least one window was minimized.
+//
+
+#[cfg(windows)]
+mod minimize_impl {
+    use once_cell::sync::Lazy;
+    use std::collections::HashSet;
+    use std::sync::Mutex;
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, ShowWindow, SW_MINIMIZE,
+    };
+
+    static FOUND_HWNDS: Lazy<Mutex<Vec<isize>>> = Lazy::new(|| Mutex::new(Vec::new()));
+    static TARGET_PIDS: Lazy<Mutex<HashSet<u32>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+
+    unsafe extern "system" fn enum_callback(hwnd: HWND, _lparam: LPARAM) -> windows::core::BOOL {
+        let mut window_pid: u32 = 0;
+
+        unsafe {
+            GetWindowThreadProcessId(hwnd, Some(&mut window_pid));
+
+            let pids = TARGET_PIDS.lock().unwrap();
+            if pids.contains(&window_pid) && IsWindowVisible(hwnd).as_bool() {
+                let mut hwnds = FOUND_HWNDS.lock().unwrap();
+                hwnds.push(hwnd.0 as isize);
+            }
+        }
+        windows::core::BOOL(1) // Continue enumeration to find all windows
+    }
+
+    pub fn minimize(target_pids: HashSet<u32>) -> bool {
+        let pid_count = target_pids.len();
+        {
+            let mut hwnds = FOUND_HWNDS.lock().unwrap();
+            hwnds.clear();
+            let mut pids = TARGET_PIDS.lock().unwrap();
+            *pids = target_pids;
+        }
+
+        unsafe {
+            let _ = EnumWindows(Some(enum_callback), LPARAM(0));
+        }
+
+        let hwnds = FOUND_HWNDS.lock().unwrap();
+        common::log_debug!(
+            "minimize: checked {} PIDs, found {} visible windows",
+            pid_count,
+            hwnds.len()
+        );
+        let mut minimized = false;
+        for &hwnd_value in hwnds.iter() {
+            let hwnd = HWND(hwnd_value as *mut _);
+            common::log_debug!("minimize: calling ShowWindow for hwnd {:x}", hwnd_value);
+            unsafe {
+                let _ = ShowWindow(hwnd, SW_MINIMIZE);
+            }
+            minimized = true;
+        }
+        minimized
+    }
+}
+
+#[cfg(windows)]
+pub fn minimize_process_window(pid: u32) -> bool {
+    use std::collections::HashSet;
+
+    //
+    // Collect all PIDs to check: the parent and all descendants.
+    //
+
+    let mut target_pids: HashSet<u32> = HashSet::new();
+    target_pids.insert(pid);
+    let descendants = get_descendant_pids(pid);
+    common::log_debug!(
+        "minimize_process_window: parent={}, descendants={:?}",
+        pid,
+        descendants
+    );
+    for descendant in descendants {
+        target_pids.insert(descendant);
+    }
+
+    let result = minimize_impl::minimize(target_pids.clone());
+    common::log_debug!(
+        "minimize_process_window: target_pids={:?}, result={}",
+        target_pids,
+        result
+    );
+    result
+}
+
+#[cfg(not(windows))]
+pub fn minimize_process_window(_pid: u32) -> bool {
+    false
+}
+
+//
 // Spawn a process on a hidden desktop. The process runs normally but on a
 // desktop that isn't displayed to the user.
 //

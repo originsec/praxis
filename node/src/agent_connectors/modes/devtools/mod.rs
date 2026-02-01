@@ -74,11 +74,11 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
         // on a hidden desktop so the window is invisible but fully functional.
         //
 
-        let pid = if let Some(ref path) = config.process_path {
+        let (pid, should_minimize) = if let Some(ref path) = config.process_path {
             let debug_arg = config.debug_port_format.replace("{}", &port.to_string());
 
             #[cfg(windows)]
-            let pid = {
+            let result = {
                 //
                 // Check both config and environment variable for hidden desktop.
                 // Config must enable it AND PRAXIS_NOT_HIDDEN must not be "1".
@@ -89,7 +89,7 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
                     None
                 };
 
-                let pid = if let Some(ref d) = desktop {
+                let (pid, should_minimize) = if let Some(ref d) = desktop {
                     let pid = utils::spawn_on_hidden_desktop(
                         path,
                         &config.debug_port_env_var,
@@ -100,7 +100,7 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
                         "Spawned process on hidden desktop '{}' with PID: {}",
                         d.name, pid
                     );
-                    pid
+                    (pid, false)
                 } else {
                     let process = std::process::Command::new(path)
                         .env(&config.debug_port_env_var, &debug_arg)
@@ -108,17 +108,18 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
                         .map_err(|e| anyhow!("Failed to spawn process: {}", e))?;
                     let pid = process.id();
                     common::log_info!(
-                        "Spawned process with PID: {} (no hidden desktop)",
+                        "Spawned process with PID: {} (will minimize after ready)",
                         pid
                     );
-                    pid
+                    (pid, true)
                 };
+
                 *self.hidden_desktop.lock().unwrap() = desktop;
-                pid
+                (Some(pid), should_minimize)
             };
 
             #[cfg(not(windows))]
-            let pid = {
+            let result = {
                 let process = std::process::Command::new(path)
                     .env(&config.debug_port_env_var, &debug_arg)
                     .spawn()
@@ -128,10 +129,10 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
                     "Spawned process with PID: {}",
                     pid
                 );
-                pid
+                (Some(pid), false)
             };
 
-            Some(pid)
+            result
         } else {
             return Err(anyhow!("No process path provided"));
         };
@@ -144,8 +145,34 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
 
         let page = Self::connect_to_devtools(port).await?;
 
-        *self.page.lock().unwrap() = Some(page);
+        *self.page.lock().unwrap() = Some(page.clone());
         common::log_info!("Connected to DevTools");
+
+        //
+        // Call post-initialization hook for adapter-specific setup.
+        //
+
+        self.adapter.post_initialize(&page).await?;
+
+        //
+        // Minimize window now that session is fully ready (Windows only).
+        // This happens after DevTools connection because WebView2 child processes
+        // that own the actual windows may not exist until the app is fully loaded.
+        //
+
+        #[cfg(windows)]
+        if should_minimize {
+            if let Some(pid) = pid {
+                if utils::minimize_process_window(pid) {
+                    common::log_info!("Minimized process window");
+                } else {
+                    common::log_debug!("No window found to minimize");
+                }
+            }
+        }
+
+        #[cfg(not(windows))]
+        let _ = should_minimize;
 
         Ok(())
     }
@@ -199,11 +226,18 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
             while let Some(event) = handler.next().await {
                 if let Err(e) = event {
                     let err_str = e.to_string();
-                    // Suppress expected errors during shutdown
+
+                    //
+                    // Suppress expected/harmless errors.
+                    //
+
                     if err_str.contains("ResetWithoutClosingHandshake")
                         || err_str.contains("Connection reset")
                     {
                         common::log_debug!("Browser connection closed");
+                    } else if err_str.contains("did not match any variant") {
+                        // Chromiumoxide doesn't recognize some CDP messages - harmless
+                        common::log_debug!("Unrecognized CDP message (harmless)");
                     } else {
                         common::log_error!("Browser handler error: {}", e);
                     }
@@ -356,6 +390,10 @@ impl<A: DevToolsAdapter + 'static> AgentSession for GenericDevToolsSession<A> {
 
     fn process_path(&self) -> Option<String> {
         self.process_path.clone()
+    }
+
+    fn working_dir(&self) -> Option<String> {
+        self.adapter.working_dir()
     }
 
     fn mode(&self) -> AgentMode {
