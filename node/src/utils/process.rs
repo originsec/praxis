@@ -346,50 +346,79 @@ impl Drop for HiddenDesktop {
 }
 
 //
-// Minimize a process window by PID. On Windows, finds the main window and
-// minimizes it. Returns true if successful.
+// Minimize a process window by PID. On Windows, finds visible windows belonging
+// to the process or any of its descendants and minimizes them.
+// Returns true if at least one window was minimized.
 //
 
 #[cfg(windows)]
-pub fn minimize_process_window(pid: u32) -> bool {
-    use std::sync::atomic::{AtomicIsize, Ordering};
+mod minimize_impl {
+    use once_cell::sync::Lazy;
+    use std::collections::HashSet;
+    use std::sync::Mutex;
     use windows::Win32::Foundation::{HWND, LPARAM};
-    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, ShowWindow, SW_MINIMIZE};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, ShowWindow, SW_MINIMIZE,
+    };
 
-    static FOUND_HWND: AtomicIsize = AtomicIsize::new(0);
-    FOUND_HWND.store(0, Ordering::SeqCst);
+    static FOUND_HWNDS: Lazy<Mutex<Vec<isize>>> = Lazy::new(|| Mutex::new(Vec::new()));
+    static TARGET_PIDS: Lazy<Mutex<HashSet<u32>>> = Lazy::new(|| Mutex::new(HashSet::new()));
 
-    unsafe extern "system" fn enum_callback(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
-        use windows::Win32::UI::WindowsAndMessaging::{GetWindowThreadProcessId, IsWindowVisible};
-
-        let target_pid = lparam.0 as u32;
+    unsafe extern "system" fn enum_callback(hwnd: HWND, _lparam: LPARAM) -> windows::core::BOOL {
         let mut window_pid: u32 = 0;
 
         unsafe {
             GetWindowThreadProcessId(hwnd, Some(&mut window_pid));
 
-            if window_pid == target_pid && IsWindowVisible(hwnd).as_bool() {
-                FOUND_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
-                return windows::core::BOOL(0); // Stop enumeration
+            let pids = TARGET_PIDS.lock().unwrap();
+            if pids.contains(&window_pid) && IsWindowVisible(hwnd).as_bool() {
+                let mut hwnds = FOUND_HWNDS.lock().unwrap();
+                hwnds.push(hwnd.0 as isize);
             }
         }
-        windows::core::BOOL(1) // Continue enumeration
+        windows::core::BOOL(1) // Continue enumeration to find all windows
     }
 
-    unsafe {
-        let _ = EnumWindows(Some(enum_callback), LPARAM(pid as isize));
-    }
-
-    let hwnd_value = FOUND_HWND.load(Ordering::SeqCst);
-    if hwnd_value != 0 {
-        let hwnd = HWND(hwnd_value as *mut _);
-        unsafe {
-            let _ = ShowWindow(hwnd, SW_MINIMIZE);
+    pub fn minimize(target_pids: HashSet<u32>) -> bool {
+        {
+            let mut hwnds = FOUND_HWNDS.lock().unwrap();
+            hwnds.clear();
+            let mut pids = TARGET_PIDS.lock().unwrap();
+            *pids = target_pids;
         }
-        true
-    } else {
-        false
+
+        unsafe {
+            let _ = EnumWindows(Some(enum_callback), LPARAM(0));
+        }
+
+        let hwnds = FOUND_HWNDS.lock().unwrap();
+        let mut minimized = false;
+        for &hwnd_value in hwnds.iter() {
+            let hwnd = HWND(hwnd_value as *mut _);
+            unsafe {
+                let _ = ShowWindow(hwnd, SW_MINIMIZE);
+            }
+            minimized = true;
+        }
+        minimized
     }
+}
+
+#[cfg(windows)]
+pub fn minimize_process_window(pid: u32) -> bool {
+    use std::collections::HashSet;
+
+    //
+    // Collect all PIDs to check: the parent and all descendants.
+    //
+
+    let mut target_pids: HashSet<u32> = HashSet::new();
+    target_pids.insert(pid);
+    for descendant in get_descendant_pids(pid) {
+        target_pids.insert(descendant);
+    }
+
+    minimize_impl::minimize(target_pids)
 }
 
 #[cfg(not(windows))]
