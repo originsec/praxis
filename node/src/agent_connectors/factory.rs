@@ -1,6 +1,8 @@
 // #[cfg(not(windows))]
 // use super::clawdbot::ClawdbotAgent;
 use super::claudecode::ClaudeCodeAgent;
+#[cfg(target_os = "linux")]
+use super::codex::CodexAgent;
 #[allow(unused_imports)]
 use super::dummy::DummyAgent;
 use super::gemini::GeminiAgent;
@@ -21,6 +23,11 @@ impl AgentFactory {
 
         agents.push(Arc::new(ClaudeCodeAgent::new()));
         agents.push(Arc::new(GeminiAgent::new()));
+
+        #[cfg(target_os = "linux")]
+        {
+            agents.push(Arc::new(CodexAgent::new()));
+        }
 
         //
         // Clawdbot - temporarily disabled.

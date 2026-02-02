@@ -12,7 +12,7 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge, NodeTypes } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, Square, Clock, CheckCircle2, XCircle, AlertCircle, Loader2, Maximize2, Cpu, Sparkles, MessageSquare, CircleStop, ExternalLink } from 'lucide-react';
+import { Play, Square, Clock, CheckCircle2, XCircle, AlertCircle, Loader2, Maximize2, Cpu, Sparkles, MessageSquare, CircleStop, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react';
 import type {
   ChainExecutionUpdate,
   ChainDefinitionFull,
@@ -27,20 +27,20 @@ import { computeLayout } from '../../utils/dagreLayout';
 function getStatusIndicator(status: string) {
   switch (status) {
     case 'Completed':
-      return { icon: CheckCircle2, color: 'var(--accent-success)', bg: 'var(--accent-success)' };
+      return { icon: CheckCircle2, color: 'var(--text-highlight)', bg: 'var(--text-highlight)' };
     case 'Failed':
       return { icon: XCircle, color: 'var(--accent-error)', bg: 'var(--accent-error)' };
     case 'Running':
-      return { icon: Loader2, color: 'var(--accent-info)', bg: 'var(--accent-info)', animate: true };
+      return { icon: Loader2, color: 'var(--text-secondary)', bg: 'var(--text-secondary)', animate: true };
     case 'WaitingForInputs':
       return { icon: Clock, color: 'var(--accent-warning)', bg: 'var(--accent-warning)' };
     case 'Skipped':
-      return { icon: AlertCircle, color: 'var(--text-secondary)', bg: 'var(--text-secondary)' };
+      return { icon: AlertCircle, color: 'var(--text-muted)', bg: 'var(--text-muted)' };
     //
     // Pending.
     //
     default:
-      return { icon: Clock, color: 'var(--text-secondary)', bg: 'var(--text-secondary)' };
+      return { icon: Clock, color: 'var(--text-muted)', bg: 'var(--text-muted)' };
   }
 }
 
@@ -268,6 +268,7 @@ interface ChainExecutionViewerInnerProps {
 
 function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }: ChainExecutionViewerInnerProps) {
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+  const [outputExpanded, setOutputExpanded] = useState(true);
   const { fitView } = useReactFlow();
 
   //
@@ -465,10 +466,10 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
           <div>
             <span className="text-xs text-muted">Status:</span>
             <span className={`ml-2 font-mono ${
-              execution.status === 'Completed' ? 'text-[var(--accent-success)]' :
+              execution.status === 'Completed' ? 'text-[var(--text-highlight)]' :
               execution.status === 'Failed' ? 'text-[var(--accent-error)]' :
               execution.status === 'Cancelled' ? 'text-[var(--accent-warning)]' :
-              'text-[var(--accent-info)]'
+              'text-[var(--text-secondary)]'
             }`}>{execution.status}</span>
           </div>
           <div>
@@ -486,26 +487,28 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
 
       {/*
       //
-      // Final Output - shown prominently at top when chain completed
-      // successfully.
+      // Final Output - collapsible section shown when chain completed.
       //
       */}
       {execution.status === 'Completed' && Object.keys(outputs).length > 0 && (
-        <div className="p-4 border-b border-subtle bg-[var(--accent-success)]/5">
-          <h4 className="text-sm font-medium text-[var(--accent-success)] mb-3 flex items-center gap-2">
-            <CheckCircle2 size={16} />
-            Final Output
-          </h4>
-          <div className="space-y-3">
-            {Object.entries(outputs).map(([label, output]) => (
-              <div key={label}>
-                <span className="text-xs font-medium text-[var(--text-primary)]">{label}:</span>
-                <div className="mt-1 p-3 bg-[var(--bg-primary)] rounded text-sm max-h-48 overflow-auto border border-[var(--accent-success)]/30">
+        <div className="border-b border-subtle">
+          <button
+            onClick={() => setOutputExpanded(!outputExpanded)}
+            className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-[var(--bg-tertiary)] transition-colors text-left"
+          >
+            {outputExpanded ? <ChevronDown size={12} className="text-[var(--text-secondary)]" /> : <ChevronRight size={12} className="text-[var(--text-secondary)]" />}
+            <span className="text-xs font-medium text-[var(--text-highlight)]">Final Output</span>
+            <span className="text-xs text-muted ml-auto">{Object.keys(outputs).length} output{Object.keys(outputs).length !== 1 ? 's' : ''}</span>
+          </button>
+          {outputExpanded && (
+            <div className="px-3 pb-3 space-y-2">
+              {Object.entries(outputs).map(([label, output]) => (
+                <div key={label} className="p-2 bg-[var(--bg-primary)] rounded text-xs max-h-48 overflow-auto border border-[var(--border-dim)]">
                   <StyledOutput output={output} />
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -626,7 +629,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
                     {stepInfo.type === 'transform' && <Sparkles size={18} className="text-[var(--accent-warning)]" />}
                     {stepInfo.type === 'genericPrompt' && <MessageSquare size={18} className="text-[var(--accent-purple)]" />}
                     {stepInfo.type === 'termination' && <Square size={18} className="text-[var(--accent-error)]" />}
-                    <span className="text-lg font-medium">{stepInfo.name}</span>
+                    <span className="text-lg font-medium text-[var(--text-highlight)]">{stepInfo.name}</span>
                     <span className="text-xs text-[var(--text-secondary)] font-mono">{selectedElementId.slice(0, 8)}</span>
                   </div>
                 );
@@ -723,7 +726,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
                       ? 'Error:'
                       : 'Output:'}
                   </span>
-                  <div className="mt-1 p-3 bg-[var(--bg-secondary)] rounded text-sm max-h-64 overflow-auto">
+                  <div className="mt-1 p-3 bg-[var(--bg-secondary)] rounded text-sm max-h-64 overflow-auto" style={{ color: 'rgb(92, 156, 102)' }}>
                     <StyledOutput output={selectedOutput} />
                   </div>
                 </div>
@@ -738,7 +741,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
                 <div>
                   <span className="text-xs text-muted font-medium">Input Data:</span>
                   <div className="mt-1 p-3 bg-[var(--bg-secondary)] rounded text-sm max-h-48 overflow-auto">
-                    <pre className="whitespace-pre-wrap font-mono text-xs">{selectedElement.context.input}</pre>
+                    <pre className="whitespace-pre-wrap font-mono text-xs" style={{ color: 'rgb(92, 156, 102)' }}>{selectedElement.context.input}</pre>
                   </div>
                 </div>
               )}
