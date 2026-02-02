@@ -28,8 +28,6 @@ Once you've added models, assign them to features:
 
 **Traffic Parser** - Summarizes intercepted traffic. Again, speed is valuable; you don't need the most powerful model.
 
-**Atlas** - Used for the Nexus multi-agent chat feature. Pick something capable that handles conversation well.
-
 ### Speed vs. Capability
 
 For parser features (Semantic Parser, Traffic Parser), we recommend providers with fast inference:
