@@ -16,51 +16,15 @@ For deeper discovery, click **Semantic Recon** (requires Semantic Parser LLM con
 
 ### Tools
 
-Tools are the capabilities available to the agent:
-
-**MCP Servers** (Claude Code, Gemini)
-- Server names and descriptions
-- Commands used to start them
-- Environment variables
-- Enabled/disabled status
-
-**Internal Tools**
-- File operations (read, write, edit)
-- Command execution
-- Web browsing
-- Code analysis
-
-**Extensions/Plugins**
-- Agent-specific integrations
-- Third-party tools
+Tools are the capabilities available to the agent. This includes MCP servers (external tool integrations), internal/built-in tools (like file operations, command execution, web browsing), and any extensions or plugins the agent supports. Recon discovers what tools are available, how they're configured, and what parameters they accept.
 
 ### Configuration
 
-Config files reveal how the agent is set up:
-
-**Main Config**
-- Model preferences
-- Permission settings
-- API configurations
-- Behavior options
-
-**MCP Config**
-- Server definitions
-- Connection details
-- Tool configurations
+Config files reveal how the agent is set up. This includes settings files (model preferences, permissions, API configurations), tool/server definitions, and instruction files like CLAUDE.md or similar that influence agent behavior. Recon identifies these files and makes their contents viewable and often editable.
 
 ### Sessions
 
-Session history shows past conversations:
-
-**Session Files**
-- Conversation transcripts
-- Project contexts
-- Timestamps
-
-**Project Paths**
-- Directories where the agent has been used
-- Recent project history
+Session history shows past conversations. Recon discovers session files containing conversation transcripts, project contexts, and timestamps. It also identifies project paths where the agent has been used, giving you visibility into recent activity and what the user has been working on.
 
 ## Static vs Semantic Recon
 
@@ -87,7 +51,7 @@ This takes longer than static recon because it actually interacts with the agent
 
 Best for: Full capability discovery, understanding what tools do
 
-Semantic recon requires the **Semantic Parser** LLM to be configured. Fast models like Claude Haiku or GPT-4o-mini work well since multiple parsing calls may be made.
+Semantic recon requires the **Semantic Parser** LLM to be configured. Choose a model that balances speed and capability - multiple parsing calls may be made so fast inference helps, but the model also needs to be capable enough to extract meaningful information from complex configurations.
 
 ## Using Recon Data
 
@@ -128,33 +92,15 @@ This reveals:
 
 ### MCP Servers
 
-MCP (Model Context Protocol) servers extend agent capabilities. Recon shows:
+MCP (Model Context Protocol) servers extend agent capabilities. Recon discovers server definitions including stdio commands and arguments, SSE endpoints, and environment variables. It also attempts to connect to each MCP server to pull out the actual tools it provides - giving you visibility into what external capabilities the agent has access to and potential attack surface.
 
-```
-MCP Server: filesystem
-  Command: npx -y @anthropic/mcp-server-filesystem
-  Args: /home/user/documents
-  Status: enabled
-```
-
-This tells you:
-- What external tools the agent can use
-- What data sources it has access to
-- Potential attack surface
+Note that if an MCP server requires specific authentication or environment setup, the tool discovery connection may fail. Praxis does its best to replicate the agent's environment but some servers may not respond.
 
 ### Internal Tools
 
-Semantic recon extracts built-in capabilities:
+Semantic recon discovers built-in agent tools by creating a session and asking the agent directly about its capabilities. The response is then passed through the semantic parser to extract structured tool definitions.
 
-```
-Tool: Bash
-  Description: Execute shell commands
-  Parameters: command (string)
-
-Tool: Read
-  Description: Read file contents
-  Parameters: path (string)
-```
+This approach has some pitfalls: the agent may refuse to disclose its tools, provide incomplete information, or the parser may fail to extract tools from the response. The prompt used to ask the agent is defined in the agent connector code and can be customized if needed for better results with specific agents.
 
 Understanding available tools helps you craft effective prompts for operations.
 
@@ -202,5 +148,4 @@ After modifying configs, run recon again to verify changes took effect.
 ### Missing MCP servers
 
 - Some agents don't use MCP
-- Check if mcp.json exists
 - Try semantic recon for deeper discovery
