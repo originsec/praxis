@@ -724,12 +724,12 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
               */}
               {selectedOutput && (
                 <div>
-                  <span className="text-xs font-medium" style={{ color: 'rgb(92, 156, 102)' }}>
+                  <span className="text-xs text-muted font-medium">
                     {typeof selectedElement.status === 'object' && 'Failed' in selectedElement.status
                       ? 'Error:'
                       : 'Output:'}
                   </span>
-                  <div className="mt-1 p-3 bg-[var(--bg-secondary)] rounded text-sm max-h-64 overflow-auto">
+                  <div className="mt-1 p-3 bg-[var(--bg-secondary)] rounded text-sm max-h-64 overflow-auto" style={{ color: 'rgb(92, 156, 102)' }}>
                     <StyledOutput output={selectedOutput} />
                   </div>
                 </div>
@@ -742,9 +742,9 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
               */}
               {selectedElement.context && selectedElement.context.input && (
                 <div>
-                  <span className="text-xs font-medium" style={{ color: 'rgb(92, 156, 102)' }}>Input Data:</span>
+                  <span className="text-xs text-muted font-medium">Input Data:</span>
                   <div className="mt-1 p-3 bg-[var(--bg-secondary)] rounded text-sm max-h-48 overflow-auto">
-                    <pre className="whitespace-pre-wrap font-mono text-xs">{selectedElement.context.input}</pre>
+                    <pre className="whitespace-pre-wrap font-mono text-xs" style={{ color: 'rgb(92, 156, 102)' }}>{selectedElement.context.input}</pre>
                   </div>
                 </div>
               )}
