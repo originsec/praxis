@@ -1,13 +1,23 @@
-use crate::agent_connectors::Agent;
+use crate::agent_connectors::{Agent, AgentSession};
 use common::{NodeCommandResult, SessionCommand, SessionCommandResult, TransactionId};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
+use uuid::Uuid;
+
+//
+// Pending transaction with cancel channel and session reference.
+//
+
+struct PendingTransaction {
+    cancel_tx: oneshot::Sender<()>,
+    session: Arc<dyn AgentSession>,
+}
 
 /// Manages pending transactions for async operations
 pub struct TransactionManager {
-    /// Map of transaction_id to cancel sender
-    pending: Mutex<HashMap<TransactionId, oneshot::Sender<()>>>,
+    /// Map of transaction_id to pending transaction info
+    pending: Mutex<HashMap<TransactionId, PendingTransaction>>,
 }
 
 impl TransactionManager {
@@ -17,15 +27,32 @@ impl TransactionManager {
         }
     }
 
-    pub fn register(&self, transaction_id: TransactionId) -> oneshot::Receiver<()> {
+    pub fn register(
+        &self,
+        transaction_id: TransactionId,
+        session: Arc<dyn AgentSession>,
+    ) -> oneshot::Receiver<()> {
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(transaction_id, tx);
+        self.pending.lock().unwrap().insert(
+            transaction_id,
+            PendingTransaction {
+                cancel_tx: tx,
+                session,
+            },
+        );
         rx
     }
 
-    pub fn cancel(&self, transaction_id: &TransactionId) -> bool {
-        if let Some(tx) = self.pending.lock().unwrap().remove(transaction_id) {
-            let _ = tx.send(());
+    //
+    // Cancel a transaction. If force=true, also kills the underlying process.
+    //
+
+    pub fn cancel(&self, transaction_id: &TransactionId, force: bool) -> bool {
+        if let Some(pending) = self.pending.lock().unwrap().remove(transaction_id) {
+            if force {
+                pending.session.abort_transaction();
+            }
+            let _ = pending.cancel_tx.send(());
             true
         } else {
             false
@@ -34,6 +61,30 @@ impl TransactionManager {
 
     pub fn complete(&self, transaction_id: &TransactionId) {
         self.pending.lock().unwrap().remove(transaction_id);
+    }
+
+    //
+    // Cancel all pending transactions for a given session.
+    // Used when closing a session to ensure no orphaned transactions.
+    //
+
+    pub fn cancel_all_for_session(&self, session_id: &Uuid, force: bool) {
+        let mut pending = self.pending.lock().unwrap();
+        let to_remove: Vec<TransactionId> = pending
+            .iter()
+            .filter(|(_, p)| p.session.session_id() == session_id)
+            .map(|(tid, _)| tid.clone())
+            .collect();
+
+        for tid in to_remove {
+            if let Some(p) = pending.remove(&tid) {
+                common::log_info!("Cancelling transaction {} for session close", tid);
+                if force {
+                    p.session.abort_transaction();
+                }
+                let _ = p.cancel_tx.send(());
+            }
+        }
     }
 }
 
@@ -76,6 +127,14 @@ pub async fn handle_session_command(
         }
         SessionCommand::Close => {
             if agent.has_session() {
+                //
+                // Cancel all pending transactions before closing the session.
+                //
+
+                if let Some(session) = agent.get_session() {
+                    transaction_manager.cancel_all_for_session(session.session_id(), true);
+                }
+
                 agent.close_session();
                 common::log_info!("Closed session for agent {}", agent.short_name());
                 NodeCommandResult::Session(SessionCommandResult::Closed)
@@ -98,7 +157,7 @@ pub async fn handle_session_command(
                     //
                     // Register the transaction for potential cancellation.
                     //
-                    let cancel_rx = transaction_manager.register(transaction_id.clone());
+                    let cancel_rx = transaction_manager.register(transaction_id.clone(), session.clone());
 
                     //
                     // Execute the transaction with cancellation support.
@@ -144,9 +203,9 @@ pub async fn handle_session_command(
                 },
             }
         }
-        SessionCommand::CancelTransaction { transaction_id } => {
-            if transaction_manager.cancel(&transaction_id) {
-                common::log_info!("Cancelled transaction {}", transaction_id);
+        SessionCommand::CancelTransaction { transaction_id, force } => {
+            if transaction_manager.cancel(&transaction_id, force) {
+                common::log_info!("Cancelled transaction {} (force={})", transaction_id, force);
                 NodeCommandResult::Session(SessionCommandResult::TransactionCancelled {
                     transaction_id,
                 })

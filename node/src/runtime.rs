@@ -607,6 +607,55 @@ async fn handle_command(
             result
         }
         NodeCommand::Session(cmd) => {
+            //
+            // Check if this is a Prompt command that should be spawned as a task.
+            // This allows Cancel/Close commands to be processed while the prompt is running.
+            //
+
+            if let common::SessionCommand::Prompt { .. } = &cmd {
+                //
+                // Spawn the prompt handling as a separate task so we don't block
+                // the message loop. This allows Cancel/Close commands to be
+                // processed while the transaction is running.
+                //
+
+                let selected_agent = selected_agent.clone();
+                let transaction_manager = transaction_manager.clone();
+                let channel = channel.clone();
+                let node_id = node_id.to_string();
+                let command_id = request.command_id.clone();
+
+                tokio::spawn(async move {
+                    let result = handle_session_command(cmd, &selected_agent, &transaction_manager).await;
+
+                    //
+                    // Send response back to the server.
+                    //
+
+                    let response = CommandResponse {
+                        command_id,
+                        node_id: node_id.to_string(),
+                        result,
+                    };
+
+                    let message = NodeSignalMessage::CommandResponse(response);
+                    if let Err(e) = publish_json(&channel, NODE_SIGNAL_QUEUE, &message).await {
+                        common::log_error!("Failed to send prompt response: {}", e);
+                    }
+                });
+
+                //
+                // Return early - response will be sent by the spawned task.
+                //
+
+                return;
+            }
+
+            //
+            // Non-Prompt session commands (Create, Close, CancelTransaction)
+            // are handled inline since they're quick.
+            //
+
             handle_session_command(cmd, selected_agent, transaction_manager).await
         }
         NodeCommand::Intercept(cmd) => {

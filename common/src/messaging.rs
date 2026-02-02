@@ -445,7 +445,12 @@ pub enum SessionCommand {
     /// transaction_id is used to match request with response
     Prompt { text: String, transaction_id: TransactionId },
     /// Cancel a pending transaction
-    CancelTransaction { transaction_id: TransactionId },
+    /// force: If true, forcibly kills the underlying process (SIGKILL/TerminateProcess)
+    CancelTransaction {
+        transaction_id: TransactionId,
+        #[serde(default)]
+        force: bool,
+    },
 }
 
 /// Method of interception (Windows-specific)

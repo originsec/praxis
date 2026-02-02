@@ -1,9 +1,11 @@
 use crate::agent_connectors::traits::{AgentMode, AgentSession};
 use crate::agent_connectors::utils;
+use crate::utils::terminate_process_tree;
 use anyhow::{anyhow, Result};
 use common::SessionContext;
 use once_cell::sync::OnceCell;
 use sha2::{Digest, Sha256};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use std::fs;
 use std::path::PathBuf;
@@ -16,6 +18,7 @@ pub struct GeminiSession {
     process_path: Option<String>,
     yolo_mode: bool,
     working_dir: Option<String>,
+    active_transaction_pid: AtomicU32,  // PID of currently running transaction process (0 = none)
 }
 
 impl GeminiSession {
@@ -33,6 +36,7 @@ impl GeminiSession {
             process_path,
             yolo_mode: context.yolo_mode,
             working_dir,
+            active_transaction_pid: AtomicU32::new(0),
         })
     }
 
@@ -139,7 +143,7 @@ impl GeminiSession {
         // to avoid issues with special characters in command line arguments.
         //
 
-        let result = utils::run_command_with_stdin(&mut cmd, prompt)?;
+        let result = utils::run_command_with_stdin_cancellable(&mut cmd, prompt, &self.active_transaction_pid)?;
 
         //
         // For lazy discovery, get and store the session ID after first prompt.
@@ -192,7 +196,25 @@ impl AgentSession for GeminiSession {
     }
 
     fn close(&self) {
+        //
+        // Abort any in-progress transaction before closing.
+        //
+
+        self.abort_transaction();
         self.delete_session();
+    }
+
+    fn abort_transaction(&self) -> bool {
+        let pid = self.active_transaction_pid.load(Ordering::SeqCst);
+        if pid != 0 {
+            common::log_info!("Aborting transaction, killing process {} and descendants", pid);
+            let killed = terminate_process_tree(pid);
+            common::log_info!("Killed {} processes", killed);
+            self.active_transaction_pid.store(0, Ordering::SeqCst);
+            true
+        } else {
+            false
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

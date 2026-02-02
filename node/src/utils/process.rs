@@ -240,6 +240,62 @@ pub fn terminate_process(pid: u32) -> bool {
     }
 }
 
+//
+// Terminate a process and all its descendants efficiently with a single system scan.
+// Kills children first (depth-first), then the parent.
+// Returns the number of processes killed.
+//
+
+pub fn terminate_process_tree(pid: u32) -> usize {
+    let mut sys = System::new_all();
+    sys.refresh_processes(ProcessesToUpdate::All, false);
+
+    //
+    // First, collect all descendant PIDs using the already-loaded process list.
+    //
+
+    let mut descendants = Vec::new();
+    let mut to_check = vec![pid];
+
+    while let Some(check_pid) = to_check.pop() {
+        let parent = Pid::from_u32(check_pid);
+        for (child_pid, process) in sys.processes() {
+            if process.parent() == Some(parent) {
+                let child_u32 = child_pid.as_u32();
+                if !descendants.contains(&child_u32) && child_u32 != pid {
+                    descendants.push(child_u32);
+                    to_check.push(child_u32);
+                }
+            }
+        }
+    }
+
+    //
+    // Kill descendants first (in reverse order - deepest children first).
+    //
+
+    let mut killed = 0;
+    for &dpid in descendants.iter().rev() {
+        if let Some(process) = sys.process(Pid::from_u32(dpid)) {
+            if process.kill() {
+                killed += 1;
+            }
+        }
+    }
+
+    //
+    // Then kill the parent.
+    //
+
+    if let Some(process) = sys.process(Pid::from_u32(pid)) {
+        if process.kill() {
+            killed += 1;
+        }
+    }
+
+    killed
+}
+
 /// Kill all processes with the given name
 pub fn kill_processes_by_name(process_name: &str) -> usize {
     use std::ffi::OsStr;
