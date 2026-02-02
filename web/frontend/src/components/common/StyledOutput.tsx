@@ -82,7 +82,7 @@ export function StyledOutput({ output }: { output: string }) {
                 <div className="text-[10px] font-medium mb-0.5 flex items-center gap-1 text-[var(--text-secondary)]">
                   <span>←</span> {block.label}
                 </div>
-                <div className="prose prose-xs prose-invert max-w-none text-xs text-[var(--text-primary)] [&_table]:text-xs [&_th]:p-1 [&_td]:p-1 [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0">
+                <div className="prose prose-xs prose-invert max-w-none text-xs [&_table]:text-xs [&_th]:p-1 [&_td]:p-1 [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
                 </div>
               </div>
@@ -110,7 +110,7 @@ export function StyledOutput({ output }: { output: string }) {
             );
           default:
             return block.content ? (
-              <div key={idx} className="prose prose-xs prose-invert max-w-none text-xs text-[var(--text-primary)] [&_table]:text-xs [&_th]:p-1 [&_td]:p-1 [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0">
+              <div key={idx} className="prose prose-xs prose-invert max-w-none text-xs [&_table]:text-xs [&_th]:p-1 [&_td]:p-1 [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
               </div>
             ) : null;
