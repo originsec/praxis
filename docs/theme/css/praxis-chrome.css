@@ -26,6 +26,11 @@
     padding: 0.3em 0.8em;
 }
 
+.coal .sidebar ol.section {
+    margin: 0 !important;
+    padding-left: 1em !important;
+}
+
 .coal .sidebar .chapter a {
     color: var(--text-secondary);
     padding: 0.15em 0.8em;
