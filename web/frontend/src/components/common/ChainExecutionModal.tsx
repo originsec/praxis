@@ -38,7 +38,7 @@ export function ChainExecutionModal({ execution, chain, isLoading, onClose, onEd
       )}
     >
       {execution && (
-        <div className="h-[70vh] p-4">
+        <div className="h-[70vh] overflow-auto">
           <ChainExecutionViewer
             execution={execution}
             chain={chain}
