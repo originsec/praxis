@@ -464,6 +464,7 @@ pub fn expand_path(template: &str) -> String {
 /// On Windows, we need to ensure the real node.exe is found first in PATH,
 /// otherwise npm batch scripts may accidentally run praxis_node.exe instead
 /// (because Windows matches "node" to executables containing "node" in the name).
+/// Also, .cmd files need to be run through cmd.exe.
 #[cfg(windows)]
 pub fn build_command(path: &str) -> Command {
     use std::os::windows::process::CommandExt;
@@ -490,7 +491,18 @@ pub fn build_command(path: &str) -> Command {
     let current_path = std::env::var("PATH").unwrap_or_default();
     let new_path = format!("{};{};{}", nodejs_path, script_dir, current_path);
 
-    let mut cmd = Command::new(path);
+    //
+    // .cmd files need to be run through cmd.exe /c.
+    //
+
+    let mut cmd = if path.to_lowercase().ends_with(".cmd") {
+        let mut c = Command::new("cmd.exe");
+        c.arg("/c").arg(path);
+        c
+    } else {
+        Command::new(path)
+    };
+
     cmd.env("PATH", new_path);
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd

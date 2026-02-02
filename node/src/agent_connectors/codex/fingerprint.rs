@@ -78,10 +78,21 @@ impl CodexAgent {
     //
 
     fn verify_binary(&self, path: &str) -> bool {
-        match crate::utils::silent_command(path)
-            .args(["--version"])
-            .output()
-        {
+        //
+        // On Windows, .cmd files need to be run through cmd.exe.
+        //
+
+        let mut cmd = if cfg!(windows) && path.to_lowercase().ends_with(".cmd") {
+            let mut c = crate::utils::silent_command("cmd.exe");
+            c.args(["/c", path, "--version"]);
+            c
+        } else {
+            let mut c = crate::utils::silent_command(path);
+            c.args(["--version"]);
+            c
+        };
+
+        match cmd.output() {
             Ok(output) if output.status.success() => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let contains = stdout.to_lowercase().contains("codex");
