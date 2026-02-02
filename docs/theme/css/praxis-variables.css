@@ -1,6 +1,7 @@
 /* Praxis Terminal Theme - CSS Variables */
+/* All variables scoped to .coal theme only */
 
-:root {
+.coal {
     /* Background colors */
     --bg-primary: #030712;
     --bg-secondary: #050807;
@@ -31,10 +32,8 @@
 
     /* Fonts */
     --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace;
-}
 
-/* mdBook variable overrides - only for coal theme */
-.coal {
+    /* mdBook variable overrides */
     --bg: var(--bg-primary);
     --fg: var(--text-primary);
 
