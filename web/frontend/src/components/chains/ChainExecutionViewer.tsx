@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   ReactFlow,
   Panel,
@@ -403,6 +403,35 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
         return orderA - orderB;
       });
   }, [execution.elements, chain]);
+
+  //
+  // Keyboard navigation for execution steps.
+  //
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (sortedElements.length === 0) return;
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+
+      const currentIndex = selectedElementId
+        ? sortedElements.findIndex(([id]) => id === selectedElementId)
+        : -1;
+
+      let newIndex: number;
+      if (e.key === 'ArrowDown') {
+        newIndex = currentIndex < sortedElements.length - 1 ? currentIndex + 1 : 0;
+      } else {
+        newIndex = currentIndex > 0 ? currentIndex - 1 : sortedElements.length - 1;
+      }
+
+      setSelectedElementId(sortedElements[newIndex][0]);
+    }
+  }, [sortedElements, selectedElementId]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
 
   return (
     <div className="flex flex-col">
