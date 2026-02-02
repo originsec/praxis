@@ -19,6 +19,7 @@
 
 .coal .sidebar li.header-item {
     margin: 0 !important;
+    padding: 0.3em 0 !important;
 }
 
 .coal .sidebar .header-in-summary {
