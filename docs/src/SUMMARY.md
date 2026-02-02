@@ -20,10 +20,10 @@
 # Agent Connectors
 
 - [Overview](./connectors/overview.md)
+- [Adding New Connectors](./connectors/adding-new.md)
 - [Claude Code](./connectors/claude-code.md)
 - [Gemini CLI](./connectors/gemini.md)
 - [M365 Copilot](./connectors/m365-copilot.md)
-- [Adding New Connectors](./connectors/adding-new.md)
 
 # Architecture
 

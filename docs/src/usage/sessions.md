@@ -51,8 +51,6 @@ When you send a prompt:
 5. Node parses and extracts the response
 6. Response appears in the UI
 
-This is real interaction with the actual agent process-not a simulation.
-
 ## Session Messages
 
 The UI tracks messages per session:
@@ -74,13 +72,9 @@ The agent returns to the fingerprinted state.
 
 ## Sessions and Operations
 
-Semantic operations can use sessions in two ways:
+Semantic operations always create their own dedicated sessions. When an operation runs, it spawns a fresh session, executes, and closes it.
 
-**Dedicated Session** - Operation creates its own session, runs, then closes it. Clean isolation.
-
-**Existing Session** - Operation uses your active session. Faster but shares state.
-
-When running operations through an active session, the conversation continues in context.
+**Warning**: Running an operation will implicitly end any open interactive session you have with that agent. Interactive sessions and operation sessions should not be expected to run concurrently - an agent supports one session at a time.
 
 ## Multiple Sessions
 

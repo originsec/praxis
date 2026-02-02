@@ -1,6 +1,6 @@
 # Terminal
 
-The terminal feature gives you direct shell access to nodes. This is a full PTY terminal, not the agent session-it's a separate shell on the target system.
+The terminal feature gives you direct shell access to nodes. This is a full PTY terminal - a separate shell on the target system.
 
 ## Opening a Terminal
 
@@ -54,7 +54,7 @@ The terminal session persists while you have the panel open. Closing the panel e
 ## Limitations
 
 - One terminal per node at a time
-- Runs as the node's user (not root unless the node runs as root)
+- Runs as the node's user
 - Subject to the node's environment and permissions
 
 ## Troubleshooting

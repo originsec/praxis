@@ -8,7 +8,7 @@ A connector handles four main capabilities:
 
 **Fingerprinting** - Detecting whether an agent is installed and getting its process path. This usually means checking for config files, finding running processes, or looking in common installation locations.
 
-**Interception** - Knowing which domains the agent talks to so traffic can be captured. For Claude Code, that's `api.anthropic.com`. For Gemini, it's `generativelanguage.googleapis.com`.
+**Interception** - Knowing which domains the agent talks to so traffic can be captured.
 
 **Reconnaissance** - Discovering the agent's configuration, tools, and session history. This includes parsing config files, finding MCP server definitions, and locating past conversations.
 
@@ -18,39 +18,13 @@ A connector handles four main capabilities:
 
 | Connector | Agent | Platform | Session Mode |
 |-----------|-------|----------|--------------|
-| `claudecode` | Claude Code CLI | Linux, Windows, macOS | CLI (PTY) |
-| `gemini` | Gemini CLI | Linux, Windows, macOS | CLI (PTY) |
-| `m365copilot` | Microsoft 365 Copilot | Windows only | DevTools / UIAutomation |
+| [`claudecode`](./claude-code.md) | Claude Code CLI | Linux, Windows | CLI (PTY) |
+| [`gemini`](./gemini.md) | Gemini CLI | Linux, Windows | CLI (PTY) |
+| [`m365copilot`](./m365-copilot.md) | Microsoft 365 Copilot | Windows only | DevTools / UIAutomation |
 
-### Claude Code
+Want to add support for another agent? Contributions welcome! See [Adding New Connectors](./adding-new.md).
 
-Anthropic's command-line AI assistant. The connector:
-- Fingerprints via `~/.claude.json` or `~/.config/claude/config.json`
-- Intercepts traffic to `api.anthropic.com`
-- Discovers MCP servers from config and `~/.claude/mcp.json`
-- Creates sessions by spawning `claude` in a PTY
-
-See [Claude Code](./claude-code.md) for details.
-
-### Gemini CLI
-
-Google's command-line AI assistant. The connector:
-- Fingerprints via `~/.gemini/settings.json`
-- Intercepts traffic to `generativelanguage.googleapis.com`
-- Discovers extensions and config
-- Creates sessions by spawning `gemini` in a PTY
-
-See [Gemini CLI](./gemini.md) for details.
-
-### M365 Copilot
-
-Microsoft 365 Copilot running in Edge. Windows only. The connector:
-- Fingerprints by checking Edge and Copilot availability
-- Intercepts traffic to `substrate.office.com` and related
-- Discovers capabilities via the web interface
-- Creates sessions using Chrome DevTools Protocol (default) or UI Automation
-
-See [M365 Copilot](./m365-copilot.md) for details.
+**Note**: Agent implementations change over time. Connectors may break when agents update and will require maintenance to work with the latest versions.
 
 ## The Trait System
 
@@ -66,6 +40,14 @@ trait Agent {
     // ...
 }
 
+// Required for sessions: session management
+trait AgentSession {
+    fn session_id(&self) -> &Uuid;
+    fn transact(&self, prompt: &str) -> Result<String>;
+    fn close(&self);
+    // ...
+}
+
 // Optional: traffic interception support
 trait AgentIntercept {
     fn intercept_domains(&self) -> Vec<&str>;
@@ -76,14 +58,6 @@ trait AgentIntercept {
 trait AgentRecon {
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult>;
 }
-
-// Required for sessions: session management
-trait AgentSession {
-    fn session_id(&self) -> &Uuid;
-    fn transact(&self, prompt: &str) -> Result<String>;
-    fn close(&self);
-    // ...
-}
 ```
 
 ## Feature Support
@@ -92,7 +66,7 @@ Not all agents support all features. The core capabilities - fingerprinting, tra
 
 **Config editing** requires the agent to have a file-based configuration that can be modified. CLI agents typically store settings in JSON files that can be edited directly. Browser-based agents often don't expose their configuration in an editable format.
 
-**MCP discovery** only applies to agents that support the Model Context Protocol for tool extensions. This is typically limited to CLI agents that have MCP server configuration.
+**MCP discovery** only applies to agents that support the Model Context Protocol for tool extensions.
 
 ## Adding New Connectors
 

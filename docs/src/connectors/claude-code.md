@@ -4,17 +4,16 @@ The Claude Code connector enables interaction with Anthropic's Claude Code CLI a
 
 ## Overview
 
-Claude Code is a command-line AI assistant that can read files, execute commands, and work with code. The connector supports all major platforms (Linux, Windows, macOS).
+Claude Code is a command-line AI assistant that can read files, execute commands, and work with code. The connector supports Linux and Windows.
 
 ## Fingerprinting
 
 The connector looks for Claude Code by checking:
 
-1. **Config file existence** - `~/.claude.json` or `~/.config/claude/config.json`
-2. **Process search** - Looking for running `claude` processes
-3. **Binary location** - Finding the `claude` executable in PATH
+1. **PATH search** - Finding the `claude` executable in PATH
+2. **Explicit paths** - Checking known installation locations (`~/.local/bin/claude` on Linux, `%USERPROFILE%\.local\bin\claude.exe` on Windows)
 
-If any of these succeed, fingerprinting returns true and the agent appears in the node's agent list.
+The binary is verified by running `claude --version` and checking the output contains "claude". If found and verified, fingerprinting succeeds and the agent appears in the node's agent list.
 
 ## Interception
 
@@ -61,17 +60,17 @@ When semantic recon is enabled (requires Semantic Parser LLM), the connector als
 Sessions are created by spawning Claude Code in a PTY (pseudo-terminal):
 
 ```
-┌─────────────────────────────────────────┐
-│              Praxis Node                 │
-│                                          │
-│  ┌─────────────────────────────────┐    │
-│  │         PTY Session              │    │
-│  │                                  │    │
-│  │  claude --yes-always ───────────┼────┼──▶ Claude Process
-│  │         │                        │    │
-│  │         └─ stdin/stdout ─────────│    │
-│  └─────────────────────────────────┘    │
-└─────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────┐
+│                      Praxis Node                      │
+│                                                       │
+│  ┌─────────────────────────────────┐                  │
+│  │          PTY Session            │                  │
+│  │                                 │                  │
+│  │  claude ────────────────────────┼──▶ Claude Process│
+│  │         │                       │                  │
+│  │         └─ stdin/stdout         │                  │
+│  └─────────────────────────────────┘                  │
+└───────────────────────────────────────────────────────┘
 ```
 
 ### Session Context
@@ -80,17 +79,24 @@ When creating a session, you can specify:
 
 **Working Directory** - Where Claude should operate. This affects what files it can see with `ls`, `cat`, etc.
 
-**YOLO Mode** - When enabled, passes `--yes-always` to Claude, which auto-approves all tool calls. Without this, Claude asks for confirmation before running commands.
+**YOLO Mode** - When enabled, passes `--dangerously-skip-permissions` and `--add-dir` (with `/` on Linux or `C:\` on Windows) to Claude, which auto-approves all tool calls and grants access to the filesystem. Without this, Claude asks for confirmation before running commands.
+
+### Session Tracking
+
+The connector maintains conversation context across multiple prompts:
+
+1. **First prompt**: Generates a UUID and passes `--session-id <id>` to Claude
+2. **Subsequent prompts**: Passes `--resume <id>` to continue the same session
+
+This allows multi-turn conversations where Claude remembers previous context within the session.
 
 ### Transacting
 
 Sending prompts works by:
-1. Writing the prompt text to the PTY stdin
+1. Running Claude with `-p` flag and the prompt text
 2. Waiting for Claude to process and respond
 3. Parsing the response from stdout
 4. Returning the assistant's message
-
-The connector handles the terminal control sequences and output parsing.
 
 ## Config Editing
 
@@ -103,27 +109,27 @@ Changes are written back to disk and take effect on the next Claude session.
 
 ## Tool Discovery
 
-The connector discovers several categories of tools:
-
-**MCP Servers** - External tools connected via the Model Context Protocol:
-- File system access
-- Database connections
-- Custom tools
-
-**Internal Tools** - Claude's built-in capabilities discovered through semantic parsing:
-- File operations (read, write, edit)
-- Command execution (bash)
-- Web browsing
-- Code analysis
+The connector supports both static and semantic recon. Static recon parses configuration files to discover MCP servers and settings. Semantic recon creates a session and queries the agent directly to discover internal tools and capabilities.
 
 ## Files and Paths
 
+**Global (Home Directory)**
+
 | File | Path | Content |
 |------|------|---------|
-| Main config | `~/.claude.json` | Settings, permissions, API config |
-| Alt config | `~/.config/claude/config.json` | Same (alternate location) |
-| MCP servers | `~/.claude/mcp.json` | MCP server definitions |
+| Global settings | `~/.claude/settings.json` | Global settings |
+| Preferences | `~/.claude.json` | User preferences |
+| Global instructions | `~/.claude/CLAUDE.md` | Global instruction file |
 | Projects | `~/.claude/projects/` | Session history by project |
+
+**Project (Working Directory)**
+
+| File | Path | Content |
+|------|------|---------|
+| Project settings | `.claude/settings.json` | Project-specific settings |
+| Local settings | `.claude/settings.local.json` | Local overrides (not committed) |
+| Project instructions | `CLAUDE.md` | Project instruction file |
+| Project MCP | `.mcp.json` | Project MCP server definitions |
 
 ## Troubleshooting
 

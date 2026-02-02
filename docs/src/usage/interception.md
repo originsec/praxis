@@ -65,7 +65,6 @@ Praxis supports three methods for routing traffic through the proxy. Each has tr
 **Disadvantages:**
 - Requires elevated privileges (root/admin)
 - More complex setup
-- Not available on macOS
 
 **Best for:** Comprehensive capture, applications that bypass proxy
 
@@ -74,7 +73,7 @@ Praxis supports three methods for routing traffic through the proxy. Each has tr
 **How it works:** Modifies the hosts file to redirect target domains to localhost where the proxy listens.
 
 **Setup:**
-- Adds entries to `/etc/hosts` (Linux/macOS) or `C:\Windows\System32\drivers\etc\hosts` (Windows)
+- Adds entries to `/etc/hosts` (Linux) or `C:\Windows\System32\drivers\etc\hosts` (Windows)
 - Flushes DNS cache
 
 **Advantages:**
@@ -117,6 +116,8 @@ The Traffic tab shows captured requests:
 | URL | Full request URL |
 | Status | Response status code |
 
+WebSocket traffic is also supported - messages are coalesced into a single row per connection.
+
 ### Request Details
 
 Click a row to see details:
@@ -137,17 +138,9 @@ For LLM APIs, you'll see:
 - Model responses
 - Token usage
 
-### Traffic Parsing
-
-With a Traffic Parser LLM configured, traffic is automatically analyzed:
-- Prompt extraction
-- Response summarization
-- Tool call detection
-- Key information highlighted
-
 ## Traffic Rules
 
-Rules let you match and process specific traffic:
+Rules let you match and process specific traffic.
 
 ### Creating Rules
 
@@ -164,8 +157,11 @@ Rules let you match and process specific traffic:
 
 When traffic matches a rule:
 - Entry is tagged with the rule
-- Optional summarization runs
 - Matches viewable separately
+
+### Semantic Parsing
+
+Rules can include a summarization prompt for semantic analysis. When a rule matches and has a summarization prompt configured, the Traffic Parser LLM processes the matched traffic - extracting prompts, summarizing responses, detecting tool calls, and highlighting key information.
 
 Use rules to:
 - Flag specific API calls

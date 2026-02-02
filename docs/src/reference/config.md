@@ -292,10 +292,3 @@ Same schema, different backend. Use for:
 | Claude Config | `%USERPROFILE%\.claude.json` |
 | Hosts File | `C:\Windows\System32\drivers\etc\hosts` |
 
-### macOS
-
-| File | Path |
-|------|------|
-| Database | `~/.praxis_operations.db` |
-| Claude Config | `~/.claude.json` |
-| Hosts File | `/etc/hosts` |

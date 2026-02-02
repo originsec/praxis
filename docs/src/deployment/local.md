@@ -72,10 +72,6 @@ The dev server proxies to the backend.
 If not using Docker:
 
 ```bash
-# macOS with Homebrew
-brew install rabbitmq
-brew services start rabbitmq
-
 # Linux
 sudo systemctl start rabbitmq-server
 ```

@@ -4,15 +4,18 @@ The Gemini connector enables interaction with Google's Gemini CLI agent.
 
 ## Overview
 
-Gemini CLI is Google's command-line AI assistant. Like Claude Code, it can read files, execute commands, and work with code. The connector works on Linux, Windows, and macOS.
+Gemini CLI is Google's command-line AI assistant. Like Claude Code, it can read files, execute commands, and work with code. The connector supports Linux and Windows.
 
 ## Fingerprinting
 
 The connector looks for Gemini CLI by checking:
 
-1. **Config file existence** - `~/.gemini/settings.json`
-2. **Process search** - Looking for running `gemini` processes
-3. **Binary location** - Finding the `gemini` executable in PATH
+1. **PATH search** - Finding the `gemini` executable in PATH (prefers `.cmd` on Windows)
+2. **Explicit paths** - Checking known installation locations:
+   - Linux: `~/.local/bin/gemini`, `/usr/local/bin/gemini`, `/usr/bin/gemini`
+   - Windows: `%USERPROFILE%\.local\bin\gemini.cmd`, `%USERPROFILE%\AppData\Roaming\npm\gemini.cmd`, etc.
+
+If found, fingerprinting succeeds and the agent appears in the node's agent list.
 
 ## Interception
 
@@ -31,68 +34,104 @@ When interception is enabled, you'll see:
 Static reconnaissance discovers:
 
 **Configuration**
-- Settings file (`~/.gemini/settings.json`)
-- Model preferences and API configuration
+- User settings (`~/.gemini/settings.json`)
+- Google account info (`~/.gemini/google_accounts.json`)
+- OAuth credentials (`~/.gemini/oauth_creds.json`)
+- System defaults and settings (platform-specific paths)
 
-**Extensions**
-- Gemini extensions (similar to MCP servers)
-- Extension names and configurations
+**Context Files**
+- Global context (`~/.gemini/GEMINI.md`)
+- Project context files (configurable via `context.fileName` in settings)
 
 **Sessions**
-- Session files under `~/.gemini/sessions/`
-- Conversation history
+- Session files under `~/.gemini/tmp/<project_hash>/chats/`
+- Session metadata including message count and timestamps
 
 ### Semantic Recon
 
-When semantic recon is enabled, the connector also:
-- Parses configuration for tool definitions
-- Identifies available Gemini capabilities
-- Extracts extension details
+When semantic recon is enabled, the connector also creates a session and queries the agent directly to discover internal tools and capabilities.
 
 ## Session Management
 
-Sessions work similarly to Claude Code-the connector spawns Gemini CLI in a PTY:
+Sessions are created by spawning Gemini CLI in a PTY (pseudo-terminal):
 
 ```
-┌─────────────────────────────────────────┐
-│              Praxis Node                 │
-│                                          │
-│  ┌─────────────────────────────────┐    │
-│  │         PTY Session              │    │
-│  │                                  │    │
-│  │  gemini ─────────────────────────┼────┼──▶ Gemini Process
-│  │    │                             │    │
-│  │    └─ stdin/stdout ──────────────│    │
-│  └─────────────────────────────────┘    │
-└─────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────┐
+│                      Praxis Node                      │
+│                                                       │
+│  ┌─────────────────────────────────┐                  │
+│  │          PTY Session            │                  │
+│  │                                 │                  │
+│  │  gemini ────────────────────────┼──▶ Gemini Process│
+│  │    │                            │                  │
+│  │    └─ stdin/stdout              │                  │
+│  └─────────────────────────────────┘                  │
+└───────────────────────────────────────────────────────┘
 ```
 
 ### Session Context
 
-**Working Directory** - Where Gemini should operate.
+When creating a session, you can specify:
 
-**YOLO Mode** - Auto-approve tool calls (behavior depends on Gemini's configuration).
+**Working Directory** - Where Gemini should operate. The session ID is derived from a hash of this path.
+
+**YOLO Mode** - When enabled, passes `-y` to Gemini, which auto-approves tool calls.
+
+### Transacting
+
+Sending prompts works by:
+1. Writing the prompt text to stdin (Gemini reads prompts from stdin)
+2. Waiting for Gemini to process and respond
+3. Parsing the response from stdout
+4. Returning the assistant's message
+
+Session continuity is maintained using the `-r` flag with the session ID discovered from Gemini's storage after the first prompt.
 
 ## Config Editing
 
-You can view and edit Gemini's configuration from the Praxis UI:
-- Settings file with model and API preferences
-- Extension configurations
+You can view and edit Gemini's configuration files directly from the Praxis UI:
+- User settings with model and API preferences
+- Context files
+
+Changes are written back to disk and take effect on the next Gemini session.
+
+## Tool Discovery
+
+The connector supports both static and semantic recon. Static recon parses configuration files to discover settings and context files. Semantic recon creates a session and queries the agent directly to discover internal tools and capabilities.
 
 ## Files and Paths
 
+**Global (Home Directory)**
+
 | File | Path | Content |
 |------|------|---------|
-| Settings | `~/.gemini/settings.json` | Main configuration |
-| Sessions | `~/.gemini/sessions/` | Session history |
+| User settings | `~/.gemini/settings.json` | Main configuration |
+| Google accounts | `~/.gemini/google_accounts.json` | Account info |
+| OAuth credentials | `~/.gemini/oauth_creds.json` | Auth credentials |
+| Global context | `~/.gemini/GEMINI.md` | Global instruction file |
+| Sessions | `~/.gemini/tmp/<hash>/chats/` | Session history by project |
+
+**System (Platform-specific)**
+
+| File | Linux Path | Windows Path |
+|------|------------|--------------|
+| System defaults | `/etc/gemini-cli/system-defaults.json` | `C:\ProgramData\gemini-cli\system-defaults.json` |
+| System settings | `/etc/gemini-cli/settings.json` | `C:\ProgramData\gemini-cli\settings.json` |
+
+**Project (Working Directory)**
+
+| File | Path | Content |
+|------|------|---------|
+| Project settings | `.gemini/settings.json` | Project-specific settings |
+| Project context | `GEMINI.md` | Project instruction file (configurable) |
 
 ## Troubleshooting
 
 ### "Agent not fingerprinted"
 
 - Ensure Gemini CLI is installed
-- Check that `~/.gemini/settings.json` exists
 - Verify the `gemini` command is in PATH
+- On Windows, check that the `.cmd` wrapper exists
 
 ### "Session creation failed"
 

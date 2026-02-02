@@ -1,6 +1,6 @@
 # M365 Copilot Connector
 
-The M365 Copilot connector enables interaction with Microsoft 365 Copilot running in Edge. **Windows only.**
+The M365 Copilot connector enables interaction with Microsoft 365 Copilot. **Windows only.**
 
 ## Overview
 
@@ -8,9 +8,7 @@ Microsoft 365 Copilot is different from CLI-based agents-it runs in a browser. T
 
 ## Fingerprinting
 
-The connector checks for:
-1. **Microsoft Edge** - The browser must be installed
-2. **Copilot availability** - The M365 Copilot web interface must be accessible
+The connector checks for Copilot availability - whether the M365 Copilot web interface is accessible.
 
 ## Interception
 
@@ -27,24 +25,26 @@ The URL pattern filters for Copilot-specific API calls.
 Uses Chrome DevTools Protocol to interact with Copilot:
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     Praxis Node                          │
-│                                                          │
-│  ┌────────────────────────────────────────────────────┐ │
-│  │              DevTools Adapter                       │ │
-│  │                                                     │ │
-│  │  Edge ──CDP Connection──▶ Copilot Page             │ │
-│  │   │                          │                      │ │
-│  │   └─ Hidden Desktop ─────────┘                      │ │
-│  └────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────┐
+│                      Praxis Node                      │
+│                                                       │
+│  ┌─────────────────────────────────────────────────┐  │
+│  │              DevTools Adapter                   │  │
+│  │                                                 │  │
+│  │  Browser ──CDP Connection──▶ Copilot Page       │  │
+│  │   │                          │                  │  │
+│  │   └─ Hidden Desktop ─────────┘                  │  │
+│  └─────────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────────┘
 ```
 
 **How it works:**
-1. Launches Edge with remote debugging enabled
+1. Launches app with webview component and remote debugging enabled
 2. Navigates to M365 Copilot
 3. Uses CDP to inject prompts and extract responses
 4. Runs on a hidden desktop to avoid interfering with user activity
+
+Set `PRAXIS_NOT_HIDDEN=1` to disable the hidden desktop. When disabled, the app spawns normally and is minimized after it's ready - useful for debugging.
 
 **Advantages:**
 - More reliable than UI automation
@@ -53,10 +53,10 @@ Uses Chrome DevTools Protocol to interact with Copilot:
 
 ### UI Automation Mode
 
-Uses Windows UI Automation to interact with the browser UI directly. This mode is experimental and less reliable.
+Uses Windows UI Automation to interact with the browser UI directly. **This mode is currently disabled in the default configuration and is not recommended for use.**
 
 **How it works:**
-1. Finds the Edge window with Copilot
+1. Finds the browser window with Copilot
 2. Locates input and output elements via UI Automation
 3. Simulates typing and reads responses
 
@@ -64,15 +64,8 @@ Uses Windows UI Automation to interact with the browser UI directly. This mode i
 - Flaky element detection
 - Slower and more fragile
 - Requires visible window
+- Breaks frequently with UI changes
 
-## Hidden Desktop
-
-By default, DevTools mode runs Edge on a hidden desktop. This:
-- Prevents interference with the user's screen
-- Allows Copilot interactions without visible UI
-- Keeps the session isolated
-
-Set `PRAXIS_NOT_HIDDEN=1` to disable this for debugging.
 
 ## Reconnaissance
 
@@ -94,7 +87,7 @@ Semantic recon attempts to discover:
 ### Creating Sessions
 
 When you create a session:
-1. Edge launches with debugging port
+1. App with webview component launches with debugging port
 2. Hidden desktop is created (if enabled)
 3. CDP connection is established
 4. Copilot page loads and authenticates
@@ -109,12 +102,11 @@ Prompts are sent by:
 
 ### Authentication
 
-M365 Copilot requires Microsoft authentication. The session uses the user's existing Edge profile and login state.
+M365 Copilot requires Microsoft authentication. The session uses the user's existing browser profile and login state.
 
 ## Requirements
 
 - **Windows** - This connector is Windows-only
-- **Microsoft Edge** - Required browser
 - **M365 License** - User must have Copilot access
 - **Logged In** - User must be authenticated to Microsoft
 
@@ -122,13 +114,12 @@ M365 Copilot requires Microsoft authentication. The session uses the user's exis
 
 ### "Agent not fingerprinted"
 
-- Ensure Microsoft Edge is installed
 - Verify the user has M365 Copilot access
-- Check that Copilot works manually in Edge
+- Check that Copilot works manually in a browser
 
 ### "Session creation failed"
 
-- Check Edge can launch with debugging enabled
+- Check app can launch with debugging enabled
 - Verify M365 authentication is valid
 - Look for firewall blocking debugging ports
 - Check node logs for CDP errors
