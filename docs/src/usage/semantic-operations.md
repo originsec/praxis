@@ -44,6 +44,25 @@ Best for: Complex tasks, multi-step operations, tasks requiring judgment.
 
 The orchestrator is a separate LLM (configured in Settings as "Semantic Ops" LLM) that manages the interaction. It has access to a `session_prompt` tool to communicate with the target agent.
 
+### Model Requirements
+
+Agent mode requires a sufficiently capable model for the orchestrator. The model must be able to:
+- Follow complex multi-step instructions
+- Output tool calls in the correct JSON format
+- Wait for tool results before proceeding
+- Avoid hallucinating results
+
+**Recommended models:**
+- Anthropic: Claude Sonnet 4 or Claude Opus 4
+- OpenAI: GPT-4o or GPT-4 Turbo
+- Google: Gemini 1.5 Pro
+
+**Not recommended for agent mode:**
+- Smaller/faster models (Haiku, GPT-4o-mini, Llama 8B) - these often fail to follow tool calling instructions correctly and may hallucinate results
+- Models without strong instruction-following capabilities
+
+If you're seeing issues with tool calling or hallucinated results, try switching to a more capable model.
+
 ### Agent Mode Architecture
 
 The orchestrator uses a system prompt that defines its behavior:
@@ -273,3 +292,22 @@ You can cancel a running chain from the Runs tab. Cancellation stops queuing new
 - Increase the timeout value
 - Simplify the operation
 - Check if the agent is responding at all
+
+### Tool calling not working (agent mode)
+
+Symptoms: The orchestrator outputs tool calls but they don't execute, or execution completes immediately without actually running the tool.
+
+- **Switch to a more capable model** - smaller models often fail to follow the tool calling format correctly. Use Claude Sonnet/Opus, GPT-4o, or Gemini 1.5 Pro
+- Check the operation output for malformed JSON in tool calls
+- Verify the model is outputting the correct format: `{"tool": "session_prompt", "args": {"text": "..."}}`
+
+### Hallucinated or fabricated results
+
+Symptoms: The operation completes with results that look plausible but are entirely made up - the orchestrator never actually called the remote agent.
+
+This happens when a model outputs both a tool call AND a completion signal in the same message, fabricating results instead of waiting for the real tool response.
+
+- **Use a more capable model** - this is almost always caused by using a model that doesn't follow instructions well
+- Check the full operation output - if you see a tool call immediately followed by a completion signal with results, the model hallucinated
+- Recommended: Claude Sonnet 4+, GPT-4o, or Gemini 1.5 Pro
+- Avoid: Smaller/faster models like Haiku, GPT-4o-mini, or small open-source models for agent mode orchestration
