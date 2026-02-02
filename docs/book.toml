@@ -1,6 +1,7 @@
 [book]
 title = "Praxis Documentation"
-authors = ["Origin Security"]
+authors = ["Origin HQ"]
+description = "Documentation for the Praxis platform"
 language = "en"
 src = "src"
 
@@ -8,6 +9,7 @@ src = "src"
 build-dir = "book"
 
 [output.html]
+theme = "theme"
 git-repository-url = "https://github.com/originsec/praxis"
 edit-url-template = "https://github.com/originsec/praxis/edit/main/docs/src/{path}"
 default-theme = "ayu"
