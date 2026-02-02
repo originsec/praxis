@@ -506,6 +506,7 @@ pub fn build_command(path: &str) -> Command {
 // Logs the command and output.
 //
 
+#[allow(dead_code)]
 pub fn run_command(cmd: &mut Command) -> Result<String> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -573,6 +574,7 @@ pub fn run_command_silent(cmd: &mut Command) -> Result<Output> {
 // Used for CLIs that require input via stdin (e.g., Gemini CLI).
 //
 
+#[allow(dead_code)]
 pub fn run_command_with_stdin(cmd: &mut Command, input: &str) -> Result<String> {
     use std::io::Write;
 
