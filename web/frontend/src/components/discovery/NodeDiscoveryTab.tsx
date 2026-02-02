@@ -121,7 +121,7 @@ export function NodeDiscoveryTab({ node }: NodeDiscoveryTabProps) {
               disabled={!node.intercept_active}
               className={`px-4 py-2 text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                 node.agent_discovery_enabled
-                  ? 'bg-red-500/20 text-[var(--accent-error)] hover:bg-red-500/30'
+                  ? 'bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30'
                   : 'bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30'
               }`}
             >
@@ -137,7 +137,7 @@ export function NodeDiscoveryTab({ node }: NodeDiscoveryTabProps) {
       //
       */}
       {state.discovery.error && (
-        <div className="bg-red-500/10 border border-red-500/30 p-4 text-[var(--accent-error)] text-sm">
+        <div className="bg-[var(--accent-error)]/10 border border-[var(--accent-error)]/30 p-4 text-[var(--accent-error)] text-sm">
           {state.discovery.error}
         </div>
       )}

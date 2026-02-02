@@ -448,11 +448,11 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
       // Execution info header.
       //
       */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-subtle bg-[var(--bg-secondary)]">
-        <div className="flex items-center gap-4">
-          <div>
-            <span className="text-xs text-muted">Chain:</span>
-            <span className="ml-2 font-mono">{execution.chain_name}</span>
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-subtle bg-[var(--bg-secondary)]">
+        <div className="flex items-center gap-3 text-[10px] whitespace-nowrap">
+          <div className="flex items-center min-w-0">
+            <span className="text-muted">Chain:</span>
+            <span className="ml-2 font-mono truncate max-w-[220px]">{execution.chain_name}</span>
             {onEditChain && chain && (
               <button
                 onClick={() => onEditChain(chain.id)}
@@ -463,8 +463,8 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
               </button>
             )}
           </div>
-          <div>
-            <span className="text-xs text-muted">Status:</span>
+          <div className="flex items-center">
+            <span className="text-muted">Status:</span>
             <span className={`ml-2 font-mono ${
               execution.status === 'Completed' ? 'text-[var(--text-highlight)]' :
               execution.status === 'Failed' ? 'text-[var(--accent-error)]' :
@@ -472,14 +472,14 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
               'text-[var(--text-secondary)]'
             }`}>{execution.status}</span>
           </div>
-          <div>
-            <span className="text-xs text-muted">Started:</span>
-            <span className="ml-2 text-sm">{new Date(execution.started_at).toLocaleString()}</span>
+          <div className="flex items-center">
+            <span className="text-muted">Started:</span>
+            <span className="ml-2">{new Date(execution.started_at).toLocaleString()}</span>
           </div>
           {execution.ended_at && (
-            <div>
-              <span className="text-xs text-muted">Ended:</span>
-              <span className="ml-2 text-sm">{new Date(execution.ended_at).toLocaleString()}</span>
+            <div className="flex items-center">
+              <span className="text-muted">Ended:</span>
+              <span className="ml-2">{new Date(execution.ended_at).toLocaleString()}</span>
             </div>
           )}
         </div>
@@ -496,14 +496,21 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
             onClick={() => setOutputExpanded(!outputExpanded)}
             className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-[var(--bg-tertiary)] transition-colors text-left"
           >
-            {outputExpanded ? <ChevronDown size={12} className="text-[var(--text-secondary)]" /> : <ChevronRight size={12} className="text-[var(--text-secondary)]" />}
+            {outputExpanded ? (
+              <ChevronDown size={12} className="text-[var(--text-secondary)]" />
+            ) : (
+              <ChevronRight size={12} className="text-[var(--text-secondary)]" />
+            )}
+            <CheckCircle2 size={12} className="text-[var(--accent-success)]" />
             <span className="text-xs font-medium text-[var(--text-highlight)]">Final Output</span>
-            <span className="text-xs text-muted ml-auto">{Object.keys(outputs).length} output{Object.keys(outputs).length !== 1 ? 's' : ''}</span>
+            <span className="text-xs text-muted ml-auto">
+              {Object.keys(outputs).length} output{Object.keys(outputs).length !== 1 ? 's' : ''}
+            </span>
           </button>
           {outputExpanded && (
             <div className="px-3 pb-3 space-y-2">
               {Object.entries(outputs).map(([label, output]) => (
-                <div key={label} className="p-2 bg-[var(--bg-primary)] rounded text-xs max-h-48 overflow-auto border border-[var(--border-dim)]">
+                <div key={label} className="p-2 bg-[var(--bg-secondary)] rounded text-xs max-h-64 overflow-auto border border-subtle text-[var(--text-secondary)]">
                   <StyledOutput output={output} />
                 </div>
               ))}
@@ -726,7 +733,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
                       ? 'Error:'
                       : 'Output:'}
                   </span>
-                  <div className="mt-1 p-3 bg-[var(--bg-secondary)] rounded text-sm max-h-64 overflow-auto" style={{ color: 'rgb(92, 156, 102)' }}>
+                  <div className="mt-1 p-3 bg-[var(--bg-secondary)] rounded text-sm max-h-64 overflow-auto text-[var(--text-secondary)]">
                     <StyledOutput output={selectedOutput} />
                   </div>
                 </div>
@@ -741,7 +748,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
                 <div>
                   <span className="text-xs text-muted font-medium">Input Data:</span>
                   <div className="mt-1 p-3 bg-[var(--bg-secondary)] rounded text-sm max-h-48 overflow-auto">
-                    <pre className="whitespace-pre-wrap font-mono text-xs" style={{ color: 'rgb(92, 156, 102)' }}>{selectedElement.context.input}</pre>
+                    <pre className="whitespace-pre-wrap font-mono text-xs text-[var(--text-secondary)]">{selectedElement.context.input}</pre>
                   </div>
                 </div>
               )}

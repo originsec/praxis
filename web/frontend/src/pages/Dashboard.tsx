@@ -250,7 +250,7 @@ export function Dashboard() {
       //
       */}
       {!isConnected && (
-        <div className="bg-red-500/10 border border-red-500/30 p-4 flex items-center gap-3 ascii-box">
+        <div className="bg-[var(--accent-error)]/10 border border-[var(--accent-error)]/30 p-4 flex items-center gap-3 ascii-box">
           <AlertCircle className="text-[var(--accent-error)]" size={20} />
           <div>
             <p className="text-xs font-medium text-[var(--accent-error)]">CONNECTION LOST</p>
@@ -261,7 +261,7 @@ export function Dashboard() {
         </div>
       )}
       {isConnected && !state.systemState && (
-        <div className="bg-yellow-500/10 border border-yellow-500/30 p-4 flex items-center gap-3 ascii-box">
+        <div className="bg-[var(--accent-warning)]/10 border border-[var(--accent-warning)]/30 p-4 flex items-center gap-3 ascii-box">
           <AlertCircle className="text-[var(--accent-warning)]" size={20} />
           <div>
             <p className="text-xs font-medium text-[var(--accent-warning)]">SERVICE UNAVAILABLE</p>

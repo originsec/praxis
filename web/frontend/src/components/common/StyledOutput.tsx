@@ -71,7 +71,7 @@ export function StyledOutput({ output }: { output: string }) {
                 <div className="text-[10px] text-[var(--text-secondary)] font-medium mb-0.5 flex items-center gap-1">
                   <span>→</span> {block.label}
                 </div>
-                <pre className="text-xs whitespace-pre-wrap font-mono text-muted">{block.content}</pre>
+                <pre className="text-[11px] whitespace-pre-wrap font-mono text-muted">{block.content}</pre>
               </div>
             );
           case 'incoming': {
@@ -82,7 +82,7 @@ export function StyledOutput({ output }: { output: string }) {
                 <div className="text-[10px] font-medium mb-0.5 flex items-center gap-1 text-[var(--text-secondary)]">
                   <span>←</span> {block.label}
                 </div>
-                <div className="prose prose-xs prose-invert max-w-none text-xs [&_table]:text-xs [&_th]:p-1 [&_td]:p-1 [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0">
+                <div className="prose prose-xs prose-invert max-w-none text-[11px] [&_table]:text-[10px] [&_th]:p-0.5 [&_td]:p-0.5 [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_h3]:text-xs [&_h3]:my-1">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
                 </div>
               </div>
@@ -91,7 +91,7 @@ export function StyledOutput({ output }: { output: string }) {
           case 'error':
             return (
               <div key={idx} className="border-l border-[var(--accent-error)] pl-2 py-0.5">
-                <pre className="text-xs whitespace-pre-wrap font-mono text-[var(--accent-error)]">{block.content}</pre>
+                <pre className="text-[11px] whitespace-pre-wrap font-mono text-[var(--accent-error)]">{block.content}</pre>
               </div>
             );
           case 'section':
@@ -110,7 +110,7 @@ export function StyledOutput({ output }: { output: string }) {
             );
           default:
             return block.content ? (
-              <div key={idx} className="prose prose-xs prose-invert max-w-none text-xs [&_table]:text-xs [&_th]:p-1 [&_td]:p-1 [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0">
+              <div key={idx} className="prose prose-xs prose-invert max-w-none text-[11px] [&_table]:text-[10px] [&_th]:p-0.5 [&_td]:p-0.5 [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_h3]:text-xs [&_h3]:my-1">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
               </div>
             ) : null;

@@ -107,7 +107,7 @@ function AgentListItem({
   const statusColor = {
     Initializing: 'var(--accent-warning)',
     Ready: 'var(--accent-success)',
-    Waiting: 'var(--accent-blue)',
+    Waiting: 'var(--accent-info)',
     Prompting: 'var(--accent-purple)',
     Disconnected: 'var(--text-muted)',
   }[agent.status] || 'var(--text-muted)';
@@ -156,7 +156,7 @@ function ChannelListItem({
     <button
       onClick={onClick}
       className={`flex items-center gap-2 py-1.5 px-2 w-full text-left hover:bg-[var(--bg-tertiary)] ${
-        isSelected ? 'bg-[var(--bg-tertiary)] text-[var(--accent-blue)]' : ''
+        isSelected ? 'bg-[var(--bg-tertiary)] text-[var(--accent-info)]' : ''
       }`}
     >
       <Hash size={12} />
@@ -249,7 +249,7 @@ function AddAgentModal({
           <button
             onClick={handleAdd}
             disabled={!selectedNode || !selectedAgent}
-            className="px-3 py-1.5 text-xs bg-[var(--accent-blue)] text-white disabled:opacity-50"
+            className="px-3 py-1.5 text-xs bg-[var(--accent-info)] text-[var(--bg-primary)] disabled:opacity-50"
           >
             Add
           </button>
@@ -500,7 +500,7 @@ export default function NexusPage() {
                 </div>
                 <button
                   onClick={() => setShowAddAgent(true)}
-                  className="text-muted hover:text-[var(--accent-blue)]"
+                  className="text-muted hover:text-[var(--accent-info)]"
                   title="Add agent"
                 >
                   <Plus size={12} />
@@ -608,7 +608,7 @@ export default function NexusPage() {
                 <button
                   onClick={handleSendMessage}
                   disabled={!messageInput.trim()}
-                  className="px-3 py-2 bg-[var(--accent-blue)] text-white disabled:opacity-50"
+                  className="px-3 py-2 bg-[var(--accent-info)] text-[var(--bg-primary)] disabled:opacity-50"
                 >
                   <Send size={14} />
                 </button>

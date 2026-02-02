@@ -418,7 +418,7 @@ export function NodeDetailPage() {
                 <span className="text-sm text-muted font-mono">Terminal: {terminalId.slice(0, 8)}...</span>
                 <button
                   onClick={handleCloseTerminal}
-                  className="inline-flex items-center gap-2 px-3 py-1 rounded text-sm text-[var(--accent-error)] hover:bg-red-500/10 transition-colors"
+                  className="inline-flex items-center gap-2 px-3 py-1 rounded text-sm text-[var(--accent-error)] hover:bg-[var(--accent-error)]/10 transition-colors"
                 >
                   <Square size={14} /> Close
                 </button>
@@ -673,7 +673,7 @@ function NodeInterceptTab({
           <div className="flex items-center gap-4">
             <div
               className={`p-3 ${
-                node.intercept_active ? 'bg-yellow-500/20' : 'bg-[var(--bg-secondary)]'
+                node.intercept_active ? 'bg-[var(--accent-warning)]/20' : 'bg-[var(--bg-secondary)]'
               }`}
             >
               <Shield
@@ -694,7 +694,7 @@ function NodeInterceptTab({
             onClick={onToggleIntercept}
             className={`px-4 py-2 text-sm transition-colors ${
               node.intercept_active
-                ? 'bg-red-500/20 text-[var(--accent-error)] hover:bg-red-500/30'
+                ? 'bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30'
                 : 'bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30'
             }`}
           >

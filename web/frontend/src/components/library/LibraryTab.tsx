@@ -685,7 +685,7 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
                         className={`p-2 transition-colors ${
                           item.disabled
                             ? 'opacity-30 cursor-not-allowed text-muted'
-                            : 'hover:bg-green-500/10 text-muted hover:text-[var(--accent-success)]'
+                            : 'hover:bg-[var(--accent-success)]/10 text-muted hover:text-[var(--accent-success)]'
                         }`}
                         title="Run"
                       >
@@ -693,21 +693,21 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
                       </button>
                       <button
                         onClick={() => handleEditItem(item)}
-                        className="p-2 hover:bg-blue-500/10 text-muted hover:text-[var(--accent-info)] transition-colors"
+                        className="p-2 hover:bg-[var(--accent-info)]/10 text-muted hover:text-[var(--accent-info)] transition-colors"
                         title="Edit"
                       >
                         <Edit2 size={14} />
                       </button>
                       <button
                         onClick={() => handleExportItem(item)}
-                        className="p-2 hover:bg-purple-500/10 text-muted hover:text-[var(--accent-purple)] transition-colors"
+                        className="p-2 hover:bg-[var(--accent-purple)]/10 text-muted hover:text-[var(--accent-purple)] transition-colors"
                         title="Export JSON"
                       >
                         <Download size={14} />
                       </button>
                       <button
                         onClick={() => handleDeleteClick(item)}
-                        className="p-2 hover:bg-red-500/10 text-muted hover:text-[var(--accent-error)] transition-colors"
+                        className="p-2 hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
                         title="Delete"
                       >
                         <Trash2 size={14} />

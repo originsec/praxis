@@ -136,7 +136,7 @@ export function DiscoveryPage() {
       //
       */}
       {state.discovery.error && (
-        <div className="bg-red-500/10 border border-red-500/30 p-4 text-[var(--accent-error)] text-sm">
+        <div className="bg-[var(--accent-error)]/10 border border-[var(--accent-error)]/30 p-4 text-[var(--accent-error)] text-sm">
           {state.discovery.error}
         </div>
       )}

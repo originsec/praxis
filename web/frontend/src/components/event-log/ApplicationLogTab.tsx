@@ -7,11 +7,11 @@ const LOG_LEVELS = ['error', 'warn', 'info', 'debug', 'trace'] as const;
 type LogLevel = typeof LOG_LEVELS[number];
 
 const LEVEL_CONFIG: Record<LogLevel, { icon: React.ReactNode; color: string; bgColor: string }> = {
-  error: { icon: <AlertCircle size={14} />, color: 'text-red-400', bgColor: 'bg-red-400/10' },
-  warn: { icon: <AlertTriangle size={14} />, color: 'text-yellow-400', bgColor: 'bg-yellow-400/10' },
-  info: { icon: <Info size={14} />, color: 'text-blue-400', bgColor: 'bg-blue-400/10' },
-  debug: { icon: <Bug size={14} />, color: 'text-purple-400', bgColor: 'bg-purple-400/10' },
-  trace: { icon: <FileText size={14} />, color: 'text-gray-400', bgColor: 'bg-gray-400/10' },
+  error: { icon: <AlertCircle size={14} />, color: 'text-[var(--accent-error)]', bgColor: 'bg-[var(--accent-error)]/10' },
+  warn: { icon: <AlertTriangle size={14} />, color: 'text-[var(--accent-warning)]', bgColor: 'bg-[var(--accent-warning)]/10' },
+  info: { icon: <Info size={14} />, color: 'text-[var(--accent-info)]', bgColor: 'bg-[var(--accent-info)]/10' },
+  debug: { icon: <Bug size={14} />, color: 'text-[var(--accent-purple)]', bgColor: 'bg-[var(--accent-purple)]/10' },
+  trace: { icon: <FileText size={14} />, color: 'text-[var(--text-muted)]', bgColor: 'bg-[var(--text-muted)]/10' },
 };
 
 interface ApplicationLogTabProps {

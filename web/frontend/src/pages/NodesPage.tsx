@@ -175,7 +175,7 @@ export function NodesPage() {
                     <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => removeNode(node.node_id)}
-                        className="p-1 hover:bg-red-500/10 text-muted hover:text-[var(--accent-error)] transition-colors"
+                        className="p-1 hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
                       >
                         <Trash2 size={14} />
                       </button>
