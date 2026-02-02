@@ -33,8 +33,8 @@
     --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace;
 }
 
-/* mdBook variable overrides */
-.coal, .navy, .ayu, .rust {
+/* mdBook variable overrides - only for coal theme */
+.coal {
     --bg: var(--bg-primary);
     --fg: var(--text-primary);
 
