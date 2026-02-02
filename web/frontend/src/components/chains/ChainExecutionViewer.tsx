@@ -496,15 +496,25 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
             onClick={() => setOutputExpanded(!outputExpanded)}
             className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-[var(--bg-tertiary)] transition-colors text-left"
           >
-            {outputExpanded ? <ChevronDown size={12} className="text-[var(--text-secondary)]" /> : <ChevronRight size={12} className="text-[var(--text-secondary)]" />}
+            {outputExpanded ? (
+              <ChevronDown size={12} className="text-[var(--text-secondary)]" />
+            ) : (
+              <ChevronRight size={12} className="text-[var(--text-secondary)]" />
+            )}
+            <CheckCircle2 size={12} className="text-[var(--accent-success)]" />
             <span className="text-xs font-medium text-[var(--text-highlight)]">Final Output</span>
-            <span className="text-xs text-muted ml-auto">{Object.keys(outputs).length} output{Object.keys(outputs).length !== 1 ? 's' : ''}</span>
+            <span className="text-xs text-muted ml-auto">
+              {Object.keys(outputs).length} output{Object.keys(outputs).length !== 1 ? 's' : ''}
+            </span>
           </button>
           {outputExpanded && (
             <div className="px-3 pb-3 space-y-2">
               {Object.entries(outputs).map(([label, output]) => (
-                <div key={label} className="p-2 bg-[var(--bg-primary)] rounded text-xs max-h-48 overflow-auto border border-[var(--border-dim)]">
-                  <StyledOutput output={output} />
+                <div key={label}>
+                  <span className="text-[10px] font-medium text-muted">{label}:</span>
+                  <div className="mt-1 p-2 bg-[var(--bg-secondary)] rounded text-xs max-h-64 overflow-auto border border-subtle">
+                    <StyledOutput output={output} />
+                  </div>
                 </div>
               ))}
             </div>
