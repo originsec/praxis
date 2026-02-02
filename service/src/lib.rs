@@ -1,6 +1,5 @@
 //! Praxis Service - Orchestration service for the Praxis framework
 
-mod chain_execution;
 mod config;
 mod database;
 mod handlers;
@@ -30,11 +29,10 @@ use tracing::{error, info, warn};
 //
 // Import from new modules.
 //
-use chain_execution::ChainExecutor;
 use database::{Database, DatabaseConfig, OperationDefinition};
 use handlers::{ClientMessageHandler, NodeMessageHandler};
 use nexus::NexusManager;
-use semantic_ops::{SemanticOpsManager, ResponseTracker};
+use semantic_ops::{SemanticOpsManager, ResponseTracker, ChainExecutor};
 use state::{NodeRegistry, ClientRegistry, PendingCommands};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
