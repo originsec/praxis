@@ -71,15 +71,18 @@ export function StyledOutput({ output }: { output: string }) {
                 <pre className="text-sm whitespace-pre-wrap font-mono text-muted">{block.content}</pre>
               </div>
             );
-          case 'incoming':
+          case 'incoming': {
+            const isToolResult = block.label?.startsWith('Tool result');
+            const accentColor = isToolResult ? 'var(--accent-success)' : 'var(--accent-purple)';
             return (
-              <div key={idx} className="border-l-2 border-[var(--accent-success)] pl-3">
-                <div className="text-xs text-[var(--accent-success)] font-medium mb-1 flex items-center gap-1">
+              <div key={idx} className={`border-l-2 pl-3`} style={{ borderColor: accentColor }}>
+                <div className="text-xs font-medium mb-1 flex items-center gap-1" style={{ color: accentColor }}>
                   <span>←</span> {block.label}
                 </div>
-                <pre className="text-sm whitespace-pre-wrap font-mono">{block.content}</pre>
+                <pre className="text-sm whitespace-pre-wrap font-mono text-[var(--text-primary)]">{block.content}</pre>
               </div>
             );
+          }
           case 'error':
             return (
               <div key={idx} className="border-l-2 border-[var(--accent-error)] pl-3 py-1 bg-[var(--accent-error)]/5 rounded-r">

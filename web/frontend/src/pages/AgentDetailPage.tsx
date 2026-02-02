@@ -165,6 +165,11 @@ export function AgentDetailPage() {
   const [showRunChainModal, setShowRunChainModal] = useState(false);
 
   //
+  // Close session confirmation modal state.
+  //
+  const [showCloseSessionModal, setShowCloseSessionModal] = useState(false);
+
+  //
   // Chain execution detail modal state.
   //
   const [selectedChainExecId, setSelectedChainExecId] = useState<string | null>(null);
@@ -512,6 +517,15 @@ export function AgentDetailPage() {
     .filter(exec => exec.agent_short_name === agentShortName && exec.node_id === nodeId);
 
   //
+  // Check for running ops/chains on the entire node (for close session warning).
+  //
+  const runningNodeOps = state.operations
+    .filter(op => op.node_id === nodeId && op.status === 'Running');
+  const runningNodeChains = state.chains.executions
+    .filter(exec => exec.node_id === nodeId && exec.status === 'Running');
+  const hasRunningOpsOrChains = runningNodeOps.length > 0 || runningNodeChains.length > 0;
+
+  //
   // Combined and sorted list of ops and chain executions by start time desc.
   //
   const sortedOpsAndChains = useMemo(() => {
@@ -797,7 +811,7 @@ export function AgentDetailPage() {
     }
   };
 
-  const handleCloseSession = async () => {
+  const doCloseSession = async () => {
     const currentSessionId = sessionId;
     setIsClosingSession(true);
     try {
@@ -811,6 +825,19 @@ export function AgentDetailPage() {
     } finally {
       setIsClosingSession(false);
     }
+  };
+
+  const handleCloseSession = () => {
+    if (hasRunningOpsOrChains) {
+      setShowCloseSessionModal(true);
+    } else {
+      doCloseSession();
+    }
+  };
+
+  const handleCloseSessionConfirm = () => {
+    setShowCloseSessionModal(false);
+    doCloseSession();
   };
 
   const handleCreateSession = async () => {
@@ -2363,6 +2390,48 @@ export function AgentDetailPage() {
         isLoading={isChainLoading}
         onClose={() => setSelectedChainExecId(null)}
       />
+
+      {/*
+      //
+      // Close Session Confirmation Modal.
+      //
+      */}
+      <Modal
+        isOpen={showCloseSessionModal}
+        title="Close Session"
+        onClose={() => setShowCloseSessionModal(false)}
+        size="sm"
+      >
+        <div className="space-y-4">
+          <p className="text-[var(--text-secondary)]">
+            There {runningNodeOps.length + runningNodeChains.length === 1 ? 'is' : 'are'}{' '}
+            <span className="text-[var(--accent-error)] font-medium">
+              {runningNodeOps.length > 0 && `${runningNodeOps.length} running operation${runningNodeOps.length !== 1 ? 's' : ''}`}
+              {runningNodeOps.length > 0 && runningNodeChains.length > 0 && ' and '}
+              {runningNodeChains.length > 0 && `${runningNodeChains.length} running chain${runningNodeChains.length !== 1 ? 's' : ''}`}
+            </span>{' '}
+            on this node that will likely fail if you close the session.
+          </p>
+          <p className="text-[var(--text-secondary)]">
+            Do you want to continue?
+          </p>
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              onClick={() => setShowCloseSessionModal(false)}
+              className="px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCloseSessionConfirm}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/30 transition-colors"
+            >
+              <Square size={16} />
+              Close Session
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

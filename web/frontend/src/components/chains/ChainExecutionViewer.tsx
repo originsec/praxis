@@ -270,9 +270,15 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const { fitView } = useReactFlow();
 
+  //
+  // Use JSON.stringify for deep comparison since React's shallow comparison
+  // may not detect changes in the elements object when updates arrive.
+  //
+  const elementsKey = JSON.stringify(execution.elements);
   const { nodes, edges } = useMemo(
     () => chainToFlowWithStatus(chain, execution.elements),
-    [chain, execution.elements]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [chain, elementsKey]
   );
 
   //
@@ -402,7 +408,8 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
         const orderB = orderMap.get(idB) ?? 999;
         return orderA - orderB;
       });
-  }, [execution.elements, chain]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [elementsKey, chain]);
 
   //
   // Keyboard navigation for execution steps.
