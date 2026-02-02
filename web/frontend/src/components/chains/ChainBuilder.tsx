@@ -500,6 +500,11 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
   const [showGenericPromptModal, setShowGenericPromptModal] = useState(false);
   const [genericPromptText, setGenericPromptText] = useState('');
 
+  //
+  // Track which node is being edited (null means adding new).
+  //
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition, fitView } = useReactFlow();
 
@@ -912,31 +917,116 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
   }, [pendingPosition, selectedOperation, addNodeAtPosition]);
 
   const handleTransformConfirm = useCallback(() => {
-    if (pendingPosition && transformPrompt.trim()) {
-      addNodeAtPosition('transform', pendingPosition, {
-        prompt: transformPrompt,
-        modelRef: transformModel || undefined,
-      });
+    if (transformPrompt.trim()) {
+      if (editingNodeId) {
+        //
+        // Update existing node.
+        //
+        setExtraData(prev => {
+          const newTransformPrompts = new Map(prev.transformPrompts);
+          const newTransformModels = new Map(prev.transformModels);
+          newTransformPrompts.set(editingNodeId, transformPrompt);
+          if (transformModel) {
+            newTransformModels.set(editingNodeId, transformModel);
+          } else {
+            newTransformModels.delete(editingNodeId);
+          }
+          return { ...prev, transformPrompts: newTransformPrompts, transformModels: newTransformModels };
+        });
+        setNodes(nds => nds.map(n =>
+          n.id === editingNodeId
+            ? { ...n, data: { ...n.data, prompt: transformPrompt } }
+            : n
+        ));
+      } else if (pendingPosition) {
+        //
+        // Add new node.
+        //
+        addNodeAtPosition('transform', pendingPosition, {
+          prompt: transformPrompt,
+          modelRef: transformModel || undefined,
+        });
+      }
       setShowTransformModal(false);
       setPendingPosition(null);
+      setEditingNodeId(null);
       setTransformPrompt('');
       setTransformModel('');
     }
-  }, [pendingPosition, transformPrompt, transformModel, addNodeAtPosition]);
+  }, [pendingPosition, editingNodeId, transformPrompt, transformModel, addNodeAtPosition, setNodes]);
 
   const handleGenericPromptConfirm = useCallback(() => {
-    if (pendingPosition && genericPromptText.trim()) {
-      addNodeAtPosition('genericPrompt', pendingPosition, {
-        prompt: genericPromptText,
-      });
+    if (genericPromptText.trim()) {
+      if (editingNodeId) {
+        //
+        // Update existing node.
+        //
+        setExtraData(prev => {
+          const newGenericPrompts = new Map(prev.genericPrompts);
+          newGenericPrompts.set(editingNodeId, genericPromptText);
+          return { ...prev, genericPrompts: newGenericPrompts };
+        });
+        setNodes(nds => nds.map(n =>
+          n.id === editingNodeId
+            ? { ...n, data: { ...n.data, prompt: genericPromptText } }
+            : n
+        ));
+      } else if (pendingPosition) {
+        //
+        // Add new node.
+        //
+        addNodeAtPosition('genericPrompt', pendingPosition, {
+          prompt: genericPromptText,
+        });
+      }
       setShowGenericPromptModal(false);
       setPendingPosition(null);
+      setEditingNodeId(null);
       setGenericPromptText('');
     }
-  }, [pendingPosition, genericPromptText, addNodeAtPosition]);
+  }, [pendingPosition, editingNodeId, genericPromptText, addNodeAtPosition, setNodes]);
 
   const handleTerminationConfirm = useCallback(() => {
-    if (pendingPosition) {
+    if (editingNodeId) {
+      //
+      // Update existing node.
+      //
+      setExtraData(prev => {
+        const newTermPrompts = new Map(prev.terminationPrompts);
+        const newTermModels = new Map(prev.terminationModels);
+        if (terminationType === 'Semantic') {
+          newTermPrompts.set(editingNodeId, terminationPrompt);
+          if (terminationModel) {
+            newTermModels.set(editingNodeId, terminationModel);
+          } else {
+            newTermModels.delete(editingNodeId);
+          }
+        } else {
+          newTermPrompts.delete(editingNodeId);
+          newTermModels.delete(editingNodeId);
+        }
+        return { ...prev, terminationPrompts: newTermPrompts, terminationModels: newTermModels };
+      });
+      setNodes(nds => nds.map(n =>
+        n.id === editingNodeId
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                label: terminationType === 'Raw' ? 'Raw Output' : 'Semantic Output',
+                termType: terminationType,
+              },
+            }
+          : n
+      ));
+      setShowTerminationModal(false);
+      setEditingNodeId(null);
+      setTerminationPrompt('');
+      setTerminationModel('');
+    } else if (pendingPosition) {
+      //
+      // Add new node.
+      //
       addNodeAtPosition('termination', pendingPosition, {
         label: terminationType === 'Raw' ? 'Raw Output' : 'Semantic Output',
         termType: terminationType,
@@ -948,7 +1038,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
       setTerminationPrompt('');
       setTerminationModel('');
     }
-  }, [pendingPosition, terminationType, terminationPrompt, terminationModel, addNodeAtPosition]);
+  }, [pendingPosition, editingNodeId, terminationType, terminationPrompt, terminationModel, addNodeAtPosition, setNodes]);
 
   const canSave = name.trim().length > 0;
 
@@ -1117,6 +1207,29 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
     setNodes(nds => nds.map(n => ({ ...n, selected: false })));
   }, [setNodes]);
 
+  //
+  // Handle double-click on nodes to open configuration modal.
+  //
+  const onNodeDoubleClick = useCallback((_event: React.MouseEvent, node: Node) => {
+    if (node.type === 'transform') {
+      setEditingNodeId(node.id);
+      setTransformPrompt(extraData.transformPrompts.get(node.id) || '');
+      setTransformModel(extraData.transformModels.get(node.id) || '');
+      setShowTransformModal(true);
+    } else if (node.type === 'termination') {
+      setEditingNodeId(node.id);
+      const termType = (node.data?.termType as string) || 'Raw';
+      setTerminationType(termType as 'Raw' | 'Semantic');
+      setTerminationPrompt(extraData.terminationPrompts.get(node.id) || '');
+      setTerminationModel(extraData.terminationModels.get(node.id) || '');
+      setShowTerminationModal(true);
+    } else if (node.type === 'genericPrompt') {
+      setEditingNodeId(node.id);
+      setGenericPromptText(extraData.genericPrompts.get(node.id) || '');
+      setShowGenericPromptModal(true);
+    }
+  }, [extraData]);
+
   return (
     <div className="flex flex-col h-full">
       {/*
@@ -1191,6 +1304,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           onNodeMouseEnter={onNodeMouseEnter}
           onNodeMouseLeave={onNodeMouseLeave}
           onNodeClick={onNodeClick}
+          onNodeDoubleClick={onNodeDoubleClick}
           onEdgeMouseEnter={onEdgeMouseEnter}
           onEdgeMouseLeave={onEdgeMouseLeave}
           onPaneClick={onPaneClick}
