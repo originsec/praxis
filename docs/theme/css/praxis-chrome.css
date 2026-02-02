@@ -14,12 +14,12 @@
 
 /* Sidebar chapter list */
 .coal .sidebar .chapter {
-    margin: 0.25em 0;
+    margin: 0;
 }
 
 .coal .sidebar .chapter a {
     color: var(--text-secondary);
-    padding: 0.4em 0.8em;
+    padding: 0.15em 0.8em;
     border-radius: 2px;
     transition: all 0.2s;
     font-size: 0.9em;
@@ -37,6 +37,8 @@
     border-left: 2px solid var(--border-color);
     border-inline-start-color: var(--border-color);
     padding-left: calc(0.8em - 2px);
+    padding-top: 0.15em;
+    padding-bottom: 0.15em;
 }
 
 /* Part titles in sidebar */
@@ -45,9 +47,9 @@
     font-size: 0.75em;
     text-transform: uppercase;
     letter-spacing: 0.15em;
-    margin-top: 1.5em;
-    margin-bottom: 0.5em;
-    padding: 0.4em 0.8em;
+    margin-top: 1em;
+    margin-bottom: 0.25em;
+    padding: 0.15em 0.8em;
     border-bottom: 1px solid var(--border-dim);
 }
 
