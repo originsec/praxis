@@ -103,6 +103,9 @@
     color: var(--text-secondary);
     transition: color 0.2s;
     line-height: normal;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .coal .icon-button:hover {
