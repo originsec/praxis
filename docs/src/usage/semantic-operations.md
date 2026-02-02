@@ -44,6 +44,31 @@ Best for: Complex tasks, multi-step operations, tasks requiring judgment.
 
 The orchestrator is a separate LLM (configured in Settings as "Semantic Ops" LLM) that manages the interaction. It has access to a `session_prompt` tool to communicate with the target agent.
 
+### Agent Mode Architecture
+
+The orchestrator uses a system prompt that defines its behavior:
+
+**Prompt Location**: `service/src/prompts/semantic_op_agent.prompt`
+
+The system prompt is embedded at build time using Rust's `include_str!` macro. This means:
+- Prompts are part of the compiled binary
+- No runtime configuration of prompts is needed or supported
+- Changes require recompilation
+
+The orchestrator prompt is combined with:
+- Tool calling instructions (`common/src/prompts/tool_calling.prompt`)
+- Task completion instructions (`common/src/prompts/task_completion.prompt`)
+
+These define the JSON format the orchestrator uses to call tools and signal completion:
+
+```json
+{"tool": "session_prompt", "args": {"text": "..."}}
+```
+
+```json
+{"complete": true, "summary": "...", "result": "..."}
+```
+
 ## Creating Operations
 
 Operations are stored in the library:

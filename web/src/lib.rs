@@ -5,7 +5,6 @@
 
 mod config;
 mod messages;
-mod prompts;
 mod rabbitmq;
 mod atlas;
 mod state;
@@ -171,19 +170,6 @@ struct ModelListResponse {
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
-}
-
-#[derive(Serialize)]
-struct DefaultPromptsResponse {
-    atlas: String,
-    semantic_op: String,
-}
-
-async fn get_default_prompts() -> Json<DefaultPromptsResponse> {
-    Json(DefaultPromptsResponse {
-        atlas: prompts::ATLAS_PROMPT.to_string(),
-        semantic_op: prompts::SEMANTIC_OP_PROMPT.to_string(),
-    })
 }
 
 //
@@ -394,7 +380,6 @@ pub async fn run() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/ws", get(ws_handler))
         .route("/api/models", post(list_models))
-        .route("/api/prompts/defaults", get(get_default_prompts))
         .route("/api/downloads/info", get(get_downloads_info))
         .route("/api/downloads/node/{platform}", get(download_node))
         .fallback(static_handler)

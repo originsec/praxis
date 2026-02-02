@@ -15,6 +15,9 @@ pub struct OperationRecord {
     pub status: SemanticOpStatus,
     pub start_time: DateTime<Utc>,
     pub end_time: Option<DateTime<Utc>>,
+    /// Brief summary of actions taken (for display in UI header)
+    pub summary: Option<String>,
+    /// Actual findings/data/output from the operation
     pub result: Option<String>,
     pub queue_position: Option<usize>,
     pub created_at: DateTime<Utc>,
@@ -35,6 +38,7 @@ impl OperationRecord {
             status: self.status.clone(),
             start_time: self.start_time,
             end_time: self.end_time,
+            summary: self.summary.clone(),
             result: self.result.clone(),
             queue_position: self.queue_position,
             output: self.output.clone(),
@@ -47,8 +51,8 @@ impl Database {
     pub async fn insert_operation(&self, record: &OperationRecord) -> Result<()> {
         let spec_json = serde_json::to_string(&record.operation_spec)?;
 
-        let sql = "INSERT INTO operations (operation_id, node_id, agent_short_name, operation_spec, status, start_time, end_time, result, queue_position, created_at, output, chain_execution_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)";
+        let sql = "INSERT INTO operations (operation_id, node_id, agent_short_name, operation_spec, status, start_time, end_time, summary, result, queue_position, created_at, output, chain_execution_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)";
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
@@ -60,6 +64,7 @@ impl Database {
                     .bind(status_to_string(&record.status))
                     .bind(record.start_time.to_rfc3339())
                     .bind(record.end_time.map(|dt| dt.to_rfc3339()))
+                    .bind(&record.summary)
                     .bind(&record.result)
                     .bind(record.queue_position.map(|p| p as i64))
                     .bind(record.created_at.to_rfc3339())
@@ -77,6 +82,7 @@ impl Database {
                     .bind(status_to_string(&record.status))
                     .bind(record.start_time.to_rfc3339())
                     .bind(record.end_time.map(|dt| dt.to_rfc3339()))
+                    .bind(&record.summary)
                     .bind(&record.result)
                     .bind(record.queue_position.map(|p| p as i64))
                     .bind(record.created_at.to_rfc3339())
@@ -95,21 +101,23 @@ impl Database {
         Ok(())
     }
 
-    /// Update operation status, end time, and result
+    /// Update operation status, end time, summary, and result
     pub async fn update_status(
         &self,
         operation_id: &str,
         status: SemanticOpStatus,
         end_time: Option<DateTime<Utc>>,
+        summary: Option<String>,
         result: Option<String>,
     ) -> Result<()> {
-        let sql = "UPDATE operations SET status = $1, end_time = $2, result = $3 WHERE operation_id = $4";
+        let sql = "UPDATE operations SET status = $1, end_time = $2, summary = $3, result = $4 WHERE operation_id = $5";
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
                 sqlx::query(sql)
                     .bind(status_to_string(&status))
                     .bind(end_time.map(|dt| dt.to_rfc3339()))
+                    .bind(&summary)
                     .bind(&result)
                     .bind(operation_id)
                     .execute(pool)
@@ -119,6 +127,7 @@ impl Database {
                 sqlx::query(sql)
                     .bind(status_to_string(&status))
                     .bind(end_time.map(|dt| dt.to_rfc3339()))
+                    .bind(&summary)
                     .bind(&result)
                     .bind(operation_id)
                     .execute(pool)
@@ -179,7 +188,7 @@ impl Database {
 
     /// Get a single operation by ID
     pub async fn get_operation(&self, operation_id: &str) -> Result<Option<OperationRecord>> {
-        let sql = "SELECT operation_id, node_id, agent_short_name, operation_spec, status, start_time, end_time, result, queue_position, created_at, output, chain_execution_id
+        let sql = "SELECT operation_id, node_id, agent_short_name, operation_spec, status, start_time, end_time, summary, result, queue_position, created_at, output, chain_execution_id
              FROM operations WHERE operation_id = $1";
 
         match &self.pool {
@@ -208,7 +217,7 @@ impl Database {
 
     /// List recent operations (limited by count)
     pub async fn list_operations(&self, limit: usize) -> Result<Vec<OperationRecord>> {
-        let sql = "SELECT operation_id, node_id, agent_short_name, operation_spec, status, start_time, end_time, result, queue_position, created_at, output, chain_execution_id
+        let sql = "SELECT operation_id, node_id, agent_short_name, operation_spec, status, start_time, end_time, summary, result, queue_position, created_at, output, chain_execution_id
              FROM operations ORDER BY created_at DESC LIMIT $1";
 
         match &self.pool {
@@ -240,7 +249,7 @@ impl Database {
     /// List operations for a specific node
     #[allow(dead_code)]
     pub async fn list_operations_by_node(&self, node_id: &str) -> Result<Vec<OperationRecord>> {
-        let sql = "SELECT operation_id, node_id, agent_short_name, operation_spec, status, start_time, end_time, result, queue_position, created_at, output, chain_execution_id
+        let sql = "SELECT operation_id, node_id, agent_short_name, operation_spec, status, start_time, end_time, summary, result, queue_position, created_at, output, chain_execution_id
              FROM operations WHERE node_id = $1 ORDER BY created_at DESC";
 
         match &self.pool {
@@ -271,7 +280,7 @@ impl Database {
 
     /// List operations by status
     pub async fn list_operations_by_status(&self, status: SemanticOpStatus) -> Result<Vec<OperationRecord>> {
-        let sql = "SELECT operation_id, node_id, agent_short_name, operation_spec, status, start_time, end_time, result, queue_position, created_at, output, chain_execution_id
+        let sql = "SELECT operation_id, node_id, agent_short_name, operation_spec, status, start_time, end_time, summary, result, queue_position, created_at, output, chain_execution_id
              FROM operations WHERE status = $1 ORDER BY created_at DESC";
 
         match &self.pool {
@@ -448,11 +457,12 @@ fn parse_operation_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> Result<Operation
     let status_str: String = row.get(4);
     let start_time_str: String = row.get(5);
     let end_time_str: Option<String> = row.get(6);
-    let result: Option<String> = row.get(7);
-    let queue_position: Option<i64> = row.get(8);
-    let created_at_str: String = row.get(9);
-    let output: Option<String> = row.get(10);
-    let chain_execution_id: Option<String> = row.get(11);
+    let summary: Option<String> = row.get(7);
+    let result: Option<String> = row.get(8);
+    let queue_position: Option<i64> = row.get(9);
+    let created_at_str: String = row.get(10);
+    let output: Option<String> = row.get(11);
+    let chain_execution_id: Option<String> = row.get(12);
 
     let operation_spec: SemanticOperationSpec = serde_json::from_str(&spec_json)?;
     let status = string_to_status(&status_str);
@@ -470,6 +480,7 @@ fn parse_operation_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> Result<Operation
         status,
         start_time,
         end_time,
+        summary,
         result,
         queue_position: queue_position.map(|p| p as usize),
         created_at,
@@ -486,11 +497,12 @@ fn parse_operation_row_postgres(row: &sqlx::postgres::PgRow) -> Result<Operation
     let status_str: String = row.get(4);
     let start_time_str: String = row.get(5);
     let end_time_str: Option<String> = row.get(6);
-    let result: Option<String> = row.get(7);
-    let queue_position: Option<i64> = row.get(8);
-    let created_at_str: String = row.get(9);
-    let output: Option<String> = row.get(10);
-    let chain_execution_id: Option<String> = row.get(11);
+    let summary: Option<String> = row.get(7);
+    let result: Option<String> = row.get(8);
+    let queue_position: Option<i64> = row.get(9);
+    let created_at_str: String = row.get(10);
+    let output: Option<String> = row.get(11);
+    let chain_execution_id: Option<String> = row.get(12);
 
     let operation_spec: SemanticOperationSpec = serde_json::from_str(&spec_json)?;
     let status = string_to_status(&status_str);
@@ -508,6 +520,7 @@ fn parse_operation_row_postgres(row: &sqlx::postgres::PgRow) -> Result<Operation
         status,
         start_time,
         end_time,
+        summary,
         result,
         queue_position: queue_position.map(|p| p as usize),
         created_at,

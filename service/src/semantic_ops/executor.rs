@@ -19,6 +19,11 @@ use common::ai::{
     ChatCompletionRequest, Message, Tool,
 };
 
+//
+// Semantic ops agent prompt embedded at build time.
+//
+const SEMANTIC_OP_AGENT_PROMPT: &str = include_str!("../prompts/semantic_op_agent.prompt");
+
 use crate::config::ServiceConfig;
 use crate::database::Database;
 
@@ -181,6 +186,8 @@ pub async fn close_session(node_id: &str, rabbitmq_channel: &Channel) -> Result<
 /// Execute an operation in one-shot mode
 /// Sends the operation prompt directly to the node session and waits for response
 /// If use_existing_session is false, creates and closes a session for this operation
+/// Execute an operation in one-shot mode
+/// Returns (summary, result) - for one-shot mode, summary is empty and result contains the response
 pub async fn execute_one_shot(
     operation_id: &str,
     node_id: &str,
@@ -190,7 +197,7 @@ pub async fn execute_one_shot(
     database: Arc<Database>,
     mut cancel_rx: oneshot::Receiver<()>,
     use_existing_session: bool,
-) -> Result<String> {
+) -> Result<(String, String)> {
     //
     // Create session if needed.
     //
@@ -257,7 +264,10 @@ pub async fn execute_one_shot(
                             let _ = database.append_output(operation_id, &fmt_incoming("Agent response", &response)).await;
                             let response_preview: String = response.chars().take(100).collect();
                             common::log_info!("SemanticResponseReceived: op={} len={} response={}", &operation_id[..8], response.len(), response_preview);
-                            Ok(response)
+                            //
+                            // One-shot mode: summary is empty, result is the response.
+                            //
+                            Ok((String::new(), response))
                         }
                         common::NodeCommandResult::Session(common::SessionCommandResult::TransactionCancelled { .. }) => {
                             let _ = database.append_output(operation_id, &fmt_error("Transaction cancelled")).await;
@@ -306,6 +316,9 @@ pub async fn execute_one_shot(
         let _ = close_session(node_id, rabbitmq_channel).await;
     }
 
+    //
+    // Response is already a (String, String) tuple from the match arm.
+    //
     Ok(response)
 }
 
@@ -313,6 +326,7 @@ pub async fn execute_one_shot(
 /// Uses an AI model to orchestrate the operation with session_prompt tool calls
 /// LLM configuration (API key, provider, model, system prompt) comes from ServiceConfig
 /// If use_existing_session is false, creates and closes a session for this operation
+/// Returns (summary, result) where summary is a brief description and result contains findings
 pub async fn execute_agent_mode(
     operation_id: &str,
     node_id: &str,
@@ -323,7 +337,7 @@ pub async fn execute_agent_mode(
     database: Arc<Database>,
     mut cancel_rx: oneshot::Receiver<()>,
     use_existing_session: bool,
-) -> Result<String> {
+) -> Result<(String, String)> {
     //
     // Create session if needed.
     //
@@ -360,10 +374,9 @@ pub async fn execute_agent_mode(
     let (provider_str, model, api_key) = (model_def.provider, model_def.model, model_def.api_key);
 
     //
-    // Get system prompt from config, with default fallback.
+    // Use the built-in semantic ops agent prompt.
     //
-    let agent_prompt = config.get_semantic_ops_prompt()
-        .unwrap_or_else(|| "ALWAYS RETURN: \"SYSTEM PROMPT NOT CONFIGURED!!\"".to_string());
+    let agent_prompt = SEMANTIC_OP_AGENT_PROMPT;
 
     //
     // Parse provider string.
@@ -412,6 +425,7 @@ pub async fn execute_agent_mode(
     ];
 
     let mut final_summary = String::new();
+    let mut final_result = String::new();
     let start_time = std::time::Instant::now();
     let timeout_duration = std::time::Duration::from_secs(spec.timeout);
 
@@ -486,34 +500,10 @@ pub async fn execute_agent_mode(
         let _ = database.append_output(operation_id, &fmt_incoming("AI Response", &text_content)).await;
 
         //
-        // Check for completion signal first.
-        //
-        if let Some((is_complete, summary, _remaining_text)) =
-            parse_completion_signal(&text_content)
-        {
-            if is_complete {
-                final_summary = if !summary.is_empty() {
-                    summary
-                } else {
-                    text_content.clone()
-                };
-
-                //
-                // Log completion.
-                //
-                let _ = database.append_output(operation_id, &fmt_complete(&final_summary)).await;
-
-                //
-                // Add final assistant message to history.
-                //
-                conversation_history.push(Message::assistant(&text_content));
-
-                break;
-            }
-        }
-
-        //
-        // Parse manual tool call from response text.
+        // IMPORTANT: Check for tool calls FIRST before completion signals.
+        // If a model outputs both a tool call and completion in the same message,
+        // the completion is hallucinated (it can't know the result before the
+        // tool executes). We must execute the tool and ignore the fake completion.
         //
         if let Some((tool_name, tool_args, remaining_text)) = parse_manual_tool_call(&text_content)
         {
@@ -584,7 +574,35 @@ pub async fn execute_agent_mode(
         }
 
         //
-        // No tool call found - log the full response and finish.
+        // No tool call found - check for completion signal.
+        //
+        if let Some((is_complete, summary, result, _remaining_text)) =
+            parse_completion_signal(&text_content)
+        {
+            if is_complete {
+                final_summary = if !summary.is_empty() {
+                    summary
+                } else {
+                    text_content.clone()
+                };
+                final_result = result;
+
+                //
+                // Log completion.
+                //
+                let _ = database.append_output(operation_id, &fmt_complete(&final_summary)).await;
+
+                //
+                // Add final assistant message to history.
+                //
+                conversation_history.push(Message::assistant(&text_content));
+
+                break;
+            }
+        }
+
+        //
+        // No tool call and no completion - log the response and exit.
         //
         if !text_content.is_empty() {
             final_summary = text_content.clone();
@@ -595,9 +613,6 @@ pub async fn execute_agent_mode(
         //
         conversation_history.push(Message::assistant(&text_content));
 
-        //
-        // No tool call and no completion - exit loop.
-        //
         break;
     }
 
@@ -608,7 +623,7 @@ pub async fn execute_agent_mode(
         let _ = close_session(node_id, rabbitmq_channel).await;
     }
 
-    Ok(final_summary)
+    Ok((final_summary, final_result))
 }
 
 /// Send a prompt to a remote node and wait for response

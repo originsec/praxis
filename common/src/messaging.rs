@@ -993,6 +993,9 @@ pub struct SemanticOpUpdate {
     pub status: SemanticOpStatus,
     pub start_time: DateTime<Utc>,
     pub end_time: Option<DateTime<Utc>>,
+    /// Brief summary of actions taken (for display in UI header)
+    pub summary: Option<String>,
+    /// Actual findings/data/output from the operation
     pub result: Option<String>,
     pub queue_position: Option<usize>,
     /// Streaming output from the operation (iterations, requests, responses)

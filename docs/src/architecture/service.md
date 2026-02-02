@@ -76,17 +76,28 @@ Operations are queued per node:
 ### Execution Modes
 
 **One-Shot Mode:**
-1. Operation prompt sent to LLM
-2. LLM generates complete prompt for agent
-3. Prompt sent to agent
-4. Response captured and returned
+1. Operation prompt sent directly to agent session
+2. Agent executes and responds
+3. Response captured and returned
 
 **Agent Mode:**
-1. Operation sent to LLM
-2. LLM determines action
+1. Operation sent to orchestrator LLM with system prompt
+2. Orchestrator determines action using `session_prompt` tool
 3. Action executed via agent
-4. Result returned to LLM
+4. Result returned to orchestrator
 5. Repeat until complete or max iterations
+
+### System Prompts
+
+Agent mode uses system prompts embedded at build time:
+
+| Prompt | Location | Purpose |
+|--------|----------|---------|
+| Semantic Op Agent | `service/src/prompts/semantic_op_agent.prompt` | Orchestrator behavior |
+| Tool Calling | `common/src/prompts/tool_calling.prompt` | Tool call JSON format |
+| Task Completion | `common/src/prompts/task_completion.prompt` | Completion signal format |
+
+These prompts are compiled into the binary using `include_str!` and cannot be modified at runtime. This ensures consistent behavior and prevents prompt injection.
 
 ### Model Override
 

@@ -14,6 +14,11 @@ use crate::messages::{AtlasPlan, PlanStep, PlanStepStatus};
 use crate::state::AppState;
 use crate::rabbitmq::RabbitMqClient;
 
+//
+// Atlas system prompt embedded at build time.
+//
+const ATLAS_PROMPT: &str = include_str!("prompts/atlas.prompt");
+
 #[derive(Default)]
 struct AtlasContext {
     selected_node_idx: usize,
@@ -65,22 +70,9 @@ impl AtlasSession {
     }
 }
 
-/// Get system prompt from config
-/// Returns None if no prompt is configured
-pub fn get_system_prompt(custom_prompt: Option<&str>) -> Option<String> {
-    //
-    // Check if custom prompt content is provided.
-    //
-    if let Some(prompt) = custom_prompt {
-        let prompt = prompt.trim();
-        if !prompt.is_empty() {
-            common::log_info!("Using custom atlas prompt ({} chars)", prompt.len());
-            return Some(prompt.to_string());
-        }
-    }
-
-    common::log_info!("No atlas prompt configured");
-    None
+/// Get the atlas system prompt (embedded at build time).
+pub fn get_system_prompt() -> &'static str {
+    ATLAS_PROMPT
 }
 
 /// Define all available tools for the AI agent
@@ -1593,7 +1585,6 @@ pub async fn start_atlas_session(
     let config = app_state.get_config(&[
         "llm_model_definitions",
         "llm_feature_atlas",
-        "llm_atlas_prompt",
         "llm_atlas_max_tokens",
     ]).await;
 
@@ -1627,7 +1618,6 @@ pub async fn start_atlas_session(
     let api_key = selected_def.api_key.clone();
     let provider_str = selected_def.provider.clone();
     let model = selected_def.model.clone();
-    let custom_prompt = config.get("llm_atlas_prompt").cloned();
     let max_tokens: u32 = config.get("llm_atlas_max_tokens")
         .and_then(|s| s.parse().ok())
         .unwrap_or(25000);
@@ -1652,12 +1642,10 @@ pub async fn start_atlas_session(
         .map_err(|e| format!("Failed to create AI client: {}", e))?;
 
     //
-    // Get system prompt - must be configured.
+    // Get system prompt (built-in) and add tool documentation.
     //
-    let base_prompt = get_system_prompt(custom_prompt.as_deref())
-        .ok_or_else(|| "No system prompt configured. Go to Settings > LLM Providers > Atlas to configure the system prompt.".to_string())?;
     let tools = get_tool_definitions();
-    let system_prompt = get_system_prompt_with_tools(&base_prompt, &tools);
+    let system_prompt = get_system_prompt_with_tools(get_system_prompt(), &tools);
 
     common::log_info!("Atlas session starting with provider {:?}, model {}, max_tokens {}, history_count {}", provider, model, max_tokens, history_count);
 

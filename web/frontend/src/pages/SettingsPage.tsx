@@ -1,11 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Server, Save, Check, List, Loader2, X, Cpu, Upload, Plus, Trash2, Edit2, Key, Info, ExternalLink, Download, Monitor } from 'lucide-react';
+import { Server, Save, Check, List, Loader2, X, Cpu, Plus, Trash2, Edit2, Key, Info, ExternalLink, Download, Monitor } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 type Tab = 'llm_providers' | 'service' | 'about';
 type LLMTab = 'model_definitions' | 'feature_selection';
-type FeatureId = 'atlas' | 'semanticOps' | 'semanticParser' | 'trafficParser';
 
 const providers = [
   { value: 'anthropic', label: 'Anthropic (Claude)' },
@@ -45,9 +44,7 @@ interface FeatureAssignments {
 // Feature-specific settings.
 //
 interface FeatureSettings {
-  atlasPrompt: string;
   atlasMaxTokens: string;
-  semanticOpPrompt: string;
 }
 
 //
@@ -113,15 +110,8 @@ export function SettingsPage() {
   // Feature-specific settings.
   //
   const [featureSettings, setFeatureSettings] = useState<FeatureSettings>({
-    atlasPrompt: '',
     atlasMaxTokens: '25000',
-    semanticOpPrompt: '',
   });
-
-  //
-  // Default prompts from server.
-  //
-  const [defaultPrompts, setDefaultPrompts] = useState<{ atlas: string; semantic_op: string } | null>(null);
 
   //
   // Save states.
@@ -141,31 +131,10 @@ export function SettingsPage() {
   const [modelError, setModelError] = useState<string | null>(null);
 
   //
-  // File input refs.
-  //
-  const atlasFileInputRef = useRef<HTMLInputElement>(null);
-  const semanticOpFileInputRef = useRef<HTMLInputElement>(null);
-
-  //
-  // Selected feature in feature configuration tab.
-  //
-  const [selectedFeature, setSelectedFeature] = useState<FeatureId>('semanticOps');
-
-  //
   // Node downloads state.
   //
   const [nodeDownloads, setNodeDownloads] = useState<NodeDownloadInfo[]>([]);
   const [isLoadingDownloads, setIsLoadingDownloads] = useState(false);
-
-  //
-  // Feature definitions for the list.
-  //
-  const features: { id: FeatureId; label: string; description: string }[] = [
-    // { id: 'atlas', label: 'Atlas', description: 'Interactive AI assistant' },  // Hidden - feature not ready
-    { id: 'semanticOps', label: 'Semantic Operations', description: 'Default model for ops' },
-    { id: 'semanticParser', label: 'Semantic Parser', description: 'Tool call parsing' },
-    { id: 'trafficParser', label: 'Traffic Parser', description: 'Traffic summarization' },
-  ];
 
   //
   // Load config on mount
@@ -178,18 +147,8 @@ export function SettingsPage() {
       'llm_feature_semantic_ops',
       'llm_feature_semantic_parser',
       'llm_feature_traffic_parser',
-      'llm_atlas_prompt',
       'llm_atlas_max_tokens',
-      'llm_semantic_op_prompt',
     ]);
-
-    //
-    // Fetch default prompts.
-    //
-    fetch('/api/prompts/defaults')
-      .then(res => res.json())
-      .then(data => setDefaultPrompts(data))
-      .catch(err => console.error('Failed to fetch default prompts:', err));
   }, [getConfig]);
 
   //
@@ -237,15 +196,12 @@ export function SettingsPage() {
     });
 
     //
-    // Load feature settings (all stored on Service via llm_* keys)
-    // Use default prompts if no config value is set.
+    // Load feature settings (all stored on Service via llm_* keys).
     //
     setFeatureSettings({
-      atlasPrompt: cfg.llm_atlas_prompt || (defaultPrompts?.atlas ?? ''),
       atlasMaxTokens: cfg.llm_atlas_max_tokens || '25000',
-      semanticOpPrompt: cfg.llm_semantic_op_prompt || (defaultPrompts?.semantic_op ?? ''),
     });
-  }, [state.config, defaultPrompts]);
+  }, [state.config]);
 
   //
   // Generate model definition name.
@@ -365,9 +321,7 @@ export function SettingsPage() {
       llm_feature_semantic_ops: featureAssignments.semanticOps || '',
       llm_feature_semantic_parser: featureAssignments.semanticParser || '',
       llm_feature_traffic_parser: featureAssignments.trafficParser || '',
-      llm_atlas_prompt: featureSettings.atlasPrompt,
       llm_atlas_max_tokens: featureSettings.atlasMaxTokens,
-      llm_semantic_op_prompt: featureSettings.semanticOpPrompt,
     });
     setTimeout(() => {
       setIsSavingFeatures(false);
@@ -807,247 +761,103 @@ export function SettingsPage() {
                       </p>
                     </div>
                   ) : (
-                    <div className="flex gap-4">
+                    <div className="space-y-3">
                       {/*
                       //
-                      // Left pane - Feature list.
+                      // Atlas.
                       //
                       */}
-                      <div className="w-56 space-y-1">
-                        {features.map((feature) => (
-                          <button
-                            key={feature.id}
-                            onClick={() => setSelectedFeature(feature.id)}
-                            className={`w-full text-left px-3 py-2.5 rounded transition-colors ${
-                              selectedFeature === feature.id
-                                ? 'bg-[var(--accent-info)]/20 text-[var(--accent-info)] border border-[var(--accent-info)]/30'
-                                : 'hover:bg-[var(--bg-tertiary)] border border-transparent'
-                            }`}
-                          >
-                            <p className="text-sm font-medium">{feature.label}</p>
-                            <p className="text-xs text-muted">{feature.description}</p>
-                          </button>
-                        ))}
+                      <div className="flex items-center gap-4 p-3 bg-[var(--bg-secondary)] border border-dim">
+                        <div className="w-48">
+                          <p className="text-sm font-medium text-highlight">Atlas</p>
+                          <p className="text-xs text-muted">Interactive AI assistant</p>
+                        </div>
+                        <select
+                          value={featureAssignments.atlas || ''}
+                          onChange={(e) => setFeatureAssignments(a => ({ ...a, atlas: e.target.value || null }))}
+                          className="flex-1 bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
+                        >
+                          <option value="">Select a model...</option>
+                          {modelDefinitions.map((m) => (
+                            <option key={m.name} value={m.name}>{m.name}</option>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          value={featureSettings.atlasMaxTokens}
+                          onChange={(e) => setFeatureSettings(s => ({ ...s, atlasMaxTokens: e.target.value }))}
+                          placeholder="Max tokens"
+                          min="1000"
+                          max="100000"
+                          className="w-28 bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
+                          title="Max tokens"
+                        />
                       </div>
 
                       {/*
                       //
-                      // Right pane - Feature configuration.
+                      // Semantic Operations.
                       //
                       */}
-                      <div className="flex-1 p-4 bg-[var(--bg-secondary)] border border-dim">
-                        {/*
-                        //
-                        // Atlas config.
-                        //
-                        */}
-                        {selectedFeature === 'atlas' && (
-                          <div className="space-y-4">
-                            <div>
-                              <h4 className="font-semibold text-highlight">Atlas</h4>
-                              <p className="text-xs text-muted">Interactive AI assistant for red teaming orchestration</p>
-                            </div>
+                      <div className="flex items-center gap-4 p-3 bg-[var(--bg-secondary)] border border-dim">
+                        <div className="w-48">
+                          <p className="text-sm font-medium text-highlight">Semantic Operations</p>
+                          <p className="text-xs text-muted">Default model for ops</p>
+                        </div>
+                        <select
+                          value={featureAssignments.semanticOps || ''}
+                          onChange={(e) => setFeatureAssignments(a => ({ ...a, semanticOps: e.target.value || null }))}
+                          className="flex-1 bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
+                        >
+                          <option value="">Select a model...</option>
+                          {modelDefinitions.map((m) => (
+                            <option key={m.name} value={m.name}>{m.name}</option>
+                          ))}
+                        </select>
+                      </div>
 
-                            <div className="space-y-4">
-                              <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                  <label className="block text-xs tracking-wider text-muted mb-1.5">Model Definition</label>
-                                  <select
-                                    value={featureAssignments.atlas || ''}
-                                    onChange={(e) => setFeatureAssignments(a => ({ ...a, atlas: e.target.value || null }))}
-                                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
-                                  >
-                                    <option value="">Select a model...</option>
-                                    {modelDefinitions.map((m) => (
-                                      <option key={m.name} value={m.name}>{m.name}</option>
-                                    ))}
-                                  </select>
-                                </div>
+                      {/*
+                      //
+                      // Semantic Parser.
+                      //
+                      */}
+                      <div className="flex items-center gap-4 p-3 bg-[var(--bg-secondary)] border border-dim">
+                        <div className="w-48">
+                          <p className="text-sm font-medium text-highlight">Semantic Parser</p>
+                          <p className="text-xs text-muted">Tool call parsing</p>
+                        </div>
+                        <select
+                          value={featureAssignments.semanticParser || ''}
+                          onChange={(e) => setFeatureAssignments(a => ({ ...a, semanticParser: e.target.value || null }))}
+                          className="flex-1 bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
+                        >
+                          <option value="">Select a model...</option>
+                          {modelDefinitions.map((m) => (
+                            <option key={m.name} value={m.name}>{m.name}</option>
+                          ))}
+                        </select>
+                      </div>
 
-                                <div>
-                                  <label className="block text-xs tracking-wider text-muted mb-1.5">Max Tokens</label>
-                                  <input
-                                    type="number"
-                                    value={featureSettings.atlasMaxTokens}
-                                    onChange={(e) => setFeatureSettings(s => ({ ...s, atlasMaxTokens: e.target.value }))}
-                                    placeholder="25000"
-                                    min="1000"
-                                    max="100000"
-                                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
-                                  />
-                                </div>
-                              </div>
-
-                              <div>
-                                <div className="flex items-center justify-between mb-1">
-                                  <label className="block text-xs font-medium text-muted">System Prompt</label>
-                                  <div>
-                                    <input
-                                      type="file"
-                                      ref={atlasFileInputRef}
-                                      accept=".txt,.md,.prompt"
-                                      onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) {
-                                          const reader = new FileReader();
-                                          reader.onload = (event) => {
-                                            setFeatureSettings(s => ({ ...s, atlasPrompt: event.target?.result as string || '' }));
-                                          };
-                                          reader.readAsText(file);
-                                        }
-                                      }}
-                                      className="hidden"
-                                    />
-                                    <button
-                                      onClick={() => atlasFileInputRef.current?.click()}
-                                      className="inline-flex items-center gap-1 px-2 py-1 text-xs tracking-wider bg-[var(--bg-primary)] border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
-                                    >
-                                      <Upload size={12} />
-                                      Load from file
-                                    </button>
-                                  </div>
-                                </div>
-                                <textarea
-                                  value={featureSettings.atlasPrompt}
-                                  onChange={(e) => setFeatureSettings(s => ({ ...s, atlasPrompt: e.target.value }))}
-                                  placeholder="Enter the system prompt for Atlas..."
-                                  rows={10}
-                                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm font-mono text-highlight focus:outline-none focus:border-subtle transition-colors resize-y"
-                                />
-                                <p className="text-xs text-muted mt-1">
-                                  {featureSettings.atlasPrompt.length} characters
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        {/*
-                        //
-                        // Semantic Operations config.
-                        //
-                        */}
-                        {selectedFeature === 'semanticOps' && (
-                          <div className="space-y-4">
-                            <div>
-                              <h4 className="font-semibold text-highlight">Semantic Operations</h4>
-                              <p className="text-xs text-muted">Default model for ops</p>
-                            </div>
-
-                            <div className="space-y-4">
-                              <div>
-                                <label className="block text-xs tracking-wider text-muted mb-1.5">Model Definition</label>
-                                <select
-                                  value={featureAssignments.semanticOps || ''}
-                                  onChange={(e) => setFeatureAssignments(a => ({ ...a, semanticOps: e.target.value || null }))}
-                                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
-                                >
-                                  <option value="">Select a model...</option>
-                                  {modelDefinitions.map((m) => (
-                                    <option key={m.name} value={m.name}>{m.name}</option>
-                                  ))}
-                                </select>
-                              </div>
-
-                              <div>
-                                <div className="flex items-center justify-between mb-1">
-                                  <label className="block text-xs font-medium text-muted">System Prompt</label>
-                                  <div>
-                                    <input
-                                      type="file"
-                                      ref={semanticOpFileInputRef}
-                                      accept=".txt,.md,.prompt"
-                                      onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) {
-                                          const reader = new FileReader();
-                                          reader.onload = (event) => {
-                                            setFeatureSettings(s => ({ ...s, semanticOpPrompt: event.target?.result as string || '' }));
-                                          };
-                                          reader.readAsText(file);
-                                        }
-                                      }}
-                                      className="hidden"
-                                    />
-                                    <button
-                                      onClick={() => semanticOpFileInputRef.current?.click()}
-                                      className="inline-flex items-center gap-1 px-2 py-1 text-xs tracking-wider bg-[var(--bg-primary)] border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
-                                    >
-                                      <Upload size={12} />
-                                      Load from file
-                                    </button>
-                                  </div>
-                                </div>
-                                <textarea
-                                  value={featureSettings.semanticOpPrompt}
-                                  onChange={(e) => setFeatureSettings(s => ({ ...s, semanticOpPrompt: e.target.value }))}
-                                  placeholder="Enter the system prompt for semantic operations..."
-                                  rows={10}
-                                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm font-mono text-highlight focus:outline-none focus:border-subtle transition-colors resize-y"
-                                />
-                                <p className="text-xs text-muted mt-1">
-                                  {featureSettings.semanticOpPrompt.length} characters
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        {/*
-                        //
-                        // Semantic Parser config.
-                        //
-                        */}
-                        {selectedFeature === 'semanticParser' && (
-                          <div className="space-y-4">
-                            <div>
-                              <h4 className="font-semibold text-highlight">Semantic Parser</h4>
-                              <p className="text-xs text-muted">Natural language parsing for tool calls</p>
-                            </div>
-
-                            <div>
-                              <label className="block text-xs tracking-wider text-muted mb-1.5">Model Definition</label>
-                              <select
-                                value={featureAssignments.semanticParser || ''}
-                                onChange={(e) => setFeatureAssignments(a => ({ ...a, semanticParser: e.target.value || null }))}
-                                className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
-                              >
-                                <option value="">Select a model...</option>
-                                {modelDefinitions.map((m) => (
-                                  <option key={m.name} value={m.name}>{m.name}</option>
-                                ))}
-                              </select>
-                            </div>
-                          </div>
-                        )}
-
-                        {/*
-                        //
-                        // Traffic Parser config.
-                        //
-                        */}
-                        {selectedFeature === 'trafficParser' && (
-                          <div className="space-y-4">
-                            <div>
-                              <h4 className="font-semibold text-highlight">Traffic Parser</h4>
-                              <p className="text-xs text-muted">Model used for traffic match rules with summarization prompts</p>
-                            </div>
-
-                            <div>
-                              <label className="block text-xs tracking-wider text-muted mb-1.5">Model Definition</label>
-                              <select
-                                value={featureAssignments.trafficParser || ''}
-                                onChange={(e) => setFeatureAssignments(a => ({ ...a, trafficParser: e.target.value || null }))}
-                                className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
-                              >
-                                <option value="">Select a model...</option>
-                                {modelDefinitions.map((m) => (
-                                  <option key={m.name} value={m.name}>{m.name}</option>
-                                ))}
-                              </select>
-                            </div>
-                          </div>
-                        )}
+                      {/*
+                      //
+                      // Traffic Parser.
+                      //
+                      */}
+                      <div className="flex items-center gap-4 p-3 bg-[var(--bg-secondary)] border border-dim">
+                        <div className="w-48">
+                          <p className="text-sm font-medium text-highlight">Traffic Parser</p>
+                          <p className="text-xs text-muted">Traffic summarization</p>
+                        </div>
+                        <select
+                          value={featureAssignments.trafficParser || ''}
+                          onChange={(e) => setFeatureAssignments(a => ({ ...a, trafficParser: e.target.value || null }))}
+                          className="flex-1 bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
+                        >
+                          <option value="">Select a model...</option>
+                          {modelDefinitions.map((m) => (
+                            <option key={m.name} value={m.name}>{m.name}</option>
+                          ))}
+                        </select>
                       </div>
                     </div>
                   )}

@@ -143,48 +143,114 @@ pub fn parse_manual_tool_call(text: &str) -> Option<(String, Value, String)> {
 
 /// Parse completion signal from AI response text
 ///
-/// Returns: (is_complete, summary, remaining_text_without_completion_block)
+/// Returns: (is_complete, summary, result, remaining_text_without_completion_block)
 ///
-/// Looks for JSON blocks in format: {"complete": true, "summary": "..."}
-pub fn parse_completion_signal(text: &str) -> Option<(bool, String, String)> {
+/// Looks for JSON blocks in format:
+/// {"complete": true, "summary": "...", "result": "..."}
+///
+/// The 'summary' field should be a brief description of actions taken.
+/// The 'result' field should contain the actual findings/data/output.
+pub fn parse_completion_signal(text: &str) -> Option<(bool, String, String, String)> {
     //
-    // Match JSON code blocks with completion signals
-    // Pattern: ```json\n{"complete": true/false, "summary": "..."}\n```.
+    // Use JSON parsing for robustness instead of regex.
+    // First try code-fenced JSON blocks, then plain JSON.
     //
-    let re = Regex::new(
-        r#"```(?:json)?\s*\n?\s*\{\s*"complete":\s*(true|false),\s*"summary":\s*"([^"]*)"\s*\}\s*```"#
-    ).ok()?;
 
-    if let Some(caps) = re.captures(text) {
-        let is_complete = caps.get(1)?.as_str() == "true";
-        let summary = caps.get(2)?.as_str().to_string();
+    //
+    // Look for code-fenced JSON blocks.
+    //
+    let code_fence_re = Regex::new(r#"```(?:json)?\s*\n?"#).ok()?;
+
+    for fence_match in code_fence_re.find_iter(text) {
+        let after_fence = fence_match.end();
 
         //
-        // Extract text before and after the completion block.
+        // Find the start of the JSON object.
         //
-        let before = &text[..caps.get(0)?.start()];
-        let after = &text[caps.get(0)?.end()..];
-        let remaining_text = format!("{}{}", before, after).trim().to_string();
+        if let Some(rel_start) = text[after_fence..].find('{') {
+            let json_start = after_fence + rel_start;
 
-        return Some((is_complete, summary, remaining_text));
+            //
+            // Use brace counting to find the end.
+            //
+            if let Some(json_end) = find_matching_brace(text, json_start) {
+                let json_str = &text[json_start..=json_end];
+
+                //
+                // Try to parse as completion signal.
+                //
+                if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
+                    if let Some(complete) = parsed.get("complete").and_then(|v| v.as_bool()) {
+                        let summary = parsed
+                            .get("summary")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let result = parsed
+                            .get("result")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+
+                        //
+                        // Find the closing fence.
+                        //
+                        let remaining_text_start = text[json_end + 1..]
+                            .find("```")
+                            .map(|i| json_end + 1 + i + 3)
+                            .unwrap_or(json_end + 1);
+
+                        let before = &text[..fence_match.start()];
+                        let after = &text[remaining_text_start..];
+                        let remaining_text = format!("{}{}", before, after).trim().to_string();
+
+                        return Some((complete, summary, result, remaining_text));
+                    }
+                }
+            }
+        }
     }
 
     //
     // Also try without code block markers (plain JSON).
+    // Look for {"complete": pattern.
     //
-    let re_plain = Regex::new(
-        r#"\{\s*"complete":\s*(true|false),\s*"summary":\s*"([^"]*)"\s*\}"#
-    ).ok()?;
+    let complete_pattern = r#"\{\s*"complete"\s*:"#;
+    let complete_re = Regex::new(complete_pattern).ok()?;
 
-    if let Some(caps) = re_plain.captures(text) {
-        let is_complete = caps.get(1)?.as_str() == "true";
-        let summary = caps.get(2)?.as_str().to_string();
+    for complete_match in complete_re.find_iter(text) {
+        let json_start = complete_match.start();
 
-        let before = &text[..caps.get(0)?.start()];
-        let after = &text[caps.get(0)?.end()..];
-        let remaining_text = format!("{}{}", before, after).trim().to_string();
+        //
+        // Use brace counting to find the end.
+        //
+        if let Some(json_end) = find_matching_brace(text, json_start) {
+            let json_str = &text[json_start..=json_end];
 
-        return Some((is_complete, summary, remaining_text));
+            //
+            // Try to parse as completion signal.
+            //
+            if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
+                if let Some(complete) = parsed.get("complete").and_then(|v| v.as_bool()) {
+                    let summary = parsed
+                        .get("summary")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let result = parsed
+                        .get("result")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+
+                    let before = &text[..json_start];
+                    let after = &text[json_end + 1..];
+                    let remaining_text = format!("{}{}", before, after).trim().to_string();
+
+                    return Some((complete, summary, result, remaining_text));
+                }
+            }
+        }
     }
 
     None
@@ -282,11 +348,28 @@ The operation is now finished."#;
         let result = parse_completion_signal(text);
         assert!(result.is_some());
 
-        let (is_complete, summary, remaining) = result.unwrap();
+        let (is_complete, summary, result_text, remaining) = result.unwrap();
         assert!(is_complete);
         assert_eq!(summary, "Retrieved user data and sent email notification");
+        assert_eq!(result_text, ""); // No result field in this test
         assert!(remaining.contains("I have completed the task"));
         assert!(remaining.contains("The operation is now finished"));
+    }
+
+    #[test]
+    fn test_parse_completion_signal_with_result() {
+        let text = r#"```json
+{"complete": true, "summary": "Enumerated all network connections and analyzed them.", "result": "Found 5 suspicious connections:\n1. SYN-SENT to port 29\n2. Multiple CLOSE-WAIT sockets"}
+```"#;
+
+        let result = parse_completion_signal(text);
+        assert!(result.is_some());
+
+        let (is_complete, summary, result_text, _remaining) = result.unwrap();
+        assert!(is_complete);
+        assert_eq!(summary, "Enumerated all network connections and analyzed them.");
+        assert!(result_text.contains("Found 5 suspicious connections"));
+        assert!(result_text.contains("SYN-SENT to port 29"));
     }
 
     #[test]
@@ -296,7 +379,7 @@ The operation is now finished."#;
         let result = parse_completion_signal(text);
         assert!(result.is_some());
 
-        let (is_complete, summary, _) = result.unwrap();
+        let (is_complete, summary, _, _) = result.unwrap();
         assert!(!is_complete);
         assert_eq!(summary, "Still working");
     }

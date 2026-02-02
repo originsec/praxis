@@ -543,6 +543,7 @@ impl ChainExecutor {
                         status: SemanticOpStatus::Running,
                         start_time: now,
                         end_time: None,
+                        summary: None,
                         result: None,
                         queue_position: None,
                         created_at: now,
@@ -600,12 +601,13 @@ impl ChainExecutor {
                     //
                     let end_time = Utc::now();
                     match &op_result {
-                        Ok(output) => {
+                        Ok((summary, result)) => {
                             let _ = database.update_status(
                                 &op_id,
                                 SemanticOpStatus::Completed,
                                 Some(end_time),
-                                Some(output.clone()),
+                                if summary.is_empty() { None } else { Some(summary.clone()) },
+                                if result.is_empty() { None } else { Some(result.clone()) },
                             ).await;
                         }
                         Err(e) => {
@@ -613,12 +615,16 @@ impl ChainExecutor {
                                 &op_id,
                                 SemanticOpStatus::Failed,
                                 Some(end_time),
+                                None,
                                 Some(e.to_string()),
                             ).await;
                         }
                     }
 
-                    op_result
+                    //
+                    // For chain flow, we only pass the result (not summary) to downstream.
+                    //
+                    op_result.map(|(_, result)| result)
                 }
                 ChainElement::Transform { prompt, model_ref, .. } => {
                     //
@@ -770,7 +776,10 @@ impl ChainExecutor {
                         let _ = close_session(&node_id, &rabbitmq_channel).await;
                     }
 
-                    result
+                    //
+                    // For chain flow, we only pass the result (not summary) to downstream.
+                    //
+                    result.map(|(_, result)| result)
                 }
                 ChainElement::Termination {
                     termination_type,

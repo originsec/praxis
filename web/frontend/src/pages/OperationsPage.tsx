@@ -7,7 +7,7 @@ import { RunModal } from '../components/common/RunModal';
 import { OperationDetailModal } from '../components/common/OperationDetailModal';
 import { ChainExecutionModal } from '../components/common/ChainExecutionModal';
 import { LibraryTab } from '../components/library/LibraryTab';
-import type { SemanticOpUpdate, OperationDefinitionInfo, ChainDefinitionFull } from '../api/types';
+import type { OperationDefinitionInfo, ChainDefinitionFull } from '../api/types';
 
 type FilterStatus = 'all' | 'Running' | 'Completed' | 'Failed' | 'Cancelled' | 'Queued';
 type MainTab = 'runs' | 'library';
@@ -26,7 +26,20 @@ export function OperationsPage() {
     setSearchParams({ tab }, { replace: true });
   };
   const [filter, setFilter] = useState<FilterStatus>('all');
-  const [selectedOp, setSelectedOp] = useState<SemanticOpUpdate | null>(null);
+
+  //
+  // Operation detail modal state - store just the ID, derive actual data from
+  // state so it updates live.
+  //
+  const [selectedOpId, setSelectedOpId] = useState<string | null>(null);
+
+  //
+  // Derive selected operation from current state (so it updates live).
+  //
+  const selectedOp = useMemo(() => {
+    if (!selectedOpId) return null;
+    return operations.find(op => op.operation_id === selectedOpId) ?? null;
+  }, [selectedOpId, operations]);
 
   //
   // Library tab state (uses operationDefs from context).
@@ -420,7 +433,7 @@ export function OperationsPage() {
                     <tr
                       key={op.operation_id}
                       className="border-b border-dim last:border-0 hover:bg-[var(--highlight)] transition-colors cursor-pointer"
-                      onClick={() => setSelectedOp(op)}
+                      onClick={() => setSelectedOpId(op.operation_id)}
                     >
                       <td className="px-4 py-2">
                         <div className="flex items-center gap-3">
@@ -503,7 +516,7 @@ export function OperationsPage() {
       */}
       <OperationDetailModal
         operation={selectedOp}
-        onClose={() => setSelectedOp(null)}
+        onClose={() => setSelectedOpId(null)}
       />
 
       {/*
