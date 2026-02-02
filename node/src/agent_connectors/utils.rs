@@ -280,7 +280,16 @@ pub fn collect_global_config_files(
 
     for home in homes {
         for pattern in patterns {
-            let file_path = home.join(pattern.path);
+            //
+            // Split pattern path by "/" and join each component to ensure
+            // correct path separators on all platforms.
+            //
+
+            let mut file_path = home.clone();
+            for component in pattern.path.split('/') {
+                file_path = file_path.join(component);
+            }
+
             if let Ok(contents) = fs::read_to_string(&file_path) {
                 config_items.push(common::ConfigItem {
                     path: normalize_path(&file_path),
