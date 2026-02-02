@@ -226,7 +226,7 @@ where
                         if let Ok(contents) = fs::read_to_string(path) {
                             let config_type = config_type_fn(&path.to_path_buf());
                             config_items.push(common::ConfigItem {
-                                path: normalize_path(path),
+                                path: path.to_string_lossy().to_string(),
                                 contents: Some(contents),
                                 config_type,
                             });
@@ -238,22 +238,6 @@ where
     }
 
     config_items
-}
-
-//
-// Normalize path separators to be consistent with the platform.
-// On Windows, converts forward slashes to backslashes.
-//
-
-pub fn normalize_path(path: &std::path::Path) -> String {
-    #[cfg(windows)]
-    {
-        path.to_string_lossy().replace('/', "\\")
-    }
-    #[cfg(not(windows))]
-    {
-        path.to_string_lossy().to_string()
-    }
 }
 
 //
@@ -292,7 +276,7 @@ pub fn collect_global_config_files(
 
             if let Ok(contents) = fs::read_to_string(&file_path) {
                 config_items.push(common::ConfigItem {
-                    path: normalize_path(&file_path),
+                    path: file_path.to_string_lossy().to_string(),
                     contents: Some(contents),
                     config_type: pattern.config_type.to_string(),
                 });
@@ -447,11 +431,11 @@ pub fn scan_directories_for_config_files_multi(
                 //
 
                 if let Ok(contents) = fs::read_to_string(path) {
-                    let project_path = normalize_path(project_dir);
+                    let project_path = project_dir.to_string_lossy().to_string();
                     project_paths_set.insert(project_path.clone());
 
                     config_items.push(common::ConfigItem {
-                        path: normalize_path(path),
+                        path: path.to_string_lossy().to_string(),
                         contents: Some(contents),
                         config_type: format!("{}:{}", pattern.config_type_prefix, project_path),
                     });
