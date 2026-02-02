@@ -261,7 +261,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
                     <div className="flex items-center justify-end gap-2">
                       <button
                         onClick={() => handleRun(chain)}
-                        className="p-2 hover:bg-green-500/10 text-muted hover:text-[var(--accent-success)] transition-colors"
+                        className="p-2 hover:bg-[var(--accent-success)]/10 text-muted hover:text-[var(--accent-success)] transition-colors"
                         title="Run chain"
                         disabled={chain.disabled}
                       >
@@ -269,14 +269,14 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
                       </button>
                       <button
                         onClick={() => handleEdit(chain)}
-                        className="p-2 hover:bg-blue-500/10 text-muted hover:text-[var(--accent-info)] transition-colors"
+                        className="p-2 hover:bg-[var(--accent-info)]/10 text-muted hover:text-[var(--accent-info)] transition-colors"
                         title="Edit chain"
                       >
                         <Edit2 size={14} />
                       </button>
                       <button
                         onClick={() => handleDeleteClick(chain)}
-                        className="p-2 hover:bg-red-500/10 text-muted hover:text-[var(--accent-error)] transition-colors"
+                        className="p-2 hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
                         title="Delete chain"
                       >
                         <Trash2 size={14} />

@@ -145,6 +145,7 @@ export function AgentDetailPage() {
   const [selectedServerIdx, setSelectedServerIdx] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
+  const previousMessageCountRef = useRef(0);
 
   //
   // Recon state.
@@ -263,6 +264,25 @@ export function AgentDetailPage() {
       }, 100);
     }
   }, [hasSession, activeTab]);
+
+  //
+  // When a new assistant message arrives, return focus to the input.
+  //
+  useEffect(() => {
+    if (!hasSession || activeTab !== 'session') {
+      previousMessageCountRef.current = messages.length;
+      return;
+    }
+
+    if (messages.length > previousMessageCountRef.current) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage?.role === 'assistant') {
+        setTimeout(() => messageInputRef.current?.focus(), 0);
+      }
+    }
+
+    previousMessageCountRef.current = messages.length;
+  }, [messages, hasSession, activeTab]);
 
   //
   // Fetch operation definitions when modal opens.
@@ -989,7 +1009,7 @@ export function AgentDetailPage() {
                 <button
                   onClick={handleCloseSession}
                   disabled={isClosingSession}
-                  className="inline-flex items-center gap-2 px-4 py-2  bg-red-500/20 text-[var(--accent-error)] hover:bg-red-500/30 transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-2 px-4 py-2  bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors disabled:opacity-50"
                 >
                   {isClosingSession ? (
                     <><Loader2 size={16} className="animate-spin" /> Closing...</>

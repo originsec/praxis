@@ -363,7 +363,7 @@ export function OperationsPage() {
                           {(exec.status === 'Running' || exec.status === 'Queued') && (
                             <button
                               onClick={() => cancelChainExecution(exec.execution_id)}
-                              className="p-2 hover:bg-red-500/10 text-muted hover:text-[var(--accent-error)] transition-colors"
+                              className="p-2 hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
                               title="Cancel"
                             >
                               <Square size={14} />
@@ -372,7 +372,7 @@ export function OperationsPage() {
                           {exec.status !== 'Running' && exec.status !== 'Queued' && (
                             <button
                               onClick={() => removeChainExecution(exec.execution_id)}
-                              className="p-2 hover:bg-red-500/10 text-muted hover:text-[var(--accent-error)] transition-colors"
+                              className="p-2 hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
                               title="Remove"
                             >
                               <X size={14} />
@@ -470,7 +470,7 @@ export function OperationsPage() {
                           {op.status === 'Running' && (
                             <button
                               onClick={() => cancelOperation(op.operation_id)}
-                              className="p-2  hover:bg-red-500/10 text-muted hover:text-[var(--accent-error)] transition-colors"
+                              className="p-2  hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
                               title="Cancel"
                             >
                               <Square size={14} />
@@ -481,7 +481,7 @@ export function OperationsPage() {
                             op.status === 'Cancelled') && (
                             <button
                               onClick={() => removeOperation(op.operation_id)}
-                              className="p-2  hover:bg-red-500/10 text-muted hover:text-[var(--accent-error)] transition-colors"
+                              className="p-2  hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
                               title="Remove"
                             >
                               <X size={14} />

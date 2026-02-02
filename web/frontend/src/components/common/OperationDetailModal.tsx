@@ -158,8 +158,8 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
           {operation.summary && (
             <div>
               <p className="text-xs text-muted mb-1">Summary</p>
-              <div className="bg-[var(--bg-secondary)] p-3 border-l-2 border-yellow-500">
-                <p className="text-sm text-yellow-400 whitespace-pre-wrap">
+              <div className="bg-[var(--bg-secondary)] p-3 border-l-2 border-[var(--accent-warning)]">
+                <p className="text-sm text-[var(--accent-warning)] whitespace-pre-wrap">
                   {operation.summary}
                 </p>
               </div>
