@@ -8,21 +8,6 @@
 - [Configuration](./getting-started/configuration.md)
 - [Quick Start](./getting-started/quick-start.md)
 
-# Architecture
-
-- [Overview](./architecture/overview.md)
-- [Node](./architecture/node.md)
-- [Service](./architecture/service.md)
-- [Web](./architecture/web.md)
-
-# Agent Connectors
-
-- [Overview](./connectors/overview.md)
-- [Claude Code](./connectors/claude-code.md)
-- [Gemini CLI](./connectors/gemini.md)
-- [M365 Copilot](./connectors/m365-copilot.md)
-- [Adding New Connectors](./connectors/adding-new.md)
-
 # Usage
 
 - [Nodes & Agents](./usage/nodes-and-agents.md)
@@ -32,6 +17,21 @@
 - [Terminal](./usage/terminal.md)
 - [Semantic Operations](./usage/semantic-operations.md)
 - [Chains](./usage/chains.md)
+
+# Agent Connectors
+
+- [Overview](./connectors/overview.md)
+- [Claude Code](./connectors/claude-code.md)
+- [Gemini CLI](./connectors/gemini.md)
+- [M365 Copilot](./connectors/m365-copilot.md)
+- [Adding New Connectors](./connectors/adding-new.md)
+
+# Architecture
+
+- [Overview](./architecture/overview.md)
+- [Node](./architecture/node.md)
+- [Service](./architecture/service.md)
+- [Web](./architecture/web.md)
 
 # Deployment
 
