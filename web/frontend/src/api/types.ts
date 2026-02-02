@@ -644,7 +644,7 @@ export type BrowserMessage =
   //
   // Nexus messages.
   //
-  | { type: 'nexus_start'; goal: string | null }
+  | { type: 'nexus_start'; goal: string | null; yolo_mode: boolean }
   | { type: 'nexus_stop'; session_id: string }
   | { type: 'nexus_add_agent'; session_id: string; node_id: string; agent_short_name: string }
   | { type: 'nexus_remove_agent'; session_id: string; agent_id: string }
