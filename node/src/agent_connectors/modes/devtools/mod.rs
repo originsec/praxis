@@ -8,6 +8,28 @@ mod adapter;
 pub use adapter::{use_hidden_desktop, DevToolsAdapter, DevToolsConfig};
 
 use crate::agent_connectors::traits::{AgentMode, AgentSession};
+use chromiumoxide::element::Element;
+
+//
+// Wait for an element to appear on the page, retrying up to `retries` times
+// with `delay_ms` milliseconds between attempts. Returns the element if found,
+// or None if the timeout expires.
+//
+
+pub async fn wait_for_element(
+    page: &Page,
+    selector: &str,
+    retries: u32,
+    delay_ms: u64,
+) -> Option<Element> {
+    for _ in 0..retries {
+        if let Ok(element) = page.find_element(selector).await {
+            return Some(element);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+    }
+    None
+}
 use crate::utils;
 use anyhow::{anyhow, Result};
 use chromiumoxide::browser::Browser;
@@ -149,12 +171,6 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
         common::log_info!("Connected to DevTools");
 
         //
-        // Call post-initialization hook for adapter-specific setup.
-        //
-
-        self.adapter.post_initialize(&page).await?;
-
-        //
         // Minimize window now that session is fully ready (Windows only).
         // This happens after DevTools connection because WebView2 child processes
         // that own the actual windows may not exist until the app is fully loaded.
@@ -173,6 +189,12 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
 
         #[cfg(not(windows))]
         let _ = should_minimize;
+
+        //
+        // Call post-initialization hook for adapter-specific setup.
+        //
+
+        self.adapter.post_initialize(&page).await?;
 
         Ok(())
     }
