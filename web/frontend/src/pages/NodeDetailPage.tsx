@@ -73,6 +73,21 @@ export function NodeDetailPage() {
   const [closingSessionFor, setClosingSessionFor] = useState<string | null>(null);
 
   //
+  // Close session confirmation modal state.
+  //
+  const [showCloseSessionModal, setShowCloseSessionModal] = useState(false);
+  const [agentToCloseSession, setAgentToCloseSession] = useState<string | null>(null);
+
+  //
+  // Check for running ops/chains on the node.
+  //
+  const runningNodeOps = state.operations
+    .filter(op => op.node_id === nodeId && op.status === 'Running');
+  const runningNodeChains = state.chains.executions
+    .filter(exec => exec.node_id === nodeId && exec.status === 'Running');
+  const hasRunningOpsOrChains = runningNodeOps.length > 0 || runningNodeChains.length > 0;
+
+  //
   // Intercept traffic state.
   //
   const [trafficFilters, setTrafficFilters] = useState<TrafficLogFilters>({
@@ -156,13 +171,30 @@ export function NodeDetailPage() {
     }
   };
 
-  const handleCloseSession = async (shortName: string) => {
+  const doCloseSession = async (shortName: string) => {
     setClosingSessionFor(shortName);
     try {
       await handleSelectAgent(shortName);
       await sendCommand(node.node_id, { Session: 'Close' });
     } finally {
       setClosingSessionFor(null);
+    }
+  };
+
+  const handleCloseSession = (shortName: string) => {
+    if (hasRunningOpsOrChains) {
+      setAgentToCloseSession(shortName);
+      setShowCloseSessionModal(true);
+    } else {
+      doCloseSession(shortName);
+    }
+  };
+
+  const handleCloseSessionConfirm = () => {
+    if (agentToCloseSession) {
+      setShowCloseSessionModal(false);
+      doCloseSession(agentToCloseSession);
+      setAgentToCloseSession(null);
     }
   };
 
@@ -513,6 +545,54 @@ export function NodeDetailPage() {
               className="px-4 py-2 text-sm border border-subtle hover:bg-[var(--bg-tertiary)] transition-colors"
             >
               Cancel
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/*
+      //
+      // Close Session Confirmation Modal.
+      //
+      */}
+      <Modal
+        isOpen={showCloseSessionModal}
+        title="Close Session"
+        onClose={() => {
+          setShowCloseSessionModal(false);
+          setAgentToCloseSession(null);
+        }}
+        size="sm"
+      >
+        <div className="space-y-4">
+          <p className="text-[var(--text-secondary)]">
+            There {runningNodeOps.length + runningNodeChains.length === 1 ? 'is' : 'are'}{' '}
+            <span className="text-[var(--accent-error)] font-medium">
+              {runningNodeOps.length > 0 && `${runningNodeOps.length} running operation${runningNodeOps.length !== 1 ? 's' : ''}`}
+              {runningNodeOps.length > 0 && runningNodeChains.length > 0 && ' and '}
+              {runningNodeChains.length > 0 && `${runningNodeChains.length} running chain${runningNodeChains.length !== 1 ? 's' : ''}`}
+            </span>{' '}
+            on this node that will likely fail if you close the session.
+          </p>
+          <p className="text-[var(--text-secondary)]">
+            Do you want to continue?
+          </p>
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              onClick={() => {
+                setShowCloseSessionModal(false);
+                setAgentToCloseSession(null);
+              }}
+              className="px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCloseSessionConfirm}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors"
+            >
+              <Square size={16} />
+              Close Session
             </button>
           </div>
         </div>

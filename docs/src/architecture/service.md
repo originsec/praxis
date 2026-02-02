@@ -215,7 +215,6 @@ Different features use different LLM assignments:
 - **Semantic Operations** - operation orchestration
 - **Semantic Parser** - tool discovery during recon
 - **Traffic Parser** - traffic summarization
-- **Atlas** - Nexus multi-agent chat
 
 ## Message Processing
 
