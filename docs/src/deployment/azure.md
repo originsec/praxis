@@ -8,15 +8,15 @@ This guide covers deploying Praxis to Azure using Azure Container Apps with Post
 ┌─────────────────────────────────────────────────┐
 │                      Azure                      │
 │                                                 │
-│  ┌──────────────┐    ┌──────────────────────┐  │
-│  │ Container    │    │  Container Instance  │  │
-│  │ App (Praxis) │◄───│  (RabbitMQ)          │  │
-│  └──────┬───────┘    └──────────────────────┘  │
+│  ┌──────────────┐    ┌──────────────────────┐   │
+│  │ Container    │    │  Container Instance  │   │
+│  │ App (Praxis) │◄───│  (RabbitMQ)          │   │
+│  └──────┬───────┘    └──────────────────────┘   │
 │         │                       │               │
-│  ┌──────▼───────┐     ┌─────────▼────────┐     │
-│  │  PostgreSQL  │     │  Azure File Share│     │
-│  │  Flexible    │     │  (persistence)   │     │
-│  └──────────────┘     └──────────────────┘     │
+│  ┌──────▼───────┐     ┌─────────▼────────┐      │
+│  │  PostgreSQL  │     │  Azure File Share│      │
+│  │  Flexible    │     │  (persistence)   │      │
+│  └──────────────┘     └──────────────────┘      │
 │                                                 │
 └─────────────────────────────────────────────────┘
             │
