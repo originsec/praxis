@@ -63,6 +63,7 @@
 .coal #menu-bar {
     background-color: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
+    line-height: normal;
 }
 
 .coal #menu-bar i {
@@ -87,6 +88,7 @@
 .coal .icon-button {
     color: var(--text-secondary);
     transition: color 0.2s;
+    line-height: normal;
 }
 
 .coal .icon-button:hover {
