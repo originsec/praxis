@@ -2424,7 +2424,7 @@ export function AgentDetailPage() {
             </button>
             <button
               onClick={handleCloseSessionConfirm}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/30 transition-colors"
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors"
             >
               <Square size={16} />
               Close Session
