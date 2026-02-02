@@ -12,7 +12,7 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge, NodeTypes } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, Square, Clock, CheckCircle2, XCircle, AlertCircle, Loader2, Maximize2, Cpu, Sparkles, MessageSquare, CircleStop, ExternalLink } from 'lucide-react';
+import { Play, Square, Clock, CheckCircle2, XCircle, AlertCircle, Loader2, Maximize2, Cpu, Sparkles, MessageSquare, CircleStop, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react';
 import type {
   ChainExecutionUpdate,
   ChainDefinitionFull,
@@ -268,6 +268,7 @@ interface ChainExecutionViewerInnerProps {
 
 function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }: ChainExecutionViewerInnerProps) {
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+  const [outputExpanded, setOutputExpanded] = useState(true);
   const { fitView } = useReactFlow();
 
   //
@@ -486,26 +487,32 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
 
       {/*
       //
-      // Final Output - shown prominently at top when chain completed
-      // successfully.
+      // Final Output - collapsible section shown when chain completed.
       //
       */}
       {execution.status === 'Completed' && Object.keys(outputs).length > 0 && (
-        <div className="p-4 border-b border-subtle bg-[var(--accent-success)]/5">
-          <h4 className="text-sm font-medium text-[var(--accent-success)] mb-3 flex items-center gap-2">
-            <CheckCircle2 size={16} />
-            Final Output
-          </h4>
-          <div className="space-y-3">
-            {Object.entries(outputs).map(([label, output]) => (
-              <div key={label}>
-                <span className="text-xs font-medium text-[var(--text-primary)]">{label}:</span>
-                <div className="mt-1 p-3 bg-[var(--bg-primary)] rounded text-sm max-h-48 overflow-auto border border-[var(--accent-success)]/30">
-                  <StyledOutput output={output} />
+        <div className="border-b border-subtle">
+          <button
+            onClick={() => setOutputExpanded(!outputExpanded)}
+            className="w-full px-4 py-2 flex items-center gap-2 hover:bg-[var(--bg-tertiary)] transition-colors text-left"
+          >
+            {outputExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <CheckCircle2 size={14} className="text-[var(--accent-success)]" />
+            <span className="text-sm font-medium">Final Output</span>
+            <span className="text-xs text-muted ml-auto">{Object.keys(outputs).length} output{Object.keys(outputs).length !== 1 ? 's' : ''}</span>
+          </button>
+          {outputExpanded && (
+            <div className="px-4 pb-4 space-y-3">
+              {Object.entries(outputs).map(([label, output]) => (
+                <div key={label}>
+                  <span className="text-xs font-medium text-muted">{label}:</span>
+                  <div className="mt-1 p-3 bg-[var(--bg-secondary)] rounded text-sm max-h-64 overflow-auto border border-subtle">
+                    <StyledOutput output={output} />
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
