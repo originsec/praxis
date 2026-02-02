@@ -17,6 +17,14 @@
     margin: 0;
 }
 
+.coal .sidebar .chapter.header-item.expanded {
+    margin: 0.1em 0;
+}
+
+.coal .sidebar .header-in-summary {
+    padding: 0.3em 0.8em;
+}
+
 .coal .sidebar .chapter a {
     color: var(--text-secondary);
     padding: 0.15em 0.8em;
