@@ -405,7 +405,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
   }, [execution.elements, chain]);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col">
       {/*
       //
       // Execution info header.
@@ -524,13 +524,13 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
       // Element details below - horizontal layout.
       //
       */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex min-h-[300px]">
         {/*
         //
         // Steps list.
         //
         */}
-        <div className="w-64 border-r border-subtle overflow-auto bg-[var(--bg-secondary)]">
+        <div className="w-64 border-r border-subtle bg-[var(--bg-secondary)]">
           <div className="p-3">
             <h4 className="text-sm font-medium text-muted mb-3">Execution Steps</h4>
             <div className="space-y-1">
@@ -578,7 +578,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
         // Element details panel.
         //
         */}
-        <div className="flex-1 overflow-auto p-4">
+        <div className="flex-1 p-4">
           {selectedElementId && selectedElement ? (
             <div className="space-y-4">
               {(() => {
