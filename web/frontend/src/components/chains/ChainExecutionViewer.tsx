@@ -632,7 +632,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
                     {stepInfo.type === 'transform' && <Sparkles size={18} className="text-[var(--accent-warning)]" />}
                     {stepInfo.type === 'genericPrompt' && <MessageSquare size={18} className="text-[var(--accent-purple)]" />}
                     {stepInfo.type === 'termination' && <Square size={18} className="text-[var(--accent-error)]" />}
-                    <span className="text-lg font-medium">{stepInfo.name}</span>
+                    <span className="text-lg font-medium text-[var(--text-highlight)]">{stepInfo.name}</span>
                     <span className="text-xs text-[var(--text-secondary)] font-mono">{selectedElementId.slice(0, 8)}</span>
                   </div>
                 );
