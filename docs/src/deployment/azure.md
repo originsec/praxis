@@ -1,6 +1,6 @@
 # Azure Deployment
 
-This guide covers deploying Praxis to Azure using Azure Container Apps with automatic scaling, persistent storage, and external access.
+This guide covers deploying Praxis to Azure using Azure Container Apps with PostgreSQL, automatic scaling, and persistent storage.
 
 ## Architecture
 
@@ -14,8 +14,8 @@ This guide covers deploying Praxis to Azure using Azure Container Apps with auto
 │  └──────┬───────┘    └──────────────────────┘   │
 │         │                       │                │
 │  ┌──────▼───────┐    ┌─────────▼────────┐       │
-│  │    SQLite    │    │  Azure File Share│       │
-│  │  (internal)  │    │  (persistence)   │       │
+│  │  PostgreSQL  │    │  Azure File Share│       │
+│  │  Flexible    │    │  (persistence)   │       │
 │  └──────────────┘    └──────────────────┘       │
 │                                                  │
 └──────────────────────────────────────────────────┘
@@ -52,28 +52,36 @@ cd /path/to/praxis
 
 The script will:
 - Create all required Azure resources
-- Build and push the Docker image
+- Build and push Docker images to ACR
+- Deploy PostgreSQL Flexible Server
 - Deploy Praxis with RabbitMQ
-- Set up external access
 - Display connection details
 
 ### 3. Access Your Deployment
 
 After deployment completes, you'll receive URLs for:
 - **Web Interface (HTTPS)**: `https://praxis-app.{region}.azurecontainerapps.io`
-- **RabbitMQ (AMQP)**: `amqp://praxis:praxis@praxis-rabbitmq-{region}.{region}.azurecontainer.io:5672`
-- **RabbitMQ Management UI**: `http://praxis-rabbitmq-{region}.{region}.azurecontainer.io:15672`
+- **RabbitMQ (AMQP)**: `amqp://praxis:praxis@praxis-rabbitmq-{hash}.{region}.azurecontainer.io:5672`
+- **RabbitMQ Management UI**: `http://praxis-rabbitmq-{hash}.{region}.azurecontainer.io:15672`
+
+## Script Commands
+
+```bash
+./scripts/azure-deploy.sh            # Deploy Praxis
+./scripts/azure-deploy.sh --stop     # Stop all resources (pause billing)
+./scripts/azure-deploy.sh --start    # Start all resources
+./scripts/azure-deploy.sh --delete   # Delete all Azure resources
+./scripts/azure-deploy.sh --help     # Show help
+```
 
 ## Configuration
 
-Customize deployment by setting environment variables before running the script:
+Customize deployment with environment variables:
 
 ```bash
 export AZURE_RESOURCE_GROUP="praxis-rg"
-export AZURE_LOCATION="eastus"
-export AZURE_ACR_NAME="praxisacr"
-export AZURE_CONTAINER_APP_ENV="praxis-env"
-export AZURE_STORAGE_ACCOUNT="praxisstorage"
+export AZURE_LOCATION="westus2"
+export PRAXIS_POSTGRES_PASS="MySecureP@ssword123"
 
 ./scripts/azure-deploy.sh
 ```
@@ -81,29 +89,46 @@ export AZURE_STORAGE_ACCOUNT="praxisstorage"
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AZURE_RESOURCE_GROUP` | `praxis-rg` | Resource group name |
-| `AZURE_LOCATION` | `eastus` | Azure region |
-| `AZURE_ACR_NAME` | `praxisacr` | Container registry name |
+| `AZURE_LOCATION` | `francecentral` | Azure region |
+| `AZURE_ACR_NAME` | `praxisacr` | Container registry name prefix |
 | `AZURE_CONTAINER_APP_ENV` | `praxis-env` | Container app environment |
 | `AZURE_STORAGE_ACCOUNT` | `praxisstorage` | Storage account prefix |
+| `AZURE_POSTGRES_SERVER` | `praxis-postgres` | PostgreSQL server name prefix |
+| `PRAXIS_POSTGRES_PASS` | `Praxis_db_2024!` | PostgreSQL admin password |
+
+Resource names are automatically made unique using a hash suffix derived from your subscription and resource group.
 
 ## What Gets Deployed
 
-1. **Azure Container Registry (ACR)** - Stores the Praxis Docker image
+1. **Azure Container Registry (ACR)** - Stores Praxis and RabbitMQ images
 2. **Azure Storage Account** - File share for RabbitMQ persistence
-3. **Container App Environment** - Managed environment for Container Apps
-4. **RabbitMQ** - Azure Container Instance with persistent storage and public access
-5. **Praxis** - Container App with external HTTPS ingress and auto-scaling (1-3 replicas)
+3. **PostgreSQL Flexible Server** - Database backend (Burstable B1ms tier)
+4. **Container App Environment** - Managed environment for Container Apps
+5. **RabbitMQ** - Azure Container Instance with persistent storage
+6. **Praxis** - Container App with external HTTPS ingress
 
-### External Access
+## Stopping and Starting
 
-**Praxis Web Interface:**
-- URL: `https://praxis-app.<region>.azurecontainerapps.io`
-- Protocol: HTTPS (automatically provisioned)
+To pause billing when not using Praxis:
 
-**RabbitMQ:**
-- AMQP: `amqp://praxis:praxis@praxis-rabbitmq-<region>.<region>.azurecontainer.io:5672`
-- Management UI: `http://praxis-rabbitmq-<region>.<region>.azurecontainer.io:15672`
-- Credentials: `praxis` / `praxis`
+```bash
+# Stop all resources
+./scripts/azure-deploy.sh --stop
+```
+
+This will:
+- Stop PostgreSQL Flexible Server
+- Stop RabbitMQ Container Instance
+- Scale Praxis Container App to 0 replicas
+
+To resume:
+
+```bash
+# Start all resources
+./scripts/azure-deploy.sh --start
+```
+
+Storage accounts and Container Registry still incur minimal charges when stopped.
 
 ## Updating Deployments
 
@@ -113,20 +138,7 @@ After making code changes, redeploy by running the script again:
 ./scripts/azure-deploy.sh
 ```
 
-The script will build a new image and update the existing deployment (typically 2-3 minutes).
-
-To update a specific component:
-
-```bash
-# Update Praxis to specific version
-az containerapp update -n praxis-app -g praxis-rg --image praxisacr.azurecr.io/praxis:0.1.0
-
-# Update Praxis to latest
-az containerapp update -n praxis-app -g praxis-rg --image praxisacr.azurecr.io/praxis:latest
-
-# Restart RabbitMQ
-az container restart --name praxis-rabbitmq -g praxis-rg
-```
+The script detects existing resources and updates them rather than recreating.
 
 ## Management Commands
 
@@ -134,7 +146,7 @@ az container restart --name praxis-rabbitmq -g praxis-rg
 # View Praxis logs (real-time)
 az containerapp logs show -n praxis-app -g praxis-rg --follow
 
-# View RabbitMQ logs (real-time)
+# View RabbitMQ logs
 az container logs --name praxis-rabbitmq -g praxis-rg --follow
 
 # Open Praxis in browser
@@ -145,12 +157,15 @@ az containerapp update -n praxis-app -g praxis-rg --min-replicas 2 --max-replica
 
 # Get shell access to Praxis container
 az containerapp exec -n praxis-app -g praxis-rg --command /bin/bash
+
+# Restart RabbitMQ
+az container restart --name praxis-rabbitmq -g praxis-rg
 ```
 
 ## Troubleshooting
 
 ```bash
-# Check app status
+# Check Praxis app status
 az containerapp show -n praxis-app -g praxis-rg --query properties.runningStatus
 
 # View recent logs
@@ -160,9 +175,8 @@ az container logs --name praxis-rabbitmq -g praxis-rg --tail 100
 # Check RabbitMQ status
 az container show --name praxis-rabbitmq -g praxis-rg --query instanceView.state
 
-# Test connectivity
-curl https://praxis-app.<region>.azurecontainerapps.io
-nc -zv praxis-rabbitmq-<region>.<region>.azurecontainer.io 5672
+# Check PostgreSQL status
+az postgres flexible-server show -n <server-name> -g praxis-rg --query state
 ```
 
 ## Cost Considerations
@@ -170,22 +184,25 @@ nc -zv praxis-rabbitmq-<region>.<region>.azurecontainer.io 5672
 | Component | Estimated Cost |
 |-----------|---------------|
 | ACR Basic | ~$5/month |
-| Storage Account | ~$2/month for 10GB |
-| Container Apps (Praxis) | ~$0.000012/vCPU-second |
-| Container Instance (RabbitMQ) | ~$0.0000012/vCPU-second |
-| **Estimated Total** | **$30-60/month** for light usage |
+| Storage Account | ~$2/month |
+| PostgreSQL Flexible (B1ms) | ~$15/month |
+| Container Apps (Praxis) | ~$10-20/month |
+| Container Instance (RabbitMQ) | ~$5-10/month |
+| **Estimated Total** | **$40-60/month** |
+
+Use `--stop` to pause compute billing when not in use.
 
 ## Security Best Practices
 
-1. **Change default RabbitMQ credentials** in production
-2. **Restrict public access** using Network Security Groups or Azure Firewall
-3. **Use Azure Key Vault** for secrets management
-4. **Enable Azure AD authentication** for management access
-5. **Regular security updates** of base images
+1. **Change default passwords** - Set `PRAXIS_POSTGRES_PASS` and update RabbitMQ credentials
+2. **Restrict public access** - Configure Network Security Groups
+3. **Use Azure Key Vault** - Store secrets securely
+4. **Enable Azure AD authentication** - For management access
+5. **Regular updates** - Keep base images current
 
 ## Cleanup
 
-Use the deployment script to remove all resources:
+Delete all resources:
 
 ```bash
 ./scripts/azure-deploy.sh --delete
@@ -194,16 +211,12 @@ Use the deployment script to remove all resources:
 This deletes:
 - Container Instance (RabbitMQ)
 - Container App (Praxis)
+- PostgreSQL Flexible Server
 - Azure Container Registry
 - Storage Account
 - Log Analytics Workspace
 - Container App Environment
-
-Or delete the resource group directly:
-
-```bash
-az group delete --name praxis-rg --yes --no-wait
-```
+- Resource Group
 
 Verify deletion:
 
