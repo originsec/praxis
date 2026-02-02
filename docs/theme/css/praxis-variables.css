@@ -1,0 +1,78 @@
+/* Praxis Terminal Theme - CSS Variables */
+
+:root {
+    /* Background colors */
+    --bg-primary: #030712;
+    --bg-secondary: #050807;
+    --bg-tertiary: #0a0f0c;
+
+    /* Border colors */
+    --border-color: #1f3229;
+    --border-dim: #141f19;
+    --border-hover: #5c9c66;
+    --border-active: #9ee675;
+
+    /* Text colors */
+    --text-primary: #9ee675;
+    --text-secondary: #5c9c66;
+    --text-highlight: #f2ffd5;
+    --text-muted: #4a5d52;
+
+    /* Accent colors */
+    --accent-success: #9ee675;
+    --accent-warning: #ffd700;
+    --accent-error: #f87171;
+    --accent-info: #00ffff;
+    --accent-purple: #cc66ff;
+
+    /* Glow effects */
+    --green-glow: rgba(158, 230, 117, 0.15);
+    --green-glow-strong: rgba(158, 230, 117, 0.4);
+
+    /* Fonts */
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace;
+}
+
+/* mdBook variable overrides */
+.coal, .navy, .ayu, .rust {
+    --bg: var(--bg-primary);
+    --fg: var(--text-primary);
+
+    --sidebar-bg: var(--bg-secondary);
+    --sidebar-fg: var(--text-primary);
+    --sidebar-non-existant: var(--text-muted);
+    --sidebar-active: var(--text-highlight);
+    --sidebar-spacer: var(--border-dim);
+    --sidebar-header-border-color: var(--border-color);
+
+    --scrollbar: var(--border-color);
+
+    --icons: var(--text-secondary);
+    --icons-hover: var(--text-primary);
+
+    --links: var(--accent-info);
+
+    --inline-code-color: var(--accent-purple);
+
+    --theme-popup-bg: var(--bg-secondary);
+    --theme-popup-border: var(--border-color);
+    --theme-hover: var(--bg-tertiary);
+
+    --quote-bg: var(--bg-tertiary);
+    --quote-border: var(--border-active);
+
+    --table-border-color: var(--border-color);
+    --table-header-bg: var(--bg-tertiary);
+    --table-alternate-bg: var(--bg-secondary);
+
+    --searchbar-border-color: var(--border-color);
+    --searchbar-bg: var(--bg-secondary);
+    --searchbar-fg: var(--text-primary);
+    --searchbar-shadow-color: transparent;
+    --searchresults-header-fg: var(--text-highlight);
+    --searchresults-border-color: var(--border-color);
+    --searchresults-li-bg: var(--bg-secondary);
+    --search-mark-bg: var(--green-glow-strong);
+
+    --warning-border: var(--accent-warning);
+}

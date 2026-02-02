@@ -9,23 +9,14 @@ Go to **Settings** → **LLM Providers** in the web UI.
 ### Adding a Model
 
 1. Click **Add Model**
-2. Select a **Provider** (Anthropic, OpenAI, Google, etc.)
-3. Enter the **Model** name (e.g., `claude-sonnet-4-20250514`)
-4. Enter your **API Key**
+2. Select a **Provider**
+3. Enter your **API Key**
+4. Click the refresh button to pull available models from the provider (not supported by all providers), or enter the model name manually
 5. Click **Save**
 
 ### Supported Providers
 
-| Provider | Example Models | Notes |
-|----------|---------------|-------|
-| **Anthropic** | `claude-sonnet-4-20250514`, `claude-haiku-4-5-20241022` | Claude models |
-| **OpenAI** | `gpt-4o`, `gpt-4o-mini` | GPT models |
-| **Google** | `gemini-1.5-pro`, `gemini-1.5-flash` | Gemini models |
-| **Groq** | `llama-3.3-70b-versatile` | Fast inference |
-| **Cerebras** | `llama-3.3-70b` | Very fast inference |
-| **Mistral** | `mistral-large-latest` | Mistral models |
-| **xAI** | `grok-2-latest` | Grok models |
-| **Ollama** | `llama3`, `codellama` | Local models |
+Anthropic, OpenAI, Google, Groq, Cerebras, Mistral, xAI, Ollama
 
 ### Feature Assignment
 

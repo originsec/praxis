@@ -1,12 +1,16 @@
 # Introduction
 
-Praxis is a semantic command and control framework for AI agents. If that sounds like a mouthful, here's what it actually means: it's a platform for discovering, monitoring, and interacting with computer-use AI agents running on endpoints.
+Praxis is an open-source research and experimentation platform for discovering, controlling, and orchestrating computer-use AI agents across endpoints.
+
+As AI coding agents become more prevalent - tools that can read files, execute commands, and interact directly with systems - understanding their security properties becomes critical. Praxis helps enrich our understanding of what's possible when you have legitimate access to systems where these agents run, and what that means for endpoint security.
+
+Built by [Origin](https://originhq.com) for security research and red team operations.
 
 ## Why Does This Exist?
 
-AI coding assistants are everywhere now-Claude Code, Gemini CLI, GitHub Copilot, Microsoft 365 Copilot. These tools can read your files, execute commands, browse the web, and interact with APIs. They're incredibly useful, but from a security perspective, they're also incredibly interesting.
+AI coding assistants are everywhere now - Claude Code, Gemini CLI, Microsoft 365 Copilot. These tools can read your files, execute commands, browse the web, and interact with APIs. From a security perspective, they're incredibly interesting.
 
-Praxis started as a question: what can you do if you have access to a system running one of these agents? Not by exploiting vulnerabilities in the agents themselves, but by using the access you already have to see what they're doing and potentially redirect their capabilities.
+Praxis started as a question: what can you do if you have access to a system running one of these agents? Not by exploiting vulnerabilities in the agents themselves, but by using the access you already have to see what they're doing and repurpose their capabilities.
 
 This matters for:
 
@@ -16,54 +20,66 @@ This matters for:
 
 ## What Can Praxis Do?
 
-At its core, Praxis lets you:
-
-**Discover agents** - Find out what AI assistants are installed and running on a system. The node component fingerprints common agents and reports what it finds.
-
-**See what they see** - Reconnaissance shows you the agent's tools (MCP servers, skills, plugins), configuration files, and session histories. You can see what projects they've been used on and what conversations have happened.
-
-**Watch the traffic** - Intercept the HTTPS traffic between agents and their LLM backends. See the prompts being sent, the responses coming back, the tool calls being made.
-
-**Talk to them** - Create sessions where you can send prompts directly to agents, either using their existing context or starting fresh.
-
-**Automate with semantic operations** - Define tasks in natural language ("find all files containing API keys and list them") and let the agent figure out how to accomplish them.
-
-**Chain operations together** - Build visual workflows that connect multiple operations, transforming outputs and passing them between steps.
+| Feature | Description |
+|---------|-------------|
+| **Agent Discovery** | Fingerprint and detect computer-use agents on endpoints |
+| **Reconnaissance** | Enumerate tools (MCP servers, skills), configurations, and session histories |
+| **Config Visibility** | View and edit agent configuration files directly |
+| **Traffic Interception** | MITM proxy for agent-to-LLM traffic |
+| **Agent Dialog** | Create interactive sessions with agents |
+| **Semantic Operations** | Define and chain natural language tasks for multi-step automation |
+| **Terminal Access** | PTY terminal on remote nodes |
 
 ## The Three Components
 
 Praxis has three main pieces:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        Your Browser                          │
-│                     (Web UI @ :8080)                         │
-└────────────────────────────┬────────────────────────────────┘
-                             │
-┌────────────────────────────▼────────────────────────────────┐
-│                         Service                              │
-│           (Backend + Database + Operation Manager)           │
-└────────────────────────────┬────────────────────────────────┘
-                             │ RabbitMQ
-        ┌────────────────────┴────────────────────┐
-        │                                          │
-┌───────▼───────┐                         ┌───────▼───────┐
-│     Node      │                         │     Node      │
-│  (Target #1)  │                         │  (Target #2)  │
-└───────────────┘                         └───────────────┘
+┌───────────────────────────────────────────────────────────┐
+│                                                           │
+│                       Your Browser                        │
+│                    (Web UI @ :8080)                       │
+│                                                           │
+└─────────────────────────────┬─────────────────────────────┘
+                              │
+                              │
+┌─────────────────────────────▼─────────────────────────────┐
+│                                                           │
+│                         Service                           │
+│         (Backend + Database + Operation Manager)          │
+│                                                           │
+└─────────────────────────────┬─────────────────────────────┘
+                              │
+                              │ RabbitMQ
+                              │
+        ┌─────────────────────┴─────────────────────┐
+        │                                           │
+        │                                           │
+┌───────▼───────┐                         ┌─────────▼─────────┐
+│               │                         │                   │
+│     Node      │                         │       Node        │
+│  (Target #1)  │                         │    (Target #2)    │
+│               │                         │                   │
+└───────────────┘                         └───────────────────┘
 ```
 
-**Node** runs on target systems. It discovers agents, intercepts traffic, handles sessions, and reports back to the service. Nodes are stateless-all the interesting data lives on the service.
+**Node** runs on target systems. It discovers agents, intercepts traffic, handles sessions, and reports back to the service. Nodes are stateless - all the interesting data lives on the service.
 
 **Service** is the central backend. It stores operation definitions, chain workflows, intercepted traffic, and recon results. It also runs the semantic operations manager that orchestrates agent tasks.
 
-**Web** is the React frontend that talks to the service over WebSocket. It provides the UI for everything-selecting nodes, viewing agents, running operations, building chains.
+**Web** is the React frontend that talks to the service over WebSocket. It provides the UI for everything - selecting nodes, viewing agents, running operations, building chains.
 
-## Early Days
+## Early Release Notice
 
-Fair warning: this is an early release. We're putting it out there to get feedback and contributions, but it's not production-ready. Some things are rough around the edges, the documentation is still being written, and the API might change.
+This is an early release to showcase initial capabilities. It is **not yet ready** for full-scale red teaming or production use - although you can certainly experiment to your heart's content.
 
-Most importantly: **Praxis is not stealthy**. It installs root CA certificates, modifies system proxy settings, adds hosts file entries, and generally leaves traces everywhere. It's a research tool, not a covert implant.
+The platform is under active development:
+
+- Some features are incomplete or experimental
+- The codebase is evolving rapidly
+- **This is not designed to be stealthy** - it installs root certificates, modifies system settings, and is generally quite noisy
+
+We're releasing early to get feedback and contributions from the community.
 
 ## Getting Started
 
