@@ -72,7 +72,6 @@ impl CodexSession {
 
         if self.yolo_mode {
             cmd.arg("--dangerously-bypass-approvals-and-sandbox");
-            cmd.arg("--add-dir").arg("/");
         }
 
         //
@@ -81,6 +80,10 @@ impl CodexSession {
 
         if !is_resume {
             cmd.arg("--color").arg("never");
+
+            if self.yolo_mode {
+                cmd.arg("--add-dir").arg("/");
+            }
 
             if let Some(ref dir) = self.working_dir {
                 cmd.arg("--cd").arg(dir);
