@@ -228,7 +228,7 @@ fn extract_project_paths_from_config(home: &Path, project_paths: &mut HashSet<St
     // Parse ~/.codex/config.toml and extract [projects."<path>"] sections.
     //
 
-    let config_path = home.join(".codex/config.toml");
+    let config_path = home.join(".codex").join("config.toml");
     if !config_path.exists() {
         return;
     }
