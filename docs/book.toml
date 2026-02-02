@@ -1,0 +1,12 @@
+[book]
+title = "Praxis Documentation"
+authors = ["Origin Security"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+
+[output.html]
+git-repository-url = "https://github.com/originsec/praxis"
+edit-url-template = "https://github.com/originsec/praxis/edit/main/docs/src/{path}"
