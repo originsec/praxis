@@ -2,7 +2,7 @@
 // M365 Copilot-specific DevTools adapter implementation.
 //
 
-use crate::agent_connectors::modes::devtools::{DevToolsAdapter, DevToolsConfig};
+use crate::agent_connectors::modes::devtools::{wait_for_element, DevToolsAdapter, DevToolsConfig};
 use anyhow::Result;
 use chromiumoxide::page::Page;
 
@@ -125,25 +125,26 @@ impl DevToolsAdapter for M365DevToolsAdapter {
     }
 
     async fn wait_for_submit_ready(&self, page: &Page) -> anyhow::Result<()> {
-        let submit_selector = r#"button[aria-label="Send"]:not([aria-disabled="true"])"#;
-        for _ in 0..100 {
-            if page.find_element(submit_selector).await.is_ok() {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
+        let selector = r#"button[aria-label="Send"]:not([aria-disabled="true"])"#;
+        wait_for_element(page, selector, 100, 100).await;
         Ok(())
     }
 
     async fn post_initialize(&self, page: &Page) -> anyhow::Result<()> {
         //
+        // Wait for input element to be ready.
+        //
+
+        let input_selector = self.input_selector();
+        common::log_debug!("Waiting for input element: {}", input_selector);
+        wait_for_element(page, input_selector, 30, 200).await;
+
+        //
         // Click the Work/Web toggle button. Defaults to "Work" if not specified.
-        // These buttons may not always be available, which is fine.
         //
 
         let working_dir = self.working_dir.as_deref().unwrap_or(WORKING_DIR_WORK);
-
-        let selector = match working_dir {
+        let toggle_selector = match working_dir {
             WORKING_DIR_WORK => r#"button[data-testid="toggle-work"]"#,
             WORKING_DIR_WEB => r#"button[data-testid="toggle-web"]"#,
             _ => {
@@ -157,19 +158,11 @@ impl DevToolsAdapter for M365DevToolsAdapter {
             }
         };
 
-        //
-        // Wait briefly for the button to appear, then click if available.
-        //
-
-        for _ in 0..30 {
-            if let Ok(button) = page.find_element(selector).await {
-                common::log_info!("Clicking {} toggle button", working_dir);
-                if let Err(e) = button.click().await {
-                    common::log_warn!("Failed to click {} toggle: {}", working_dir, e);
-                }
-                break;
+        if let Some(button) = wait_for_element(page, toggle_selector, 3, 200).await {
+            common::log_debug!("Clicking {} toggle button", working_dir);
+            if let Err(e) = button.click().await {
+                common::log_warn!("Failed to click {} toggle: {}", working_dir, e);
             }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
 
         //
@@ -177,28 +170,20 @@ impl DevToolsAdapter for M365DevToolsAdapter {
         //
 
         let menu_selector = r#"button[data-automation-id="newPrivateChatMenuButton"]"#;
-        for _ in 0..30 {
-            if let Ok(button) = page.find_element(menu_selector).await {
-                common::log_info!("Clicking new private chat menu button");
-                if let Err(e) = button.click().await {
-                    common::log_warn!("Failed to click menu button: {}", e);
-                    return Ok(());
-                }
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-
-        let new_chat_selector = r#"div[data-automation-id="newPrivateChatButton"]"#;
-        for _ in 0..30 {
-            if let Ok(button) = page.find_element(new_chat_selector).await {
-                common::log_info!("Clicking new private chat button");
-                if let Err(e) = button.click().await {
-                    common::log_warn!("Failed to click new private chat button: {}", e);
-                }
+        if let Some(menu_button) = wait_for_element(page, menu_selector, 3, 200).await {
+            common::log_debug!("Clicking new private chat menu button");
+            if let Err(e) = menu_button.click().await {
+                common::log_warn!("Failed to click menu button: {}", e);
                 return Ok(());
             }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            let new_chat_selector = r#"div[data-automation-id="newPrivateChatButton"]"#;
+            if let Some(chat_button) = wait_for_element(page, new_chat_selector, 5, 200).await {
+                common::log_debug!("Clicking new private chat button");
+                if let Err(e) = chat_button.click().await {
+                    common::log_warn!("Failed to click new private chat button: {}", e);
+                }
+            }
         }
 
         Ok(())
