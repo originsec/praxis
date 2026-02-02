@@ -1,3 +1,6 @@
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+
 type OutputBlockType = 'outgoing' | 'incoming' | 'error' | 'section' | 'iteration' | 'regular';
 
 interface OutputBlock {
@@ -79,7 +82,9 @@ export function StyledOutput({ output }: { output: string }) {
                 <div className="text-xs font-medium mb-1 flex items-center gap-1" style={{ color: accentColor }}>
                   <span>←</span> {block.label}
                 </div>
-                <pre className="text-sm whitespace-pre-wrap font-mono text-[var(--text-primary)]">{block.content}</pre>
+                <div className="prose prose-sm prose-invert max-w-none text-[var(--text-primary)]">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
+                </div>
               </div>
             );
           }
@@ -105,7 +110,9 @@ export function StyledOutput({ output }: { output: string }) {
             );
           default:
             return block.content ? (
-              <pre key={idx} className="text-sm whitespace-pre-wrap font-mono text-muted">{block.content}</pre>
+              <div key={idx} className="prose prose-sm prose-invert max-w-none text-[var(--text-primary)]">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
+              </div>
             ) : null;
         }
       })}
