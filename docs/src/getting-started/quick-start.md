@@ -96,7 +96,7 @@ The operation executes through your agent. Watch the output in real-time in the 
 - **One-shot** - sends the prompt directly to the agent and returns the response
 - **Agent** - uses an orchestrating LLM to run multi-turn interactions with the target agent (useful for complex tasks)
 
-For more complex workflows, you can chain multiple operations together with the visual chain builder. See [Chains](../usage/chains.md) for details.
+For more complex workflows, you can chain multiple operations together with the visual chain builder. See [Semantic Operations](../usage/semantic-operations.md) for details.
 
 ## Step 7: Enable Interception (Optional)
 
@@ -122,4 +122,4 @@ See [Interception](../usage/interception.md) for details on each method.
 - [Configure LLM providers](./configuration.md) for semantic features
 - [Learn about agent connectors](../connectors/overview.md) and their capabilities
 - [Set up traffic interception](../usage/interception.md) in detail
-- [Build operation chains](../usage/chains.md) for automation
+- [Build operation chains](../usage/semantic-operations.md) for automation

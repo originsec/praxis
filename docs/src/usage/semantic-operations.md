@@ -144,7 +144,90 @@ When timeout is reached, the operation fails with a timeout error.
 
 ## Chaining Operations
 
-Operations can be combined into chains for complex workflows. See the [Chains](chains.md) section.
+Operations can be combined into chains for complex workflows. A chain is a graph of operations with connections defining execution order and session groups controlling how sessions are shared.
+
+### Visual Chain Builder
+
+Praxis includes a visual chain builder using React Flow:
+
+1. Go to **Operations** → **Library**
+2. Click **New Chain**
+3. Drag operations onto the canvas
+4. Connect outputs to inputs
+5. Configure session groups
+6. Save the chain
+
+### Chain Structure
+
+A chain consists of:
+
+- **Start Node** - Entry point, begins execution
+- **Operation Nodes** - Each runs a semantic operation
+- **Connections** - Define execution order and data flow
+- **End** - Implicit when all paths complete
+
+### Session Groups
+
+Session groups control how sessions are managed across operations.
+
+**Same Session Group** - Operations share a session. The first operation creates the session, subsequent operations reuse it, and it closes after the last operation. This maintains context between operations.
+
+**Different Session Groups** - Operations get their own sessions with clean isolation and no shared context.
+
+Why does this matter? Agent sessions have context. If one operation sets something up, the next operation in the same session sees that state.
+
+### Chain Execution
+
+When running a chain:
+
+1. The executor builds a dependency graph from connections
+2. Finds operations with no dependencies (starting points)
+3. Executes ready operations (possibly in parallel)
+4. Marks completed, finds newly ready operations
+5. Repeats until all complete or one fails
+
+Operations without dependencies on each other can run simultaneously. The executor identifies these and runs them in parallel.
+
+```
+    ┌─────┐
+    │Start│
+    └──┬──┘
+       │
+   ┌───┴───┐
+   │       │
+┌──▼──┐ ┌──▼──┐
+│Op A │ │Op B │  ← These run in parallel
+└──┬──┘ └──┬──┘
+   │       │
+   └───┬───┘
+       │
+    ┌──▼──┐
+    │Op C │  ← This waits for both A and B
+    └─────┘
+```
+
+### Monitoring Chains
+
+Chain executions appear in the Runs tab alongside individual operations. Click a chain execution to see individual element status, output from each operation, and timing information.
+
+### Chain Cancellation
+
+You can cancel a running chain from the Runs tab. Cancellation stops queuing new operations and lets running operations complete (or cancels them).
+
+### Use Cases
+
+**Sequential Operations** - Run operations in order, each building on the previous: enumerate capabilities, identify target, execute action, verify result.
+
+**Parallel Reconnaissance** - Run multiple recon operations simultaneously, then combine results.
+
+**Staged Operations** - Build up context across operations with shared sessions, maintaining state throughout.
+
+### Chain Best Practices
+
+- Plan session groups carefully - shared sessions maintain context but accumulate state
+- Handle failures - if an operation fails, the chain stops
+- Test incrementally - run individual operations first, then combine
+- Keep chains focused - one chain, one goal
 
 ## Troubleshooting
 

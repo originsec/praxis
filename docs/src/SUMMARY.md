@@ -12,11 +12,10 @@
 
 - [Nodes & Agents](./usage/nodes-and-agents.md)
 - [Reconnaissance](./usage/recon.md)
-- [Interception](./usage/interception.md)
 - [Sessions](./usage/sessions.md)
 - [Terminal](./usage/terminal.md)
+- [Interception](./usage/interception.md)
 - [Semantic Operations](./usage/semantic-operations.md)
-- [Chains](./usage/chains.md)
 
 # Agent Connectors
 
