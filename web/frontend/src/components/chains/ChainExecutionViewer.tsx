@@ -503,11 +503,8 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
           {outputExpanded && (
             <div className="px-3 pb-3 space-y-2">
               {Object.entries(outputs).map(([label, output]) => (
-                <div key={label}>
-                  <span className="text-xs text-[var(--text-highlight)]">{label}:</span>
-                  <div className="mt-1 p-2 bg-[var(--bg-primary)] rounded text-xs max-h-48 overflow-auto border border-[var(--border-dim)]">
-                    <StyledOutput output={output} />
-                  </div>
+                <div key={label} className="p-2 bg-[var(--bg-primary)] rounded text-xs max-h-48 overflow-auto border border-[var(--border-dim)]">
+                  <StyledOutput output={output} />
                 </div>
               ))}
             </div>
