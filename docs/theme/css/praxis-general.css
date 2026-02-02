@@ -1,34 +1,10 @@
 /* Praxis Terminal Theme - General Styles */
+/* Scoped to .coal theme to not break other themes */
 
-/* Base styles */
-html {
+/* Grid background pattern - only for coal theme */
+html.coal {
     font-family: var(--font-mono);
     color-scheme: dark;
-    background-color: var(--bg-primary);
-    color: var(--text-primary);
-    scrollbar-color: var(--border-color) var(--bg-secondary);
-}
-
-body {
-    font-family: var(--font-mono);
-    font-size: 14px;
-    line-height: 1.7;
-    background-color: transparent;
-    color: var(--text-secondary);
-}
-
-/* Make content areas transparent so grid shows through */
-.page-wrapper,
-.page,
-#mdbook-page-wrapper,
-#mdbook-content,
-.content,
-main {
-    background: transparent !important;
-}
-
-/* Grid background pattern - matching web UI */
-html {
     background-color: var(--bg-primary);
     background-image:
         linear-gradient(rgba(31, 50, 41, 0.15) 1px, transparent 1px),
@@ -37,27 +13,40 @@ html {
     background-attachment: fixed;
 }
 
+.coal body {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    line-height: 1.7;
+    background-color: transparent;
+    color: var(--text-secondary);
+}
+
+/* Make content areas transparent so grid shows through */
+.coal .page-wrapper,
+.coal .page,
+.coal #mdbook-page-wrapper,
+.coal #mdbook-content,
+.coal .content,
+.coal main {
+    background: transparent;
+}
 
 /* Main content */
-#content main {
+.coal #content main {
     padding: 1em 2em;
 }
 
 /* Override any blue borders */
-* {
+.coal .pagetoc a,
+.coal .pagetoc,
+.coal #pagetoc,
+.coal [class*="toc"],
+.coal .chapter-item {
     border-inline-start-color: var(--border-color);
 }
 
-.pagetoc a,
-.pagetoc,
-#pagetoc,
-[class*="toc"],
-.chapter-item {
-    border-inline-start-color: var(--border-color) !important;
-}
-
 /* Headings - match web UI style */
-h1, h2, h3, h4, h5, h6 {
+.coal h1, .coal h2, .coal h3, .coal h4, .coal h5, .coal h6 {
     font-family: var(--font-mono);
     color: var(--text-highlight);
     font-weight: 500;
@@ -66,20 +55,20 @@ h1, h2, h3, h4, h5, h6 {
     border-bottom: none;
 }
 
-h1 {
+.coal h1 {
     font-size: 1.6em;
-    color: rgb(242, 255, 213) !important;
+    color: rgb(242, 255, 213);
 }
 
-h1 a,
-h1 a.header,
-#mdbook-content h1 a,
-.content h1 a,
-main h1 a {
-    color: rgb(242, 255, 213) !important;
+.coal h1 a,
+.coal h1 a.header,
+.coal #mdbook-content h1 a,
+.coal .content h1 a,
+.coal main h1 a {
+    color: rgb(242, 255, 213);
 }
 
-h2 {
+.coal h2 {
     font-size: 1.3em;
     color: var(--text-highlight);
     margin-top: 2em;
@@ -87,35 +76,35 @@ h2 {
     border-bottom: 1px solid var(--border-dim);
 }
 
-h3 {
+.coal h3 {
     font-size: 1.1em;
     color: var(--text-highlight);
 }
 
-h4, h5, h6 {
+.coal h4, .coal h5, .coal h6 {
     font-size: 1em;
     color: var(--text-primary);
 }
 
 /* Paragraphs */
-p {
+.coal p {
     margin: 1em 0;
 }
 
 /* Links */
-a {
+.coal a {
     color: var(--accent-info);
     text-decoration: none;
     transition: color 0.2s, text-shadow 0.2s;
 }
 
-a:hover {
+.coal a:hover {
     color: var(--text-highlight);
     text-shadow: 0 0 8px var(--green-glow);
 }
 
 /* Code blocks */
-code {
+.coal code {
     font-family: var(--font-mono);
     background-color: var(--bg-tertiary);
     border: 1px solid var(--border-dim);
@@ -125,8 +114,8 @@ code {
     color: var(--accent-purple);
 }
 
-pre {
-    background: var(--bg-primary) !important;
+.coal pre {
+    background: var(--bg-primary);
     border: 1px solid var(--border-color);
     border-radius: 4px;
     padding: 1em;
@@ -135,8 +124,8 @@ pre {
     line-height: 1.4;
 }
 
-pre code {
-    background: transparent !important;
+.coal pre code {
+    background: transparent;
     border: none;
     padding: 0;
     color: var(--text-primary);
@@ -144,19 +133,19 @@ pre code {
 }
 
 /* Remove hljs background */
-.hljs {
-    background: transparent !important;
+.coal .hljs {
+    background: transparent;
 }
 
 /* Inline code in headings */
-h1 code, h2 code, h3 code, h4 code {
+.coal h1 code, .coal h2 code, .coal h3 code, .coal h4 code {
     color: var(--accent-purple);
     background-color: var(--bg-tertiary);
     font-size: 0.85em;
 }
 
 /* Tables - matching web UI style */
-table {
+.coal table {
     width: 100%;
     border-collapse: collapse;
     margin: 1.5em 0;
@@ -165,12 +154,12 @@ table {
     background-color: rgb(20, 31, 25);
 }
 
-table thead tr {
-    background-color: var(--bg-tertiary) !important;
+.coal table thead tr {
+    background-color: var(--bg-tertiary);
     border-bottom: 1px solid rgb(31, 50, 41);
 }
 
-table th {
+.coal table th {
     color: var(--text-muted);
     font-weight: 500;
     padding: 0.5em 1em;
@@ -180,27 +169,22 @@ table th {
     letter-spacing: 0.1em;
 }
 
-table td {
+.coal table td {
     padding: 0.5em 1em;
-    border: none !important;
-    border-bottom: 1px solid rgb(31, 50, 41) !important;
+    border: none;
+    border-bottom: 1px solid rgb(31, 50, 41);
 }
 
-table tbody tr {
-    background-color: transparent !important;
+.coal table tbody tr {
+    background-color: transparent;
 }
 
-table tbody tr:nth-child(odd),
-table tbody tr:nth-child(even) {
-    background-color: transparent !important;
-}
-
-table tbody tr:last-child td {
-    border-bottom: none !important;
+.coal table tbody tr:last-child td {
+    border-bottom: none;
 }
 
 /* Blockquotes */
-blockquote {
+.coal blockquote {
     background-color: var(--bg-tertiary);
     border-left: 3px solid var(--border-active);
     margin: 1.5em 0;
@@ -208,75 +192,75 @@ blockquote {
     color: var(--text-secondary);
 }
 
-blockquote p {
+.coal blockquote p {
     margin: 0;
 }
 
 /* Lists */
-ul, ol {
+.coal ul, .coal ol {
     margin: 1em 0;
     padding-left: 2.5em;
 }
 
-li {
+.coal li {
     margin: 0.5em 0;
 }
 
-li::marker {
+.coal li::marker {
     color: var(--text-secondary);
 }
 
 /* Strong and emphasis */
-strong, b {
+.coal strong, .coal b {
     color: var(--text-highlight);
     font-weight: 600;
 }
 
-em, i {
+.coal em, .coal i {
     color: var(--text-secondary);
 }
 
 /* Horizontal rules */
-hr {
+.coal hr {
     border: none;
     border-top: 1px solid var(--border-color);
     margin: 2em 0;
 }
 
 /* Images */
-img {
+.coal img {
     max-width: 100%;
     border: 1px solid var(--border-color);
     border-radius: 4px;
 }
 
 /* Selection */
-::selection {
+.coal ::selection {
     background-color: var(--green-glow-strong);
     color: var(--text-highlight);
 }
 
 /* Custom scrollbar */
-::-webkit-scrollbar {
+.coal ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
 }
 
-::-webkit-scrollbar-track {
+.coal ::-webkit-scrollbar-track {
     background: var(--bg-secondary);
 }
 
-::-webkit-scrollbar-thumb {
+.coal ::-webkit-scrollbar-thumb {
     background: var(--border-color);
     border-radius: 4px;
 }
 
-::-webkit-scrollbar-thumb:hover {
+.coal ::-webkit-scrollbar-thumb:hover {
     background: var(--border-hover);
 }
 
 /* Warning/Note boxes */
-.warning {
+.coal .warning {
     background-color: rgba(255, 215, 0, 0.1);
     border-left: 3px solid var(--accent-warning);
     padding: 1em;
@@ -284,12 +268,12 @@ img {
 }
 
 /* Chapter navigation */
-.nav-chapters {
+.coal .nav-chapters {
     font-size: 0.9em;
 }
 
 /* Page title area */
-#content > main > h1:first-child {
+.coal #content > main > h1:first-child {
     margin-top: 0;
     padding-top: 0.5em;
 }

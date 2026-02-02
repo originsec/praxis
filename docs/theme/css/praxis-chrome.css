@@ -1,28 +1,22 @@
 /* Praxis Terminal Theme - Chrome/Navigation Styles */
-
-/* Override any blue borders from mdBook defaults */
-.sidebar-scrollbox .active,
-.chapter li.active,
-.content .active {
-    border-inline-start-color: var(--border-color) !important;
-}
+/* Scoped to .coal theme to not break other themes */
 
 /* Sidebar */
-.sidebar {
+.coal .sidebar {
     background-color: var(--bg-secondary);
     border-right: 1px solid var(--border-color);
 }
 
-.sidebar .sidebar-scrollbox {
+.coal .sidebar .sidebar-scrollbox {
     padding: 1em;
 }
 
 /* Sidebar chapter list */
-.sidebar .chapter {
+.coal .sidebar .chapter {
     margin: 0.25em 0;
 }
 
-.sidebar .chapter a {
+.coal .sidebar .chapter a {
     color: var(--text-secondary);
     padding: 0.4em 0.8em;
     border-radius: 2px;
@@ -30,22 +24,22 @@
     font-size: 0.9em;
 }
 
-.chapter a:hover {
+.coal .sidebar .chapter a:hover {
     color: var(--text-highlight);
     background-color: var(--bg-tertiary);
     text-shadow: 0 0 8px var(--green-glow);
 }
 
-.chapter li.active > a {
+.coal .chapter li.active > a {
     color: var(--text-highlight);
     background-color: var(--bg-tertiary);
     border-left: 2px solid var(--border-color);
-    border-inline-start-color: var(--border-color) !important;
+    border-inline-start-color: var(--border-color);
     padding-left: calc(0.8em - 2px);
 }
 
 /* Part titles in sidebar */
-.chapter li.part-title {
+.coal .chapter li.part-title {
     color: var(--text-muted);
     font-size: 0.75em;
     text-transform: uppercase;
@@ -57,26 +51,26 @@
 }
 
 /* Sidebar toggle */
-.sidebar-toggle {
+.coal .sidebar-toggle {
     background-color: var(--bg-secondary);
     border: 1px solid var(--border-color);
 }
 
 /* Menu bar */
-#menu-bar {
+.coal #menu-bar {
     background-color: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
 }
 
-#menu-bar i {
+.coal #menu-bar i {
     color: var(--text-secondary);
 }
 
-#menu-bar i:hover {
+.coal #menu-bar i:hover {
     color: var(--text-primary);
 }
 
-#menu-bar h1 {
+.coal #menu-bar h1 {
     text-transform: uppercase;
     letter-spacing: 0.1em;
     font-size: 0.9em;
@@ -87,32 +81,32 @@
 }
 
 /* Icon buttons */
-.icon-button {
+.coal .icon-button {
     color: var(--text-secondary);
     transition: color 0.2s;
 }
 
-.icon-button:hover {
+.coal .icon-button:hover {
     color: var(--text-primary);
 }
 
 /* Theme popup */
-#theme-list {
+.coal #theme-list {
     background-color: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: 4px;
 }
 
-#theme-list li {
+.coal #theme-list li {
     color: var(--text-primary);
 }
 
-#theme-list li:hover {
+.coal #theme-list li:hover {
     background-color: var(--bg-tertiary);
 }
 
 /* Search bar */
-#searchbar {
+.coal #searchbar {
     background-color: var(--bg-secondary);
     border: 1px solid var(--border-color);
     color: var(--text-primary);
@@ -120,47 +114,47 @@
     border-radius: 2px;
 }
 
-#searchbar:focus {
+.coal #searchbar:focus {
     border-color: var(--border-active);
     box-shadow: 0 0 8px var(--green-glow);
     outline: none;
 }
 
-#searchbar::placeholder {
+.coal #searchbar::placeholder {
     color: var(--text-muted);
 }
 
 /* Search results */
-.search-results {
+.coal .search-results {
     background-color: var(--bg-secondary);
     border: 1px solid var(--border-color);
 }
 
-.search-results .search-results-title {
+.coal .search-results .search-results-title {
     color: var(--text-highlight);
     text-transform: uppercase;
     letter-spacing: 0.1em;
     font-size: 0.85em;
 }
 
-.search-results li {
+.coal .search-results li {
     border-bottom: 1px solid var(--border-dim);
 }
 
-.search-results li:hover {
+.coal .search-results li:hover {
     background-color: var(--bg-tertiary);
 }
 
-.search-results a {
+.coal .search-results a {
     color: var(--text-primary);
 }
 
-.search-results .teaser {
+.coal .search-results .teaser {
     color: var(--text-secondary);
     font-size: 0.9em;
 }
 
-mark {
+.coal mark {
     background-color: var(--green-glow-strong);
     color: var(--text-highlight);
     padding: 0.1em 0.2em;
@@ -168,29 +162,27 @@ mark {
 }
 
 /* Navigation arrows */
-.nav-wrapper {
+.coal .nav-wrapper {
     margin-top: 2em;
 }
 
-.nav-chapters {
+.coal .nav-chapters {
     color: var(--text-secondary);
     padding: 1em;
     transition: all 0.2s;
 }
 
-.nav-chapters:hover {
+.coal .nav-chapters:hover {
     color: var(--text-highlight);
     background-color: var(--bg-tertiary);
 }
 
-.previous, .next {
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+.coal .previous, .coal .next {
     font-size: 0.85em;
 }
 
 /* Mobile menu */
-.menu-title {
+.coal .menu-title {
     color: var(--text-highlight);
     font-size: 0.9em;
     text-transform: uppercase;
@@ -198,12 +190,12 @@ mark {
 }
 
 /* Sidebar resize handle */
-.sidebar-resize-handle {
+.coal .sidebar-resize-handle {
     width: 5px;
     background-color: transparent;
 }
 
-.sidebar-resize-handle:hover {
+.coal .sidebar-resize-handle:hover {
     background-color: var(--border-hover);
 }
 
