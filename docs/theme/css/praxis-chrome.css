@@ -206,6 +206,7 @@
     font-size: 0.9em;
     text-transform: uppercase;
     letter-spacing: 0.1em;
+    margin-top: 0 !important;
 }
 
 /* Sidebar resize handle */
