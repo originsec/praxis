@@ -27,20 +27,20 @@ import { computeLayout } from '../../utils/dagreLayout';
 function getStatusIndicator(status: string) {
   switch (status) {
     case 'Completed':
-      return { icon: CheckCircle2, color: 'var(--accent-success)', bg: 'var(--accent-success)' };
+      return { icon: CheckCircle2, color: 'var(--text-highlight)', bg: 'var(--text-highlight)' };
     case 'Failed':
       return { icon: XCircle, color: 'var(--accent-error)', bg: 'var(--accent-error)' };
     case 'Running':
-      return { icon: Loader2, color: 'var(--accent-info)', bg: 'var(--accent-info)', animate: true };
+      return { icon: Loader2, color: 'var(--text-secondary)', bg: 'var(--text-secondary)', animate: true };
     case 'WaitingForInputs':
       return { icon: Clock, color: 'var(--accent-warning)', bg: 'var(--accent-warning)' };
     case 'Skipped':
-      return { icon: AlertCircle, color: 'var(--text-secondary)', bg: 'var(--text-secondary)' };
+      return { icon: AlertCircle, color: 'var(--text-muted)', bg: 'var(--text-muted)' };
     //
     // Pending.
     //
     default:
-      return { icon: Clock, color: 'var(--text-secondary)', bg: 'var(--text-secondary)' };
+      return { icon: Clock, color: 'var(--text-muted)', bg: 'var(--text-muted)' };
   }
 }
 
@@ -466,10 +466,10 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
           <div>
             <span className="text-xs text-muted">Status:</span>
             <span className={`ml-2 font-mono ${
-              execution.status === 'Completed' ? 'text-[var(--accent-success)]' :
+              execution.status === 'Completed' ? 'text-[var(--text-highlight)]' :
               execution.status === 'Failed' ? 'text-[var(--accent-error)]' :
               execution.status === 'Cancelled' ? 'text-[var(--accent-warning)]' :
-              'text-[var(--accent-info)]'
+              'text-[var(--text-secondary)]'
             }`}>{execution.status}</span>
           </div>
           <div>
@@ -496,16 +496,16 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
             onClick={() => setOutputExpanded(!outputExpanded)}
             className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-[var(--bg-tertiary)] transition-colors text-left"
           >
-            {outputExpanded ? <ChevronDown size={12} className="text-muted" /> : <ChevronRight size={12} className="text-muted" />}
-            <span className="text-xs font-medium text-muted">Final Output</span>
-            <span className="text-xs text-[var(--text-secondary)] ml-auto">{Object.keys(outputs).length} output{Object.keys(outputs).length !== 1 ? 's' : ''}</span>
+            {outputExpanded ? <ChevronDown size={12} className="text-[var(--text-secondary)]" /> : <ChevronRight size={12} className="text-[var(--text-secondary)]" />}
+            <span className="text-xs font-medium text-[var(--text-highlight)]">Final Output</span>
+            <span className="text-xs text-muted ml-auto">{Object.keys(outputs).length} output{Object.keys(outputs).length !== 1 ? 's' : ''}</span>
           </button>
           {outputExpanded && (
             <div className="px-3 pb-3 space-y-2">
               {Object.entries(outputs).map(([label, output]) => (
                 <div key={label}>
-                  <span className="text-xs text-[var(--text-secondary)]">{label}:</span>
-                  <div className="mt-1 p-2 bg-[var(--bg-primary)] rounded text-xs max-h-48 overflow-auto border border-subtle">
+                  <span className="text-xs text-[var(--text-highlight)]">{label}:</span>
+                  <div className="mt-1 p-2 bg-[var(--bg-primary)] rounded text-xs max-h-48 overflow-auto border border-[var(--border-dim)]">
                     <StyledOutput output={output} />
                   </div>
                 </div>
