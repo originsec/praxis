@@ -22,6 +22,7 @@
 - [Overview](./connectors/overview.md)
 - [Adding New Connectors](./connectors/adding-new.md)
 - [Claude Code](./connectors/claude-code.md)
+- [Codex CLI](./connectors/codex.md)
 - [Gemini CLI](./connectors/gemini.md)
 - [M365 Copilot](./connectors/m365-copilot.md)
 

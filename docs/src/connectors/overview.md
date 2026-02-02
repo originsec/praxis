@@ -19,6 +19,7 @@ A connector handles four main capabilities:
 | Connector | Agent | Platform | Session Mode |
 |-----------|-------|----------|--------------|
 | [`claudecode`](./claude-code.md) | Claude Code CLI | Linux, Windows | CLI (PTY) |
+| [`codex`](./codex.md) | Codex CLI (OpenAI) | Linux only | CLI |
 | [`gemini`](./gemini.md) | Gemini CLI | Linux, Windows | CLI (PTY) |
 | [`m365copilot`](./m365-copilot.md) | Microsoft 365 Copilot | Windows only | DevTools / UIAutomation |
 
@@ -92,6 +93,8 @@ pub fn create_all_agents(&self) -> Vec<Arc<dyn Agent>> {
     let mut agents: Vec<Arc<dyn Agent>> = Vec::new();
     agents.push(Arc::new(ClaudeCodeAgent::new()));
     agents.push(Arc::new(GeminiAgent::new()));
+    #[cfg(target_os = "linux")]
+    agents.push(Arc::new(CodexAgent::new()));
     #[cfg(windows)]
     agents.push(Arc::new(M365CopilotAgent::new()));
     agents

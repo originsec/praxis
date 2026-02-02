@@ -68,3 +68,4 @@ libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tun = "0.7"
+toml = "0.8"

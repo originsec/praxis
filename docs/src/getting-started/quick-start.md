@@ -18,7 +18,7 @@ Click on it to select it. The main panel shows:
 - **Detected agents** - which AI assistants were found
 - **Status** of interception, sessions, etc.
 
-If no agents show up, make sure the target system actually has Claude Code, Gemini CLI, or another supported agent installed and configured.
+If no agents show up, make sure the target system actually has Claude Code, Codex CLI, Gemini CLI, or another supported agent installed and configured.
 
 ## Step 2: Select an Agent
 

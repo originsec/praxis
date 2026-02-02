@@ -8,7 +8,7 @@ Built by [Origin](https://originhq.com) for security research and red team opera
 
 ## Why Does This Exist?
 
-AI coding assistants are everywhere now - Claude Code, Gemini CLI, Microsoft 365 Copilot. These tools can read your files, execute commands, browse the web, and interact with APIs. From a security perspective, they're incredibly interesting.
+AI coding assistants are everywhere now - Claude Code, Codex CLI, Gemini CLI, Microsoft 365 Copilot. These tools can read your files, execute commands, browse the web, and interact with APIs. From a security perspective, they're incredibly interesting.
 
 Praxis started as a question: what can you do if you have access to a system running one of these agents? Not by exploiting vulnerabilities in the agents themselves, but by using the access you already have to see what they're doing and repurpose their capabilities.
 

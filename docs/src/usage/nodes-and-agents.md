@@ -33,6 +33,7 @@ If a node disconnects and you want to remove it from the list, click the remove 
 Agents are the AI assistants detected on each node. When a node fingerprints successfully, you'll see agents like:
 
 - **Claude Code** - Anthropic's CLI assistant
+- **Codex CLI** - OpenAI's CLI assistant (Linux only)
 - **Gemini CLI** - Google's CLI assistant
 - **M365 Copilot** - Microsoft 365 Copilot (Windows only)
 
@@ -84,14 +85,14 @@ The service periodically requests updates from nodes. You can also:
 
 Different agents support different features:
 
-| Feature | Claude Code | Gemini | M365 Copilot |
-|---------|-------------|--------|--------------|
-| Static Recon | ✓ | ✓ | ✓ |
-| Semantic Recon | ✓ | ✓ | ✓ |
-| Sessions | ✓ | ✓ | ✓ |
-| Config Editing | ✓ | ✓ | - |
-| MCP Discovery | ✓ | ✓ | - |
-| Traffic Intercept | ✓ | ✓ | ✓ |
+| Feature | Claude Code | Codex | Gemini | M365 Copilot |
+|---------|-------------|-------|--------|--------------|
+| Static Recon | ✓ | ✓ | ✓ | ✓ |
+| Semantic Recon | ✓ | ✓ | ✓ | ✓ |
+| Sessions | ✓ | ✓ | ✓ | ✓ |
+| Config Editing | ✓ | ✓ | ✓ | - |
+| MCP Discovery | ✓ | ✓ | ✓ | - |
+| Traffic Intercept | ✓ | - | ✓ | ✓ |
 
 ## Troubleshooting
 

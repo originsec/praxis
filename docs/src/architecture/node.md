@@ -45,6 +45,8 @@ pub fn create_all_agents(&self) -> Vec<Arc<dyn Agent>> {
     let mut agents = Vec::new();
     agents.push(Arc::new(ClaudeCodeAgent::new()));
     agents.push(Arc::new(GeminiAgent::new()));
+    #[cfg(target_os = "linux")]
+    agents.push(Arc::new(CodexAgent::new()));
     #[cfg(windows)]
     agents.push(Arc::new(M365CopilotAgent::new()));
     agents
