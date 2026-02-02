@@ -1,4 +1,5 @@
-import { Download } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Download, ChevronDown, ChevronRight } from 'lucide-react';
 import { Modal } from './Modal';
 import { StatusBadge, getOperationStatusColor } from './StatusBadge';
 import { StyledOutput } from './StyledOutput';
@@ -21,6 +22,19 @@ function formatDuration(start: string, end: string | null): string {
 }
 
 export function OperationDetailModal({ operation, onClose }: OperationDetailModalProps) {
+  const outputRef = useRef<HTMLDivElement>(null);
+  const [promptCollapsed, setPromptCollapsed] = useState(false);
+  const [outputCollapsed, setOutputCollapsed] = useState(false);
+
+  //
+  // Autoscroll output when it changes (for live updates during execution).
+  //
+  useEffect(() => {
+    if (outputRef.current && operation?.status === 'Running') {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }
+  }, [operation?.output, operation?.status]);
+
   const handleExport = () => {
     if (!operation) return;
     const content = exportOperationResult(operation);
@@ -91,35 +105,70 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
 
           {/*
           //
-          // Prompt.
+          // Prompt (collapsible).
           //
           */}
           <div>
-            <p className="text-xs text-muted mb-1">Prompt</p>
-            <div className="bg-[var(--bg-secondary)] p-3">
-              <pre className="text-sm whitespace-pre-wrap font-mono">
-                {operation.spec.operation_prompt}
-              </pre>
-            </div>
+            <button
+              onClick={() => setPromptCollapsed(!promptCollapsed)}
+              className="flex items-center gap-1 text-xs text-muted mb-1 hover:text-[var(--text-primary)] transition-colors"
+            >
+              {promptCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+              Prompt
+            </button>
+            {!promptCollapsed && (
+              <div className="bg-[var(--bg-secondary)] p-3">
+                <pre className="text-sm whitespace-pre-wrap font-mono">
+                  {operation.spec.operation_prompt}
+                </pre>
+              </div>
+            )}
           </div>
 
           {/*
           //
-          // Output.
+          // Output (collapsible, with autoscroll during execution).
           //
           */}
           {operation.output && (
             <div>
-              <p className="text-xs text-muted mb-1">Output</p>
-              <div className="bg-[var(--bg-secondary)] p-3 max-h-96 overflow-auto">
-                <StyledOutput output={operation.output} />
+              <button
+                onClick={() => setOutputCollapsed(!outputCollapsed)}
+                className="flex items-center gap-1 text-xs text-muted mb-1 hover:text-[var(--text-primary)] transition-colors"
+              >
+                {outputCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                Output
+              </button>
+              {!outputCollapsed && (
+                <div
+                  ref={outputRef}
+                  className="bg-[var(--bg-secondary)] p-3 max-h-96 overflow-auto"
+                >
+                  <StyledOutput output={operation.output} />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/*
+          //
+          // Summary - brief description of actions taken (displayed in yellow).
+          //
+          */}
+          {operation.summary && (
+            <div>
+              <p className="text-xs text-muted mb-1">Summary</p>
+              <div className="bg-[var(--bg-secondary)] p-3 border-l-2 border-yellow-500">
+                <p className="text-sm text-yellow-400 whitespace-pre-wrap">
+                  {operation.summary}
+                </p>
               </div>
             </div>
           )}
 
           {/*
           //
-          // Result.
+          // Result - actual findings/data/output.
           //
           */}
           {operation.result && (

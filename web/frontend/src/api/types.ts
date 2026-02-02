@@ -239,6 +239,9 @@ export interface SemanticOpUpdate {
   status: SemanticOpStatus;
   start_time: string;
   end_time: string | null;
+  /** Brief summary of actions taken (for display in UI header) */
+  summary: string | null;
+  /** Actual findings/data/output from the operation */
   result: string | null;
   queue_position: number | null;
   output: string | null;

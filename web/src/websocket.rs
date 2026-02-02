@@ -221,7 +221,6 @@ pub(super) async fn handle_atlas_start(
     let _ = state.rabbitmq.get_config(vec![
         "llm_model_definitions".to_string(),
         "llm_feature_atlas".to_string(),
-        "llm_atlas_prompt".to_string(),
         "llm_atlas_max_tokens".to_string(),
     ]).await;
     //

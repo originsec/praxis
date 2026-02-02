@@ -408,9 +408,11 @@ impl<A: DevToolsAdapter + 'static> AgentSession for GenericDevToolsSession<A> {
     }
 
     fn close(&self) {
-        if let Some(pid) = self.process_id {
-            utils::terminate_process(pid);
-        }
+        //
+        // Abort any in-progress transaction first.
+        //
+
+        self.abort_transaction();
 
         //
         // Close the hidden desktop if one was created.
@@ -419,6 +421,17 @@ impl<A: DevToolsAdapter + 'static> AgentSession for GenericDevToolsSession<A> {
         #[cfg(windows)]
         {
             let _ = self.hidden_desktop.lock().unwrap().take();
+        }
+    }
+
+    fn abort_transaction(&self) -> bool {
+        if let Some(pid) = self.process_id {
+            common::log_info!("Aborting transaction, killing process {} and descendants", pid);
+            let killed = utils::terminate_process_tree(pid);
+            common::log_info!("Killed {} processes", killed);
+            true
+        } else {
+            false
         }
     }
 

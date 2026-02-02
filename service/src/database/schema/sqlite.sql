@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS operations (
     status TEXT NOT NULL,
     start_time TEXT NOT NULL,
     end_time TEXT,
+    summary TEXT,
     result TEXT,
     queue_position INTEGER,
     created_at TEXT NOT NULL,

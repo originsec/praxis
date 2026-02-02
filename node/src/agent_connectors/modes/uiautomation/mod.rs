@@ -180,8 +180,21 @@ impl<A: UIAutomationAdapter + 'static> AgentSession for GenericUIAutomationSessi
     }
 
     fn close(&self) {
+        //
+        // Abort any in-progress transaction first.
+        //
+
+        self.abort_transaction();
+    }
+
+    fn abort_transaction(&self) -> bool {
         if let Some(pid) = self.process_id {
-            utils::terminate_process(pid);
+            common::log_info!("Aborting transaction, killing process {} and descendants", pid);
+            let killed = utils::terminate_process_tree(pid);
+            common::log_info!("Killed {} processes", killed);
+            true
+        } else {
+            false
         }
     }
 

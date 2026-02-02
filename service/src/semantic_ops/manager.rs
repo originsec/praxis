@@ -142,6 +142,7 @@ impl SemanticOpsManager {
                 status: SemanticOpStatus::Queued,
                 start_time: Utc::now(),
                 end_time: None,
+                summary: None,
                 result: None,
                 queue_position: Some(position - 1),
                 created_at: Utc::now(),
@@ -172,6 +173,7 @@ impl SemanticOpsManager {
                 status: SemanticOpStatus::Running,
                 start_time: Utc::now(),
                 end_time: None,
+                summary: None,
                 result: None,
                 queue_position: None,
                 created_at: Utc::now(),
@@ -251,6 +253,7 @@ impl SemanticOpsManager {
                 operation_id,
                 SemanticOpStatus::Cancelled,
                 Some(Utc::now()),
+                None,
                 Some("Cancelled by user".to_string()),
             ).await?;
 
@@ -280,6 +283,7 @@ impl SemanticOpsManager {
                 operation_id,
                 SemanticOpStatus::Cancelled,
                 Some(Utc::now()),
+                None,
                 Some("Cancelled by user".to_string()),
             ).await?;
 
@@ -420,6 +424,7 @@ impl SemanticOpsManager {
                     &op.operation_id,
                     SemanticOpStatus::Cancelled,
                     Some(Utc::now()),
+                    None,
                     Some("Node no longer exists".to_string()),
                 ).await?;
 
@@ -508,7 +513,7 @@ impl SemanticOpsManager {
         //
         // Update database to Running status.
         //
-        let _ = self.database.update_status(&operation_id, SemanticOpStatus::Running, None, None).await;
+        let _ = self.database.update_status(&operation_id, SemanticOpStatus::Running, None, None, None).await;
 
         //
         // Clone necessary references for the task.
@@ -565,7 +570,7 @@ impl SemanticOpsManager {
         // Step 1: Select the agent.
         //
         if let Err(e) = crate::semantic_ops::executor::select_agent(&node_id, &agent_short_name, &rabbitmq_channel, response_tracker.clone()).await {
-            let _ = database.update_status(&operation_id, SemanticOpStatus::Failed, Some(Utc::now()), Some(format!("Failed to select agent: {}", e))).await;
+            let _ = database.update_status(&operation_id, SemanticOpStatus::Failed, Some(Utc::now()), None, Some(format!("Failed to select agent: {}", e))).await;
             //
             // Clean up and continue to next op.
             //
@@ -579,7 +584,7 @@ impl SemanticOpsManager {
         // Step 2: Create session (with YOLO mode from operation spec).
         //
         if let Err(e) = crate::semantic_ops::executor::create_session(&node_id, spec.yolo_mode, &rabbitmq_channel, response_tracker.clone()).await {
-            let _ = database.update_status(&operation_id, SemanticOpStatus::Failed, Some(Utc::now()), Some(format!("Failed to create session: {}", e))).await;
+            let _ = database.update_status(&operation_id, SemanticOpStatus::Failed, Some(Utc::now()), None, Some(format!("Failed to create session: {}", e))).await;
             running.write().unwrap().remove(&node_id);
             op_to_node.write().unwrap().remove(&operation_id);
             return;
@@ -633,19 +638,27 @@ impl SemanticOpsManager {
         //
         // Update database with result.
         //
-        let (status, result_text) = match result {
-            Ok(output) => (SemanticOpStatus::Completed, Some(output)),
+        let (status, summary_text, result_text) = match result {
+            Ok((summary, result_data)) => {
+                //
+                // For agent mode, we get both summary and result.
+                // For one-shot mode, result is just a string (put in result, leave summary empty).
+                //
+                let summary_opt = if summary.is_empty() { None } else { Some(summary) };
+                let result_opt = if result_data.is_empty() { None } else { Some(result_data) };
+                (SemanticOpStatus::Completed, summary_opt, result_opt)
+            }
             Err(e) => {
                 let error_msg = e.to_string();
                 if error_msg.contains("cancelled") {
-                    (SemanticOpStatus::Cancelled, Some(error_msg))
+                    (SemanticOpStatus::Cancelled, None, Some(error_msg))
                 } else {
-                    (SemanticOpStatus::Failed, Some(error_msg))
+                    (SemanticOpStatus::Failed, None, Some(error_msg))
                 }
             }
         };
 
-        let _ = database.update_status(&operation_id, status, Some(Utc::now()), result_text).await;
+        let _ = database.update_status(&operation_id, status, Some(Utc::now()), summary_text, result_text).await;
 
         //
         // Remove from running.
@@ -697,7 +710,7 @@ impl SemanticOpsManager {
             //
             // Update database to Running.
             //
-            let _ = database.update_status(&next_op_id, SemanticOpStatus::Running, None, None).await;
+            let _ = database.update_status(&next_op_id, SemanticOpStatus::Running, None, None, None).await;
             let _ = database.update_queue_position(&next_op_id, None).await;
 
             //

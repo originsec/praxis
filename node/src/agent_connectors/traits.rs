@@ -35,6 +35,14 @@ pub trait AgentSession: Send + Sync {
     fn transact(&self, prompt: &str) -> Result<String>;
     fn close(&self);
 
+    //
+    // Abort any in-progress transaction by killing the underlying process.
+    // Returns true if a process was killed, false if no active process.
+    //
+    fn abort_transaction(&self) -> bool {
+        false
+    }
+
     #[allow(dead_code)]
     fn as_any(&self) -> &dyn std::any::Any;
 }

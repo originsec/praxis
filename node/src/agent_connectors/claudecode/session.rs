@@ -1,8 +1,10 @@
 use crate::agent_connectors::traits::{AgentMode, AgentSession};
 use crate::agent_connectors::utils;
+use crate::utils::terminate_process_tree;
 use anyhow::{anyhow, Result};
 use common::SessionContext;
 use once_cell::sync::OnceCell;
+use std::sync::atomic::{AtomicU32, Ordering};
 use uuid::Uuid;
 
 pub struct ClaudeCodeSession {
@@ -11,6 +13,7 @@ pub struct ClaudeCodeSession {
     process_path: Option<String>,
     yolo_mode: bool,
     working_dir: Option<String>,
+    active_transaction_pid: AtomicU32,  // PID of currently running transaction process (0 = none)
 }
 
 impl ClaudeCodeSession {
@@ -28,6 +31,7 @@ impl ClaudeCodeSession {
             process_path,
             yolo_mode: context.yolo_mode,
             working_dir,
+            active_transaction_pid: AtomicU32::new(0),
         })
     }
 
@@ -78,7 +82,7 @@ impl ClaudeCodeSession {
         cmd.arg("--");
         cmd.arg(prompt);
 
-        utils::run_command(&mut cmd)
+        utils::run_command_cancellable(&mut cmd, &self.active_transaction_pid)
     }
 }
 
@@ -104,7 +108,25 @@ impl AgentSession for ClaudeCodeSession {
     }
 
     fn close(&self) {
+        //
+        // Abort any in-progress transaction before closing.
+        //
+
+        self.abort_transaction();
         common::log_info!("Session closed");
+    }
+
+    fn abort_transaction(&self) -> bool {
+        let pid = self.active_transaction_pid.load(Ordering::SeqCst);
+        if pid != 0 {
+            common::log_info!("Aborting transaction, killing process {} and descendants", pid);
+            let killed = terminate_process_tree(pid);
+            common::log_info!("Killed {} processes", killed);
+            self.active_transaction_pid.store(0, Ordering::SeqCst);
+            true
+        } else {
+            false
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

@@ -445,7 +445,12 @@ pub enum SessionCommand {
     /// transaction_id is used to match request with response
     Prompt { text: String, transaction_id: TransactionId },
     /// Cancel a pending transaction
-    CancelTransaction { transaction_id: TransactionId },
+    /// force: If true, forcibly kills the underlying process (SIGKILL/TerminateProcess)
+    CancelTransaction {
+        transaction_id: TransactionId,
+        #[serde(default)]
+        force: bool,
+    },
 }
 
 /// Method of interception (Windows-specific)
@@ -993,6 +998,9 @@ pub struct SemanticOpUpdate {
     pub status: SemanticOpStatus,
     pub start_time: DateTime<Utc>,
     pub end_time: Option<DateTime<Utc>>,
+    /// Brief summary of actions taken (for display in UI header)
+    pub summary: Option<String>,
+    /// Actual findings/data/output from the operation
     pub result: Option<String>,
     pub queue_position: Option<usize>,
     /// Streaming output from the operation (iterations, requests, responses)

@@ -152,6 +152,11 @@ impl Database {
         //
         db.init_schema().await?;
 
+        //
+        // Run migrations for existing databases.
+        //
+        db.run_migrations().await?;
+
         Ok(db)
     }
 
@@ -200,6 +205,35 @@ impl Database {
                             .map_err(|e| anyhow!("PostgreSQL schema error: {} in statement: {}", e, stmt))?;
                     }
                 }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Run schema migrations for existing databases
+    async fn run_migrations(&self) -> Result<()> {
+        //
+        // Migration: Add summary column to operations table.
+        // This is needed for v0.2+ which stores summary separately from result.
+        //
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                //
+                // SQLite doesn't support ADD COLUMN IF NOT EXISTS, so we just
+                // try to add and ignore the error if it already exists.
+                //
+                let _ = sqlx::query("ALTER TABLE operations ADD COLUMN summary TEXT")
+                    .execute(pool)
+                    .await;
+            }
+            DatabasePool::Postgres(pool) => {
+                //
+                // PostgreSQL supports ADD COLUMN IF NOT EXISTS.
+                //
+                let _ = sqlx::query("ALTER TABLE operations ADD COLUMN IF NOT EXISTS summary TEXT")
+                    .execute(pool)
+                    .await;
             }
         }
 

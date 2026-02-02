@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 //
 // Enum for selecting which prompt to use for internal tools discovery.
@@ -618,6 +619,193 @@ pub fn run_command_with_stdin(cmd: &mut Command, input: &str) -> Result<String> 
     }
 
     if !output.status.success() {
+        common::log_error!(
+            "Command failed with status {}: {}",
+            output.status,
+            stderr.trim()
+        );
+        return Err(anyhow!(
+            "Command exited with status {}: {}",
+            output.status,
+            stderr
+        ));
+    }
+
+    let trimmed = stdout.trim().to_string();
+    common::log_info!("output: {}", trimmed);
+    Ok(trimmed)
+}
+
+//
+// Execute a command with cancellation support via PID tracking.
+// The active PID is stored in the provided AtomicU32 during execution,
+// allowing external code to kill the process if needed.
+//
+
+pub fn run_command_cancellable(cmd: &mut Command, active_pid: &AtomicU32) -> Result<String> {
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy()).collect();
+    common::log_info!(
+        "command: {} {}",
+        cmd.get_program().to_string_lossy(),
+        args.join(" ")
+    );
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| anyhow!("Failed to spawn command: {}", e))?;
+
+    //
+    // Store PID for potential cancellation.
+    //
+
+    let pid = child.id();
+    active_pid.store(pid, Ordering::SeqCst);
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| anyhow!("Failed to wait for command: {}", e))?;
+
+    //
+    // Clear PID after completion.
+    //
+
+    active_pid.store(0, Ordering::SeqCst);
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if !stderr.trim().is_empty() {
+        common::log_warn!("stderr: {}", stderr.trim());
+    }
+
+    if !output.status.success() {
+        //
+        // Check if the process was killed by a signal (e.g., SIGKILL from abort).
+        // This is expected behavior when we force-cancel a transaction.
+        //
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            if output.status.signal().is_some() {
+                common::log_warn!(
+                    "Command terminated by signal {}: {}",
+                    output.status,
+                    stderr.trim()
+                );
+                return Err(anyhow!(
+                    "Command terminated by signal {}: {}",
+                    output.status,
+                    stderr
+                ));
+            }
+        }
+
+        common::log_error!(
+            "Command failed with status {}: {}",
+            output.status,
+            stderr.trim()
+        );
+        return Err(anyhow!(
+            "Command exited with status {}: {}",
+            output.status,
+            stderr
+        ));
+    }
+
+    let trimmed = stdout.trim().to_string();
+    common::log_info!("output: {}", trimmed);
+    Ok(trimmed)
+}
+
+//
+// Execute a command with stdin input and cancellation support via PID tracking.
+//
+
+pub fn run_command_with_stdin_cancellable(
+    cmd: &mut Command,
+    input: &str,
+    active_pid: &AtomicU32,
+) -> Result<String> {
+    use std::io::Write;
+
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy()).collect();
+    common::log_info!(
+        "command: {} {} (with stdin: {})",
+        cmd.get_program().to_string_lossy(),
+        args.join(" "),
+        input.replace('\n', " | ")
+    );
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| anyhow!("Failed to spawn command: {}", e))?;
+
+    //
+    // Store PID for potential cancellation.
+    //
+
+    let pid = child.id();
+    active_pid.store(pid, Ordering::SeqCst);
+
+    //
+    // Write input to stdin.
+    //
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(input.as_bytes())
+            .map_err(|e| anyhow!("Failed to write to stdin: {}", e))?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| anyhow!("Failed to wait for command: {}", e))?;
+
+    //
+    // Clear PID after completion.
+    //
+
+    active_pid.store(0, Ordering::SeqCst);
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if !stderr.trim().is_empty() {
+        common::log_warn!("stderr: {}", stderr.trim());
+    }
+
+    if !output.status.success() {
+        //
+        // Check if the process was killed by a signal (e.g., SIGKILL from abort).
+        // This is expected behavior when we force-cancel a transaction.
+        //
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            if output.status.signal().is_some() {
+                common::log_warn!(
+                    "Command terminated by signal {}: {}",
+                    output.status,
+                    stderr.trim()
+                );
+                return Err(anyhow!(
+                    "Command terminated by signal {}: {}",
+                    output.status,
+                    stderr
+                ));
+            }
+        }
+
         common::log_error!(
             "Command failed with status {}: {}",
             output.status,

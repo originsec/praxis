@@ -1,0 +1,52 @@
+## Task Completion
+
+Signal completion ONLY when you have gathered REAL data from tool responses.
+
+```json
+{"complete": true, "summary": "Brief summary of actions", "result": "The actual data"}
+```
+
+### CRITICAL REQUIREMENTS
+
+1. **'summary'**: Brief description of what you did (1-2 sentences)
+
+2. **'result'**: Must contain REAL DATA that you received from tool responses.
+   - Copy actual output from the tool results you received
+   - NEVER fabricate, guess, or make up data
+   - NEVER use placeholder text like "..." or "[additional entries]"
+
+3. **ONLY complete AFTER receiving tool results**
+   - You MUST have called at least one tool
+   - You MUST have received the tool's response
+   - The result field MUST contain data FROM that response
+
+### WHEN TO COMPLETE
+
+Complete ONLY when:
+- You have received actual tool results with real data
+- The task objective has been satisfied with that real data
+- You can populate 'result' with actual data from tool responses
+
+### DO NOT complete when:
+- You just sent a tool call (wait for the response first!)
+- You haven't received any tool results yet
+- You would need to fabricate or guess data
+
+### Example Flow
+
+Message 1 (you):
+```json
+{"tool": "session_prompt", "args": {"text": "list files"}}
+```
+
+Message 2 (system):
+```
+Tool 'session_prompt' result: file1.txt file2.txt file3.txt
+```
+
+Message 3 (you):
+```json
+{"complete": true, "summary": "Listed files in directory", "result": "file1.txt file2.txt file3.txt"}
+```
+
+The 'result' field contains the ACTUAL data received from the tool, not made-up data.

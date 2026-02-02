@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   ReactFlow,
   Panel,
@@ -404,8 +404,37 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
       });
   }, [execution.elements, chain]);
 
+  //
+  // Keyboard navigation for execution steps.
+  //
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (sortedElements.length === 0) return;
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+
+      const currentIndex = selectedElementId
+        ? sortedElements.findIndex(([id]) => id === selectedElementId)
+        : -1;
+
+      let newIndex: number;
+      if (e.key === 'ArrowDown') {
+        newIndex = currentIndex < sortedElements.length - 1 ? currentIndex + 1 : 0;
+      } else {
+        newIndex = currentIndex > 0 ? currentIndex - 1 : sortedElements.length - 1;
+      }
+
+      setSelectedElementId(sortedElements[newIndex][0]);
+    }
+  }, [sortedElements, selectedElementId]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col">
       {/*
       //
       // Execution info header.
@@ -524,13 +553,13 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
       // Element details below - horizontal layout.
       //
       */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex min-h-[300px]">
         {/*
         //
         // Steps list.
         //
         */}
-        <div className="w-64 border-r border-subtle overflow-auto bg-[var(--bg-secondary)]">
+        <div className="w-64 border-r border-subtle bg-[var(--bg-secondary)]">
           <div className="p-3">
             <h4 className="text-sm font-medium text-muted mb-3">Execution Steps</h4>
             <div className="space-y-1">
@@ -578,7 +607,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
         // Element details panel.
         //
         */}
-        <div className="flex-1 overflow-auto p-4">
+        <div className="flex-1 p-4">
           {selectedElementId && selectedElement ? (
             <div className="space-y-4">
               {(() => {
