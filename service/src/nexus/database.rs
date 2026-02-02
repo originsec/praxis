@@ -10,6 +10,7 @@ use crate::database::{Database, DatabasePool};
 
 /// Session record from database
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct NexusSessionRecord {
     pub id: String,
     pub goal: Option<String>,
@@ -20,6 +21,7 @@ pub struct NexusSessionRecord {
 
 /// Agent record from database
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct NexusAgentRecord {
     pub id: String,
     pub nexus_session_id: String,
@@ -35,6 +37,7 @@ pub struct NexusAgentRecord {
 
 /// Channel record from database
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct NexusChannelRecord {
     pub id: String,
     pub nexus_session_id: String,
@@ -46,6 +49,7 @@ pub struct NexusChannelRecord {
 
 /// Message record from database
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct NexusMessageRecord {
     pub id: i64,
     pub nexus_session_id: String,
@@ -94,6 +98,7 @@ impl Database {
     }
 
     /// Get the active Nexus session
+    #[allow(dead_code)]
     pub async fn get_active_nexus_session(&self) -> Result<Option<NexusSessionRecord>> {
         let sql = "SELECT id, goal, status, created_at, updated_at
                    FROM nexus_sessions WHERE status = 'active' LIMIT 1";
@@ -243,6 +248,7 @@ impl Database {
     }
 
     /// Get all agents for a Nexus session
+    #[allow(dead_code)]
     pub async fn get_nexus_agents(&self, session_id: &str) -> Result<Vec<NexusAgentRecord>> {
         let sql = "SELECT id, nexus_session_id, node_id, agent_short_name, nickname, precedence, current_channel_id, status, agent_session_id, created_at
                    FROM nexus_agents WHERE nexus_session_id = $1 ORDER BY precedence";
@@ -407,6 +413,7 @@ impl Database {
     }
 
     /// Get all channels for a session
+    #[allow(dead_code)]
     pub async fn get_nexus_channels(&self, session_id: &str) -> Result<Vec<NexusChannelRecord>> {
         let sql = "SELECT id, nexus_session_id, name, topic, created_by, created_at
                    FROM nexus_channels WHERE nexus_session_id = $1 ORDER BY name";
@@ -445,6 +452,7 @@ impl Database {
     }
 
     /// Get a channel by name in a session
+    #[allow(dead_code)]
     pub async fn get_nexus_channel_by_name(&self, session_id: &str, name: &str) -> Result<Option<NexusChannelRecord>> {
         let sql = "SELECT id, nexus_session_id, name, topic, created_by, created_at
                    FROM nexus_channels WHERE nexus_session_id = $1 AND name = $2";

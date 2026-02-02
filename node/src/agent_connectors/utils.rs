@@ -8,6 +8,7 @@ use std::process::{Command, Output, Stdio};
 //
 
 #[derive(Clone, Copy, Debug)]
+#[allow(dead_code)]
 pub enum ToolDiscoveryPrompt {
     //
     // Standard prompt asking for a list of internal tools with descriptions.
