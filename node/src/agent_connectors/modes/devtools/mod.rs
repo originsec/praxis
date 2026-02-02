@@ -308,26 +308,8 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
         // Wait for input element to be ready.
         //
 
-        common::log_info!("waiting for input element (selector: {})", input_selector);
-        let mut input_ready = false;
-        for attempt in 1..=10 {
-            match page.find_element(input_selector).await {
-                Ok(_) => {
-                    input_ready = true;
-                    common::log_info!("input element found on attempt {}", attempt);
-                    break;
-                }
-                Err(e) => {
-                    common::log_debug!("input element not found, attempt {}/10: {}", attempt, e);
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                }
-            }
-        }
-
-        if !input_ready {
-            //
-            // Get page info for debugging.
-            //
+        common::log_debug!("Waiting for input element: {}", input_selector);
+        if wait_for_element(page, input_selector, 10, 1000).await.is_none() {
             let page_title = page.evaluate("document.title")
                 .await
                 .ok()
@@ -338,7 +320,7 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
             let page_url = page.url().await.unwrap_or_else(|_| None).unwrap_or_else(|| "unknown".to_string());
 
             common::log_error!(
-                "input element not ready after 10 attempts. Selector: '{}', Page title: '{}', Page URL: '{}'",
+                "Input element not ready. Selector: '{}', Page: '{}', URL: '{}'",
                 input_selector, page_title, page_url
             );
             return Err(anyhow!(
@@ -346,7 +328,6 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
                 input_selector, page_title, page_url
             ));
         }
-        common::log_info!("input element ready");
 
         //
         // Get initial message count.
