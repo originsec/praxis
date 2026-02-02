@@ -1,24 +1,22 @@
 # Azure Deployment
 
-This guide covers deploying Praxis to Azure.
+This guide covers deploying Praxis to Azure using Azure Container Apps with automatic scaling, persistent storage, and external access.
 
 ## Architecture
-
-A typical Azure deployment:
 
 ```
 ┌──────────────────────────────────────────────────┐
 │                      Azure                       │
 │                                                  │
 │  ┌──────────────┐    ┌──────────────────────┐   │
-│  │  App Service │    │  Azure Service Bus   │   │
-│  │  (Web + Svc) │◄───│  (or self-hosted RMQ)│   │
+│  │ Container    │    │  Container Instance  │   │
+│  │ App (Praxis) │◄───│  (RabbitMQ)          │   │
 │  └──────┬───────┘    └──────────────────────┘   │
-│         │                                        │
-│  ┌──────▼───────┐                               │
-│  │ Azure SQL or │                               │
-│  │  PostgreSQL  │                               │
-│  └──────────────┘                               │
+│         │                       │                │
+│  ┌──────▼───────┐    ┌─────────▼────────┐       │
+│  │    SQLite    │    │  Azure File Share│       │
+│  │  (internal)  │    │  (persistence)   │       │
+│  └──────────────┘    └──────────────────┘       │
 │                                                  │
 └──────────────────────────────────────────────────┘
             │
@@ -30,212 +28,185 @@ A typical Azure deployment:
       └───────────┘
 ```
 
-## Components
+## Prerequisites
 
-### RabbitMQ
+1. **Azure CLI** - Install from https://docs.microsoft.com/en-us/cli/azure/install-azure-cli
+2. **Docker** - Install from https://docs.docker.com/get-docker/
+3. **Azure Subscription** - Active subscription with appropriate permissions
 
-Options:
-1. **CloudAMQP** - Managed RabbitMQ service
-2. **Azure Container Instance** - Self-hosted RabbitMQ
-3. **Azure VM** - Traditional VM deployment
+## Quick Start
 
-CloudAMQP is simplest for getting started.
+### 1. Login to Azure
 
-### Database
-
-Options:
-1. **Azure Database for PostgreSQL** - Managed PostgreSQL
-2. **Azure SQL** - Managed SQL (requires minor schema changes)
-3. **SQLite** - File-based, simplest but limited
-
-For production, use managed PostgreSQL.
-
-### Web + Service
-
-Deploy as a single container to:
-- Azure App Service
-- Azure Container Instances
-- Azure Kubernetes Service
-
-## Deployment Steps
-
-### 1. Set Up RabbitMQ
-
-Using CloudAMQP:
-1. Create account at cloudamqp.com
-2. Create a new instance (Little Lemur tier for testing)
-3. Note the AMQP URL
-
-Or deploy to Azure Container Instance:
 ```bash
-az container create \
-  --resource-group praxis-rg \
-  --name praxis-rabbitmq \
-  --image rabbitmq:3-management \
-  --ports 5672 15672 \
-  --environment-variables \
-    RABBITMQ_DEFAULT_USER=praxis \
-    RABBITMQ_DEFAULT_PASS=<strong-password>
+az login
+az account set --subscription <your-subscription-id>
 ```
 
-### 2. Set Up Database
+### 2. Deploy Praxis
 
-Create Azure Database for PostgreSQL:
 ```bash
-az postgres flexible-server create \
-  --resource-group praxis-rg \
-  --name praxis-db \
-  --admin-user praxis \
-  --admin-password <strong-password> \
-  --sku-name Standard_B1ms
-
-az postgres flexible-server db create \
-  --resource-group praxis-rg \
-  --server-name praxis-db \
-  --database-name praxis
+cd /path/to/praxis
+./scripts/azure-deploy.sh
 ```
 
-### 3. Build Container
+The script will:
+- Create all required Azure resources
+- Build and push the Docker image
+- Deploy Praxis with RabbitMQ
+- Set up external access
+- Display connection details
 
-Create a Dockerfile (already in repo):
-```dockerfile
-FROM rust:1.75 as builder
-WORKDIR /app
-COPY . .
-RUN cargo build --release
+### 3. Access Your Deployment
 
-FROM debian:bookworm-slim
-COPY --from=builder /app/target/release/praxis_service /usr/local/bin/
-COPY --from=builder /app/target/release/praxis_web /usr/local/bin/
-ENTRYPOINT ["/usr/local/bin/praxis_web"]
-```
+After deployment completes, you'll receive URLs for:
+- **Web Interface (HTTPS)**: `https://praxis-app.{region}.azurecontainerapps.io`
+- **RabbitMQ (AMQP)**: `amqp://praxis:praxis@praxis-rabbitmq-{region}.{region}.azurecontainer.io:5672`
+- **RabbitMQ Management UI**: `http://praxis-rabbitmq-{region}.{region}.azurecontainer.io:15672`
 
-Build and push:
+## Configuration
+
+Customize deployment by setting environment variables before running the script:
+
 ```bash
-az acr build \
-  --registry praxisacr \
-  --image praxis:latest .
+export AZURE_RESOURCE_GROUP="praxis-rg"
+export AZURE_LOCATION="eastus"
+export AZURE_ACR_NAME="praxisacr"
+export AZURE_CONTAINER_APP_ENV="praxis-env"
+export AZURE_STORAGE_ACCOUNT="praxisstorage"
+
+./scripts/azure-deploy.sh
 ```
 
-### 4. Deploy to App Service
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AZURE_RESOURCE_GROUP` | `praxis-rg` | Resource group name |
+| `AZURE_LOCATION` | `eastus` | Azure region |
+| `AZURE_ACR_NAME` | `praxisacr` | Container registry name |
+| `AZURE_CONTAINER_APP_ENV` | `praxis-env` | Container app environment |
+| `AZURE_STORAGE_ACCOUNT` | `praxisstorage` | Storage account prefix |
 
-Create App Service:
+## What Gets Deployed
+
+1. **Azure Container Registry (ACR)** - Stores the Praxis Docker image
+2. **Azure Storage Account** - File share for RabbitMQ persistence
+3. **Container App Environment** - Managed environment for Container Apps
+4. **RabbitMQ** - Azure Container Instance with persistent storage and public access
+5. **Praxis** - Container App with external HTTPS ingress and auto-scaling (1-3 replicas)
+
+### External Access
+
+**Praxis Web Interface:**
+- URL: `https://praxis-app.<region>.azurecontainerapps.io`
+- Protocol: HTTPS (automatically provisioned)
+
+**RabbitMQ:**
+- AMQP: `amqp://praxis:praxis@praxis-rabbitmq-<region>.<region>.azurecontainer.io:5672`
+- Management UI: `http://praxis-rabbitmq-<region>.<region>.azurecontainer.io:15672`
+- Credentials: `praxis` / `praxis`
+
+## Updating Deployments
+
+After making code changes, redeploy by running the script again:
+
 ```bash
-az webapp create \
-  --resource-group praxis-rg \
-  --plan praxis-plan \
-  --name praxis-app \
-  --deployment-container-image-name praxisacr.azurecr.io/praxis:latest
+./scripts/azure-deploy.sh
 ```
 
-Configure environment:
+The script will build a new image and update the existing deployment (typically 2-3 minutes).
+
+To update a specific component:
+
 ```bash
-az webapp config appsettings set \
-  --resource-group praxis-rg \
-  --name praxis-app \
-  --settings \
-    PRAXIS_RABBITMQ_URL="amqps://user:pass@host.cloudamqp.com/vhost" \
-    PRAXIS_DATABASE_URL="postgresql://praxis:pass@praxis-db.postgres.database.azure.com/praxis" \
-    RUST_LOG="info"
+# Update Praxis to specific version
+az containerapp update -n praxis-app -g praxis-rg --image praxisacr.azurecr.io/praxis:0.1.0
+
+# Update Praxis to latest
+az containerapp update -n praxis-app -g praxis-rg --image praxisacr.azurecr.io/praxis:latest
+
+# Restart RabbitMQ
+az container restart --name praxis-rabbitmq -g praxis-rg
 ```
 
-### 5. Configure Networking
+## Management Commands
 
-Ensure nodes can reach:
-- RabbitMQ (port 5672 or 5671 for TLS)
-- Web UI (port 443 through App Service)
+```bash
+# View Praxis logs (real-time)
+az containerapp logs show -n praxis-app -g praxis-rg --follow
 
-For nodes on-premises or in other clouds, consider:
-- Azure VPN Gateway
-- ExpressRoute
-- Public endpoint with firewall rules
+# View RabbitMQ logs (real-time)
+az container logs --name praxis-rabbitmq -g praxis-rg --follow
 
-## Node Deployment
+# Open Praxis in browser
+az containerapp browse -n praxis-app -g praxis-rg
 
-Nodes deploy to target machines (Windows, Linux):
+# Scale Praxis manually
+az containerapp update -n praxis-app -g praxis-rg --min-replicas 2 --max-replicas 5
 
-1. Download node binary from Settings in the web UI
-2. Configure environment:
-   ```bash
-   export PRAXIS_RABBITMQ_URL="amqps://..."
-   ```
-3. Run the node binary
+# Get shell access to Praxis container
+az containerapp exec -n praxis-app -g praxis-rg --command /bin/bash
+```
 
-For persistent deployment, create a systemd service (Linux) or Windows Service.
+## Troubleshooting
 
-## Security Considerations
+```bash
+# Check app status
+az containerapp show -n praxis-app -g praxis-rg --query properties.runningStatus
 
-### RabbitMQ
+# View recent logs
+az containerapp logs show -n praxis-app -g praxis-rg --tail 100
+az container logs --name praxis-rabbitmq -g praxis-rg --tail 100
 
-- Use TLS (amqps://)
-- Strong passwords
-- Network security groups
+# Check RabbitMQ status
+az container show --name praxis-rabbitmq -g praxis-rg --query instanceView.state
 
-### Database
+# Test connectivity
+curl https://praxis-app.<region>.azurecontainerapps.io
+nc -zv praxis-rabbitmq-<region>.<region>.azurecontainer.io 5672
+```
 
-- Enable SSL
-- Private endpoint (no public access)
-- Network security groups
+## Cost Considerations
 
-### Web UI
+| Component | Estimated Cost |
+|-----------|---------------|
+| ACR Basic | ~$5/month |
+| Storage Account | ~$2/month for 10GB |
+| Container Apps (Praxis) | ~$0.000012/vCPU-second |
+| Container Instance (RabbitMQ) | ~$0.0000012/vCPU-second |
+| **Estimated Total** | **$30-60/month** for light usage |
 
-- App Service authentication
-- Azure AD integration
-- IP restrictions
+## Security Best Practices
 
-### Secrets
+1. **Change default RabbitMQ credentials** in production
+2. **Restrict public access** using Network Security Groups or Azure Firewall
+3. **Use Azure Key Vault** for secrets management
+4. **Enable Azure AD authentication** for management access
+5. **Regular security updates** of base images
 
-- Use Azure Key Vault
-- Reference secrets in App Service config
-- Don't commit credentials
+## Cleanup
 
-## Scaling
+Use the deployment script to remove all resources:
 
-### Horizontal Scaling
+```bash
+./scripts/azure-deploy.sh --delete
+```
 
-- App Service supports scaling out
-- Multiple service instances work with PostgreSQL
-- RabbitMQ handles message distribution
+This deletes:
+- Container Instance (RabbitMQ)
+- Container App (Praxis)
+- Azure Container Registry
+- Storage Account
+- Log Analytics Workspace
+- Container App Environment
 
-### Database
+Or delete the resource group directly:
 
-- Scale up the PostgreSQL tier
-- Enable connection pooling
-- Consider read replicas for heavy read loads
+```bash
+az group delete --name praxis-rg --yes --no-wait
+```
 
-## Monitoring
+Verify deletion:
 
-### Application Insights
-
-Add to App Service for:
-- Request tracing
-- Error tracking
-- Performance metrics
-
-### Log Analytics
-
-Configure diagnostic settings to send:
-- Container logs
-- App Service logs
-- PostgreSQL logs
-
-### Alerts
-
-Set up alerts for:
-- High error rate
-- Connection failures
-- Resource exhaustion
-
-## Cost Optimization
-
-### Development/Testing
-
-- Use consumption-based plans
-- Scale down when not in use
-- Use Basic tier PostgreSQL
-
-### Production
-
-- Reserved instances for predictable workloads
-- Right-size based on actual usage
-- Monitor and adjust regularly
+```bash
+az group list --query "[?name=='praxis-rg']" -o table
+```
