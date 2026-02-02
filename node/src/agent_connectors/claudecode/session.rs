@@ -50,6 +50,10 @@ impl ClaudeCodeSession {
 
         if self.yolo_mode {
             cmd.arg("--dangerously-skip-permissions");
+
+            #[cfg(windows)]
+            cmd.arg("--add-dir").arg("C:\\");
+            #[cfg(not(windows))]
             cmd.arg("--add-dir").arg("/");
         }
 
