@@ -4,7 +4,7 @@ The Codex connector enables interaction with OpenAI's Codex CLI agent.
 
 ## Overview
 
-Codex is OpenAI's command-line coding agent that can execute commands, modify files, and work with code. The connector currently supports Linux only.
+Codex is OpenAI's command-line coding agent that can execute commands, modify files, and work with code. The connector supports Linux and Windows.
 
 ## Fingerprinting
 
@@ -12,14 +12,23 @@ The connector looks for Codex by checking:
 
 1. **PATH search** - Finding the `codex` executable in PATH
 2. **Explicit paths** - Checking known installation locations:
+
+   **Linux:**
    - `/usr/local/bin/codex`
    - `/usr/bin/codex`
    - `~/.local/bin/codex`
    - `~/.npm-global/bin/codex`
    - `~/.volta/bin/codex`
+
+   **Windows:**
+   - `%LOCALAPPDATA%\Microsoft\WinGet\Links\codex.exe` (WinGet)
+   - `%APPDATA%\npm\codex.cmd` (npm global)
+   - `%USERPROFILE%\.volta\bin\codex.exe` (Volta)
+   - `%USERPROFILE%\.npm-global\codex.cmd`
+
 3. **Version managers** - Glob patterns for common Node.js version managers:
-   - `~/.local/share/mise/installs/node/*/bin/codex`
-   - `~/.nvm/versions/node/*/bin/codex`
+   - Linux: `~/.local/share/mise/installs/node/*/bin/codex`, `~/.nvm/versions/node/*/bin/codex`
+   - Windows: `%APPDATA%\nvm\*\codex.cmd`
 
 The binary is verified by running `codex --version` and checking the output contains "codex". If found and verified, fingerprinting succeeds and the agent appears in the node's agent list.
 
@@ -82,7 +91,7 @@ When creating a session, you can specify:
 
 **Working Directory** - Where Codex should operate. Passed via `--cd <dir>` option on the first prompt.
 
-**YOLO Mode** - When enabled, passes `--dangerously-bypass-approvals-and-sandbox` and `--add-dir /` to Codex, which auto-approves all operations and grants full filesystem access. Without this, Codex operates with its default sandbox restrictions.
+**YOLO Mode** - When enabled, passes `--dangerously-bypass-approvals-and-sandbox` and `--add-dir /` (Linux) or `--add-dir C:\` (Windows) to Codex, which auto-approves all operations and grants full filesystem access. Without this, Codex operates with its default sandbox restrictions.
 
 ### Session Tracking
 
@@ -104,7 +113,7 @@ The connector uses these flags:
 | `--skip-git-repo-check` | Allows running outside git repositories |
 | `--color never` | Disables colored output (exec only) |
 | `--dangerously-bypass-approvals-and-sandbox` | YOLO mode - skips all approvals |
-| `--add-dir /` | YOLO mode - grants full filesystem access (exec only) |
+| `--add-dir /` or `C:\` | YOLO mode - grants full filesystem access (exec only) |
 | `--cd <dir>` | Sets working directory (exec only) |
 
 ## Config Format
@@ -148,7 +157,9 @@ sandbox = "workspace-write"
 
 ### "Agent not fingerprinted"
 
-- Ensure Codex is installed (`npm install -g @openai/codex`)
+- Ensure Codex is installed:
+  - npm: `npm install -g @openai/codex`
+  - WinGet (Windows): `winget install OpenAI.Codex`
 - Check that the `codex` command is in PATH
 - If using a version manager (mise, nvm), ensure Node.js is active
 

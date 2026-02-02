@@ -82,7 +82,15 @@ impl CodexSession {
             cmd.arg("--color").arg("never");
 
             if self.yolo_mode {
-                cmd.arg("--add-dir").arg("/");
+                //
+                // Grant full filesystem access - root on Unix, C:\ on Windows.
+                //
+
+                if cfg!(windows) {
+                    cmd.arg("--add-dir").arg("C:\\");
+                } else {
+                    cmd.arg("--add-dir").arg("/");
+                }
             }
 
             if let Some(ref dir) = self.working_dir {
