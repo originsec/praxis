@@ -494,19 +494,18 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
         <div className="border-b border-subtle">
           <button
             onClick={() => setOutputExpanded(!outputExpanded)}
-            className="w-full px-4 py-2 flex items-center gap-2 hover:bg-[var(--bg-tertiary)] transition-colors text-left"
+            className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-[var(--bg-tertiary)] transition-colors text-left"
           >
-            {outputExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            <CheckCircle2 size={14} className="text-[var(--accent-success)]" />
-            <span className="text-sm font-medium">Final Output</span>
-            <span className="text-xs text-muted ml-auto">{Object.keys(outputs).length} output{Object.keys(outputs).length !== 1 ? 's' : ''}</span>
+            {outputExpanded ? <ChevronDown size={12} className="text-muted" /> : <ChevronRight size={12} className="text-muted" />}
+            <span className="text-xs font-medium text-muted">Final Output</span>
+            <span className="text-xs text-[var(--text-secondary)] ml-auto">{Object.keys(outputs).length} output{Object.keys(outputs).length !== 1 ? 's' : ''}</span>
           </button>
           {outputExpanded && (
-            <div className="px-4 pb-4 space-y-3">
+            <div className="px-3 pb-3 space-y-2">
               {Object.entries(outputs).map(([label, output]) => (
                 <div key={label}>
-                  <span className="text-xs font-medium text-muted">{label}:</span>
-                  <div className="mt-1 p-3 bg-[var(--bg-secondary)] rounded text-sm max-h-64 overflow-auto border border-subtle">
+                  <span className="text-xs text-[var(--text-secondary)]">{label}:</span>
+                  <div className="mt-1 p-2 bg-[var(--bg-primary)] rounded text-xs max-h-48 overflow-auto border border-subtle">
                     <StyledOutput output={output} />
                   </div>
                 </div>

@@ -62,27 +62,27 @@ export function StyledOutput({ output }: { output: string }) {
   const blocks = parseOutput(output);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {blocks.map((block, idx) => {
         switch (block.type) {
           case 'outgoing':
             return (
-              <div key={idx} className="border-l-2 border-[var(--accent-info)] pl-3">
-                <div className="text-xs text-[var(--accent-info)] font-medium mb-1 flex items-center gap-1">
+              <div key={idx} className="border-l border-[var(--text-secondary)] pl-2">
+                <div className="text-[10px] text-[var(--text-secondary)] font-medium mb-0.5 flex items-center gap-1">
                   <span>→</span> {block.label}
                 </div>
-                <pre className="text-sm whitespace-pre-wrap font-mono text-muted">{block.content}</pre>
+                <pre className="text-xs whitespace-pre-wrap font-mono text-muted">{block.content}</pre>
               </div>
             );
           case 'incoming': {
             const isToolResult = block.label?.startsWith('Tool result');
-            const accentColor = isToolResult ? 'var(--accent-success)' : 'var(--accent-purple)';
+            const borderColor = isToolResult ? 'var(--accent-info)' : 'var(--text-secondary)';
             return (
-              <div key={idx} className={`border-l-2 pl-3`} style={{ borderColor: accentColor }}>
-                <div className="text-xs font-medium mb-1 flex items-center gap-1" style={{ color: accentColor }}>
+              <div key={idx} className="border-l pl-2" style={{ borderColor }}>
+                <div className="text-[10px] font-medium mb-0.5 flex items-center gap-1 text-[var(--text-secondary)]">
                   <span>←</span> {block.label}
                 </div>
-                <div className="prose prose-sm prose-invert max-w-none text-[var(--text-primary)]">
+                <div className="prose prose-xs prose-invert max-w-none text-xs text-[var(--text-primary)] [&_table]:text-xs [&_th]:p-1 [&_td]:p-1 [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
                 </div>
               </div>
@@ -90,27 +90,27 @@ export function StyledOutput({ output }: { output: string }) {
           }
           case 'error':
             return (
-              <div key={idx} className="border-l-2 border-[var(--accent-error)] pl-3 py-1 bg-[var(--accent-error)]/5 rounded-r">
-                <pre className="text-sm whitespace-pre-wrap font-mono text-[var(--accent-error)]">{block.content}</pre>
+              <div key={idx} className="border-l border-[var(--accent-error)] pl-2 py-0.5">
+                <pre className="text-xs whitespace-pre-wrap font-mono text-[var(--accent-error)]">{block.content}</pre>
               </div>
             );
           case 'section':
             return (
-              <div key={idx} className="text-center py-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-[var(--accent-warning)] bg-[var(--accent-warning)]/10 px-3 py-1 rounded-full">
+              <div key={idx} className="text-center py-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">
                   {block.content}
                 </span>
               </div>
             );
           case 'iteration':
             return (
-              <div key={idx} className="text-center py-1">
-                <span className="text-xs text-muted">— {block.content} —</span>
+              <div key={idx} className="text-center py-0.5">
+                <span className="text-[10px] text-muted">— {block.content} —</span>
               </div>
             );
           default:
             return block.content ? (
-              <div key={idx} className="prose prose-sm prose-invert max-w-none text-[var(--text-primary)]">
+              <div key={idx} className="prose prose-xs prose-invert max-w-none text-xs text-[var(--text-primary)] [&_table]:text-xs [&_th]:p-1 [&_td]:p-1 [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
               </div>
             ) : null;
