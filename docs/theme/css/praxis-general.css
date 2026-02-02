@@ -121,7 +121,7 @@ html.ayu {
     padding: 1em;
     overflow-x: auto;
     box-shadow: 3px 3px 0 0 rgba(0, 0, 0, 0.3);
-    line-height: 1.4;
+    line-height: 1.25;
 }
 
 .ayu pre code {
@@ -129,7 +129,7 @@ html.ayu {
     border: none;
     padding: 0;
     color: var(--text-primary);
-    line-height: 1.4;
+    line-height: 1.25;
 }
 
 /* Remove hljs background */
