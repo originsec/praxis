@@ -2,9 +2,9 @@ use crate::agent_connectors::utils::{
     collect_global_config_files, enumerate_user_homes, scan_directories_for_config_files_multi,
     ConfigFilePattern, GlobalConfigPattern,
 };
-use chrono::Utc;
+use chrono::{TimeZone, Utc};
 use common::{ConfigItem, SessionItem};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::BufRead;
 use std::path::Path;
@@ -23,10 +23,6 @@ const GLOBAL_CONFIG_PATTERNS: &[GlobalConfigPattern] = &[
     GlobalConfigPattern {
         path: ".codex/auth.json",
         config_type: "credentials",
-    },
-    GlobalConfigPattern {
-        path: ".codex/history.jsonl",
-        config_type: "session_history",
     },
 ];
 
@@ -79,7 +75,6 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
     for home in &user_homes {
         discover_sessions(home, &mut sessions)?;
     }
-    sessions.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
 
     //
     // Collect project-level config files.
@@ -113,114 +108,92 @@ pub fn enumerate() -> anyhow::Result<EnumerationData> {
 
 fn discover_sessions(home: &Path, sessions: &mut Vec<SessionItem>) -> anyhow::Result<()> {
     //
-    // Codex stores session history as per-session JSONL files in:
-    // - ~/.codex/sessions/**.jsonl
-    // - ~/.codex/archived_sessions/*.jsonl
+    // Codex stores session history in ~/.codex/history.jsonl.
+    // Parse and group entries by session_id.
     //
 
-    let codex_dir = home.join(".codex");
-    let sessions_dir = codex_dir.join("sessions");
-    let archived_dir = codex_dir.join("archived_sessions");
-
-    discover_sessions_in_dir(home, &sessions_dir, sessions)?;
-    discover_sessions_in_dir(home, &archived_dir, sessions)?;
-
-    Ok(())
-}
-
-fn discover_sessions_in_dir(
-    home: &Path,
-    dir: &Path,
-    sessions: &mut Vec<SessionItem>,
-) -> anyhow::Result<()> {
-    use walkdir::WalkDir;
-
-    if !dir.exists() {
+    let history_file = home.join(".codex/history.jsonl");
+    if !history_file.exists() {
         return Ok(());
     }
 
-    let context_path = home.to_string_lossy().to_string();
-
-    for entry in WalkDir::new(dir)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-
-        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-            continue;
-        }
-
-        if let Some(session) = parse_session_file(&context_path, path) {
-            sessions.push(session);
-        }
-    }
+    let parsed_sessions = parse_history_file(&history_file);
+    sessions.extend(parsed_sessions);
 
     Ok(())
 }
 
-fn parse_session_file(context_path: &str, path: &Path) -> Option<SessionItem> {
-    let file = fs::File::open(path).ok()?;
+fn parse_history_file(path: &Path) -> Vec<SessionItem> {
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return Vec::new(),
+    };
+
+    let context_path = path
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
     let session_file = path.to_string_lossy().to_string();
 
-    let mut session_id: Option<String> = None;
-    let mut message_count: usize = 0;
-    let mut last_modified: Option<chrono::DateTime<Utc>> = None;
+    //
+    // Group entries by session_id, tracking count and max timestamp.
+    //
+
+    let mut session_data: HashMap<String, (usize, i64)> = HashMap::new();
 
     for line in std::io::BufReader::new(file).lines().flatten() {
         if line.trim().is_empty() {
             continue;
         }
 
-        let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) else {
-            continue;
-        };
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
+            let session_id = json
+                .get("session_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
 
-        if let Some(ts) = json.get("timestamp").and_then(|v| v.as_str()) {
-            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) {
-                let dt_utc = dt.with_timezone(&Utc);
-                if last_modified.map_or(true, |cur| dt_utc > cur) {
-                    last_modified = Some(dt_utc);
-                }
+            let ts = json.get("ts").and_then(|v| v.as_i64()).unwrap_or(0);
+
+            let entry = session_data.entry(session_id).or_insert((0, 0));
+            entry.0 += 1;  // message count
+            if ts > entry.1 {
+                entry.1 = ts;  // max timestamp
             }
-        }
-
-        if session_id.is_none() {
-            if json.get("type").and_then(|v| v.as_str()) == Some("session_meta") {
-                if let Some(id) = json
-                    .get("payload")
-                    .and_then(|v| v.get("id"))
-                    .and_then(|v| v.as_str())
-                {
-                    session_id = Some(id.to_string());
-                }
-            } else if let Some(id) = json.get("session_id").and_then(|v| v.as_str()) {
-                session_id = Some(id.to_string());
-            }
-        }
-
-        if json.get("type").and_then(|v| v.as_str()) == Some("response_item") {
-            message_count += 1;
         }
     }
 
-    let session_id = session_id.unwrap_or_else(|| "unknown".to_string());
-    let last_modified = last_modified
-        .map(|dt| dt.to_rfc3339())
-        .unwrap_or_default();
+    //
+    // Convert to SessionItem list, sorted by timestamp descending.
+    //
 
-    Some(SessionItem {
-        session_id,
-        context_path: context_path.to_string(),
-        session_file,
-        last_modified,
-        message_count,
-        content: None,
-    })
+    let mut sessions: Vec<SessionItem> = session_data
+        .into_iter()
+        .map(|(session_id, (message_count, max_ts))| {
+            let last_modified = if max_ts > 0 {
+                Utc.timestamp_opt(max_ts, 0)
+                    .single()
+                    .map(|dt| dt.to_rfc3339())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            SessionItem {
+                session_id,
+                context_path: context_path.clone(),
+                session_file: session_file.clone(),
+                last_modified,
+                message_count,
+                content: None,
+            }
+        })
+        .collect();
+
+    sessions.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
+    sessions
 }
 
 fn extract_project_paths_from_config(home: &Path, project_paths: &mut HashSet<String>) {

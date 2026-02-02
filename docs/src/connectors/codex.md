@@ -69,9 +69,9 @@ Sessions use the `codex exec` subcommand for non-interactive execution:
 │  ┌─────────────────────────────────────────────────┐  │
 │  │               CLI Session                        │  │
 │  │                                                  │  │
-│  │  codex exec - ◀────── prompt via stdin          │  │
+│  │  codex exec <prompt> ──────────▶ Codex Process  │  │
 │  │            │                                     │  │
-│  │            └─────────▶ Codex Process            │  │
+│  │            └─ stdin/stdout                       │  │
 │  └─────────────────────────────────────────────────┘  │
 └───────────────────────────────────────────────────────┘
 ```
@@ -88,10 +88,10 @@ When creating a session, you can specify:
 
 The connector maintains conversation context across multiple prompts:
 
-1. **First prompt**: Runs `codex exec -` with configuration flags, prompt piped via stdin
-2. **Subsequent prompts**: Runs `codex exec resume --last -` to continue the session
+1. **First prompt**: Runs `codex exec <prompt>` with configuration flags
+2. **Subsequent prompts**: Runs `codex exec resume --last <prompt>` to continue the session
 
-Prompts are piped via stdin using the `-` argument to avoid argument parsing issues. This allows multi-turn conversations where Codex remembers previous context.
+This allows multi-turn conversations where Codex remembers previous context.
 
 ### Command Line Flags
 
@@ -104,7 +104,7 @@ The connector uses these flags:
 | `--skip-git-repo-check` | Allows running outside git repositories |
 | `--color never` | Disables colored output (exec only) |
 | `--dangerously-bypass-approvals-and-sandbox` | YOLO mode - skips all approvals |
-| `--add-dir /` | YOLO mode - grants full filesystem access (exec only) |
+| `--add-dir /` | YOLO mode - grants full filesystem access |
 | `--cd <dir>` | Sets working directory (exec only) |
 
 ## Config Format

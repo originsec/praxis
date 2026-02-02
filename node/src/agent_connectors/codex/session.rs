@@ -72,6 +72,7 @@ impl CodexSession {
 
         if self.yolo_mode {
             cmd.arg("--dangerously-bypass-approvals-and-sandbox");
+            cmd.arg("--add-dir").arg("/");
         }
 
         //
@@ -81,27 +82,18 @@ impl CodexSession {
         if !is_resume {
             cmd.arg("--color").arg("never");
 
-            if self.yolo_mode {
-                cmd.arg("--add-dir").arg("/");
-            }
-
             if let Some(ref dir) = self.working_dir {
                 cmd.arg("--cd").arg(dir);
             }
         }
 
         //
-        // Use "-" to read prompt from stdin. This avoids issues with positional
-        // argument parsing on exec resume.
+        // Add prompt as the last argument.
         //
 
-        cmd.arg("-");
+        cmd.arg(prompt);
 
-        let result = utils::run_command_with_stdin_cancellable(
-            &mut cmd,
-            prompt,
-            &self.active_transaction_pid,
-        );
+        let result = utils::run_command_cancellable(&mut cmd, &self.active_transaction_pid);
 
         //
         // Mark that we've sent the first prompt (for subsequent resume).
