@@ -1,8 +1,8 @@
 /* Praxis Terminal Theme - General Styles */
-/* Scoped to .coal theme to not break other themes */
+/* Scoped to .ayu theme to not break other themes */
 
 /* Grid background pattern - only for coal theme */
-html.coal {
+html.ayu {
     font-family: var(--font-mono);
     color-scheme: dark;
     background-color: var(--bg-primary);
@@ -13,7 +13,7 @@ html.coal {
     background-attachment: fixed;
 }
 
-.coal body {
+.ayu body {
     font-family: var(--font-mono);
     font-size: 14px;
     line-height: 1.7;
@@ -22,31 +22,31 @@ html.coal {
 }
 
 /* Make content areas transparent so grid shows through */
-.coal .page-wrapper,
-.coal .page,
-.coal #mdbook-page-wrapper,
-.coal #mdbook-content,
-.coal .content,
-.coal main {
+.ayu .page-wrapper,
+.ayu .page,
+.ayu #mdbook-page-wrapper,
+.ayu #mdbook-content,
+.ayu .content,
+.ayu main {
     background: transparent;
 }
 
 /* Main content */
-.coal #content main {
+.ayu #content main {
     padding: 1em 2em;
 }
 
 /* Override any blue borders */
-.coal .pagetoc a,
-.coal .pagetoc,
-.coal #pagetoc,
-.coal [class*="toc"],
-.coal .chapter-item {
+.ayu .pagetoc a,
+.ayu .pagetoc,
+.ayu #pagetoc,
+.ayu [class*="toc"],
+.ayu .chapter-item {
     border-inline-start-color: var(--border-color);
 }
 
 /* Headings - match web UI style */
-.coal h1, .coal h2, .coal h3, .coal h4, .coal h5, .coal h6 {
+.ayu h1, .ayu h2, .ayu h3, .ayu h4, .ayu h5, .ayu h6 {
     font-family: var(--font-mono);
     color: var(--text-highlight);
     font-weight: 500;
@@ -55,20 +55,20 @@ html.coal {
     border-bottom: none;
 }
 
-.coal h1 {
+.ayu h1 {
     font-size: 1.6em;
     color: rgb(242, 255, 213);
 }
 
-.coal h1 a,
-.coal h1 a.header,
-.coal #mdbook-content h1 a,
-.coal .content h1 a,
-.coal main h1 a {
+.ayu h1 a,
+.ayu h1 a.header,
+.ayu #mdbook-content h1 a,
+.ayu .content h1 a,
+.ayu main h1 a {
     color: rgb(242, 255, 213);
 }
 
-.coal h2 {
+.ayu h2 {
     font-size: 1.3em;
     color: var(--text-highlight);
     margin-top: 2em;
@@ -76,35 +76,35 @@ html.coal {
     border-bottom: 1px solid var(--border-dim);
 }
 
-.coal h3 {
+.ayu h3 {
     font-size: 1.1em;
     color: var(--text-highlight);
 }
 
-.coal h4, .coal h5, .coal h6 {
+.ayu h4, .ayu h5, .ayu h6 {
     font-size: 1em;
     color: var(--text-primary);
 }
 
 /* Paragraphs */
-.coal p {
+.ayu p {
     margin: 1em 0;
 }
 
 /* Links */
-.coal a {
+.ayu a {
     color: var(--accent-info);
     text-decoration: none;
     transition: color 0.2s, text-shadow 0.2s;
 }
 
-.coal a:hover {
+.ayu a:hover {
     color: var(--text-highlight);
     text-shadow: 0 0 8px var(--green-glow);
 }
 
 /* Code blocks */
-.coal code {
+.ayu code {
     font-family: var(--font-mono);
     background-color: var(--bg-tertiary);
     border: 1px solid var(--border-dim);
@@ -114,7 +114,7 @@ html.coal {
     color: var(--accent-purple);
 }
 
-.coal pre {
+.ayu pre {
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
     border-radius: 4px;
@@ -124,7 +124,7 @@ html.coal {
     line-height: 1.4;
 }
 
-.coal pre code {
+.ayu pre code {
     background: transparent;
     border: none;
     padding: 0;
@@ -133,19 +133,19 @@ html.coal {
 }
 
 /* Remove hljs background */
-.coal .hljs {
+.ayu .hljs {
     background: transparent;
 }
 
 /* Inline code in headings */
-.coal h1 code, .coal h2 code, .coal h3 code, .coal h4 code {
+.ayu h1 code, .ayu h2 code, .ayu h3 code, .ayu h4 code {
     color: var(--accent-purple);
     background-color: var(--bg-tertiary);
     font-size: 0.85em;
 }
 
 /* Tables - matching web UI style */
-.coal table {
+.ayu table {
     width: 100%;
     border-collapse: collapse;
     margin: 1.5em 0;
@@ -154,12 +154,12 @@ html.coal {
     background-color: rgb(20, 31, 25);
 }
 
-.coal table thead tr {
+.ayu table thead tr {
     background-color: var(--bg-tertiary);
     border-bottom: 1px solid rgb(31, 50, 41);
 }
 
-.coal table th {
+.ayu table th {
     color: var(--text-muted);
     font-weight: 500;
     padding: 0.5em 1em;
@@ -169,22 +169,22 @@ html.coal {
     letter-spacing: 0.1em;
 }
 
-.coal table td {
+.ayu table td {
     padding: 0.5em 1em;
     border: none;
     border-bottom: 1px solid rgb(31, 50, 41);
 }
 
-.coal table tbody tr {
+.ayu table tbody tr {
     background-color: transparent;
 }
 
-.coal table tbody tr:last-child td {
+.ayu table tbody tr:last-child td {
     border-bottom: none;
 }
 
 /* Blockquotes */
-.coal blockquote {
+.ayu blockquote {
     background-color: var(--bg-tertiary);
     border-left: 3px solid var(--border-active);
     margin: 1.5em 0;
@@ -192,75 +192,75 @@ html.coal {
     color: var(--text-secondary);
 }
 
-.coal blockquote p {
+.ayu blockquote p {
     margin: 0;
 }
 
 /* Lists */
-.coal ul, .coal ol {
+.ayu ul, .ayu ol {
     margin: 1em 0;
     padding-left: 2.5em;
 }
 
-.coal li {
+.ayu li {
     margin: 0.5em 0;
 }
 
-.coal li::marker {
+.ayu li::marker {
     color: var(--text-secondary);
 }
 
 /* Strong and emphasis */
-.coal strong, .coal b {
+.ayu strong, .ayu b {
     color: var(--text-highlight);
     font-weight: 600;
 }
 
-.coal em, .coal i {
+.ayu em, .ayu i {
     color: var(--text-secondary);
 }
 
 /* Horizontal rules */
-.coal hr {
+.ayu hr {
     border: none;
     border-top: 1px solid var(--border-color);
     margin: 2em 0;
 }
 
 /* Images */
-.coal img {
+.ayu img {
     max-width: 100%;
     border: 1px solid var(--border-color);
     border-radius: 4px;
 }
 
 /* Selection */
-.coal ::selection {
+.ayu ::selection {
     background-color: var(--green-glow-strong);
     color: var(--text-highlight);
 }
 
 /* Custom scrollbar */
-.coal ::-webkit-scrollbar {
+.ayu ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
 }
 
-.coal ::-webkit-scrollbar-track {
+.ayu ::-webkit-scrollbar-track {
     background: var(--bg-secondary);
 }
 
-.coal ::-webkit-scrollbar-thumb {
+.ayu ::-webkit-scrollbar-thumb {
     background: var(--border-color);
     border-radius: 4px;
 }
 
-.coal ::-webkit-scrollbar-thumb:hover {
+.ayu ::-webkit-scrollbar-thumb:hover {
     background: var(--border-hover);
 }
 
 /* Warning/Note boxes */
-.coal .warning {
+.ayu .warning {
     background-color: rgba(255, 215, 0, 0.1);
     border-left: 3px solid var(--accent-warning);
     padding: 1em;
@@ -268,12 +268,12 @@ html.coal {
 }
 
 /* Chapter navigation */
-.coal .nav-chapters {
+.ayu .nav-chapters {
     font-size: 0.9em;
 }
 
 /* Page title area */
-.coal #content > main > h1:first-child {
+.ayu #content > main > h1:first-child {
     margin-top: 0;
     padding-top: 0.5em;
 }

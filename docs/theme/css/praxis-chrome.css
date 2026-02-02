@@ -1,37 +1,37 @@
 /* Praxis Terminal Theme - Chrome/Navigation Styles */
-/* Scoped to .coal theme to not break other themes */
+/* Scoped to .ayu theme to not break other themes */
 
 /* Sidebar */
-.coal .sidebar {
+.ayu .sidebar {
     background-color: var(--bg-secondary);
     border-right: 1px solid var(--border-color);
 }
 
-.coal .sidebar .sidebar-scrollbox {
+.ayu .sidebar .sidebar-scrollbox {
     padding: 1em;
     line-height: 1.3;
 }
 
 /* Sidebar chapter list */
-.coal .sidebar .chapter {
+.ayu .sidebar .chapter {
     margin: 0;
 }
 
-.coal .sidebar li.header-item {
+.ayu .sidebar li.header-item {
     margin: 0 !important;
     padding: 0.3em 0 !important;
 }
 
-.coal .sidebar .header-in-summary {
+.ayu .sidebar .header-in-summary {
     padding: 0.3em 0.8em;
 }
 
-.coal .sidebar ol.section {
+.ayu .sidebar ol.section {
     margin: 0 !important;
     padding-left: 1em !important;
 }
 
-.coal .sidebar .chapter a {
+.ayu .sidebar .chapter a {
     color: var(--text-secondary);
     padding: 0.15em 0.8em;
     border-radius: 2px;
@@ -39,13 +39,13 @@
     font-size: 0.9em;
 }
 
-.coal .sidebar .chapter a:hover {
+.ayu .sidebar .chapter a:hover {
     color: var(--text-highlight);
     background-color: var(--bg-tertiary);
     text-shadow: 0 0 8px var(--green-glow);
 }
 
-.coal .chapter li.active > a {
+.ayu .chapter li.active > a {
     color: var(--text-highlight);
     background-color: var(--bg-tertiary);
     border-left: 2px solid var(--border-color);
@@ -56,7 +56,7 @@
 }
 
 /* Part titles in sidebar */
-.coal .chapter li.part-title {
+.ayu .chapter li.part-title {
     color: var(--text-muted);
     font-size: 0.75em;
     text-transform: uppercase;
@@ -68,27 +68,27 @@
 }
 
 /* Sidebar toggle */
-.coal .sidebar-toggle {
+.ayu .sidebar-toggle {
     background-color: var(--bg-secondary);
     border: 1px solid var(--border-color);
 }
 
 /* Menu bar */
-.coal #menu-bar {
+.ayu #menu-bar {
     background-color: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
     line-height: normal;
 }
 
-.coal #menu-bar i {
+.ayu #menu-bar i {
     color: var(--text-secondary);
 }
 
-.coal #menu-bar i:hover {
+.ayu #menu-bar i:hover {
     color: var(--text-primary);
 }
 
-.coal #menu-bar h1 {
+.ayu #menu-bar h1 {
     text-transform: uppercase;
     letter-spacing: 0.1em;
     font-size: 0.9em;
@@ -99,7 +99,7 @@
 }
 
 /* Icon buttons */
-.coal .icon-button {
+.ayu .icon-button {
     color: var(--text-secondary);
     transition: color 0.2s;
     line-height: normal;
@@ -108,27 +108,27 @@
     justify-content: center;
 }
 
-.coal .icon-button:hover {
+.ayu .icon-button:hover {
     color: var(--text-primary);
 }
 
 /* Theme popup */
-.coal #theme-list {
+.ayu #theme-list {
     background-color: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: 4px;
 }
 
-.coal #theme-list li {
+.ayu #theme-list li {
     color: var(--text-primary);
 }
 
-.coal #theme-list li:hover {
+.ayu #theme-list li:hover {
     background-color: var(--bg-tertiary);
 }
 
 /* Search bar */
-.coal #searchbar {
+.ayu #searchbar {
     background-color: var(--bg-secondary);
     border: 1px solid var(--border-color);
     color: var(--text-primary);
@@ -136,47 +136,47 @@
     border-radius: 2px;
 }
 
-.coal #searchbar:focus {
+.ayu #searchbar:focus {
     border-color: var(--border-active);
     box-shadow: 0 0 8px var(--green-glow);
     outline: none;
 }
 
-.coal #searchbar::placeholder {
+.ayu #searchbar::placeholder {
     color: var(--text-muted);
 }
 
 /* Search results */
-.coal .search-results {
+.ayu .search-results {
     background-color: var(--bg-secondary);
     border: 1px solid var(--border-color);
 }
 
-.coal .search-results .search-results-title {
+.ayu .search-results .search-results-title {
     color: var(--text-highlight);
     text-transform: uppercase;
     letter-spacing: 0.1em;
     font-size: 0.85em;
 }
 
-.coal .search-results li {
+.ayu .search-results li {
     border-bottom: 1px solid var(--border-dim);
 }
 
-.coal .search-results li:hover {
+.ayu .search-results li:hover {
     background-color: var(--bg-tertiary);
 }
 
-.coal .search-results a {
+.ayu .search-results a {
     color: var(--text-primary);
 }
 
-.coal .search-results .teaser {
+.ayu .search-results .teaser {
     color: var(--text-secondary);
     font-size: 0.9em;
 }
 
-.coal mark {
+.ayu mark {
     background-color: var(--green-glow-strong);
     color: var(--text-highlight);
     padding: 0.1em 0.2em;
@@ -184,27 +184,27 @@
 }
 
 /* Navigation arrows */
-.coal .nav-wrapper {
+.ayu .nav-wrapper {
     margin-top: 2em;
 }
 
-.coal .nav-chapters {
+.ayu .nav-chapters {
     color: var(--text-secondary);
     padding: 1em;
     transition: all 0.2s;
 }
 
-.coal .nav-chapters:hover {
+.ayu .nav-chapters:hover {
     color: var(--text-highlight);
     background-color: var(--bg-tertiary);
 }
 
-.coal .previous, .coal .next {
+.ayu .previous, .ayu .next {
     font-size: 0.85em;
 }
 
 /* Mobile menu */
-.coal .menu-title {
+.ayu .menu-title {
     color: var(--text-highlight);
     font-size: 0.9em;
     text-transform: uppercase;
@@ -213,12 +213,12 @@
 }
 
 /* Sidebar resize handle */
-.coal .sidebar-resize-handle {
+.ayu .sidebar-resize-handle {
     width: 5px;
     background-color: transparent;
 }
 
-.coal .sidebar-resize-handle:hover {
+.ayu .sidebar-resize-handle:hover {
     background-color: var(--border-hover);
 }
 

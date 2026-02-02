@@ -10,8 +10,8 @@ build-dir = "book"
 [output.html]
 git-repository-url = "https://github.com/originsec/praxis"
 edit-url-template = "https://github.com/originsec/praxis/edit/main/docs/src/{path}"
-default-theme = "coal"
-preferred-dark-theme = "coal"
+default-theme = "ayu"
+preferred-dark-theme = "ayu"
 additional-css = [
     "theme/css/praxis-variables.css",
     "theme/css/praxis-general.css",
