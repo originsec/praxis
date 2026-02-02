@@ -128,7 +128,7 @@ To resume:
 ./scripts/azure-deploy.sh --start
 ```
 
-Storage accounts and Container Registry still incur minimal charges when stopped.
+Storage accounts and Container Registry may still incur minimal charges when stopped.
 
 ## Updating Deployments
 
@@ -152,12 +152,6 @@ az container logs --name praxis-rabbitmq -g praxis-rg --follow
 # Open Praxis in browser
 az containerapp browse -n praxis-app -g praxis-rg
 
-# Scale Praxis manually
-az containerapp update -n praxis-app -g praxis-rg --min-replicas 2 --max-replicas 5
-
-# Get shell access to Praxis container
-az containerapp exec -n praxis-app -g praxis-rg --command /bin/bash
-
 # Restart RabbitMQ
 az container restart --name praxis-rabbitmq -g praxis-rg
 ```
@@ -179,26 +173,42 @@ az container show --name praxis-rabbitmq -g praxis-rg --query instanceView.state
 az postgres flexible-server show -n <server-name> -g praxis-rg --query state
 ```
 
-## Cost Considerations
-
-| Component | Estimated Cost |
-|-----------|---------------|
-| ACR Basic | ~$5/month |
-| Storage Account | ~$2/month |
-| PostgreSQL Flexible (B1ms) | ~$15/month |
-| Container Apps (Praxis) | ~$10-20/month |
-| Container Instance (RabbitMQ) | ~$5-10/month |
-| **Estimated Total** | **$40-60/month** |
-
-Use `--stop` to pause compute billing when not in use.
-
 ## Security Best Practices
 
+> **Warning**: The Praxis web interface has no built-in authentication or access control. Anyone who can reach the URL can access and control your Praxis deployment. You must implement access protection at the network or gateway level.
+
+### Protecting the Web Interface
+
+Since Praxis does not provide its own authentication, use one of these Azure-native approaches:
+
+**Azure AD Easy Auth (Recommended)**
+
+Container Apps support built-in authentication. Enable it via the Azure Portal or CLI:
+
+```bash
+az containerapp auth update \
+  -n praxis-app \
+  -g praxis-rg \
+  --unauthenticated-client-action RedirectToLoginPage \
+  --set-provider-aad \
+  --client-id <your-app-registration-client-id> \
+  --issuer "https://login.microsoftonline.com/<your-tenant-id>/v2.0"
+```
+
+This requires users to authenticate with Azure AD before accessing Praxis.
+
+**Other Options**
+
+- **VNet Integration** - Restrict to internal network only, access via VPN or Azure Bastion
+- **IP Allowlisting** - Use Container Apps ingress access restrictions to allow specific IPs
+- **Azure Front Door with WAF** - For production: WAF protection, DDoS mitigation, geo-restrictions
+
+### Other Security Recommendations
+
 1. **Change default passwords** - Set `PRAXIS_POSTGRES_PASS` and update RabbitMQ credentials
-2. **Restrict public access** - Configure Network Security Groups
-3. **Use Azure Key Vault** - Store secrets securely
-4. **Enable Azure AD authentication** - For management access
-5. **Regular updates** - Keep base images current
+2. **Use Azure Key Vault** - Store secrets securely rather than in environment variables
+3. **Enable diagnostic logging** - Send logs to Log Analytics for audit trails
+4. **Regular updates** - Keep base images current
 
 ## Cleanup
 
