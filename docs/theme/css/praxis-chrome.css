@@ -17,8 +17,8 @@
     margin: 0;
 }
 
-.coal .sidebar .chapter.header-item.expanded {
-    margin: 0.1em 0;
+.coal .sidebar li.header-item {
+    margin: 0 !important;
 }
 
 .coal .sidebar .header-in-summary {
