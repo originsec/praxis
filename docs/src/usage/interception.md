@@ -51,8 +51,10 @@ Praxis supports four methods for routing traffic through the proxy. Each has tra
 
 **How it works:** Creates a TUN network adapter and routes specific IPs through it at the packet level.
 
+**Platform support:** Windows only (Linux support in development)
+
 **Setup:**
-1. TUN device created (wintun on Windows, tun crate on Linux)
+1. TUN device created (wintun on Windows)
 2. Intercept domains resolved to IP addresses
 3. Routes added for those IPs through the TUN
 4. Packet engine performs NAT to redirect to proxy
@@ -63,10 +65,11 @@ Praxis supports four methods for routing traffic through the proxy. Each has tra
 - More comprehensive coverage
 
 **Disadvantages:**
-- Requires elevated privileges (root/admin)
+- Windows only (Linux support in development)
+- Requires elevated privileges (admin)
 - More complex setup
 
-**Best for:** Comprehensive capture, applications that bypass proxy
+**Best for:** Comprehensive capture on Windows, applications that bypass proxy
 
 ### Hosts Mode
 
@@ -94,11 +97,12 @@ Praxis supports four methods for routing traffic through the proxy. Each has tra
 **How it works:** Uses iptables TPROXY to transparently redirect traffic to the proxy at the kernel level.
 
 **Setup:**
-1. Intercept domains resolved to IP addresses
-2. iptables mangle rules added to mark packets to target IPs
-3. Policy routing configured to route marked packets to loopback
-4. TPROXY rule redirects packets to proxy port
-5. Proxy uses `SO_ORIGINAL_DST` to get real destination
+1. IPv6 disabled system-wide (restored on cleanup)
+2. Intercept domains resolved to IP addresses
+3. iptables mangle rules added to mark packets to target IPs
+4. Policy routing configured to route marked packets to loopback
+5. TPROXY rule redirects packets to proxy port
+6. Proxy uses `SO_ORIGINAL_DST` to get real destination
 
 **Advantages:**
 - No TUN device or userspace packet processing
@@ -110,6 +114,7 @@ Praxis supports four methods for routing traffic through the proxy. Each has tra
 - Linux only
 - Requires elevated privileges (root or `CAP_NET_ADMIN`)
 - Modifies iptables rules (may conflict with existing firewall)
+- Temporarily disables IPv6 (IPv4 only)
 
 **Best for:** Linux systems needing efficient kernel-level interception
 
@@ -249,9 +254,8 @@ This tool is designed for research, not covert operations.
 
 ### VPN mode fails
 
-- Requires root/admin privileges
-- Linux: Run as root or with `CAP_NET_ADMIN`
-- Windows: Run as Administrator
+- Windows only (Linux support in development)
+- Requires Administrator privileges
 - Check for conflicting VPN software
 
 ### TPROXY mode fails
@@ -262,6 +266,17 @@ This tool is designed for research, not covert operations.
 - Check for conflicting mangle rules: `iptables -t mangle -L`
 - Ensure `route_localnet` can be enabled on loopback
 - Check policy routing: `ip rule list` and `ip route show table 100`
+
+### IPv6 connectivity issues during interception
+
+TPROXY mode temporarily disables IPv6 system-wide (`net.ipv6.conf.all.disable_ipv6=1`) because:
+- TPROXY rules only handle IPv4 traffic
+- IPv6 traffic would bypass interception
+
+IPv6 is automatically restored when interception is disabled. If the node crashes without cleanup, restore manually:
+```bash
+sudo sysctl -w net.ipv6.conf.all.disable_ipv6=0
+```
 
 ### Performance issues
 

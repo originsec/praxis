@@ -43,7 +43,7 @@ use crate::agent_connectors::Agent;
 use dns_resolver::DomainResolver;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use packet_engine::PacketEngine;
-use routing::RouteManager;
+use routing::{Ipv6Manager, RouteManager, VpnBypassManager};
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use tun_device::SharedTunDevice;
 
@@ -93,6 +93,10 @@ pub struct NodeInterceptManager {
     dns_resolver: Option<Arc<DomainResolver>>,
     /// Route manager for VPN mode
     route_manager: Option<RouteManager>,
+    /// VPN bypass manager for policy routing (Linux)
+    vpn_bypass_manager: Option<VpnBypassManager>,
+    /// IPv6 manager to disable/restore IPv6 for VPN and TPROXY modes (Linux)
+    ipv6_manager: Option<Ipv6Manager>,
     /// Packet engine task for VPN mode
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     packet_engine_task: Option<JoinHandle<()>>,
@@ -158,6 +162,8 @@ impl NodeInterceptManager {
             #[cfg(any(target_os = "windows", target_os = "linux"))]
             dns_resolver: None,
             route_manager: None,
+            vpn_bypass_manager: None,
+            ipv6_manager: None,
             #[cfg(any(target_os = "windows", target_os = "linux"))]
             packet_engine_task: None,
             #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -432,6 +438,34 @@ impl NodeInterceptManager {
         self.discovery_observer_task = Some(discovery_task);
 
         //
+        // For Hosts mode, resolve real IPs BEFORE modifying hosts file.
+        // This prevents the proxy from connecting back to itself.
+        //
+        let domain_to_real_ip = if method == InterceptMethod::Hosts {
+            let dns_resolver = DomainResolver::new()
+                .await
+                .context("Failed to create DNS resolver for hosts mode")?;
+
+            let mut ip_map = HashMap::new();
+            for domain in &self.domains {
+                match dns_resolver.resolve_domain(domain).await {
+                    Ok(ips) => {
+                        if let Some(ip) = ips.iter().next() {
+                            common::log_info!("Pre-resolved {} -> {} for hosts mode", domain, ip);
+                            ip_map.insert(domain.clone(), *ip);
+                        }
+                    }
+                    Err(e) => {
+                        common::log_warn!("Failed to pre-resolve {} for hosts mode: {}", domain, e);
+                    }
+                }
+            }
+            ip_map
+        } else {
+            HashMap::new()
+        };
+
+        //
         // Create proxy configuration.
         //
         let config = ProxyConfig {
@@ -441,6 +475,7 @@ impl NodeInterceptManager {
             node_id: self.node_id.clone(),
             intercept_method: method,
             connection_observer_tx: Some(connection_observer_tx),
+            domain_to_real_ip,
         };
 
         //
@@ -498,6 +533,14 @@ impl NodeInterceptManager {
                     if let Err(e) = hosts::add_hosts_entry(domain) {
                         common::log_error!("Failed to add hosts entry for {}: {}", domain, e);
                     }
+                }
+
+                //
+                // On Linux, add iptables REDIRECT to forward 127.0.0.1:443 to proxy port.
+                //
+
+                if let Err(e) = hosts::enable_hosts_redirect(proxy_port) {
+                    common::log_error!("Failed to enable hosts redirect: {}", e);
                 }
 
                 //
@@ -699,10 +742,11 @@ impl NodeInterceptManager {
     /// Enable VPN mode with packet-level routing (Linux).
     ///
     /// This sets up:
-    /// 1. TUN device via the tun crate
-    /// 2. DNS resolution for intercept domains
-    /// 3. Routes for resolved IPs through the TUN device
-    /// 4. Packet engine for NAT and forwarding
+    /// 1. VPN bypass routing (policy routing for proxy's outbound connections)
+    /// 2. TUN device via the tun crate
+    /// 3. DNS resolution for intercept domains
+    /// 4. Routes for resolved IPs through the TUN device
+    /// 5. Packet engine for NAT and forwarding
     #[cfg(target_os = "linux")]
     async fn enable_vpn_mode(&mut self, proxy_port: u16) -> Result<()> {
         use tun_linux::ADAPTER_NAME;
@@ -710,7 +754,26 @@ impl NodeInterceptManager {
         common::log_info!("Setting up VPN mode with packet routing (Linux)");
 
         //
-        // 1. Start Linux TUN device.
+        // 0. Disable IPv6 to avoid routing issues with TUN device.
+        //    IPv6 traffic doesn't go through our packet engine properly.
+        //
+        let mut ipv6_manager = Ipv6Manager::new();
+        ipv6_manager
+            .disable()
+            .context("Failed to disable IPv6")?;
+
+        //
+        // 1. Set up VPN bypass routing FIRST (before adding TUN routes).
+        //    This discovers the default gateway and sets up policy routing
+        //    so that proxy's outbound connections (with SO_MARK) bypass TUN.
+        //
+        let mut vpn_bypass_manager = VpnBypassManager::new();
+        vpn_bypass_manager
+            .start()
+            .context("Failed to set up VPN bypass routing")?;
+
+        //
+        // 2. Start Linux TUN device.
         //
         let mut tun_manager = LinuxTunManager::new();
         tun_manager
@@ -722,7 +785,7 @@ impl NodeInterceptManager {
             .ok_or_else(|| anyhow::anyhow!("TUN device not available"))?;
 
         //
-        // 2. Configure TUN interface IP.
+        // 3. Configure TUN interface IP.
         //
         let mut route_manager = RouteManager::new(ADAPTER_NAME);
         route_manager
@@ -730,7 +793,7 @@ impl NodeInterceptManager {
             .context("Failed to configure TUN interface")?;
 
         //
-        // 3. Resolve domain IPs.
+        // 4. Resolve domain IPs.
         //
         let dns_resolver = Arc::new(
             DomainResolver::new()
@@ -750,7 +813,7 @@ impl NodeInterceptManager {
         }
 
         //
-        // 4. Add routes for all resolved IPs.
+        // 5. Add routes for all resolved IPs.
         //
         let intercept_ips = dns_resolver.get_all_intercept_ips();
         common::log_info!("Adding routes for {} IPs", intercept_ips.len());
@@ -762,7 +825,7 @@ impl NodeInterceptManager {
         }
 
         //
-        // 5. Start packet engine.
+        // 6. Start packet engine.
         //
         let packet_engine = Arc::new(PacketEngine::new(
             tun_device.clone(),
@@ -790,6 +853,8 @@ impl NodeInterceptManager {
         self.tun_device = Some(tun_device);
         self.dns_resolver = Some(dns_resolver);
         self.route_manager = Some(route_manager);
+        self.vpn_bypass_manager = Some(vpn_bypass_manager);
+        self.ipv6_manager = Some(ipv6_manager);
         self.packet_engine_task = Some(task);
         self.shutdown_token = Some(shutdown_token);
 
@@ -811,6 +876,16 @@ impl NodeInterceptManager {
     #[cfg(target_os = "linux")]
     async fn enable_tproxy_mode(&mut self, proxy_port: u16) -> Result<()> {
         common::log_info!("Setting up TPROXY intercept mode (Linux)");
+
+        //
+        // 0. Disable IPv6 to avoid routing issues.
+        //    TPROXY rules only handle IPv4 currently.
+        //
+        let mut ipv6_manager = Ipv6Manager::new();
+        ipv6_manager
+            .disable()
+            .context("Failed to disable IPv6")?;
+        self.ipv6_manager = Some(ipv6_manager);
 
         //
         // 1. Resolve domain IPs.
@@ -1104,6 +1179,7 @@ impl NodeInterceptManager {
         if let Err(e) = hosts::remove_all_hosts_entries() {
             common::log_error!("Failed to remove hosts file entries: {}", e);
         }
+        hosts::disable_hosts_redirect();
         hosts::flush_dns_cache();
     }
 
@@ -1126,6 +1202,24 @@ impl NodeInterceptManager {
         if let Some(mut route_manager) = self.route_manager.take() {
             if let Err(e) = route_manager.remove_all_routes() {
                 common::log_error!("Failed to remove routes: {}", e);
+            }
+        }
+
+        //
+        // Clean up VPN bypass routing (policy routing rules).
+        //
+        if let Some(mut vpn_bypass_manager) = self.vpn_bypass_manager.take() {
+            if let Err(e) = vpn_bypass_manager.stop() {
+                common::log_error!("Failed to stop VPN bypass routing: {}", e);
+            }
+        }
+
+        //
+        // Restore IPv6.
+        //
+        if let Some(mut ipv6_manager) = self.ipv6_manager.take() {
+            if let Err(e) = ipv6_manager.restore() {
+                common::log_error!("Failed to restore IPv6: {}", e);
             }
         }
 
@@ -1163,6 +1257,16 @@ impl NodeInterceptManager {
         if let Some(mut tproxy_manager) = self.tproxy_manager.take() {
             if let Err(e) = tproxy_manager.stop() {
                 common::log_error!("Failed to stop TPROXY manager: {}", e);
+            }
+        }
+
+        //
+        // Restore IPv6.
+        //
+
+        if let Some(mut ipv6_manager) = self.ipv6_manager.take() {
+            if let Err(e) = ipv6_manager.restore() {
+                common::log_error!("Failed to restore IPv6: {}", e);
             }
         }
 

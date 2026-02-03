@@ -501,22 +501,22 @@ export function NodeDetailPage() {
               </div>
             </button>
             <button
-              onClick={() => (isWindowsNode || isLinuxNode) && handleEnableWithMethod('Vpn')}
-              disabled={!isWindowsNode && !isLinuxNode}
+              onClick={() => isWindowsNode && handleEnableWithMethod('Vpn')}
+              disabled={!isWindowsNode}
               className={`w-full p-3 bg-[var(--bg-secondary)] transition-colors text-left ${
-                isWindowsNode || isLinuxNode
+                isWindowsNode
                   ? 'hover:bg-[var(--bg-tertiary)] cursor-pointer'
                   : 'opacity-50 cursor-not-allowed'
               }`}
             >
               <div className="flex items-center gap-3">
-                <Wifi size={20} className={isWindowsNode || isLinuxNode ? 'text-[var(--accent-info)]' : 'text-muted'} />
+                <Wifi size={20} className={isWindowsNode ? 'text-[var(--accent-info)]' : 'text-muted'} />
                 <div>
-                  <div className={`text-sm font-medium ${isWindowsNode || isLinuxNode ? 'text-title' : 'text-muted'}`}>VPN</div>
+                  <div className={`text-sm font-medium ${isWindowsNode ? 'text-title' : 'text-muted'}`}>VPN</div>
                   <div className="text-muted text-xs mt-0.5">
-                    {isWindowsNode || isLinuxNode
+                    {isWindowsNode
                       ? 'Virtual network adapter for packet-level interception'
-                      : 'Windows and Linux only'}
+                      : 'Windows only'}
                   </div>
                 </div>
               </div>
