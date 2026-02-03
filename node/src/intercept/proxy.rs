@@ -449,13 +449,38 @@ async fn handle_tls_connection(
 
     if !should_intercept {
         //
-        // For non-intercepted domains, we could tunnel through, but since
-        // routing only sends intercepted IPs here, this shouldn't happen often.
+        // Non-intercepted domain reached proxy (likely shares IP with intercepted domain).
+        // Tunnel through without TLS termination.
         //
-        common::log_warn!("Non-intercepted domain {} reached proxy, passing through", sni);
+        common::log_info!("Passthrough for non-intercepted domain {}", sni);
+
+        let pre_resolved_ip = config.domain_to_real_ip.get(&sni).copied();
+        let server = connect_bypass_tun(&sni, dest_port, pre_resolved_ip, config.intercept_method).await
+            .context(format!("Failed to connect to {} for passthrough", sni))?;
+
         //
-        // TODO: Implement passthrough for non-intercepted domains.
+        // Tunnel bytes bidirectionally. Since we used peek() for ClientHello,
+        // it's still in the stream buffer and will be sent to the server.
         //
+        let (mut client_read, mut client_write) = tokio::io::split(stream);
+        let (mut server_read, mut server_write) = tokio::io::split(server);
+
+        let client_to_server = tokio::io::copy(&mut client_read, &mut server_write);
+        let server_to_client = tokio::io::copy(&mut server_read, &mut client_write);
+
+        tokio::select! {
+            result = client_to_server => {
+                if let Err(e) = result {
+                    common::log_debug!("Passthrough {} client->server ended: {}", sni, e);
+                }
+            }
+            result = server_to_client => {
+                if let Err(e) = result {
+                    common::log_debug!("Passthrough {} server->client ended: {}", sni, e);
+                }
+            }
+        }
+
         return Ok(());
     }
 
