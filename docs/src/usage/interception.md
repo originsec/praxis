@@ -25,7 +25,7 @@ Praxis acts as a man-in-the-middle:
 
 ## Interception Methods
 
-Praxis supports three methods for routing traffic through the proxy. Each has tradeoffs.
+Praxis supports four methods for routing traffic through the proxy. Each has tradeoffs.
 
 ### Proxy Mode
 
@@ -89,11 +89,35 @@ Praxis supports three methods for routing traffic through the proxy. Each has tr
 
 **Best for:** Simple setups with known domains
 
+### TPROXY Mode (Linux only)
+
+**How it works:** Uses iptables TPROXY to transparently redirect traffic to the proxy at the kernel level.
+
+**Setup:**
+1. Intercept domains resolved to IP addresses
+2. iptables mangle rules added to mark packets to target IPs
+3. Policy routing configured to route marked packets to loopback
+4. TPROXY rule redirects packets to proxy port
+5. Proxy uses `SO_ORIGINAL_DST` to get real destination
+
+**Advantages:**
+- No TUN device or userspace packet processing
+- Lower overhead than VPN mode
+- Standard Linux networking (works with any kernel supporting TPROXY)
+- Works for all TCP traffic to target IPs
+
+**Disadvantages:**
+- Linux only
+- Requires elevated privileges (root or `CAP_NET_ADMIN`)
+- Modifies iptables rules (may conflict with existing firewall)
+
+**Best for:** Linux systems needing efficient kernel-level interception
+
 ## Enabling Interception
 
 1. Go to **Intercept** in the web UI
 2. Select your node
-3. Choose a method (Proxy, VPN, or Hosts)
+3. Choose a method (Proxy, VPN, Hosts, or TPROXY)
 4. Click **Enable**
 
 The node will:
@@ -175,6 +199,7 @@ Click **Disable** to stop interception. This:
 - Removes the installed certificate
 - Restores proxy settings (if modified)
 - Cleans hosts file entries (if modified)
+- Removes iptables TPROXY rules (if used)
 - Stops the proxy server
 
 ## Security Considerations
@@ -202,6 +227,7 @@ Interception is not stealthy:
 - System proxy modified (Proxy mode)
 - Hosts file modified (Hosts mode)
 - Network adapter created (VPN mode)
+- iptables rules modified (TPROXY mode)
 
 This tool is designed for research, not covert operations.
 
@@ -227,6 +253,15 @@ This tool is designed for research, not covert operations.
 - Linux: Run as root or with `CAP_NET_ADMIN`
 - Windows: Run as Administrator
 - Check for conflicting VPN software
+
+### TPROXY mode fails
+
+- Linux only
+- Requires root or `CAP_NET_ADMIN` capability
+- Verify iptables is available: `which iptables`
+- Check for conflicting mangle rules: `iptables -t mangle -L`
+- Ensure `route_localnet` can be enabled on loopback
+- Check policy routing: `ip rule list` and `ip route show table 100`
 
 ### Performance issues
 

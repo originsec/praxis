@@ -463,8 +463,8 @@ pub enum InterceptMethod {
     Vpn,
     /// Hosts file method - redirects domains via hosts file without VPN adapter
     Hosts,
-    /// eBPF method - uses TC eBPF hooks for packet interception (Linux only)
-    Ebpf,
+    /// TPROXY method - uses iptables TPROXY for transparent proxying (Linux only)
+    Tproxy,
 }
 
 impl std::fmt::Display for InterceptMethod {
@@ -473,7 +473,7 @@ impl std::fmt::Display for InterceptMethod {
             InterceptMethod::Proxy => write!(f, "proxy"),
             InterceptMethod::Vpn => write!(f, "vpn"),
             InterceptMethod::Hosts => write!(f, "hosts"),
-            InterceptMethod::Ebpf => write!(f, "ebpf"),
+            InterceptMethod::Tproxy => write!(f, "tproxy"),
         }
     }
 }
@@ -486,7 +486,7 @@ impl std::str::FromStr for InterceptMethod {
             "proxy" => Ok(InterceptMethod::Proxy),
             "vpn" => Ok(InterceptMethod::Vpn),
             "hosts" => Ok(InterceptMethod::Hosts),
-            "ebpf" => Ok(InterceptMethod::Ebpf),
+            "tproxy" => Ok(InterceptMethod::Tproxy),
             _ => Err(format!("Unknown intercept method: {}", s)),
         }
     }

@@ -85,6 +85,18 @@ Modifies the hosts file to redirect domains to localhost:
 - Proxy listens and handles redirected traffic
 - Simpler but less flexible than VPN mode
 
+### TPROXY Mode (Linux)
+
+Uses iptables TPROXY for transparent interception:
+
+1. Intercept domains resolved to IP addresses
+2. iptables mangle rules mark packets to target IPs
+3. Policy routing directs marked packets to loopback
+4. TPROXY redirects packets to proxy
+5. Proxy uses `SO_ORIGINAL_DST` to get real destination
+
+This provides kernel-level interception without a TUN device.
+
 ### Certificate Authority
 
 All methods use a generated CA:
@@ -94,6 +106,38 @@ All methods use a generated CA:
 3. Leaf certificates generated per domain
 4. TLS termination with valid-looking certs
 
+## Multi-User Support
+
+When the node runs as root, it provides multi-user support:
+
+### User Enumeration
+
+The node scans all user home directories (`/home/*` and `/root`) to discover:
+- Agent configurations (e.g., `.claude/`, `.gemini/`, `.codex/`)
+- Project directories with agent config files
+- Session history files
+
+This allows a single node running as root to manage agents across all users on the system.
+
+### User-Aware Session Execution
+
+When a session is created with a working directory owned by a non-root user, the node automatically:
+
+1. Determines the directory owner's uid/gid
+2. Sets the `HOME` environment variable to the user's home directory
+3. Spawns the agent process as that user
+
+This ensures the agent:
+- Has appropriate file permissions for the project
+- Reads its config from the correct user's home directory
+- Creates files owned by the correct user
+
+### Security Considerations
+
+- Path validation ensures file operations stay within valid home directories
+- Config file access is restricted to enumerated user homes
+- The node validates all paths before reading or writing
+
 ## Session Management
 
 Sessions allow direct interaction with agents:
@@ -101,7 +145,7 @@ Sessions allow direct interaction with agents:
 ### CLI Agents
 
 1. PTY created for the agent process
-2. Agent spawned with appropriate flags
+2. Agent spawned with appropriate flags (and as appropriate user when running as root)
 3. Prompts written to stdin
 4. Responses read from stdout
 5. Output parsed and returned

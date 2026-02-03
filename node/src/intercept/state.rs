@@ -49,6 +49,18 @@ pub struct InterceptState {
     /// Whether hosts file was modified (Hosts method)
     pub hosts_modified: bool,
 
+    /// Whether TPROXY rules were added (Tproxy method, Linux only)
+    #[serde(default)]
+    pub tproxy_enabled: bool,
+
+    /// IPs that have TPROXY rules (for cleanup)
+    #[serde(default)]
+    pub tproxy_ips: Vec<String>,
+
+    /// Proxy port used for TPROXY
+    #[serde(default)]
+    pub tproxy_port: u16,
+
     /// Whether environment variables were set
     pub env_vars_set: bool,
 }
@@ -66,6 +78,9 @@ impl InterceptState {
             saved_proxy_enable: None,
             saved_proxy_server: None,
             hosts_modified: false,
+            tproxy_enabled: false,
+            tproxy_ips: Vec::new(),
+            tproxy_port: 0,
             env_vars_set: false,
         }
     }
@@ -225,7 +240,17 @@ pub fn cleanup_stale_state() {
     }
 
     //
-    // 6. Remove environment variables.
+    // 6. Clean up TPROXY rules (Linux).
+    //
+
+    #[cfg(target_os = "linux")]
+    if state.tproxy_enabled {
+        common::log_info!("Cleaning up TPROXY rules");
+        cleanup_tproxy(&state.tproxy_ips, state.tproxy_port);
+    }
+
+    //
+    // 7. Remove environment variables.
     //
 
     if state.env_vars_set {
@@ -346,4 +371,100 @@ fn uninstall_linux_cert(cert_path: &str, distro: Option<&str>) {
 
     let temp_dir = std::env::temp_dir().join("praxis_certs");
     let _ = fs::remove_dir_all(&temp_dir);
+}
+
+//
+// Linux-specific TPROXY cleanup.
+//
+
+#[cfg(target_os = "linux")]
+fn cleanup_tproxy(ips: &[String], proxy_port: u16) {
+    use std::process::Command;
+
+    //
+    // Remove iptables rules for each IP.
+    //
+
+    for ip in ips {
+        let _ = Command::new("iptables")
+            .args([
+                "-t",
+                "mangle",
+                "-D",
+                "OUTPUT",
+                "-p",
+                "tcp",
+                "-d",
+                ip,
+                "--dport",
+                "443",
+                "-j",
+                "MARK",
+                "--set-mark",
+                "1",
+            ])
+            .output();
+
+        let _ = Command::new("iptables")
+            .args([
+                "-t",
+                "mangle",
+                "-D",
+                "PREROUTING",
+                "-p",
+                "tcp",
+                "-d",
+                ip,
+                "--dport",
+                "443",
+                "-j",
+                "TPROXY",
+                "--on-port",
+                &proxy_port.to_string(),
+                "--tproxy-mark",
+                "1",
+            ])
+            .output();
+    }
+
+    //
+    // Remove bypass rule.
+    //
+
+    let _ = Command::new("iptables")
+        .args([
+            "-t",
+            "mangle",
+            "-D",
+            "OUTPUT",
+            "-m",
+            "mark",
+            "--mark",
+            "2",
+            "-j",
+            "RETURN",
+        ])
+        .output();
+
+    //
+    // Remove policy routing.
+    //
+
+    let _ = Command::new("ip")
+        .args(["route", "del", "local", "0.0.0.0/0", "dev", "lo", "table", "100"])
+        .output();
+
+    let _ = Command::new("ip")
+        .args(["rule", "del", "fwmark", "1", "lookup", "100"])
+        .output();
+
+    //
+    // Disable route_localnet.
+    //
+
+    let _ = Command::new("sysctl")
+        .args(["-w", "net.ipv4.conf.lo.route_localnet=0"])
+        .output();
+
+    common::log_info!("TPROXY cleanup complete");
 }

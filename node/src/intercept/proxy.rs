@@ -177,9 +177,30 @@ impl InterceptProxy {
             let port = listener.local_addr()?.port();
             common::log_info!("Intercept proxy (Proxy mode) starting on port {}", port);
             (listener, port)
+        } else if config.intercept_method == InterceptMethod::Tproxy {
+            //
+            // For TPROXY mode (Linux), use a transparent socket that can accept
+            // connections destined for any IP address. We use SO_ORIGINAL_DST
+            // to get the real destination.
+            //
+
+            #[cfg(target_os = "linux")]
+            {
+                let addr = "127.0.0.1:0";
+                let std_listener = super::tproxy::create_transparent_listener(addr)
+                    .context("Failed to create transparent listener")?;
+                let port = std_listener.local_addr()?.port();
+                let listener = TcpListener::from_std(std_listener)?;
+                common::log_info!("Intercept proxy (TPROXY mode) starting on port {}", port);
+                (listener, port)
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                anyhow::bail!("TPROXY mode is only supported on Linux");
+            }
         } else {
             //
-            // For VPN mode, bind to all interfaces since TUN adapter traffic
+            // For VPN/TUN mode, bind to all interfaces since TUN adapter traffic
             // comes from a different interface.
             //
 
@@ -342,13 +363,14 @@ async fn handle_connection(
     }
 }
 
-/// Handle a direct TLS connection (VPN mode)
+/// Handle a direct TLS connection (VPN/TPROXY mode)
 ///
-/// In VPN mode, clients connect directly with TLS, not via HTTP CONNECT.
+/// In VPN/TPROXY mode, clients connect directly with TLS, not via HTTP CONNECT.
 /// We need to:
-/// 1. Read ClientHello to extract SNI
-/// 2. Perform TLS termination with our certificate
-/// 3. Forward decrypted traffic to the real server
+/// 1. Read ClientHello to extract SNI (for certificate selection)
+/// 2. For TPROXY mode, use SO_ORIGINAL_DST to get real destination
+/// 3. Perform TLS termination with our certificate
+/// 4. Forward decrypted traffic to the real server
 async fn handle_tls_connection(
     stream: TcpStream,
     _addr: SocketAddr,
@@ -358,6 +380,29 @@ async fn handle_tls_connection(
 ) -> Result<()> {
     #![allow(unused_imports)]
     use tokio::io::AsyncReadExt;
+
+    //
+    // For TPROXY mode, get the original destination using SO_ORIGINAL_DST.
+    //
+
+    #[cfg(target_os = "linux")]
+    let original_dst = if config.intercept_method == InterceptMethod::Tproxy {
+        match super::tproxy::get_original_dst(&stream) {
+            Ok(addr) => {
+                common::log_debug!("TPROXY: Original destination: {}", addr);
+                Some(addr)
+            }
+            Err(e) => {
+                common::log_warn!("Failed to get original destination via SO_ORIGINAL_DST: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    #[cfg(not(target_os = "linux"))]
+    let original_dst: Option<SocketAddr> = None;
 
     //
     // Read enough bytes to parse ClientHello and extract SNI.
@@ -372,12 +417,20 @@ async fn handle_tls_connection(
         .context("Failed to parse SNI from ClientHello")?;
 
     //
+    // Determine the actual destination port (from SO_ORIGINAL_DST or default 443).
+    //
+    let dest_port = original_dst.map(|a| a.port()).unwrap_or(443);
+
+    //
     // Send observation for agent discovery.
     //
     if let Some(ref tx) = config.connection_observer_tx {
+        let ip = original_dst
+            .map(|a| a.ip())
+            .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
         let _ = tx.send(ObservedConnection {
-            ip: std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
-            port: 443,
+            ip,
+            port: dest_port,
             domain: Some(sni.clone()),
             is_https: true,
             api_key: None,
@@ -395,10 +448,9 @@ async fn handle_tls_connection(
     if !should_intercept {
         //
         // For non-intercepted domains, we could tunnel through, but since
-        // routing
-        // only sends intercepted IPs here, this shouldn't happen often.
+        // routing only sends intercepted IPs here, this shouldn't happen often.
         //
-        common::log_warn!("Non-intercepted domain {} reached VPN proxy, passing through", sni);
+        common::log_warn!("Non-intercepted domain {} reached proxy, passing through", sni);
         //
         // TODO: Implement passthrough for non-intercepted domains.
         //
@@ -426,7 +478,7 @@ async fn handle_tls_connection(
     //
     // Now handle the decrypted traffic similar to CONNECT tunnel.
     //
-    handle_intercepted_tunnel_vpn(tls_stream, &sni, 443, config, traffic_tx).await
+    handle_intercepted_tunnel_vpn(tls_stream, &sni, dest_port, config, traffic_tx).await
 }
 
 /// Parse SNI (Server Name Indication) from a TLS ClientHello message
@@ -581,6 +633,17 @@ async fn connect_bypass_tun(host: &str, port: u16) -> Result<TcpStream> {
     //
     let socket = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP))
         .context("Failed to create socket")?;
+
+    //
+    // On Linux, set SO_MARK to bypass TPROXY interception.
+    // This mark tells iptables to skip the TPROXY rules for our outgoing connection.
+    //
+    #[cfg(target_os = "linux")]
+    {
+        socket
+            .set_mark(super::tproxy::TPROXY_BYPASS_MARK)
+            .context("Failed to set SO_MARK")?;
+    }
 
     //
     // On Windows, we can use IP_UNICAST_IF to specify the interface

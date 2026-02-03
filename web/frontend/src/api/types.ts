@@ -128,9 +128,9 @@ export type SessionCommand =
 
 //
 // Interception method. Proxy works on all platforms. VPN works on Windows and
-// Linux. Hosts works on all platforms. Ebpf is Linux-only.
+// Linux. Hosts works on all platforms. Tproxy is Linux-only.
 //
-export type InterceptMethod = 'Proxy' | 'Vpn' | 'Hosts' | 'Ebpf';
+export type InterceptMethod = 'Proxy' | 'Vpn' | 'Hosts' | 'Tproxy';
 
 export type InterceptCommand =
   | { Enable: { method: InterceptMethod | null } }

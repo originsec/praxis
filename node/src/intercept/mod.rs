@@ -8,6 +8,8 @@ pub mod proxy;
 pub mod routing;
 pub mod state;
 pub mod system_proxy;
+#[cfg(target_os = "linux")]
+pub mod tproxy;
 pub mod tun_device;
 #[cfg(target_os = "linux")]
 pub mod tun_linux;
@@ -18,6 +20,8 @@ pub use certificate::CertificateAuthority;
 pub use proxy::{InterceptProxy, ObservedConnection, ProxyConfig};
 pub use state::cleanup_stale_state;
 pub use system_proxy::{disable_system_proxy, enable_system_proxy, SavedProxySettings};
+#[cfg(target_os = "linux")]
+pub use tproxy::TproxyManager;
 #[cfg(target_os = "linux")]
 pub use tun_linux::LinuxTunManager;
 #[cfg(target_os = "windows")]
@@ -46,10 +50,11 @@ use tun_device::SharedTunDevice;
 /// Node-level intercept manager
 ///
 /// Manages traffic interception at the node level, collecting domains
-/// from all agents that support interception. Supports three methods:
+/// from all agents that support interception. Supports four methods:
 /// - Proxy: Uses system proxy settings (Windows registry / Linux env vars)
 /// - VPN: Uses TUN adapter with packet-level routing (Windows/Linux)
 /// - Hosts: Uses hosts file redirection only
+/// - Tproxy: Uses iptables TPROXY for transparent proxying (Linux only)
 pub struct NodeInterceptManager {
     /// Whether interception is currently enabled
     is_enabled: bool,
@@ -97,6 +102,16 @@ pub struct NodeInterceptManager {
     /// TUN device for VPN mode (shared between manager and packet engine)
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     tun_device: Option<SharedTunDevice>,
+
+    //
+    // TPROXY mode components (Linux only).
+    //
+    /// TPROXY manager for iptables-based transparent proxying
+    #[cfg(target_os = "linux")]
+    tproxy_manager: Option<TproxyManager>,
+    /// DNS resolver for TPROXY mode
+    #[cfg(target_os = "linux")]
+    tproxy_dns_resolver: Option<Arc<DomainResolver>>,
 
     //
     // Agent discovery.
@@ -149,6 +164,14 @@ impl NodeInterceptManager {
             shutdown_token: None,
             #[cfg(any(target_os = "windows", target_os = "linux"))]
             tun_device: None,
+
+            //
+            // TPROXY mode components (Linux only).
+            //
+            #[cfg(target_os = "linux")]
+            tproxy_manager: None,
+            #[cfg(target_os = "linux")]
+            tproxy_dns_resolver: None,
 
             //
             // Agent discovery.
@@ -489,6 +512,37 @@ impl NodeInterceptManager {
                     proxy_port
                 );
             }
+            InterceptMethod::Tproxy => {
+                //
+                // Start TPROXY-based interception (Linux only).
+                //
+
+                self.enable_tproxy_mode(proxy_port).await?;
+
+                //
+                // Save TPROXY state for crash recovery.
+                //
+
+                intercept_state.tproxy_enabled = true;
+                intercept_state.tproxy_port = proxy_port;
+
+                #[cfg(target_os = "linux")]
+                if let Some(ref resolver) = self.tproxy_dns_resolver {
+                    let ips = resolver.get_all_intercept_ips();
+                    intercept_state.tproxy_ips = ips
+                        .iter()
+                        .filter_map(|ip| match ip {
+                            std::net::IpAddr::V4(v4) => Some(v4.to_string()),
+                            std::net::IpAddr::V6(_) => None,
+                        })
+                        .collect();
+                }
+
+                common::log_info!(
+                    "Traffic interception enabled via TPROXY on port {}",
+                    proxy_port
+                );
+            }
         }
 
         self.ca = Some(ca);
@@ -748,6 +802,105 @@ impl NodeInterceptManager {
         Err(anyhow::anyhow!("VPN mode is only supported on Windows and Linux"))
     }
 
+    /// Enable TPROXY mode with iptables-based packet interception (Linux).
+    ///
+    /// This sets up:
+    /// 1. iptables TPROXY rules to redirect traffic to proxy
+    /// 2. Policy routing for marked packets
+    /// 3. SO_ORIGINAL_DST used by proxy to get real destination
+    #[cfg(target_os = "linux")]
+    async fn enable_tproxy_mode(&mut self, proxy_port: u16) -> Result<()> {
+        common::log_info!("Setting up TPROXY intercept mode (Linux)");
+
+        //
+        // 1. Resolve domain IPs.
+        //
+
+        let dns_resolver = Arc::new(
+            DomainResolver::new()
+                .await
+                .context("Failed to create DNS resolver")?,
+        );
+
+        for domain in &self.domains {
+            match dns_resolver.resolve_domain(domain).await {
+                Ok(ips) => {
+                    common::log_debug!("Resolved {} to {:?}", domain, ips);
+                }
+                Err(e) => {
+                    common::log_warn!("Failed to resolve {}: {}", domain, e);
+                }
+            }
+        }
+
+        //
+        // 2. Get IPv4 addresses for TPROXY rules.
+        //
+
+        let intercept_ips = dns_resolver.get_all_intercept_ips();
+        let ipv4_ips: Vec<std::net::Ipv4Addr> = intercept_ips
+            .iter()
+            .filter_map(|ip| match ip {
+                std::net::IpAddr::V4(v4) => Some(*v4),
+                std::net::IpAddr::V6(_) => None,
+            })
+            .collect();
+
+        common::log_info!("Setting up TPROXY for {} IPv4 addresses", ipv4_ips.len());
+
+        //
+        // 3. Start TPROXY manager (sets up iptables rules + policy routing).
+        //
+
+        let mut tproxy_manager = TproxyManager::new();
+        tproxy_manager
+            .start(proxy_port, &ipv4_ips)
+            .context("Failed to start TPROXY manager")?;
+
+        //
+        // Store components.
+        //
+
+        self.tproxy_manager = Some(tproxy_manager);
+        self.tproxy_dns_resolver = Some(dns_resolver);
+
+        Ok(())
+    }
+
+    /// Non-Linux stub for TPROXY mode.
+    #[cfg(not(target_os = "linux"))]
+    async fn enable_tproxy_mode(&mut self, _proxy_port: u16) -> Result<()> {
+        Err(anyhow::anyhow!("TPROXY mode is only supported on Linux"))
+    }
+
+    /// Disable TPROXY mode and clean up components (Linux).
+    #[cfg(target_os = "linux")]
+    async fn disable_tproxy_mode(&mut self) {
+        common::log_info!("Disabling TPROXY mode");
+
+        //
+        // Stop TPROXY manager (removes iptables rules + policy routing).
+        //
+
+        if let Some(mut tproxy_manager) = self.tproxy_manager.take() {
+            if let Err(e) = tproxy_manager.stop() {
+                common::log_error!("Failed to stop TPROXY manager: {}", e);
+            }
+        }
+
+        //
+        // Clear DNS resolver.
+        //
+
+        self.tproxy_dns_resolver = None;
+    }
+
+    /// Non-Linux stub for TPROXY mode cleanup.
+    #[cfg(not(target_os = "linux"))]
+    async fn disable_tproxy_mode(&mut self) {
+        // No-op on non-Linux
+    }
+
     /// Disable interception and clean up
     ///
     /// This will:
@@ -774,6 +927,7 @@ impl NodeInterceptManager {
             InterceptMethod::Proxy => self.cleanup_proxy_sync(),
             InterceptMethod::Vpn => self.disable_vpn_mode().await,
             InterceptMethod::Hosts => self.cleanup_hosts_sync(),
+            InterceptMethod::Tproxy => self.disable_tproxy_mode().await,
         }
 
         //
@@ -995,6 +1149,34 @@ impl NodeInterceptManager {
             self.dns_resolver = None;
         }
     }
+
+    //
+    // Synchronous TPROXY cleanup.
+    //
+
+    #[cfg(target_os = "linux")]
+    fn cleanup_tproxy_sync(&mut self) {
+        //
+        // Stop TPROXY manager (removes iptables rules + policy routing).
+        //
+
+        if let Some(mut tproxy_manager) = self.tproxy_manager.take() {
+            if let Err(e) = tproxy_manager.stop() {
+                common::log_error!("Failed to stop TPROXY manager: {}", e);
+            }
+        }
+
+        //
+        // Clear DNS resolver.
+        //
+
+        self.tproxy_dns_resolver = None;
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn cleanup_tproxy_sync(&mut self) {
+        // No-op on non-Linux
+    }
 }
 
 impl Drop for NodeInterceptManager {
@@ -1008,6 +1190,7 @@ impl Drop for NodeInterceptManager {
             InterceptMethod::Proxy => self.cleanup_proxy_sync(),
             InterceptMethod::Vpn => self.cleanup_vpn_sync(),
             InterceptMethod::Hosts => self.cleanup_hosts_sync(),
+            InterceptMethod::Tproxy => self.cleanup_tproxy_sync(),
         }
     }
 }
