@@ -449,13 +449,38 @@ async fn handle_tls_connection(
 
     if !should_intercept {
         //
-        // For non-intercepted domains, we could tunnel through, but since
-        // routing only sends intercepted IPs here, this shouldn't happen often.
+        // Non-intercepted domain reached proxy (likely shares IP with intercepted domain).
+        // Tunnel through without TLS termination.
         //
-        common::log_warn!("Non-intercepted domain {} reached proxy, passing through", sni);
+        common::log_info!("Passthrough for non-intercepted domain {}", sni);
+
+        let pre_resolved_ip = config.domain_to_real_ip.get(&sni).copied();
+        let server = connect_bypass_tun(&sni, dest_port, pre_resolved_ip, config.intercept_method).await
+            .context(format!("Failed to connect to {} for passthrough", sni))?;
+
         //
-        // TODO: Implement passthrough for non-intercepted domains.
+        // Tunnel bytes bidirectionally. Since we used peek() for ClientHello,
+        // it's still in the stream buffer and will be sent to the server.
         //
+        let (mut client_read, mut client_write) = tokio::io::split(stream);
+        let (mut server_read, mut server_write) = tokio::io::split(server);
+
+        let client_to_server = tokio::io::copy(&mut client_read, &mut server_write);
+        let server_to_client = tokio::io::copy(&mut server_read, &mut client_write);
+
+        tokio::select! {
+            result = client_to_server => {
+                if let Err(e) = result {
+                    common::log_debug!("Passthrough {} client->server ended: {}", sni, e);
+                }
+            }
+            result = server_to_client => {
+                if let Err(e) = result {
+                    common::log_debug!("Passthrough {} server->client ended: {}", sni, e);
+                }
+            }
+        }
+
         return Ok(());
     }
 
@@ -693,7 +718,25 @@ async fn connect_bypass_tun(
         }
     }
 
-    #[cfg(not(target_os = "linux"))]
+    //
+    // Windows VPN bypass: Bind to the main interface's IP so packets have a
+    // source IP != TUN IP (10.255.0.1). The packet engine checks is_from_tun
+    // and passes through traffic from other source IPs.
+    //
+    #[cfg(target_os = "windows")]
+    if intercept_method == InterceptMethod::Vpn {
+        if let Some(bind_ip) = discover_non_tun_ip() {
+            common::log_debug!("Windows VPN bypass: binding to {}", bind_ip);
+            let bind_addr = std::net::SocketAddr::new(bind_ip, 0);
+            if let Err(e) = socket.bind(&bind_addr.into()) {
+                common::log_warn!("Failed to bind to {}: {}", bind_ip, e);
+            }
+        } else {
+            common::log_warn!("Could not find non-TUN IP for VPN bypass");
+        }
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     let _ = intercept_method; // Silence unused variable warning
 
     socket.set_nonblocking(true)
@@ -2273,6 +2316,40 @@ fn discover_default_interface() -> Option<String> {
                 if *part == "dev" && i + 1 < parts.len() {
                     return Some(parts[i + 1].to_string());
                 }
+            }
+        }
+    }
+
+    None
+}
+
+/// Discover an IP address that is not the TUN IP (10.255.x.x).
+/// Used on Windows to bind sockets for VPN bypass.
+#[cfg(target_os = "windows")]
+fn discover_non_tun_ip() -> Option<std::net::IpAddr> {
+    use std::net::IpAddr;
+
+    //
+    // Use local_ip crate if available, or fall back to a simple method.
+    // For now, iterate through interfaces looking for a non-TUN IPv4.
+    //
+    if let Ok(addrs) = get_if_addrs::get_if_addrs() {
+        for iface in addrs {
+            if let IpAddr::V4(ipv4) = iface.ip() {
+                //
+                // Skip loopback and TUN subnet (10.255.x.x).
+                //
+                if ipv4.is_loopback() {
+                    continue;
+                }
+                if ipv4.octets()[0] == 10 && ipv4.octets()[1] == 255 {
+                    continue;
+                }
+
+                //
+                // Found a non-TUN IPv4 address.
+                //
+                return Some(IpAddr::V4(ipv4));
             }
         }
     }
