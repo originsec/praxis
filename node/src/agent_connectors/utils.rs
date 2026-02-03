@@ -112,6 +112,69 @@ pub const SKIP_DIRS: &[&str] = &[
 ];
 
 //
+// Extract the user home directory from a path.
+//
+// Given a path like /home/depmod/code/project, returns /home/depmod.
+// This is useful when running as root but needing to access config files
+// in the original user's home directory.
+//
+// - Linux/Unix: Extracts /home/<user> or /root from path
+// - Windows: Extracts C:\Users\<user> from path
+// - Falls back to dirs::home_dir() if pattern doesn't match
+//
+pub fn extract_user_home_from_path(path: &str) -> Option<PathBuf> {
+    let path = std::path::Path::new(path);
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        //
+        // Check for /home/<user>/... pattern.
+        //
+        let mut components = path.components();
+        if let (Some(std::path::Component::RootDir), Some(std::path::Component::Normal(first))) =
+            (components.next(), components.next())
+        {
+            if first == "home" {
+                if let Some(std::path::Component::Normal(user)) = components.next() {
+                    return Some(PathBuf::from("/home").join(user));
+                }
+            } else if first == "root" {
+                return Some(PathBuf::from("/root"));
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        //
+        // Check for C:\Users\<user>\... pattern.
+        //
+        let path_str = path.to_string_lossy().to_lowercase();
+        if path_str.contains("\\users\\") || path_str.contains("/users/") {
+            let mut components = path.components();
+            //
+            // Skip prefix (C:) and root (\).
+            //
+            let _ = components.next();
+            let _ = components.next();
+
+            if let Some(std::path::Component::Normal(first)) = components.next() {
+                if first.to_string_lossy().to_lowercase() == "users" {
+                    if let Some(std::path::Component::Normal(user)) = components.next() {
+                        return Some(PathBuf::from("C:\\Users").join(user));
+                    }
+                }
+            }
+        }
+    }
+
+    //
+    // Fallback to current user's home.
+    //
+    dirs::home_dir()
+}
+
+//
 // Enumerate all user home directories on the system.
 // Returns a list of home directories that can be accessed.
 //
@@ -171,6 +234,38 @@ pub fn enumerate_user_homes() -> Vec<PathBuf> {
 
     common::log_info!("Found {} user home directories to scan", homes.len());
     homes
+}
+
+//
+// Get user homes that have a specific agent config directory (e.g., ".claude", ".gemini").
+// Returns paths as strings suitable for use in project_paths.
+//
+pub fn get_user_homes_with_config(config_dir_name: &str) -> Vec<String> {
+    let homes = enumerate_user_homes();
+    let result: Vec<String> = homes
+        .iter()
+        .filter(|home| {
+            let config_path = home.join(config_dir_name);
+            let exists = config_path.is_dir();
+            common::log_debug!(
+                "Checking {} for {}: exists={}",
+                home.display(),
+                config_dir_name,
+                exists
+            );
+            exists
+        })
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+
+    common::log_info!(
+        "Found {} user homes with {} config (checked {} homes): {:?}",
+        result.len(),
+        config_dir_name,
+        homes.len(),
+        result
+    );
+    result
 }
 
 //
@@ -520,6 +615,83 @@ pub fn build_command(path: &str) -> Command {
 #[cfg(not(windows))]
 pub fn build_command(path: &str) -> Command {
     Command::new(path)
+}
+
+//
+// Get the owner uid/gid of a path. Returns None if the path doesn't exist or
+// metadata can't be read.
+//
+#[cfg(unix)]
+pub fn get_path_owner(path: &std::path::Path) -> Option<(u32, u32)> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path)
+        .ok()
+        .map(|m| (m.uid(), m.gid()))
+}
+
+#[cfg(not(unix))]
+pub fn get_path_owner(_path: &std::path::Path) -> Option<(u32, u32)> {
+    None
+}
+
+//
+// Configure a command to run as the owner of the specified working directory.
+// Only takes effect when running as root on Unix systems. On non-Unix systems
+// or when not running as root, this is a no-op.
+//
+#[cfg(unix)]
+pub fn configure_command_for_directory(cmd: &mut Command, working_dir: &std::path::Path) {
+    use std::os::unix::process::CommandExt;
+
+    //
+    // Only switch user if we're running as root.
+    //
+    if !nix::unistd::Uid::effective().is_root() {
+        return;
+    }
+
+    if let Some((uid, gid)) = get_path_owner(working_dir) {
+        //
+        // Don't switch if the directory is owned by root.
+        //
+        if uid == 0 {
+            return;
+        }
+
+        //
+        // Look up the user's home directory from passwd.
+        //
+        let home_dir = nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(uid))
+            .ok()
+            .flatten()
+            .map(|u| u.dir);
+
+        if let Some(ref home) = home_dir {
+            common::log_info!(
+                "Running command as user {} (gid {}) with HOME={} for directory: {}",
+                uid,
+                gid,
+                home.display(),
+                working_dir.display()
+            );
+            cmd.env("HOME", home);
+        } else {
+            common::log_info!(
+                "Running command as user {} (gid {}) for directory: {}",
+                uid,
+                gid,
+                working_dir.display()
+            );
+        }
+
+        cmd.uid(uid);
+        cmd.gid(gid);
+    }
+}
+
+#[cfg(not(unix))]
+pub fn configure_command_for_directory(_cmd: &mut Command, _working_dir: &std::path::Path) {
+    // No-op on non-Unix systems
 }
 
 //

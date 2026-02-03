@@ -57,6 +57,7 @@ WORKDIR /build
 #
 # Build dependencies only - this layer is cached until Cargo.toml/Cargo.lock changes.
 #
+
 COPY --from=planner /build/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json -p praxis_node && \
     cargo chef cook --release --recipe-path recipe.json -p praxis_node --target x86_64-pc-windows-gnu && \
@@ -76,22 +77,26 @@ COPY web ./web
 #
 # Copy pre-built frontend from frontend stage.
 #
+
 COPY --from=frontend /build/web/frontend/dist ./web/frontend/dist
 
 #
 # Skip frontend build in build.rs since it's already built above.
 #
+
 ENV PRAXIS_SKIP_FRONTEND=1
 
 #
 # Build praxis_node for Linux and Windows.
 #
+
 RUN cargo build --release -p praxis_node && \
     cargo build --release -p praxis_node --target x86_64-pc-windows-gnu
 
 #
 # Build service and web binaries.
 #
+
 RUN cargo build --release -p praxis_service -p praxis_web
 
 # ==============================================================================
@@ -102,6 +107,8 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     netcat-openbsd \
+    iptables \
+    iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -109,12 +116,14 @@ WORKDIR /app
 #
 # Copy main binaries.
 #
+
 COPY --from=builder /build/target/release/praxis_service /app/
 COPY --from=builder /build/target/release/praxis_web /app/
 
 #
 # Copy node binaries for download.
 #
+
 RUN mkdir -p /app/nodes
 COPY --from=builder /build/target/release/praxis_node /app/nodes/praxis_node_linux
 COPY --from=builder /build/target/x86_64-pc-windows-gnu/release/praxis_node.exe /app/nodes/praxis_node_windows.exe
@@ -122,6 +131,7 @@ COPY --from=builder /build/target/x86_64-pc-windows-gnu/release/praxis_node.exe 
 #
 # Copy and setup entrypoint script.
 #
+
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 

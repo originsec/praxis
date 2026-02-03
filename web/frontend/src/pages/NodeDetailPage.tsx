@@ -15,6 +15,7 @@ import {
   Globe,
   FileText,
   Loader2,
+  Zap,
   // Radar,  // Hidden - Discovery feature not ready
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
@@ -219,10 +220,14 @@ export function NodeDetailPage() {
   };
 
   //
-  // Check if node is Windows (supports all intercept methods) or Linux (Proxy
-  // only).
+  // Platform detection for intercept method availability.
+  // - Proxy: all platforms
+  // - VPN: Windows and Linux
+  // - Hosts: all platforms
+  // - Tproxy: Linux only
   //
   const isWindowsNode = node.os_details.toLowerCase().includes('windows');
+  const isLinuxNode = node.os_details.toLowerCase().includes('linux');
 
   const handleToggleIntercept = async () => {
     if (node.intercept_active) {
@@ -517,22 +522,36 @@ export function NodeDetailPage() {
               </div>
             </button>
             <button
-              onClick={() => isWindowsNode && handleEnableWithMethod('Hosts')}
-              disabled={!isWindowsNode}
+              onClick={() => handleEnableWithMethod('Hosts')}
+              className="w-full p-3 bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors text-left"
+            >
+              <div className="flex items-center gap-3">
+                <FileText size={20} className="text-[var(--accent-info)]" />
+                <div>
+                  <div className="text-title text-sm font-medium">Hosts File</div>
+                  <div className="text-muted text-xs mt-0.5">
+                    Redirects domains via hosts file
+                  </div>
+                </div>
+              </div>
+            </button>
+            <button
+              onClick={() => isLinuxNode && handleEnableWithMethod('Tproxy')}
+              disabled={!isLinuxNode}
               className={`w-full p-3 bg-[var(--bg-secondary)] transition-colors text-left ${
-                isWindowsNode
+                isLinuxNode
                   ? 'hover:bg-[var(--bg-tertiary)] cursor-pointer'
                   : 'opacity-50 cursor-not-allowed'
               }`}
             >
               <div className="flex items-center gap-3">
-                <FileText size={20} className={isWindowsNode ? 'text-[var(--accent-info)]' : 'text-muted'} />
+                <Zap size={20} className={isLinuxNode ? 'text-[var(--accent-info)]' : 'text-muted'} />
                 <div>
-                  <div className={`text-sm font-medium ${isWindowsNode ? 'text-title' : 'text-muted'}`}>Hosts File</div>
+                  <div className={`text-sm font-medium ${isLinuxNode ? 'text-title' : 'text-muted'}`}>TPROXY</div>
                   <div className="text-muted text-xs mt-0.5">
-                    {isWindowsNode
-                      ? 'Redirects domains via hosts file'
-                      : 'Windows only'}
+                    {isLinuxNode
+                      ? 'Transparent proxy via iptables TPROXY'
+                      : 'Linux only'}
                   </div>
                 </div>
               </div>

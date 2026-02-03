@@ -453,16 +453,18 @@ pub enum SessionCommand {
     },
 }
 
-/// Method of interception (Windows-specific)
+/// Method of interception
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InterceptMethod {
-    /// System proxy method (default) - configures Windows proxy settings
+    /// System proxy method (default) - configures system proxy settings
     #[default]
     Proxy,
-    /// VPN method - creates a virtual network adapter using wintun
+    /// VPN method - creates a virtual network adapter (wintun on Windows, TUN on Linux)
     Vpn,
     /// Hosts file method - redirects domains via hosts file without VPN adapter
     Hosts,
+    /// TPROXY method - uses iptables TPROXY for transparent proxying (Linux only)
+    Tproxy,
 }
 
 impl std::fmt::Display for InterceptMethod {
@@ -471,6 +473,7 @@ impl std::fmt::Display for InterceptMethod {
             InterceptMethod::Proxy => write!(f, "proxy"),
             InterceptMethod::Vpn => write!(f, "vpn"),
             InterceptMethod::Hosts => write!(f, "hosts"),
+            InterceptMethod::Tproxy => write!(f, "tproxy"),
         }
     }
 }
@@ -483,6 +486,7 @@ impl std::str::FromStr for InterceptMethod {
             "proxy" => Ok(InterceptMethod::Proxy),
             "vpn" => Ok(InterceptMethod::Vpn),
             "hosts" => Ok(InterceptMethod::Hosts),
+            "tproxy" => Ok(InterceptMethod::Tproxy),
             _ => Err(format!("Unknown intercept method: {}", s)),
         }
     }
@@ -1121,6 +1125,8 @@ pub enum ClientSignalMessage {
         operation_name: String,
         /// Request ID for correlating with SemanticOpQueued response
         request_id: String,
+        /// Working directory for the operation session
+        working_dir: Option<String>,
     },
     SemanticOpCancel {
         operation_id: String,
@@ -1205,6 +1211,8 @@ pub enum ClientSignalMessage {
         chain_id: String,
         node_id: String,
         agent_short_name: String,
+        /// Working directory for the chain session
+        working_dir: Option<String>,
     },
     /// Cancel a running chain execution
     ChainCancel {

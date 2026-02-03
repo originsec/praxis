@@ -44,6 +44,7 @@ pub async fn handle_browser_message(
             node_id,
             agent_short_name,
             operation_name,
+            working_dir,
         } => {
             //
             // Browser-initiated runs don't need to track request_id - just
@@ -52,7 +53,7 @@ pub async fn handle_browser_message(
             let request_id = uuid::Uuid::new_v4().to_string();
             state
                 .rabbitmq
-                .run_semantic_op(node_id, agent_short_name, operation_name, request_id)
+                .run_semantic_op(node_id, agent_short_name, operation_name, request_id, working_dir)
                 .await?;
         }
         BrowserMessage::SemanticOpCancel { operation_id } => {
@@ -191,10 +192,11 @@ pub async fn handle_browser_message(
             chain_id,
             node_id,
             agent_short_name,
+            working_dir,
         } => {
             state
                 .rabbitmq
-                .run_chain(chain_id, node_id, agent_short_name)
+                .run_chain(chain_id, node_id, agent_short_name, working_dir)
                 .await?;
         }
         BrowserMessage::ChainCancel { execution_id } => {

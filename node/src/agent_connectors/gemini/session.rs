@@ -28,7 +28,11 @@ impl GeminiSession {
             .ok_or_else(|| anyhow!("No process path provided"))?;
 
         let working_dir = context.working_dir.clone()
-            .or_else(|| dirs::home_dir().map(|p| p.to_string_lossy().to_string()));
+            .or_else(|| {
+                crate::agent_connectors::utils::get_user_homes_with_config(".gemini")
+                    .into_iter()
+                    .next()
+            });
 
         Ok(Self {
             internal_id: Uuid::new_v4(),
@@ -60,9 +64,15 @@ impl GeminiSession {
         hasher.update(working_dir.as_bytes());
         let project_hash = format!("{:x}", hasher.finalize());
 
-        let gemini_dir = dirs::home_dir()
-            .ok_or_else(|| anyhow!("Could not determine home directory"))?;
-        let chats_dir: PathBuf = gemini_dir
+        //
+        // Extract user home from working_dir path. This handles the case where
+        // we're running as root but the working_dir is in another user's home
+        // (e.g., working_dir=/home/depmod/project -> look in /home/depmod/.gemini).
+        //
+        let user_home = utils::extract_user_home_from_path(working_dir)
+            .ok_or_else(|| anyhow!("Could not determine user home from working directory"))?;
+
+        let chats_dir: PathBuf = user_home
             .join(".gemini")
             .join("tmp")
             .join(&project_hash)
@@ -123,6 +133,7 @@ impl GeminiSession {
 
         if let Some(ref dir) = self.working_dir {
             cmd.current_dir(dir);
+            utils::configure_command_for_directory(&mut cmd, std::path::Path::new(dir));
         }
 
         if self.yolo_mode {

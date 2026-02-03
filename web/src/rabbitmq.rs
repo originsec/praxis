@@ -70,6 +70,7 @@ impl RabbitMqClient {
         agent_short_name: String,
         operation_name: String,
         request_id: String,
+        working_dir: Option<String>,
     ) -> Result<()> {
         let message = ClientSignalMessage::SemanticOpRun {
             client_id: self.state.client_id.clone(),
@@ -77,6 +78,7 @@ impl RabbitMqClient {
             agent_short_name,
             operation_name,
             request_id,
+            working_dir,
         };
         self.publish_signal(message).await
     }
@@ -214,12 +216,19 @@ impl RabbitMqClient {
     }
 
     /// Run a chain
-    pub async fn run_chain(&self, chain_id: String, node_id: String, agent_short_name: String) -> Result<()> {
+    pub async fn run_chain(
+        &self,
+        chain_id: String,
+        node_id: String,
+        agent_short_name: String,
+        working_dir: Option<String>,
+    ) -> Result<()> {
         let message = ClientSignalMessage::ChainRun {
             client_id: self.state.client_id.clone(),
             chain_id,
             node_id,
             agent_short_name,
+            working_dir,
         };
         self.publish_signal(message).await
     }

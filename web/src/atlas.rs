@@ -1031,8 +1031,9 @@ async fn execute_tool(
 
             //
             // Run operation by name - service looks up the definition.
+            // Atlas doesn't have working_dir context, so pass None.
             //
-            match rabbitmq.run_semantic_op(node_id.clone(), agent_short_name.to_string(), operation.full_name.clone(), request_id.clone()).await {
+            match rabbitmq.run_semantic_op(node_id.clone(), agent_short_name.to_string(), operation.full_name.clone(), request_id.clone(), None).await {
                 Ok(_) => {
                     //
                     // Poll for the queued response using the request_id.
@@ -1315,9 +1316,9 @@ async fn execute_tool(
             };
 
             //
-            // Run chain.
+            // Run chain. Atlas doesn't have working_dir context, so pass None.
             //
-            match rabbitmq.run_chain(chain.id.clone(), node_id.clone(), agent_short_name.to_string()).await {
+            match rabbitmq.run_chain(chain.id.clone(), node_id.clone(), agent_short_name.to_string(), None).await {
                 Ok(_) => {
                     //
                     // Wait briefly for execution to start and get execution_id.

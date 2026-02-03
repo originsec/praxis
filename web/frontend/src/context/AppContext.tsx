@@ -987,7 +987,7 @@ interface AppContextValue {
   // Semantic Operations.
   //
   requestOperations: () => void;
-  runOperation: (nodeId: string, agentShortName: string, operationName: string) => void;
+  runOperation: (nodeId: string, agentShortName: string, operationName: string, workingDir?: string) => void;
   cancelOperation: (operationId: string) => void;
   removeOperation: (operationId: string) => void;
   clearOperations: () => void;
@@ -1042,7 +1042,7 @@ interface AppContextValue {
   createChain: (definition: ChainDefinitionInput) => void;
   updateChain: (chainId: string, definition: ChainDefinitionInput) => void;
   deleteChain: (chainId: string) => void;
-  runChain: (chainId: string, nodeId: string, agentShortName: string) => void;
+  runChain: (chainId: string, nodeId: string, agentShortName: string, workingDir?: string) => void;
   cancelChainExecution: (executionId: string) => void;
   removeChainExecution: (executionId: string) => void;
   //
@@ -1430,8 +1430,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Semantic operations - run by operation name (service looks up definition).
   //
   const runOperation = useCallback(
-    (nodeId: string, agentShortName: string, operationName: string) => {
-      wsClient.send({ type: 'semantic_op_run', node_id: nodeId, agent_short_name: agentShortName, operation_name: operationName });
+    (nodeId: string, agentShortName: string, operationName: string, workingDir?: string) => {
+      wsClient.send({
+        type: 'semantic_op_run',
+        node_id: nodeId,
+        agent_short_name: agentShortName,
+        operation_name: operationName,
+        working_dir: workingDir ?? null,
+      });
     },
     []
   );
@@ -1616,8 +1622,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     wsClient.send({ type: 'chain_delete', chain_id: chainId });
   }, []);
 
-  const runChain = useCallback((chainId: string, nodeId: string, agentShortName: string) => {
-    wsClient.send({ type: 'chain_run', chain_id: chainId, node_id: nodeId, agent_short_name: agentShortName });
+  const runChain = useCallback((chainId: string, nodeId: string, agentShortName: string, workingDir?: string) => {
+    wsClient.send({
+      type: 'chain_run',
+      chain_id: chainId,
+      node_id: nodeId,
+      agent_short_name: agentShortName,
+      working_dir: workingDir ?? null,
+    });
   }, []);
 
   const cancelChainExecution = useCallback((executionId: string) => {

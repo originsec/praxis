@@ -102,6 +102,99 @@ pub fn flush_dns_cache() {
     //
 }
 
+//
+// On Linux, redirect traffic from 127.0.0.1:443 to the proxy port.
+// This is needed because the hosts file redirects domains to 127.0.0.1,
+// but the proxy listens on a random port.
+//
+
+#[cfg(target_os = "linux")]
+pub fn enable_hosts_redirect(proxy_port: u16) -> Result<()> {
+    use std::process::Command;
+
+    let port_str = proxy_port.to_string();
+
+    let output = Command::new("iptables")
+        .args([
+            "-t",
+            "nat",
+            "-A",
+            "OUTPUT",
+            "-p",
+            "tcp",
+            "-d",
+            "127.0.0.1",
+            "--dport",
+            "443",
+            "-j",
+            "REDIRECT",
+            "--to-ports",
+            &port_str,
+        ])
+        .output()
+        .context("Failed to run iptables")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("iptables redirect failed: {}", stderr.trim());
+    }
+
+    common::log_info!(
+        "Added iptables REDIRECT rule: 127.0.0.1:443 -> port {}",
+        proxy_port
+    );
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub fn disable_hosts_redirect() {
+    use std::process::Command;
+
+    //
+    // Remove all REDIRECT rules for 127.0.0.1:443 (may have multiple from retries).
+    //
+
+    for _ in 0..5 {
+        let output = Command::new("iptables")
+            .args([
+                "-t",
+                "nat",
+                "-D",
+                "OUTPUT",
+                "-p",
+                "tcp",
+                "-d",
+                "127.0.0.1",
+                "--dport",
+                "443",
+                "-j",
+                "REDIRECT",
+            ])
+            .output();
+
+        match output {
+            Ok(o) if o.status.success() => continue,
+            _ => break,
+        }
+    }
+
+    common::log_info!("Removed iptables REDIRECT rules for hosts mode");
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn enable_hosts_redirect(_proxy_port: u16) -> Result<()> {
+    //
+    // On non-Linux, hosts mode connects directly to the proxy port.
+    // This requires the proxy to listen on port 443 or use platform-specific redirect.
+    //
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn disable_hosts_redirect() {
+    // No-op on non-Linux.
+}
+
 /// Remove ALL praxis intercept entries from the hosts file
 pub fn remove_all_hosts_entries() -> Result<()> {
     let hosts_path = PathBuf::from(HOSTS_FILE_PATH);

@@ -108,6 +108,7 @@ pub async fn select_agent(
 pub async fn create_session(
     node_id: &str,
     yolo_mode: bool,
+    working_dir: Option<String>,
     rabbitmq_channel: &Channel,
     response_tracker: Arc<ResponseTracker>,
 ) -> Result<String> {
@@ -116,15 +117,12 @@ pub async fn create_session(
     let rx = response_tracker.register(cmd_id.clone());
 
     common::log_info!(
-        "Creating session on node {} (yolo_mode: {}, cmd_id: {})",
-        &node_id[..8], yolo_mode, &cmd_id[..8]
+        "Creating session on node {} (yolo_mode: {}, working_dir: {:?}, cmd_id: {})",
+        &node_id[..8], yolo_mode, working_dir, &cmd_id[..8]
     );
 
-    //
-    // Service creates sessions without project context.
-    //
     let context = SessionContext {
-        working_dir: None,
+        working_dir,
         yolo_mode,
     };
 
@@ -192,6 +190,7 @@ pub async fn execute_one_shot(
     operation_id: &str,
     node_id: &str,
     spec: &SemanticOperationSpec,
+    working_dir: Option<String>,
     rabbitmq_channel: &Channel,
     response_tracker: Arc<ResponseTracker>,
     database: Arc<Database>,
@@ -202,7 +201,7 @@ pub async fn execute_one_shot(
     // Create session if needed.
     //
     if !use_existing_session {
-        create_session(node_id, spec.yolo_mode, rabbitmq_channel, response_tracker.clone())
+        create_session(node_id, spec.yolo_mode, working_dir.clone(), rabbitmq_channel, response_tracker.clone())
             .await
             .context("Failed to create session for one-shot operation")?;
     }
@@ -331,6 +330,7 @@ pub async fn execute_agent_mode(
     operation_id: &str,
     node_id: &str,
     spec: &SemanticOperationSpec,
+    working_dir: Option<String>,
     config: &Arc<TokioRwLock<ServiceConfig>>,
     rabbitmq_channel: &Channel,
     response_tracker: Arc<ResponseTracker>,
@@ -342,7 +342,7 @@ pub async fn execute_agent_mode(
     // Create session if needed.
     //
     if !use_existing_session {
-        create_session(node_id, spec.yolo_mode, rabbitmq_channel, response_tracker.clone())
+        create_session(node_id, spec.yolo_mode, working_dir.clone(), rabbitmq_channel, response_tracker.clone())
             .await
             .context("Failed to create session for agent mode operation")?;
     }

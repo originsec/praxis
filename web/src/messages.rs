@@ -63,6 +63,8 @@ pub enum BrowserMessage {
         agent_short_name: String,
         /// Full name of the operation definition (e.g., "recon::network_scan")
         operation_name: String,
+        /// Working directory for the operation session
+        working_dir: Option<String>,
     },
     /// Cancel a semantic operation
     SemanticOpCancel {
@@ -194,6 +196,8 @@ pub enum BrowserMessage {
         chain_id: String,
         node_id: String,
         agent_short_name: String,
+        /// Working directory for the chain session
+        working_dir: Option<String>,
     },
     /// Cancel a chain execution
     ChainCancel {

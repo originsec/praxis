@@ -3,6 +3,13 @@ use anyhow::Result;
 use anyhow::Context;
 use std::net::IpAddr;
 
+/// Mark for proxy's outgoing connections to bypass VPN/TUN routing.
+/// Same as TPROXY_BYPASS_MARK - both serve the same purpose.
+pub const VPN_BYPASS_MARK: u32 = 0x2;
+
+/// Routing table number for VPN bypass routes.
+const VPN_BYPASS_TABLE: u32 = 200;
+
 /// TUN interface IPv4 address
 #[allow(dead_code)]
 pub const TUN_IP: &str = "10.255.0.1";
@@ -275,6 +282,48 @@ impl RouteManager {
             common::log_warn!("ip link set up warning: {}", stderr.trim());
         }
 
+        //
+        // Configure sysctl settings for proper packet handling.
+        //
+        // rp_filter=0: Disable reverse path filtering so packets with our
+        // virtual source IP (10.255.0.100) aren't dropped.
+        //
+        // accept_local=1: Allow the kernel to accept packets with source
+        // addresses that belong to local interfaces (needed for our NAT).
+        //
+        // route_localnet=1: Allow routing of 127.x.x.x and local addresses
+        // through this interface (needed for our NAT to work).
+        //
+
+        let sysctl_settings = [
+            format!("net.ipv4.conf.{}.rp_filter=0", self.interface_name),
+            format!("net.ipv4.conf.{}.accept_local=1", self.interface_name),
+            format!("net.ipv4.conf.{}.route_localnet=1", self.interface_name),
+            //
+            // Also set on "all" to ensure defaults don't override.
+            //
+            "net.ipv4.conf.all.rp_filter=0".to_string(),
+        ];
+
+        for setting in &sysctl_settings {
+            let output = crate::utils::silent_command("sysctl")
+                .args(["-w", setting])
+                .output();
+
+            match output {
+                Ok(o) if o.status.success() => {
+                    common::log_debug!("Set {}", setting);
+                }
+                Ok(o) => {
+                    let stderr = String::from_utf8_lossy(&o.stderr);
+                    common::log_warn!("Failed to set {}: {}", setting, stderr.trim());
+                }
+                Err(e) => {
+                    common::log_warn!("Failed to run sysctl for {}: {}", setting, e);
+                }
+            }
+        }
+
         self.interface_configured = true;
         common::log_info!("Interface {} configured with IPv4 {} and IPv6 {}", self.interface_name, TUN_IP, TUN_IP6);
         Ok(())
@@ -435,5 +484,393 @@ impl RouteManager {
 impl Default for RouteManager {
     fn default() -> Self {
         Self::new(TUN_INTERFACE_NAME)
+    }
+}
+
+//
+// VPN Bypass Manager (Linux only).
+//
+// Sets up policy routing so that proxy's outgoing connections (marked with
+// VPN_BYPASS_MARK) bypass the TUN routes and use the real default gateway.
+//
+
+#[cfg(target_os = "linux")]
+pub struct VpnBypassManager {
+    /// Whether bypass routing is active.
+    is_active: bool,
+    /// The default gateway we're using for bypass.
+    default_gateway: Option<String>,
+    /// The interface for the default gateway.
+    default_interface: Option<String>,
+}
+
+#[cfg(target_os = "linux")]
+impl VpnBypassManager {
+    pub fn new() -> Self {
+        Self {
+            is_active: false,
+            default_gateway: None,
+            default_interface: None,
+        }
+    }
+
+    /// Start VPN bypass routing.
+    ///
+    /// Sets up:
+    /// 1. Discover the default gateway before TUN routes are added
+    /// 2. Add policy routing rule: packets with VPN_BYPASS_MARK use table VPN_BYPASS_TABLE
+    /// 3. Add default route via real gateway in VPN_BYPASS_TABLE
+    pub fn start(&mut self) -> Result<()> {
+        use anyhow::Context;
+
+        if self.is_active {
+            return Ok(());
+        }
+
+        common::log_info!("Setting up VPN bypass routing");
+
+        //
+        // 1. Discover the default gateway and interface.
+        //
+        let (gateway, interface) = self.discover_default_gateway()
+            .context("Failed to discover default gateway")?;
+
+        common::log_info!("Default gateway: {} via {}", gateway, interface);
+
+        self.default_gateway = Some(gateway.clone());
+        self.default_interface = Some(interface.clone());
+
+        //
+        // 2. Add policy routing rule: packets with mark use our bypass table.
+        //
+        let output = crate::utils::silent_command("ip")
+            .args([
+                "rule", "add",
+                "fwmark", &VPN_BYPASS_MARK.to_string(),
+                "lookup", &VPN_BYPASS_TABLE.to_string(),
+                "priority", "100",
+            ])
+            .output()
+            .context("Failed to add ip rule")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            //
+            // Ignore "already exists" errors.
+            //
+            if !stderr.contains("File exists") {
+                common::log_warn!("ip rule add warning: {}", stderr.trim());
+            }
+        }
+
+        //
+        // 3. Add default route via real gateway in our bypass table.
+        //
+        let output = crate::utils::silent_command("ip")
+            .args([
+                "route", "add",
+                "default",
+                "via", &gateway,
+                "dev", &interface,
+                "table", &VPN_BYPASS_TABLE.to_string(),
+            ])
+            .output()
+            .context("Failed to add bypass route")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            //
+            // Ignore "already exists" errors.
+            //
+            if !stderr.contains("File exists") {
+                common::log_warn!("ip route add (bypass table) warning: {}", stderr.trim());
+            }
+        }
+
+        self.is_active = true;
+        common::log_info!("VPN bypass routing enabled (mark={}, table={})", VPN_BYPASS_MARK, VPN_BYPASS_TABLE);
+
+        Ok(())
+    }
+
+    /// Stop VPN bypass routing and clean up rules.
+    pub fn stop(&mut self) -> Result<()> {
+        if !self.is_active {
+            return Ok(());
+        }
+
+        common::log_info!("Removing VPN bypass routing");
+
+        //
+        // Remove the bypass route from our table.
+        //
+        if let (Some(gateway), Some(interface)) = (&self.default_gateway, &self.default_interface) {
+            let _ = crate::utils::silent_command("ip")
+                .args([
+                    "route", "del",
+                    "default",
+                    "via", gateway,
+                    "dev", interface,
+                    "table", &VPN_BYPASS_TABLE.to_string(),
+                ])
+                .output();
+        }
+
+        //
+        // Remove the policy routing rule.
+        //
+        let _ = crate::utils::silent_command("ip")
+            .args([
+                "rule", "del",
+                "fwmark", &VPN_BYPASS_MARK.to_string(),
+                "lookup", &VPN_BYPASS_TABLE.to_string(),
+            ])
+            .output();
+
+        self.is_active = false;
+        self.default_gateway = None;
+        self.default_interface = None;
+
+        common::log_info!("VPN bypass routing disabled");
+        Ok(())
+    }
+
+    /// Discover the default gateway and interface.
+    ///
+    /// Parses output of `ip route show default` to find the gateway.
+    fn discover_default_gateway(&self) -> Result<(String, String)> {
+        use anyhow::Context;
+
+        let output = crate::utils::silent_command("ip")
+            .args(["route", "show", "default"])
+            .output()
+            .context("Failed to run ip route show default")?;
+
+        if !output.status.success() {
+            anyhow::bail!("ip route show default failed");
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        //
+        // Parse output like: "default via 192.168.1.1 dev eth0 proto dhcp metric 100"
+        //
+        for line in stdout.lines() {
+            if line.starts_with("default") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+
+                let mut gateway = None;
+                let mut interface = None;
+
+                let mut i = 0;
+                while i < parts.len() {
+                    if parts[i] == "via" && i + 1 < parts.len() {
+                        gateway = Some(parts[i + 1].to_string());
+                    }
+                    if parts[i] == "dev" && i + 1 < parts.len() {
+                        interface = Some(parts[i + 1].to_string());
+                    }
+                    i += 1;
+                }
+
+                if let (Some(gw), Some(iface)) = (gateway, interface) {
+                    return Ok((gw, iface));
+                }
+            }
+        }
+
+        anyhow::bail!("Could not find default gateway in routing table")
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.is_active
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Default for VpnBypassManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for VpnBypassManager {
+    fn drop(&mut self) {
+        if self.is_active {
+            common::log_warn!("VpnBypassManager dropped while still active, cleaning up");
+            let _ = self.stop();
+        }
+    }
+}
+
+//
+// Non-Linux stub for VpnBypassManager.
+//
+
+#[cfg(not(target_os = "linux"))]
+pub struct VpnBypassManager;
+
+#[cfg(not(target_os = "linux"))]
+impl VpnBypassManager {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn start(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn stop(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn is_active(&self) -> bool {
+        false
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+impl Default for VpnBypassManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+//
+// IPv6 Manager (Linux only).
+//
+// Disables IPv6 when VPN or TPROXY modes are active to avoid routing issues,
+// then restores the original setting on cleanup.
+//
+
+#[cfg(target_os = "linux")]
+pub struct Ipv6Manager {
+    /// Whether we disabled IPv6 (need to restore).
+    is_disabled: bool,
+    /// Original value of net.ipv6.conf.all.disable_ipv6.
+    original_value: Option<String>,
+}
+
+#[cfg(target_os = "linux")]
+impl Ipv6Manager {
+    pub fn new() -> Self {
+        Self {
+            is_disabled: false,
+            original_value: None,
+        }
+    }
+
+    /// Disable IPv6 system-wide.
+    ///
+    /// Saves the original value of `net.ipv6.conf.all.disable_ipv6` so it can
+    /// be restored later.
+    pub fn disable(&mut self) -> Result<()> {
+        use anyhow::Context;
+
+        if self.is_disabled {
+            return Ok(());
+        }
+
+        //
+        // Read current value to save for restoration.
+        //
+
+        let output = crate::utils::silent_command("sysctl")
+            .args(["-n", "net.ipv6.conf.all.disable_ipv6"])
+            .output()
+            .context("Failed to read IPv6 disable status")?;
+
+        if output.status.success() {
+            let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            common::log_info!("Original net.ipv6.conf.all.disable_ipv6 = {}", value);
+            self.original_value = Some(value);
+        }
+
+        //
+        // Disable IPv6.
+        //
+
+        let output = crate::utils::silent_command("sysctl")
+            .args(["-w", "net.ipv6.conf.all.disable_ipv6=1"])
+            .output()
+            .context("Failed to disable IPv6")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            common::log_warn!("sysctl disable IPv6 warning: {}", stderr.trim());
+        }
+
+        self.is_disabled = true;
+        common::log_info!("IPv6 disabled (net.ipv6.conf.all.disable_ipv6=1)");
+
+        Ok(())
+    }
+
+    /// Restore IPv6 to its original state.
+    pub fn restore(&mut self) -> Result<()> {
+        if !self.is_disabled {
+            return Ok(());
+        }
+
+        let value = self.original_value.as_deref().unwrap_or("0");
+        common::log_info!("Restoring net.ipv6.conf.all.disable_ipv6 to {}", value);
+
+        let _ = crate::utils::silent_command("sysctl")
+            .args(["-w", &format!("net.ipv6.conf.all.disable_ipv6={}", value)])
+            .output();
+
+        self.is_disabled = false;
+        self.original_value = None;
+
+        common::log_info!("IPv6 restored");
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Default for Ipv6Manager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for Ipv6Manager {
+    fn drop(&mut self) {
+        if self.is_disabled {
+            common::log_warn!("Ipv6Manager dropped while IPv6 still disabled, restoring");
+            let _ = self.restore();
+        }
+    }
+}
+
+//
+// Non-Linux stub for Ipv6Manager.
+//
+
+#[cfg(not(target_os = "linux"))]
+pub struct Ipv6Manager;
+
+#[cfg(not(target_os = "linux"))]
+impl Ipv6Manager {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn disable(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn restore(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+impl Default for Ipv6Manager {
+    fn default() -> Self {
+        Self::new()
     }
 }

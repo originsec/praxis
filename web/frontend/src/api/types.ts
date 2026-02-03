@@ -127,9 +127,10 @@ export type SessionCommand =
   | { CancelTransaction: { transaction_id: string } };
 
 //
-// Interception method. Windows supports all methods, Linux supports Proxy only.
+// Interception method. Proxy works on all platforms. VPN works on Windows and
+// Linux. Hosts works on all platforms. Tproxy is Linux-only.
 //
-export type InterceptMethod = 'Proxy' | 'Vpn' | 'Hosts';
+export type InterceptMethod = 'Proxy' | 'Vpn' | 'Hosts' | 'Tproxy';
 
 export type InterceptCommand =
   | { Enable: { method: InterceptMethod | null } }
@@ -586,7 +587,7 @@ export interface NexusSessionState {
 export type BrowserMessage =
   | { type: 'command'; payload: CommandRequest }
   | { type: 'terminal_write'; node_id: string; terminal_id: string; data: number[] }
-  | { type: 'semantic_op_run'; node_id: string; agent_short_name: string; operation_name: string }
+  | { type: 'semantic_op_run'; node_id: string; agent_short_name: string; operation_name: string; working_dir: string | null }
   | { type: 'semantic_op_cancel'; operation_id: string }
   | { type: 'semantic_op_remove'; operation_id: string }
   | { type: 'semantic_op_clear' }
@@ -622,7 +623,7 @@ export type BrowserMessage =
   | { type: 'chain_create'; definition: ChainDefinitionInput }
   | { type: 'chain_update'; chain_id: string; definition: ChainDefinitionInput }
   | { type: 'chain_delete'; chain_id: string }
-  | { type: 'chain_run'; chain_id: string; node_id: string; agent_short_name: string }
+  | { type: 'chain_run'; chain_id: string; node_id: string; agent_short_name: string; working_dir: string | null }
   | { type: 'chain_cancel'; execution_id: string }
   | { type: 'chain_execution_list' }
   | { type: 'chain_execution_remove'; execution_id: string }

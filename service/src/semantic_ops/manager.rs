@@ -19,6 +19,7 @@ struct QueuedOperation {
     node_id: String,
     agent_short_name: String,
     spec: SemanticOperationSpec,
+    working_dir: Option<String>,
 }
 
 /// A running operation with cancellation support
@@ -29,6 +30,7 @@ struct RunningOperation {
     node_id: String,
     agent_short_name: String,
     spec: SemanticOperationSpec,
+    working_dir: Option<String>,
     start_time: chrono::DateTime<chrono::Utc>,
     cancel_tx: Option<oneshot::Sender<()>>,
 }
@@ -86,6 +88,7 @@ impl SemanticOpsManager {
         node_id: String,
         agent_short_name: String,
         operation_name: String,
+        working_dir: Option<String>,
     ) -> Result<(String, usize)> {
         //
         // Look up the operation definition from the database.
@@ -112,6 +115,7 @@ impl SemanticOpsManager {
             node_id: node_id.clone(),
             agent_short_name: agent_short_name.clone(),
             spec: spec.clone(),
+            working_dir: working_dir.clone(),
         };
 
         //
@@ -485,6 +489,7 @@ impl SemanticOpsManager {
         let node_id = queued_op.node_id.clone();
         let agent_short_name = queued_op.agent_short_name.clone();
         let spec = queued_op.spec.clone();
+        let working_dir = queued_op.working_dir.clone();
 
         //
         // Create cancel channel.
@@ -504,6 +509,7 @@ impl SemanticOpsManager {
                     node_id: node_id.clone(),
                     agent_short_name: agent_short_name.clone(),
                     spec: spec.clone(),
+                    working_dir: working_dir.clone(),
                     start_time: Utc::now(),
                     cancel_tx: Some(cancel_tx),
                 },
@@ -534,6 +540,7 @@ impl SemanticOpsManager {
             node_id,
             agent_short_name,
             spec,
+            working_dir,
             cancel_rx,
             database,
             config,
@@ -551,6 +558,7 @@ impl SemanticOpsManager {
         node_id: String,
         agent_short_name: String,
         spec: SemanticOperationSpec,
+        working_dir: Option<String>,
         cancel_rx: oneshot::Receiver<()>,
         database: Arc<Database>,
         config: Arc<TokioRwLock<ServiceConfig>>,
@@ -581,9 +589,9 @@ impl SemanticOpsManager {
         let _ = database.append_output(&operation_id, &format!("Agent '{}' selected.\n", agent_short_name)).await;
 
         //
-        // Step 2: Create session (with YOLO mode from operation spec).
+        // Step 2: Create session (with YOLO mode from operation spec and working directory).
         //
-        if let Err(e) = crate::semantic_ops::executor::create_session(&node_id, spec.yolo_mode, &rabbitmq_channel, response_tracker.clone()).await {
+        if let Err(e) = crate::semantic_ops::executor::create_session(&node_id, spec.yolo_mode, working_dir.clone(), &rabbitmq_channel, response_tracker.clone()).await {
             let _ = database.update_status(&operation_id, SemanticOpStatus::Failed, Some(Utc::now()), None, Some(format!("Failed to create session: {}", e))).await;
             running.write().unwrap().remove(&node_id);
             op_to_node.write().unwrap().remove(&operation_id);
@@ -601,6 +609,7 @@ impl SemanticOpsManager {
                 &operation_id,
                 &node_id,
                 &spec,
+                working_dir.clone(),
                 &config,
                 &rabbitmq_channel,
                 response_tracker.clone(),
@@ -617,6 +626,7 @@ impl SemanticOpsManager {
                 &operation_id,
                 &node_id,
                 &spec,
+                working_dir.clone(),
                 &rabbitmq_channel,
                 response_tracker.clone(),
                 database.clone(),
@@ -721,6 +731,7 @@ impl SemanticOpsManager {
             //
             // Register as running.
             //
+            let next_working_dir = next_queued_op.working_dir.clone();
             {
                 let mut running_guard = running.write().unwrap();
                 running_guard.insert(
@@ -731,6 +742,7 @@ impl SemanticOpsManager {
                         node_id: next_node_id.clone(),
                         agent_short_name: next_agent_short_name.clone(),
                         spec: next_spec.clone(),
+                        working_dir: next_working_dir.clone(),
                         start_time: Utc::now(),
                         cancel_tx: Some(cancel_tx),
                     },
@@ -751,6 +763,7 @@ impl SemanticOpsManager {
                 next_node_id,
                 next_agent_short_name,
                 next_spec,
+                next_working_dir,
                 cancel_rx,
                 database,
                 config,

@@ -1083,10 +1083,10 @@ pub async fn run() -> Result<()> {
                                             warn!("Attempted to remove unknown node: {}", node_id);
                                                                                     }
                                     }
-                                    ClientSignalMessage::SemanticOpRun { client_id, node_id, agent_short_name, operation_name, request_id } => {
-                                        info!("Received SemanticOpRun from client {} for node {} agent {}: {}", client_id.get(..8).unwrap_or(&client_id), node_id.get(..8).unwrap_or(&node_id), agent_short_name, operation_name);
-                                        
-                                        match semantic_ops_manager.queue_operation(client_id.clone(), node_id.clone(), agent_short_name, operation_name).await {
+                                    ClientSignalMessage::SemanticOpRun { client_id, node_id, agent_short_name, operation_name, request_id, working_dir } => {
+                                        info!("Received SemanticOpRun from client {} for node {} agent {}: {} (working_dir: {:?})", client_id.get(..8).unwrap_or(&client_id), node_id.get(..8).unwrap_or(&node_id), agent_short_name, operation_name, working_dir);
+
+                                        match semantic_ops_manager.queue_operation(client_id.clone(), node_id.clone(), agent_short_name, operation_name, working_dir).await {
                                             Ok((operation_id, queue_position)) => {
                                                 let message = ClientDirectMessage::SemanticOpQueued {
                                                     operation_id: operation_id.clone(),
@@ -1958,8 +1958,8 @@ pub async fn run() -> Result<()> {
                                         let success = database.delete_chain(&chain_id).await.unwrap_or(false);
                                         let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::ChainDeleted { chain_id, success }).await;
                                     }
-                                    ClientSignalMessage::ChainRun { client_id, chain_id, node_id, agent_short_name } => {
-                                        info!("Received ChainRun from client {} for chain {} on node {}", &client_id[..8.min(client_id.len())], chain_id, &node_id[..8.min(node_id.len())]);
+                                    ClientSignalMessage::ChainRun { client_id, chain_id, node_id, agent_short_name, working_dir } => {
+                                        info!("Received ChainRun from client {} for chain {} on node {} (working_dir: {:?})", &client_id[..8.min(client_id.len())], chain_id, &node_id[..8.min(node_id.len())], working_dir);
 
                                         //
                                         // Get the chain definition.
@@ -1973,6 +1973,7 @@ pub async fn run() -> Result<()> {
                                                     chain,
                                                     node_id,
                                                     agent_short_name,
+                                                    working_dir,
                                                     service_config.clone(),
                                                     semantic_ops_channel.clone(),
                                                     broadcast_channel.clone(),

@@ -36,7 +36,7 @@ Use YOLO mode when you want uninterrupted operation execution. Be aware that thi
 
 Sessions can be created with context:
 
-**Working Directory** - The directory where the agent operates. This affects file paths and command execution.
+**Working Directory** - The directory where the agent operates. This affects file paths and command execution. When running semantic operations or chains from an agent with an active session, the session's working directory is used.
 
 **Session ID** - A unique identifier for tracking the session. Used internally for message routing.
 
