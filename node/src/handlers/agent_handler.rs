@@ -1,7 +1,21 @@
 use crate::agent_connectors::{Agent, AgentRegistry};
 use common::{AgentCommand, AgentCommandResult, NodeCommandResult, ReconResult};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
+
+//
+// Check if a path is within any valid user home directory. Uses the same
+// enumeration logic as recon to ensure consistency.
+//
+fn is_path_in_valid_home(canonical_path: &Path) -> bool {
+    let valid_homes = crate::agent_connectors::utils::enumerate_user_homes();
+    valid_homes.iter().any(|home| {
+        home.canonicalize()
+            .map(|h| canonical_path.starts_with(&h))
+            .unwrap_or(false)
+    })
+}
 
 pub async fn handle_agent_command(
     cmd: AgentCommand,
@@ -165,21 +179,9 @@ pub async fn handle_agent_command(
         }
         AgentCommand::UpdateConfigFile { path, contents } => {
             //
-            // Validate path is within home directory for security.
-            // Canonicalize home_dir too so both paths have the same format
-            // (on Windows, canonicalize returns \\?\ prefixed paths).
+            // Validate path is within a valid user home directory for security.
             //
-            let home_dir = match dirs::home_dir().and_then(|h| h.canonicalize().ok()) {
-                Some(h) => h,
-                None => {
-                    return NodeCommandResult::Agent(AgentCommandResult::ConfigFileUpdated {
-                        success: false,
-                        error: Some("Could not determine home directory".to_string()),
-                    });
-                }
-            };
-
-            let target_path = std::path::Path::new(&path);
+            let target_path = Path::new(&path);
             let canonical_path = match target_path.canonicalize() {
                 Ok(p) => p,
                 Err(_) => {
@@ -187,7 +189,7 @@ pub async fn handle_agent_command(
                     // File might not exist yet, check parent.
                     //
                     match target_path.parent().and_then(|p| p.canonicalize().ok()) {
-                        Some(parent) if parent.starts_with(&home_dir) => target_path.to_path_buf(),
+                        Some(parent) if is_path_in_valid_home(&parent) => target_path.to_path_buf(),
                         _ => {
                             return NodeCommandResult::Agent(AgentCommandResult::ConfigFileUpdated {
                                 success: false,
@@ -198,10 +200,10 @@ pub async fn handle_agent_command(
                 }
             };
 
-            if !canonical_path.starts_with(&home_dir) {
+            if !is_path_in_valid_home(&canonical_path) {
                 return NodeCommandResult::Agent(AgentCommandResult::ConfigFileUpdated {
                     success: false,
-                    error: Some("Path must be within home directory".to_string()),
+                    error: Some("Path must be within a valid user home directory".to_string()),
                 });
             }
 
@@ -227,22 +229,9 @@ pub async fn handle_agent_command(
         }
         AgentCommand::GetSessionContent { session_file } => {
             //
-            // Validate path is within home directory for security.
-            // Canonicalize home_dir too so both paths have the same format
-            // (on Windows, canonicalize returns \\?\ prefixed paths).
+            // Validate path is within a valid user home directory for security.
             //
-            let home_dir = match dirs::home_dir().and_then(|h| h.canonicalize().ok()) {
-                Some(h) => h,
-                None => {
-                    return NodeCommandResult::Agent(AgentCommandResult::SessionContent {
-                        session_file,
-                        content: None,
-                        error: Some("Could not determine home directory".to_string()),
-                    });
-                }
-            };
-
-            let target_path = std::path::Path::new(&session_file);
+            let target_path = Path::new(&session_file);
             let canonical_path = match target_path.canonicalize() {
                 Ok(p) => p,
                 Err(e) => {
@@ -254,11 +243,11 @@ pub async fn handle_agent_command(
                 }
             };
 
-            if !canonical_path.starts_with(&home_dir) {
+            if !is_path_in_valid_home(&canonical_path) {
                 return NodeCommandResult::Agent(AgentCommandResult::SessionContent {
                     session_file,
                     content: None,
-                    error: Some("Path must be within home directory".to_string()),
+                    error: Some("Path must be within a valid user home directory".to_string()),
                 });
             }
 
@@ -286,22 +275,9 @@ pub async fn handle_agent_command(
         }
         AgentCommand::GetConfigContent { config_path } => {
             //
-            // Validate path is within home directory for security.
-            // Canonicalize home_dir too so both paths have the same format
-            // (on Windows, canonicalize returns \\?\ prefixed paths).
+            // Validate path is within a valid user home directory for security.
             //
-            let home_dir = match dirs::home_dir().and_then(|h| h.canonicalize().ok()) {
-                Some(h) => h,
-                None => {
-                    return NodeCommandResult::Agent(AgentCommandResult::ConfigContent {
-                        config_path,
-                        content: None,
-                        error: Some("Could not determine home directory".to_string()),
-                    });
-                }
-            };
-
-            let target_path = std::path::Path::new(&config_path);
+            let target_path = Path::new(&config_path);
             let canonical_path = match target_path.canonicalize() {
                 Ok(p) => p,
                 Err(e) => {
@@ -313,11 +289,11 @@ pub async fn handle_agent_command(
                 }
             };
 
-            if !canonical_path.starts_with(&home_dir) {
+            if !is_path_in_valid_home(&canonical_path) {
                 return NodeCommandResult::Agent(AgentCommandResult::ConfigContent {
                     config_path,
                     content: None,
-                    error: Some("Path must be within home directory".to_string()),
+                    error: Some("Path must be within a valid user home directory".to_string()),
                 });
             }
 

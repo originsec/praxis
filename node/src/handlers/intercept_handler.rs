@@ -36,9 +36,12 @@ pub async fn handle_intercept_command(
                     common::log_info!("Intercept enabled ({:?}) for {} domain(s): {:?}", used_method, domains.len(), domains);
                     NodeCommandResult::Intercept(InterceptCommandResult::Enabled { method: used_method })
                 }
-                Err(e) => NodeCommandResult::Error {
-                    message: format!("Failed to enable intercept: {}", e),
-                },
+                Err(e) => {
+                    common::log_error!("Failed to enable intercept: {:?}", e);
+                    NodeCommandResult::Error {
+                        message: format!("Failed to enable intercept: {}", e),
+                    }
+                }
             }
         }
         InterceptCommand::Disable => {

@@ -23,7 +23,11 @@ impl ClaudeCodeSession {
             .ok_or_else(|| anyhow!("No process path provided"))?;
 
         let working_dir = context.working_dir.clone()
-            .or_else(|| dirs::home_dir().map(|p| p.to_string_lossy().to_string()));
+            .or_else(|| {
+                crate::agent_connectors::utils::get_user_homes_with_config(".claude")
+                    .into_iter()
+                    .next()
+            });
 
         Ok(Self {
             internal_id: Uuid::new_v4(),
@@ -50,6 +54,7 @@ impl ClaudeCodeSession {
 
         if let Some(ref dir) = self.working_dir {
             cmd.current_dir(dir);
+            utils::configure_command_for_directory(&mut cmd, std::path::Path::new(dir));
         }
 
         if self.yolo_mode {

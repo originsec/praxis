@@ -243,15 +243,34 @@ impl PacketEngine {
         //
         // Check if this is an outbound packet to an intercept IP.
         //
+        // IMPORTANT: Only NAT packets that originate from the TUN interface
+        // (source IP = TUN IP). Packets from other IPs (like the real host IP)
+        // are from the proxy's bypass connection and should NOT be NAT'd -
+        // they need to pass through to the real server.
+        //
         let intercept_ips = self.intercept_ips.read().await;
         let is_intercept_dst = intercept_ips.contains(&IpAddr::V4(dst_ip));
         drop(intercept_ips);
 
-        if is_intercept_dst && dst_port == 443 {
+        let is_from_tun = src_ip == tun_ipv4();
+
+        if is_intercept_dst && dst_port == 443 && is_from_tun {
             //
-            // Outbound to intercepted server - NAT to local proxy.
+            // Outbound to intercepted server FROM TUN - NAT to local proxy.
             //
             return self.nat_outbound_v4(packet, &ip_header, &tcp_header);
+        }
+
+        if is_intercept_dst && !is_from_tun {
+            //
+            // This is the proxy's bypass connection to the real server.
+            // Pass through without modification.
+            //
+            common::log_debug!(
+                "Passing through proxy bypass (IPv4): {}:{} -> {}:{}",
+                src_ip, src_port, dst_ip, dst_port
+            );
+            return Some(packet.to_vec());
         }
 
         //
@@ -320,15 +339,33 @@ impl PacketEngine {
         //
         // Check if this is an outbound packet to an intercept IP.
         //
+        // IMPORTANT: Only NAT packets that originate from the TUN interface
+        // (source IP = TUN IP). Packets from other IPs are from the proxy's
+        // bypass connection and should NOT be NAT'd.
+        //
         let intercept_ips = self.intercept_ips.read().await;
         let is_intercept_dst = intercept_ips.contains(&IpAddr::V6(dst_ip));
         drop(intercept_ips);
 
-        if is_intercept_dst && dst_port == 443 {
+        let is_from_tun = src_ip == tun_ipv6();
+
+        if is_intercept_dst && dst_port == 443 && is_from_tun {
             //
-            // Outbound to intercepted server - NAT to local proxy.
+            // Outbound to intercepted server FROM TUN - NAT to local proxy.
             //
             return self.nat_outbound_v6(packet, &ip_header, &tcp_header);
+        }
+
+        if is_intercept_dst && !is_from_tun {
+            //
+            // This is the proxy's bypass connection to the real server.
+            // Pass through without modification.
+            //
+            common::log_debug!(
+                "Passing through proxy bypass (IPv6): [{}]:{} -> [{}]:{}",
+                src_ip, src_port, dst_ip, dst_port
+            );
+            return Some(packet.to_vec());
         }
 
         //

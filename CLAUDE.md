@@ -32,3 +32,12 @@
 
 - Never use `common::log_*` macros in `node/src/runtime.rs` event log forwarder task. These macros send to the event log channel, which the forwarder processes, creating an infinite recursion loop when RabbitMQ fails. Use `tracing::*` directly instead.
 
+## Documentation
+
+- Documentation lives in `docs/` and is built with mdBook.
+- When making code changes, update the corresponding documentation in `docs/src/`.
+- Key documentation files:
+  - `docs/src/architecture/` - Node architecture
+  - `docs/src/connectors/` - Agent connector documentation
+- But look through entire docs/src to locate any areas that may need updates
+- Don't make changes to CLAUDE.md unless specifically instructed to

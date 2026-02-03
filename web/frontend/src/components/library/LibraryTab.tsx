@@ -426,6 +426,7 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
         node_id: nodeId,
         agent_short_name: agentName,
         operation_name: itemId,
+        working_dir: null,
       });
     } else {
       runChain(itemId, nodeId, agentName);

@@ -186,6 +186,7 @@ pub fn cleanup_stale_state() {
         if let Err(e) = super::hosts::remove_all_hosts_entries() {
             common::log_error!("Failed to clean up hosts file: {}", e);
         }
+        super::hosts::disable_hosts_redirect();
         super::hosts::flush_dns_cache();
     }
 

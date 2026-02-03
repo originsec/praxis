@@ -105,6 +105,7 @@ export function OperationsPage() {
       node_id: nodeId,
       agent_short_name: agentName,
       operation_name: opFullName,
+      working_dir: null,
     });
     setMainTab('runs');
   };

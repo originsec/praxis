@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useApp } from '../context/AppContext';
 import {
   Radio,
@@ -420,8 +422,10 @@ function MatchesTab() {
                           {match.match_info.summary && match.match_info.summary.trim().toUpperCase() !== 'NONE' && (
                             <div>
                               <div className="text-[var(--accent-info)] mb-2 tracking-wider">AI SUMMARY</div>
-                              <div className="text-xs bg-[var(--bg-primary)] p-3 border border-[var(--accent-info)]/30 whitespace-pre-wrap">
-                                {match.match_info.summary}
+                              <div className="text-xs bg-[var(--bg-primary)] p-3 border border-[var(--accent-info)]/30 prose prose-invert prose-xs max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-code:text-[var(--accent-info)] prose-code:bg-[var(--bg-tertiary)] prose-code:px-1 prose-code:rounded prose-pre:bg-[var(--bg-tertiary)] prose-pre:border prose-pre:border-subtle prose-strong:text-[var(--text-primary)] prose-table:text-xs prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1 prose-th:border prose-td:border prose-th:border-subtle prose-td:border-subtle">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                  {match.match_info.summary}
+                                </ReactMarkdown>
                               </div>
                             </div>
                           )}
