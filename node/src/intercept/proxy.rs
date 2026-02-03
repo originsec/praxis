@@ -718,7 +718,25 @@ async fn connect_bypass_tun(
         }
     }
 
-    #[cfg(not(target_os = "linux"))]
+    //
+    // Windows VPN bypass: Bind to the main interface's IP so packets have a
+    // source IP != TUN IP (10.255.0.1). The packet engine checks is_from_tun
+    // and passes through traffic from other source IPs.
+    //
+    #[cfg(target_os = "windows")]
+    if intercept_method == InterceptMethod::Vpn {
+        if let Some(bind_ip) = discover_non_tun_ip() {
+            common::log_debug!("Windows VPN bypass: binding to {}", bind_ip);
+            let bind_addr = std::net::SocketAddr::new(bind_ip, 0);
+            if let Err(e) = socket.bind(&bind_addr.into()) {
+                common::log_warn!("Failed to bind to {}: {}", bind_ip, e);
+            }
+        } else {
+            common::log_warn!("Could not find non-TUN IP for VPN bypass");
+        }
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     let _ = intercept_method; // Silence unused variable warning
 
     socket.set_nonblocking(true)
@@ -2298,6 +2316,40 @@ fn discover_default_interface() -> Option<String> {
                 if *part == "dev" && i + 1 < parts.len() {
                     return Some(parts[i + 1].to_string());
                 }
+            }
+        }
+    }
+
+    None
+}
+
+/// Discover an IP address that is not the TUN IP (10.255.x.x).
+/// Used on Windows to bind sockets for VPN bypass.
+#[cfg(target_os = "windows")]
+fn discover_non_tun_ip() -> Option<std::net::IpAddr> {
+    use std::net::IpAddr;
+
+    //
+    // Use local_ip crate if available, or fall back to a simple method.
+    // For now, iterate through interfaces looking for a non-TUN IPv4.
+    //
+    if let Ok(addrs) = get_if_addrs::get_if_addrs() {
+        for iface in addrs {
+            if let IpAddr::V4(ipv4) = iface.ip() {
+                //
+                // Skip loopback and TUN subnet (10.255.x.x).
+                //
+                if ipv4.is_loopback() {
+                    continue;
+                }
+                if ipv4.octets()[0] == 10 && ipv4.octets()[1] == 255 {
+                    continue;
+                }
+
+                //
+                // Found a non-TUN IPv4 address.
+                //
+                return Some(IpAddr::V4(ipv4));
             }
         }
     }
