@@ -51,13 +51,20 @@ Praxis supports four methods for routing traffic through the proxy. Each has tra
 
 **How it works:** Creates a TUN network adapter and routes specific IPs through it at the packet level.
 
-**Platform support:** Windows only (Linux support in development)
+**Platform support:** Windows only. For Linux, use TPROXY mode instead (more efficient, no userspace packet processing).
 
 **Setup:**
 1. TUN device created (wintun on Windows)
 2. Intercept domains resolved to IP addresses
 3. Routes added for those IPs through the TUN
 4. Packet engine performs NAT to redirect to proxy
+5. Proxy connects to real server, bypassing TUN via interface binding
+
+**Internal details:**
+- TUN uses IP 10.255.0.1, virtual client uses 10.255.0.100
+- Packet engine maintains NAT table mapping client connections to proxy
+- Proxy bypasses TUN by binding to the real network interface's IP (not 10.255.0.1)
+- Packet engine distinguishes proxy traffic (src != 10.255.0.1) and passes it through
 
 **Advantages:**
 - Captures traffic from all applications
@@ -65,7 +72,7 @@ Praxis supports four methods for routing traffic through the proxy. Each has tra
 - More comprehensive coverage
 
 **Disadvantages:**
-- Windows only (Linux support in development)
+- Windows only (use TPROXY on Linux)
 - Requires elevated privileges (admin)
 - More complex setup
 
@@ -99,10 +106,17 @@ Praxis supports four methods for routing traffic through the proxy. Each has tra
 **Setup:**
 1. IPv6 disabled system-wide (restored on cleanup)
 2. Intercept domains resolved to IP addresses
-3. iptables mangle rules added to mark packets to target IPs
+3. iptables mangle rules added to mark packets to target IPs (mark 0x1)
 4. Policy routing configured to route marked packets to loopback
 5. TPROXY rule redirects packets to proxy port
 6. Proxy uses `SO_ORIGINAL_DST` to get real destination
+7. Proxy's outbound connections marked with bypass mark (0x2) to skip iptables rules
+
+**Internal details:**
+- Uses iptables mangle table with PREROUTING chain
+- Bypass rule: `-m mark --mark 0x2 -j RETURN` placed before intercept rules
+- Proxy sets `SO_MARK=0x2` on outbound sockets to avoid routing loop
+- Policy routing table 100 handles marked packets
 
 **Advantages:**
 - No TUN device or userspace packet processing
@@ -206,6 +220,18 @@ Click **Disable** to stop interception. This:
 - Cleans hosts file entries (if modified)
 - Removes iptables TPROXY rules (if used)
 - Stops the proxy server
+
+## Shared IP Passthrough
+
+When multiple domains share the same IP address (e.g., `claude.ai` and `api.anthropic.com` both resolve to `160.79.104.10`), traffic to non-intercepted domains may route through the proxy.
+
+The proxy handles this transparently:
+1. Extracts SNI (Server Name Indication) from TLS ClientHello
+2. Checks if the domain should be intercepted
+3. For non-intercepted domains, tunnels traffic through without TLS termination
+4. Uses the same bypass mechanisms to connect to the real server
+
+This ensures non-intercepted domains continue to work normally even when sharing IPs with intercepted domains.
 
 ## Security Considerations
 
