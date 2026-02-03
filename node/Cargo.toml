@@ -36,7 +36,7 @@ flate2 = "1"
 brotli = "7"
 zstd = "0.13"
 # VPN packet routing dependencies
-socket2 = "0.5"
+socket2 = { version = "0.5", features = ["all"] }
 etherparse = "0.16"
 hickory-resolver = { version = "0.24", features = ["tokio-runtime"] }
 dashmap = "6"
