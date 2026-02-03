@@ -2,11 +2,12 @@ use crate::agent_connectors::utils::{
     collect_global_config_files, enumerate_user_homes, scan_directories_for_config_files_multi,
     ConfigFilePattern, GlobalConfigPattern,
 };
-use common::{SessionItem, ConfigItem};
+use common::{ConfigItem, SessionItem};
 use chrono::{DateTime, Utc};
+use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const MAX_SCAN_DEPTH: usize = 7;
 
@@ -27,6 +28,85 @@ pub struct EnumerationData {
     pub config_items: Vec<ConfigItem>,
     pub sessions: Vec<SessionItem>,
     pub project_paths: Vec<String>,
+}
+
+//
+// Check if authentication environment variables are set.
+//
+
+pub fn has_auth_env_vars() -> bool {
+    std::env::var("ANTHROPIC_API_KEY").is_ok()
+        || std::env::var("ANTHROPIC_AUTH_TOKEN").is_ok()
+        || std::env::var("ANTHROPIC_FOUNDRY_API_KEY").is_ok()
+        || std::env::var("AWS_BEARER_TOKEN_BEDROCK").is_ok()
+}
+
+//
+// Check if a .claude.json file has authentication configured.
+// Looks for oauthAccount, primaryApiKey, or apiKeyHelper fields.
+//
+
+fn has_auth_in_claude_json(claude_json_path: &Path) -> bool {
+    let Ok(contents) = fs::read_to_string(claude_json_path) else {
+        return false;
+    };
+
+    let Ok(json) = serde_json::from_str::<Value>(&contents) else {
+        return false;
+    };
+
+    //
+    // Check for auth-related fields in .claude.json.
+    //
+
+    json.get("oauthAccount").is_some()
+        || json.get("primaryApiKey").is_some()
+        || json.get("apiKeyHelper").is_some()
+}
+
+//
+// Check if a path (user home or project) has valid Claude Code authentication.
+// Auth can come from:
+// 1. Environment variables (global)
+// 2. Auth in the path's own .claude.json (for user homes)
+// 3. Auth in the owning user's home .claude.json (for project paths)
+//
+
+pub fn path_has_valid_auth(path: &Path, user_homes: &[PathBuf]) -> bool {
+    //
+    // Global env vars take precedence.
+    //
+
+    if has_auth_env_vars() {
+        return true;
+    }
+
+    //
+    // Check path's own .claude.json (for user homes).
+    //
+
+    let path_claude_json = path.join(".claude.json");
+    if has_auth_in_claude_json(&path_claude_json) {
+        return true;
+    }
+
+    //
+    // For project paths, check if the owning user's home has auth configured.
+    // Find which user home is a parent of this path.
+    //
+
+    let path_str = path.to_string_lossy();
+    for home in user_homes {
+        let home_str = home.to_string_lossy();
+        if path_str.starts_with(home_str.as_ref()) {
+            let home_claude_json = home.join(".claude.json");
+            if has_auth_in_claude_json(&home_claude_json) {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 pub fn enumerate() -> anyhow::Result<EnumerationData> {

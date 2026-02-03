@@ -127,9 +127,10 @@ export type SessionCommand =
   | { CancelTransaction: { transaction_id: string } };
 
 //
-// Interception method. Windows supports all methods, Linux supports Proxy only.
+// Interception method. Proxy works on all platforms. VPN works on Windows and
+// Linux. Hosts works on all platforms. Ebpf is Linux-only.
 //
-export type InterceptMethod = 'Proxy' | 'Vpn' | 'Hosts';
+export type InterceptMethod = 'Proxy' | 'Vpn' | 'Hosts' | 'Ebpf';
 
 export type InterceptCommand =
   | { Enable: { method: InterceptMethod | null } }

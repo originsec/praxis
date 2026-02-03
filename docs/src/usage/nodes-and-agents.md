@@ -20,6 +20,12 @@ The node also reports:
 - **OS details** - operating system and version
 - **Agent list** - discovered AI agents
 
+### Superuser Mode
+
+When the node runs as root, it can operate as different users based on the selected working directory. Selecting a working directory owned by another user will cause agent sessions to run as that user (with the appropriate `HOME` environment variable set).
+
+**Note**: Full superuser support is still under development. Users may notice unexpected behaviour when running sessions as different users from a root node. If you encounter issues, try running the node as the target user directly instead.
+
 ### Node List
 
 In the web UI, the left sidebar shows all connected nodes. Click a node to select it. The main panel then shows that node's details and agents.

@@ -44,6 +44,7 @@ impl ChainExecutor {
         chain: ChainDefinition,
         node_id: String,
         agent_short_name: String,
+        working_dir: Option<String>,
         config: Arc<TokioRwLock<ServiceConfig>>,
         rabbitmq_channel: Channel,
         broadcast_channel: Channel,
@@ -136,6 +137,7 @@ impl ChainExecutor {
         let _registry_clone = self.registry.clone();
         let cancel_senders = self.cancel_senders.clone();
         let database_clone = database.clone();
+        let working_dir_clone = working_dir.clone();
 
         //
         // Spawn the execution task - runs entirely in background.
@@ -180,6 +182,7 @@ impl ChainExecutor {
                         chain,
                         node_id,
                         agent_short_name,
+                        working_dir_clone,
                         config,
                         rabbitmq_channel,
                         broadcast_channel.clone(),
@@ -277,6 +280,7 @@ impl ChainExecutor {
         _chain: ChainDefinition,
         node_id: String,
         agent_short_name: String,
+        working_dir: Option<String>,
         config: Arc<TokioRwLock<ServiceConfig>>,
         rabbitmq_channel: Channel,
         broadcast_channel: Channel,
@@ -355,7 +359,7 @@ impl ChainExecutor {
                     current_session_yolo_mode = yolo_mode;
 
                     active_session = Some(
-                        create_session(&node_id, yolo_mode, &rabbitmq_channel, response_tracker.clone())
+                        create_session(&node_id, yolo_mode, working_dir.clone(), &rabbitmq_channel, response_tracker.clone())
                             .await
                             .context("Failed to create session for session group")?,
                     );
@@ -574,6 +578,7 @@ impl ChainExecutor {
                             &op_id,
                             &node_id,
                             &spec,
+                            working_dir.clone(),
                             &config,
                             &rabbitmq_channel,
                             response_tracker.clone(),
@@ -587,6 +592,7 @@ impl ChainExecutor {
                             &op_id,
                             &node_id,
                             &spec,
+                            working_dir.clone(),
                             &rabbitmq_channel,
                             response_tracker.clone(),
                             database.clone(),
@@ -744,7 +750,7 @@ impl ChainExecutor {
                         //
                         // Create temp session for this operation.
                         //
-                        let _temp_session = create_session(&node_id, session_yolo, &rabbitmq_channel, response_tracker.clone())
+                        let _temp_session = create_session(&node_id, session_yolo, working_dir.clone(), &rabbitmq_channel, response_tracker.clone())
                             .await
                             .context("Failed to create temp session for generic prompt")?;
                     }
@@ -758,6 +764,7 @@ impl ChainExecutor {
                         &op_id,
                         &node_id,
                         &spec,
+                        working_dir.clone(),
                         &rabbitmq_channel,
                         response_tracker.clone(),
                         database.clone(),

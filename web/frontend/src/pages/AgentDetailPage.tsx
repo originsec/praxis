@@ -376,13 +376,17 @@ export function AgentDetailPage() {
 
   //
   // Extract project paths from recon result (recon now includes sessions and
-  // project_paths).
+  // project_paths). Auto-select first path if none selected.
   //
   useEffect(() => {
     if (reconResult && !hasSession) {
-      setProjectPaths(reconResult.project_paths || []);
+      const paths = reconResult.project_paths || [];
+      setProjectPaths(paths);
+      if (paths.length > 0 && selectedProjectPath === null) {
+        setSelectedProjectPath(paths[0]);
+      }
     }
-  }, [reconResult, hasSession]);
+  }, [reconResult, hasSession, selectedProjectPath]);
 
   //
   // Fetch session content when a session is selected.
@@ -651,13 +655,15 @@ export function AgentDetailPage() {
 
   const handleRunOpFromModal = (opFullName: string, _nodeId: string, _agentName: string) => {
     if (!nodeId || !agentShortName) return;
-    runOperation(nodeId, agentShortName, opFullName);
+    const workingDir = selectedAgent?.working_dir ?? selectedProjectPath ?? undefined;
+    runOperation(nodeId, agentShortName, opFullName, workingDir);
     setActiveTab('ops');
   };
 
   const handleRunChainFromModal = (chainId: string, _nodeId: string, _agentName: string) => {
     if (!nodeId || !agentShortName) return;
-    runChain(chainId, nodeId, agentShortName);
+    const workingDir = selectedAgent?.working_dir ?? selectedProjectPath ?? undefined;
+    runChain(chainId, nodeId, agentShortName, workingDir);
     setActiveTab('ops');
   };
 

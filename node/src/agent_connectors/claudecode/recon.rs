@@ -20,17 +20,39 @@ impl AgentRecon for ClaudeCodeAgent {
         };
 
         //
-        // Prepend $HOME as "Home" to project paths list.
+        // Prepend user homes that have .claude directory to project paths list.
         //
 
+        let user_home_strings = crate::agent_connectors::utils::get_user_homes_with_config(".claude");
+        let user_homes: Vec<std::path::PathBuf> = user_home_strings
+            .iter()
+            .map(|s| std::path::PathBuf::from(s))
+            .collect();
+
         let project_paths = {
-            let mut paths = Vec::new();
-            if let Ok(home) = std::env::var("HOME") {
-                paths.push(home);
-            }
+            let mut paths = user_home_strings;
             paths.extend(project_paths);
             paths
         };
+
+        //
+        // Filter out paths that don't have valid Claude Code authentication.
+        // Auth can come from env vars or .claude.json in home directory.
+        //
+
+        let project_paths: Vec<String> = project_paths
+            .into_iter()
+            .filter(|path| {
+                let has_auth = super::enumeration::path_has_valid_auth(
+                    std::path::Path::new(path),
+                    &user_homes,
+                );
+                if !has_auth {
+                    common::log_debug!("Filtering out path without valid auth: {}", path);
+                }
+                has_auth
+            })
+            .collect();
 
         let mut tools = ReconTools::default();
 

@@ -36,6 +36,18 @@ The binary is verified by running `codex --version` and checking the output cont
 
 Traffic interception is not yet supported for this connector.
 
+## Authentication
+
+Codex CLI requires authentication to function. During reconnaissance, Praxis validates that valid authentication is configured before including paths in the project list.
+
+Authentication is considered valid if any of the following are true:
+
+1. **Environment variable** - `OPENAI_API_KEY` is set
+
+2. **Auth file** - The `auth_mode` field is present in `~/.codex/auth.json`
+
+Paths without valid authentication are filtered out during reconnaissance. This prevents the UI from showing user homes or projects that cannot actually be used with Codex.
+
 ## Reconnaissance
 
 ### Static Recon

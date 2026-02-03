@@ -20,15 +20,20 @@ impl AgentRecon for CodexAgent {
         };
 
         //
-        // Prepend home directory to project paths list and dedupe.
+        // Prepend user homes that have .codex directory to project paths list and dedupe.
         //
+
+        let user_home_strings = crate::agent_connectors::utils::get_user_homes_with_config(".codex");
+        let user_homes: Vec<std::path::PathBuf> = user_home_strings
+            .iter()
+            .map(|s| std::path::PathBuf::from(s))
+            .collect();
 
         let project_paths = {
             let mut seen = std::collections::HashSet::new();
             let mut paths = Vec::new();
 
-            let home_var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
-            if let Ok(home) = std::env::var(home_var) {
+            for home in user_home_strings {
                 if seen.insert(home.clone()) {
                     paths.push(home);
                 }
@@ -40,6 +45,25 @@ impl AgentRecon for CodexAgent {
             }
             paths
         };
+
+        //
+        // Filter out paths that don't have valid Codex authentication.
+        // Auth can come from env vars or .codex/auth.json in home directory.
+        //
+
+        let project_paths: Vec<String> = project_paths
+            .into_iter()
+            .filter(|path| {
+                let has_auth = super::enumeration::path_has_valid_auth(
+                    std::path::Path::new(path),
+                    &user_homes,
+                );
+                if !has_auth {
+                    common::log_debug!("Filtering out path without valid auth: {}", path);
+                }
+                has_auth
+            })
+            .collect();
 
         let mut tools = ReconTools::default();
 

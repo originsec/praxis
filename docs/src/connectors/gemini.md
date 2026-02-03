@@ -27,6 +27,23 @@ When interception is enabled, you'll see:
 - Responses including assistant messages
 - Function/tool calls and results
 
+## Authentication
+
+Gemini CLI requires authentication to function. During reconnaissance, Praxis validates that valid authentication is configured before including paths in the project list.
+
+Authentication is considered valid if any of the following are true:
+
+1. **Environment variables** - One of these is set:
+   - `GEMINI_API_KEY`
+   - `GOOGLE_GENAI_USE_VERTEXAI`
+   - `GOOGLE_GENAI_USE_GCA`
+
+2. **Settings file** - The `security.auth` object is present in the relevant `settings.json`:
+   - For user homes: `~/.gemini/settings.json`
+   - For project paths: `.gemini/settings.json` in the project, or the owning user's home settings
+
+Paths without valid authentication are filtered out during reconnaissance. This prevents the UI from showing user homes or projects that cannot actually be used with Gemini.
+
 ## Reconnaissance
 
 ### Static Recon

@@ -4,10 +4,11 @@ use crate::agent_connectors::utils::{
 };
 use chrono::Utc;
 use common::{ConfigItem, SessionItem};
+use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
 use std::io::BufRead;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const MAX_SCAN_DEPTH: usize = 7;
 
@@ -46,6 +47,80 @@ pub struct EnumerationData {
     pub config_items: Vec<ConfigItem>,
     pub sessions: Vec<SessionItem>,
     pub project_paths: Vec<String>,
+}
+
+//
+// Check if authentication environment variables are set.
+//
+
+pub fn has_auth_env_vars() -> bool {
+    std::env::var("OPENAI_API_KEY").is_ok()
+}
+
+//
+// Check if a .codex/auth.json file has authentication configured.
+// Looks for auth_mode key.
+//
+
+fn has_auth_in_auth_json(auth_json_path: &Path) -> bool {
+    let Ok(contents) = fs::read_to_string(auth_json_path) else {
+        return false;
+    };
+
+    let Ok(json) = serde_json::from_str::<Value>(&contents) else {
+        return false;
+    };
+
+    //
+    // Check for auth_mode field in auth.json.
+    //
+
+    json.get("auth_mode").is_some()
+}
+
+//
+// Check if a path (user home or project) has valid Codex authentication.
+// Auth can come from:
+// 1. Environment variables (global)
+// 2. Auth in the path's own .codex/auth.json (for user homes)
+// 3. Auth in the owning user's home .codex/auth.json (for project paths)
+//
+
+pub fn path_has_valid_auth(path: &Path, user_homes: &[PathBuf]) -> bool {
+    //
+    // Global env vars take precedence.
+    //
+
+    if has_auth_env_vars() {
+        return true;
+    }
+
+    //
+    // Check path's own .codex/auth.json (for user homes).
+    //
+
+    let path_auth_json = path.join(".codex").join("auth.json");
+    if has_auth_in_auth_json(&path_auth_json) {
+        return true;
+    }
+
+    //
+    // For project paths, check if the owning user's home has auth configured.
+    // Find which user home is a parent of this path.
+    //
+
+    let path_str = path.to_string_lossy();
+    for home in user_homes {
+        let home_str = home.to_string_lossy();
+        if path_str.starts_with(home_str.as_ref()) {
+            let home_auth_json = home.join(".codex").join("auth.json");
+            if has_auth_in_auth_json(&home_auth_json) {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 pub fn enumerate() -> anyhow::Result<EnumerationData> {

@@ -28,6 +28,25 @@ When interception is enabled, you'll see:
 - Responses including assistant messages and tool calls
 - Token usage and other metadata
 
+## Authentication
+
+Claude Code requires authentication to function. During reconnaissance, Praxis validates that valid authentication is configured before including paths in the project list.
+
+Authentication is considered valid if any of the following are true:
+
+1. **Environment variables** - One of these is set:
+   - `ANTHROPIC_API_KEY`
+   - `ANTHROPIC_AUTH_TOKEN`
+   - `ANTHROPIC_FOUNDRY_API_KEY`
+   - `AWS_BEARER_TOKEN_BEDROCK`
+
+2. **Preferences file** - One of these fields is present in `~/.claude.json`:
+   - `oauthAccount` - OAuth login credentials
+   - `primaryApiKey` - Direct API key
+   - `apiKeyHelper` - External key provider
+
+Paths without valid authentication are filtered out during reconnaissance. This prevents the UI from showing user homes or projects that cannot actually be used with Claude Code.
+
 ## Reconnaissance
 
 ### Static Recon

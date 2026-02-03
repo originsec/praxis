@@ -355,6 +355,84 @@ fn get_system_prompt_mode() -> SystemPromptMode {
     }
 }
 
+//
+// Check if authentication environment variables are set.
+//
+
+pub fn has_auth_env_vars() -> bool {
+    std::env::var("GEMINI_API_KEY").is_ok()
+        || std::env::var("GOOGLE_GENAI_USE_VERTEXAI").is_ok()
+        || std::env::var("GOOGLE_GENAI_USE_GCA").is_ok()
+}
+
+//
+// Check if a settings.json file has authentication configured.
+// Gemini CLI stores auth config at security.auth.
+//
+
+fn has_auth_in_settings_file(settings_path: &Path) -> bool {
+    let Ok(contents) = fs::read_to_string(settings_path) else {
+        return false;
+    };
+
+    let Ok(json) = serde_json::from_str::<Value>(&contents) else {
+        return false;
+    };
+
+    //
+    // Check for presence of security.auth in settings.json.
+    //
+
+    json.get("security")
+        .and_then(|s| s.get("auth"))
+        .is_some()
+}
+
+//
+// Check if a path (user home or project) has valid Gemini authentication.
+// Auth can come from:
+// 1. Environment variables (global)
+// 2. Auth method in the path's own .gemini/settings.json
+// 3. Auth method in the user's home .gemini/settings.json (for project paths)
+//
+
+pub fn path_has_valid_auth(path: &Path, user_homes: &[PathBuf]) -> bool {
+    //
+    // Global env vars take precedence.
+    //
+
+    if has_auth_env_vars() {
+        return true;
+    }
+
+    //
+    // Check path's own settings.json.
+    //
+
+    let path_settings = path.join(".gemini").join("settings.json");
+    if has_auth_in_settings_file(&path_settings) {
+        return true;
+    }
+
+    //
+    // For project paths, check if the owning user's home has auth configured.
+    // Find which user home is a parent of this path.
+    //
+
+    let path_str = path.to_string_lossy();
+    for home in user_homes {
+        let home_str = home.to_string_lossy();
+        if path_str.starts_with(home_str.as_ref()) {
+            let home_settings = home.join(".gemini").join("settings.json");
+            if has_auth_in_settings_file(&home_settings) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 pub fn enumerate() -> anyhow::Result<EnumerationData> {
     common::log_debug!("Enumerating Gemini configurations across all users");
 
