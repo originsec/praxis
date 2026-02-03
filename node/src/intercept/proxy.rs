@@ -102,6 +102,8 @@ pub struct ProxyConfig {
     pub intercept_method: InterceptMethod,
     /// Optional channel for observed connections (for agent discovery)
     pub connection_observer_tx: Option<mpsc::UnboundedSender<ObservedConnection>>,
+    /// Pre-resolved IPs for domains (used in Hosts mode to bypass hosts file redirection)
+    pub domain_to_real_ip: HashMap<String, std::net::IpAddr>,
 }
 
 /// The intercept proxy server
@@ -609,24 +611,41 @@ fn parse_sni_from_client_hello(data: &[u8]) -> Result<String> {
     anyhow::bail!("No SNI extension found in ClientHello")
 }
 
-/// Connect to a server bypassing TUN routing (for VPN mode)
+/// Connect to a server bypassing TUN routing, TPROXY iptables, and hosts file
 ///
 /// In VPN mode, we route intercept IPs through the TUN interface. But when the
 /// proxy needs to connect to the real server, that traffic must bypass the TUN
-/// to avoid a routing loop. We do this by binding to the default gateway interface.
-async fn connect_bypass_tun(host: &str, port: u16) -> Result<TcpStream> {
+/// to avoid a routing loop. We use SO_BINDTODEVICE to force traffic through
+/// the real interface.
+///
+/// In TPROXY mode, iptables rules intercept traffic to certain IPs. The proxy's
+/// own outbound connections must be marked with TPROXY_BYPASS_MARK so the
+/// iptables bypass rule skips them and prevents a routing loop.
+///
+/// In Hosts mode, the hosts file redirects domains to 127.0.0.1. We must use
+/// pre-resolved IPs to avoid connecting back to ourselves.
+async fn connect_bypass_tun(
+    host: &str,
+    port: u16,
+    pre_resolved_ip: Option<std::net::IpAddr>,
+    intercept_method: InterceptMethod,
+) -> Result<TcpStream> {
     use socket2::{Domain, Protocol, Socket, Type};
     use std::net::ToSocketAddrs;
 
-    let target = format!("{}:{}", host, port);
-
     //
-    // Resolve the target address.
+    // Use pre-resolved IP if available (for Hosts mode), otherwise resolve via DNS.
     //
-    let addr = target.to_socket_addrs()
-        .context("Failed to resolve target address")?
-        .next()
-        .context("No addresses found for target")?;
+    let addr = if let Some(ip) = pre_resolved_ip {
+        common::log_debug!("Using pre-resolved IP {} for {}", ip, host);
+        std::net::SocketAddr::new(ip, port)
+    } else {
+        let target = format!("{}:{}", host, port);
+        target.to_socket_addrs()
+            .context("Failed to resolve target address")?
+            .next()
+            .context("No addresses found for target")?
+    };
 
     //
     // Create socket.
@@ -635,36 +654,47 @@ async fn connect_bypass_tun(host: &str, port: u16) -> Result<TcpStream> {
         .context("Failed to create socket")?;
 
     //
-    // On Linux, set SO_MARK to bypass TPROXY interception.
-    // This mark tells iptables to skip the TPROXY rules for our outgoing connection.
+    // Apply bypass mechanisms based on intercept mode:
+    // - VPN: SO_MARK + SO_BINDTODEVICE (bypass TUN routing)
+    // - TPROXY: SO_MARK only (bypass iptables rules)
+    // - Hosts: nothing needed (uses pre-resolved IPs)
     //
     #[cfg(target_os = "linux")]
-    {
-        socket
-            .set_mark(super::tproxy::TPROXY_BYPASS_MARK)
-            .context("Failed to set SO_MARK")?;
-    }
-
-    //
-    // On Windows, we can use IP_UNICAST_IF to specify the interface
-    // For now, we'll try binding to 0.0.0.0:0 which should use the default
-    // route
-    // The key is that we need to NOT use the TUN interface.
-    //
-
-    //
-    // Get the default interface IP by querying a public DNS and checking local
-    // addr
-    // This is a common trick to find the default outbound interface.
-    //
-    if let Ok(probe_socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
-        if probe_socket.connect("8.8.8.8:53").is_ok() {
-            if let Ok(local_addr) = probe_socket.local_addr() {
-                let bind_addr = std::net::SocketAddr::new(local_addr.ip(), 0);
-                let _ = socket.bind(&bind_addr.into());
+    match intercept_method {
+        InterceptMethod::Vpn => {
+            //
+            // VPN mode: Set SO_MARK for policy routing and SO_BINDTODEVICE
+            // to force traffic through the real network interface.
+            //
+            if let Err(e) = socket.set_mark(super::routing::VPN_BYPASS_MARK) {
+                common::log_warn!("Failed to set SO_MARK: {} (may need CAP_NET_ADMIN)", e);
+            }
+            if let Some(iface) = discover_default_interface() {
+                common::log_debug!("VPN bypass: binding to interface {}", iface);
+                if let Err(e) = socket.bind_device(Some(iface.as_bytes())) {
+                    common::log_warn!("Failed to bind to device {}: {} (may need CAP_NET_ADMIN)", iface, e);
+                }
             }
         }
+        InterceptMethod::Tproxy => {
+            //
+            // TPROXY mode: Only need SO_MARK so the iptables bypass rule
+            // (-m mark --mark 0x2 -j RETURN) skips our outbound packets.
+            //
+            common::log_debug!("TPROXY bypass: setting SO_MARK=0x2");
+            if let Err(e) = socket.set_mark(super::tproxy::TPROXY_BYPASS_MARK) {
+                common::log_warn!("Failed to set SO_MARK: {} (may need CAP_NET_ADMIN)", e);
+            }
+        }
+        _ => {
+            //
+            // Hosts/Proxy modes don't need special socket options.
+            //
+        }
     }
+
+    #[cfg(not(target_os = "linux"))]
+    let _ = intercept_method; // Silence unused variable warning
 
     socket.set_nonblocking(true)
         .context("Failed to set non-blocking")?;
@@ -672,22 +702,36 @@ async fn connect_bypass_tun(host: &str, port: u16) -> Result<TcpStream> {
     //
     // Connect (non-blocking) - in-progress errors are expected.
     //
+    common::log_debug!("connect_bypass_tun: connecting to {}", addr);
     match socket.connect(&addr.into()) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+        Ok(()) => {
+            common::log_debug!("connect_bypass_tun: connect() returned Ok");
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+            common::log_debug!("connect_bypass_tun: connect() returned WouldBlock (expected)");
+        }
         //
         // WSAEWOULDBLOCK (Windows).
         //
-        Err(e) if e.raw_os_error() == Some(10035) => {}
+        Err(e) if e.raw_os_error() == Some(10035) => {
+            common::log_debug!("connect_bypass_tun: connect() returned WSAEWOULDBLOCK (expected)");
+        }
         //
         // EINPROGRESS (Linux).
         //
-        Err(e) if e.raw_os_error() == Some(115) => {}
+        Err(e) if e.raw_os_error() == Some(115) => {
+            common::log_debug!("connect_bypass_tun: connect() returned EINPROGRESS (expected)");
+        }
         //
         // EINPROGRESS (macOS).
         //
-        Err(e) if e.raw_os_error() == Some(36) => {}
-        Err(e) => return Err(e).context("Failed to connect"),
+        Err(e) if e.raw_os_error() == Some(36) => {
+            common::log_debug!("connect_bypass_tun: connect() returned EINPROGRESS macOS (expected)");
+        }
+        Err(e) => {
+            common::log_error!("connect_bypass_tun: connect() failed: {} (os_error={:?})", e, e.raw_os_error());
+            return Err(e).context("Failed to connect");
+        }
     }
 
     //
@@ -700,6 +744,7 @@ async fn connect_bypass_tun(host: &str, port: u16) -> Result<TcpStream> {
     //
     // Wait for connection to complete.
     //
+    common::log_debug!("connect_bypass_tun: waiting for connection to {}", addr);
     stream.writable().await
         .context("Failed to wait for connection")?;
 
@@ -707,9 +752,11 @@ async fn connect_bypass_tun(host: &str, port: u16) -> Result<TcpStream> {
     // Check for connection errors.
     //
     if let Some(e) = stream.take_error()? {
+        common::log_debug!("connect_bypass_tun: connection to {} failed: {}", addr, e);
         return Err(e).context("Connection failed");
     }
 
+    common::log_debug!("connect_bypass_tun: connected to {}", addr);
     Ok(stream)
 }
 
@@ -725,10 +772,17 @@ async fn handle_intercepted_tunnel_vpn(
     traffic_tx: mpsc::UnboundedSender<InterceptedTrafficEntry>,
 ) -> Result<()> {
     //
-    // Connect to real server, bypassing TUN routing.
+    // For Hosts mode, use pre-resolved IP to avoid hosts file loop.
     //
-    let server_tcp = connect_bypass_tun(host, port).await
+    let pre_resolved_ip = config.domain_to_real_ip.get(host).copied();
+
+    //
+    // Connect to real server, bypassing TUN routing and hosts file.
+    //
+    common::log_debug!("handle_intercepted_tunnel_vpn: connecting to {}:{}", host, port);
+    let server_tcp = connect_bypass_tun(host, port, pre_resolved_ip, config.intercept_method).await
         .context(format!("Failed to connect to {}:{}", host, port))?;
+    common::log_debug!("handle_intercepted_tunnel_vpn: TCP connected to {}:{}", host, port);
 
     //
     // Create TLS connector for server.
@@ -744,8 +798,10 @@ async fn handle_intercepted_tunnel_vpn(
     let server_name = rustls_pki_types::ServerName::try_from(host.to_string())
         .map_err(|_| anyhow::anyhow!("Invalid server name"))?;
 
+    common::log_debug!("handle_intercepted_tunnel_vpn: starting TLS to {}", host);
     let server_tls = connector.connect(server_name, server_tcp).await
         .context("Failed to establish TLS with server")?;
+    common::log_debug!("handle_intercepted_tunnel_vpn: TLS established to {}", host);
 
     //
     // Now proxy HTTP traffic over the TLS connections.
@@ -959,6 +1015,7 @@ where
     //
     // Process requests from client.
     //
+    common::log_debug!("proxy_https_traffic: starting for {}", host);
     loop {
         //
         // Read HTTP request from client.
@@ -968,9 +1025,15 @@ where
             //
             // Connection closed.
             //
-            Ok(0) => break,
-            Ok(_) => {}
-            Err(_) => {
+            Ok(0) => {
+                common::log_debug!("proxy_https_traffic: client closed (0 bytes)");
+                break;
+            }
+            Ok(n) => {
+                common::log_debug!("proxy_https_traffic: read {} bytes: {:?}", n, request_line.trim());
+            }
+            Err(e) => {
+                common::log_warn!("proxy_https_traffic: read error: {}", e);
                 break;
             }
         }
@@ -2182,6 +2245,39 @@ where
     }
 
     Ok(body_buffer)
+}
+
+/// Discover the default network interface by parsing `ip route show default`.
+#[cfg(target_os = "linux")]
+fn discover_default_interface() -> Option<String> {
+    use std::process::Command;
+
+    let output = Command::new("ip")
+        .args(["route", "show", "default"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    //
+    // Parse output like: "default via 192.168.1.1 dev eth0 proto dhcp metric 100"
+    //
+    for line in stdout.lines() {
+        if line.starts_with("default") {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            for (i, part) in parts.iter().enumerate() {
+                if *part == "dev" && i + 1 < parts.len() {
+                    return Some(parts[i + 1].to_string());
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Decompress response body based on Content-Encoding header
