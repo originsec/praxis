@@ -103,19 +103,13 @@ impl WintunManager {
         };
 
         //
-        // Try to open existing adapter first, or create new one.
+        // Always create a new adapter. The wintun crate logs errors when open()
+        // fails to find an existing adapter, which is noisy. Creating always
+        // works and will reuse an existing adapter with the same name if present.
         //
-        let adapter = match wintun::Adapter::open(&wintun, ADAPTER_NAME) {
-            Ok(adapter) => {
-                common::log_info!("Opened existing Praxis VPN adapter");
-                adapter
-            }
-            Err(_) => {
-                common::log_info!("Creating new Praxis VPN adapter");
-                wintun::Adapter::create(&wintun, ADAPTER_NAME, TUNNEL_TYPE, None)
-                    .context("Failed to create wintun adapter")?
-            }
-        };
+        common::log_info!("Creating Praxis VPN adapter");
+        let adapter = wintun::Adapter::create(&wintun, ADAPTER_NAME, TUNNEL_TYPE, None)
+            .context("Failed to create wintun adapter")?;
 
         //
         // Start a packet session with maximum ring buffer capacity.
