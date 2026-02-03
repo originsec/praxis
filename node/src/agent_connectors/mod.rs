@@ -2,7 +2,7 @@
 #[allow(dead_code)]
 pub mod clawdbot;
 pub mod claudecode;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 pub mod codex;
 pub mod dummy;
 pub mod dynamic;
@@ -25,7 +25,7 @@ pub use common::{AgentTool, McpServer, McpTransport, ReconResult, ReconTools};
 pub use clawdbot::ClawdbotAgent;
 #[allow(unused_imports)]
 pub use claudecode::ClaudeCodeAgent;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 #[allow(unused_imports)]
 pub use codex::CodexAgent;
 #[allow(unused_imports)]

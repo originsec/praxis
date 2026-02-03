@@ -166,8 +166,10 @@ pub async fn handle_agent_command(
         AgentCommand::UpdateConfigFile { path, contents } => {
             //
             // Validate path is within home directory for security.
+            // Canonicalize home_dir too so both paths have the same format
+            // (on Windows, canonicalize returns \\?\ prefixed paths).
             //
-            let home_dir = match dirs::home_dir() {
+            let home_dir = match dirs::home_dir().and_then(|h| h.canonicalize().ok()) {
                 Some(h) => h,
                 None => {
                     return NodeCommandResult::Agent(AgentCommandResult::ConfigFileUpdated {
@@ -226,8 +228,10 @@ pub async fn handle_agent_command(
         AgentCommand::GetSessionContent { session_file } => {
             //
             // Validate path is within home directory for security.
+            // Canonicalize home_dir too so both paths have the same format
+            // (on Windows, canonicalize returns \\?\ prefixed paths).
             //
-            let home_dir = match dirs::home_dir() {
+            let home_dir = match dirs::home_dir().and_then(|h| h.canonicalize().ok()) {
                 Some(h) => h,
                 None => {
                     return NodeCommandResult::Agent(AgentCommandResult::SessionContent {
@@ -283,8 +287,10 @@ pub async fn handle_agent_command(
         AgentCommand::GetConfigContent { config_path } => {
             //
             // Validate path is within home directory for security.
+            // Canonicalize home_dir too so both paths have the same format
+            // (on Windows, canonicalize returns \\?\ prefixed paths).
             //
-            let home_dir = match dirs::home_dir() {
+            let home_dir = match dirs::home_dir().and_then(|h| h.canonicalize().ok()) {
                 Some(h) => h,
                 None => {
                     return NodeCommandResult::Agent(AgentCommandResult::ConfigContent {

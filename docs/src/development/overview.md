@@ -40,7 +40,7 @@ The agent that runs on target machines:
 node/src/
 ├── agent_connectors/    # Per-agent implementations
 │   ├── claudecode/
-│   ├── codex/           # Linux only
+│   ├── codex/
 │   ├── gemini/
 │   └── m365copilot/     # Windows only
 ├── intercept/           # Traffic interception

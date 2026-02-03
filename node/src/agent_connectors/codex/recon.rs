@@ -20,13 +20,15 @@ impl AgentRecon for CodexAgent {
         };
 
         //
-        // Prepend $HOME to project paths list and dedupe.
+        // Prepend home directory to project paths list and dedupe.
         //
 
         let project_paths = {
             let mut seen = std::collections::HashSet::new();
             let mut paths = Vec::new();
-            if let Ok(home) = std::env::var("HOME") {
+
+            let home_var = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+            if let Ok(home) = std::env::var(home_var) {
                 if seen.insert(home.clone()) {
                     paths.push(home);
                 }
