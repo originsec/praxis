@@ -1,6 +1,6 @@
 /*
- * Theme system - supports static theme loading via CSS import.
- * To switch themes: change the import in main.tsx
+ * Theme system - supports runtime theme switching via ThemeContext.
+ * Theme preference is persisted to localStorage.
  *
  * Available themes:
  * - origin_light: Clean, minimal aesthetic with warm stone/bone tones

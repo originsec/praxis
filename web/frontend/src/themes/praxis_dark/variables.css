@@ -3,7 +3,7 @@
  * Retro terminal aesthetic with green phosphor glow
  */
 
-:root {
+html[data-theme="praxis_dark"] {
   /* Theme identifier */
   --theme-name: 'praxis_dark';
   --theme-is-dark: 1;
@@ -46,13 +46,11 @@
   --splash-glow: rgba(158, 230, 117, 0.6);
   --splash-glow-weak: rgba(158, 230, 117, 0.3);
   --splash-matrix-color: rgb(30, 80, 40);
-}
 
-html {
   color-scheme: dark;
 }
 
-body {
+html[data-theme="praxis_dark"] body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
 }

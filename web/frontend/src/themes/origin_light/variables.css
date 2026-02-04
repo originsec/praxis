@@ -3,7 +3,7 @@
  * Clean, minimal aesthetic with warm stone/bone tones
  */
 
-:root {
+html[data-theme="origin_light"] {
   /* Theme identifier */
   --theme-name: 'origin_light';
   --theme-is-dark: 0;
@@ -58,13 +58,11 @@
   --splash-button-text: #181612;
   --splash-button-border: #dad9d4;
   --splash-button-shadow: rgba(24, 22, 18, 0.15);
-}
 
-html {
   color-scheme: light;
 }
 
-body {
+html[data-theme="origin_light"] body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
 }

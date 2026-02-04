@@ -252,7 +252,7 @@ export function NodeDetailPage() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col h-full gap-6">
       {/*
       //
       // Back link.
@@ -416,9 +416,9 @@ export function NodeDetailPage() {
       )}
 
       {activeTab === 'terminal' && (
-        <div className="bg-card ascii-box border border-subtle overflow-hidden">
+        <div className="flex-1 flex flex-col bg-card ascii-box border border-subtle overflow-hidden">
           {terminalId ? (
-            <div>
+            <div className="flex-1 flex flex-col min-h-0">
               <div className="px-4 py-2 border-b border-subtle flex items-center justify-between bg-[var(--bg-secondary)]">
                 <span className="text-sm text-muted font-mono">Terminal: {terminalId.slice(0, 8)}...</span>
                 <button

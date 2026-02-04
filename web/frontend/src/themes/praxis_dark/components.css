@@ -3,8 +3,8 @@
  * Visual effects, buttons, panels, and prose styling
  */
 
-/* Grid background pattern */
-body::before {
+/* Grid background pattern - dark theme only */
+html[data-theme="praxis_dark"] body::before {
   content: "";
   position: fixed;
   top: 0;
@@ -19,8 +19,8 @@ body::before {
   z-index: -1;
 }
 
-/* Scanline effect */
-body::after {
+/* Scanline effect - dark theme only */
+html[data-theme="praxis_dark"] body::after {
   content: "";
   position: fixed;
   top: 0;
@@ -125,33 +125,33 @@ body::after {
   color: var(--accent-info);
 }
 
-/* Terminal panel styling with box shadow */
-.terminal-panel {
+/* Terminal panel styling with box shadow - dark theme */
+html[data-theme="praxis_dark"] .terminal-panel {
   border: 1px solid var(--border-color);
   background: var(--bg-secondary);
   box-shadow: 3px 3px 0 0 rgba(0, 0, 0, 0.4);
 }
 
-.terminal-panel:hover {
+html[data-theme="praxis_dark"] .terminal-panel:hover {
   border-color: var(--border-hover);
 }
 
-/* Glowing border effect */
-.glow-border {
+/* Glowing border effect - dark theme */
+html[data-theme="praxis_dark"] .glow-border {
   box-shadow: 0 0 10px var(--green-glow), inset 0 0 10px var(--green-glow);
 }
 
-/* Text glow effects */
-.text-glow {
+/* Text glow effects - dark theme */
+html[data-theme="praxis_dark"] .text-glow {
   text-shadow: 0 0 10px var(--green-glow-strong), 0 0 20px var(--green-glow);
 }
 
-.text-glow-strong {
+html[data-theme="praxis_dark"] .text-glow-strong {
   text-shadow: 0 0 10px var(--accent-success), 0 0 30px var(--green-glow-strong), 0 0 50px var(--green-glow);
 }
 
-/* Retro button style */
-.btn-retro {
+/* Retro button style - dark theme */
+html[data-theme="praxis_dark"] .btn-retro {
   border: 1px solid var(--border-color);
   background: var(--bg-secondary);
   color: var(--text-secondary);
@@ -163,30 +163,30 @@ body::after {
   box-shadow: 3px 3px 0 0 rgba(0, 0, 0, 0.4);
 }
 
-.btn-retro:hover {
+html[data-theme="praxis_dark"] .btn-retro:hover {
   border-color: var(--border-active);
   color: var(--text-highlight);
   background: var(--bg-tertiary);
   text-shadow: 0 0 10px var(--green-glow-strong);
 }
 
-.btn-retro-danger {
+html[data-theme="praxis_dark"] .btn-retro-danger {
   border-color: var(--accent-error);
   color: var(--accent-error);
 }
 
-.btn-retro-danger:hover {
+html[data-theme="praxis_dark"] .btn-retro-danger:hover {
   background: rgba(248, 113, 113, 0.1);
 }
 
-/* Primary button - filled green */
-.btn-primary {
+/* Primary button - filled green - dark theme */
+html[data-theme="praxis_dark"] .btn-primary {
   background: var(--text-primary);
   color: var(--bg-primary);
   border-color: var(--text-primary);
 }
 
-.btn-primary:hover {
+html[data-theme="praxis_dark"] .btn-primary:hover {
   background: var(--text-highlight);
   border-color: var(--text-highlight);
   color: var(--bg-primary);
@@ -206,27 +206,31 @@ body::after {
   background: var(--border-color);
 }
 
-/* Selection styling */
-::selection {
+/* Selection styling - dark theme */
+html[data-theme="praxis_dark"] ::selection {
   background: var(--accent-success);
   color: var(--bg-primary);
 }
 
-/* Input styling */
-input, select, textarea {
+/* Input styling - dark theme */
+html[data-theme="praxis_dark"] input,
+html[data-theme="praxis_dark"] select,
+html[data-theme="praxis_dark"] textarea {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   color: var(--text-primary);
 }
 
-input:focus, select:focus, textarea:focus {
+html[data-theme="praxis_dark"] input:focus,
+html[data-theme="praxis_dark"] select:focus,
+html[data-theme="praxis_dark"] textarea:focus {
   outline: none;
   border-color: var(--border-active) !important;
   box-shadow: 0 0 5px var(--green-glow);
 }
 
-/* ASCII art style headers */
-.ascii-header {
+/* ASCII art style headers - dark theme */
+html[data-theme="praxis_dark"] .ascii-header {
   font-family: monospace;
   white-space: pre;
   color: var(--accent-success);
@@ -243,8 +247,8 @@ th {
   color: var(--text-secondary);
 }
 
-/* ASCII box styling for panels */
-.ascii-box {
+/* ASCII box styling for panels - dark theme */
+html[data-theme="praxis_dark"] .ascii-box {
   border: 1px solid var(--border-color);
   background: var(--bg-secondary);
   box-shadow: 3px 3px 0 0 rgba(0, 0, 0, 0.4);
@@ -252,30 +256,30 @@ th {
   overflow: hidden;
 }
 
-.ascii-box:hover {
+html[data-theme="praxis_dark"] .ascii-box:hover {
   border-color: var(--border-hover);
 }
 
-.ascii-box > table > thead > tr:first-child > th:first-child {
+html[data-theme="praxis_dark"] .ascii-box > table > thead > tr:first-child > th:first-child {
   border-top-left-radius: 3px;
 }
 
-.ascii-box > table > thead > tr:first-child > th:last-child {
+html[data-theme="praxis_dark"] .ascii-box > table > thead > tr:first-child > th:last-child {
   border-top-right-radius: 3px;
 }
 
-.ascii-box > div:first-child {
+html[data-theme="praxis_dark"] .ascii-box > div:first-child {
   border-top-left-radius: 3px;
   border-top-right-radius: 3px;
 }
 
-/* Card with ASCII-style border */
-.card-ascii::before {
+/* Card with ASCII-style border - dark theme */
+html[data-theme="praxis_dark"] .card-ascii::before {
   border: 1px solid var(--border-color);
 }
 
-/* Sparkline-style background pattern */
-.sparkline-bg {
+/* Sparkline-style background pattern - dark theme */
+html[data-theme="praxis_dark"] .sparkline-bg {
   background: repeating-linear-gradient(
     90deg,
     var(--border-color) 0px,
@@ -285,33 +289,33 @@ th {
   );
 }
 
-/* Status indicator dot colors */
-.status-dot-online {
+/* Status indicator dot colors - dark theme (with glow) */
+html[data-theme="praxis_dark"] .status-dot-online {
   background: var(--accent-success);
   box-shadow: 0 0 4px var(--accent-success);
 }
 
-.status-dot-offline {
+html[data-theme="praxis_dark"] .status-dot-offline {
   background: var(--accent-error);
 }
 
-.status-dot-warning {
+html[data-theme="praxis_dark"] .status-dot-warning {
   background: var(--accent-warning);
   box-shadow: 0 0 4px var(--accent-warning);
 }
 
-/* Label color */
-.label-upper {
+/* Label color - dark theme */
+html[data-theme="praxis_dark"] .label-upper {
   color: var(--text-secondary);
 }
 
-/* Tooltip styling */
-.tooltip-wrapper {
+/* Tooltip styling - dark theme */
+html[data-theme="praxis_dark"] .tooltip-wrapper {
   position: relative;
   display: inline-flex;
 }
 
-.tooltip-wrapper .tooltip-content {
+html[data-theme="praxis_dark"] .tooltip-wrapper .tooltip-content {
   visibility: hidden;
   opacity: 0;
   position: absolute;
@@ -333,7 +337,7 @@ th {
   letter-spacing: 0.03em;
 }
 
-.tooltip-wrapper .tooltip-content::after {
+html[data-theme="praxis_dark"] .tooltip-wrapper .tooltip-content::after {
   content: '';
   position: absolute;
   top: 100%;
@@ -342,12 +346,12 @@ th {
   border-top-color: var(--border-hover);
 }
 
-.tooltip-wrapper:hover .tooltip-content {
+html[data-theme="praxis_dark"] .tooltip-wrapper:hover .tooltip-content {
   visibility: visible;
   opacity: 1;
 }
 
-.tooltip-content-floating {
+html[data-theme="praxis_dark"] .tooltip-content-floating {
   position: fixed;
   background: var(--bg-secondary);
   color: var(--accent-info);

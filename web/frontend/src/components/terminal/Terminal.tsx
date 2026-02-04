@@ -23,7 +23,7 @@ export function Terminal({ nodeId, terminalId }: TerminalProps) {
     //
     const xterm = new XTerm({
       cursorBlink: true,
-      fontSize: 14,
+      fontSize: 12,
       fontFamily: 'JetBrains Mono, Consolas, monospace',
       theme: {
         background: '#030712',
@@ -109,8 +109,8 @@ export function Terminal({ nodeId, terminalId }: TerminalProps) {
   return (
     <div
       ref={termRef}
-      className="h-96 bg-[var(--bg-primary)]"
-      style={{ padding: '8px' }}
+      className="flex-1 min-h-0 bg-[var(--bg-primary)]"
+      style={{ padding: '8px', paddingBottom: '24px' }}
     />
   );
 }

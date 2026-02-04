@@ -1,9 +1,11 @@
-import { Wifi, WifiOff, RefreshCw } from 'lucide-react';
+import { Wifi, WifiOff, RefreshCw, Sun, Moon } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useTheme } from '../../context/ThemeContext';
 import { useLocation } from 'react-router-dom';
 
 export function Header() {
   const { state } = useApp();
+  const { isDark, toggleTheme } = useTheme();
   const location = useLocation();
   const nodeCount = state.systemState?.nodes.length ?? 0;
   const runningOps = state.operations.filter((op) => op.status === 'Running').length;
@@ -79,6 +81,23 @@ export function Header() {
             </>
           )}
         </div>
+
+        {/*
+        //
+        // Theme toggle.
+        //
+        */}
+        <button
+          onClick={toggleTheme}
+          className="p-1 rounded hover:bg-[var(--highlight)] transition-colors"
+          title={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
+        >
+          {isDark ? (
+            <Sun size={14} className="text-muted hover:text-primary" />
+          ) : (
+            <Moon size={14} className="text-muted hover:text-primary" />
+          )}
+        </button>
       </div>
     </header>
   );
