@@ -107,10 +107,8 @@ export function Terminal({ nodeId, terminalId }: TerminalProps) {
   }, [nodeId, terminalId, registerTerminalHandler, sendTerminalInput, sendCommand]);
 
   return (
-    <div
-      ref={termRef}
-      className="flex-1 min-h-0 bg-[var(--bg-primary)]"
-      style={{ padding: '8px', paddingBottom: '24px' }}
-    />
+    <div className="flex-1 min-h-0 flex flex-col bg-[var(--bg-primary)]" style={{ padding: '8px', paddingBottom: '24px' }}>
+      <div ref={termRef} className="flex-1 min-h-0" />
+    </div>
   );
 }
