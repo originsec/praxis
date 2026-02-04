@@ -97,6 +97,7 @@ The parser supports multiple LLM providers:
 | Cerebras | `cerebras` | Fast inference |
 | Mistral | `mistral` | Mistral models |
 | xAI | `xai` | Grok models |
+| NVIDIA | `nvidia` | NIM models |
 | Ollama | `ollama` | Local models |
 
 ## Model Selection

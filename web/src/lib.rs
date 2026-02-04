@@ -189,6 +189,21 @@ struct DownloadsInfoResponse {
     nodes: Vec<NodeDownloadInfo>,
 }
 
+//
+// Provider list API types.
+//
+
+#[derive(Serialize)]
+struct ProviderInfo {
+    id: String,
+    name: String,
+}
+
+#[derive(Serialize)]
+struct ProvidersResponse {
+    providers: Vec<ProviderInfo>,
+}
+
 fn get_nodes_dir() -> PathBuf {
     std::env::var("PRAXIS_NODES_DIR")
         .map(PathBuf::from)
@@ -271,6 +286,21 @@ async fn download_node(Path(platform): Path<String>) -> impl IntoResponse {
             )))
             .unwrap(),
     }
+}
+
+//
+// API handler for listing available providers.
+//
+async fn get_providers() -> Json<ProvidersResponse> {
+    let providers = common::ai::Provider::all()
+        .iter()
+        .map(|p| ProviderInfo {
+            id: p.as_str().to_string(),
+            name: p.display_name().to_string(),
+        })
+        .collect();
+
+    Json(ProvidersResponse { providers })
 }
 
 //
@@ -379,6 +409,7 @@ pub async fn run() -> anyhow::Result<()> {
     //
     let app = Router::new()
         .route("/ws", get(ws_handler))
+        .route("/api/providers", get(get_providers))
         .route("/api/models", post(list_models))
         .route("/api/downloads/info", get(get_downloads_info))
         .route("/api/downloads/node/{platform}", get(download_node))
