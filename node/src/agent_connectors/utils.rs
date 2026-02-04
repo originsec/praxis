@@ -441,9 +441,17 @@ pub fn scan_directories_for_config_files_multi(
                 // Skip .claude/plugins/marketplaces* directories.
                 //
 
-                let path_str = e.path().to_string_lossy();
-                if path_str.contains(".claude/plugins/marketplaces") {
-                    return false;
+                let components: Vec<_> = e.path().components().collect();
+                for window in components.windows(3) {
+                    use std::path::Component;
+                    if let [Component::Normal(a), Component::Normal(b), Component::Normal(c)] = window {
+                        if a.to_string_lossy() == ".claude"
+                            && b.to_string_lossy() == "plugins"
+                            && c.to_string_lossy().starts_with("marketplaces")
+                        {
+                            return false;
+                        }
+                    }
                 }
 
                 //
