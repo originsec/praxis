@@ -7,6 +7,8 @@ use crate::config::ParserConfig;
 /// System prompt for the semantic parser
 const SYSTEM_PROMPT: &str = r#"You are a semantic parser. Your task is to parse the provided text and extract structured data according to the JSON schema provided.
 
+The input TEXT can be in any format - plain text, xml, json (yes still parse this according to the provided schema), etc.
+
 IMPORTANT RULES:
 1. You MUST return ONLY valid JSON that matches the schema exactly
 2. Do NOT include any explanatory text, markdown formatting, or code blocks
@@ -63,24 +65,12 @@ impl SemanticParser {
             schema, prompt, text
         );
 
-        self.parse_raw(&full_prompt, schema).await
+        self.parse_raw(&full_prompt).await
     }
 
     /// Parse using a raw prompt (prompt already contains all context)
-    ///
-    /// # Arguments
-    /// * `prompt` - Complete prompt including text and instructions
-    /// * `schema` - JSON schema defining the expected output structure
-    ///
-    /// # Returns
-    /// The parsed JSON string if successful
     pub async fn parse_raw(&self, prompt: &str, schema: &str) -> Result<String> {
-        let user_prompt = format!(
-            "Parse the provided TEXT according to the INSTRUCTIONS and yield a json output in the form of the provided SCHEMA only. (Don't output anything but valid JSON):\n\nSCHEMA:\n{}\n\nPARSING INSTRUCTIONS:\n{}",
-            schema, prompt
-        );
-
-        self.execute_parse(&user_prompt).await
+        self.execute_parse(&prompt).await
     }
 
     /// Execute the parse operation with retries

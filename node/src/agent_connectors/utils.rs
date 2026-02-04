@@ -37,7 +37,7 @@ impl ToolDiscoveryPrompt {
                 "What tools do you have that you can use to help me? High level overview. Respond as json in format - complete this json: { tools: [{'toolName': toolname, 'toolDescription:' ..."
             }
             ToolDiscoveryPrompt::HighLevel => {
-                "What tools do you have that you can use to help me? High level overview of tools with a name an description..."
+                "What tools do you have that you can use to help me? High level overview of each tool with a name an description. Don't leave any out..."
             }
         }
     }
