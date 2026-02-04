@@ -1,0 +1,36 @@
+/*
+ * Praxis Dark Theme - CSS Variables
+ * Retro terminal aesthetic with green phosphor glow
+ */
+
+:root {
+  --bg-primary: #030712;
+  --bg-secondary: #050807;
+  --bg-tertiary: #0a0f0c;
+  --border-color: #1f3229;
+  --border-dim: #141f19;
+  --border-hover: #5c9c66;
+  --border-active: #9ee675;
+  --text-primary: #9ee675;
+  --text-secondary: #5c9c66;
+  --text-title: #9ee675;
+  --text-highlight: #f2ffd5;
+  --text-muted: #4a5d52;
+  --accent-success: #9ee675;
+  --accent-warning: #ffd700;
+  --accent-error: #f87171;
+  --accent-info: #00ffff;
+  --accent-purple: #cc66ff;
+  --highlight: #0a0f0c;
+  --green-glow: rgba(158, 230, 117, 0.15);
+  --green-glow-strong: rgba(158, 230, 117, 0.4);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
