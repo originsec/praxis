@@ -12,6 +12,17 @@
 }
 
 /*
+ * Rename "Ayu" to "Dark" in theme picker.
+ */
+#mdbook-theme-ayu {
+    font-size: 0;
+}
+#mdbook-theme-ayu::after {
+    content: "Dark";
+    font-size: 1rem;
+}
+
+/*
  * Light Theme - Origin Light Chrome
  */
 
