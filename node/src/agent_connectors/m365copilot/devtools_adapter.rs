@@ -137,7 +137,7 @@ impl DevToolsAdapter for M365DevToolsAdapter {
 
         let input_selector = self.input_selector();
         common::log_debug!("Waiting for input element: {}", input_selector);
-        wait_for_element(page, input_selector, 30, 200).await;
+        wait_for_element(page, input_selector, 30, 300).await;
 
         //
         // Click the Work/Web toggle button. Defaults to "Work" if not specified.
@@ -158,7 +158,7 @@ impl DevToolsAdapter for M365DevToolsAdapter {
             }
         };
 
-        if let Some(button) = wait_for_element(page, toggle_selector, 3, 200).await {
+        if let Some(button) = wait_for_element(page, toggle_selector, 3, 300).await {
             common::log_debug!("Clicking {} toggle button", working_dir);
             if let Err(e) = button.click().await {
                 common::log_warn!("Failed to click {} toggle: {}", working_dir, e);
@@ -170,7 +170,7 @@ impl DevToolsAdapter for M365DevToolsAdapter {
         //
 
         let menu_selector = r#"button[data-automation-id="newPrivateChatMenuButton"]"#;
-        if let Some(menu_button) = wait_for_element(page, menu_selector, 3, 200).await {
+        if let Some(menu_button) = wait_for_element(page, menu_selector, 3, 300).await {
             common::log_debug!("Clicking new private chat menu button");
             if let Err(e) = menu_button.click().await {
                 common::log_warn!("Failed to click menu button: {}", e);
@@ -178,7 +178,7 @@ impl DevToolsAdapter for M365DevToolsAdapter {
             }
 
             let new_chat_selector = r#"div[data-automation-id="newPrivateChatButton"]"#;
-            if let Some(chat_button) = wait_for_element(page, new_chat_selector, 5, 200).await {
+            if let Some(chat_button) = wait_for_element(page, new_chat_selector, 5, 300).await {
                 common::log_debug!("Clicking new private chat button");
                 if let Err(e) = chat_button.click().await {
                     common::log_warn!("Failed to click new private chat button: {}", e);
