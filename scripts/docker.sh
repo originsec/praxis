@@ -7,7 +7,8 @@
 set -e
 
 PRAXIS_DIR="${PRAXIS_DIR:-$HOME/.praxis-docker}"
-PRAXIS_RAW="https://raw.githubusercontent.com/originsec/praxis/main"
+PRAXIS_REPO="originsec/praxis"
+PRAXIS_VERSION="${PRAXIS_VERSION:-}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -32,6 +33,27 @@ info() { echo -e "${CYAN}[INFO]${NC} $1"; }
 success() { echo -e "${GREEN}[OK]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+
+get_latest_version() {
+    if [ -n "$PRAXIS_VERSION" ]; then
+        success "Using specified version: $PRAXIS_VERSION"
+        echo ""
+        return
+    fi
+
+    info "Fetching latest release version..."
+
+    PRAXIS_VERSION=$(curl -fsSL "https://api.github.com/repos/$PRAXIS_REPO/releases/latest" | \
+        grep '"tag_name":' | \
+        sed 's/.*"tag_name": "\([^"]*\)".*/\1/')
+
+    if [ -z "$PRAXIS_VERSION" ]; then
+        error "Could not determine latest version. Check your internet connection."
+    fi
+
+    success "Latest version: $PRAXIS_VERSION"
+    echo ""
+}
 
 check_docker() {
     info "Checking prerequisites..."
@@ -60,28 +82,30 @@ check_docker() {
 }
 
 setup_files() {
-    info "Setting up Praxis in $PRAXIS_DIR..."
+    local raw_url="https://raw.githubusercontent.com/$PRAXIS_REPO/$PRAXIS_VERSION"
+
+    info "Setting up Praxis $PRAXIS_VERSION in $PRAXIS_DIR..."
     mkdir -p "$PRAXIS_DIR"
     cd "$PRAXIS_DIR"
 
     info "Downloading Docker configuration..."
-    curl -fsSL "$PRAXIS_RAW/Dockerfile" -o Dockerfile
-    curl -fsSL "$PRAXIS_RAW/docker-compose.yml" -o docker-compose.yml
-    curl -fsSL "$PRAXIS_RAW/.dockerignore" -o .dockerignore
+    curl -fsSL "$raw_url/Dockerfile" -o Dockerfile
+    curl -fsSL "$raw_url/docker-compose.yml" -o docker-compose.yml
+    curl -fsSL "$raw_url/.dockerignore" -o .dockerignore
 
     #
     # Download source for build context.
     #
     info "Downloading Praxis source..."
-    curl -fsSL "$PRAXIS_RAW/Cargo.toml" -o Cargo.toml
-    curl -fsSL "$PRAXIS_RAW/Cargo.lock" -o Cargo.lock
+    curl -fsSL "$raw_url/Cargo.toml" -o Cargo.toml
+    curl -fsSL "$raw_url/Cargo.lock" -o Cargo.lock
 
     for dir in common node semantic_parser semantic_ops service web; do
         mkdir -p "$dir"
         #
         # Download directory contents via GitHub API.
         #
-        curl -fsSL "https://api.github.com/repos/originsec/praxis/contents/$dir?ref=main" | \
+        curl -fsSL "https://api.github.com/repos/$PRAXIS_REPO/contents/$dir?ref=$PRAXIS_VERSION" | \
             grep '"download_url"' | \
             sed 's/.*"download_url": "\([^"]*\)".*/\1/' | \
             while read -r url; do
@@ -97,19 +121,13 @@ setup_files() {
 }
 
 clone_repo() {
-    info "Setting up Praxis in $PRAXIS_DIR..."
+    info "Setting up Praxis $PRAXIS_VERSION in $PRAXIS_DIR..."
 
-    if [ -d "$PRAXIS_DIR/.git" ]; then
-        info "Updating existing installation..."
-        cd "$PRAXIS_DIR"
-        git pull --ff-only
-    else
-        rm -rf "$PRAXIS_DIR"
-        git clone --depth 1 https://github.com/originsec/praxis.git "$PRAXIS_DIR"
-        cd "$PRAXIS_DIR"
-    fi
+    rm -rf "$PRAXIS_DIR"
+    git clone --depth 1 --branch "$PRAXIS_VERSION" "https://github.com/$PRAXIS_REPO.git" "$PRAXIS_DIR"
+    cd "$PRAXIS_DIR"
 
-    success "Praxis source ready"
+    success "Praxis $PRAXIS_VERSION ready"
     echo ""
 }
 
@@ -127,7 +145,7 @@ start_praxis() {
 print_summary() {
     echo -e "${GREEN}"
     echo "=============================================="
-    echo "  Praxis is ready!"
+    echo "  Praxis $PRAXIS_VERSION is ready!"
     echo "=============================================="
     echo -e "${NC}"
     echo "Web UI:              http://localhost:8080"
@@ -148,6 +166,7 @@ print_summary() {
 main() {
     print_banner
     check_docker
+    get_latest_version
     clone_repo
     start_praxis
     print_summary

@@ -66,4 +66,3 @@ jobs:
           files: |
             praxis_node-linux-x86_64
             praxis_node-windows-x86_64.exe
-          generate_release_notes: true

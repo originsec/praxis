@@ -5,17 +5,18 @@
 .DESCRIPTION
     Installs Praxis service, web UI, and node agent
 .EXAMPLE
-    iex (irm https://praxis.originhq.com/install.ps1)
+    irm https://praxis.originhq.com/install.ps1 | iex
 #>
 
 $ErrorActionPreference = "Stop"
 
 # Configuration
-$PraxisHome = if ($env:PRAXIS_HOME) { $env:PRAXIS_HOME } else { "$env:USERPROFILE\.praxis" }
+$HomeDir = if ($env:USERPROFILE) { $env:USERPROFILE } elseif ($env:HOME) { $env:HOME } else { "~" }
+$PraxisHome = if ($env:PRAXIS_HOME) { $env:PRAXIS_HOME } else { Join-Path $HomeDir ".praxis" }
 $PraxisBin = "$PraxisHome\bin"
 $PraxisNodes = "$PraxisBin\nodes\windows"
-$PraxisRepo = "https://github.com/originsec/praxis"
-$PraxisBranch = if ($env:PRAXIS_BRANCH) { $env:PRAXIS_BRANCH } else { "main" }
+$PraxisRepo = "originsec/praxis"
+$PraxisVersion = $env:PRAXIS_VERSION
 
 # Colors
 function Write-Info { param($msg) Write-Host "[INFO] " -ForegroundColor Cyan -NoNewline; Write-Host $msg }
@@ -40,6 +41,30 @@ function Test-Command {
     param($cmd)
     $null = Get-Command $cmd -ErrorAction SilentlyContinue
     return $?
+}
+
+function Get-LatestVersion {
+    if ($script:PraxisVersion) {
+        Write-Success "Using specified version: $script:PraxisVersion"
+        Write-Host ""
+        return
+    }
+
+    Write-Info "Fetching latest release version..."
+
+    try {
+        $response = Invoke-RestMethod -Uri "https://api.github.com/repos/$PraxisRepo/releases/latest" -UseBasicParsing
+        $script:PraxisVersion = $response.tag_name
+    } catch {
+        Write-Err "Could not determine latest version. Check your internet connection."
+    }
+
+    if (-not $script:PraxisVersion) {
+        Write-Err "Could not determine latest version."
+    }
+
+    Write-Success "Latest version: $script:PraxisVersion"
+    Write-Host ""
 }
 
 function Check-Prerequisites {
@@ -100,12 +125,14 @@ function Install-Praxis {
     New-Item -ItemType Directory -Force -Path $PraxisBin | Out-Null
     New-Item -ItemType Directory -Force -Path $PraxisNodes | Out-Null
 
+    $repoUrl = "https://github.com/$PraxisRepo"
+
     Write-Info "Installing praxis_service and praxis_web..."
-    cargo install --git $PraxisRepo --branch $PraxisBranch --root $PraxisHome praxis_service praxis_web
+    cargo install --git $repoUrl --tag $script:PraxisVersion --root $PraxisHome praxis_service praxis_web
     Write-Success "Installed praxis_service and praxis_web"
 
     Write-Info "Installing praxis_node..."
-    cargo install --git $PraxisRepo --branch $PraxisBranch --root $PraxisHome praxis_node
+    cargo install --git $repoUrl --tag $script:PraxisVersion --root $PraxisHome praxis_node
     Move-Item -Force "$PraxisBin\praxis_node.exe" "$PraxisNodes\"
     Write-Success "Installed praxis_node"
 
@@ -192,7 +219,7 @@ finally {
 function Print-Summary {
     Write-Host ""
     Write-Host "==============================================" -ForegroundColor Green
-    Write-Host "  Praxis installation complete!" -ForegroundColor Green
+    Write-Host "  Praxis $script:PraxisVersion installation complete!" -ForegroundColor Green
     Write-Host "==============================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "Installed to: $PraxisHome"
@@ -223,6 +250,7 @@ function Print-Summary {
 
 # Main
 Print-Banner
+Get-LatestVersion
 Check-Prerequisites
 Install-Praxis
 Install-Runner
