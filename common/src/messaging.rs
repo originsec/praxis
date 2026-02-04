@@ -355,6 +355,9 @@ pub struct NodeInformationUpdate {
     /// Number of discovered LLM endpoints
     #[serde(default)]
     pub discovered_endpoints_count: usize,
+    /// Active terminal session ID (if any)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_terminal_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1981,6 +1984,9 @@ pub struct NodeState {
     /// Number of discovered LLM endpoints
     #[serde(default)]
     pub discovered_endpoints_count: usize,
+    /// Active terminal session ID (if any)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_terminal_id: Option<String>,
 }
 
 /// Complete system state broadcast to clients

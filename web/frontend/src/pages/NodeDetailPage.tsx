@@ -67,8 +67,12 @@ export function NodeDetailPage() {
     setSearchParams({ tab }, { replace: true });
   };
 
-  const [terminalId, setTerminalId] = useState<string | null>(null);
   const [isCreatingTerminal, setIsCreatingTerminal] = useState(false);
+
+  //
+  // Terminal ID from node state (persists across navigation).
+  //
+  const terminalId = node?.active_terminal_id ?? null;
   const [creatingSessionFor, setCreatingSessionFor] = useState<string | null>(null);
   const [closingSessionFor, setClosingSessionFor] = useState<string | null>(null);
 
@@ -199,15 +203,19 @@ export function NodeDetailPage() {
   };
 
   const handleCreateTerminal = async () => {
-    console.log('handleCreateTerminal called');
+    //
+    // If terminal already exists on node, just use it (state will update
+    // via node information update).
+    //
+    if (terminalId) {
+      return;
+    }
     setIsCreatingTerminal(true);
     try {
-      console.log('Sending Terminal Create command...');
-      const response = await sendCommand(node.node_id, { Terminal: 'Create' });
-      console.log('Terminal response:', response);
-      if ('Terminal' in response.result && typeof response.result.Terminal === 'object' && response.result.Terminal !== null && 'Created' in response.result.Terminal) {
-        setTerminalId(response.result.Terminal.Created.terminal_id);
-      }
+      await sendCommand(node.node_id, { Terminal: 'Create' });
+      //
+      // Terminal ID will be set via node state update, not from response.
+      //
     } finally {
       setIsCreatingTerminal(false);
     }
@@ -215,7 +223,9 @@ export function NodeDetailPage() {
 
   const handleCloseTerminal = async () => {
     await sendCommand(node.node_id, { Terminal: 'Close' });
-    setTerminalId(null);
+    //
+    // Terminal ID will be cleared via node state update.
+    //
   };
 
   //

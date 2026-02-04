@@ -774,13 +774,14 @@ async fn send_node_information_update(
     //
     // Check intercept status (now node-level, not per-agent).
     //
-    let (intercept_enabled, intercept_method, agent_discovery_enabled, discovered_endpoints_count) = {
+    let (intercept_enabled, intercept_method, agent_discovery_enabled, discovered_endpoints_count, active_terminal_id) = {
         let state = node_state.read().await;
         let enabled = state.intercept_manager.is_enabled();
         let method = state.intercept_manager.method();
         let discovery_enabled = state.intercept_manager.is_agent_discovery_enabled().await;
         let endpoints_count = state.intercept_manager.discovered_endpoints_count().await;
-        (enabled, method, discovery_enabled, endpoints_count)
+        let terminal_id = state.terminal_manager.get_active_terminal_id();
+        (enabled, method, discovery_enabled, endpoints_count, terminal_id)
     };
 
     //
@@ -820,6 +821,7 @@ async fn send_node_information_update(
         intercept_method,
         agent_discovery_enabled,
         discovered_endpoints_count,
+        active_terminal_id,
     };
 
     let message = NodeSignalMessage::InformationUpdate(update);
