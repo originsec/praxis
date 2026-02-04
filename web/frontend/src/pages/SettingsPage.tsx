@@ -1031,7 +1031,7 @@ export function SettingsPage() {
                       href="https://originhq.com"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors"
+                      className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim rounded hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors"
                     >
                       <ExternalLink size={14} />
                       originhq.com
