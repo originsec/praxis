@@ -62,9 +62,9 @@ Access via **Settings** > **LLM Providers** in the web UI.
 | `llm.traffic_parser.provider` | `anthropic` | Provider for traffic analysis |
 | `llm.traffic_parser.model` | `claude-haiku-4-5-20241022` | Model for traffic analysis |
 | `llm.traffic_parser.api_key` | (encrypted) | API key for provider |
-| `llm.atlas.provider` | `anthropic` | Provider for Atlas/Nexus |
-| `llm.atlas.model` | `claude-sonnet-4-20250514` | Model for Atlas/Nexus |
-| `llm.atlas.api_key` | (encrypted) | API key for provider |
+| `llm.orchestrator.provider` | `anthropic` | Provider for Orchestrator |
+| `llm.orchestrator.model` | `claude-sonnet-4-20250514` | Model for Orchestrator |
+| `llm.orchestrator.api_key` | (encrypted) | API key for provider |
 
 ### Supported Providers
 

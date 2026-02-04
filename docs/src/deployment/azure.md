@@ -4,7 +4,7 @@ This guide covers deploying Praxis to Azure using Azure Container Apps with Post
 
 ## Architecture
 
-```
+```diagram
 ┌─────────────────────────────────────────────────┐
 │                      Azure                      │
 │                                                 │

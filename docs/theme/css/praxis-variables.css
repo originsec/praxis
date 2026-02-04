@@ -1,6 +1,88 @@
 /* Praxis Terminal Theme - CSS Variables */
-/* All variables scoped to .ayu theme only */
+/* Variables scoped to .ayu (dark) and .light themes */
 
+/*
+ * Light Theme - Origin Light
+ * Matches web/frontend/src/themes/origin_light
+ */
+.light {
+    /* Background colors - warm stone/bone tones */
+    --bg-primary: #f6f5f2;
+    --bg-secondary: #fbfbf9;
+    --bg-tertiary: #f2f1ec;
+
+    /* Border colors */
+    --border-color: #dad9d4;
+    --border-dim: #e6e5e0;
+    --border-hover: #b2b1ac;
+    --border-active: #78776e;
+
+    /* Text colors - charcoal tones */
+    --text-primary: #181612;
+    --text-secondary: #5c5b54;
+    --text-highlight: #2d2c26;
+    --text-muted: #94938c;
+
+    /* Accent colors - muted tones */
+    --accent-success: #658a65;
+    --accent-warning: #b2a064;
+    --accent-error: #a86262;
+    --accent-info: #476955;
+    --accent-purple: #7a6b8a;
+
+    /* Highlight for selection */
+    --highlight-glow: rgba(101, 138, 101, 0.25);
+    --highlight-glow-strong: rgba(101, 138, 101, 0.45);
+
+    /* Fonts */
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace;
+
+    /* mdBook variable overrides */
+    --bg: var(--bg-primary);
+    --fg: var(--text-primary);
+
+    --sidebar-bg: var(--bg-secondary);
+    --sidebar-fg: var(--text-primary);
+    --sidebar-non-existant: var(--text-muted);
+    --sidebar-active: var(--text-highlight);
+    --sidebar-spacer: var(--border-dim);
+    --sidebar-header-border-color: var(--border-color);
+
+    --scrollbar: var(--border-color);
+
+    --icons: var(--text-secondary);
+    --icons-hover: var(--text-primary);
+
+    --links: var(--accent-info);
+
+    --inline-code-color: var(--accent-purple);
+
+    --theme-popup-bg: var(--bg-secondary);
+    --theme-popup-border: var(--border-color);
+    --theme-hover: var(--bg-tertiary);
+
+    --quote-bg: var(--bg-tertiary);
+    --quote-border: var(--border-active);
+
+    --table-border-color: var(--border-color);
+    --table-header-bg: var(--bg-tertiary);
+    --table-alternate-bg: var(--bg-secondary);
+
+    --searchbar-border-color: var(--border-color);
+    --searchbar-bg: var(--bg-secondary);
+    --searchbar-fg: var(--text-primary);
+    --searchbar-shadow-color: transparent;
+    --searchresults-header-fg: var(--text-highlight);
+    --searchresults-border-color: var(--border-color);
+    --searchresults-li-bg: var(--bg-secondary);
+    --search-mark-bg: var(--highlight-glow-strong);
+
+    --warning-border: var(--accent-warning);
+}
+
+/*
+ * Dark Theme - Praxis Terminal
+ */
 .ayu {
     /* Background colors */
     --bg-primary: #030712;

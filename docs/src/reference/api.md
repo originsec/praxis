@@ -18,7 +18,7 @@ This reference documents the message types and RabbitMQ queues used for communic
 
 ## Message Flow
 
-```
+```diagram
 ┌────────┐                  ┌─────────┐                  ┌────────┐
 │ Client │                  │ Service │                  │  Node  │
 └───┬────┘                  └────┬────┘                  └───┬────┘
@@ -176,16 +176,16 @@ pub enum ClientSignalMessage {
     // Recon
     ReconGet { client_id, node_id, agent_short_name },
 
-    // Nexus (Multi-Agent Chat)
-    NexusStart { client_id, goal, yolo_mode },
-    NexusStop { client_id, session_id },
-    NexusAddAgent { client_id, session_id, node_id, agent_short_name },
-    NexusRemoveAgent { client_id, session_id, agent_id },
-    NexusReorderAgents { client_id, session_id, agent_ids },
-    NexusSendMessage { client_id, session_id, content, channel_id, recipient_nickname },
-    NexusJoinChannel { client_id, session_id, channel_name },
-    NexusGetHistory { client_id, session_id, channel_id, limit },
-    NexusGetState { client_id, session_id },
+    // Agent Chat (Multi-Agent Chat)
+    AgentChatStart { client_id, goal, yolo_mode },
+    AgentChatStop { client_id, session_id },
+    AgentChatAddAgent { client_id, session_id, node_id, agent_short_name },
+    AgentChatRemoveAgent { client_id, session_id, agent_id },
+    AgentChatReorderAgents { client_id, session_id, agent_ids },
+    AgentChatSendMessage { client_id, session_id, content, channel_id, recipient_nickname },
+    AgentChatJoinChannel { client_id, session_id, channel_name },
+    AgentChatGetHistory { client_id, session_id, channel_id, limit },
+    AgentChatGetState { client_id, session_id },
 }
 ```
 
@@ -251,20 +251,20 @@ pub enum ClientDirectMessage {
     // Recon
     ReconGetResponse { node_id, agent_short_name, recon_result, performed_at, is_semantic },
 
-    // Nexus
-    NexusSessionStarted { session_id, goal },
-    NexusSessionStopped { session_id },
-    NexusAgentAdded { session_id, agent },
-    NexusAgentRemoved { session_id, agent_id },
-    NexusAgentStatusChanged { session_id, agent_id, status },
-    NexusChannelCreated { session_id, channel },
-    NexusChannelUpdated { session_id, channel },
-    NexusAgentJoinedChannel { session_id, agent_id, channel_id },
-    NexusAgentLeftChannel { session_id, agent_id, channel_id },
-    NexusMessage { session_id, message },
-    NexusStateUpdate { session },
-    NexusHistoryResponse { session_id, channel_id, messages },
-    NexusError { message },
+    // Agent Chat
+    AgentChatSessionStarted { session_id, goal },
+    AgentChatSessionStopped { session_id },
+    AgentChatAgentAdded { session_id, agent },
+    AgentChatAgentRemoved { session_id, agent_id },
+    AgentChatAgentStatusChanged { session_id, agent_id, status },
+    AgentChatChannelCreated { session_id, channel },
+    AgentChatChannelUpdated { session_id, channel },
+    AgentChatAgentJoinedChannel { session_id, agent_id, channel_id },
+    AgentChatAgentLeftChannel { session_id, agent_id, channel_id },
+    AgentChatMessage { session_id, message },
+    AgentChatStateUpdate { session },
+    AgentChatHistoryResponse { session_id, channel_id, messages },
+    AgentChatError { message },
 }
 ```
 

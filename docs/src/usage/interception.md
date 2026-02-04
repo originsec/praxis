@@ -4,7 +4,7 @@ Traffic interception lets you see the communication between AI agents and their 
 
 ## How It Works
 
-```
+```diagram
 ┌─────────┐         ┌─────────────┐         ┌─────────────┐
 │  Agent  │──HTTPS──│   Praxis    │──HTTPS──│   LLM API   │
 │         │         │   Proxy     │         │             │

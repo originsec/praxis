@@ -4,7 +4,7 @@ The service is the central backend that coordinates nodes, manages data, and orc
 
 ## Overview
 
-```
+```diagram
 ┌──────────────────────────────────────────────────────────────┐
 │                           Service                            │
 │                                                              │
@@ -109,7 +109,7 @@ Executes multi-step workflows:
 
 ### Chain Structure
 
-```
+```diagram
 Trigger → Element → Element → ... → Termination
              │
              └── Transform/Operation/Prompt

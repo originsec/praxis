@@ -21,8 +21,8 @@ Built by [Origin](https://originhq.com) for security research and red team opera
 | **Agent Dialog** | Create interactive sessions with agents |
 | **Semantic Operations** | Define and chain natural language tasks for multi-step automation |
 | **Terminal Access** | PTY terminal on remote nodes |
-| **Nexus** *(coming soon)* | IRC-style multi-agent collaboration and orchestration |
-| **Atlas** *(coming soon)* | High-level agent-based orchestrator for coordinating agent workflows |
+| **Agent Chat** *(coming soon)* | IRC-style multi-agent collaboration and orchestration |
+| **Orchestrator** *(coming soon)* | High-level AI assistant for coordinating agent workflows |
 
 ### Supported Agents
 

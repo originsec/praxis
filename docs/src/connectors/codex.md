@@ -83,7 +83,7 @@ When semantic recon is enabled (requires Semantic Parser LLM), the connector als
 
 Sessions use the `codex exec` subcommand for non-interactive execution:
 
-```
+```diagram
 ┌───────────────────────────────────────────────────────┐
 │                      Praxis Node                      │
 │                                                       │
