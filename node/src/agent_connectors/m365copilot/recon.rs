@@ -186,7 +186,7 @@ impl M365CopilotAgent {
 
         let mut tools = utils::discover_internal_tools_semantically(
             "M365CopilotAgent",
-            utils::ToolDiscoveryPrompt::HighLevel,
+            utils::ToolDiscoveryPrompt::JsonFormat,
             || {
                 let temp_context = SessionContext::default();
                 self.create_session(&temp_context)
@@ -206,7 +206,7 @@ impl M365CopilotAgent {
 
             tools = utils::discover_internal_tools_semantically(
                 "M365CopilotAgent",
-                utils::ToolDiscoveryPrompt::JsonFormat,
+                utils::ToolDiscoveryPrompt::HighLevel,
                 || {
                     let temp_context = SessionContext::default();
                     self.create_session(&temp_context)
