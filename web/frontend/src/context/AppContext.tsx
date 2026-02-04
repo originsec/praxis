@@ -389,14 +389,21 @@ function reduceOrchestrator(state: AppState, action: Action): AppState | null {
           currentToolExecutions: [],
         },
       };
-    case 'ORCHESTRATOR_ADD_CONTENT':
+    case 'ORCHESTRATOR_ADD_CONTENT': {
+      //
+      // Add newline separator between content chunks if needed.
+      //
+      const existing = state.orchestrator.streamingContent;
+      const needsSeparator = existing.length > 0 && !existing.endsWith('\n') && !action.content.startsWith('\n');
+      const separator = needsSeparator ? '\n\n' : '';
       return {
         ...state,
         orchestrator: {
           ...state.orchestrator,
-          streamingContent: state.orchestrator.streamingContent + action.content,
+          streamingContent: existing + separator + action.content,
         },
       };
+    }
     case 'ORCHESTRATOR_TOOL_EXECUTING':
       return {
         ...state,
@@ -1011,7 +1018,7 @@ interface AppContextValue {
   orchestratorStop: () => void;
   orchestratorCancel: () => void;
   orchestratorPrompt: (message: string) => void;
-  atlasClearMessages: () => void;
+  orchestratorClearMessages: () => void;
   //
   // Generic send.
   //
@@ -1166,31 +1173,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
         //
         // Orchestrator messages.
         //
-        case 'atlas_started':
+        case 'orchestrator_started':
           dispatch({ type: 'ORCHESTRATOR_STARTED' });
           break;
-        case 'atlas_stopped':
+        case 'orchestrator_stopped':
           dispatch({ type: 'ORCHESTRATOR_STOPPED' });
           break;
-        case 'atlas_content':
+        case 'orchestrator_content':
           dispatch({ type: 'ORCHESTRATOR_ADD_CONTENT', content: message.content });
           break;
-        case 'atlas_tool_executing':
+        case 'orchestrator_tool_executing':
           dispatch({ type: 'ORCHESTRATOR_TOOL_EXECUTING', name: message.name, input: message.input });
           break;
-        case 'atlas_tool_executed':
+        case 'orchestrator_tool_executed':
           dispatch({ type: 'ORCHESTRATOR_TOOL_EXECUTED', name: message.name, display: message.display, success: message.success, result: message.result });
           break;
         case 'orchestrator_plan_updated':
           dispatch({ type: 'ORCHESTRATOR_PLAN_UPDATED', plan: message.plan });
           break;
-        case 'atlas_done':
+        case 'orchestrator_done':
           dispatch({ type: 'ORCHESTRATOR_DONE' });
           break;
-        case 'atlas_error':
+        case 'orchestrator_error':
           dispatch({ type: 'ORCHESTRATOR_ERROR', message: message.message });
           break;
-        case 'atlas_token_usage':
+        case 'orchestrator_token_usage':
           dispatch({
             type: 'ORCHESTRATOR_TOKEN_USAGE',
             promptTokens: message.prompt_tokens,
@@ -1495,25 +1502,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
   //
   const orchestratorStart = useCallback(() => {
     dispatch({ type: 'ORCHESTRATOR_STARTING' });
-    wsClient.send({ type: 'atlas_start' });
+    wsClient.send({ type: 'orchestrator_start' });
   }, []);
 
   const orchestratorStop = useCallback(() => {
-    wsClient.send({ type: 'atlas_stop' });
+    wsClient.send({ type: 'orchestrator_stop' });
     dispatch({ type: 'ORCHESTRATOR_STOPPED' });
   }, []);
 
   const orchestratorCancel = useCallback(() => {
-    wsClient.send({ type: 'atlas_cancel' });
+    wsClient.send({ type: 'orchestrator_cancel' });
     dispatch({ type: 'ORCHESTRATOR_DONE' });
   }, []);
 
   const orchestratorPrompt = useCallback((message: string) => {
     dispatch({ type: 'ORCHESTRATOR_ADD_USER_MESSAGE', message });
-    wsClient.send({ type: 'atlas_prompt', message });
+    wsClient.send({ type: 'orchestrator_prompt', message });
   }, []);
 
-  const atlasClearMessages = useCallback(() => {
+  const orchestratorClearMessages = useCallback(() => {
     dispatch({ type: 'ORCHESTRATOR_CLEAR_MESSAGES' });
   }, []);
 
@@ -1839,7 +1846,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     orchestratorStop,
     orchestratorCancel,
     orchestratorPrompt,
-    atlasClearMessages,
+    orchestratorClearMessages,
     send,
     requestTrafficLog,
     requestTrafficMatches,

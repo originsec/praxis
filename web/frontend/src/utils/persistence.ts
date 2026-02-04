@@ -1,6 +1,6 @@
 import type { OrchestratorMessage, OrchestratorState } from '../context/orchestratorTypes';
 
-const ORCHESTRATOR_SESSION_STORAGE_KEY = 'praxis_atlas_session';
+const ORCHESTRATOR_SESSION_STORAGE_KEY = 'praxis_orchestrator_session';
 const RECENT_NODES_STORAGE_KEY = 'praxis_recent_nodes';
 
 function serializeOrchestratorState(state: OrchestratorState): string {

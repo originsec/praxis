@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Server, Save, Check, List, Loader2, X, Cpu, Plus, Trash2, Edit2, Key, Info, ExternalLink, Download, Monitor } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { getFeatureFlags } from '../utils/featureFlags';
 
 type Tab = 'llm_providers' | 'service' | 'about';
 type LLMTab = 'model_definitions' | 'feature_selection';
@@ -781,9 +782,10 @@ export function SettingsPage() {
                     <div className="space-y-3">
                       {/*
                       //
-                      // Orchestrator - hidden, feature not ready.
+                      // Orchestrator - enabled via devtools flag.
                       //
-                      {false && (
+                      */}
+                      {getFeatureFlags().orchestrator && (
                       <div className="flex items-center gap-4 p-3 bg-[var(--bg-secondary)] border border-dim">
                         <div className="w-48">
                           <p className="text-sm font-medium text-highlight">Orchestrator</p>
@@ -811,7 +813,6 @@ export function SettingsPage() {
                         />
                       </div>
                       )}
-                      */}
 
                       {/*
                       //

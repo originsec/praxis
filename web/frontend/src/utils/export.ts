@@ -80,7 +80,7 @@ export function exportAgentSession(
 }
 
 //
-// Export Atlas session to Markdown.
+// Export Orchestrator session to Markdown.
 //
 export function exportOrchestratorSession(
   messages: OrchestratorMessage[],
