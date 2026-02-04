@@ -73,6 +73,10 @@ pub fn create_ai_client(provider: Provider, api_key: String) -> Result<AiClient>
             api_key,
             "https://api.cerebras.ai/v1".to_string(),
         ))),
+        Provider::Nvidia => Ok(AiClient::OpenAI(OpenAIClient::with_base_url(
+            api_key,
+            "https://integrate.api.nvidia.com/v1".to_string(),
+        ))),
     }
 }
 

@@ -6,16 +6,13 @@ import { useApp } from '../context/AppContext';
 type Tab = 'llm_providers' | 'service' | 'about';
 type LLMTab = 'model_definitions' | 'feature_selection';
 
-const providers = [
-  { value: 'anthropic', label: 'Anthropic (Claude)' },
-  { value: 'cerebras', label: 'Cerebras' },
-  { value: 'gemini', label: 'Google Gemini' },
-  { value: 'groq', label: 'Groq' },
-  { value: 'mistral', label: 'Mistral' },
-  { value: 'ollama', label: 'Ollama (Local)' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'xai', label: 'xAI (Grok)' },
-];
+//
+// Provider info from API.
+//
+interface ProviderOption {
+  value: string;
+  label: string;
+}
 
 //
 // Model definition stored in config.
@@ -137,6 +134,11 @@ export function SettingsPage() {
   const [isLoadingDownloads, setIsLoadingDownloads] = useState(false);
 
   //
+  // Provider options fetched from API.
+  //
+  const [providers, setProviders] = useState<ProviderOption[]>([]);
+
+  //
   // Load config on mount
   // All llm_* keys go to Service (not starting with atlas_).
   //
@@ -150,6 +152,21 @@ export function SettingsPage() {
       'llm_atlas_max_tokens',
     ]);
   }, [getConfig]);
+
+  //
+  // Fetch providers from API on mount.
+  //
+  useEffect(() => {
+    fetch('/api/providers')
+      .then(res => res.json())
+      .then(data => {
+        const opts = (data.providers || [])
+          .map((p: { id: string; name: string }) => ({ value: p.id, label: p.name }))
+          .sort((a: ProviderOption, b: ProviderOption) => a.label.localeCompare(b.label));
+        setProviders(opts);
+      })
+      .catch(err => console.error('Failed to fetch providers:', err));
+  }, []);
 
   //
   // Fetch downloads info when Service tab is active.

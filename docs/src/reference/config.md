@@ -77,6 +77,7 @@ Access via **Settings** > **LLM Providers** in the web UI.
 | `cerebras` | Cerebras | `CEREBRAS_API_KEY` |
 | `mistral` | Mistral | `MISTRAL_API_KEY` |
 | `xai` | xAI | `XAI_API_KEY` |
+| `nvidia` | NVIDIA | `NVIDIA_API_KEY` |
 | `ollama` | Ollama (local) | (none) |
 
 ### Model Reference Format

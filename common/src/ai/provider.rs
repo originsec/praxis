@@ -10,6 +10,7 @@ pub enum Provider {
     XAI,
     Gemini,
     Cerebras,
+    Nvidia,
 }
 
 impl Provider {
@@ -23,6 +24,7 @@ impl Provider {
             Provider::XAI => "xai",
             Provider::Gemini => "gemini",
             Provider::Cerebras => "cerebras",
+            Provider::Nvidia => "nvidia",
         }
     }
 
@@ -36,6 +38,7 @@ impl Provider {
             "xai" => Some(Provider::XAI),
             "gemini" => Some(Provider::Gemini),
             "cerebras" => Some(Provider::Cerebras),
+            "nvidia" => Some(Provider::Nvidia),
             _ => None,
         }
     }
@@ -50,6 +53,7 @@ impl Provider {
             Provider::XAI,
             Provider::Gemini,
             Provider::Cerebras,
+            Provider::Nvidia,
         ]
     }
 
@@ -63,6 +67,7 @@ impl Provider {
             Provider::XAI => "xAI",
             Provider::Gemini => "Google Gemini",
             Provider::Cerebras => "Cerebras",
+            Provider::Nvidia => "NVIDIA",
         }
     }
 
@@ -76,6 +81,7 @@ impl Provider {
             Provider::XAI => "https://api.x.ai/v1",
             Provider::Gemini => "https://generativelanguage.googleapis.com/v1beta",
             Provider::Cerebras => "https://api.cerebras.ai/v1",
+            Provider::Nvidia => "https://integrate.api.nvidia.com/v1",
         }
     }
 
@@ -88,6 +94,7 @@ impl Provider {
                 | Provider::Mistral
                 | Provider::XAI
                 | Provider::Cerebras
+                | Provider::Nvidia
         )
     }
 }
