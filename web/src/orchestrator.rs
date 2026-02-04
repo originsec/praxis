@@ -425,7 +425,6 @@ async fn execute_tool(
             let nodes: Vec<_> = {
                 if let Some(system_state) = app_state.get_state().await {
                     system_state.nodes.iter().enumerate().map(|(i, n)| {
-                        let marker = if i == ctx.selected_node_idx { "►" } else { " " };
                         let last_update = chrono::DateTime::parse_from_rfc3339(&n.last_update.to_rfc3339())
                             .map(|dt| dt.with_timezone(&chrono::Utc))
                             .unwrap_or(now);
@@ -439,7 +438,6 @@ async fn execute_tool(
                         };
                         json!({
                             "selected": i == ctx.selected_node_idx,
-                            "marker": marker,
                             "node_id": n.node_id,
                             "node_id_short": &n.node_id[..8.min(n.node_id.len())],
                             "machine_name": n.machine_name,
@@ -560,13 +558,19 @@ async fn execute_tool(
             match (node_id, agent_short_name) {
                 (Some(nid), Some(agent_name)) => {
                     let cmd = NodeCommand::Agent(AgentCommand::Select { short_name: agent_name.clone() });
-                    send_command_fire_and_forget(rabbitmq, &app_state.client_id, &nid, cmd).await;
-                    json!({
-                        "status": "success",
-                        "message": format!("Selected agent '{}'", agent_name),
-                        "short_name": agent_name,
-                        "display": format!("Selected: {}", agent_name)
-                    }).to_string()
+                    match send_command_and_wait(rabbitmq, app_state, &nid, cmd, 60).await {
+                        Ok(_) => json!({
+                            "status": "success",
+                            "message": format!("Selected agent '{}'", agent_name),
+                            "short_name": agent_name,
+                            "display": format!("Selected: {}", agent_name)
+                        }).to_string(),
+                        Err(e) => json!({
+                            "status": "error",
+                            "message": format!("Failed to select agent: {}", e),
+                            "display": format!("Error: {}", e)
+                        }).to_string(),
+                    }
                 }
                 (Some(_), None) => {
                     json!({

@@ -599,10 +599,10 @@ export type BrowserMessage =
   | { type: 'op_def_list' }
   | { type: 'op_def_delete'; full_name: string }
   | { type: 'op_def_get'; full_name: string }
-  | { type: 'atlas_start' }
-  | { type: 'atlas_prompt'; message: string }
-  | { type: 'atlas_stop' }
-  | { type: 'atlas_cancel' }
+  | { type: 'orchestrator_start' }
+  | { type: 'orchestrator_prompt'; message: string }
+  | { type: 'orchestrator_stop' }
+  | { type: 'orchestrator_cancel' }
   //
   // Traffic interception messages.
   //
@@ -678,15 +678,15 @@ export type ServerMessage =
   | { type: 'op_def_added'; full_name: string }
   | { type: 'op_def_deleted'; full_name: string; success: boolean }
   | { type: 'op_def_error'; message: string }
-  | { type: 'atlas_started' }
-  | { type: 'atlas_content'; content: string }
-  | { type: 'atlas_tool_executing'; name: string; input?: string }
-  | { type: 'atlas_tool_executed'; name: string; display: string; success: boolean; result: string }
+  | { type: 'orchestrator_started' }
+  | { type: 'orchestrator_content'; content: string }
+  | { type: 'orchestrator_tool_executing'; name: string; input?: string }
+  | { type: 'orchestrator_tool_executed'; name: string; display: string; success: boolean; result: string }
   | { type: 'orchestrator_plan_updated'; plan: OrchestratorPlan }
-  | { type: 'atlas_done' }
-  | { type: 'atlas_stopped' }
-  | { type: 'atlas_error'; message: string }
-  | { type: 'atlas_token_usage'; prompt_tokens: number; completion_tokens: number; total_tokens: number }
+  | { type: 'orchestrator_done' }
+  | { type: 'orchestrator_stopped' }
+  | { type: 'orchestrator_error'; message: string }
+  | { type: 'orchestrator_token_usage'; prompt_tokens: number; completion_tokens: number; total_tokens: number }
   //
   // Traffic interception messages.
   //
