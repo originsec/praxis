@@ -70,7 +70,7 @@ async fn static_handler(req: Request<Body>) -> impl IntoResponse {
         .unwrap()
 }
 
-const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-ALPHA");
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Print the startup banner
 pub fn print_banner(rabbitmq_url: &str, listen_addr: &SocketAddr) {
