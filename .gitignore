@@ -1,4 +1,5 @@
 target/
 .claude/
+.cargo/
 .praxis*
 op_runner/

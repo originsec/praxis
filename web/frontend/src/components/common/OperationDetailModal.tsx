@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Download, ChevronDown, ChevronRight } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Modal } from './Modal';
 import { StatusBadge, getOperationStatusColor } from './StatusBadge';
 import { StyledOutput } from './StyledOutput';
@@ -174,10 +176,10 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
           {operation.result && (
             <div>
               <p className="text-xs text-muted mb-1">Result</p>
-              <div className="bg-[var(--bg-secondary)] p-3 max-h-64 overflow-auto">
-                <pre className="text-sm whitespace-pre-wrap font-mono">
+              <div className="bg-[var(--bg-secondary)] p-3 max-h-64 overflow-auto prose prose-sm prose-invert max-w-none [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0 [&_h2]:text-base [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-sm [&_h3]:mt-2 [&_h3]:mb-1">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {operation.result}
-                </pre>
+                </ReactMarkdown>
               </div>
             </div>
           )}

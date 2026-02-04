@@ -8,8 +8,8 @@ import { Dashboard } from './pages/Dashboard';
 import { NodesPage } from './pages/NodesPage';
 import { NodeDetailPage } from './pages/NodeDetailPage';
 import { AgentDetailPage } from './pages/AgentDetailPage';
-// import { AtlasPage } from './pages/AtlasPage';  // Hidden - feature not ready
-import { AtlasComingSoonPage } from './pages/AtlasComingSoonPage';
+// import { OrchestratorPage } from './pages/OrchestratorPage';  // Hidden - feature not ready
+import { OrchestratorComingSoonPage } from './pages/OrchestratorComingSoonPage';
 import { ToolkitPage } from './pages/ToolkitPage';
 import { OperationsPage } from './pages/OperationsPage';
 import { EventsPage } from './pages/EventsPage';
@@ -17,7 +17,7 @@ import { InterceptPage } from './pages/InterceptPage';
 // import { DiscoveryPage } from './pages/DiscoveryPage';  // Hidden - feature not ready
 import { SettingsPage } from './pages/SettingsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
-import NexusPage from './pages/NexusPage';
+import AgentChatPage from './pages/AgentChatPage';
 
 export default function App() {
   //
@@ -39,12 +39,12 @@ export default function App() {
               <Route path="/nodes" element={<NodesPage />} />
               <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
               <Route path="/nodes/:nodeId/agents/:agentShortName" element={<AgentDetailPage />} />
-              <Route path="/atlas" element={<AtlasComingSoonPage />} />
+              <Route path="/orchestrator" element={<OrchestratorComingSoonPage />} />
               <Route path="/toolkit" element={<ToolkitPage />} />
               <Route path="/operations" element={<OperationsPage />} />
               <Route path="/events" element={<EventsPage />} />
               <Route path="/intercept" element={<InterceptPage />} />
-              <Route path="/nexus" element={<NexusPage />} />
+              <Route path="/agent-chat" element={<AgentChatPage />} />
               {/* <Route path="/discovery" element={<DiscoveryPage />} /> */}  {/* Hidden - feature not ready */}
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="*" element={<NotFoundPage />} />

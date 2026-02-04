@@ -1,7 +1,7 @@
 //
-// Nexus - IRC-style multi-agent chat system.
+// AgentChat - IRC-style multi-agent chat system.
 //
-// Nexus opens agent sessions on multiple nodes and connects them in an
+// AgentChat opens agent sessions on multiple nodes and connects them in an
 // IRC-like chat environment. Agents can join channels, send messages,
 // DM each other, and work toward user-defined goals.
 //
@@ -13,8 +13,8 @@ use anyhow::Result;
 use chrono::Utc;
 use common::{
     publish_json, node_queue_name, ClientDirectMessage, CommandRequest,
-    NodeCommand, NodeDirectMessage, NexusAgentInfo, NexusAgentStatus,
-    NexusChannelInfo, NexusMessageInfo, NexusMessageType, NexusSessionState,
+    NodeCommand, NodeDirectMessage, AgentChatAgentInfo, AgentChatAgentStatus,
+    AgentChatChannelInfo, AgentChatMessageInfo, AgentChatMessageType, AgentChatSessionState,
     SessionCommand, SessionContext,
 };
 use lapin::Channel;
@@ -27,10 +27,10 @@ use uuid::Uuid;
 use crate::database::Database;
 use crate::state::{NodeRegistry, PendingCommands};
 
-use parser::NexusAction;
+use parser::AgentChatAction;
 
-/// User nickname in Nexus chat
-const USER_NICKNAME: &str = "nexus_user";
+/// User nickname in AgentChat chat
+const USER_NICKNAME: &str = "agent_chat_user";
 /// Default channel created when session starts
 const DEFAULT_CHANNEL: &str = "#general";
 
@@ -42,52 +42,52 @@ struct PendingMessage {
     direct_messages: Vec<(String, String, String)>,
 }
 
-/// In-memory state for an active Nexus session
-struct NexusSessionState_ {
+/// In-memory state for an active AgentChat session
+struct AgentChatSessionState_ {
     id: String,
     goal: Option<String>,
     yolo_mode: bool,
-    agents: HashMap<String, NexusAgentState>,
-    channels: HashMap<String, NexusChannel>,
+    agents: HashMap<String, AgentChatAgentState>,
+    channels: HashMap<String, AgentChatChannel>,
     message_queue: VecDeque<PendingMessage>,
 }
 
-/// In-memory state for a Nexus agent
+/// In-memory state for a AgentChat agent
 #[derive(Debug, Clone)]
-struct NexusAgentState {
+struct AgentChatAgentState {
     id: String,
     node_id: String,
     agent_short_name: String,
     nickname: String,
     precedence: u32,
     current_channel_id: Option<String>,
-    status: NexusAgentStatus,
+    status: AgentChatAgentStatus,
     agent_session_id: Option<String>,
     waiting: bool,
     /// System prompt to send when session is created
     pending_system_prompt: Option<String>,
 }
 
-/// In-memory state for a Nexus channel
+/// In-memory state for a AgentChat channel
 #[derive(Debug, Clone)]
-struct NexusChannel {
+struct AgentChatChannel {
     id: String,
     name: String,
     topic: Option<String>,
     created_by: String,
 }
 
-/// Manager for Nexus sessions
-pub struct NexusManager {
+/// Manager for AgentChat sessions
+pub struct AgentChatManager {
     db: Arc<Database>,
     channel: Channel,
     node_registry: Arc<NodeRegistry>,
     pending_commands: Arc<PendingCommands>,
-    active_session: RwLock<Option<NexusSessionState_>>,
+    active_session: RwLock<Option<AgentChatSessionState_>>,
 }
 
-impl NexusManager {
-    /// Create a new NexusManager
+impl AgentChatManager {
+    /// Create a new AgentChatManager
     pub fn new(
         db: Arc<Database>,
         channel: Channel,
@@ -103,7 +103,7 @@ impl NexusManager {
         }
     }
 
-    /// Start a new Nexus session
+    /// Start a new AgentChat session
     pub async fn start_session(&self, client_id: &str, goal: Option<String>, yolo_mode: bool) -> Result<String> {
         let mut session_lock = self.active_session.write().await;
 
@@ -111,7 +111,7 @@ impl NexusManager {
         // Check if there's already an active session.
         //
         if session_lock.is_some() {
-            return Err(anyhow::anyhow!("A Nexus session is already active"));
+            return Err(anyhow::anyhow!("A AgentChat session is already active"));
         }
 
         let session_id = Uuid::new_v4().to_string();
@@ -120,25 +120,25 @@ impl NexusManager {
         //
         // Create session in database.
         //
-        self.db.create_nexus_session(&session_id, goal.as_deref()).await?;
+        self.db.create_agent_chat_session(&session_id, goal.as_deref()).await?;
 
         //
         // Create default #general channel.
         //
-        self.db.create_nexus_channel(&channel_id, &session_id, DEFAULT_CHANNEL, USER_NICKNAME).await?;
+        self.db.create_agent_chat_channel(&channel_id, &session_id, DEFAULT_CHANNEL, USER_NICKNAME).await?;
 
         //
         // Set up in-memory state.
         //
         let mut channels = HashMap::new();
-        channels.insert(channel_id.clone(), NexusChannel {
+        channels.insert(channel_id.clone(), AgentChatChannel {
             id: channel_id.clone(),
             name: DEFAULT_CHANNEL.to_string(),
             topic: None,
             created_by: USER_NICKNAME.to_string(),
         });
 
-        *session_lock = Some(NexusSessionState_ {
+        *session_lock = Some(AgentChatSessionState_ {
             id: session_id.clone(),
             goal: goal.clone(),
             yolo_mode,
@@ -147,12 +147,12 @@ impl NexusManager {
             message_queue: VecDeque::new(),
         });
 
-        info!("Started Nexus session {} with goal: {:?}, yolo_mode: {}", session_id, goal, yolo_mode);
+        info!("Started AgentChat session {} with goal: {:?}, yolo_mode: {}", session_id, goal, yolo_mode);
 
         //
         // Notify the client.
         //
-        self.send_to_client(client_id, ClientDirectMessage::NexusSessionStarted {
+        self.send_to_client(client_id, ClientDirectMessage::AgentChatSessionStarted {
             session_id: session_id.clone(),
             goal,
         }).await?;
@@ -160,9 +160,9 @@ impl NexusManager {
         //
         // Send channel created notification.
         //
-        self.send_to_client(client_id, ClientDirectMessage::NexusChannelCreated {
+        self.send_to_client(client_id, ClientDirectMessage::AgentChatChannelCreated {
             session_id: session_id.clone(),
-            channel: NexusChannelInfo {
+            channel: AgentChatChannelInfo {
                 id: channel_id,
                 name: DEFAULT_CHANNEL.to_string(),
                 topic: None,
@@ -174,12 +174,12 @@ impl NexusManager {
         Ok(session_id)
     }
 
-    /// Stop the active Nexus session
+    /// Stop the active AgentChat session
     pub async fn stop_session(&self, client_id: &str, session_id: &str) -> Result<()> {
         let mut session_lock = self.active_session.write().await;
 
         let session = session_lock.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No active Nexus session"))?;
+            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
 
         if session.id != session_id {
             return Err(anyhow::anyhow!("Session ID mismatch"));
@@ -197,9 +197,9 @@ impl NexusManager {
         //
         // Update database.
         //
-        self.db.update_nexus_session_status(session_id, "stopped").await?;
+        self.db.update_agent_chat_session_status(session_id, "stopped").await?;
 
-        info!("Stopped Nexus session {}", session_id);
+        info!("Stopped AgentChat session {}", session_id);
 
         //
         // Clear in-memory state.
@@ -209,14 +209,14 @@ impl NexusManager {
         //
         // Notify client.
         //
-        self.send_to_client(client_id, ClientDirectMessage::NexusSessionStopped {
+        self.send_to_client(client_id, ClientDirectMessage::AgentChatSessionStopped {
             session_id: session_id.to_string(),
         }).await?;
 
         Ok(())
     }
 
-    /// Add an agent to the Nexus session
+    /// Add an agent to the AgentChat session
     pub async fn add_agent(
         &self,
         client_id: &str,
@@ -227,7 +227,7 @@ impl NexusManager {
         let mut session_lock = self.active_session.write().await;
 
         let session = session_lock.as_mut()
-            .ok_or_else(|| anyhow::anyhow!("No active Nexus session"))?;
+            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
 
         if session.id != session_id {
             return Err(anyhow::anyhow!("Session ID mismatch"));
@@ -292,7 +292,7 @@ impl NexusManager {
         //
         // Add to database.
         //
-        self.db.add_nexus_agent(
+        self.db.add_agent_chat_agent(
             &agent_id,
             session_id,
             node_id,
@@ -304,14 +304,14 @@ impl NexusManager {
         //
         // Add to in-memory state.
         //
-        let agent_state = NexusAgentState {
+        let agent_state = AgentChatAgentState {
             id: agent_id.clone(),
             node_id: node_id.to_string(),
             agent_short_name: agent_short_name.to_string(),
             nickname: nickname.clone(),
             precedence,
             current_channel_id: default_channel_id.clone(),
-            status: NexusAgentStatus::Initializing,
+            status: AgentChatAgentStatus::Initializing,
             agent_session_id: None,
             waiting: false,
             pending_system_prompt: Some(system_prompt),
@@ -319,22 +319,22 @@ impl NexusManager {
 
         session.agents.insert(agent_id.clone(), agent_state.clone());
 
-        let agent_info = NexusAgentInfo {
+        let agent_info = AgentChatAgentInfo {
             id: agent_id.clone(),
             node_id: node_id.to_string(),
             agent_short_name: agent_short_name.to_string(),
             nickname: nickname.clone(),
             precedence,
             current_channel_id: default_channel_id.clone(),
-            status: NexusAgentStatus::Initializing,
+            status: AgentChatAgentStatus::Initializing,
         };
 
-        info!("Added agent {} ({}) to Nexus session {}", nickname, agent_id, session_id);
+        info!("Added agent {} ({}) to AgentChat session {}", nickname, agent_id, session_id);
 
         //
         // Notify client.
         //
-        self.send_to_client(client_id, ClientDirectMessage::NexusAgentAdded {
+        self.send_to_client(client_id, ClientDirectMessage::AgentChatAgentAdded {
             session_id: session_id.to_string(),
             agent: agent_info,
         }).await?;
@@ -355,12 +355,12 @@ impl NexusManager {
         Ok(agent_id)
     }
 
-    /// Remove an agent from the Nexus session
+    /// Remove an agent from the AgentChat session
     pub async fn remove_agent(&self, client_id: &str, session_id: &str, agent_id: &str) -> Result<()> {
         let mut session_lock = self.active_session.write().await;
 
         let session = session_lock.as_mut()
-            .ok_or_else(|| anyhow::anyhow!("No active Nexus session"))?;
+            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
 
         if session.id != session_id {
             return Err(anyhow::anyhow!("Session ID mismatch"));
@@ -379,14 +379,14 @@ impl NexusManager {
         //
         // Remove from database.
         //
-        self.db.remove_nexus_agent(agent_id).await?;
+        self.db.remove_agent_chat_agent(agent_id).await?;
 
-        info!("Removed agent {} from Nexus session {}", agent.nickname, session_id);
+        info!("Removed agent {} from AgentChat session {}", agent.nickname, session_id);
 
         //
         // Notify client.
         //
-        self.send_to_client(client_id, ClientDirectMessage::NexusAgentRemoved {
+        self.send_to_client(client_id, ClientDirectMessage::AgentChatAgentRemoved {
             session_id: session_id.to_string(),
             agent_id: agent_id.to_string(),
         }).await?;
@@ -414,7 +414,7 @@ impl NexusManager {
         let mut session_lock = self.active_session.write().await;
 
         let session = session_lock.as_mut()
-            .ok_or_else(|| anyhow::anyhow!("No active Nexus session"))?;
+            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
 
         if session.id != session_id {
             return Err(anyhow::anyhow!("Session ID mismatch"));
@@ -432,9 +432,9 @@ impl NexusManager {
         //
         // Update database.
         //
-        self.db.update_nexus_agent_precedence(&agent_ids).await?;
+        self.db.update_agent_chat_agent_precedence(&agent_ids).await?;
 
-        info!("Reordered agents in Nexus session {}", session_id);
+        info!("Reordered agents in AgentChat session {}", session_id);
 
         Ok(())
     }
@@ -451,22 +451,22 @@ impl NexusManager {
         let session_lock = self.active_session.read().await;
 
         let session = session_lock.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No active Nexus session"))?;
+            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
 
         if session.id != session_id {
             return Err(anyhow::anyhow!("Session ID mismatch"));
         }
 
         let message_type = if recipient_nickname.is_some() {
-            NexusMessageType::DirectMessage
+            AgentChatMessageType::DirectMessage
         } else {
-            NexusMessageType::Channel
+            AgentChatMessageType::Channel
         };
 
         //
         // Insert message into database.
         //
-        let message_id = self.db.insert_nexus_message(
+        let message_id = self.db.insert_agent_chat_message(
             session_id,
             channel_id,
             USER_NICKNAME,
@@ -475,7 +475,7 @@ impl NexusManager {
             content,
         ).await?;
 
-        let message_info = NexusMessageInfo {
+        let message_info = AgentChatMessageInfo {
             id: message_id,
             channel_id: channel_id.map(String::from),
             sender_nickname: USER_NICKNAME.to_string(),
@@ -488,7 +488,7 @@ impl NexusManager {
         //
         // Notify client.
         //
-        self.send_to_client(client_id, ClientDirectMessage::NexusMessage {
+        self.send_to_client(client_id, ClientDirectMessage::AgentChatMessage {
             session_id: session_id.to_string(),
             message: message_info,
         }).await?;
@@ -513,7 +513,7 @@ impl NexusManager {
         let mut session_lock = self.active_session.write().await;
 
         let session = session_lock.as_mut()
-            .ok_or_else(|| anyhow::anyhow!("No active Nexus session"))?;
+            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
 
         if session.id != session_id {
             return Err(anyhow::anyhow!("Session ID mismatch"));
@@ -542,9 +542,9 @@ impl NexusManager {
         //
         let channel_id = Uuid::new_v4().to_string();
 
-        self.db.create_nexus_channel(&channel_id, session_id, &channel_name, USER_NICKNAME).await?;
+        self.db.create_agent_chat_channel(&channel_id, session_id, &channel_name, USER_NICKNAME).await?;
 
-        let channel = NexusChannel {
+        let channel = AgentChatChannel {
             id: channel_id.clone(),
             name: channel_name.clone(),
             topic: None,
@@ -553,14 +553,14 @@ impl NexusManager {
 
         session.channels.insert(channel_id.clone(), channel);
 
-        info!("Created channel {} in Nexus session {}", channel_name, session_id);
+        info!("Created channel {} in AgentChat session {}", channel_name, session_id);
 
         //
         // Notify client.
         //
-        self.send_to_client(client_id, ClientDirectMessage::NexusChannelCreated {
+        self.send_to_client(client_id, ClientDirectMessage::AgentChatChannelCreated {
             session_id: session_id.to_string(),
-            channel: NexusChannelInfo {
+            channel: AgentChatChannelInfo {
                 id: channel_id.clone(),
                 name: channel_name,
                 topic: None,
@@ -583,24 +583,24 @@ impl NexusManager {
         let session_lock = self.active_session.read().await;
 
         let session = session_lock.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No active Nexus session"))?;
+            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
 
         if session.id != session_id {
             return Err(anyhow::anyhow!("Session ID mismatch"));
         }
 
-        let messages = self.db.get_nexus_messages(session_id, channel_id, limit).await?;
+        let messages = self.db.get_agent_chat_messages(session_id, channel_id, limit).await?;
 
-        let message_infos: Vec<NexusMessageInfo> = messages.into_iter().map(|m| {
+        let message_infos: Vec<AgentChatMessageInfo> = messages.into_iter().map(|m| {
             let message_type = match m.message_type.as_str() {
-                "channel" => NexusMessageType::Channel,
-                "dm" => NexusMessageType::DirectMessage,
-                "system" => NexusMessageType::System,
-                "command_result" => NexusMessageType::CommandResult,
-                _ => NexusMessageType::Channel,
+                "channel" => AgentChatMessageType::Channel,
+                "dm" => AgentChatMessageType::DirectMessage,
+                "system" => AgentChatMessageType::System,
+                "command_result" => AgentChatMessageType::CommandResult,
+                _ => AgentChatMessageType::Channel,
             };
 
-            NexusMessageInfo {
+            AgentChatMessageInfo {
                 id: m.id,
                 channel_id: m.channel_id,
                 sender_nickname: m.sender_nickname,
@@ -611,7 +611,7 @@ impl NexusManager {
             }
         }).collect();
 
-        self.send_to_client(client_id, ClientDirectMessage::NexusHistoryResponse {
+        self.send_to_client(client_id, ClientDirectMessage::AgentChatHistoryResponse {
             session_id: session_id.to_string(),
             channel_id: channel_id.map(String::from),
             messages: message_infos,
@@ -625,8 +625,8 @@ impl NexusManager {
         let session_lock = self.active_session.read().await;
 
         if let Some(session) = session_lock.as_ref() {
-            let mut agents: Vec<NexusAgentInfo> = session.agents.values().map(|a| {
-                NexusAgentInfo {
+            let mut agents: Vec<AgentChatAgentInfo> = session.agents.values().map(|a| {
+                AgentChatAgentInfo {
                     id: a.id.clone(),
                     node_id: a.node_id.clone(),
                     agent_short_name: a.agent_short_name.clone(),
@@ -638,13 +638,13 @@ impl NexusManager {
             }).collect();
             agents.sort_by_key(|a| a.precedence);
 
-            let mut channels: Vec<NexusChannelInfo> = Vec::new();
+            let mut channels: Vec<AgentChatChannelInfo> = Vec::new();
             for channel in session.channels.values() {
                 let member_count = session.agents.values()
                     .filter(|a| a.current_channel_id.as_ref() == Some(&channel.id))
                     .count();
 
-                channels.push(NexusChannelInfo {
+                channels.push(AgentChatChannelInfo {
                     id: channel.id.clone(),
                     name: channel.name.clone(),
                     topic: channel.topic.clone(),
@@ -657,14 +657,14 @@ impl NexusManager {
             //
             // Get created_at from database.
             //
-            let created_at = if let Ok(Some(db_session)) = self.db.get_nexus_session(&session.id).await {
+            let created_at = if let Ok(Some(db_session)) = self.db.get_agent_chat_session(&session.id).await {
                 db_session.created_at
             } else {
                 Utc::now()
             };
 
-            self.send_to_client(client_id, ClientDirectMessage::NexusStateUpdate {
-                session: NexusSessionState {
+            self.send_to_client(client_id, ClientDirectMessage::AgentChatStateUpdate {
+                session: AgentChatSessionState {
                     id: session.id.clone(),
                     goal: session.goal.clone(),
                     status: "active".to_string(),
@@ -677,8 +677,8 @@ impl NexusManager {
             //
             // No active session - send null state.
             //
-            self.send_to_client(client_id, ClientDirectMessage::NexusError {
-                message: "No active Nexus session".to_string(),
+            self.send_to_client(client_id, ClientDirectMessage::AgentChatError {
+                message: "No active AgentChat session".to_string(),
             }).await?;
         }
 
@@ -694,7 +694,7 @@ impl NexusManager {
         result: &common::NodeCommandResult,
     ) -> Result<bool> {
         //
-        // Check if this is a Nexus-related command response.
+        // Check if this is a AgentChat-related command response.
         //
         let session_lock = self.active_session.read().await;
         let session = match session_lock.as_ref() {
@@ -722,7 +722,7 @@ impl NexusManager {
         if let common::NodeCommandResult::Session(
             common::SessionCommandResult::Created { session_id: agent_session_id }
         ) = result {
-            info!("Nexus agent {} session created: {}", agent.nickname, agent_session_id);
+            info!("AgentChat agent {} session created: {}", agent.nickname, agent_session_id);
 
             //
             // Update agent with session ID and get pending system prompt.
@@ -733,7 +733,7 @@ impl NexusManager {
                 if let Some(session) = session_lock.as_mut() {
                     if let Some(agent_state) = session.agents.get_mut(&agent.id) {
                         agent_state.agent_session_id = Some(agent_session_id.clone());
-                        agent_state.status = NexusAgentStatus::Prompting;
+                        agent_state.status = AgentChatAgentStatus::Prompting;
                         pending_prompt = agent_state.pending_system_prompt.take();
                     } else {
                         pending_prompt = None;
@@ -746,16 +746,16 @@ impl NexusManager {
             //
             // Update database.
             //
-            self.db.update_nexus_agent_session_id(&agent.id, Some(&agent_session_id)).await?;
-            self.db.update_nexus_agent_status(&agent.id, "prompting").await?;
+            self.db.update_agent_chat_agent_session_id(&agent.id, Some(&agent_session_id)).await?;
+            self.db.update_agent_chat_agent_status(&agent.id, "prompting").await?;
 
             //
             // Notify client.
             //
-            self.send_to_client(client_id, ClientDirectMessage::NexusAgentStatusChanged {
+            self.send_to_client(client_id, ClientDirectMessage::AgentChatAgentStatusChanged {
                 session_id: session_id.clone(),
                 agent_id: agent.id.clone(),
-                status: NexusAgentStatus::Prompting,
+                status: AgentChatAgentStatus::Prompting,
             }).await?;
 
             //
@@ -792,7 +792,7 @@ impl NexusManager {
         if let common::NodeCommandResult::Session(
             common::SessionCommandResult::PromptResponse { response, .. }
         ) = result {
-            info!("Nexus agent {} responded (command {})", agent.nickname, command_id);
+            info!("AgentChat agent {} responded (command {})", agent.nickname, command_id);
 
             //
             // Parse the response.
@@ -812,17 +812,17 @@ impl NexusManager {
             let mut session_lock = self.active_session.write().await;
             if let Some(session) = session_lock.as_mut() {
                 if let Some(agent_state) = session.agents.get_mut(&agent.id) {
-                    agent_state.status = NexusAgentStatus::Ready;
+                    agent_state.status = AgentChatAgentStatus::Ready;
                 }
             }
             drop(session_lock);
 
-            self.db.update_nexus_agent_status(&agent.id, "ready").await?;
+            self.db.update_agent_chat_agent_status(&agent.id, "ready").await?;
 
-            self.send_to_client(client_id, ClientDirectMessage::NexusAgentStatusChanged {
+            self.send_to_client(client_id, ClientDirectMessage::AgentChatAgentStatusChanged {
                 session_id: session_id.clone(),
                 agent_id: agent.id.clone(),
-                status: NexusAgentStatus::Ready,
+                status: AgentChatAgentStatus::Ready,
             }).await?;
 
             //
@@ -926,7 +926,7 @@ impl NexusManager {
     ) -> Result<()> {
         let mut session_lock = self.active_session.write().await;
         let session = session_lock.as_mut()
-            .ok_or_else(|| anyhow::anyhow!("No active Nexus session"))?;
+            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
 
         if session.id != session_id {
             return Err(anyhow::anyhow!("Session ID mismatch"));
@@ -968,8 +968,8 @@ impl NexusManager {
             //
             if let Some(agent_state) = session.agents.get_mut(&agent_id) {
                 agent_state.waiting = false;
-                if agent_state.status == NexusAgentStatus::Waiting {
-                    agent_state.status = NexusAgentStatus::Ready;
+                if agent_state.status == AgentChatAgentStatus::Waiting {
+                    agent_state.status = AgentChatAgentStatus::Ready;
                 }
             }
 
@@ -1029,7 +1029,7 @@ impl NexusManager {
             let mut pending_idx = None;
 
             for agent in agents_by_precedence {
-                if agent.status != NexusAgentStatus::Ready || agent.waiting {
+                if agent.status != AgentChatAgentStatus::Ready || agent.waiting {
                     continue;
                 }
 
@@ -1061,7 +1061,7 @@ impl NexusManager {
             // Update agent status to prompting.
             //
             if let Some(agent_state) = session.agents.get_mut(&agent.id) {
-                agent_state.status = NexusAgentStatus::Prompting;
+                agent_state.status = AgentChatAgentStatus::Prompting;
             }
 
             drop(session_lock);
@@ -1069,10 +1069,10 @@ impl NexusManager {
             //
             // Notify client.
             //
-            self.send_to_client(client_id, ClientDirectMessage::NexusAgentStatusChanged {
+            self.send_to_client(client_id, ClientDirectMessage::AgentChatAgentStatusChanged {
                 session_id: session_id.to_string(),
                 agent_id: agent.id.clone(),
-                status: NexusAgentStatus::Prompting,
+                status: AgentChatAgentStatus::Prompting,
             }).await?;
 
             //
@@ -1135,28 +1135,28 @@ impl NexusManager {
         client_id: &str,
         session_id: &str,
         agent_id: &str,
-        action: NexusAction,
+        action: AgentChatAction,
     ) -> Result<()> {
         match action {
-            NexusAction::SendMessage { content } => {
+            AgentChatAction::SendMessage { content } => {
                 self.handle_agent_message(client_id, session_id, agent_id, &content).await?;
             }
-            NexusAction::JoinChannel { channel_name } => {
+            AgentChatAction::JoinChannel { channel_name } => {
                 self.handle_agent_join_channel(client_id, session_id, agent_id, &channel_name).await?;
             }
-            NexusAction::LeaveChannel => {
+            AgentChatAction::LeaveChannel => {
                 self.handle_agent_leave_channel(client_id, session_id, agent_id).await?;
             }
-            NexusAction::SetTopic { topic } => {
+            AgentChatAction::SetTopic { topic } => {
                 self.handle_agent_set_topic(client_id, session_id, agent_id, &topic).await?;
             }
-            NexusAction::ListChannels => {
+            AgentChatAction::ListChannels => {
                 self.handle_agent_list_channels(client_id, session_id, agent_id).await?;
             }
-            NexusAction::DirectMessage { nickname, message } => {
+            AgentChatAction::DirectMessage { nickname, message } => {
                 self.handle_agent_dm(client_id, session_id, agent_id, &nickname, &message).await?;
             }
-            NexusAction::Wait => {
+            AgentChatAction::Wait => {
                 self.handle_agent_wait(session_id, agent_id).await?;
             }
         }
@@ -1172,7 +1172,7 @@ impl NexusManager {
     ) -> Result<()> {
         let session_lock = self.active_session.read().await;
         let session = session_lock.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No active Nexus session"))?;
+            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
 
         let agent = session.agents.get(agent_id)
             .ok_or_else(|| anyhow::anyhow!("Agent not found"))?;
@@ -1186,7 +1186,7 @@ impl NexusManager {
             //
             // Insert message into database.
             //
-            let message_id = self.db.insert_nexus_message(
+            let message_id = self.db.insert_agent_chat_message(
                 session_id,
                 Some(channel_id),
                 &nickname,
@@ -1195,12 +1195,12 @@ impl NexusManager {
                 content,
             ).await?;
 
-            let message_info = NexusMessageInfo {
+            let message_info = AgentChatMessageInfo {
                 id: message_id,
                 channel_id: Some(channel_id.clone()),
                 sender_nickname: nickname.clone(),
                 recipient_nickname: None,
-                message_type: NexusMessageType::Channel,
+                message_type: AgentChatMessageType::Channel,
                 content: content.to_string(),
                 timestamp: Utc::now(),
             };
@@ -1208,7 +1208,7 @@ impl NexusManager {
             //
             // Notify client.
             //
-            self.send_to_client(client_id, ClientDirectMessage::NexusMessage {
+            self.send_to_client(client_id, ClientDirectMessage::AgentChatMessage {
                 session_id: session_id.to_string(),
                 message: message_info,
             }).await?;
@@ -1239,7 +1239,7 @@ impl NexusManager {
         //
         let mut session_lock = self.active_session.write().await;
         let session = session_lock.as_mut()
-            .ok_or_else(|| anyhow::anyhow!("No active Nexus session"))?;
+            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
 
         let old_channel_id = if let Some(agent) = session.agents.get_mut(agent_id) {
             let old = agent.current_channel_id.clone();
@@ -1255,12 +1255,12 @@ impl NexusManager {
         //
         // Update database.
         //
-        self.db.update_nexus_agent_channel(agent_id, Some(&channel_id)).await?;
+        self.db.update_agent_chat_agent_channel(agent_id, Some(&channel_id)).await?;
 
         //
         // Notify client.
         //
-        self.send_to_client(client_id, ClientDirectMessage::NexusAgentJoinedChannel {
+        self.send_to_client(client_id, ClientDirectMessage::AgentChatAgentJoinedChannel {
             session_id: session_id.to_string(),
             agent_id: agent_id.to_string(),
             channel_id: channel_id.clone(),
@@ -1301,7 +1301,7 @@ impl NexusManager {
     ) -> Result<()> {
         let mut session_lock = self.active_session.write().await;
         let session = session_lock.as_mut()
-            .ok_or_else(|| anyhow::anyhow!("No active Nexus session"))?;
+            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
 
         let old_channel_id = if let Some(agent) = session.agents.get_mut(agent_id) {
             let old = agent.current_channel_id.take();
@@ -1316,13 +1316,13 @@ impl NexusManager {
         //
         // Update database.
         //
-        self.db.update_nexus_agent_channel(agent_id, None).await?;
+        self.db.update_agent_chat_agent_channel(agent_id, None).await?;
 
         //
         // Notify client.
         //
         if let Some(ref channel_id) = old_channel_id {
-            self.send_to_client(client_id, ClientDirectMessage::NexusAgentLeftChannel {
+            self.send_to_client(client_id, ClientDirectMessage::AgentChatAgentLeftChannel {
                 session_id: session_id.to_string(),
                 agent_id: agent_id.to_string(),
                 channel_id: channel_id.clone(),
@@ -1351,7 +1351,7 @@ impl NexusManager {
     ) -> Result<()> {
         let session_lock = self.active_session.read().await;
         let session = session_lock.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No active Nexus session"))?;
+            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
 
         let agent = session.agents.get(agent_id)
             .ok_or_else(|| anyhow::anyhow!("Agent not found"))?;
@@ -1370,7 +1370,7 @@ impl NexusManager {
         //
         // Update database.
         //
-        self.db.update_nexus_channel_topic(&channel_id, Some(topic)).await?;
+        self.db.update_agent_chat_channel_topic(&channel_id, Some(topic)).await?;
 
         //
         // Update in-memory state.
@@ -1386,10 +1386,10 @@ impl NexusManager {
         //
         // Notify client.
         //
-        let member_count = self.db.count_nexus_channel_members(&channel_id).await?;
-        self.send_to_client(client_id, ClientDirectMessage::NexusChannelUpdated {
+        let member_count = self.db.count_agent_chat_channel_members(&channel_id).await?;
+        self.send_to_client(client_id, ClientDirectMessage::AgentChatChannelUpdated {
             session_id: session_id.to_string(),
-            channel: NexusChannelInfo {
+            channel: AgentChatChannelInfo {
                 id: channel_id.clone(),
                 name: channel_name,
                 topic: Some(topic.to_string()),
@@ -1419,7 +1419,7 @@ impl NexusManager {
     ) -> Result<()> {
         let session_lock = self.active_session.read().await;
         let session = session_lock.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No active Nexus session"))?;
+            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
 
         let agent = session.agents.get(agent_id)
             .ok_or_else(|| anyhow::anyhow!("Agent not found"))?;
@@ -1436,7 +1436,7 @@ impl NexusManager {
         //
         // Send as a command result DM to the agent.
         //
-        let message_id = self.db.insert_nexus_message(
+        let message_id = self.db.insert_agent_chat_message(
             session_id,
             None,
             "system",
@@ -1445,14 +1445,14 @@ impl NexusManager {
             &list_msg,
         ).await?;
 
-        self.send_to_client(client_id, ClientDirectMessage::NexusMessage {
+        self.send_to_client(client_id, ClientDirectMessage::AgentChatMessage {
             session_id: session_id.to_string(),
-            message: NexusMessageInfo {
+            message: AgentChatMessageInfo {
                 id: message_id,
                 channel_id: None,
                 sender_nickname: "system".to_string(),
                 recipient_nickname: Some(nickname.clone()),
-                message_type: NexusMessageType::CommandResult,
+                message_type: AgentChatMessageType::CommandResult,
                 content: list_msg.clone(),
                 timestamp: Utc::now(),
             },
@@ -1476,7 +1476,7 @@ impl NexusManager {
     ) -> Result<()> {
         let session_lock = self.active_session.read().await;
         let session = session_lock.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No active Nexus session"))?;
+            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
 
         let agent = session.agents.get(agent_id)
             .ok_or_else(|| anyhow::anyhow!("Agent not found"))?;
@@ -1499,7 +1499,7 @@ impl NexusManager {
         //
         // Insert message.
         //
-        let message_id = self.db.insert_nexus_message(
+        let message_id = self.db.insert_agent_chat_message(
             session_id,
             None,
             &sender_nickname,
@@ -1508,12 +1508,12 @@ impl NexusManager {
             content,
         ).await?;
 
-        let message_info = NexusMessageInfo {
+        let message_info = AgentChatMessageInfo {
             id: message_id,
             channel_id: None,
             sender_nickname: sender_nickname.clone(),
             recipient_nickname: Some(recipient_nickname.to_string()),
-            message_type: NexusMessageType::DirectMessage,
+            message_type: AgentChatMessageType::DirectMessage,
             content: content.to_string(),
             timestamp: Utc::now(),
         };
@@ -1521,7 +1521,7 @@ impl NexusManager {
         //
         // Notify client.
         //
-        self.send_to_client(client_id, ClientDirectMessage::NexusMessage {
+        self.send_to_client(client_id, ClientDirectMessage::AgentChatMessage {
             session_id: session_id.to_string(),
             message: message_info,
         }).await?;
@@ -1539,7 +1539,7 @@ impl NexusManager {
     async fn handle_agent_wait(&self, session_id: &str, agent_id: &str) -> Result<()> {
         let mut session_lock = self.active_session.write().await;
         let session = session_lock.as_mut()
-            .ok_or_else(|| anyhow::anyhow!("No active Nexus session"))?;
+            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
 
         if session.id != session_id {
             return Err(anyhow::anyhow!("Session ID mismatch"));
@@ -1547,7 +1547,7 @@ impl NexusManager {
 
         if let Some(agent) = session.agents.get_mut(agent_id) {
             agent.waiting = true;
-            agent.status = NexusAgentStatus::Waiting;
+            agent.status = AgentChatAgentStatus::Waiting;
         }
 
         Ok(())
@@ -1560,7 +1560,7 @@ impl NexusManager {
         channel_id: Option<&str>,
         content: &str,
     ) -> Result<()> {
-        let message_id = self.db.insert_nexus_message(
+        let message_id = self.db.insert_agent_chat_message(
             session_id,
             channel_id,
             "system",
@@ -1569,17 +1569,17 @@ impl NexusManager {
             content,
         ).await?;
 
-        let message_info = NexusMessageInfo {
+        let message_info = AgentChatMessageInfo {
             id: message_id,
             channel_id: channel_id.map(String::from),
             sender_nickname: "system".to_string(),
             recipient_nickname: None,
-            message_type: NexusMessageType::System,
+            message_type: AgentChatMessageType::System,
             content: content.to_string(),
             timestamp: Utc::now(),
         };
 
-        self.send_to_client(client_id, ClientDirectMessage::NexusMessage {
+        self.send_to_client(client_id, ClientDirectMessage::AgentChatMessage {
             session_id: session_id.to_string(),
             message: message_info,
         }).await?;

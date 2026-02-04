@@ -19,9 +19,9 @@ import {
   ChevronDown,
   Download,
 } from 'lucide-react';
-import { exportAtlasSession, downloadTextFile } from '../utils/export';
-import { useApp, type AtlasMessage, type AtlasToolExecution } from '../context/AppContext';
-import type { AtlasPlan, PlanStep } from '../api/types';
+import { exportOrchestratorSession, downloadTextFile } from '../utils/export';
+import { useApp, type OrchestratorMessage, type OrchestratorToolExecution } from '../context/AppContext';
+import type { OrchestratorPlan, PlanStep } from '../api/types';
 
 //
 // Plan step status icon.
@@ -41,7 +41,7 @@ function PlanStepIcon({ status }: { status: PlanStep['status'] }) {
 //
 // Plan display component.
 //
-function PlanDisplay({ plan }: { plan: AtlasPlan }) {
+function PlanDisplay({ plan }: { plan: OrchestratorPlan }) {
   const doneCount = plan.steps.filter((s) => s.status === 'done').length;
   const totalCount = plan.steps.length;
   const progressPercent = totalCount > 0 ? (doneCount / totalCount) * 100 : 0;
@@ -121,7 +121,7 @@ function PlanDisplay({ plan }: { plan: AtlasPlan }) {
 //
 // Single tool execution item.
 //
-function ToolExecutionItem({ exec }: { exec: AtlasToolExecution }) {
+function ToolExecutionItem({ exec }: { exec: OrchestratorToolExecution }) {
   const [expanded, setExpanded] = useState(false);
   const canExpand = !exec.executing && exec.result;
 
@@ -175,7 +175,7 @@ function ToolExecutionDisplay({
   executions,
   collapsible = false,
 }: {
-  executions: AtlasToolExecution[];
+  executions: OrchestratorToolExecution[];
   collapsible?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -239,7 +239,7 @@ function ToolExecutionDisplay({
 //
 // Message component.
 //
-function ChatMessage({ message }: { message: AtlasMessage }) {
+function ChatMessage({ message }: { message: OrchestratorMessage }) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
 
@@ -259,7 +259,7 @@ function ChatMessage({ message }: { message: AtlasMessage }) {
         {!isUser && !isSystem && (
           <div className="flex items-center gap-2 mb-2 text-[var(--accent-success)]">
             <Bot size={16} />
-            <span className="text-xs font-medium">Atlas</span>
+            <span className="text-xs font-medium">Orchestrator</span>
           </div>
         )}
 
@@ -299,14 +299,14 @@ function StreamingMessage({
   toolExecutions,
 }: {
   content: string;
-  toolExecutions: AtlasToolExecution[];
+  toolExecutions: OrchestratorToolExecution[];
 }) {
   return (
     <div className="flex justify-start">
       <div className="max-w-[85%] ascii-box px-4 py-3 bg-[var(--bg-secondary)] text-[var(--text-highlight)]/80">
         <div className="flex items-center gap-2 mb-2 text-[var(--accent-success)]">
           <Bot size={16} />
-          <span className="text-xs font-medium">Atlas</span>
+          <span className="text-xs font-medium">Orchestrator</span>
           <Loader2 size={12} className="animate-spin ml-auto" />
         </div>
 
@@ -329,18 +329,18 @@ function StreamingMessage({
   );
 }
 
-export function AtlasPage() {
-  const { state, atlasStart, atlasStop, atlasCancel, atlasPrompt, getConfig } = useApp();
-  const { atlas } = state;
+export function OrchestratorPage() {
+  const { state, orchestratorStart, orchestratorStop, orchestratorCancel, orchestratorPrompt, getConfig } = useApp();
+  const { orchestrator } = state;
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   //
-  // Fetch config on mount to check if Atlas is configured.
+  // Fetch config on mount to check if Orchestrator is configured.
   //
   useEffect(() => {
-    getConfig(['llm_feature_atlas', 'llm_model_definitions']);
+    getConfig(['llm_feature_orchestrator', 'llm_model_definitions']);
   }, [getConfig]);
 
   const scrollToBottom = () => {
@@ -349,43 +349,43 @@ export function AtlasPage() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [atlas.messages, atlas.streamingContent, atlas.currentToolExecutions]);
+  }, [orchestrator.messages, orchestrator.streamingContent, orchestrator.currentToolExecutions]);
 
   //
   // Focus input when loading completes.
   //
   useEffect(() => {
-    if (!atlas.isLoading && atlas.sessionActive) {
+    if (!orchestrator.isLoading && orchestrator.sessionActive) {
       inputRef.current?.focus();
     }
-  }, [atlas.isLoading, atlas.sessionActive]);
+  }, [orchestrator.isLoading, orchestrator.sessionActive]);
 
   const handleSendMessage = () => {
-    if (!input.trim() || atlas.isLoading) return;
-    atlasPrompt(input.trim());
+    if (!input.trim() || orchestrator.isLoading) return;
+    orchestratorPrompt(input.trim());
     setInput('');
   };
 
   const handleNewSession = () => {
-    atlasStart();
+    orchestratorStart();
   };
 
   const handleStopSession = () => {
-    atlasStop();
+    orchestratorStop();
   };
 
   const handleExport = () => {
-    if (atlas.messages.length === 0) return;
-    const content = exportAtlasSession(atlas.messages, atlas.tokenUsage);
+    if (orchestrator.messages.length === 0) return;
+    const content = exportOrchestratorSession(orchestrator.messages, orchestrator.tokenUsage);
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    downloadTextFile(content, `atlas-session-${timestamp}.md`);
+    downloadTextFile(content, `orchestrator-session-${timestamp}.md`);
   };
 
   //
-  // Check if Atlas is configured via the LLM feature system.
+  // Check if Orchestrator is configured via the LLM feature system.
   //
-  const atlasConfig = (() => {
-    const selectedModelName = state.config.llm_feature_atlas;
+  const orchestratorConfig = (() => {
+    const selectedModelName = state.config.llm_feature_orchestrator;
     if (!selectedModelName) return null;
 
     const modelDefsRaw = state.config.llm_model_definitions;
@@ -403,7 +403,7 @@ export function AtlasPage() {
     return null;
   })();
 
-  const isConfigured = !!atlasConfig;
+  const isConfigured = !!orchestratorConfig;
 
   return (
     <div className="h-full flex flex-col">
@@ -419,16 +419,16 @@ export function AtlasPage() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-highlight">Atlas</h1>
+              <h1 className="text-2xl font-bold text-highlight">Orchestrator</h1>
               <span className="px-2 py-0.5 text-xs font-medium bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] rounded">
                 Experimental
               </span>
             </div>
             <p className="text-muted mt-1">
               AI-powered red teaming orchestration
-              {atlasConfig && (
+              {orchestratorConfig && (
                 <span className="ml-2 text-[var(--accent-info)]">
-                  · {atlasConfig.provider}/{atlasConfig.model}
+                  · {orchestratorConfig.provider}/{orchestratorConfig.model}
                 </span>
               )}
             </p>
@@ -443,14 +443,14 @@ export function AtlasPage() {
           */}
           <button
             onClick={handleExport}
-            disabled={atlas.messages.length === 0}
+            disabled={orchestrator.messages.length === 0}
             className="flex items-center gap-2 px-3 py-2 bg-[var(--bg-secondary)] border border-subtle text-muted hover:text-[var(--text-primary)] hover:border-[var(--border-active)] transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             title="Export session transcript"
           >
             <Download size={16} />
           </button>
 
-          {atlas.sessionActive ? (
+          {orchestrator.sessionActive ? (
             <button
               onClick={handleStopSession}
               className="flex items-center gap-2 px-4 py-2 bg-[var(--accent-error)]/20 text-[var(--accent-error)]  hover:bg-[var(--accent-error)]/30 transition-colors text-sm"
@@ -461,10 +461,10 @@ export function AtlasPage() {
           ) : (
             <button
               onClick={handleNewSession}
-              disabled={!isConfigured || atlas.isStarting}
+              disabled={!isConfigured || orchestrator.isStarting}
               className="flex items-center gap-2 px-4 py-2 bg-[var(--accent-purple)]/20 text-[var(--accent-purple)]  hover:bg-[var(--accent-purple)]/30 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {atlas.isStarting ? (
+              {orchestrator.isStarting ? (
                 <>
                   <Loader2 size={16} className="animate-spin" />
                   Starting...
@@ -490,10 +490,10 @@ export function AtlasPage() {
           <AlertCircle size={20} className="text-[var(--accent-warning)] mt-0.5 flex-shrink-0" />
           <div>
             <p className="text-sm font-medium text-[var(--accent-warning)]">
-              Atlas Not Configured
+              Orchestrator Not Configured
             </p>
             <p className="text-xs text-muted mt-1">
-              Go to Settings &gt; Atlas to configure an LLM provider and API key.
+              Go to Settings &gt; Orchestrator to configure an LLM provider and API key.
             </p>
           </div>
         </div>
@@ -504,8 +504,8 @@ export function AtlasPage() {
       // Plan display.
       //
       */}
-      {atlas.currentPlan && atlas.currentPlan.steps.length > 0 && (
-        <PlanDisplay plan={atlas.currentPlan} />
+      {orchestrator.currentPlan && orchestrator.currentPlan.steps.length > 0 && (
+        <PlanDisplay plan={orchestrator.currentPlan} />
       )}
 
       {/*
@@ -520,7 +520,7 @@ export function AtlasPage() {
         //
         */}
         <div className="flex-1 overflow-auto p-6 space-y-4">
-          {atlas.messages.map((msg) => (
+          {orchestrator.messages.map((msg) => (
             <ChatMessage key={msg.id} message={msg} />
           ))}
 
@@ -529,10 +529,10 @@ export function AtlasPage() {
           // Streaming content.
           //
           */}
-          {atlas.isLoading && (
+          {orchestrator.isLoading && (
             <StreamingMessage
-              content={atlas.streamingContent}
-              toolExecutions={atlas.currentToolExecutions}
+              content={orchestrator.streamingContent}
+              toolExecutions={orchestrator.currentToolExecutions}
             />
           )}
 
@@ -553,16 +553,16 @@ export function AtlasPage() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
               placeholder={
-                atlas.sessionActive
-                  ? 'Ask Atlas anything...'
+                orchestrator.sessionActive
+                  ? 'Ask Orchestrator anything...'
                   : 'Start a session to begin chatting...'
               }
               className="flex-1 bg-[var(--bg-secondary)] border border-subtle  px-4 py-3 text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:outline-none focus:border-[var(--border-active)]"
-              disabled={!atlas.sessionActive || atlas.isLoading}
+              disabled={!orchestrator.sessionActive || orchestrator.isLoading}
             />
-            {atlas.isLoading ? (
+            {orchestrator.isLoading ? (
               <button
-                onClick={atlasCancel}
+                onClick={orchestratorCancel}
                 className="px-4 py-3 bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors"
                 title="Stop generation"
               >
@@ -571,7 +571,7 @@ export function AtlasPage() {
             ) : (
               <button
                 onClick={handleSendMessage}
-                disabled={!input.trim() || !atlas.sessionActive}
+                disabled={!input.trim() || !orchestrator.sessionActive}
                 className="px-4 py-3 bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Send size={20} />
@@ -592,12 +592,12 @@ export function AtlasPage() {
           <span>
             {state.operations.filter((op) => op.status === 'Running').length} operations running
           </span>
-          {atlas.sessionActive && (
-            <span className="text-[var(--accent-purple)]">Atlas session active</span>
+          {orchestrator.sessionActive && (
+            <span className="text-[var(--accent-purple)]">Orchestrator session active</span>
           )}
-          {atlas.tokenUsage && (
-            <span className="text-[var(--accent-info)]" title={`Prompt: ${atlas.tokenUsage.promptTokens.toLocaleString()} | Completion: ${atlas.tokenUsage.completionTokens.toLocaleString()}`}>
-              {atlas.tokenUsage.totalTokens.toLocaleString()} tokens
+          {orchestrator.tokenUsage && (
+            <span className="text-[var(--accent-info)]" title={`Prompt: ${orchestrator.tokenUsage.promptTokens.toLocaleString()} | Completion: ${orchestrator.tokenUsage.completionTokens.toLocaleString()}`}>
+              {orchestrator.tokenUsage.totalTokens.toLocaleString()} tokens
             </span>
           )}
         </div>

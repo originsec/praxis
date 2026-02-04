@@ -424,7 +424,7 @@ export interface ChainExecutionUpdate {
 }
 
 //
-// Atlas Plan types.
+// Orchestrator Plan types.
 //
 export type PlanStepStatus = 'not_started' | 'in_progress' | 'done';
 
@@ -433,7 +433,7 @@ export interface PlanStep {
   status: PlanStepStatus;
 }
 
-export interface AtlasPlan {
+export interface OrchestratorPlan {
   steps: PlanStep[];
   summary?: string;
   current_step_description?: string;
@@ -538,21 +538,21 @@ export interface DiscoveredLlmEndpoint {
 }
 
 //
-// Nexus types - IRC-style multi-agent chat system.
+// Agent Chat types - IRC-style multi-agent chat system.
 //
-export type NexusAgentStatus = 'Initializing' | 'Ready' | 'Waiting' | 'Prompting' | 'Disconnected';
+export type AgentChatAgentStatus = 'Initializing' | 'Ready' | 'Waiting' | 'Prompting' | 'Disconnected';
 
-export interface NexusAgentInfo {
+export interface AgentChatAgentInfo {
   id: string;
   node_id: string;
   agent_short_name: string;
   nickname: string;
   precedence: number;
   current_channel_id: string | null;
-  status: NexusAgentStatus;
+  status: AgentChatAgentStatus;
 }
 
-export interface NexusChannelInfo {
+export interface AgentChatChannelInfo {
   id: string;
   name: string;
   topic: string | null;
@@ -560,24 +560,24 @@ export interface NexusChannelInfo {
   created_by: string;
 }
 
-export type NexusMessageType = 'Channel' | 'DirectMessage' | 'System' | 'CommandResult';
+export type AgentChatMessageType = 'Channel' | 'DirectMessage' | 'System' | 'CommandResult';
 
-export interface NexusMessageInfo {
+export interface AgentChatMessageInfo {
   id: number;
   channel_id: string | null;
   sender_nickname: string;
   recipient_nickname: string | null;
-  message_type: NexusMessageType;
+  message_type: AgentChatMessageType;
   content: string;
   timestamp: string;
 }
 
-export interface NexusSessionState {
+export interface AgentChatSessionState {
   id: string;
   goal: string | null;
   status: string;
-  agents: NexusAgentInfo[];
-  channels: NexusChannelInfo[];
+  agents: AgentChatAgentInfo[];
+  channels: AgentChatChannelInfo[];
   created_at: string;
 }
 
@@ -646,17 +646,17 @@ export type BrowserMessage =
   //
   | { type: 'recon_get'; node_id: string; agent_short_name: string }
   //
-  // Nexus messages.
+  // Agent Chat messages.
   //
-  | { type: 'nexus_start'; goal: string | null; yolo_mode: boolean }
-  | { type: 'nexus_stop'; session_id: string }
-  | { type: 'nexus_add_agent'; session_id: string; node_id: string; agent_short_name: string }
-  | { type: 'nexus_remove_agent'; session_id: string; agent_id: string }
-  | { type: 'nexus_reorder_agents'; session_id: string; agent_ids: string[] }
-  | { type: 'nexus_send_message'; session_id: string; content: string; channel_id: string | null; recipient_nickname: string | null }
-  | { type: 'nexus_join_channel'; session_id: string; channel_name: string }
-  | { type: 'nexus_get_history'; session_id: string; channel_id: string | null; limit: number }
-  | { type: 'nexus_get_state'; session_id: string | null };
+  | { type: 'agent_chat_start'; goal: string | null; yolo_mode: boolean }
+  | { type: 'agent_chat_stop'; session_id: string }
+  | { type: 'agent_chat_add_agent'; session_id: string; node_id: string; agent_short_name: string }
+  | { type: 'agent_chat_remove_agent'; session_id: string; agent_id: string }
+  | { type: 'agent_chat_reorder_agents'; session_id: string; agent_ids: string[] }
+  | { type: 'agent_chat_send_message'; session_id: string; content: string; channel_id: string | null; recipient_nickname: string | null }
+  | { type: 'agent_chat_join_channel'; session_id: string; channel_name: string }
+  | { type: 'agent_chat_get_history'; session_id: string; channel_id: string | null; limit: number }
+  | { type: 'agent_chat_get_state'; session_id: string | null };
 
 //
 // WebSocket Messages (Server -> Browser).
@@ -682,7 +682,7 @@ export type ServerMessage =
   | { type: 'atlas_content'; content: string }
   | { type: 'atlas_tool_executing'; name: string; input?: string }
   | { type: 'atlas_tool_executed'; name: string; display: string; success: boolean; result: string }
-  | { type: 'atlas_plan_updated'; plan: AtlasPlan }
+  | { type: 'orchestrator_plan_updated'; plan: OrchestratorPlan }
   | { type: 'atlas_done' }
   | { type: 'atlas_stopped' }
   | { type: 'atlas_error'; message: string }
@@ -728,18 +728,18 @@ export type ServerMessage =
   //
   | { type: 'recon_get_response'; node_id: string; agent_short_name: string; recon_result: ReconResult | null; performed_at: string | null; is_semantic: boolean | null }
   //
-  // Nexus messages.
+  // Agent Chat messages.
   //
-  | { type: 'nexus_session_started'; session_id: string; goal: string | null }
-  | { type: 'nexus_session_stopped'; session_id: string }
-  | { type: 'nexus_agent_added'; session_id: string; agent: NexusAgentInfo }
-  | { type: 'nexus_agent_removed'; session_id: string; agent_id: string }
-  | { type: 'nexus_agent_status_changed'; session_id: string; agent_id: string; status: NexusAgentStatus }
-  | { type: 'nexus_channel_created'; session_id: string; channel: NexusChannelInfo }
-  | { type: 'nexus_channel_updated'; session_id: string; channel: NexusChannelInfo }
-  | { type: 'nexus_agent_joined_channel'; session_id: string; agent_id: string; channel_id: string }
-  | { type: 'nexus_agent_left_channel'; session_id: string; agent_id: string; channel_id: string }
-  | { type: 'nexus_message'; session_id: string; message: NexusMessageInfo }
-  | { type: 'nexus_state_update'; session: NexusSessionState }
-  | { type: 'nexus_history_response'; session_id: string; channel_id: string | null; messages: NexusMessageInfo[] }
-  | { type: 'nexus_error'; message: string };
+  | { type: 'agent_chat_session_started'; session_id: string; goal: string | null }
+  | { type: 'agent_chat_session_stopped'; session_id: string }
+  | { type: 'agent_chat_agent_added'; session_id: string; agent: AgentChatAgentInfo }
+  | { type: 'agent_chat_agent_removed'; session_id: string; agent_id: string }
+  | { type: 'agent_chat_agent_status_changed'; session_id: string; agent_id: string; status: AgentChatAgentStatus }
+  | { type: 'agent_chat_channel_created'; session_id: string; channel: AgentChatChannelInfo }
+  | { type: 'agent_chat_channel_updated'; session_id: string; channel: AgentChatChannelInfo }
+  | { type: 'agent_chat_agent_joined_channel'; session_id: string; agent_id: string; channel_id: string }
+  | { type: 'agent_chat_agent_left_channel'; session_id: string; agent_id: string; channel_id: string }
+  | { type: 'agent_chat_message'; session_id: string; message: AgentChatMessageInfo }
+  | { type: 'agent_chat_state_update'; session: AgentChatSessionState }
+  | { type: 'agent_chat_history_response'; session_id: string; channel_id: string | null; messages: AgentChatMessageInfo[] }
+  | { type: 'agent_chat_error'; message: string };

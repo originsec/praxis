@@ -2,7 +2,7 @@
 // M365 Copilot-specific DevTools adapter implementation.
 //
 
-use crate::agent_connectors::modes::devtools::{wait_for_element, DevToolsAdapter, DevToolsConfig};
+use crate::agent_connectors::modes::devtools::{wait_for_element, DevToolsAdapter, DevToolsConfig, ResponseCheckState};
 use anyhow::Result;
 use chromiumoxide::page::Page;
 
@@ -51,6 +51,15 @@ impl DevToolsAdapter for M365DevToolsAdapter {
         page: &Page,
         initial_count: usize,
     ) -> Result<Option<String>> {
+        let state = self.check_response_state(page, initial_count).await?;
+        Ok(state.response)
+    }
+
+    async fn check_response_state(
+        &self,
+        page: &Page,
+        initial_count: usize,
+    ) -> Result<ResponseCheckState> {
         //
         // Check message count, toolbar count, and last message text via JavaScript.
         //
@@ -82,11 +91,13 @@ impl DevToolsAdapter for M365DevToolsAdapter {
             .into_value()?;
 
         let message_count = result["messageCount"].as_u64().unwrap_or(0) as usize;
-        let is_generating = result["isGenerating"].as_bool().unwrap_or(true);
+        let is_generating = result["isGenerating"].as_bool().unwrap_or(false);
         let response_text = result["responseText"]
             .as_str()
             .unwrap_or("")
             .to_string();
+
+        let has_new_messages = message_count > initial_count;
 
         common::log_debug!(
             "check_response: messages={}, initial={}, generating={}, response_len={}",
@@ -94,34 +105,28 @@ impl DevToolsAdapter for M365DevToolsAdapter {
         );
 
         //
-        // Check if we have a new message (response).
+        // Determine if response is complete.
         //
 
-        if message_count <= initial_count {
-            common::log_debug!("check_response: no new messages yet");
-            return Ok(None);
-        }
-
-        //
-        // Check if still generating.
-        //
-
-        if is_generating {
-            common::log_debug!("check_response: still generating");
-            return Ok(None);
-        }
-
-        //
-        // Check if we have text content.
-        //
-
-        if !response_text.is_empty() {
+        let response = if has_new_messages && !is_generating && !response_text.is_empty() {
             common::log_debug!("check_response: complete!");
-            return Ok(Some(response_text.trim().to_string()));
-        }
+            Some(response_text.trim().to_string())
+        } else {
+            if !has_new_messages {
+                common::log_debug!("check_response: no new messages yet");
+            } else if is_generating {
+                common::log_debug!("check_response: still generating");
+            } else {
+                common::log_debug!("check_response: waiting for text content");
+            }
+            None
+        };
 
-        common::log_debug!("check_response: waiting for text content");
-        Ok(None)
+        Ok(ResponseCheckState {
+            response,
+            is_generating,
+            has_new_messages,
+        })
     }
 
     async fn wait_for_submit_ready(&self, page: &Page) -> anyhow::Result<()> {
@@ -137,7 +142,7 @@ impl DevToolsAdapter for M365DevToolsAdapter {
 
         let input_selector = self.input_selector();
         common::log_debug!("Waiting for input element: {}", input_selector);
-        wait_for_element(page, input_selector, 30, 200).await;
+        wait_for_element(page, input_selector, 30, 300).await;
 
         //
         // Click the Work/Web toggle button. Defaults to "Work" if not specified.
@@ -158,7 +163,7 @@ impl DevToolsAdapter for M365DevToolsAdapter {
             }
         };
 
-        if let Some(button) = wait_for_element(page, toggle_selector, 3, 200).await {
+        if let Some(button) = wait_for_element(page, toggle_selector, 3, 300).await {
             common::log_debug!("Clicking {} toggle button", working_dir);
             if let Err(e) = button.click().await {
                 common::log_warn!("Failed to click {} toggle: {}", working_dir, e);
@@ -170,7 +175,7 @@ impl DevToolsAdapter for M365DevToolsAdapter {
         //
 
         let menu_selector = r#"button[data-automation-id="newPrivateChatMenuButton"]"#;
-        if let Some(menu_button) = wait_for_element(page, menu_selector, 3, 200).await {
+        if let Some(menu_button) = wait_for_element(page, menu_selector, 3, 300).await {
             common::log_debug!("Clicking new private chat menu button");
             if let Err(e) = menu_button.click().await {
                 common::log_warn!("Failed to click menu button: {}", e);
@@ -178,7 +183,7 @@ impl DevToolsAdapter for M365DevToolsAdapter {
             }
 
             let new_chat_selector = r#"div[data-automation-id="newPrivateChatButton"]"#;
-            if let Some(chat_button) = wait_for_element(page, new_chat_selector, 5, 200).await {
+            if let Some(chat_button) = wait_for_element(page, new_chat_selector, 5, 300).await {
                 common::log_debug!("Clicking new private chat button");
                 if let Err(e) = chat_button.click().await {
                     common::log_warn!("Failed to click new private chat button: {}", e);

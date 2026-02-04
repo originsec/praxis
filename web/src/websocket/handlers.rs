@@ -89,17 +89,17 @@ pub async fn handle_browser_message(
         BrowserMessage::OpDefGet { full_name } => {
             state.rabbitmq.get_op_def(full_name).await?;
         }
-        BrowserMessage::AtlasStart => {
-            super::handle_atlas_start(state, connection_id).await?;
+        BrowserMessage::OrchestratorStart => {
+            super::handle_orchestrator_start(state, connection_id).await?;
         }
-        BrowserMessage::AtlasPrompt { message } => {
-            super::handle_atlas_prompt(state, connection_id, &message).await?;
+        BrowserMessage::OrchestratorPrompt { message } => {
+            super::handle_orchestrator_prompt(state, connection_id, &message).await?;
         }
-        BrowserMessage::AtlasStop => {
-            super::handle_atlas_stop(state, connection_id).await?;
+        BrowserMessage::OrchestratorStop => {
+            super::handle_orchestrator_stop(state, connection_id).await?;
         }
-        BrowserMessage::AtlasCancel => {
-            super::handle_atlas_cancel(state, connection_id).await?;
+        BrowserMessage::OrchestratorCancel => {
+            super::handle_orchestrator_cancel(state, connection_id).await?;
         }
 
         //
@@ -257,34 +257,34 @@ pub async fn handle_browser_message(
         }
 
         //
-        // Nexus messages.
+        // AgentChat messages.
         //
-        BrowserMessage::NexusStart { goal, yolo_mode } => {
-            state.rabbitmq.nexus_start(goal, yolo_mode).await?;
+        BrowserMessage::AgentChatStart { goal, yolo_mode } => {
+            state.rabbitmq.agent_chat_start(goal, yolo_mode).await?;
         }
-        BrowserMessage::NexusStop { session_id } => {
-            state.rabbitmq.nexus_stop(session_id).await?;
+        BrowserMessage::AgentChatStop { session_id } => {
+            state.rabbitmq.agent_chat_stop(session_id).await?;
         }
-        BrowserMessage::NexusAddAgent { session_id, node_id, agent_short_name } => {
-            state.rabbitmq.nexus_add_agent(session_id, node_id, agent_short_name).await?;
+        BrowserMessage::AgentChatAddAgent { session_id, node_id, agent_short_name } => {
+            state.rabbitmq.agent_chat_add_agent(session_id, node_id, agent_short_name).await?;
         }
-        BrowserMessage::NexusRemoveAgent { session_id, agent_id } => {
-            state.rabbitmq.nexus_remove_agent(session_id, agent_id).await?;
+        BrowserMessage::AgentChatRemoveAgent { session_id, agent_id } => {
+            state.rabbitmq.agent_chat_remove_agent(session_id, agent_id).await?;
         }
-        BrowserMessage::NexusReorderAgents { session_id, agent_ids } => {
-            state.rabbitmq.nexus_reorder_agents(session_id, agent_ids).await?;
+        BrowserMessage::AgentChatReorderAgents { session_id, agent_ids } => {
+            state.rabbitmq.agent_chat_reorder_agents(session_id, agent_ids).await?;
         }
-        BrowserMessage::NexusSendMessage { session_id, content, channel_id, recipient_nickname } => {
-            state.rabbitmq.nexus_send_message(session_id, content, channel_id, recipient_nickname).await?;
+        BrowserMessage::AgentChatSendMessage { session_id, content, channel_id, recipient_nickname } => {
+            state.rabbitmq.agent_chat_send_message(session_id, content, channel_id, recipient_nickname).await?;
         }
-        BrowserMessage::NexusJoinChannel { session_id, channel_name } => {
-            state.rabbitmq.nexus_join_channel(session_id, channel_name).await?;
+        BrowserMessage::AgentChatJoinChannel { session_id, channel_name } => {
+            state.rabbitmq.agent_chat_join_channel(session_id, channel_name).await?;
         }
-        BrowserMessage::NexusGetHistory { session_id, channel_id, limit } => {
-            state.rabbitmq.nexus_get_history(session_id, channel_id, limit).await?;
+        BrowserMessage::AgentChatGetHistory { session_id, channel_id, limit } => {
+            state.rabbitmq.agent_chat_get_history(session_id, channel_id, limit).await?;
         }
-        BrowserMessage::NexusGetState { session_id } => {
-            state.rabbitmq.nexus_get_state(session_id).await?;
+        BrowserMessage::AgentChatGetState { session_id } => {
+            state.rabbitmq.agent_chat_get_state(session_id).await?;
         }
     }
 
@@ -293,11 +293,11 @@ pub async fn handle_browser_message(
 
 async fn handle_config_get(state: &Arc<WsState>, keys: Vec<String>) -> anyhow::Result<()> {
     //
-    // Split keys into local (atlas_*) and service (semantic_parser_*,
+    // Split keys into local (orchestrator_*) and service (semantic_parser_*,
     // semantic_op_*).
     //
     let (local_keys, service_keys): (Vec<_>, Vec<_>) =
-        keys.into_iter().partition(|k| k.starts_with("atlas_"));
+        keys.into_iter().partition(|k| k.starts_with("orchestrator_"));
 
     //
     // Get local config values.
@@ -327,11 +327,11 @@ async fn handle_config_set(
     values: HashMap<String, String>,
 ) -> anyhow::Result<()> {
     //
-    // Split values into local (atlas_*) and service (semantic_parser_*,
+    // Split values into local (orchestrator_*) and service (semantic_parser_*,
     // semantic_op_*).
     //
     let (local_values, service_values): (HashMap<_, _>, HashMap<_, _>) =
-        values.into_iter().partition(|(k, _)| k.starts_with("atlas_"));
+        values.into_iter().partition(|(k, _)| k.starts_with("orchestrator_"));
 
     //
     // Save local config values.

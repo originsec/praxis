@@ -71,19 +71,6 @@ let result = parser.parse(text, prompt, schema).await?;
 // Returns: {"name": "mypackage", "version": "1.2.3"}
 ```
 
-### Raw Parsing
-
-For more control over the prompt:
-
-```rust
-let full_prompt = format!(
-    "Parse the following config and extract all database settings:\n\n{}",
-    config_contents
-);
-
-let result = parser.parse_raw(&full_prompt, schema).await?;
-```
-
 ## Provider Support
 
 The parser supports multiple LLM providers:

@@ -2,7 +2,7 @@ use super::AppState;
 
 impl AppState {
     //
-    // --- Command tracking for Atlas ---.
+    // --- Command tracking for Orchestrator ---.
     //
 
     /// Add a pending command ID

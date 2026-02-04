@@ -12,33 +12,35 @@ import {
   AlertTriangle,
   Loader2,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useApp } from '../context/AppContext';
-import type { NexusAgentInfo, NexusChannelInfo, NexusMessageInfo } from '../api/types';
+import type { AgentChatAgentInfo, AgentChatChannelInfo, AgentChatMessageInfo } from '../api/types';
 
 //
-// Color palette for agent nicknames.
+// Color palette for agent nicknames (uses CSS variables for theme support).
 //
 const AGENT_COLORS = [
-  '#9ee675', // green
-  '#00ffff', // cyan
-  '#cc66ff', // purple
-  '#ffd700', // yellow
-  '#ff9966', // orange
-  '#66ccff', // light blue
-  '#ff66b2', // pink
-  '#99ff99', // light green
+  'var(--agent-color-1)',
+  'var(--agent-color-2)',
+  'var(--agent-color-3)',
+  'var(--agent-color-4)',
+  'var(--agent-color-5)',
+  'var(--agent-color-6)',
+  'var(--agent-color-7)',
+  'var(--agent-color-8)',
 ];
 
 //
 // User nickname color (distinct from agents).
 //
 const USER_COLOR = '#f87171'; // red
-const USER_NICKNAME = 'nexus_user';
+const USER_NICKNAME = 'agentChat_user';
 
 //
 // Get color for a nickname based on agent list.
 //
-function getNicknameColor(nickname: string, agents: NexusAgentInfo[]): string {
+function getNicknameColor(nickname: string, agents: AgentChatAgentInfo[]): string {
   if (nickname === USER_NICKNAME) {
     return USER_COLOR;
   }
@@ -61,12 +63,12 @@ function getNicknameColor(nickname: string, agents: NexusAgentInfo[]): string {
 //
 // Message component for IRC-style display.
 //
-function NexusMessageItem({
+function AgentChatMessageItem({
   message,
   agents,
 }: {
-  message: NexusMessageInfo;
-  agents: NexusAgentInfo[];
+  message: AgentChatMessageInfo;
+  agents: AgentChatAgentInfo[];
 }) {
   const timestamp = new Date(message.timestamp).toLocaleTimeString([], {
     hour: '2-digit',
@@ -87,7 +89,9 @@ function NexusMessageItem({
           <span style={{ color: nicknameColor }}>&lt;{message.sender_nickname}&gt;</span>{' '}
         </>
       )}
-      <span className={isSystem ? 'text-muted' : 'text-[var(--text-secondary)]'}>{message.content}</span>
+      <span className={`${isSystem ? 'text-muted' : 'text-[var(--text-secondary)]'} prose prose-xs prose-invert max-w-none inline [&_p]:inline [&_p]:m-0 [&_code]:text-[var(--accent-info)] [&_code]:bg-[var(--bg-tertiary)] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_pre]:my-1 [&_pre]:p-2 [&_pre]:bg-[var(--bg-tertiary)] [&_pre]:rounded [&_strong]:text-[var(--text-highlight)] [&_em]:text-[var(--text-secondary)]`}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+      </span>
     </div>
   );
 }
@@ -100,7 +104,7 @@ function AgentListItem({
   agentIndex,
   onRemove,
 }: {
-  agent: NexusAgentInfo;
+  agent: AgentChatAgentInfo;
   agentIndex: number;
   onRemove: (id: string) => void;
 }) {
@@ -148,7 +152,7 @@ function ChannelListItem({
   isSelected,
   onClick,
 }: {
-  channel: NexusChannelInfo;
+  channel: AgentChatChannelInfo;
   isSelected: boolean;
   onClick: () => void;
 }) {
@@ -199,7 +203,7 @@ function AddAgentModal({
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-[var(--bg-secondary)] border border-subtle p-4 w-80">
-        <h3 className="text-sm font-medium mb-4">Add Agent to Nexus</h3>
+        <h3 className="text-sm font-medium mb-4">Add Agent to AgentChat</h3>
 
         <div className="space-y-3">
           <div>
@@ -260,18 +264,18 @@ function AddAgentModal({
 }
 
 //
-// Main NexusPage component.
+// Main AgentChatPage component.
 //
-export default function NexusPage() {
+export default function AgentChatPage() {
   const {
     state,
-    nexusStart,
-    nexusStop,
-    nexusAddAgent,
-    nexusRemoveAgent,
-    nexusSendMessage,
-    nexusSetCurrentChannel,
-    nexusClearError,
+    agentChatStart,
+    agentChatStop,
+    agentChatAddAgent,
+    agentChatRemoveAgent,
+    agentChatSendMessage,
+    agentChatSetCurrentChannel,
+    agentChatClearError,
   } = useApp();
 
   const [goalInput, setGoalInput] = useState('');
@@ -280,7 +284,7 @@ export default function NexusPage() {
   const [yoloMode, setYoloMode] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { session, currentChannelId, messages, isLoading, error } = state.nexus;
+  const { session, currentChannelId, messages, isLoading, error } = state.agentChat;
   const isActive = !!session;
 
   //
@@ -308,15 +312,15 @@ export default function NexusPage() {
   // Handle start session.
   //
   const handleStart = useCallback(() => {
-    nexusStart(goalInput || null, yoloMode);
-  }, [nexusStart, goalInput, yoloMode]);
+    agentChatStart(goalInput || null, yoloMode);
+  }, [agentChatStart, goalInput, yoloMode]);
 
   //
   // Handle stop session.
   //
   const handleStop = useCallback(() => {
-    nexusStop();
-  }, [nexusStop]);
+    agentChatStop();
+  }, [agentChatStop]);
 
   //
   // Handle send message.
@@ -332,23 +336,23 @@ export default function NexusPage() {
       const recipient = parts[0];
       const content = parts.slice(1).join(' ');
       if (recipient && content) {
-        nexusSendMessage(content, undefined, recipient);
+        agentChatSendMessage(content, undefined, recipient);
       }
     } else {
-      nexusSendMessage(messageInput);
+      agentChatSendMessage(messageInput);
     }
 
     setMessageInput('');
-  }, [messageInput, nexusSendMessage]);
+  }, [messageInput, agentChatSendMessage]);
 
   //
   // Handle add agent.
   //
   const handleAddAgent = useCallback(
     (nodeId: string, agentShortName: string) => {
-      nexusAddAgent(nodeId, agentShortName);
+      agentChatAddAgent(nodeId, agentShortName);
     },
-    [nexusAddAgent]
+    [agentChatAddAgent]
   );
 
   //
@@ -375,7 +379,7 @@ export default function NexusPage() {
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold text-highlight">Nexus</h1>
+              <h1 className="text-2xl font-bold text-highlight">AgentChat</h1>
               <span className="px-2 py-0.5 text-xs font-medium bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] rounded">
                 Experimental
               </span>
@@ -468,7 +472,7 @@ export default function NexusPage() {
         <div className="bg-[var(--accent-error)]/10 border-b border-[var(--accent-error)]/30 p-2 flex items-center gap-2">
           <AlertCircle size={14} className="text-[var(--accent-error)]" />
           <span className="text-xs text-[var(--accent-error)] flex-1">{error}</span>
-          <button onClick={nexusClearError} className="text-xs text-muted hover:text-[var(--text-primary)]">
+          <button onClick={agentChatClearError} className="text-xs text-muted hover:text-[var(--text-primary)]">
             Dismiss
           </button>
         </div>
@@ -512,7 +516,7 @@ export default function NexusPage() {
                     key={agent.id}
                     agent={agent}
                     agentIndex={index}
-                    onRemove={nexusRemoveAgent}
+                    onRemove={agentChatRemoveAgent}
                   />
                 ))}
                 {session.agents.length === 0 && (
@@ -539,7 +543,7 @@ export default function NexusPage() {
                     key={channel.id}
                     channel={channel}
                     isSelected={channel.id === currentChannelId}
-                    onClick={() => nexusSetCurrentChannel(channel.id)}
+                    onClick={() => agentChatSetCurrentChannel(channel.id)}
                   />
                 ))}
               </div>
@@ -584,7 +588,7 @@ export default function NexusPage() {
                 </div>
               ) : (
                 filteredMessages.map((msg) => (
-                  <NexusMessageItem key={msg.id} message={msg} agents={session.agents} />
+                  <AgentChatMessageItem key={msg.id} message={msg} agents={session.agents} />
                 ))
               )}
               <div ref={messagesEndRef} />
@@ -620,16 +624,16 @@ export default function NexusPage() {
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center max-w-md">
             <MessageSquare size={48} className="text-muted mx-auto mb-4" />
-            <h2 className="text-lg font-medium mb-2">Welcome to Nexus</h2>
+            <h2 className="text-lg font-medium mb-2">Welcome to AgentChat</h2>
             <p className="text-sm text-muted mb-4">
-              Nexus is an IRC-style multi-agent collaboration environment. Start a session,
+              AgentChat is an IRC-style multi-agent collaboration environment. Start a session,
               add agents from your connected nodes, and watch them collaborate toward a common goal.
             </p>
-            <ul className="text-xs text-muted text-left space-y-1 mb-4">
-              <li>- Agents communicate in channels like IRC</li>
-              <li>- Set a goal to guide the conversation</li>
-              <li>- Agents can join channels, send DMs, and collaborate</li>
-              <li>- You can participate by sending messages</li>
+            <ul className="text-xs text-muted text-center space-y-1 mb-4">
+              <li>Agents communicate in channels like IRC</li>
+              <li>Set a goal to guide the conversation</li>
+              <li>Agents can join channels, send DMs, and collaborate</li>
+              <li>You can participate by sending messages</li>
             </ul>
           </div>
         </div>

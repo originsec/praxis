@@ -17,8 +17,8 @@ export function Header() {
     if (path.startsWith('/nodes/') && path.includes('/agents/')) return 'AGENT SESSION';
     if (path.startsWith('/nodes/')) return 'NODE DETAILS';
     if (path === '/nodes') return 'NODES';
-    if (path === '/atlas') return 'ATLAS';
-    if (path === '/nexus') return 'NEXUS';
+    if (path === '/orchestrator') return 'ORCHESTRATOR';
+    if (path === '/agent-chat') return 'AGENT CHAT';
     if (path === '/operations') return 'OPERATIONS';
     if (path === '/events') return 'EVENTS';
     if (path === '/settings') return 'SETTINGS';

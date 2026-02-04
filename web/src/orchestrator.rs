@@ -10,24 +10,24 @@ use common::{
     SessionCommandResult, SessionContext,
 };
 
-use crate::messages::{AtlasPlan, PlanStep, PlanStepStatus};
+use crate::messages::{OrchestratorPlan, PlanStep, PlanStepStatus};
 use crate::state::AppState;
 use crate::rabbitmq::RabbitMqClient;
 
 //
-// Atlas system prompt embedded at build time.
+// Orchestrator system prompt embedded at build time.
 //
-const ATLAS_PROMPT: &str = include_str!("prompts/atlas.prompt");
+const ORCHESTRATOR_PROMPT: &str = include_str!("prompts/orchestrator.prompt");
 
 #[derive(Default)]
-struct AtlasContext {
+struct OrchestratorContext {
     selected_node_idx: usize,
     selected_agent_idx: usize,
 }
 
-/// Events from the Atlas handler
+/// Events from the Orchestrator handler
 #[derive(Debug, Clone)]
-pub enum AtlasEvent {
+pub enum OrchestratorEvent {
     /// Partial content during streaming
     Content(String),
     /// Stream completed successfully
@@ -39,13 +39,13 @@ pub enum AtlasEvent {
     /// Tool execution completed with display summary and result
     ToolExecuted { name: String, display: String, success: bool, result: String },
     /// Plan updated
-    PlanUpdated(AtlasPlan),
+    PlanUpdated(OrchestratorPlan),
     /// Token usage update (prompt tokens, completion tokens, total tokens)
     TokenUsage { prompt_tokens: u32, completion_tokens: u32, total_tokens: u32 },
 }
 
-/// Atlas session state
-pub struct AtlasSession {
+/// Orchestrator session state
+pub struct OrchestratorSession {
     /// Channel to send prompts to the handler
     pub prompt_tx: mpsc::Sender<String>,
     /// Handle to the background task
@@ -57,7 +57,7 @@ pub struct AtlasSession {
     pub cancel_flag: Arc<std::sync::atomic::AtomicBool>,
 }
 
-impl AtlasSession {
+impl OrchestratorSession {
     /// Signal the session to stop entirely
     pub fn stop(&self) {
         self.stop_flag.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -70,9 +70,9 @@ impl AtlasSession {
     }
 }
 
-/// Get the atlas system prompt (embedded at build time).
+/// Get the orchestrator system prompt (embedded at build time).
 pub fn get_system_prompt() -> &'static str {
-    ATLAS_PROMPT
+    ORCHESTRATOR_PROMPT
 }
 
 /// Define all available tools for the AI agent
@@ -415,7 +415,7 @@ fn get_tool_definitions() -> Vec<Tool> {
 async fn execute_tool(
     app_state: &Arc<AppState>,
     rabbitmq: &Arc<RabbitMqClient>,
-    ctx: &mut AtlasContext,
+    ctx: &mut OrchestratorContext,
     tool_name: &str,
     tool_input: &Value,
 ) -> String {
@@ -1031,7 +1031,7 @@ async fn execute_tool(
 
             //
             // Run operation by name - service looks up the definition.
-            // Atlas doesn't have working_dir context, so pass None.
+            // Orchestrator doesn't have working_dir context, so pass None.
             //
             match rabbitmq.run_semantic_op(node_id.clone(), agent_short_name.to_string(), operation.full_name.clone(), request_id.clone(), None).await {
                 Ok(_) => {
@@ -1316,7 +1316,7 @@ async fn execute_tool(
             };
 
             //
-            // Run chain. Atlas doesn't have working_dir context, so pass None.
+            // Run chain. Orchestrator doesn't have working_dir context, so pass None.
             //
             match rabbitmq.run_chain(chain.id.clone(), node_id.clone(), agent_short_name.to_string(), None).await {
                 Ok(_) => {
@@ -1490,7 +1490,7 @@ async fn execute_tool(
 }
 
 /// Get the selected node ID from context
-async fn get_selected_node_id(app_state: &Arc<AppState>, ctx: &AtlasContext) -> Option<String> {
+async fn get_selected_node_id(app_state: &Arc<AppState>, ctx: &OrchestratorContext) -> Option<String> {
     if let Some(system_state) = app_state.get_state().await {
         system_state.nodes.get(ctx.selected_node_idx)
             .map(|n| n.node_id.clone())
@@ -1572,28 +1572,28 @@ async fn send_command_and_wait(
     Err(format!("Timeout waiting for response after {} seconds", timeout_secs))
 }
 
-/// Start a new Atlas session
-pub async fn start_atlas_session(
+/// Start a new Orchestrator session
+pub async fn start_orchestrator_session(
     app_state: Arc<AppState>,
     rabbitmq: Arc<RabbitMqClient>,
     _config_manager: Arc<crate::config::ConfigManager>,
-    event_tx: mpsc::Sender<AtlasEvent>,
-) -> Result<AtlasSession, String> {
+    event_tx: mpsc::Sender<OrchestratorEvent>,
+) -> Result<OrchestratorSession, String> {
     //
     // Get configuration from app_state cache (populated from Service via
     // RabbitMQ).
     //
     let config = app_state.get_config(&[
         "llm_model_definitions",
-        "llm_feature_atlas",
-        "llm_atlas_max_tokens",
+        "llm_feature_orchestrator",
+        "llm_orchestrator_max_tokens",
     ]).await;
 
     //
-    // Parse model definitions and find the selected Atlas model.
+    // Parse model definitions and find the selected Orchestrator model.
     //
     let model_defs_json = config.get("llm_model_definitions").cloned().unwrap_or_else(|| "[]".to_string());
-    let selected_model_name = config.get("llm_feature_atlas").cloned().unwrap_or_default();
+    let selected_model_name = config.get("llm_feature_orchestrator").cloned().unwrap_or_default();
 
     //
     // Parse model definitions.
@@ -1614,12 +1614,12 @@ pub async fn start_atlas_session(
     // Find the selected model definition.
     //
     let selected_def = model_defs.iter().find(|d| d.name == selected_model_name)
-        .ok_or_else(|| format!("No model selected for Atlas. Go to Settings > LLM Providers > Feature Selection to configure."))?;
+        .ok_or_else(|| format!("No model selected for Orchestrator. Go to Settings > LLM Providers > Feature Selection to configure."))?;
 
     let api_key = selected_def.api_key.clone();
     let provider_str = selected_def.provider.clone();
     let model = selected_def.model.clone();
-    let max_tokens: u32 = config.get("llm_atlas_max_tokens")
+    let max_tokens: u32 = config.get("llm_orchestrator_max_tokens")
         .and_then(|s| s.parse().ok())
         .unwrap_or(25000);
     //
@@ -1648,7 +1648,7 @@ pub async fn start_atlas_session(
     let tools = get_tool_definitions();
     let system_prompt = get_system_prompt_with_tools(get_system_prompt(), &tools);
 
-    common::log_info!("Atlas session starting with provider {:?}, model {}, max_tokens {}, history_count {}", provider, model, max_tokens, history_count);
+    common::log_info!("Orchestrator session starting with provider {:?}, model {}, max_tokens {}, history_count {}", provider, model, max_tokens, history_count);
 
     //
     // Create communication channels.
@@ -1664,7 +1664,7 @@ pub async fn start_atlas_session(
     //
     let task_handle = tokio::spawn(async move {
         let mut conversation_history: Vec<Message> = Vec::new();
-        let mut ctx = AtlasContext::default();
+        let mut ctx = OrchestratorContext::default();
 
         //
         // Add system message to conversation.
@@ -1684,7 +1684,7 @@ pub async fn start_atlas_session(
             //
             cancel_flag_clone.store(false, std::sync::atomic::Ordering::SeqCst);
 
-            common::log_info!("Atlas received prompt: {}...", &prompt[..prompt.len().min(50)]);
+            common::log_info!("Orchestrator received prompt: {}...", &prompt[..prompt.len().min(50)]);
 
             //
             // Add user message.
@@ -1731,7 +1731,7 @@ pub async fn start_atlas_session(
                     Err(e) => {
                         let err_msg = format!("AI request failed: {}", e);
                         common::log_error!("{}", err_msg);
-                        let _ = event_tx.send(AtlasEvent::Error(err_msg)).await;
+                        let _ = event_tx.send(OrchestratorEvent::Error(err_msg)).await;
                         conversation_history.pop();
                         break;
                     }
@@ -1741,7 +1741,7 @@ pub async fn start_atlas_session(
                 // Send token usage update if available.
                 //
                 if let Some(usage) = usage {
-                    let _ = event_tx.send(AtlasEvent::TokenUsage {
+                    let _ = event_tx.send(OrchestratorEvent::TokenUsage {
                         prompt_tokens: usage.prompt_tokens,
                         completion_tokens: usage.completion_tokens,
                         total_tokens: usage.total_tokens,
@@ -1762,7 +1762,7 @@ pub async fn start_atlas_session(
                         break;
                     }
 
-                    common::log_info!("Atlas executing tool: {}", tool_name);
+                    common::log_info!("Orchestrator executing tool: {}", tool_name);
 
                     //
                     // Extract input for display (e.g., prompt text for
@@ -1773,7 +1773,7 @@ pub async fn start_atlas_session(
                     } else {
                         None
                     };
-                    let _ = event_tx.send(AtlasEvent::ToolExecuting { name: tool_name.clone(), input: tool_input_display }).await;
+                    let _ = event_tx.send(OrchestratorEvent::ToolExecuting { name: tool_name.clone(), input: tool_input_display }).await;
 
                     //
                     // Execute tool.
@@ -1797,14 +1797,14 @@ pub async fn start_atlas_session(
                     if tool_name == "report_plan" {
                         if let Ok(result_json) = serde_json::from_str::<Value>(&result) {
                             if let Some(plan_obj) = result_json.get("plan") {
-                                if let Ok(plan) = serde_json::from_value::<AtlasPlan>(plan_obj.clone()) {
-                                    let _ = event_tx.send(AtlasEvent::PlanUpdated(plan)).await;
+                                if let Ok(plan) = serde_json::from_value::<OrchestratorPlan>(plan_obj.clone()) {
+                                    let _ = event_tx.send(OrchestratorEvent::PlanUpdated(plan)).await;
                                 }
                             }
                         }
                     }
 
-                    let _ = event_tx.send(AtlasEvent::ToolExecuted {
+                    let _ = event_tx.send(OrchestratorEvent::ToolExecuted {
                         name: tool_name.clone(),
                         display,
                         success,
@@ -1826,7 +1826,7 @@ pub async fn start_atlas_session(
                     //
                     let remaining = response_text.trim();
                     if !remaining.is_empty() {
-                        let _ = event_tx.send(AtlasEvent::Content(remaining.to_string())).await;
+                        let _ = event_tx.send(OrchestratorEvent::Content(remaining.to_string())).await;
                     }
 
                     //
@@ -1850,7 +1850,7 @@ pub async fn start_atlas_session(
                 // No tool call - send response and complete.
                 //
                 if !full_response.is_empty() {
-                    let _ = event_tx.send(AtlasEvent::Content(full_response.clone())).await;
+                    let _ = event_tx.send(OrchestratorEvent::Content(full_response.clone())).await;
                 }
 
                 conversation_history.push(Message::assistant(&full_response));
@@ -1858,11 +1858,11 @@ pub async fn start_atlas_session(
                 break;
             }
 
-            let _ = event_tx.send(AtlasEvent::Done).await;
+            let _ = event_tx.send(OrchestratorEvent::Done).await;
         }
     });
 
-    Ok(AtlasSession {
+    Ok(OrchestratorSession {
         prompt_tx,
         task_handle,
         stop_flag,

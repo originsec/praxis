@@ -3,7 +3,7 @@
 mod config;
 mod database;
 mod handlers;
-mod nexus;
+mod agent_chat;
 mod semantic_helpers;
 mod semantic_ops;
 mod state;
@@ -31,7 +31,7 @@ use tracing::{error, info, warn};
 //
 use database::{Database, DatabaseConfig, OperationDefinition};
 use handlers::{ClientMessageHandler, NodeMessageHandler};
-use nexus::NexusManager;
+use agent_chat::AgentChatManager;
 use semantic_ops::{SemanticOpsManager, ResponseTracker, ChainExecutor};
 use state::{NodeRegistry, ClientRegistry, PendingCommands};
 
@@ -513,16 +513,16 @@ pub async fn run() -> Result<()> {
     info!("Initialized chain executor");
 
     //
-    // Initialize Nexus manager.
+    // Initialize AgentChat manager.
     //
-    let nexus_channel = connection.create_channel().await?;
-    let nexus_manager = Arc::new(NexusManager::new(
+    let agent_chat_channel = connection.create_channel().await?;
+    let agent_chat_manager = Arc::new(AgentChatManager::new(
         database.clone(),
-        nexus_channel,
+        agent_chat_channel,
         node_registry.clone(),
         pending_commands.clone(),
     ));
-    info!("Initialized Nexus manager");
+    info!("Initialized AgentChat manager");
 
     //
     // Initialize event logging system.
@@ -833,15 +833,15 @@ pub async fn run() -> Result<()> {
                                             info!("Forwarded command response {} to client {}", response.command_id, pending.client_id);
 
                                             //
-                                            // Check if this is a Nexus-related command.
+                                            // Check if this is a AgentChat-related command.
                                             //
-                                            if let Err(e) = nexus_manager.handle_command_response(
+                                            if let Err(e) = agent_chat_manager.handle_command_response(
                                                 &pending.client_id,
                                                 &response.command_id,
                                                 &response.node_id,
                                                 &response.result,
                                             ).await {
-                                                warn!("Nexus command response handling failed: {}", e);
+                                                warn!("AgentChat command response handling failed: {}", e);
                                             }
                                         } else {
                                             //
@@ -2049,98 +2049,98 @@ pub async fn run() -> Result<()> {
                                     }
 
                                     //
-                                    // Nexus messages.
+                                    // AgentChat messages.
                                     //
-                                    ClientSignalMessage::NexusStart { client_id, goal, yolo_mode } => {
-                                        info!("Received NexusStart from client {} (yolo_mode: {})", client_id, yolo_mode);
-                                        match nexus_manager.start_session(&client_id, goal, yolo_mode).await {
+                                    ClientSignalMessage::AgentChatStart { client_id, goal, yolo_mode } => {
+                                        info!("Received AgentChatStart from client {} (yolo_mode: {})", client_id, yolo_mode);
+                                        match agent_chat_manager.start_session(&client_id, goal, yolo_mode).await {
                                             Ok(session_id) => {
-                                                info!("Started Nexus session {}", session_id);
+                                                info!("Started AgentChat session {}", session_id);
                                             }
                                             Err(e) => {
-                                                error!("Failed to start Nexus session: {}", e);
-                                                let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                                error!("Failed to start AgentChat session: {}", e);
+                                                let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::AgentChatError {
                                                     message: e.to_string(),
                                                 }).await;
                                             }
                                         }
                                     }
-                                    ClientSignalMessage::NexusStop { client_id, session_id } => {
-                                        info!("Received NexusStop from client {}", client_id);
-                                        if let Err(e) = nexus_manager.stop_session(&client_id, &session_id).await {
-                                            error!("Failed to stop Nexus session: {}", e);
-                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                    ClientSignalMessage::AgentChatStop { client_id, session_id } => {
+                                        info!("Received AgentChatStop from client {}", client_id);
+                                        if let Err(e) = agent_chat_manager.stop_session(&client_id, &session_id).await {
+                                            error!("Failed to stop AgentChat session: {}", e);
+                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::AgentChatError {
                                                 message: e.to_string(),
                                             }).await;
                                         }
                                     }
-                                    ClientSignalMessage::NexusAddAgent { client_id, session_id, node_id, agent_short_name } => {
-                                        info!("Received NexusAddAgent from client {}", client_id);
-                                        match nexus_manager.add_agent(&client_id, &session_id, &node_id, &agent_short_name).await {
+                                    ClientSignalMessage::AgentChatAddAgent { client_id, session_id, node_id, agent_short_name } => {
+                                        info!("Received AgentChatAddAgent from client {}", client_id);
+                                        match agent_chat_manager.add_agent(&client_id, &session_id, &node_id, &agent_short_name).await {
                                             Ok(agent_id) => {
-                                                info!("Added agent {} to Nexus session", agent_id);
+                                                info!("Added agent {} to AgentChat session", agent_id);
                                             }
                                             Err(e) => {
-                                                error!("Failed to add agent to Nexus: {}", e);
-                                                let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                                error!("Failed to add agent to AgentChat: {}", e);
+                                                let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::AgentChatError {
                                                     message: e.to_string(),
                                                 }).await;
                                             }
                                         }
                                     }
-                                    ClientSignalMessage::NexusRemoveAgent { client_id, session_id, agent_id } => {
-                                        info!("Received NexusRemoveAgent from client {}", client_id);
-                                        if let Err(e) = nexus_manager.remove_agent(&client_id, &session_id, &agent_id).await {
-                                            error!("Failed to remove agent from Nexus: {}", e);
-                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                    ClientSignalMessage::AgentChatRemoveAgent { client_id, session_id, agent_id } => {
+                                        info!("Received AgentChatRemoveAgent from client {}", client_id);
+                                        if let Err(e) = agent_chat_manager.remove_agent(&client_id, &session_id, &agent_id).await {
+                                            error!("Failed to remove agent from AgentChat: {}", e);
+                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::AgentChatError {
                                                 message: e.to_string(),
                                             }).await;
                                         }
                                     }
-                                    ClientSignalMessage::NexusReorderAgents { client_id, session_id, agent_ids } => {
-                                        info!("Received NexusReorderAgents from client {}", client_id);
-                                        if let Err(e) = nexus_manager.reorder_agents(&client_id, &session_id, agent_ids).await {
-                                            error!("Failed to reorder Nexus agents: {}", e);
-                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                    ClientSignalMessage::AgentChatReorderAgents { client_id, session_id, agent_ids } => {
+                                        info!("Received AgentChatReorderAgents from client {}", client_id);
+                                        if let Err(e) = agent_chat_manager.reorder_agents(&client_id, &session_id, agent_ids).await {
+                                            error!("Failed to reorder AgentChat agents: {}", e);
+                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::AgentChatError {
                                                 message: e.to_string(),
                                             }).await;
                                         }
                                     }
-                                    ClientSignalMessage::NexusSendMessage { client_id, session_id, content, channel_id, recipient_nickname } => {
-                                        info!("Received NexusSendMessage from client {}", client_id);
-                                        if let Err(e) = nexus_manager.send_message(&client_id, &session_id, &content, channel_id.as_deref(), recipient_nickname.as_deref()).await {
-                                            error!("Failed to send Nexus message: {}", e);
-                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                    ClientSignalMessage::AgentChatSendMessage { client_id, session_id, content, channel_id, recipient_nickname } => {
+                                        info!("Received AgentChatSendMessage from client {}", client_id);
+                                        if let Err(e) = agent_chat_manager.send_message(&client_id, &session_id, &content, channel_id.as_deref(), recipient_nickname.as_deref()).await {
+                                            error!("Failed to send AgentChat message: {}", e);
+                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::AgentChatError {
                                                 message: e.to_string(),
                                             }).await;
                                         }
                                     }
-                                    ClientSignalMessage::NexusJoinChannel { client_id, session_id, channel_name } => {
-                                        info!("Received NexusJoinChannel from client {}", client_id);
-                                        match nexus_manager.join_channel(&client_id, &session_id, &channel_name).await {
+                                    ClientSignalMessage::AgentChatJoinChannel { client_id, session_id, channel_name } => {
+                                        info!("Received AgentChatJoinChannel from client {}", client_id);
+                                        match agent_chat_manager.join_channel(&client_id, &session_id, &channel_name).await {
                                             Ok(_) => {}
                                             Err(e) => {
-                                                error!("Failed to join Nexus channel: {}", e);
-                                                let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                                error!("Failed to join AgentChat channel: {}", e);
+                                                let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::AgentChatError {
                                                     message: e.to_string(),
                                                 }).await;
                                             }
                                         }
                                     }
-                                    ClientSignalMessage::NexusGetHistory { client_id, session_id, channel_id, limit } => {
-                                        info!("Received NexusGetHistory from client {}", client_id);
-                                        if let Err(e) = nexus_manager.get_history(&client_id, &session_id, channel_id.as_deref(), limit).await {
-                                            error!("Failed to get Nexus history: {}", e);
-                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                    ClientSignalMessage::AgentChatGetHistory { client_id, session_id, channel_id, limit } => {
+                                        info!("Received AgentChatGetHistory from client {}", client_id);
+                                        if let Err(e) = agent_chat_manager.get_history(&client_id, &session_id, channel_id.as_deref(), limit).await {
+                                            error!("Failed to get AgentChat history: {}", e);
+                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::AgentChatError {
                                                 message: e.to_string(),
                                             }).await;
                                         }
                                     }
-                                    ClientSignalMessage::NexusGetState { client_id, session_id } => {
-                                        info!("Received NexusGetState from client {}", client_id);
-                                        if let Err(e) = nexus_manager.get_state(&client_id, session_id.as_deref()).await {
-                                            error!("Failed to get Nexus state: {}", e);
-                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::NexusError {
+                                    ClientSignalMessage::AgentChatGetState { client_id, session_id } => {
+                                        info!("Received AgentChatGetState from client {}", client_id);
+                                        if let Err(e) = agent_chat_manager.get_state(&client_id, session_id.as_deref()).await {
+                                            error!("Failed to get AgentChat state: {}", e);
+                                            let _ = send_to_client(&client_publish_channel, &client_id, ClientDirectMessage::AgentChatError {
                                                 message: e.to_string(),
                                             }).await;
                                         }

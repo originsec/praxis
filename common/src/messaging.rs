@@ -1012,12 +1012,12 @@ pub struct SemanticOpUpdate {
 }
 
 //
-// Nexus - IRC-style multi-agent chat system.
+// AgentChat - IRC-style multi-agent chat system.
 //
 
-/// Status of a Nexus agent in the session
+/// Status of a AgentChat agent in the session
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub enum NexusAgentStatus {
+pub enum AgentChatAgentStatus {
     Initializing,
     Ready,
     Waiting,
@@ -1025,33 +1025,33 @@ pub enum NexusAgentStatus {
     Disconnected,
 }
 
-impl std::fmt::Display for NexusAgentStatus {
+impl std::fmt::Display for AgentChatAgentStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            NexusAgentStatus::Initializing => write!(f, "initializing"),
-            NexusAgentStatus::Ready => write!(f, "ready"),
-            NexusAgentStatus::Waiting => write!(f, "waiting"),
-            NexusAgentStatus::Prompting => write!(f, "prompting"),
-            NexusAgentStatus::Disconnected => write!(f, "disconnected"),
+            AgentChatAgentStatus::Initializing => write!(f, "initializing"),
+            AgentChatAgentStatus::Ready => write!(f, "ready"),
+            AgentChatAgentStatus::Waiting => write!(f, "waiting"),
+            AgentChatAgentStatus::Prompting => write!(f, "prompting"),
+            AgentChatAgentStatus::Disconnected => write!(f, "disconnected"),
         }
     }
 }
 
-/// Information about a Nexus agent
+/// Information about a AgentChat agent
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct NexusAgentInfo {
+pub struct AgentChatAgentInfo {
     pub id: String,
     pub node_id: String,
     pub agent_short_name: String,
     pub nickname: String,
     pub precedence: u32,
     pub current_channel_id: Option<String>,
-    pub status: NexusAgentStatus,
+    pub status: AgentChatAgentStatus,
 }
 
-/// Information about a Nexus channel
+/// Information about a AgentChat channel
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct NexusChannelInfo {
+pub struct AgentChatChannelInfo {
     pub id: String,
     pub name: String,
     pub topic: Option<String>,
@@ -1059,46 +1059,46 @@ pub struct NexusChannelInfo {
     pub created_by: String,
 }
 
-/// Type of Nexus message
+/// Type of AgentChat message
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub enum NexusMessageType {
+pub enum AgentChatMessageType {
     Channel,
     DirectMessage,
     System,
     CommandResult,
 }
 
-impl std::fmt::Display for NexusMessageType {
+impl std::fmt::Display for AgentChatMessageType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            NexusMessageType::Channel => write!(f, "channel"),
-            NexusMessageType::DirectMessage => write!(f, "dm"),
-            NexusMessageType::System => write!(f, "system"),
-            NexusMessageType::CommandResult => write!(f, "command_result"),
+            AgentChatMessageType::Channel => write!(f, "channel"),
+            AgentChatMessageType::DirectMessage => write!(f, "dm"),
+            AgentChatMessageType::System => write!(f, "system"),
+            AgentChatMessageType::CommandResult => write!(f, "command_result"),
         }
     }
 }
 
-/// Information about a Nexus message
+/// Information about a AgentChat message
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct NexusMessageInfo {
+pub struct AgentChatMessageInfo {
     pub id: i64,
     pub channel_id: Option<String>,
     pub sender_nickname: String,
     pub recipient_nickname: Option<String>,
-    pub message_type: NexusMessageType,
+    pub message_type: AgentChatMessageType,
     pub content: String,
     pub timestamp: DateTime<Utc>,
 }
 
-/// Complete state of a Nexus session
+/// Complete state of a AgentChat session
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct NexusSessionState {
+pub struct AgentChatSessionState {
     pub id: String,
     pub goal: Option<String>,
     pub status: String,
-    pub agents: Vec<NexusAgentInfo>,
-    pub channels: Vec<NexusChannelInfo>,
+    pub agents: Vec<AgentChatAgentInfo>,
+    pub channels: Vec<AgentChatChannelInfo>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -1361,61 +1361,61 @@ pub enum ClientSignalMessage {
     },
 
     //
-    // Nexus - IRC-style multi-agent chat.
+    // AgentChat - IRC-style multi-agent chat.
     //
-    /// Start a new Nexus session
-    NexusStart {
+    /// Start a new AgentChat session
+    AgentChatStart {
         client_id: String,
         goal: Option<String>,
         yolo_mode: bool,
     },
-    /// Stop the current Nexus session
-    NexusStop {
+    /// Stop the current AgentChat session
+    AgentChatStop {
         client_id: String,
         session_id: String,
     },
-    /// Add an agent to the Nexus session
-    NexusAddAgent {
+    /// Add an agent to the AgentChat session
+    AgentChatAddAgent {
         client_id: String,
         session_id: String,
         node_id: String,
         agent_short_name: String,
     },
-    /// Remove an agent from the Nexus session
-    NexusRemoveAgent {
+    /// Remove an agent from the AgentChat session
+    AgentChatRemoveAgent {
         client_id: String,
         session_id: String,
         agent_id: String,
     },
-    /// Reorder agents in the Nexus session (set precedence order)
-    NexusReorderAgents {
+    /// Reorder agents in the AgentChat session (set precedence order)
+    AgentChatReorderAgents {
         client_id: String,
         session_id: String,
         agent_ids: Vec<String>,
     },
-    /// Send a message to the Nexus session
-    NexusSendMessage {
+    /// Send a message to the AgentChat session
+    AgentChatSendMessage {
         client_id: String,
         session_id: String,
         content: String,
         channel_id: Option<String>,
         recipient_nickname: Option<String>,
     },
-    /// Join a channel in the Nexus session
-    NexusJoinChannel {
+    /// Join a channel in the AgentChat session
+    AgentChatJoinChannel {
         client_id: String,
         session_id: String,
         channel_name: String,
     },
-    /// Get message history from the Nexus session
-    NexusGetHistory {
+    /// Get message history from the AgentChat session
+    AgentChatGetHistory {
         client_id: String,
         session_id: String,
         channel_id: Option<String>,
         limit: u32,
     },
-    /// Get the current state of the Nexus session
-    NexusGetState {
+    /// Get the current state of the AgentChat session
+    AgentChatGetState {
         client_id: String,
         session_id: Option<String>,
     },
@@ -1623,72 +1623,72 @@ pub enum ClientDirectMessage {
     },
 
     //
-    // Nexus responses.
+    // AgentChat responses.
     //
-    /// Nexus session started
-    NexusSessionStarted {
+    /// AgentChat session started
+    AgentChatSessionStarted {
         session_id: String,
         goal: Option<String>,
     },
-    /// Nexus session stopped
-    NexusSessionStopped {
+    /// AgentChat session stopped
+    AgentChatSessionStopped {
         session_id: String,
     },
-    /// Agent added to Nexus session
-    NexusAgentAdded {
+    /// Agent added to AgentChat session
+    AgentChatAgentAdded {
         session_id: String,
-        agent: NexusAgentInfo,
+        agent: AgentChatAgentInfo,
     },
-    /// Agent removed from Nexus session
-    NexusAgentRemoved {
-        session_id: String,
-        agent_id: String,
-    },
-    /// Agent status changed in Nexus session
-    NexusAgentStatusChanged {
+    /// Agent removed from AgentChat session
+    AgentChatAgentRemoved {
         session_id: String,
         agent_id: String,
-        status: NexusAgentStatus,
     },
-    /// Channel created in Nexus session
-    NexusChannelCreated {
-        session_id: String,
-        channel: NexusChannelInfo,
-    },
-    /// Channel updated in Nexus session
-    NexusChannelUpdated {
-        session_id: String,
-        channel: NexusChannelInfo,
-    },
-    /// Agent joined a channel in Nexus session
-    NexusAgentJoinedChannel {
+    /// Agent status changed in AgentChat session
+    AgentChatAgentStatusChanged {
         session_id: String,
         agent_id: String,
-        channel_id: String,
+        status: AgentChatAgentStatus,
     },
-    /// Agent left a channel in Nexus session
-    NexusAgentLeftChannel {
+    /// Channel created in AgentChat session
+    AgentChatChannelCreated {
+        session_id: String,
+        channel: AgentChatChannelInfo,
+    },
+    /// Channel updated in AgentChat session
+    AgentChatChannelUpdated {
+        session_id: String,
+        channel: AgentChatChannelInfo,
+    },
+    /// Agent joined a channel in AgentChat session
+    AgentChatAgentJoinedChannel {
         session_id: String,
         agent_id: String,
         channel_id: String,
     },
-    /// New message in Nexus session
-    NexusMessage {
+    /// Agent left a channel in AgentChat session
+    AgentChatAgentLeftChannel {
         session_id: String,
-        message: NexusMessageInfo,
+        agent_id: String,
+        channel_id: String,
     },
-    /// Full Nexus session state update
-    NexusStateUpdate {
-        session: NexusSessionState,
+    /// New message in AgentChat session
+    AgentChatMessage {
+        session_id: String,
+        message: AgentChatMessageInfo,
     },
-    /// History response for Nexus session
-    NexusHistoryResponse {
+    /// Full AgentChat session state update
+    AgentChatStateUpdate {
+        session: AgentChatSessionState,
+    },
+    /// History response for AgentChat session
+    AgentChatHistoryResponse {
         session_id: String,
         channel_id: Option<String>,
-        messages: Vec<NexusMessageInfo>,
+        messages: Vec<AgentChatMessageInfo>,
     },
-    /// Nexus error
-    NexusError {
+    /// AgentChat error
+    AgentChatError {
         message: String,
     },
 }
@@ -1702,8 +1702,10 @@ pub enum ClientDirectMessage {
 pub struct SemanticParserRequest {
     /// Unique request ID for matching response
     pub request_id: String,
+    /// Instructions for what to extract
+    pub instruction: String,
     /// The text/data to parse
-    pub prompt: String,
+    pub text: String,
     /// JSON schema that the output must match (as a string)
     pub schema: String,
 }

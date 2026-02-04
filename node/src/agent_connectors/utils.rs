@@ -37,7 +37,7 @@ impl ToolDiscoveryPrompt {
                 "What tools do you have that you can use to help me? High level overview. Respond as json in format - complete this json: { tools: [{'toolName': toolname, 'toolDescription:' ..."
             }
             ToolDiscoveryPrompt::HighLevel => {
-                "What tools do you have that you can use to help me? High level overview of tools with a name an description..."
+                "What tools do you have that you can use to help me? High level overview of each tool with a name an description. Don't leave any out..."
             }
         }
     }
@@ -441,9 +441,17 @@ pub fn scan_directories_for_config_files_multi(
                 // Skip .claude/plugins/marketplaces* directories.
                 //
 
-                let path_str = e.path().to_string_lossy();
-                if path_str.contains(".claude/plugins/marketplaces") {
-                    return false;
+                let components: Vec<_> = e.path().components().collect();
+                for window in components.windows(3) {
+                    use std::path::Component;
+                    if let [Component::Normal(a), Component::Normal(b), Component::Normal(c)] = window {
+                        if a.to_string_lossy() == ".claude"
+                            && b.to_string_lossy() == "plugins"
+                            && c.to_string_lossy().starts_with("marketplaces")
+                        {
+                            return false;
+                        }
+                    }
                 }
 
                 //
@@ -1095,10 +1103,11 @@ where
     //
     // Use the internal tools schema to parse the response.
     //
-    let discovery_prompt = crate::utils::semantic_parser::build_internal_tools_prompt(&response);
+
     match semantic_client
         .parse(
-            discovery_prompt,
+            crate::utils::semantic_parser::INTERNAL_TOOLS_PROMPT.to_string(),
+            response,
             crate::utils::semantic_parser::INTERNAL_TOOLS_SCHEMA.to_string(),
         )
         .await
@@ -1332,10 +1341,10 @@ async fn process_metadata_batch(
         batch_content.len()
     );
 
-    let extraction_prompt = crate::utils::semantic_parser::build_metadata_extraction_prompt(batch_content);
     match semantic_client
         .parse(
-            extraction_prompt,
+            crate::utils::semantic_parser::METADATA_EXTRACTION_PROMPT.to_string(),
+            batch_content.to_string(),
             crate::utils::semantic_parser::METADATA_EXTRACTION_SCHEMA.to_string(),
         )
         .await

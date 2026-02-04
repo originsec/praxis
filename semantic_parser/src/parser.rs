@@ -7,6 +7,8 @@ use crate::config::ParserConfig;
 /// System prompt for the semantic parser
 const SYSTEM_PROMPT: &str = r#"You are a semantic parser. Your task is to parse the provided text and extract structured data according to the JSON schema provided.
 
+The input TEXT can be in any format - plain text, xml, json (yes still parse this according to the provided schema), etc.
+
 IMPORTANT RULES:
 1. You MUST return ONLY valid JSON that matches the schema exactly
 2. Do NOT include any explanatory text, markdown formatting, or code blocks
@@ -52,35 +54,18 @@ impl SemanticParser {
     ///
     /// # Arguments
     /// * `text` - The text to parse
-    /// * `prompt` - Instructions for what to extract
+    /// * `instructions` - Instructions for what to extract
     /// * `schema` - JSON schema defining the expected output structure
     ///
     /// # Returns
     /// The parsed JSON string if successful
-    pub async fn parse(&self, text: &str, prompt: &str, schema: &str) -> Result<String> {
+    pub async fn parse(&self, text: &str, instructions: &str, schema: &str) -> Result<String> {
         let full_prompt = format!(
             "Parse the provided TEXT according to the INSTRUCTIONS and yield a json output in the form of the provided SCHEMA only. (Don't output anything but valid JSON):\n\nSCHEMA:\n{}\n\nINSTRUCTIONS:\n{}\n\nTEXT:\n{}",
-            schema, prompt, text
+            schema, instructions, text
         );
 
-        self.parse_raw(&full_prompt, schema).await
-    }
-
-    /// Parse using a raw prompt (prompt already contains all context)
-    ///
-    /// # Arguments
-    /// * `prompt` - Complete prompt including text and instructions
-    /// * `schema` - JSON schema defining the expected output structure
-    ///
-    /// # Returns
-    /// The parsed JSON string if successful
-    pub async fn parse_raw(&self, prompt: &str, schema: &str) -> Result<String> {
-        let user_prompt = format!(
-            "Parse the provided TEXT according to the INSTRUCTIONS and yield a json output in the form of the provided SCHEMA only. (Don't output anything but valid JSON):\n\nSCHEMA:\n{}\n\nPARSING INSTRUCTIONS:\n{}",
-            schema, prompt
-        );
-
-        self.execute_parse(&user_prompt).await
+        self.execute_parse(&full_prompt).await
     }
 
     /// Execute the parse operation with retries
@@ -103,7 +88,14 @@ impl SemanticParser {
                     //
                     // Extract text content from the response.
                     //
+
                     let text_content = response.text().unwrap_or_default().to_string();
+                    info!(
+                        "Raw model response (attempt {}, {} chars): {}",
+                        attempt,
+                        text_content.len(),
+                        text_content
+                    );
 
                     //
                     // Try to parse the response as JSON.
