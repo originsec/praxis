@@ -77,13 +77,35 @@ export function StyledOutput({ output }: { output: string }) {
           case 'incoming': {
             const isToolResult = block.label?.startsWith('Tool result');
             const borderColor = isToolResult ? 'var(--accent-info)' : 'var(--text-secondary)';
+
+            //
+            // For AI Response blocks, strip out tool call JSON (starts with {"tool": or
+            // {"complete":). These are internal signals, not user-facing content.
+            // Also strip code blocks containing these JSON patterns, and empty code blocks.
+            //
+            let displayContent = block.content;
+            if (block.label === 'AI Response') {
+              displayContent = displayContent
+                .replace(/```[a-z]*\s*\n?\s*\{"\s*tool\s*"[\s\S]*?```/gi, '')
+                .replace(/```[a-z]*\s*\n?\s*\{"\s*complete\s*"[\s\S]*?```/gi, '')
+                .replace(/\{"tool":\s*"[^"]+",\s*"args":\s*\{[^}]*\}\}/g, '')
+                .replace(/\{"complete":\s*(true|false)(,\s*"summary":\s*"[^"]*")?(,\s*"result":\s*"[^"]*")?\}/g, '');
+
+              //
+              // Strip empty code blocks (any code block containing only whitespace).
+              //
+              displayContent = displayContent.replace(/```[a-z]*\n[\s\n]*```/gi, '').trim();
+            }
+
+            if (!displayContent) return null;
+
             return (
               <div key={idx} className="border-l pl-2" style={{ borderColor }}>
                 <div className="text-[10px] font-medium mb-0.5 flex items-center gap-1 text-[var(--text-secondary)]">
                   <span>←</span> {block.label}
                 </div>
                 <div className="prose prose-xs prose-invert max-w-none text-[11px] [&_table]:text-[10px] [&_th]:p-0.5 [&_td]:p-0.5 [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_h3]:text-xs [&_h3]:my-1">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
                 </div>
               </div>
             );

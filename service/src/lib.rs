@@ -200,12 +200,27 @@ pub fn print_banner(rabbitmq_url: &str) {
 // === Main ===.
 //
 
-async fn setup_rabbitmq() -> Result<Connection> {
+const RABBITMQ_RETRY_SECS: u64 = 5;
+
+async fn setup_rabbitmq() -> Connection {
     let url = rabbitmq_url();
-    info!("Connecting to RabbitMQ at: {}", url);
-    let conn = Connection::connect(url, ConnectionProperties::default()).await?;
-    info!("Connected to RabbitMQ");
-    Ok(conn)
+
+    loop {
+        info!("Connecting to RabbitMQ at: {}", url);
+        match Connection::connect(&url, ConnectionProperties::default()).await {
+            Ok(conn) => {
+                info!("Connected to RabbitMQ");
+                return conn;
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to connect to RabbitMQ: {}. Retrying in {} seconds...",
+                    e, RABBITMQ_RETRY_SECS
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(RABBITMQ_RETRY_SECS)).await;
+            }
+        }
+    }
 }
 
 /// Send a message to a specific node
@@ -231,11 +246,21 @@ async fn broadcast_state_to_clients(
     let state = node_registry.build_system_state().await;
     let clients = client_registry.list().await;
 
+    let mut stale_clients = Vec::new();
+
     for client in clients {
         let message = ClientDirectMessage::StateUpdate(state.clone());
         if let Err(e) = send_to_client(channel, &client.id, message).await {
-            warn!("Failed to send state update to client {}: {}", client.id, e);
+            warn!("Failed to send to client {} (removing stale): {}", client.id, e);
+            stale_clients.push(client.id.clone());
         }
+    }
+
+    //
+    // Remove stale clients that failed to receive messages.
+    //
+    for client_id in stale_clients {
+        client_registry.remove(&client_id).await;
     }
 
     Ok(())
@@ -365,12 +390,30 @@ fn convert_msg_chain_element(e: common::ChainElement) -> database::ChainElement 
 
 /// Run the Praxis service
 pub async fn run() -> Result<()> {
+    loop {
+        match run_main_loop().await {
+            Ok(()) => {
+                //
+                // Connection lost, restart.
+                //
+                warn!("RabbitMQ connection lost. Restarting in {} seconds...", RABBITMQ_RETRY_SECS);
+            }
+            Err(e) => {
+                error!("Service error: {}. Restarting in {} seconds...", e, RABBITMQ_RETRY_SECS);
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(RABBITMQ_RETRY_SECS)).await;
+    }
+}
+
+/// Main loop for the Praxis service - runs until connection loss
+async fn run_main_loop() -> Result<()> {
     //
     // Set up RabbitMQ and the signal queues which are used for node<-->service
     // signalling.
     //
 
-    let connection = setup_rabbitmq().await?;
+    let connection = setup_rabbitmq().await;
 
     let node_signal_channel = connection.create_channel().await?;
     let publish_channel = connection.create_channel().await?;
@@ -1025,6 +1068,7 @@ pub async fn run() -> Result<()> {
                     }
                     Err(e) => {
                         error!("Error receiving node message: {}", e);
+                        return Ok(());
                     }
                 }
             }
@@ -2158,14 +2202,16 @@ pub async fn run() -> Result<()> {
                     }
                     Err(e) => {
                         error!("Error receiving client message: {}", e);
+                        return Ok(());
                     }
                 }
             }
             else => {
-                break;
+                //
+                // Both consumers returned None - connection lost.
+                //
+                return Ok(());
             }
         }
     }
-
-    Ok(())
 }
