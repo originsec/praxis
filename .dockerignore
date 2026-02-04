@@ -1,0 +1,25 @@
+# Build artifacts
+target/
+web/frontend/node_modules/
+web/frontend/dist/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Documentation
+*.md
+LICENSE
+
+# Scripts (not needed in container)
+scripts/
+
+# Misc
+.DS_Store
+Thumbs.db

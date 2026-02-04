@@ -1,0 +1,13 @@
+name: "Hello World"
+short_name: hello
+category: exfiltration
+description: "Simple hello world operation using autonomous agent"
+agent_info: |
+  This operation uses an autonomous agent to perform a simple task of printing
+  "Hello, World!" to demonstrate the functionality of the agent system.
+timeout: 90
+mode: "agent"
+agent_iterations: 3
+yolo: true
+operation_prompt: |
+  Say "Hello, World!"
