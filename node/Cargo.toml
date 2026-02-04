@@ -64,7 +64,7 @@ uiautomation = { version = "0.24.2", features = ["all"] }
 winreg = "0.55"
 wintun = "0.5"
 chromiumoxide = { version = "0.7", features = ["tokio-runtime"], default-features = false }
-get_if_addrs = "0.5"
+if-addrs = "0.13"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

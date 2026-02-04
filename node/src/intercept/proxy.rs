@@ -2333,7 +2333,7 @@ fn discover_non_tun_ip() -> Option<std::net::IpAddr> {
     // Use local_ip crate if available, or fall back to a simple method.
     // For now, iterate through interfaces looking for a non-TUN IPv4.
     //
-    if let Ok(addrs) = get_if_addrs::get_if_addrs() {
+    if let Ok(addrs) = if_addrs::get_if_addrs() {
         for iface in addrs {
             if let IpAddr::V4(ipv4) = iface.ip() {
                 //
