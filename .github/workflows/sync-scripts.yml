@@ -1,0 +1,36 @@
+name: Sync Install Scripts
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout praxis
+        uses: actions/checkout@v4
+
+      - name: Checkout praxis_site
+        uses: actions/checkout@v4
+        with:
+          repository: originsec/praxis_site
+          token: ${{ secrets.SITE_DEPLOY_TOKEN }}
+          path: praxis_site
+
+      - name: Copy scripts to praxis_site
+        run: |
+          cp scripts/docker.sh praxis_site/public/
+          cp scripts/docker.ps1 praxis_site/public/
+          cp scripts/install.sh praxis_site/public/
+          cp scripts/install.ps1 praxis_site/public/
+
+      - name: Commit and push
+        working-directory: praxis_site
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/docker.sh public/docker.ps1 public/install.sh public/install.ps1
+          git diff --staged --quiet || git commit -m "Sync install scripts from praxis ${{ github.ref_name }}"
+          git push origin main
