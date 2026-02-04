@@ -1702,8 +1702,10 @@ pub enum ClientDirectMessage {
 pub struct SemanticParserRequest {
     /// Unique request ID for matching response
     pub request_id: String,
+    /// Instructions for what to extract
+    pub instruction: String,
     /// The text/data to parse
-    pub prompt: String,
+    pub text: String,
     /// JSON schema that the output must match (as a string)
     pub schema: String,
 }

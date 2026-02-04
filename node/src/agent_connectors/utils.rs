@@ -1095,10 +1095,11 @@ where
     //
     // Use the internal tools schema to parse the response.
     //
-    let discovery_prompt = crate::utils::semantic_parser::build_internal_tools_prompt(&response);
+
     match semantic_client
         .parse(
-            discovery_prompt,
+            crate::utils::semantic_parser::INTERNAL_TOOLS_PROMPT.to_string(),
+            response,
             crate::utils::semantic_parser::INTERNAL_TOOLS_SCHEMA.to_string(),
         )
         .await
@@ -1332,10 +1333,10 @@ async fn process_metadata_batch(
         batch_content.len()
     );
 
-    let extraction_prompt = crate::utils::semantic_parser::build_metadata_extraction_prompt(batch_content);
     match semantic_client
         .parse(
-            extraction_prompt,
+            crate::utils::semantic_parser::METADATA_EXTRACTION_PROMPT.to_string(),
+            batch_content.to_string(),
             crate::utils::semantic_parser::METADATA_EXTRACTION_SCHEMA.to_string(),
         )
         .await

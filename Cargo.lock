@@ -2743,6 +2743,7 @@ dependencies = [
  "indexmap",
  "lapin",
  "regex",
+ "semantic_parser",
  "serde",
  "serde_json",
  "serde_yaml",

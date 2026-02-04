@@ -87,17 +87,10 @@ pub const INTERNAL_TOOLS_SCHEMA: &str = r#"{
 
 /// Discovery prompt for extracting internal tools from unstructured text.
 pub const INTERNAL_TOOLS_PROMPT: &str = "Extract all internal/built-in tools from the following text. \
-These are tools that are part of the agent's core functionality, NOT MCP server tools. \
-Examples include: Bash (command execution), Read (file reading), Write (file writing), \
-Edit (file editing), Grep (search), Glob (file pattern matching), Task (agent spawning), etc. \
+These are tools that are part of the agent's core functionality, exclude MCP server tools. \
 For each tool, extract the name and a brief description of what it does. \
 DO NOT LIST ANY TOOLS THAT DO NOT EXIST IN THE TEXT. Only include tools that are explicitly mentioned. \
 Tools could also appear in all sorts of formats - plain text, json, xml, etc.";
-
-/// Build a prompt for internal tools discovery from unstructured text.
-pub fn build_internal_tools_prompt(text: &str) -> String {
-    format!("{}\n\n**TEXT**:\n{}", INTERNAL_TOOLS_PROMPT, text)
-}
 
 /// Parse JSON response from semantic parser into a Vec of AgentTool for internal tools.
 /// Returns None if parsing fails.
@@ -245,11 +238,6 @@ pub const METADATA_EXTRACTION_PROMPT: &str = "Analyze the following configuratio
 2. API keys: Any API keys, tokens, secrets, or credentials - identify by field names\n\n\
 Only extract values that actually exist in the text. Do not guess or fabricate any information.";
 
-/// Build a prompt for metadata extraction from config file contents.
-pub fn build_metadata_extraction_prompt(config_contents: &str) -> String {
-    format!("{}\n\n**CONFIG FILES**:\n{}", METADATA_EXTRACTION_PROMPT, config_contents)
-}
-
 /// Parsed metadata from semantic parser response
 #[derive(Debug, Default)]
 pub struct ExtractedMetadata {
@@ -358,7 +346,7 @@ impl SemanticParserClient {
     }
 
     /// Send a semantic parser request and wait for the response
-    pub async fn parse(&self, prompt: String, schema: String) -> Result<SemanticParserResponse> {
+    pub async fn parse(&self, instruction: String, text: String, schema: String) -> Result<SemanticParserResponse> {
         let request_id = Uuid::new_v4().to_string();
 
         //
@@ -371,7 +359,8 @@ impl SemanticParserClient {
         //
         let request = SemanticParserRequest {
             request_id: request_id.clone(),
-            prompt,
+            instruction,
+            text,
             schema,
         };
 
