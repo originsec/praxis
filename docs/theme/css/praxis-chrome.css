@@ -2,6 +2,15 @@
 /* Scoped to .light and .ayu themes */
 
 /*
+ * Hide unwanted themes from theme picker - show only Light (origin_light) and Ayu (praxis_dark).
+ */
+#theme-list > button#rust,
+#theme-list > button#coal,
+#theme-list > button#navy {
+    display: none !important;
+}
+
+/*
  * Light Theme - Origin Light Chrome
  */
 
