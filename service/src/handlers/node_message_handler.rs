@@ -96,12 +96,22 @@ impl NodeMessageHandler {
         let state = self.registry.build_system_state().await;
         let clients = self.client_registry.list().await;
 
+        let mut stale_clients = Vec::new();
+
         for client in clients {
             let message = ClientDirectMessage::StateUpdate(state.clone());
             let queue_name = client_queue_name(&client.id);
             if let Err(e) = publish_json(&self.channel, &queue_name, &message).await {
-                common::log_warn!("Failed to send state update to client {}: {}", client.id, e);
+                common::log_warn!("Failed to send to client {} (removing stale): {}", client.id, e);
+                stale_clients.push(client.id.clone());
             }
+        }
+
+        //
+        // Remove stale clients that failed to receive messages.
+        //
+        for client_id in stale_clients {
+            self.client_registry.remove(&client_id).await;
         }
 
         Ok(())

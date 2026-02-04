@@ -449,21 +449,21 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
       //
       */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-subtle bg-[var(--bg-secondary)]">
-        <div className="flex items-center gap-3 text-[10px] whitespace-nowrap">
-          <div className="flex items-center min-w-0">
+        <div className="flex items-baseline gap-3 text-[10px] whitespace-nowrap">
+          <div className="flex items-baseline min-w-0">
             <span className="text-muted">Chain:</span>
             <span className="ml-2 font-mono truncate max-w-[220px]">{execution.chain_name}</span>
             {onEditChain && chain && (
               <button
                 onClick={() => onEditChain(chain.id)}
-                className="ml-2 text-[var(--accent-info)] hover:text-[var(--accent-info)]/80 transition-colors"
+                className="ml-2 text-[var(--accent-info)] hover:text-[var(--accent-info)]/80 transition-colors self-center"
                 title="Edit chain definition"
               >
                 <ExternalLink size={12} />
               </button>
             )}
           </div>
-          <div className="flex items-center">
+          <div className="flex items-baseline">
             <span className="text-muted">Status:</span>
             <span className={`ml-2 font-mono ${
               execution.status === 'Completed' ? 'text-[var(--text-highlight)]' :
@@ -472,12 +472,12 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
               'text-[var(--text-secondary)]'
             }`}>{execution.status}</span>
           </div>
-          <div className="flex items-center">
+          <div className="flex items-baseline">
             <span className="text-muted">Started:</span>
             <span className="ml-2">{new Date(execution.started_at).toLocaleString()}</span>
           </div>
           {execution.ended_at && (
-            <div className="flex items-center">
+            <div className="flex items-baseline">
               <span className="text-muted">Ended:</span>
               <span className="ml-2">{new Date(execution.ended_at).toLocaleString()}</span>
             </div>
@@ -630,37 +630,37 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
               {(() => {
                 const stepInfo = getStepName(selectedElementId);
                 return (
-                  <div className="flex items-center gap-2">
-                    {stepInfo.type === 'trigger' && <Play size={18} className="text-[var(--accent-success)]" />}
-                    {stepInfo.type === 'operation' && <Cpu size={18} className="text-[var(--accent-info)]" />}
-                    {stepInfo.type === 'transform' && <Sparkles size={18} className="text-[var(--accent-warning)]" />}
-                    {stepInfo.type === 'genericPrompt' && <MessageSquare size={18} className="text-[var(--accent-purple)]" />}
-                    {stepInfo.type === 'termination' && <Square size={18} className="text-[var(--accent-error)]" />}
+                  <div className="flex items-baseline gap-2">
+                    {stepInfo.type === 'trigger' && <Play size={18} className="text-[var(--accent-success)] self-center" />}
+                    {stepInfo.type === 'operation' && <Cpu size={18} className="text-[var(--accent-info)] self-center" />}
+                    {stepInfo.type === 'transform' && <Sparkles size={18} className="text-[var(--accent-warning)] self-center" />}
+                    {stepInfo.type === 'genericPrompt' && <MessageSquare size={18} className="text-[var(--accent-purple)] self-center" />}
+                    {stepInfo.type === 'termination' && <Square size={18} className="text-[var(--accent-error)] self-center" />}
                     <span className="text-lg font-medium text-[var(--text-highlight)]">{stepInfo.name}</span>
                     <span className="text-xs text-[var(--text-secondary)] font-mono">{selectedElementId.slice(0, 8)}</span>
                   </div>
                 );
               })()}
 
-              <div className="flex gap-6 text-sm">
+              <div className="flex gap-4 text-[11px]">
                 <div>
-                  <span className="text-xs text-muted">Status:</span>
-                  <p className="font-mono">
+                  <span className="text-muted">Status:</span>{' '}
+                  <span className="font-mono">
                     {typeof selectedElement.status === 'object'
                       ? Object.keys(selectedElement.status)[0]
                       : selectedElement.status}
-                  </p>
+                  </span>
                 </div>
                 {selectedElement.started_at && (
                   <div>
-                    <span className="text-xs text-muted">Started:</span>
-                    <p className="text-xs">{new Date(selectedElement.started_at).toLocaleString()}</p>
+                    <span className="text-muted">Started:</span>{' '}
+                    <span>{new Date(selectedElement.started_at).toLocaleString()}</span>
                   </div>
                 )}
                 {selectedElement.completed_at && (
                   <div>
-                    <span className="text-xs text-muted">Completed:</span>
-                    <p className="text-xs">{new Date(selectedElement.completed_at).toLocaleString()}</p>
+                    <span className="text-muted">Completed:</span>{' '}
+                    <span>{new Date(selectedElement.completed_at).toLocaleString()}</span>
                   </div>
                 )}
               </div>

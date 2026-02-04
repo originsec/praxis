@@ -39,7 +39,7 @@ export function Sidebar() {
       */}
       <div className="p-4 border-b border-subtle">
         <div className="flex items-center justify-between">
-          <span className="text-highlight font-bold tracking-widest text-sm">[0] PRAXIS</span>
+          <span className="text-highlight font-bold tracking-widest text-sm">[Ø] PRAXIS</span>
           <span className="text-[10px] text-muted">v{state.version ?? '?.?.?'}</span>
         </div>
         <div className="text-[10px] text-muted tracking-wider mt-1">Command & Control</div>

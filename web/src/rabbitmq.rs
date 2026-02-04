@@ -18,6 +18,8 @@ use std::sync::Arc;
 use crate::messages::ServerMessage;
 use crate::state::AppState;
 
+const RABBITMQ_RETRY_SECS: u64 = 5;
+
 /// RabbitMQ client for the web server
 pub struct RabbitMqClient {
     channel: Channel,
@@ -25,17 +27,38 @@ pub struct RabbitMqClient {
 }
 
 impl RabbitMqClient {
-    /// Connect to RabbitMQ and set up queues
-    pub async fn connect(state: Arc<AppState>) -> Result<Self> {
+    /// Connect to RabbitMQ and set up queues (retries until successful)
+    pub async fn connect(state: Arc<AppState>) -> Self {
         let url = rabbitmq_url();
-        common::log_info!("Connecting to RabbitMQ at: {}", url);
 
-        let connection = Connection::connect(url, ConnectionProperties::default()).await?;
-        let channel = connection.create_channel().await?;
+        loop {
+            common::log_info!("Connecting to RabbitMQ at: {}", url);
 
-        common::log_info!("Connected to RabbitMQ");
+            match Connection::connect(&url, ConnectionProperties::default()).await {
+                Ok(connection) => {
+                    match connection.create_channel().await {
+                        Ok(channel) => {
+                            common::log_info!("Connected to RabbitMQ");
+                            return Self { channel, state };
+                        }
+                        Err(e) => {
+                            common::log_warn!(
+                                "Failed to create RabbitMQ channel: {}. Retrying in {} seconds...",
+                                e, RABBITMQ_RETRY_SECS
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    common::log_warn!(
+                        "Failed to connect to RabbitMQ: {}. Retrying in {} seconds...",
+                        e, RABBITMQ_RETRY_SECS
+                    );
+                }
+            }
 
-        Ok(Self { channel, state })
+            tokio::time::sleep(std::time::Duration::from_secs(RABBITMQ_RETRY_SECS)).await;
+        }
     }
 
     /// Register as a client with the service
@@ -643,21 +666,27 @@ impl RabbitMqClient {
 
         //
         // Spawn task to consume from client-specific queue.
+        // Signal shutdown on connection loss for graceful restart.
         //
         let client_queue_clone = client_queue.clone();
         tokio::spawn(async move {
             if let Err(e) = self_direct.consume_direct_messages(&client_queue_clone).await {
                 common::log_error!("Direct message consumer error: {}", e);
             }
+            common::log_error!("RabbitMQ connection lost (direct consumer). Signaling restart...");
+            self_direct.state.signal_shutdown();
         });
 
         //
         // Spawn task to consume from broadcast queue.
+        // Signal shutdown on connection loss for graceful restart.
         //
         tokio::spawn(async move {
             if let Err(e) = self_broadcast.consume_broadcast_messages().await {
                 common::log_error!("Broadcast message consumer error: {}", e);
             }
+            common::log_error!("RabbitMQ connection lost (broadcast consumer). Signaling restart...");
+            self_broadcast.state.signal_shutdown();
         });
 
         Ok(())

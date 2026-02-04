@@ -921,33 +921,21 @@ export function SettingsPage() {
               </div>
 
               <div className="space-y-4 max-w-md">
-                <div className="p-4 bg-[var(--bg-secondary)]">
-                  <div className="flex items-center gap-4 mb-2">
-                    <span className="text-sm font-medium w-32">Connection Status</span>
-                    <span
-                      className={`text-sm ${
-                        state.connected ? 'status-online' : 'status-offline'
-                      }`}
-                    >
-                      {state.connected ? 'Connected' : 'Disconnected'}
-                    </span>
-                  </div>
+                <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+                  <span className="text-muted">Status</span>
+                  <span className={state.connected ? 'status-online' : 'status-offline'}>
+                    {state.connected ? 'Connected' : 'Disconnected'}
+                  </span>
                   {state.clientId && (
-                    <div className="flex items-center gap-4">
-                      <span className="text-sm text-muted w-32">Client ID</span>
-                      <span className="text-xs font-mono text-muted">{state.clientId}</span>
-                    </div>
+                    <>
+                      <span className="text-muted">Client ID</span>
+                      <span className="font-mono text-muted">{state.clientId}</span>
+                    </>
                   )}
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2">WebSocket URL</label>
-                  <input
-                    type="text"
-                    value={`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`}
-                    disabled
-                    className="w-full bg-[var(--bg-secondary)] border border-subtle px-4 py-2.5 text-muted"
-                  />
+                  <span className="text-muted">WebSocket</span>
+                  <span className="font-mono text-muted">
+                    {`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`}
+                  </span>
                 </div>
               </div>
 

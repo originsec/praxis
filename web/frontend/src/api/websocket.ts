@@ -2,13 +2,12 @@ import type { BrowserMessage, ServerMessage } from './types';
 
 export type MessageHandler = (message: ServerMessage) => void;
 
+const RECONNECT_DELAY_MS = 5000;
+
 export class WebSocketClient {
   private ws: WebSocket | null = null;
   private url: string;
   private handlers: Set<MessageHandler> = new Set();
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
-  private reconnectDelay = 1000;
   private isConnecting = false;
 
   constructor(url?: string) {
@@ -36,7 +35,6 @@ export class WebSocketClient {
         this.ws.onopen = () => {
           console.log('WebSocket connected');
           this.isConnecting = false;
-          this.reconnectAttempts = 0;
           resolve();
         };
 
@@ -68,18 +66,10 @@ export class WebSocketClient {
   }
 
   private attemptReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Max reconnection attempts reached');
-      return;
-    }
-
-    this.reconnectAttempts++;
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-    console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
-
+    console.log(`WebSocket reconnecting in ${RECONNECT_DELAY_MS / 1000} seconds...`);
     setTimeout(() => {
       this.connect().catch(console.error);
-    }, delay);
+    }, RECONNECT_DELAY_MS);
   }
 
   disconnect(): void {

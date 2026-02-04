@@ -27,6 +27,7 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
   const outputRef = useRef<HTMLDivElement>(null);
   const [promptCollapsed, setPromptCollapsed] = useState(false);
   const [outputCollapsed, setOutputCollapsed] = useState(false);
+  const [resultCollapsed, setResultCollapsed] = useState(false);
 
   //
   // Autoscroll output when it changes (for live updates during execution).
@@ -61,48 +62,39 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
       )}
     >
       {operation && (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {/*
           //
           // Info.
           //
           */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="col-span-2">
-              <p className="text-xs text-muted mb-1">Operation ID</p>
-              <p className="text-sm font-mono">{operation.operation_id}</p>
+          <div className="grid grid-cols-4 gap-x-4 gap-y-1 text-[11px]">
+            <div className="col-span-4">
+              <span className="text-muted">ID:</span>{' '}
+              <span className="font-mono">{operation.operation_id}</span>
             </div>
             <div>
-              <p className="text-xs text-muted mb-1">Status</p>
+              <span className="text-muted">Status:</span>{' '}
               <StatusBadge
                 status={getOperationStatusColor(operation.status)}
                 label={operation.status}
               />
             </div>
             <div>
-              <p className="text-xs text-muted mb-1">Agent</p>
-              <p className="text-sm">{operation.agent_short_name}</p>
+              <span className="text-muted">Agent:</span>{' '}
+              <span>{operation.agent_short_name}</span>
             </div>
             <div>
-              <p className="text-xs text-muted mb-1">Mode</p>
-              <p className="text-sm">{operation.spec.mode}</p>
+              <span className="text-muted">Mode:</span>{' '}
+              <span>{operation.spec.mode}</span>
             </div>
             <div>
-              <p className="text-xs text-muted mb-1">Duration</p>
-              <p className="text-sm">
-                {formatDuration(operation.start_time, operation.end_time)}
-              </p>
+              <span className="text-muted">Duration:</span>{' '}
+              <span>{formatDuration(operation.start_time, operation.end_time)}</span>
             </div>
-          </div>
-
-          {/*
-          //
-          // Description.
-          //
-          */}
-          <div>
-            <p className="text-xs text-muted mb-1">Description</p>
-            <p className="text-sm text-muted">{operation.spec.description}</p>
+            <div className="col-span-4 mt-1">
+              <span className="text-muted">{operation.spec.description}</span>
+            </div>
           </div>
 
           {/*
@@ -154,33 +146,25 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
 
           {/*
           //
-          // Summary - brief description of actions taken (displayed in yellow).
-          //
-          */}
-          {operation.summary && (
-            <div>
-              <p className="text-xs text-muted mb-1">Summary</p>
-              <div className="bg-[var(--bg-secondary)] p-3 border-l-2 border-[var(--accent-warning)]">
-                <p className="text-sm text-[var(--accent-warning)] whitespace-pre-wrap">
-                  {operation.summary}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/*
-          //
-          // Result - actual findings/data/output.
+          // Result - actual findings/data/output (collapsible).
           //
           */}
           {operation.result && (
             <div>
-              <p className="text-xs text-muted mb-1">Result</p>
-              <div className="bg-[var(--bg-secondary)] p-3 max-h-64 overflow-auto prose prose-sm prose-invert max-w-none [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0 [&_h2]:text-base [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-sm [&_h3]:mt-2 [&_h3]:mb-1">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {operation.result}
-                </ReactMarkdown>
-              </div>
+              <button
+                onClick={() => setResultCollapsed(!resultCollapsed)}
+                className="flex items-center gap-1 text-xs text-muted mb-1 hover:text-[var(--text-primary)] transition-colors"
+              >
+                {resultCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                Result
+              </button>
+              {!resultCollapsed && (
+                <div className="bg-[var(--bg-secondary)] p-3 max-h-64 overflow-auto prose prose-sm prose-invert max-w-none [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0 [&_h2]:text-base [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-sm [&_h3]:mt-2 [&_h3]:mb-1">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {operation.result}
+                  </ReactMarkdown>
+                </div>
+              )}
             </div>
           )}
         </div>

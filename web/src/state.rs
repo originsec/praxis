@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{broadcast, Notify, RwLock};
 use common::{
     ChainDefinitionInfo, ChainExecutionUpdate, InterceptedTrafficEntry, NodeCommandResult,
     OperationDefinitionInfo, SemanticOpUpdate, SystemState,
@@ -49,6 +49,8 @@ pub struct AppState {
     pub chain_definitions: RwLock<Vec<ChainDefinitionInfo>>,
     /// Tracked chain executions
     pub chain_executions: RwLock<HashMap<String, ChainExecutionUpdate>>,
+    /// Notify for signaling shutdown/restart (RabbitMQ connection lost)
+    pub shutdown_notify: Arc<Notify>,
 }
 
 /// Information about a WebSocket connection
@@ -77,7 +79,13 @@ impl AppState {
             traffic_search_responses: RwLock::new(HashMap::new()),
             chain_definitions: RwLock::new(Vec::new()),
             chain_executions: RwLock::new(HashMap::new()),
+            shutdown_notify: Arc::new(Notify::new()),
         })
+    }
+
+    /// Signal shutdown/restart needed (called when RabbitMQ connection lost)
+    pub fn signal_shutdown(&self) {
+        self.shutdown_notify.notify_one();
     }
 
     /// Update cached system state

@@ -318,6 +318,8 @@ async fn list_models(
     }
 }
 
+const RECONNECT_DELAY_SECS: u64 = 5;
+
 /// Run the Praxis web server
 pub async fn run() -> anyhow::Result<()> {
     //
@@ -326,10 +328,38 @@ pub async fn run() -> anyhow::Result<()> {
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
 
     //
-    // Print banner first.
+    // Print banner first (only once).
     //
     print_banner(common::rabbitmq_url(), &addr);
 
+    //
+    // Main loop - restarts on RabbitMQ connection loss.
+    //
+    loop {
+        match run_server(addr).await {
+            Ok(()) => {
+                //
+                // Server stopped due to shutdown signal (RabbitMQ connection
+                // lost).
+                //
+                common::log_warn!(
+                    "RabbitMQ connection lost. Restarting in {} seconds...",
+                    RECONNECT_DELAY_SECS
+                );
+            }
+            Err(e) => {
+                common::log_error!(
+                    "Server error: {}. Restarting in {} seconds...",
+                    e, RECONNECT_DELAY_SECS
+                );
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(RECONNECT_DELAY_SECS)).await;
+    }
+}
+
+/// Run the web server until shutdown signal (RabbitMQ connection lost)
+async fn run_server(addr: SocketAddr) -> anyhow::Result<()> {
     //
     // Generate client ID for this web server instance.
     //
@@ -347,23 +377,36 @@ pub async fn run() -> anyhow::Result<()> {
     let app_state = AppState::new(client_id.clone());
 
     //
-    // Connect to RabbitMQ.
+    // Connect to RabbitMQ (retries until successful).
     //
-    let rabbitmq: Arc<RabbitMqClient> = RabbitMqClient::connect(Arc::clone(&app_state)).await
-        .map(Arc::new)
-        .map_err(|e| anyhow::anyhow!("Failed to connect to RabbitMQ: {}", e))?;
+    let rabbitmq: Arc<RabbitMqClient> = Arc::new(RabbitMqClient::connect(Arc::clone(&app_state)).await);
 
     //
     // Spawn task to forward web logs to service via RabbitMQ.
+    // Also stops when shutdown is signaled (RabbitMQ connection lost).
     //
     let rabbitmq_for_logging = rabbitmq.clone();
+    let shutdown_notify_for_logging = Arc::clone(&app_state.shutdown_notify);
     tokio::spawn(async move {
-        while let Some(entry) = event_log_rx.recv().await {
-            //
-            // Send log entry to service via NodeSignal queue.
-            //
-            if let Err(e) = rabbitmq_for_logging.send_event_log(entry).await {
-                eprintln!("Failed to send web log to service: {}", e);
+        loop {
+            tokio::select! {
+                entry = event_log_rx.recv() => {
+                    match entry {
+                        Some(entry) => {
+                            if let Err(_) = rabbitmq_for_logging.send_event_log(entry).await {
+                                //
+                                // Channel broken, stop task (will restart with
+                                // new connection).
+                                //
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                _ = shutdown_notify_for_logging.notified() => {
+                    break;
+                }
             }
         }
     });
@@ -419,8 +462,24 @@ pub async fn run() -> anyhow::Result<()> {
 
     common::log_info!("Starting web server on {}", addr);
 
+    //
+    // Bind and run server. Abort immediately on RabbitMQ connection loss
+    // (don't wait for graceful shutdown - WebSocket connections are long-lived).
+    //
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+
+    let shutdown_notify = Arc::clone(&app_state.shutdown_notify);
+
+    tokio::select! {
+        result = axum::serve(listener, app) => {
+            result?;
+        }
+        _ = shutdown_notify.notified() => {
+            //
+            // RabbitMQ connection lost - abort immediately and restart.
+            //
+        }
+    }
 
     Ok(())
 }
