@@ -781,9 +781,9 @@ export function SettingsPage() {
                     <div className="space-y-3">
                       {/*
                       //
-                      // Orchestrator.
+                      // Orchestrator - hidden, feature not ready.
                       //
-                      */}
+                      {false && (
                       <div className="flex items-center gap-4 p-3 bg-[var(--bg-secondary)] border border-dim">
                         <div className="w-48">
                           <p className="text-sm font-medium text-highlight">Orchestrator</p>
@@ -810,6 +810,8 @@ export function SettingsPage() {
                           title="Max tokens"
                         />
                       </div>
+                      )}
+                      */}
 
                       {/*
                       //
