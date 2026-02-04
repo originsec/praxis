@@ -25,8 +25,7 @@ import type {
   RuleScope,
 } from '../api/types';
 import {
-  GroupedTrafficRows,
-  TrafficTableHeader,
+  ScrollableTrafficTable,
   TrafficFilterBar,
   countTrafficEntries,
   tryPrettyPrintJson,
@@ -235,31 +234,17 @@ function TrafficLogTab() {
       // Traffic Table.
       //
       */}
-      <div className="border border-subtle ascii-box">
-        <table className="w-full text-xs">
-          <thead>
-            <TrafficTableHeader showNodeColumn={true} />
-          </thead>
-          <tbody>
-            <GroupedTrafficRows
-              entries={state.intercept.trafficLog}
-              protocolFilter={protocolFilter}
-              searchFilter={searchFilter}
-              expandedRow={expandedRow}
-              setExpandedRow={setExpandedRow}
-              showNodeColumn={true}
-              displayLimit={DISPLAY_LIMIT}
-            />
-            {state.intercept.trafficLog.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-muted">
-                  No traffic entries
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <ScrollableTrafficTable
+        entries={state.intercept.trafficLog}
+        protocolFilter={protocolFilter}
+        searchFilter={searchFilter}
+        expandedRow={expandedRow}
+        setExpandedRow={setExpandedRow}
+        showNodeColumn={true}
+        displayLimit={DISPLAY_LIMIT}
+        heightMode="fixed"
+        maxHeight="70vh"
+      />
 
       {/*
       //

@@ -830,3 +830,77 @@ export function TrafficTableHeader({ showNodeColumn = true }: { showNodeColumn?:
     </tr>
   );
 }
+
+//
+// Scrollable Traffic Table Component.
+// Reusable wrapper that provides fixed header and scrollable body.
+//
+
+export interface ScrollableTrafficTableProps extends TrafficTableProps {
+  //
+  // Height mode: 'flex' fills available space in flex container,
+  // 'fixed' uses maxHeight for non-flex contexts.
+  //
+  heightMode?: 'flex' | 'fixed';
+  //
+  // Max height for fixed mode (default: 70vh).
+  //
+  maxHeight?: string;
+  //
+  // Empty state message.
+  //
+  emptyMessage?: string;
+}
+
+export function ScrollableTrafficTable({
+  entries,
+  protocolFilter,
+  searchFilter,
+  expandedRow,
+  setExpandedRow,
+  showNodeColumn = true,
+  displayLimit,
+  heightMode = 'fixed',
+  maxHeight = '70vh',
+  emptyMessage = 'No traffic entries',
+}: ScrollableTrafficTableProps) {
+  const colSpan = showNodeColumn ? 7 : 6;
+
+  const containerClass = heightMode === 'flex'
+    ? 'flex-1 min-h-0 border border-subtle ascii-box flex flex-col overflow-hidden'
+    : `border border-subtle ascii-box flex flex-col overflow-hidden`;
+
+  const containerStyle = heightMode === 'fixed' ? { maxHeight } : undefined;
+
+  return (
+    <div className={containerClass} style={containerStyle}>
+      <table className="w-full text-xs table-fixed">
+        <thead>
+          <TrafficTableHeader showNodeColumn={showNodeColumn} />
+        </thead>
+      </table>
+      <div className="flex-1 overflow-y-auto">
+        <table className="w-full text-xs table-fixed">
+          <tbody>
+            <GroupedTrafficRows
+              entries={entries}
+              protocolFilter={protocolFilter}
+              searchFilter={searchFilter}
+              expandedRow={expandedRow}
+              setExpandedRow={setExpandedRow}
+              showNodeColumn={showNodeColumn}
+              displayLimit={displayLimit}
+            />
+            {entries.length === 0 && (
+              <tr>
+                <td colSpan={colSpan} className="px-4 py-8 text-center text-muted">
+                  {emptyMessage}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

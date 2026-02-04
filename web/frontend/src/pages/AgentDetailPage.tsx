@@ -44,8 +44,7 @@ import { Tooltip } from '../components/common/Tooltip';
 import type { SemanticOpUpdate, ReconResult, TrafficLogFilters, SessionContext, ChainDefinitionFull } from '../api/types';
 import { StatusBadge, getOperationStatusColor } from '../components/common/StatusBadge';
 import {
-  GroupedTrafficRows,
-  TrafficTableHeader,
+  ScrollableTrafficTable,
   TrafficFilterBar,
   type ProtocolFilter,
 } from '../components/traffic/TrafficTable';
@@ -2539,35 +2538,28 @@ function AgentInterceptTab({
       // Traffic Table.
       //
       */}
-      <div className="border border-subtle ascii-box">
-        {agentTraffic.length === 0 ? (
-          <div className="p-12 text-center">
-            <Shield size={48} className="mx-auto mb-4 text-muted opacity-50" />
-            <h2 className="text-title font-semibold text-lg mb-2">No Traffic Captured</h2>
-            <p className="text-muted">Enable interception on this node to start capturing traffic</p>
-            <p className="text-muted text-sm mt-2">
-              Go to <Link to={`/nodes/${nodeId}?tab=intercept`} className="text-[var(--accent-info)] hover:underline">Node Intercept</Link> to enable
-            </p>
-          </div>
-        ) : (
-          <table className="w-full text-xs">
-            <thead>
-              <TrafficTableHeader showNodeColumn={false} />
-            </thead>
-            <tbody>
-              <GroupedTrafficRows
-                entries={agentTraffic}
-                protocolFilter={protocolFilter}
-                searchFilter={searchFilter}
-                expandedRow={expandedRow}
-                setExpandedRow={setExpandedRow}
-                showNodeColumn={false}
-                displayLimit={100}
-              />
-            </tbody>
-          </table>
-        )}
-      </div>
+      {agentTraffic.length === 0 ? (
+        <div className="border border-subtle ascii-box p-12 text-center">
+          <Shield size={48} className="mx-auto mb-4 text-muted opacity-50" />
+          <h2 className="text-title font-semibold text-lg mb-2">No Traffic Captured</h2>
+          <p className="text-muted">Enable interception on this node to start capturing traffic</p>
+          <p className="text-muted text-sm mt-2">
+            Go to <Link to={`/nodes/${nodeId}?tab=intercept`} className="text-[var(--accent-info)] hover:underline">Node Intercept</Link> to enable
+          </p>
+        </div>
+      ) : (
+        <ScrollableTrafficTable
+          entries={agentTraffic}
+          protocolFilter={protocolFilter}
+          searchFilter={searchFilter}
+          expandedRow={expandedRow}
+          setExpandedRow={setExpandedRow}
+          showNodeColumn={false}
+          displayLimit={100}
+          heightMode="fixed"
+          maxHeight="60vh"
+        />
+      )}
     </div>
   );
 }

@@ -24,8 +24,7 @@ import { Terminal } from '../components/terminal/Terminal';
 import { Modal } from '../components/common/Modal';
 import type { InterceptedTrafficEntry, TrafficLogFilters, InterceptMethod } from '../api/types';
 import {
-  GroupedTrafficRows,
-  TrafficTableHeader,
+  ScrollableTrafficTable,
   TrafficFilterBar,
   countTrafficEntries,
   type ProtocolFilter,
@@ -681,7 +680,7 @@ function NodeInterceptTab({
   const hasNext = filters.offset + filters.limit < trafficTotalCount;
 
   return (
-    <div className="space-y-4">
+    <div className="flex-1 flex flex-col gap-4 min-h-0">
       {/*
       //
       // Enable/Disable Control.
@@ -744,31 +743,17 @@ function NodeInterceptTab({
       // Traffic Table.
       //
       */}
-      <div className="border border-subtle ascii-box">
-        <table className="w-full text-xs">
-          <thead>
-            <TrafficTableHeader showNodeColumn={false} />
-          </thead>
-          <tbody>
-            <GroupedTrafficRows
-              entries={trafficLog}
-              protocolFilter={protocolFilter}
-              searchFilter={searchFilter}
-              expandedRow={expandedRow}
-              setExpandedRow={setExpandedRow}
-              showNodeColumn={false}
-              displayLimit={DISPLAY_LIMIT}
-            />
-            {trafficLog.length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-muted">
-                  No traffic entries for this node
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <ScrollableTrafficTable
+        entries={trafficLog}
+        protocolFilter={protocolFilter}
+        searchFilter={searchFilter}
+        expandedRow={expandedRow}
+        setExpandedRow={setExpandedRow}
+        showNodeColumn={false}
+        displayLimit={DISPLAY_LIMIT}
+        heightMode="flex"
+        emptyMessage="No traffic entries for this node"
+      />
 
       {/*
       //
