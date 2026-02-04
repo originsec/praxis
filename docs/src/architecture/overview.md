@@ -4,7 +4,7 @@ Praxis has a distributed architecture designed for monitoring and controlling AI
 
 ## The Big Picture
 
-```
+```diagram
                               ┌─────────────────┐
                               │   Web Browser   │
                               │  (React SPA)    │
@@ -122,7 +122,7 @@ Here's what happens when you run an operation from the UI:
 
 ### Intercepted Traffic
 
-```
+```diagram
 Agent ─HTTPS─▶ Proxy ─▶ Node ─RabbitMQ─▶ Service ─▶ Database
                                            │
                                            └─▶ Web ─WebSocket─▶ Browser
@@ -130,7 +130,7 @@ Agent ─HTTPS─▶ Proxy ─▶ Node ─RabbitMQ─▶ Service ─▶ Database
 
 ### Operations
 
-```
+```diagram
 Browser ─▶ Web ─▶ Service ─▶ LLM (planning)
                      │
                      └─▶ Node ─▶ Agent (execution)

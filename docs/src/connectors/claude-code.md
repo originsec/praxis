@@ -78,7 +78,7 @@ When semantic recon is enabled (requires Semantic Parser LLM), the connector als
 
 Sessions are created by spawning Claude Code in a PTY (pseudo-terminal):
 
-```
+```diagram
 ┌───────────────────────────────────────────────────────┐
 │                      Praxis Node                      │
 │                                                       │

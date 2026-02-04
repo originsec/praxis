@@ -72,7 +72,7 @@ When semantic recon is enabled, the connector also creates a session and queries
 
 Sessions are created by spawning Gemini CLI in a PTY (pseudo-terminal):
 
-```
+```diagram
 ┌───────────────────────────────────────────────────────┐
 │                      Praxis Node                      │
 │                                                       │

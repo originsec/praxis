@@ -4,7 +4,7 @@ The web component serves the frontend and provides the communication layer betwe
 
 ## Overview
 
-```
+```diagram
 ┌───────────────────────────────────────────────────────────┐
 │                       Web Component                       │
 │                                                           │
@@ -68,12 +68,12 @@ Most functionality uses WebSocket for bidirectional communication.
 ### Message Flow
 
 **Client → Server:**
-```
+```diagram
 Browser → WebSocket → Handler → RabbitMQ (ClientSignal) → Service
 ```
 
 **Server → Client:**
-```
+```diagram
 Service → RabbitMQ (Client_{id} or ClientBroadcast) → Handler → WebSocket → Browser
 ```
 

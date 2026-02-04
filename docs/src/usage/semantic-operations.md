@@ -292,7 +292,7 @@ When running a chain:
 
 Operations without dependencies on each other can run simultaneously. The executor identifies these and runs them in parallel.
 
-```
+```diagram
     ┌─────┐
     │Start│
     └──┬──┘

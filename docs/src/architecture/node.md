@@ -4,7 +4,7 @@ The node is the component that runs on target systems. It's responsible for all 
 
 ## Overview
 
-```
+```diagram
 ┌──────────────────────────────────────────────────────────────┐
 │                            Node                              │
 │                                                              │
@@ -16,9 +16,11 @@ The node is the component that runs on target systems. It's responsible for all 
 │  │ ├────────────┤ │  │ ├────────────┤ │  │ └────────────┘ │  │
 │  │ │ Connector  │ │  │ │  TUN/VPN   │ │  │                │  │
 │  │ ├────────────┤ │  │ ├────────────┤ │  └────────────────┘  │
-│  │ │ Connector  │ │  │ │   Hosts    │ │                      │
-│  │ └────────────┘ │  │ └────────────┘ │                      │
-│  └────────────────┘  └────────────────┘                      │
+│  │ │ Connector  │ │  │ │  TPROXY    │ │                      │
+│  │ └────────────┘ │  │ ├────────────┤ │                      │
+│  └────────────────┘  │ │   Hosts    │ │                      │
+│                      │ └────────────┘ │                      │
+│                      └────────────────┘                      │
 │                                                              │
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │               Runtime / Message Handler                │  │
@@ -55,7 +57,7 @@ pub fn create_all_agents(&self) -> Vec<Arc<dyn Agent>> {
 
 ## Intercept Manager
 
-The intercept manager handles traffic capture. It supports three methods:
+The intercept manager handles traffic capture. It supports four methods:
 
 ### Proxy Mode
 

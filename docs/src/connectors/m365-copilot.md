@@ -24,7 +24,7 @@ The URL pattern filters for Copilot-specific API calls.
 
 Uses Chrome DevTools Protocol to interact with Copilot:
 
-```
+```diagram
 ┌───────────────────────────────────────────────────────┐
 │                      Praxis Node                      │
 │                                                       │

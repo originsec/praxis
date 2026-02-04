@@ -34,7 +34,7 @@ This matters for:
 
 Praxis has three main pieces:
 
-```
+```diagram
 ┌───────────────────────────────────────────────────────────┐
 │                                                           │
 │                       Your Browser                        │

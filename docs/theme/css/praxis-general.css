@@ -1,7 +1,271 @@
 /* Praxis Terminal Theme - General Styles */
-/* Scoped to .ayu theme to not break other themes */
+/* Scoped to .light and .ayu themes */
 
-/* Grid background pattern - only for coal theme */
+/*
+ * Light Theme - Origin Light
+ */
+html.light {
+    font-family: var(--font-mono);
+    color-scheme: light;
+    background-color: var(--bg-primary);
+}
+
+.light body {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    line-height: 1.7;
+    background-color: var(--bg-primary);
+    color: var(--text-secondary);
+}
+
+/* Headings - light theme */
+.light h1, .light h2, .light h3, .light h4, .light h5, .light h6 {
+    font-family: var(--font-mono);
+    color: var(--text-highlight);
+    font-weight: 500;
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+    border-bottom: none;
+}
+
+.light h1 {
+    font-size: 1.6em;
+    color: var(--text-highlight);
+}
+
+.light h1 a,
+.light h1 a.header,
+.light #mdbook-content h1 a,
+.light .content h1 a,
+.light main h1 a {
+    color: var(--text-highlight);
+}
+
+.light h2 {
+    font-size: 1.3em;
+    color: var(--text-highlight);
+    margin-top: 2em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid var(--border-dim);
+}
+
+.light h3 {
+    font-size: 1.1em;
+    color: var(--text-highlight);
+}
+
+.light h4, .light h5, .light h6 {
+    font-size: 1em;
+    color: var(--text-primary);
+}
+
+/* Paragraphs - light theme */
+.light p {
+    margin: 1em 0;
+}
+
+/* Links - light theme */
+.light a {
+    color: var(--accent-info);
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+.light a:hover {
+    color: var(--text-highlight);
+}
+
+/* Code blocks - light theme */
+.light code {
+    font-family: var(--font-mono);
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border-dim);
+    border-radius: 2px;
+    padding: 0.1em 0.4em;
+    font-size: 0.9em;
+    color: var(--accent-purple);
+}
+
+.light pre {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 1em;
+    overflow-x: auto;
+    box-shadow: 2px 2px 0 0 rgba(0, 0, 0, 0.08);
+    line-height: 1.35;
+}
+
+/* Center diagrams (use ```diagram in markdown) */
+.light pre code.language-diagram {
+    display: block;
+}
+.light pre:has(code.language-diagram) {
+    width: fit-content;
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.light pre code {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: var(--text-primary);
+    line-height: 1.35;
+}
+
+/* Remove hljs background - light theme */
+.light .hljs {
+    background: transparent;
+}
+
+/* Inline code in headings - light theme */
+.light h1 code, .light h2 code, .light h3 code, .light h4 code {
+    color: var(--accent-purple);
+    background-color: var(--bg-tertiary);
+    font-size: 0.85em;
+}
+
+/* Tables - light theme */
+.light table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.5em 0;
+    font-size: 0.9em;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-secondary);
+}
+
+.light table thead tr {
+    background-color: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.light table th {
+    color: var(--text-muted);
+    font-weight: 500;
+    padding: 0.5em 1em;
+    text-align: left;
+    text-transform: uppercase;
+    font-size: 0.7em;
+    letter-spacing: 0.1em;
+}
+
+.light table td {
+    padding: 0.5em 1em;
+    border: none;
+    border-bottom: 1px solid var(--border-dim);
+}
+
+.light table tbody tr {
+    background-color: transparent;
+}
+
+.light table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* Blockquotes - light theme */
+.light blockquote {
+    background-color: var(--bg-tertiary);
+    border-left: 3px solid var(--border-active);
+    margin: 1.5em 0;
+    padding: 1em 1.5em;
+    color: var(--text-secondary);
+}
+
+.light blockquote p {
+    margin: 0;
+}
+
+/* Lists - light theme */
+.light ul, .light ol {
+    margin: 1em 0;
+    padding-left: 2.5em;
+}
+
+.light li {
+    margin: 0.5em 0;
+}
+
+.light li::marker {
+    color: var(--text-secondary);
+}
+
+/* Strong and emphasis - light theme */
+.light strong, .light b {
+    color: var(--text-highlight);
+    font-weight: 600;
+}
+
+.light em, .light i {
+    color: var(--text-secondary);
+}
+
+/* Horizontal rules - light theme */
+.light hr {
+    border: none;
+    border-top: 1px solid var(--border-color);
+    margin: 2em 0;
+}
+
+/* Images - light theme */
+.light img {
+    max-width: 100%;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+/* Selection - light theme */
+.light ::selection {
+    background-color: var(--highlight-glow-strong);
+    color: var(--text-highlight);
+}
+
+/* Custom scrollbar - light theme */
+.light ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.light ::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+}
+
+.light ::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
+.light ::-webkit-scrollbar-thumb:hover {
+    background: var(--border-hover);
+}
+
+/* Warning/Note boxes - light theme */
+.light .warning {
+    background-color: rgba(178, 160, 100, 0.15);
+    border-left: 3px solid var(--accent-warning);
+    padding: 1em;
+    margin: 1.5em 0;
+}
+
+/* Chapter navigation - light theme */
+.light .nav-chapters {
+    font-size: 0.9em;
+}
+
+/* Page title area - light theme */
+.light #content > main > h1:first-child {
+    margin-top: 0;
+    padding-top: 0.5em;
+}
+
+/*
+ * Dark Theme - Praxis Terminal
+ */
+
+/* Grid background pattern - only for ayu theme */
 html.ayu {
     font-family: var(--font-mono);
     color-scheme: dark;
