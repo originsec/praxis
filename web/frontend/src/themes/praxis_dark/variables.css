@@ -4,6 +4,10 @@
  */
 
 :root {
+  /* Theme identifier */
+  --theme-name: 'praxis_dark';
+  --theme-is-dark: 1;
+
   --bg-primary: #030712;
   --bg-secondary: #050807;
   --bg-tertiary: #0a0f0c;
@@ -24,6 +28,14 @@
   --highlight: #0a0f0c;
   --green-glow: rgba(158, 230, 117, 0.15);
   --green-glow-strong: rgba(158, 230, 117, 0.4);
+
+  /* Splash screen colors - green phosphor theme */
+  --splash-bg: #030712;
+  --splash-logo: #f2ffd5;
+  --splash-logo-dim: #5c9c66;
+  --splash-glow: rgba(158, 230, 117, 0.6);
+  --splash-glow-weak: rgba(158, 230, 117, 0.3);
+  --splash-matrix-color: rgb(30, 80, 40);
 }
 
 html {
