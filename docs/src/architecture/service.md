@@ -53,7 +53,8 @@ When a node registers:
 1. Node info stored/updated
 2. Agent list recorded
 3. Acknowledgment sent with node-specific queue name
-4. Node added to broadcast list
+4. Node subscribes to broadcast exchange
+5. Service broadcasts current `application_logs_enabled` state to nodes and clients
 
 ### Health Monitoring
 
@@ -240,16 +241,17 @@ The service processes messages from multiple queues:
 
 ### Broadcasts
 
-The service sends broadcasts to keep all clients in sync:
+The service sends broadcasts (fanout exchange) to keep all clients in sync:
 - `StateUpdate` - periodic full state
 - `ChainExecutionUpdate` - chain progress
 - `ServiceOnline` - service restart notification
+- `EventLoggingSet` - centralized logging toggle
 
 ## Startup Sequence
 
 1. Load configuration from database
 2. Connect to RabbitMQ
-3. Declare queues
+3. Declare queues and broadcast exchanges
 4. Start message consumers
 5. Initialize semantic ops manager
 6. Initialize chain executor

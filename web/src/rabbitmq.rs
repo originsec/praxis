@@ -1,16 +1,16 @@
 use anyhow::Result;
 use common::{
     publish_json, rabbitmq_url, client_queue_name,
-    CLIENT_SIGNAL_QUEUE, CLIENT_BROADCAST_QUEUE, WEB_EVENT_LOG_QUEUE,
+    CLIENT_SIGNAL_QUEUE, CLIENT_BROADCAST_EXCHANGE, WEB_EVENT_LOG_QUEUE,
     ClientSignalMessage, ClientDirectMessage, ClientBroadcastMessage,
     ClientRegistration, CommandRequest, InterceptMethod,
     TrafficLogFilters, TrafficSearchFilters,
 };
 use futures_util::StreamExt;
 use lapin::{
-    options::{BasicAckOptions, BasicConsumeOptions, QueueDeclareOptions},
+    options::{BasicAckOptions, BasicConsumeOptions, ExchangeDeclareOptions, QueueBindOptions, QueueDeclareOptions},
     types::FieldTable,
-    Channel, Connection, ConnectionProperties,
+    Channel, Connection, ConnectionProperties, ExchangeKind,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -648,12 +648,35 @@ impl RabbitMqClient {
         common::log_info!("Declared queue: {}", client_queue);
 
         //
-        // Declare broadcast queue subscription.
+        // Declare broadcast exchange and bind a private queue.
         //
         self.channel
+            .exchange_declare(
+                CLIENT_BROADCAST_EXCHANGE,
+                ExchangeKind::Fanout,
+                ExchangeDeclareOptions::default(),
+                FieldTable::default(),
+            )
+            .await?;
+
+        let broadcast_queue = self.channel
             .queue_declare(
-                CLIENT_BROADCAST_QUEUE,
-                QueueDeclareOptions::default(),
+                "",
+                QueueDeclareOptions {
+                    exclusive: true,
+                    auto_delete: true,
+                    ..QueueDeclareOptions::default()
+                },
+                FieldTable::default(),
+            )
+            .await?;
+
+        self.channel
+            .queue_bind(
+                broadcast_queue.name().as_str(),
+                CLIENT_BROADCAST_EXCHANGE,
+                "",
+                QueueBindOptions::default(),
                 FieldTable::default(),
             )
             .await?;
@@ -678,11 +701,12 @@ impl RabbitMqClient {
         });
 
         //
-        // Spawn task to consume from broadcast queue.
+        // Spawn task to consume from broadcast queue (bound to exchange).
         // Signal shutdown on connection loss for graceful restart.
         //
+        let broadcast_queue_name = broadcast_queue.name().to_string();
         tokio::spawn(async move {
-            if let Err(e) = self_broadcast.consume_broadcast_messages().await {
+            if let Err(e) = self_broadcast.consume_broadcast_messages(&broadcast_queue_name).await {
                 common::log_error!("Broadcast message consumer error: {}", e);
             }
             common::log_error!("RabbitMQ connection lost (broadcast consumer). Signaling restart...");
@@ -724,18 +748,18 @@ impl RabbitMqClient {
         Ok(())
     }
 
-    /// Consume messages from broadcast queue
-    async fn consume_broadcast_messages(&self) -> Result<()> {
+    /// Consume messages from broadcast queue (bound to exchange)
+    async fn consume_broadcast_messages(&self, queue_name: &str) -> Result<()> {
         let mut consumer = self.channel
             .basic_consume(
-                CLIENT_BROADCAST_QUEUE,
+                queue_name,
                 &format!("web_broadcast_consumer_{}", &self.state.client_id[..8]),
                 BasicConsumeOptions::default(),
                 FieldTable::default(),
             )
             .await?;
 
-        common::log_info!("Started consuming from {}", CLIENT_BROADCAST_QUEUE);
+        common::log_info!("Started consuming from broadcast queue: {}", queue_name);
 
         while let Some(delivery_result) = consumer.next().await {
             match delivery_result {
@@ -995,7 +1019,7 @@ impl RabbitMqClient {
         Ok(())
     }
 
-    /// Handle a message from the broadcast queue
+    /// Handle a message from the broadcast queue (fanout exchange)
     async fn handle_broadcast_message(&self, data: &[u8]) -> Result<()> {
         let message: ClientBroadcastMessage = serde_json::from_slice(data)?;
 
@@ -1013,6 +1037,10 @@ impl RabbitMqClient {
             ClientBroadcastMessage::ChainExecutionUpdate(execution) => {
                 self.state.update_chain_execution(execution.clone()).await;
                 self.state.broadcast(ServerMessage::ChainExecutionUpdate { execution });
+            }
+            ClientBroadcastMessage::EventLoggingSet { enabled } => {
+                common::logging::set_event_log_enabled(enabled);
+                common::log_info!("Event logging {}", if enabled { "enabled" } else { "disabled" });
             }
         }
 

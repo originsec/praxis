@@ -11,6 +11,12 @@ import { GlobalEventLogPanel } from '../event-log/GlobalEventLogPanel';
 export function MainLayout() {
   const { state, toggleEventLogPanel, setEventLogPanelHeight } = useApp();
   const [isResizing, setIsResizing] = useState(false);
+  const eventLoggingEnabled = (() => {
+    const value = state.config.application_logs_enabled;
+    if (!value) return false;
+    const normalized = value.toLowerCase();
+    return !(normalized === 'false' || normalized === '0' || normalized === 'no');
+  })();
 
   //
   // Handle event log panel resizing.
@@ -90,6 +96,16 @@ export function MainLayout() {
               <div className="flex items-center gap-2">
                 <ScrollText size={16} className="text-[var(--accent-info)]" />
                 <h3 className="text-sm font-semibold text-title">Event Log</h3>
+                <span
+                  className={`text-[10px] px-2 py-0.5 border rounded-full tracking-wider ${
+                    eventLoggingEnabled
+                      ? 'text-[var(--accent-success)] border-[var(--accent-success)]/40 bg-[var(--accent-success)]/10'
+                      : 'text-[var(--accent-error)] border-[var(--accent-error)]/40 bg-[var(--accent-error)]/10'
+                  }`}
+                  title={eventLoggingEnabled ? 'Centralized logging enabled' : 'Centralized logging disabled'}
+                >
+                  {eventLoggingEnabled ? 'LOGGING ON' : 'LOGGING OFF'}
+                </span>
               </div>
               <button
                 onClick={toggleEventLogPanel}

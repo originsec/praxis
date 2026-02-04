@@ -17,6 +17,9 @@ pub const LLM_FEATURE_SEMANTIC_OPS: &str = "llm_feature_semantic_ops";
 #[allow(dead_code)]
 pub const LLM_FEATURE_ORCHESTRATOR: &str = "llm_feature_orchestrator";
 
+/// Centralized application/event logging toggle
+pub const APPLICATION_LOGS_ENABLED: &str = "application_logs_enabled";
+
 /// A model definition stored in config
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -49,6 +52,17 @@ impl ServiceConfig {
     /// Get a configuration value by key (from cache)
     pub fn get(&self, key: &str) -> Option<&String> {
         self.cache.get(key)
+    }
+
+    /// Get a boolean configuration value by key (from cache)
+    pub fn get_bool(&self, key: &str, default: bool) -> bool {
+        match self.get(key) {
+            Some(value) => {
+                let normalized = value.to_lowercase();
+                !(normalized == "false" || normalized == "0" || normalized == "no")
+            }
+            None => default,
+        }
     }
 
     /// Set a configuration value (writes to database and updates cache)

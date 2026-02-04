@@ -12,6 +12,10 @@ export interface NodeState {
   // ISO datetime.
   //
   last_update: string;
+  //
+  // Active terminal session ID (if any).
+  //
+  active_terminal_id?: string | null;
 }
 
 export interface DiscoveredAgent {

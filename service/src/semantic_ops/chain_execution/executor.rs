@@ -7,8 +7,8 @@ use uuid::Uuid;
 
 use chrono::Utc;
 use common::{
-    publish_json, ChainExecutionStatus, ClientBroadcastMessage, ElementConfig, ElementContext,
-    SemanticOperationSpec, SemanticOpStatus, CLIENT_BROADCAST_QUEUE,
+    publish_json_exchange, ChainExecutionStatus, ClientBroadcastMessage, ElementConfig,
+    ElementContext, SemanticOperationSpec, SemanticOpStatus, CLIENT_BROADCAST_EXCHANGE,
     ai::{create_ai_client, execute_chat_completion, Message, Provider},
 };
 
@@ -270,7 +270,7 @@ impl ChainExecutor {
 
     /// Broadcast an update to all clients via RabbitMQ
     async fn broadcast_update(channel: &Channel, message: ClientBroadcastMessage) {
-        let _ = publish_json(channel, CLIENT_BROADCAST_QUEUE, &message).await;
+        let _ = publish_json_exchange(channel, CLIENT_BROADCAST_EXCHANGE, &message).await;
     }
 
     /// Run the chain execution logic

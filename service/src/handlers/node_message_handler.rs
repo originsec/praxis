@@ -1,8 +1,8 @@
 use anyhow::Result;
 use common::{
-    publish_json, client_queue_name, ClientDirectMessage, NodeBroadcastMessage,
-    NodeDirectMessage, NodeInformationUpdate, NodeRegistration, NodeRegistrationAck,
-    NODE_BROADCAST_QUEUE,
+    publish_json, publish_json_exchange, client_queue_name, ClientDirectMessage,
+    NodeBroadcastMessage, NodeDirectMessage, NodeInformationUpdate, NodeRegistration,
+    NodeRegistrationAck, NODE_BROADCAST_EXCHANGE,
 };
 use lapin::Channel;
 use std::sync::Arc;
@@ -123,7 +123,7 @@ impl NodeMessageHandler {
 
     pub async fn broadcast_refresh_registration(&self) -> Result<()> {
         let message = NodeBroadcastMessage::NodeRefreshRegistration;
-        publish_json(&self.channel, NODE_BROADCAST_QUEUE, &message).await?;
+        publish_json_exchange(&self.channel, NODE_BROADCAST_EXCHANGE, &message).await?;
 
         common::log_warn!("Broadcast NodeRefreshRegistration to all nodes");
 

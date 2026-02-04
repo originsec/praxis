@@ -94,10 +94,10 @@ All communication between nodes, service, and web clients flows through RabbitMQ
 |-------|-----------|---------|
 | `NodeSignal` | Node → Service | Registration, traffic, recon results |
 | `Node_{id}` | Service → Node | Commands, parser responses |
-| `NodeBroadcast` | Service → All Nodes | Refresh requests |
+| `NodeBroadcast` | Service → All Nodes | Refresh requests (fanout exchange) |
 | `ClientSignal` | Client → Service | UI requests |
 | `Client_{id}` | Service → Client | Direct responses |
-| `ClientBroadcast` | Service → All Clients | State updates |
+| `ClientBroadcast` | Service → All Clients | State updates (fanout exchange) |
 
 RabbitMQ provides:
 - Reliable message delivery
@@ -150,7 +150,7 @@ The service stores everything in a relational database:
 - **traffic_log** - intercepted HTTP traffic
 - **intercept_rules** - traffic matching rules
 - **recon_results** - cached reconnaissance data
-- **application_logs** - centralized logging
+- **application_logs** - centralized logging (controlled by `application_logs_enabled`)
 
 ## Deployment Patterns
 

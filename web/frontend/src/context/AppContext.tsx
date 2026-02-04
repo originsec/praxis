@@ -1161,6 +1161,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         case 'config_response':
           dispatch({ type: 'SET_CONFIG', values: message.values });
           break;
+        case 'config_saved':
+          //
+          // Refresh centralized logging state after a config update.
+          //
+          wsClient.send({ type: 'config_get', keys: ['application_logs_enabled'] });
+          break;
         case 'op_def_list':
           dispatch({ type: 'SET_OPERATION_DEFS', definitions: message.definitions });
           break;

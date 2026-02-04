@@ -190,4 +190,11 @@ impl TerminalManager {
             let _ = self.close_session(&id);
         }
     }
+
+    //
+    // Get the active terminal ID (first session if any exist).
+    //
+    pub fn get_active_terminal_id(&self) -> Option<String> {
+        self.sessions.keys().next().cloned()
+    }
 }

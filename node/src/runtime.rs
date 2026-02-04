@@ -10,7 +10,7 @@ use crate::utils::semantic_parser::{self, SemanticParserTracker};
 use chrono::Utc;
 use common::{
     publish_json, CommandRequest, CommandResponse, DiscoveredAgent, DiscoveredLlmEndpoint,
-    InterceptedTrafficEntry, NODE_BROADCAST_QUEUE, NODE_SIGNAL_QUEUE, NODE_EVENT_LOG_QUEUE,
+    InterceptedTrafficEntry, NODE_BROADCAST_EXCHANGE, NODE_EVENT_LOG_QUEUE, NODE_SIGNAL_QUEUE,
     NodeBroadcastMessage, NodeCommand, NodeCommandResult, NodeDirectMessage, NodeInformationUpdate,
     NodeSignalMessage, SelectedAgent, TerminalCommand, TerminalOutput,
 };
@@ -40,13 +40,42 @@ async fn listen_to_queues(
     shutdown_token: CancellationToken,
 ) -> anyhow::Result<()> {
     //
-    // Create consumers for both the broadcast queue and the node-specific
-    // queue (which was created during registration).
+    // Create a private broadcast queue bound to the fanout exchange.
     //
+    channel
+        .exchange_declare(
+            NODE_BROADCAST_EXCHANGE,
+            lapin::ExchangeKind::Fanout,
+            ExchangeDeclareOptions::default(),
+            FieldTable::default(),
+        )
+        .await?;
+
+    let broadcast_queue = channel
+        .queue_declare(
+            "",
+            QueueDeclareOptions {
+                exclusive: true,
+                auto_delete: true,
+                ..QueueDeclareOptions::default()
+            },
+            FieldTable::default(),
+        )
+        .await?;
+
+    channel
+        .queue_bind(
+            broadcast_queue.name().as_str(),
+            NODE_BROADCAST_EXCHANGE,
+            "",
+            QueueBindOptions::default(),
+            FieldTable::default(),
+        )
+        .await?;
 
     let mut broadcast_consumer = channel
         .basic_consume(
-            NODE_BROADCAST_QUEUE,
+            broadcast_queue.name().as_str(),
             &format!("node-broadcast-consumer-{}", node_id),
             BasicConsumeOptions::default(),
             FieldTable::default(),
@@ -372,7 +401,11 @@ async fn listen_to_queues(
     // Listen to both queues concurrently and handle messages as they arrive.
     //
 
-    common::log_info!("Listening to queues: {}, {}", NODE_BROADCAST_QUEUE, node_queue);
+    common::log_info!(
+        "Listening to queues: {} (exchange), {}",
+        NODE_BROADCAST_EXCHANGE,
+        node_queue
+    );
 
     loop {
         tokio::select! {
@@ -549,6 +582,13 @@ async fn handle_broadcast_message(
             if let Err(e) = publish_registration(channel, node_id).await {
                 common::log_error!("Failed to re-register with service: {}", e);
             }
+        }
+        NodeBroadcastMessage::EventLoggingSet { enabled } => {
+            common::logging::set_event_log_enabled(enabled);
+            common::log_info!(
+                "Event logging {} by service broadcast",
+                if enabled { "enabled" } else { "disabled" }
+            );
         }
     }
 }
@@ -774,13 +814,14 @@ async fn send_node_information_update(
     //
     // Check intercept status (now node-level, not per-agent).
     //
-    let (intercept_enabled, intercept_method, agent_discovery_enabled, discovered_endpoints_count) = {
+    let (intercept_enabled, intercept_method, agent_discovery_enabled, discovered_endpoints_count, active_terminal_id) = {
         let state = node_state.read().await;
         let enabled = state.intercept_manager.is_enabled();
         let method = state.intercept_manager.method();
         let discovery_enabled = state.intercept_manager.is_agent_discovery_enabled().await;
         let endpoints_count = state.intercept_manager.discovered_endpoints_count().await;
-        (enabled, method, discovery_enabled, endpoints_count)
+        let terminal_id = state.terminal_manager.get_active_terminal_id();
+        (enabled, method, discovery_enabled, endpoints_count, terminal_id)
     };
 
     //
@@ -820,6 +861,7 @@ async fn send_node_information_update(
         intercept_method,
         agent_discovery_enabled,
         discovered_endpoints_count,
+        active_terminal_id,
     };
 
     let message = NodeSignalMessage::InformationUpdate(update);

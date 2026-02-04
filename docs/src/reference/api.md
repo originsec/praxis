@@ -1,17 +1,17 @@
 # API Reference
 
-This reference documents the message types and RabbitMQ queues used for communication between Praxis components.
+This reference documents the message types and RabbitMQ queues/exchanges used for communication between Praxis components.
 
 ## RabbitMQ Queues
 
 | Queue | Direction | Purpose |
 |-------|-----------|---------|
 | `NodeSignal` | Node → Service | Node registration, commands, traffic |
-| `NodeBroadcast` | Service → All Nodes | Broadcast commands to all nodes |
+| `NodeBroadcast` | Service → All Nodes | Broadcast commands to all nodes (fanout exchange) |
 | `Node_{id}` | Service → Node | Commands for specific node |
 | `Node_{id}_semantic` | Service → Node | Semantic parser responses |
 | `ClientSignal` | Client → Service | Client requests |
-| `ClientBroadcast` | Service → All Clients | System state updates |
+| `ClientBroadcast` | Service → All Clients | System state updates (fanout exchange) |
 | `Client_{id}` | Service → Client | Responses for specific client |
 | `NodeEventLog` | Node → Service | Application log entries |
 | `ServiceEventLog` | Service → Service | Service log entries |
@@ -29,7 +29,7 @@ This reference documents the message types and RabbitMQ queues used for communic
     │                            │◀──────────NodeSignal──────│
     │◀──Client_{id}──────────────│                           │
     │                            │                           │
-    │◀──ClientBroadcast──────────│──NodeBroadcast───────────▶│
+    │◀──ClientBroadcast exchange─│──NodeBroadcast exchange─▶│
     │                            │                           │
 ```
 
@@ -94,7 +94,7 @@ pub enum NodeDirectMessage {
 
 ### NodeBroadcastMessage
 
-Messages broadcast to all nodes via `NodeBroadcast` queue.
+Messages broadcast to all nodes via `NodeBroadcast` fanout exchange.
 
 ```rust
 pub enum NodeBroadcastMessage {
@@ -103,6 +103,9 @@ pub enum NodeBroadcastMessage {
 
     // Request nodes to re-register
     NodeRefreshRegistration,
+
+    // Enable/disable centralized event logging
+    EventLoggingSet { enabled: bool },
 }
 ```
 
@@ -270,7 +273,7 @@ pub enum ClientDirectMessage {
 
 ### ClientBroadcastMessage
 
-Messages broadcast to all clients via `ClientBroadcast` queue.
+Messages broadcast to all clients via `ClientBroadcast` fanout exchange.
 
 ```rust
 pub enum ClientBroadcastMessage {
@@ -282,6 +285,9 @@ pub enum ClientBroadcastMessage {
 
     // Chain execution progress
     ChainExecutionUpdate(ChainExecutionUpdate),
+
+    // Enable/disable centralized event logging
+    EventLoggingSet { enabled: bool },
 }
 ```
 
