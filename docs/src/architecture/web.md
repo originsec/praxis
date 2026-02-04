@@ -44,7 +44,7 @@ The React frontend is compiled and embedded in the binary at build time. When yo
 `/ws` upgrades HTTP connections to WebSocket for real-time communication. Each connected browser gets:
 - A unique client ID
 - A dedicated RabbitMQ queue for responses
-- State updates via broadcast queue
+- State updates via broadcast exchange (fanout)
 
 ### API Endpoints
 
@@ -74,7 +74,7 @@ Browser → WebSocket → Handler → RabbitMQ (ClientSignal) → Service
 
 **Server → Client:**
 ```diagram
-Service → RabbitMQ (Client_{id} or ClientBroadcast) → Handler → WebSocket → Browser
+Service → RabbitMQ (Client_{id} or ClientBroadcast exchange) → Handler → WebSocket → Browser
 ```
 
 ### Message Types

@@ -47,6 +47,15 @@ This reference documents all configuration options for Praxis components.
 
 Service configuration is stored in the database and managed via the web UI.
 
+### Application Logging
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `application_logs_enabled` | `false` | Enable centralized application/event logging from service, web, and nodes |
+
+When disabled or missing, logging is off by default. The service broadcasts the
+current setting to nodes and web clients at startup and on registration.
+
 ### LLM Provider Settings
 
 Access via **Settings** > **LLM Providers** in the web UI.
@@ -255,7 +264,7 @@ Tables:
 - `intercept_rules` - Traffic rules
 - `traffic_matches` - Rule matches
 - `recon_results` - Stored recon data
-- `application_logs` - Centralized logging
+- `application_logs` - Centralized logging table (controlled by `application_logs_enabled`)
 
 ### PostgreSQL
 
@@ -292,4 +301,3 @@ Same schema, different backend. Use for:
 | Database | `%USERPROFILE%\.praxis_operations.db` |
 | Claude Config | `%USERPROFILE%\.claude.json` |
 | Hosts File | `C:\Windows\System32\drivers\etc\hosts` |
-

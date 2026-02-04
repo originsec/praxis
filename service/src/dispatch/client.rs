@@ -2,10 +2,13 @@
 
 use anyhow::Result;
 use common::{
-    ClientDirectMessage, ClientSignalMessage, CommandRequest, CommandResponse, NodeDirectMessage,
+    publish_json_exchange, ClientBroadcastMessage, ClientDirectMessage, ClientSignalMessage,
+    CommandRequest, CommandResponse, NodeBroadcastMessage, NodeDirectMessage,
+    CLIENT_BROADCAST_EXCHANGE, NODE_BROADCAST_EXCHANGE,
 };
 use tracing::{error, info, warn};
 
+use crate::config::service_config::APPLICATION_LOGS_ENABLED;
 use crate::conversions::{to_common as convert_chain_element, to_database as convert_msg_chain_element};
 use crate::database::{self, OperationDefinition};
 use crate::messaging::{broadcast_state_to_clients, send_to_client, send_to_node};
@@ -21,6 +24,17 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             if let Err(e) = ctx.client_handler.handle_client_registration(registration).await {
                 error!("Failed to handle ClientRegistration: {}", e);
             }
+            //
+            // Broadcast current event logging setting so new clients align.
+            //
+            let enabled = {
+                let config = ctx.service_config.read().await;
+                config.get_bool(APPLICATION_LOGS_ENABLED, false)
+            };
+            let node_message = NodeBroadcastMessage::EventLoggingSet { enabled };
+            let _ = publish_json_exchange(&ctx.broadcast_channel, NODE_BROADCAST_EXCHANGE, &node_message).await;
+            let client_message = ClientBroadcastMessage::EventLoggingSet { enabled };
+            let _ = publish_json_exchange(&ctx.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &client_message).await;
         }
 
         ClientSignalMessage::Command(request) => {
@@ -353,7 +367,13 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             {
                 let mut config = ctx.service_config.write().await;
                 let mut save_error = None;
+                let mut event_logging_enabled: Option<bool> = None;
                 for (key, value) in values {
+                    if key == APPLICATION_LOGS_ENABLED {
+                        let normalized = value.to_lowercase();
+                        let enabled = !(normalized == "false" || normalized == "0" || normalized == "no");
+                        event_logging_enabled = Some(enabled);
+                    }
                     if let Err(e) = config.set(key, value).await {
                         save_error = Some(e);
                         break;
@@ -371,6 +391,15 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
                             "Failed to send config saved confirmation to client {}: {}",
                             client_id, e
                         );
+                    }
+                    if let Some(enabled) = event_logging_enabled {
+                        common::logging::set_event_log_enabled(enabled);
+
+                        let node_message = NodeBroadcastMessage::EventLoggingSet { enabled };
+                        let _ = publish_json_exchange(&ctx.broadcast_channel, NODE_BROADCAST_EXCHANGE, &node_message).await;
+                        let client_message = ClientBroadcastMessage::EventLoggingSet { enabled };
+                        let _ = publish_json_exchange(&ctx.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &client_message).await;
+
                     }
                 }
             }

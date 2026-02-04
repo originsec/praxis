@@ -326,6 +326,7 @@ impl TproxyManager {
     }
 
     /// Update the list of intercept IPs.
+    #[allow(dead_code)]
     pub fn update_intercept_ips(&mut self, ips: &[Ipv4Addr]) -> Result<()> {
         if !self.is_active {
             self.intercept_ips = ips.to_vec();
@@ -357,6 +358,7 @@ impl TproxyManager {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn is_active(&self) -> bool {
         self.is_active
     }

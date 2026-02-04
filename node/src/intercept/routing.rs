@@ -5,9 +5,11 @@ use std::net::IpAddr;
 
 /// Mark for proxy's outgoing connections to bypass VPN/TUN routing.
 /// Same as TPROXY_BYPASS_MARK - both serve the same purpose.
+#[allow(dead_code)]
 pub const VPN_BYPASS_MARK: u32 = 0x2;
 
 /// Routing table number for VPN bypass routes.
+#[allow(dead_code)]
 const VPN_BYPASS_TABLE: u32 = 200;
 
 /// TUN interface IPv4 address
@@ -682,6 +684,7 @@ impl VpnBypassManager {
         anyhow::bail!("Could not find default gateway in routing table")
     }
 
+    #[allow(dead_code)]
     pub fn is_active(&self) -> bool {
         self.is_active
     }
@@ -717,6 +720,7 @@ impl VpnBypassManager {
         Self
     }
 
+    #[allow(dead_code)]
     pub fn start(&mut self) -> Result<()> {
         Ok(())
     }
@@ -859,6 +863,7 @@ impl Ipv6Manager {
         Self
     }
 
+    #[allow(dead_code)]
     pub fn disable(&mut self) -> Result<()> {
         Ok(())
     }

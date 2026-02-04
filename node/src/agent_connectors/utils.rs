@@ -638,6 +638,7 @@ pub fn get_path_owner(path: &std::path::Path) -> Option<(u32, u32)> {
 }
 
 #[cfg(not(unix))]
+#[allow(dead_code)]
 pub fn get_path_owner(_path: &std::path::Path) -> Option<(u32, u32)> {
     None
 }

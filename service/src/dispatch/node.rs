@@ -2,10 +2,13 @@
 
 use anyhow::Result;
 use common::{
-    node_semantic_queue_name, publish_json, ClientDirectMessage, NodeSignalMessage,
+    node_semantic_queue_name, publish_json, publish_json_exchange, ClientBroadcastMessage,
+    ClientDirectMessage, NodeBroadcastMessage, NodeSignalMessage, CLIENT_BROADCAST_EXCHANGE,
+    NODE_BROADCAST_EXCHANGE,
 };
 use tracing::{error, info, warn};
 
+use crate::config::service_config::APPLICATION_LOGS_ENABLED;
 use crate::messaging::send_to_client;
 use crate::semantic_helpers;
 
@@ -20,6 +23,17 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             if let Err(e) = ctx.node_handler.handle_node_registration(registration).await {
                 error!("Failed to handle NodeRegistration: {}", e);
             }
+            //
+            // Broadcast current event logging setting so new nodes align.
+            //
+            let enabled = {
+                let config = ctx.service_config.read().await;
+                config.get_bool(APPLICATION_LOGS_ENABLED, false)
+            };
+            let node_message = NodeBroadcastMessage::EventLoggingSet { enabled };
+            let _ = publish_json_exchange(&ctx.broadcast_channel, NODE_BROADCAST_EXCHANGE, &node_message).await;
+            let client_message = ClientBroadcastMessage::EventLoggingSet { enabled };
+            let _ = publish_json_exchange(&ctx.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &client_message).await;
         }
 
         NodeSignalMessage::InformationUpdate(update) => {

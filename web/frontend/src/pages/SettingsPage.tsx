@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Server, Save, Check, List, Loader2, X, Cpu, Plus, Trash2, Edit2, Key, Info, ExternalLink, Download, Monitor } from 'lucide-react';
+import { Server, Save, Check, List, Loader2, X, Cpu, Plus, Trash2, Edit2, Key, Info, ExternalLink, Download, Monitor, ToggleLeft, ToggleRight } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getFeatureFlags } from '../utils/featureFlags';
 
@@ -140,6 +140,11 @@ export function SettingsPage() {
   const [providers, setProviders] = useState<ProviderOption[]>([]);
 
   //
+  // Event logging toggle.
+  //
+  const [eventLoggingEnabled, setEventLoggingEnabled] = useState(false);
+
+  //
   // Load config on mount
   // All llm_* keys go to Service (not starting with orchestrator_).
   //
@@ -151,6 +156,7 @@ export function SettingsPage() {
       'llm_feature_semantic_parser',
       'llm_feature_traffic_parser',
       'llm_orchestrator_max_tokens',
+      'application_logs_enabled',
     ]);
   }, [getConfig]);
 
@@ -219,6 +225,17 @@ export function SettingsPage() {
     setFeatureSettings({
       orchestratorMaxTokens: cfg.llm_orchestrator_max_tokens || '25000',
     });
+
+    //
+    // Load event logging setting.
+    //
+    if (cfg.application_logs_enabled) {
+      const normalized = cfg.application_logs_enabled.toLowerCase();
+      const enabled = !(normalized === 'false' || normalized === '0' || normalized === 'no');
+      setEventLoggingEnabled(enabled);
+    } else {
+      setEventLoggingEnabled(false);
+    }
   }, [state.config]);
 
   //
@@ -226,6 +243,15 @@ export function SettingsPage() {
   //
   const generateModelName = (provider: string, model: string): string => {
     return `${provider}::${model}`;
+  };
+
+  //
+  // Toggle centralized event logging.
+  //
+  const handleEventLoggingToggle = () => {
+    const next = !eventLoggingEnabled;
+    setEventLoggingEnabled(next);
+    setConfig({ application_logs_enabled: next ? 'true' : 'false' });
   };
 
   //
@@ -937,6 +963,32 @@ export function SettingsPage() {
                     {`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`}
                   </span>
                 </div>
+              </div>
+
+              {/*
+              //
+              // Event Logging.
+              //
+              */}
+              <div className="pt-4 border-t border-subtle">
+                <div className="mb-2">
+                  <h3 className="text-md font-semibold text-highlight mb-1">Event Logging</h3>
+                  <p className="text-sm text-muted">Centralized application logs from service, nodes, and web</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleEventLoggingToggle}
+                  className="flex items-center gap-2 text-sm text-muted hover:text-highlight transition-colors"
+                >
+                  {eventLoggingEnabled ? (
+                    <ToggleRight size={20} className="text-muted" />
+                  ) : (
+                    <ToggleLeft size={20} className="text-muted" />
+                  )}
+                  <span className="tracking-wider">
+                    {eventLoggingEnabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                </button>
               </div>
 
               {/*

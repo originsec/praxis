@@ -15,14 +15,15 @@ mod state;
 use anyhow::Result;
 pub use common::rabbitmq_url;
 use common::{
-    publish_json, ClientBroadcastMessage, ClientDirectMessage, ClientSignalMessage,
-    NodeBroadcastMessage, NodeSignalMessage, CLIENT_BROADCAST_QUEUE, CLIENT_SIGNAL_QUEUE,
-    NODE_BROADCAST_QUEUE, NODE_SIGNAL_QUEUE,
+    publish_json_exchange, ClientBroadcastMessage, ClientDirectMessage, ClientSignalMessage,
+    NodeBroadcastMessage, NodeSignalMessage, CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE,
+    NODE_BROADCAST_EXCHANGE, NODE_SIGNAL_QUEUE,
 };
 use futures_util::StreamExt;
 use lapin::{
-    options::{BasicAckOptions, BasicConsumeOptions, QueueDeclareOptions, QueuePurgeOptions},
+    options::{BasicAckOptions, BasicConsumeOptions, ExchangeDeclareOptions, QueueDeclareOptions, QueuePurgeOptions},
     types::FieldTable,
+    ExchangeKind,
     Connection, ConnectionProperties,
 };
 use std::sync::Arc;
@@ -41,6 +42,7 @@ use database::{Database, DatabaseConfig};
 use dispatch::ServiceContext;
 use handlers::{ClientMessageHandler, NodeMessageHandler};
 use agent_chat::AgentChatManager;
+use config::service_config::APPLICATION_LOGS_ENABLED;
 use semantic_ops::{SemanticOpsManager, ResponseTracker, ChainExecutor};
 use state::{NodeRegistry, ClientRegistry, PendingCommands};
 use messaging::{send_to_client, broadcast_state_to_clients};
@@ -116,20 +118,14 @@ async fn run_main_loop() -> Result<()> {
     info!("Declared queue: {} (purged {} stale messages)", NODE_SIGNAL_QUEUE, purged);
 
     broadcast_channel
-        .queue_declare(
-            NODE_BROADCAST_QUEUE,
-            QueueDeclareOptions::default(),
+        .exchange_declare(
+            NODE_BROADCAST_EXCHANGE,
+            ExchangeKind::Fanout,
+            ExchangeDeclareOptions::default(),
             FieldTable::default(),
         )
         .await?;
-
-    //
-    // Purge stale messages from previous service run.
-    //
-    let purged = broadcast_channel
-        .queue_purge(NODE_BROADCAST_QUEUE, QueuePurgeOptions::default())
-        .await?;
-    info!("Declared queue: {} (purged {} stale messages)", NODE_BROADCAST_QUEUE, purged);
+    info!("Declared exchange: {}", NODE_BROADCAST_EXCHANGE);
 
     let client_signal_channel = connection.create_channel().await?;
     client_signal_channel
@@ -149,20 +145,14 @@ async fn run_main_loop() -> Result<()> {
     info!("Declared queue: {} (purged {} stale messages)", CLIENT_SIGNAL_QUEUE, purged);
 
     broadcast_channel
-        .queue_declare(
-            CLIENT_BROADCAST_QUEUE,
-            QueueDeclareOptions::default(),
+        .exchange_declare(
+            CLIENT_BROADCAST_EXCHANGE,
+            ExchangeKind::Fanout,
+            ExchangeDeclareOptions::default(),
             FieldTable::default(),
         )
         .await?;
-
-    //
-    // Purge stale messages from previous service run.
-    //
-    let purged = broadcast_channel
-        .queue_purge(CLIENT_BROADCAST_QUEUE, QueuePurgeOptions::default())
-        .await?;
-    info!("Declared queue: {} (purged {} stale messages)", CLIENT_BROADCAST_QUEUE, purged);
+    info!("Declared exchange: {}", CLIENT_BROADCAST_EXCHANGE);
 
     //
     // Initialise service components.
@@ -214,6 +204,11 @@ async fn run_main_loop() -> Result<()> {
     }
 
     let service_config = Arc::new(RwLock::new(config::ServiceConfig::new(database.clone()).await?));
+    let event_logging_enabled = {
+        let config = service_config.read().await;
+        config.get_bool(APPLICATION_LOGS_ENABLED, false)
+    };
+    common::logging::set_event_log_enabled(event_logging_enabled);
     let response_tracker = Arc::new(ResponseTracker::new());
 
     let semantic_ops_channel = connection.create_channel().await?;
@@ -320,8 +315,10 @@ async fn run_main_loop() -> Result<()> {
                 Ok(delivery) => {
                     match serde_json::from_slice::<common::ApplicationLogEntry>(&delivery.data) {
                         Ok(entry) => {
-                            if let Err(e) = database_for_web_logs.insert_event_log(&entry).await {
-                                error!("Failed to insert web event log: {}", e);
+                            if common::logging::is_event_log_enabled() {
+                                if let Err(e) = database_for_web_logs.insert_event_log(&entry).await {
+                                    error!("Failed to insert web event log: {}", e);
+                                }
                             }
                         }
                         Err(e) => {
@@ -347,8 +344,10 @@ async fn run_main_loop() -> Result<()> {
                 Ok(delivery) => {
                     match serde_json::from_slice::<common::ApplicationLogEntry>(&delivery.data) {
                         Ok(entry) => {
-                            if let Err(e) = database_for_node_logs.insert_event_log(&entry).await {
-                                error!("Failed to insert node event log: {}", e);
+                            if common::logging::is_event_log_enabled() {
+                                if let Err(e) = database_for_node_logs.insert_event_log(&entry).await {
+                                    error!("Failed to insert node event log: {}", e);
+                                }
                             }
                         }
                         Err(e) => {
@@ -373,8 +372,20 @@ async fn run_main_loop() -> Result<()> {
     // Broadcast ServiceOnline to all clients so they can re-register.
     //
     let service_online_message = ClientBroadcastMessage::ServiceOnline;
-    let _ = publish_json(&broadcast_channel, CLIENT_BROADCAST_QUEUE, &service_online_message).await;
+    let _ = publish_json_exchange(&broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &service_online_message).await;
     info!("Broadcast ServiceOnline to clients");
+
+    //
+    // Broadcast current event logging setting to clients and nodes.
+    //
+    let client_logging_message = ClientBroadcastMessage::EventLoggingSet {
+        enabled: event_logging_enabled,
+    };
+    let _ = publish_json_exchange(&broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &client_logging_message).await;
+    let node_logging_message = NodeBroadcastMessage::EventLoggingSet {
+        enabled: event_logging_enabled,
+    };
+    let _ = publish_json_exchange(&broadcast_channel, NODE_BROADCAST_EXCHANGE, &node_logging_message).await;
 
     let mut node_signal_consumer = node_signal_channel
         .basic_consume(
@@ -414,7 +425,7 @@ async fn run_main_loop() -> Result<()> {
             // Request updates from all nodes.
             //
             let message = NodeBroadcastMessage::NodeInformationUpdateRequest;
-            let _ = publish_json(&broadcast_channel_clone, NODE_BROADCAST_QUEUE, &message).await;
+            let _ = publish_json_exchange(&broadcast_channel_clone, NODE_BROADCAST_EXCHANGE, &message).await;
 
             //
             // Wait a bit for nodes to respond, then broadcast state to clients.

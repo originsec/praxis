@@ -20,14 +20,14 @@ pub const WEB_EVENT_LOG_QUEUE: &str = "WebEventLog";
 /// Service event log queue - service writes its own event logs here
 pub const SERVICE_EVENT_LOG_QUEUE: &str = "ServiceEventLog";
 
-/// Node broadcast queue - service broadcasts to all nodes
-pub const NODE_BROADCAST_QUEUE: &str = "NodeBroadcast";
+/// Node broadcast exchange (fanout) - service broadcasts to all nodes
+pub const NODE_BROADCAST_EXCHANGE: &str = "NodeBroadcast";
 
 /// Client signal queue - clients send messages here
 pub const CLIENT_SIGNAL_QUEUE: &str = "ClientSignal";
 
-/// Client broadcast queue - service broadcasts to all clients
-pub const CLIENT_BROADCAST_QUEUE: &str = "ClientBroadcast";
+/// Client broadcast exchange (fanout) - service broadcasts to all clients
+pub const CLIENT_BROADCAST_EXCHANGE: &str = "ClientBroadcast";
 
 /// Default RabbitMQ URL if PRAXIS_RABBITMQ_URL environment variable is not set
 const DEFAULT_RABBITMQ_URL: &str = "amqp://praxis:praxis@localhost:5672";
@@ -53,6 +53,25 @@ pub async fn publish_json<T: Serialize>(
         .basic_publish(
             "",
             routing_key,
+            BasicPublishOptions::default(),
+            &payload,
+            BasicProperties::default(),
+        )
+        .await?;
+    Ok(confirm)
+}
+
+/// Publish a JSON message to a fanout exchange.
+pub async fn publish_json_exchange<T: Serialize>(
+    channel: &Channel,
+    exchange: &str,
+    message: &T,
+) -> anyhow::Result<PublisherConfirm> {
+    let payload = serde_json::to_vec(message)?;
+    let confirm = channel
+        .basic_publish(
+            exchange,
+            "",
             BasicPublishOptions::default(),
             &payload,
             BasicProperties::default(),
@@ -364,6 +383,10 @@ pub struct NodeInformationUpdate {
 pub enum NodeBroadcastMessage {
     NodeInformationUpdateRequest,
     NodeRefreshRegistration,
+    /// Enable/disable centralized event logging on nodes
+    EventLoggingSet {
+        enabled: bool,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1424,7 +1447,7 @@ pub enum ClientSignalMessage {
     },
 }
 
-/// Messages broadcast from server to all clients via CLIENT_BROADCAST_QUEUE
+/// Messages broadcast from server to all clients via CLIENT_BROADCAST_EXCHANGE
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum ClientBroadcastMessage {
     /// Periodic state update with all nodes and their agents
@@ -1433,6 +1456,10 @@ pub enum ClientBroadcastMessage {
     ServiceOnline,
     /// Chain execution update (progress, completion, etc.)
     ChainExecutionUpdate(ChainExecutionUpdate),
+    /// Enable/disable centralized event logging for clients
+    EventLoggingSet {
+        enabled: bool,
+    },
 }
 
 /// Messages sent to a specific client queue

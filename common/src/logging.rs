@@ -5,6 +5,7 @@
 use chrono::Utc;
 use crate::ApplicationLogEntry;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc;
 
 //
@@ -12,6 +13,7 @@ use tokio::sync::mpsc;
 //
 static EVENT_LOG_TX: OnceLock<mpsc::UnboundedSender<ApplicationLogEntry>> = OnceLock::new();
 static SOURCE_ID: OnceLock<String> = OnceLock::new();
+static EVENT_LOG_ENABLED: AtomicBool = AtomicBool::new(false);
 
 /// Initialize the event log sender. Call this once during startup.
 /// source_id can be a node_id, "service", "web", etc.
@@ -20,9 +22,23 @@ pub fn init(source_id: String, tx: mpsc::UnboundedSender<ApplicationLogEntry>) {
     let _ = EVENT_LOG_TX.set(tx);
 }
 
+/// Enable or disable centralized event logging.
+pub fn set_event_log_enabled(enabled: bool) {
+    EVENT_LOG_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+/// Check if centralized event logging is enabled.
+pub fn is_event_log_enabled() -> bool {
+    EVENT_LOG_ENABLED.load(Ordering::Relaxed)
+}
+
 /// Send a log event to the service.
 /// This is non-blocking and will silently fail if not initialized.
 pub fn send_event(level: &str, target: &str, message: String) {
+    if !is_event_log_enabled() {
+        return;
+    }
+
     if let (Some(tx), Some(source_id)) = (EVENT_LOG_TX.get(), SOURCE_ID.get()) {
         let entry = ApplicationLogEntry {
             source: source_id.clone(),
