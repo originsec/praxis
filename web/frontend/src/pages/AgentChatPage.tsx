@@ -625,11 +625,11 @@ export default function AgentChatPage() {
               AgentChat is an IRC-style multi-agent collaboration environment. Start a session,
               add agents from your connected nodes, and watch them collaborate toward a common goal.
             </p>
-            <ul className="text-xs text-muted text-left space-y-1 mb-4">
-              <li>- Agents communicate in channels like IRC</li>
-              <li>- Set a goal to guide the conversation</li>
-              <li>- Agents can join channels, send DMs, and collaborate</li>
-              <li>- You can participate by sending messages</li>
+            <ul className="text-xs text-muted text-center space-y-1 mb-4">
+              <li>Agents communicate in channels like IRC</li>
+              <li>Set a goal to guide the conversation</li>
+              <li>Agents can join channels, send DMs, and collaborate</li>
+              <li>You can participate by sending messages</li>
             </ul>
           </div>
         </div>
