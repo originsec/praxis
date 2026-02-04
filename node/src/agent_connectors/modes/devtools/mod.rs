@@ -5,7 +5,7 @@
 
 mod adapter;
 
-pub use adapter::{use_hidden_desktop, DevToolsAdapter, DevToolsConfig};
+pub use adapter::{use_hidden_desktop, DevToolsAdapter, DevToolsConfig, ResponseCheckState};
 
 use crate::agent_connectors::traits::{AgentMode, AgentSession};
 use chromiumoxide::element::Element;
@@ -358,27 +358,83 @@ impl<A: DevToolsAdapter> GenericDevToolsSession<A> {
         common::log_info!("prompt sent, waiting for response");
 
         //
-        // Poll for response.
+        // Poll for response. Track consecutive idle checks (no new messages, not
+        // generating) to detect failed sends and retry.
         //
 
         let max_wait_secs = 120;
         let poll_interval_ms = 250;
         let max_iterations = (max_wait_secs * 1000) / poll_interval_ms;
+        let max_retries = 3;
+        let idle_threshold = 12; // ~3 seconds of no activity triggers retry
+
+        let mut retry_count = 0;
+        let mut idle_checks = 0;
 
         for _ in 0..max_iterations {
             tokio::time::sleep(std::time::Duration::from_millis(poll_interval_ms as u64)).await;
 
             //
-            // Delegate response completion check to the adapter.
+            // Delegate response state check to the adapter.
             //
 
-            if let Some(response) = self
+            match self
                 .adapter
-                .check_response_complete(page, initial_message_count)
-                .await?
+                .check_response_state(page, initial_message_count)
+                .await
             {
-                common::log_info!("response received, length = {}", response.len());
-                return Ok(response);
+                Ok(state) => {
+                    if let Some(response) = state.response {
+                        common::log_info!("response received, length = {}", response.len());
+                        return Ok(response);
+                    }
+
+                    //
+                    // Reset idle counter if there's activity (generating or new messages).
+                    //
+
+                    if state.is_generating || state.has_new_messages {
+                        idle_checks = 0;
+                    } else {
+                        idle_checks += 1;
+                    }
+
+                    //
+                    // If idle too long, the send likely failed. Retry.
+                    //
+
+                    if idle_checks >= idle_threshold && retry_count < max_retries {
+                        common::log_warn!(
+                            "No activity after {} checks, retrying send (attempt {}/{})",
+                            idle_checks, retry_count + 1, max_retries
+                        );
+
+                        //
+                        // Re-find input element and resend the prompt.
+                        //
+
+                        if let Some(_) = wait_for_element(page, input_selector, 5, 300).await {
+                            let input = page.find_element(input_selector).await?;
+                            input.click().await?;
+
+                            use chromiumoxide::cdp::browser_protocol::input::InsertTextParams;
+                            page.execute(InsertTextParams::new(prompt)).await?;
+
+                            self.adapter.wait_for_submit_ready(page).await?;
+                            input.press_key("Enter").await?;
+
+                            common::log_info!("prompt resent, continuing to wait for response");
+                        } else {
+                            common::log_error!("Failed to find input element for retry");
+                        }
+
+                        retry_count += 1;
+                        idle_checks = 0;
+                    }
+                }
+                Err(e) => {
+                    common::log_error!("Error checking response: {}", e);
+                }
             }
         }
 

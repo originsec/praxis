@@ -8,6 +8,22 @@ use chromiumoxide::page::Page;
 use std::future::Future;
 
 //
+// Response check state returned by check_response_state. Provides detailed
+// information about what's happening so the polling loop can make smart
+// decisions about retries.
+//
+
+#[derive(Debug, Clone)]
+pub struct ResponseCheckState {
+    /// The response text, if complete.
+    pub response: Option<String>,
+    /// Whether the agent is currently generating a response.
+    pub is_generating: bool,
+    /// Whether new messages have appeared since the prompt was sent.
+    pub has_new_messages: bool,
+}
+
+//
 // Check if hidden desktop should be used for DevTools-based agent windows.
 //
 // By default, returns true (use hidden desktop) to keep agent windows
@@ -69,6 +85,24 @@ pub trait DevToolsAdapter: Send + Sync {
         page: &Page,
         initial_count: usize,
     ) -> impl Future<Output = Result<Option<String>>> + Send;
+
+    /// Check response state with detailed activity information. This is used by
+    /// the polling loop to detect idle states and trigger retries when needed.
+    /// Default implementation wraps check_response_complete with minimal info.
+    fn check_response_state(
+        &self,
+        page: &Page,
+        initial_count: usize,
+    ) -> impl Future<Output = Result<ResponseCheckState>> + Send {
+        async move {
+            let response = self.check_response_complete(page, initial_count).await?;
+            Ok(ResponseCheckState {
+                response,
+                is_generating: false,
+                has_new_messages: false,
+            })
+        }
+    }
 
     /// Called after text is inserted but before submit. Adapters can use this
     /// to wait for submit button to be ready, etc. Default does nothing.
