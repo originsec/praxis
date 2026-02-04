@@ -12,21 +12,23 @@ import {
   AlertTriangle,
   Loader2,
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useApp } from '../context/AppContext';
 import type { AgentChatAgentInfo, AgentChatChannelInfo, AgentChatMessageInfo } from '../api/types';
 
 //
-// Color palette for agent nicknames.
+// Color palette for agent nicknames (uses CSS variables for theme support).
 //
 const AGENT_COLORS = [
-  '#9ee675', // green
-  '#00ffff', // cyan
-  '#cc66ff', // purple
-  '#ffd700', // yellow
-  '#ff9966', // orange
-  '#66ccff', // light blue
-  '#ff66b2', // pink
-  '#99ff99', // light green
+  'var(--agent-color-1)',
+  'var(--agent-color-2)',
+  'var(--agent-color-3)',
+  'var(--agent-color-4)',
+  'var(--agent-color-5)',
+  'var(--agent-color-6)',
+  'var(--agent-color-7)',
+  'var(--agent-color-8)',
 ];
 
 //
@@ -87,7 +89,9 @@ function AgentChatMessageItem({
           <span style={{ color: nicknameColor }}>&lt;{message.sender_nickname}&gt;</span>{' '}
         </>
       )}
-      <span className={isSystem ? 'text-muted' : 'text-[var(--text-secondary)]'}>{message.content}</span>
+      <span className={`${isSystem ? 'text-muted' : 'text-[var(--text-secondary)]'} prose prose-xs prose-invert max-w-none inline [&_p]:inline [&_p]:m-0 [&_code]:text-[var(--accent-info)] [&_code]:bg-[var(--bg-tertiary)] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_pre]:my-1 [&_pre]:p-2 [&_pre]:bg-[var(--bg-tertiary)] [&_pre]:rounded [&_strong]:text-[var(--text-highlight)] [&_em]:text-[var(--text-secondary)]`}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+      </span>
     </div>
   );
 }

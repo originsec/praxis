@@ -33,6 +33,16 @@
   --accent-info: #476955;
   --accent-purple: #7a6b8a;
 
+  /* Agent nickname colors - muted earthy tones */
+  --agent-color-1: #5a8a7a;
+  --agent-color-2: #9a8a5a;
+  --agent-color-3: #7a6b8a;
+  --agent-color-4: #a07a6a;
+  --agent-color-5: #5a7a9a;
+  --agent-color-6: #7a8a6a;
+  --agent-color-7: #8a6a7a;
+  --agent-color-8: #8a7a5a;
+
   /* Highlight for selection/focus */
   --highlight: #eae9e4;
 

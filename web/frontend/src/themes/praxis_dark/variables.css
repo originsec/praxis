@@ -25,6 +25,16 @@
   --accent-error: #f87171;
   --accent-info: #00ffff;
   --accent-purple: #cc66ff;
+
+  /* Agent nickname colors - vibrant neon */
+  --agent-color-1: #9ee675;
+  --agent-color-2: #00ffff;
+  --agent-color-3: #cc66ff;
+  --agent-color-4: #ffd700;
+  --agent-color-5: #ff9966;
+  --agent-color-6: #66ccff;
+  --agent-color-7: #ff66b2;
+  --agent-color-8: #99ff99;
   --highlight: #0a0f0c;
   --green-glow: rgba(158, 230, 117, 0.15);
   --green-glow-strong: rgba(158, 230, 117, 0.4);
