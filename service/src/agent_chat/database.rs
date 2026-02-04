@@ -5,13 +5,13 @@ use sqlx::Row;
 use crate::database::{Database, DatabasePool};
 
 //
-// Nexus database operations.
+// AgentChat database operations.
 //
 
 /// Session record from database
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub struct NexusSessionRecord {
+pub struct AgentChatSessionRecord {
     pub id: String,
     pub goal: Option<String>,
     pub status: String,
@@ -22,9 +22,9 @@ pub struct NexusSessionRecord {
 /// Agent record from database
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub struct NexusAgentRecord {
+pub struct AgentChatAgentRecord {
     pub id: String,
-    pub nexus_session_id: String,
+    pub agent_chat_session_id: String,
     pub node_id: String,
     pub agent_short_name: String,
     pub nickname: String,
@@ -38,9 +38,9 @@ pub struct NexusAgentRecord {
 /// Channel record from database
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub struct NexusChannelRecord {
+pub struct AgentChatChannelRecord {
     pub id: String,
-    pub nexus_session_id: String,
+    pub agent_chat_session_id: String,
     pub name: String,
     pub topic: Option<String>,
     pub created_by: String,
@@ -50,9 +50,9 @@ pub struct NexusChannelRecord {
 /// Message record from database
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub struct NexusMessageRecord {
+pub struct AgentChatMessageRecord {
     pub id: i64,
-    pub nexus_session_id: String,
+    pub agent_chat_session_id: String,
     pub channel_id: Option<String>,
     pub sender_nickname: String,
     pub recipient_nickname: Option<String>,
@@ -66,10 +66,10 @@ impl Database {
     // Session operations.
     //
 
-    /// Create a new Nexus session
-    pub async fn create_nexus_session(&self, id: &str, goal: Option<&str>) -> Result<()> {
+    /// Create a new AgentChat session
+    pub async fn create_agent_chat_session(&self, id: &str, goal: Option<&str>) -> Result<()> {
         let now = Utc::now();
-        let sql = "INSERT INTO nexus_sessions (id, goal, status, created_at, updated_at)
+        let sql = "INSERT INTO agent_chat_sessions (id, goal, status, created_at, updated_at)
                    VALUES ($1, $2, $3, $4, $5)";
 
         match &self.pool {
@@ -97,17 +97,17 @@ impl Database {
         Ok(())
     }
 
-    /// Get the active Nexus session
+    /// Get the active AgentChat session
     #[allow(dead_code)]
-    pub async fn get_active_nexus_session(&self) -> Result<Option<NexusSessionRecord>> {
+    pub async fn get_active_agent_chat_session(&self) -> Result<Option<AgentChatSessionRecord>> {
         let sql = "SELECT id, goal, status, created_at, updated_at
-                   FROM nexus_sessions WHERE status = 'active' LIMIT 1";
+                   FROM agent_chat_sessions WHERE status = 'active' LIMIT 1";
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
                 let row_opt = sqlx::query(sql).fetch_optional(pool).await?;
                 if let Some(row) = row_opt {
-                    Ok(Some(NexusSessionRecord {
+                    Ok(Some(AgentChatSessionRecord {
                         id: row.get(0),
                         goal: row.get(1),
                         status: row.get(2),
@@ -121,7 +121,7 @@ impl Database {
             DatabasePool::Postgres(pool) => {
                 let row_opt = sqlx::query(sql).fetch_optional(pool).await?;
                 if let Some(row) = row_opt {
-                    Ok(Some(NexusSessionRecord {
+                    Ok(Some(AgentChatSessionRecord {
                         id: row.get(0),
                         goal: row.get(1),
                         status: row.get(2),
@@ -135,16 +135,16 @@ impl Database {
         }
     }
 
-    /// Get a Nexus session by ID
-    pub async fn get_nexus_session(&self, id: &str) -> Result<Option<NexusSessionRecord>> {
+    /// Get a AgentChat session by ID
+    pub async fn get_agent_chat_session(&self, id: &str) -> Result<Option<AgentChatSessionRecord>> {
         let sql = "SELECT id, goal, status, created_at, updated_at
-                   FROM nexus_sessions WHERE id = $1";
+                   FROM agent_chat_sessions WHERE id = $1";
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
                 let row_opt = sqlx::query(sql).bind(id).fetch_optional(pool).await?;
                 if let Some(row) = row_opt {
-                    Ok(Some(NexusSessionRecord {
+                    Ok(Some(AgentChatSessionRecord {
                         id: row.get(0),
                         goal: row.get(1),
                         status: row.get(2),
@@ -158,7 +158,7 @@ impl Database {
             DatabasePool::Postgres(pool) => {
                 let row_opt = sqlx::query(sql).bind(id).fetch_optional(pool).await?;
                 if let Some(row) = row_opt {
-                    Ok(Some(NexusSessionRecord {
+                    Ok(Some(AgentChatSessionRecord {
                         id: row.get(0),
                         goal: row.get(1),
                         status: row.get(2),
@@ -173,8 +173,8 @@ impl Database {
     }
 
     /// Update session status
-    pub async fn update_nexus_session_status(&self, id: &str, status: &str) -> Result<()> {
-        let sql = "UPDATE nexus_sessions SET status = $1, updated_at = $2 WHERE id = $3";
+    pub async fn update_agent_chat_session_status(&self, id: &str, status: &str) -> Result<()> {
+        let sql = "UPDATE agent_chat_sessions SET status = $1, updated_at = $2 WHERE id = $3";
         let now = Utc::now();
 
         match &self.pool {
@@ -202,8 +202,8 @@ impl Database {
     // Agent operations.
     //
 
-    /// Add an agent to a Nexus session
-    pub async fn add_nexus_agent(
+    /// Add an agent to a AgentChat session
+    pub async fn add_agent_chat_agent(
         &self,
         id: &str,
         session_id: &str,
@@ -213,7 +213,7 @@ impl Database {
         precedence: i32,
     ) -> Result<()> {
         let now = Utc::now();
-        let sql = "INSERT INTO nexus_agents (id, nexus_session_id, node_id, agent_short_name, nickname, precedence, status, created_at)
+        let sql = "INSERT INTO agent_chat_agents (id, agent_chat_session_id, node_id, agent_short_name, nickname, precedence, status, created_at)
                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)";
 
         match &self.pool {
@@ -247,11 +247,11 @@ impl Database {
         Ok(())
     }
 
-    /// Get all agents for a Nexus session
+    /// Get all agents for a AgentChat session
     #[allow(dead_code)]
-    pub async fn get_nexus_agents(&self, session_id: &str) -> Result<Vec<NexusAgentRecord>> {
-        let sql = "SELECT id, nexus_session_id, node_id, agent_short_name, nickname, precedence, current_channel_id, status, agent_session_id, created_at
-                   FROM nexus_agents WHERE nexus_session_id = $1 ORDER BY precedence";
+    pub async fn get_agent_chat_agents(&self, session_id: &str) -> Result<Vec<AgentChatAgentRecord>> {
+        let sql = "SELECT id, agent_chat_session_id, node_id, agent_short_name, nickname, precedence, current_channel_id, status, agent_session_id, created_at
+                   FROM agent_chat_agents WHERE agent_chat_session_id = $1 ORDER BY precedence";
 
         let mut agents = Vec::new();
 
@@ -259,9 +259,9 @@ impl Database {
             DatabasePool::Sqlite(pool) => {
                 let rows = sqlx::query(sql).bind(session_id).fetch_all(pool).await?;
                 for row in rows {
-                    agents.push(NexusAgentRecord {
+                    agents.push(AgentChatAgentRecord {
                         id: row.get(0),
-                        nexus_session_id: row.get(1),
+                        agent_chat_session_id: row.get(1),
                         node_id: row.get(2),
                         agent_short_name: row.get(3),
                         nickname: row.get(4),
@@ -276,9 +276,9 @@ impl Database {
             DatabasePool::Postgres(pool) => {
                 let rows = sqlx::query(sql).bind(session_id).fetch_all(pool).await?;
                 for row in rows {
-                    agents.push(NexusAgentRecord {
+                    agents.push(AgentChatAgentRecord {
                         id: row.get(0),
-                        nexus_session_id: row.get(1),
+                        agent_chat_session_id: row.get(1),
                         node_id: row.get(2),
                         agent_short_name: row.get(3),
                         nickname: row.get(4),
@@ -295,8 +295,8 @@ impl Database {
     }
 
     /// Update agent status
-    pub async fn update_nexus_agent_status(&self, id: &str, status: &str) -> Result<()> {
-        let sql = "UPDATE nexus_agents SET status = $1 WHERE id = $2";
+    pub async fn update_agent_chat_agent_status(&self, id: &str, status: &str) -> Result<()> {
+        let sql = "UPDATE agent_chat_agents SET status = $1 WHERE id = $2";
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
@@ -310,8 +310,8 @@ impl Database {
     }
 
     /// Update agent's current channel
-    pub async fn update_nexus_agent_channel(&self, id: &str, channel_id: Option<&str>) -> Result<()> {
-        let sql = "UPDATE nexus_agents SET current_channel_id = $1 WHERE id = $2";
+    pub async fn update_agent_chat_agent_channel(&self, id: &str, channel_id: Option<&str>) -> Result<()> {
+        let sql = "UPDATE agent_chat_agents SET current_channel_id = $1 WHERE id = $2";
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
@@ -325,8 +325,8 @@ impl Database {
     }
 
     /// Update agent's session ID (from the node's agent session)
-    pub async fn update_nexus_agent_session_id(&self, id: &str, agent_session_id: Option<&str>) -> Result<()> {
-        let sql = "UPDATE nexus_agents SET agent_session_id = $1 WHERE id = $2";
+    pub async fn update_agent_chat_agent_session_id(&self, id: &str, agent_session_id: Option<&str>) -> Result<()> {
+        let sql = "UPDATE agent_chat_agents SET agent_session_id = $1 WHERE id = $2";
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
@@ -340,9 +340,9 @@ impl Database {
     }
 
     /// Update agent precedence values
-    pub async fn update_nexus_agent_precedence(&self, agent_ids: &[String]) -> Result<()> {
+    pub async fn update_agent_chat_agent_precedence(&self, agent_ids: &[String]) -> Result<()> {
         for (i, agent_id) in agent_ids.iter().enumerate() {
-            let sql = "UPDATE nexus_agents SET precedence = $1 WHERE id = $2";
+            let sql = "UPDATE agent_chat_agents SET precedence = $1 WHERE id = $2";
 
             match &self.pool {
                 DatabasePool::Sqlite(pool) => {
@@ -356,9 +356,9 @@ impl Database {
         Ok(())
     }
 
-    /// Remove an agent from a Nexus session
-    pub async fn remove_nexus_agent(&self, id: &str) -> Result<bool> {
-        let sql = "DELETE FROM nexus_agents WHERE id = $1";
+    /// Remove an agent from a AgentChat session
+    pub async fn remove_agent_chat_agent(&self, id: &str) -> Result<bool> {
+        let sql = "DELETE FROM agent_chat_agents WHERE id = $1";
 
         let count = match &self.pool {
             DatabasePool::Sqlite(pool) => {
@@ -376,7 +376,7 @@ impl Database {
     //
 
     /// Create a new channel
-    pub async fn create_nexus_channel(
+    pub async fn create_agent_chat_channel(
         &self,
         id: &str,
         session_id: &str,
@@ -384,7 +384,7 @@ impl Database {
         created_by: &str,
     ) -> Result<()> {
         let now = Utc::now();
-        let sql = "INSERT INTO nexus_channels (id, nexus_session_id, name, created_by, created_at)
+        let sql = "INSERT INTO agent_chat_channels (id, agent_chat_session_id, name, created_by, created_at)
                    VALUES ($1, $2, $3, $4, $5)";
 
         match &self.pool {
@@ -414,9 +414,9 @@ impl Database {
 
     /// Get all channels for a session
     #[allow(dead_code)]
-    pub async fn get_nexus_channels(&self, session_id: &str) -> Result<Vec<NexusChannelRecord>> {
-        let sql = "SELECT id, nexus_session_id, name, topic, created_by, created_at
-                   FROM nexus_channels WHERE nexus_session_id = $1 ORDER BY name";
+    pub async fn get_agent_chat_channels(&self, session_id: &str) -> Result<Vec<AgentChatChannelRecord>> {
+        let sql = "SELECT id, agent_chat_session_id, name, topic, created_by, created_at
+                   FROM agent_chat_channels WHERE agent_chat_session_id = $1 ORDER BY name";
 
         let mut channels = Vec::new();
 
@@ -424,9 +424,9 @@ impl Database {
             DatabasePool::Sqlite(pool) => {
                 let rows = sqlx::query(sql).bind(session_id).fetch_all(pool).await?;
                 for row in rows {
-                    channels.push(NexusChannelRecord {
+                    channels.push(AgentChatChannelRecord {
                         id: row.get(0),
-                        nexus_session_id: row.get(1),
+                        agent_chat_session_id: row.get(1),
                         name: row.get(2),
                         topic: row.get(3),
                         created_by: row.get(4),
@@ -437,9 +437,9 @@ impl Database {
             DatabasePool::Postgres(pool) => {
                 let rows = sqlx::query(sql).bind(session_id).fetch_all(pool).await?;
                 for row in rows {
-                    channels.push(NexusChannelRecord {
+                    channels.push(AgentChatChannelRecord {
                         id: row.get(0),
-                        nexus_session_id: row.get(1),
+                        agent_chat_session_id: row.get(1),
                         name: row.get(2),
                         topic: row.get(3),
                         created_by: row.get(4),
@@ -453,17 +453,17 @@ impl Database {
 
     /// Get a channel by name in a session
     #[allow(dead_code)]
-    pub async fn get_nexus_channel_by_name(&self, session_id: &str, name: &str) -> Result<Option<NexusChannelRecord>> {
-        let sql = "SELECT id, nexus_session_id, name, topic, created_by, created_at
-                   FROM nexus_channels WHERE nexus_session_id = $1 AND name = $2";
+    pub async fn get_agent_chat_channel_by_name(&self, session_id: &str, name: &str) -> Result<Option<AgentChatChannelRecord>> {
+        let sql = "SELECT id, agent_chat_session_id, name, topic, created_by, created_at
+                   FROM agent_chat_channels WHERE agent_chat_session_id = $1 AND name = $2";
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
                 let row_opt = sqlx::query(sql).bind(session_id).bind(name).fetch_optional(pool).await?;
                 if let Some(row) = row_opt {
-                    Ok(Some(NexusChannelRecord {
+                    Ok(Some(AgentChatChannelRecord {
                         id: row.get(0),
-                        nexus_session_id: row.get(1),
+                        agent_chat_session_id: row.get(1),
                         name: row.get(2),
                         topic: row.get(3),
                         created_by: row.get(4),
@@ -476,9 +476,9 @@ impl Database {
             DatabasePool::Postgres(pool) => {
                 let row_opt = sqlx::query(sql).bind(session_id).bind(name).fetch_optional(pool).await?;
                 if let Some(row) = row_opt {
-                    Ok(Some(NexusChannelRecord {
+                    Ok(Some(AgentChatChannelRecord {
                         id: row.get(0),
-                        nexus_session_id: row.get(1),
+                        agent_chat_session_id: row.get(1),
                         name: row.get(2),
                         topic: row.get(3),
                         created_by: row.get(4),
@@ -492,8 +492,8 @@ impl Database {
     }
 
     /// Update channel topic
-    pub async fn update_nexus_channel_topic(&self, id: &str, topic: Option<&str>) -> Result<()> {
-        let sql = "UPDATE nexus_channels SET topic = $1 WHERE id = $2";
+    pub async fn update_agent_chat_channel_topic(&self, id: &str, topic: Option<&str>) -> Result<()> {
+        let sql = "UPDATE agent_chat_channels SET topic = $1 WHERE id = $2";
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
@@ -511,7 +511,7 @@ impl Database {
     //
 
     /// Insert a new message
-    pub async fn insert_nexus_message(
+    pub async fn insert_agent_chat_message(
         &self,
         session_id: &str,
         channel_id: Option<&str>,
@@ -524,7 +524,7 @@ impl Database {
 
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let sql = "INSERT INTO nexus_messages (nexus_session_id, channel_id, sender_nickname, recipient_nickname, message_type, content, timestamp)
+                let sql = "INSERT INTO agent_chat_messages (agent_chat_session_id, channel_id, sender_nickname, recipient_nickname, message_type, content, timestamp)
                            VALUES ($1, $2, $3, $4, $5, $6, $7)";
                 let result = sqlx::query(sql)
                     .bind(session_id)
@@ -539,7 +539,7 @@ impl Database {
                 Ok(result.last_insert_rowid())
             }
             DatabasePool::Postgres(pool) => {
-                let sql = "INSERT INTO nexus_messages (nexus_session_id, channel_id, sender_nickname, recipient_nickname, message_type, content, timestamp)
+                let sql = "INSERT INTO agent_chat_messages (agent_chat_session_id, channel_id, sender_nickname, recipient_nickname, message_type, content, timestamp)
                            VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id";
                 let row = sqlx::query(sql)
                     .bind(session_id)
@@ -557,19 +557,19 @@ impl Database {
     }
 
     /// Get messages for a channel (or DMs if channel_id is None)
-    pub async fn get_nexus_messages(
+    pub async fn get_agent_chat_messages(
         &self,
         session_id: &str,
         channel_id: Option<&str>,
         limit: u32,
-    ) -> Result<Vec<NexusMessageRecord>> {
+    ) -> Result<Vec<AgentChatMessageRecord>> {
         let (sql, has_channel) = if channel_id.is_some() {
-            ("SELECT id, nexus_session_id, channel_id, sender_nickname, recipient_nickname, message_type, content, timestamp
-              FROM nexus_messages WHERE nexus_session_id = $1 AND channel_id = $2
+            ("SELECT id, agent_chat_session_id, channel_id, sender_nickname, recipient_nickname, message_type, content, timestamp
+              FROM agent_chat_messages WHERE agent_chat_session_id = $1 AND channel_id = $2
               ORDER BY timestamp DESC LIMIT $3", true)
         } else {
-            ("SELECT id, nexus_session_id, channel_id, sender_nickname, recipient_nickname, message_type, content, timestamp
-              FROM nexus_messages WHERE nexus_session_id = $1 AND channel_id IS NULL
+            ("SELECT id, agent_chat_session_id, channel_id, sender_nickname, recipient_nickname, message_type, content, timestamp
+              FROM agent_chat_messages WHERE agent_chat_session_id = $1 AND channel_id IS NULL
               ORDER BY timestamp DESC LIMIT $2", false)
         };
 
@@ -592,9 +592,9 @@ impl Database {
                         .await?
                 };
                 for row in rows {
-                    messages.push(NexusMessageRecord {
+                    messages.push(AgentChatMessageRecord {
                         id: row.get(0),
-                        nexus_session_id: row.get(1),
+                        agent_chat_session_id: row.get(1),
                         channel_id: row.get(2),
                         sender_nickname: row.get(3),
                         recipient_nickname: row.get(4),
@@ -620,9 +620,9 @@ impl Database {
                         .await?
                 };
                 for row in rows {
-                    messages.push(NexusMessageRecord {
+                    messages.push(AgentChatMessageRecord {
                         id: row.get(0),
-                        nexus_session_id: row.get(1),
+                        agent_chat_session_id: row.get(1),
                         channel_id: row.get(2),
                         sender_nickname: row.get(3),
                         recipient_nickname: row.get(4),
@@ -642,8 +642,8 @@ impl Database {
     }
 
     /// Count agents in a channel
-    pub async fn count_nexus_channel_members(&self, channel_id: &str) -> Result<usize> {
-        let sql = "SELECT COUNT(*) FROM nexus_agents WHERE current_channel_id = $1";
+    pub async fn count_agent_chat_channel_members(&self, channel_id: &str) -> Result<usize> {
+        let sql = "SELECT COUNT(*) FROM agent_chat_agents WHERE current_channel_id = $1";
 
         let count: i64 = match &self.pool {
             DatabasePool::Sqlite(pool) => {

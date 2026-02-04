@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::config::ConfigManager;
 use crate::messages::ServerMessage;
 use crate::rabbitmq::RabbitMqClient;
-use crate::atlas::{self, AtlasEvent, AtlasSession};
+use crate::orchestrator::{self, OrchestratorEvent, OrchestratorSession};
 use crate::state::AppState;
 
 mod handlers;
@@ -27,8 +27,8 @@ pub struct WsState {
     pub app_state: Arc<AppState>,
     pub rabbitmq: Arc<RabbitMqClient>,
     pub config: Arc<ConfigManager>,
-    /// Active Atlas sessions keyed by connection ID
-    pub atlas_sessions: RwLock<HashMap<String, AtlasSession>>,
+    /// Active Orchestrator sessions keyed by connection ID
+    pub orchestrator_sessions: RwLock<HashMap<String, OrchestratorSession>>,
 }
 
 impl WsState {
@@ -37,7 +37,7 @@ impl WsState {
             app_state,
             rabbitmq,
             config,
-            atlas_sessions: RwLock::new(HashMap::new()),
+            orchestrator_sessions: RwLock::new(HashMap::new()),
         }
     }
 }
@@ -187,16 +187,16 @@ async fn handle_incoming(
     }
 
     //
-    // Clean up Atlas session when connection closes.
+    // Clean up Orchestrator session when connection closes.
     //
-    let mut sessions = state.atlas_sessions.write().await;
+    let mut sessions = state.orchestrator_sessions.write().await;
     if let Some(session) = sessions.remove(&connection_id) {
         session.stop();
     }
 }
 
-/// Handle AtlasStart message - create a new Atlas session for this connection
-pub(super) async fn handle_atlas_start(
+/// Handle OrchestratorStart message - create a new Orchestrator session for this connection
+pub(super) async fn handle_orchestrator_start(
     state: &Arc<WsState>,
     connection_id: &str,
 ) -> anyhow::Result<()> {
@@ -204,14 +204,14 @@ pub(super) async fn handle_atlas_start(
     // Stop any existing session first.
     //
     {
-        let mut sessions = state.atlas_sessions.write().await;
+        let mut sessions = state.orchestrator_sessions.write().await;
         if let Some(session) = sessions.remove(connection_id) {
             session.stop();
         }
     }
 
     //
-    // Fetch operation definitions so they're available for Atlas tools.
+    // Fetch operation definitions so they're available for Orchestrator tools.
     //
     let _ = state.rabbitmq.list_op_defs().await;
 
@@ -220,8 +220,8 @@ pub(super) async fn handle_atlas_start(
     //
     let _ = state.rabbitmq.get_config(vec![
         "llm_model_definitions".to_string(),
-        "llm_feature_atlas".to_string(),
-        "llm_atlas_max_tokens".to_string(),
+        "llm_feature_orchestrator".to_string(),
+        "llm_orchestrator_max_tokens".to_string(),
     ]).await;
     //
     // Wait briefly for config response.
@@ -231,12 +231,12 @@ pub(super) async fn handle_atlas_start(
     //
     // Create event channel for this session.
     //
-    let (event_tx, mut event_rx) = mpsc::channel::<AtlasEvent>(100);
+    let (event_tx, mut event_rx) = mpsc::channel::<OrchestratorEvent>(100);
 
     //
-    // Start the Atlas session.
+    // Start the Orchestrator session.
     //
-    let session = match atlas::start_atlas_session(
+    let session = match orchestrator::start_orchestrator_session(
         Arc::clone(&state.app_state),
         Arc::clone(&state.rabbitmq),
         Arc::clone(&state.config),
@@ -244,7 +244,7 @@ pub(super) async fn handle_atlas_start(
     ).await {
         Ok(s) => s,
         Err(e) => {
-            state.app_state.broadcast(ServerMessage::AtlasError { message: e });
+            state.app_state.broadcast(ServerMessage::OrchestratorError { message: e });
             return Ok(());
         }
     };
@@ -253,32 +253,32 @@ pub(super) async fn handle_atlas_start(
     // Store the session.
     //
     {
-        let mut sessions = state.atlas_sessions.write().await;
+        let mut sessions = state.orchestrator_sessions.write().await;
         sessions.insert(connection_id.to_string(), session);
     }
 
     //
     // Send started message via broadcast.
     //
-    state.app_state.broadcast(ServerMessage::AtlasStarted);
+    state.app_state.broadcast(ServerMessage::OrchestratorStarted);
 
     //
-    // Spawn task to forward Atlas events to the browser.
+    // Spawn task to forward Orchestrator events to the browser.
     //
     let state_clone = Arc::clone(state);
     tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
             let msg = match event {
-                AtlasEvent::Content(content) => ServerMessage::AtlasContent { content },
-                AtlasEvent::Done => ServerMessage::AtlasDone,
-                AtlasEvent::Error(message) => ServerMessage::AtlasError { message },
-                AtlasEvent::ToolExecuting { name, input } => ServerMessage::AtlasToolExecuting { name, input },
-                AtlasEvent::ToolExecuted { name, display, success, result } => {
-                    ServerMessage::AtlasToolExecuted { name, display, success, result }
+                OrchestratorEvent::Content(content) => ServerMessage::OrchestratorContent { content },
+                OrchestratorEvent::Done => ServerMessage::OrchestratorDone,
+                OrchestratorEvent::Error(message) => ServerMessage::OrchestratorError { message },
+                OrchestratorEvent::ToolExecuting { name, input } => ServerMessage::OrchestratorToolExecuting { name, input },
+                OrchestratorEvent::ToolExecuted { name, display, success, result } => {
+                    ServerMessage::OrchestratorToolExecuted { name, display, success, result }
                 }
-                AtlasEvent::PlanUpdated(plan) => ServerMessage::AtlasPlanUpdated { plan },
-                AtlasEvent::TokenUsage { prompt_tokens, completion_tokens, total_tokens } => {
-                    ServerMessage::AtlasTokenUsage { prompt_tokens, completion_tokens, total_tokens }
+                OrchestratorEvent::PlanUpdated(plan) => ServerMessage::OrchestratorPlanUpdated { plan },
+                OrchestratorEvent::TokenUsage { prompt_tokens, completion_tokens, total_tokens } => {
+                    ServerMessage::OrchestratorTokenUsage { prompt_tokens, completion_tokens, total_tokens }
                 }
             };
             state_clone.app_state.broadcast(msg);
@@ -288,54 +288,54 @@ pub(super) async fn handle_atlas_start(
     Ok(())
 }
 
-/// Handle AtlasPrompt message - send a prompt to the active Atlas session
-pub(super) async fn handle_atlas_prompt(
+/// Handle OrchestratorPrompt message - send a prompt to the active Orchestrator session
+pub(super) async fn handle_orchestrator_prompt(
     state: &Arc<WsState>,
     connection_id: &str,
     message: &str,
 ) -> anyhow::Result<()> {
-    let sessions = state.atlas_sessions.read().await;
+    let sessions = state.orchestrator_sessions.read().await;
     if let Some(session) = sessions.get(connection_id) {
         if let Err(e) = session.prompt_tx.send(message.to_string()).await {
-            common::log_warn!("Failed to send prompt to Atlas session: {}", e);
-            state.app_state.broadcast(ServerMessage::AtlasError {
+            common::log_warn!("Failed to send prompt to Orchestrator session: {}", e);
+            state.app_state.broadcast(ServerMessage::OrchestratorError {
                 message: format!("Failed to send prompt: {}", e),
             });
         }
     } else {
-        common::log_warn!("No active Atlas session for connection {}", connection_id);
-        state.app_state.broadcast(ServerMessage::AtlasError {
-            message: "No active Atlas session. Click 'New Session' to start.".to_string(),
+        common::log_warn!("No active Orchestrator session for connection {}", connection_id);
+        state.app_state.broadcast(ServerMessage::OrchestratorError {
+            message: "No active Orchestrator session. Click 'New Session' to start.".to_string(),
         });
     }
     Ok(())
 }
 
-/// Handle AtlasStop message - stop the Atlas session for this connection
-pub(super) async fn handle_atlas_stop(
+/// Handle OrchestratorStop message - stop the Orchestrator session for this connection
+pub(super) async fn handle_orchestrator_stop(
     state: &Arc<WsState>,
     connection_id: &str,
 ) -> anyhow::Result<()> {
-    let mut sessions = state.atlas_sessions.write().await;
+    let mut sessions = state.orchestrator_sessions.write().await;
     if let Some(session) = sessions.remove(connection_id) {
         session.stop();
     }
-    state.app_state.broadcast(ServerMessage::AtlasStopped);
+    state.app_state.broadcast(ServerMessage::OrchestratorStopped);
     Ok(())
 }
 
-/// Handle AtlasCancel message - cancel current inference but keep session alive
-pub(super) async fn handle_atlas_cancel(
+/// Handle OrchestratorCancel message - cancel current inference but keep session alive
+pub(super) async fn handle_orchestrator_cancel(
     state: &Arc<WsState>,
     connection_id: &str,
 ) -> anyhow::Result<()> {
-    let sessions = state.atlas_sessions.read().await;
+    let sessions = state.orchestrator_sessions.read().await;
     if let Some(session) = sessions.get(connection_id) {
         session.cancel();
     }
     //
     // Broadcast Done to finalize any streaming content (session stays active).
     //
-    state.app_state.broadcast(ServerMessage::AtlasDone);
+    state.app_state.broadcast(ServerMessage::OrchestratorDone);
     Ok(())
 }

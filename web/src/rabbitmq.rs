@@ -487,12 +487,12 @@ impl RabbitMqClient {
     }
 
     //
-    // Nexus methods.
+    // AgentChat methods.
     //
 
-    /// Start a new Nexus session
-    pub async fn nexus_start(&self, goal: Option<String>, yolo_mode: bool) -> Result<()> {
-        let message = ClientSignalMessage::NexusStart {
+    /// Start a new AgentChat session
+    pub async fn agent_chat_start(&self, goal: Option<String>, yolo_mode: bool) -> Result<()> {
+        let message = ClientSignalMessage::AgentChatStart {
             client_id: self.state.client_id.clone(),
             goal,
             yolo_mode,
@@ -500,23 +500,23 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
-    /// Stop the current Nexus session
-    pub async fn nexus_stop(&self, session_id: String) -> Result<()> {
-        let message = ClientSignalMessage::NexusStop {
+    /// Stop the current AgentChat session
+    pub async fn agent_chat_stop(&self, session_id: String) -> Result<()> {
+        let message = ClientSignalMessage::AgentChatStop {
             client_id: self.state.client_id.clone(),
             session_id,
         };
         self.publish_signal(message).await
     }
 
-    /// Add an agent to the Nexus session
-    pub async fn nexus_add_agent(
+    /// Add an agent to the AgentChat session
+    pub async fn agent_chat_add_agent(
         &self,
         session_id: String,
         node_id: String,
         agent_short_name: String,
     ) -> Result<()> {
-        let message = ClientSignalMessage::NexusAddAgent {
+        let message = ClientSignalMessage::AgentChatAddAgent {
             client_id: self.state.client_id.clone(),
             session_id,
             node_id,
@@ -525,9 +525,9 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
-    /// Remove an agent from the Nexus session
-    pub async fn nexus_remove_agent(&self, session_id: String, agent_id: String) -> Result<()> {
-        let message = ClientSignalMessage::NexusRemoveAgent {
+    /// Remove an agent from the AgentChat session
+    pub async fn agent_chat_remove_agent(&self, session_id: String, agent_id: String) -> Result<()> {
+        let message = ClientSignalMessage::AgentChatRemoveAgent {
             client_id: self.state.client_id.clone(),
             session_id,
             agent_id,
@@ -535,13 +535,13 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
-    /// Reorder agents in the Nexus session
-    pub async fn nexus_reorder_agents(
+    /// Reorder agents in the AgentChat session
+    pub async fn agent_chat_reorder_agents(
         &self,
         session_id: String,
         agent_ids: Vec<String>,
     ) -> Result<()> {
-        let message = ClientSignalMessage::NexusReorderAgents {
+        let message = ClientSignalMessage::AgentChatReorderAgents {
             client_id: self.state.client_id.clone(),
             session_id,
             agent_ids,
@@ -549,15 +549,15 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
-    /// Send a message in Nexus
-    pub async fn nexus_send_message(
+    /// Send a message in AgentChat
+    pub async fn agent_chat_send_message(
         &self,
         session_id: String,
         content: String,
         channel_id: Option<String>,
         recipient_nickname: Option<String>,
     ) -> Result<()> {
-        let message = ClientSignalMessage::NexusSendMessage {
+        let message = ClientSignalMessage::AgentChatSendMessage {
             client_id: self.state.client_id.clone(),
             session_id,
             content,
@@ -567,9 +567,9 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
-    /// Join or create a channel in Nexus
-    pub async fn nexus_join_channel(&self, session_id: String, channel_name: String) -> Result<()> {
-        let message = ClientSignalMessage::NexusJoinChannel {
+    /// Join or create a channel in AgentChat
+    pub async fn agent_chat_join_channel(&self, session_id: String, channel_name: String) -> Result<()> {
+        let message = ClientSignalMessage::AgentChatJoinChannel {
             client_id: self.state.client_id.clone(),
             session_id,
             channel_name,
@@ -578,13 +578,13 @@ impl RabbitMqClient {
     }
 
     /// Get message history for a channel
-    pub async fn nexus_get_history(
+    pub async fn agent_chat_get_history(
         &self,
         session_id: String,
         channel_id: Option<String>,
         limit: u32,
     ) -> Result<()> {
-        let message = ClientSignalMessage::NexusGetHistory {
+        let message = ClientSignalMessage::AgentChatGetHistory {
             client_id: self.state.client_id.clone(),
             session_id,
             channel_id,
@@ -593,9 +593,9 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
-    /// Get current Nexus state
-    pub async fn nexus_get_state(&self, session_id: Option<String>) -> Result<()> {
-        let message = ClientSignalMessage::NexusGetState {
+    /// Get current AgentChat state
+    pub async fn agent_chat_get_state(&self, session_id: Option<String>) -> Result<()> {
+        let message = ClientSignalMessage::AgentChatGetState {
             client_id: self.state.client_id.clone(),
             session_id,
         };
@@ -748,7 +748,7 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::CommandResponse(response) => {
                 //
-                // Store for Atlas if it's a pending command.
+                // Store for Orchestrator if it's a pending command.
                 //
                 self.state.store_command_response(response.command_id.clone(), response.result.clone()).await;
                 self.state.broadcast(ServerMessage::CommandResponse { response });
@@ -758,14 +758,14 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::SemanticOpQueued { operation_id, queue_position, request_id } => {
                 //
-                // Store for Atlas if it's a pending request.
+                // Store for Orchestrator if it's a pending request.
                 //
                 self.state.store_semantic_op_response(request_id.clone(), operation_id.clone()).await;
                 self.state.broadcast(ServerMessage::SemanticOpQueued { operation_id, queue_position, request_id });
             }
             ClientDirectMessage::SemanticOpUpdate(update) => {
                 //
-                // Store in state for Atlas access.
+                // Store in state for Orchestrator access.
                 //
                 self.state.update_operation(update.clone()).await;
                 self.state.broadcast(ServerMessage::SemanticOpUpdate { update });
@@ -791,7 +791,7 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::OpDefListResponse { definitions } => {
                 //
-                // Store operation definitions for Atlas access.
+                // Store operation definitions for Orchestrator access.
                 //
                 self.state.update_operation_definitions(definitions.clone()).await;
                 self.state.broadcast(ServerMessage::OpDefList { definitions });
@@ -817,7 +817,7 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::TrafficSearchResponse { entries, total_count } => {
                 //
-                // Store for Atlas to pick up.
+                // Store for Orchestrator to pick up.
                 //
                 self.state.store_traffic_search_response(entries.clone(), total_count).await;
                 self.state.broadcast(ServerMessage::TrafficSearchResponse { entries, total_count });
@@ -920,46 +920,46 @@ impl RabbitMqClient {
             }
 
             //
-            // Nexus responses.
+            // AgentChat responses.
             //
-            ClientDirectMessage::NexusSessionStarted { session_id, goal } => {
-                self.state.broadcast(ServerMessage::NexusSessionStarted { session_id, goal });
+            ClientDirectMessage::AgentChatSessionStarted { session_id, goal } => {
+                self.state.broadcast(ServerMessage::AgentChatSessionStarted { session_id, goal });
             }
-            ClientDirectMessage::NexusSessionStopped { session_id } => {
-                self.state.broadcast(ServerMessage::NexusSessionStopped { session_id });
+            ClientDirectMessage::AgentChatSessionStopped { session_id } => {
+                self.state.broadcast(ServerMessage::AgentChatSessionStopped { session_id });
             }
-            ClientDirectMessage::NexusAgentAdded { session_id, agent } => {
-                self.state.broadcast(ServerMessage::NexusAgentAdded { session_id, agent });
+            ClientDirectMessage::AgentChatAgentAdded { session_id, agent } => {
+                self.state.broadcast(ServerMessage::AgentChatAgentAdded { session_id, agent });
             }
-            ClientDirectMessage::NexusAgentRemoved { session_id, agent_id } => {
-                self.state.broadcast(ServerMessage::NexusAgentRemoved { session_id, agent_id });
+            ClientDirectMessage::AgentChatAgentRemoved { session_id, agent_id } => {
+                self.state.broadcast(ServerMessage::AgentChatAgentRemoved { session_id, agent_id });
             }
-            ClientDirectMessage::NexusAgentStatusChanged { session_id, agent_id, status } => {
-                self.state.broadcast(ServerMessage::NexusAgentStatusChanged { session_id, agent_id, status });
+            ClientDirectMessage::AgentChatAgentStatusChanged { session_id, agent_id, status } => {
+                self.state.broadcast(ServerMessage::AgentChatAgentStatusChanged { session_id, agent_id, status });
             }
-            ClientDirectMessage::NexusChannelCreated { session_id, channel } => {
-                self.state.broadcast(ServerMessage::NexusChannelCreated { session_id, channel });
+            ClientDirectMessage::AgentChatChannelCreated { session_id, channel } => {
+                self.state.broadcast(ServerMessage::AgentChatChannelCreated { session_id, channel });
             }
-            ClientDirectMessage::NexusChannelUpdated { session_id, channel } => {
-                self.state.broadcast(ServerMessage::NexusChannelUpdated { session_id, channel });
+            ClientDirectMessage::AgentChatChannelUpdated { session_id, channel } => {
+                self.state.broadcast(ServerMessage::AgentChatChannelUpdated { session_id, channel });
             }
-            ClientDirectMessage::NexusAgentJoinedChannel { session_id, agent_id, channel_id } => {
-                self.state.broadcast(ServerMessage::NexusAgentJoinedChannel { session_id, agent_id, channel_id });
+            ClientDirectMessage::AgentChatAgentJoinedChannel { session_id, agent_id, channel_id } => {
+                self.state.broadcast(ServerMessage::AgentChatAgentJoinedChannel { session_id, agent_id, channel_id });
             }
-            ClientDirectMessage::NexusAgentLeftChannel { session_id, agent_id, channel_id } => {
-                self.state.broadcast(ServerMessage::NexusAgentLeftChannel { session_id, agent_id, channel_id });
+            ClientDirectMessage::AgentChatAgentLeftChannel { session_id, agent_id, channel_id } => {
+                self.state.broadcast(ServerMessage::AgentChatAgentLeftChannel { session_id, agent_id, channel_id });
             }
-            ClientDirectMessage::NexusMessage { session_id, message } => {
-                self.state.broadcast(ServerMessage::NexusMessage { session_id, message });
+            ClientDirectMessage::AgentChatMessage { session_id, message } => {
+                self.state.broadcast(ServerMessage::AgentChatMessage { session_id, message });
             }
-            ClientDirectMessage::NexusStateUpdate { session } => {
-                self.state.broadcast(ServerMessage::NexusStateUpdate { session });
+            ClientDirectMessage::AgentChatStateUpdate { session } => {
+                self.state.broadcast(ServerMessage::AgentChatStateUpdate { session });
             }
-            ClientDirectMessage::NexusHistoryResponse { session_id, channel_id, messages } => {
-                self.state.broadcast(ServerMessage::NexusHistoryResponse { session_id, channel_id, messages });
+            ClientDirectMessage::AgentChatHistoryResponse { session_id, channel_id, messages } => {
+                self.state.broadcast(ServerMessage::AgentChatHistoryResponse { session_id, channel_id, messages });
             }
-            ClientDirectMessage::NexusError { message } => {
-                self.state.broadcast(ServerMessage::NexusError { message });
+            ClientDirectMessage::AgentChatError { message } => {
+                self.state.broadcast(ServerMessage::AgentChatError { message });
             }
         }
 

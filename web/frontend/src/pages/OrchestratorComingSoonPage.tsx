@@ -1,6 +1,6 @@
 import { Bot } from 'lucide-react';
 
-export function AtlasComingSoonPage() {
+export function OrchestratorComingSoonPage() {
   return (
     <div className="space-y-6 h-full flex flex-col">
       {/*
@@ -9,7 +9,7 @@ export function AtlasComingSoonPage() {
       //
       */}
       <div>
-        <h1 className="text-2xl font-bold text-highlight">Atlas</h1>
+        <h1 className="text-2xl font-bold text-highlight">Orchestrator</h1>
         <p className="text-muted mt-1">Interactive AI assistant for red teaming orchestration</p>
       </div>
 
@@ -27,7 +27,7 @@ export function AtlasComingSoonPage() {
           <div>
             <h2 className="text-sm font-bold tracking-wider text-title mb-2">COMING SOON</h2>
             <p className="text-xs text-muted leading-relaxed">
-              Atlas will be your intelligent command and control assistant. This module will
+              Orchestrator will be your intelligent command and control assistant. This module will
               provide natural language interaction for orchestrating operations, managing nodes,
               analyzing data, and automating complex red team workflows across your infrastructure.
             </p>

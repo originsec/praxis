@@ -198,11 +198,11 @@ CREATE TABLE IF NOT EXISTS service_config (
 );
 
 --
--- Nexus tables - IRC-style multi-agent chat system.
+-- AgentChat tables - IRC-style multi-agent chat system.
 --
 
--- Nexus sessions (one active at a time)
-CREATE TABLE IF NOT EXISTS nexus_sessions (
+-- AgentChat sessions (one active at a time)
+CREATE TABLE IF NOT EXISTS agent_chat_sessions (
     id TEXT PRIMARY KEY,
     goal TEXT,
     status TEXT NOT NULL,
@@ -210,10 +210,10 @@ CREATE TABLE IF NOT EXISTS nexus_sessions (
     updated_at TEXT NOT NULL
 );
 
--- Nexus agents participating in session
-CREATE TABLE IF NOT EXISTS nexus_agents (
+-- AgentChat agents participating in session
+CREATE TABLE IF NOT EXISTS agent_chat_agents (
     id TEXT PRIMARY KEY,
-    nexus_session_id TEXT NOT NULL,
+    agent_chat_session_id TEXT NOT NULL,
     node_id TEXT NOT NULL,
     agent_short_name TEXT NOT NULL,
     nickname TEXT NOT NULL,
@@ -222,34 +222,34 @@ CREATE TABLE IF NOT EXISTS nexus_agents (
     status TEXT NOT NULL,
     agent_session_id TEXT,
     created_at TEXT NOT NULL,
-    FOREIGN KEY (nexus_session_id) REFERENCES nexus_sessions(id) ON DELETE CASCADE,
-    UNIQUE(nexus_session_id, node_id)
+    FOREIGN KEY (agent_chat_session_id) REFERENCES agent_chat_sessions(id) ON DELETE CASCADE,
+    UNIQUE(agent_chat_session_id, node_id)
 );
-CREATE INDEX IF NOT EXISTS idx_nexus_agents_session ON nexus_agents(nexus_session_id);
+CREATE INDEX IF NOT EXISTS idx_agent_chat_agents_session ON agent_chat_agents(agent_chat_session_id);
 
--- Nexus channels
-CREATE TABLE IF NOT EXISTS nexus_channels (
+-- AgentChat channels
+CREATE TABLE IF NOT EXISTS agent_chat_channels (
     id TEXT PRIMARY KEY,
-    nexus_session_id TEXT NOT NULL,
+    agent_chat_session_id TEXT NOT NULL,
     name TEXT NOT NULL,
     topic TEXT,
     created_by TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    FOREIGN KEY (nexus_session_id) REFERENCES nexus_sessions(id) ON DELETE CASCADE,
-    UNIQUE(nexus_session_id, name)
+    FOREIGN KEY (agent_chat_session_id) REFERENCES agent_chat_sessions(id) ON DELETE CASCADE,
+    UNIQUE(agent_chat_session_id, name)
 );
 
--- Nexus messages (channel + DM)
-CREATE TABLE IF NOT EXISTS nexus_messages (
+-- AgentChat messages (channel + DM)
+CREATE TABLE IF NOT EXISTS agent_chat_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nexus_session_id TEXT NOT NULL,
+    agent_chat_session_id TEXT NOT NULL,
     channel_id TEXT,
     sender_nickname TEXT NOT NULL,
     recipient_nickname TEXT,
     message_type TEXT NOT NULL,
     content TEXT NOT NULL,
     timestamp TEXT NOT NULL,
-    FOREIGN KEY (nexus_session_id) REFERENCES nexus_sessions(id) ON DELETE CASCADE
+    FOREIGN KEY (agent_chat_session_id) REFERENCES agent_chat_sessions(id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_nexus_messages_channel ON nexus_messages(channel_id);
-CREATE INDEX IF NOT EXISTS idx_nexus_messages_timestamp ON nexus_messages(timestamp)
+CREATE INDEX IF NOT EXISTS idx_agent_chat_messages_channel ON agent_chat_messages(channel_id);
+CREATE INDEX IF NOT EXISTS idx_agent_chat_messages_timestamp ON agent_chat_messages(timestamp)

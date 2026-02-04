@@ -31,7 +31,7 @@ interface ModelDefinition {
 // Feature assignments.
 //
 interface FeatureAssignments {
-  atlas: string | null;
+  orchestrator: string | null;
   semanticOps: string | null;
   semanticParser: string | null;
   trafficParser: string | null;
@@ -41,7 +41,7 @@ interface FeatureAssignments {
 // Feature-specific settings.
 //
 interface FeatureSettings {
-  atlasMaxTokens: string;
+  orchestratorMaxTokens: string;
 }
 
 //
@@ -97,7 +97,7 @@ export function SettingsPage() {
   // Feature assignments state.
   //
   const [featureAssignments, setFeatureAssignments] = useState<FeatureAssignments>({
-    atlas: null,
+    orchestrator: null,
     semanticOps: null,
     semanticParser: null,
     trafficParser: null,
@@ -107,7 +107,7 @@ export function SettingsPage() {
   // Feature-specific settings.
   //
   const [featureSettings, setFeatureSettings] = useState<FeatureSettings>({
-    atlasMaxTokens: '25000',
+    orchestratorMaxTokens: '25000',
   });
 
   //
@@ -140,16 +140,16 @@ export function SettingsPage() {
 
   //
   // Load config on mount
-  // All llm_* keys go to Service (not starting with atlas_).
+  // All llm_* keys go to Service (not starting with orchestrator_).
   //
   useEffect(() => {
     getConfig([
       'llm_model_definitions',
-      'llm_feature_atlas',
+      'llm_feature_orchestrator',
       'llm_feature_semantic_ops',
       'llm_feature_semantic_parser',
       'llm_feature_traffic_parser',
-      'llm_atlas_max_tokens',
+      'llm_orchestrator_max_tokens',
     ]);
   }, [getConfig]);
 
@@ -206,7 +206,7 @@ export function SettingsPage() {
     // Load feature assignments (all stored on Service via llm_* keys).
     //
     setFeatureAssignments({
-      atlas: cfg.llm_feature_atlas || null,
+      orchestrator: cfg.llm_feature_orchestrator || null,
       semanticOps: cfg.llm_feature_semantic_ops || null,
       semanticParser: cfg.llm_feature_semantic_parser || null,
       trafficParser: cfg.llm_feature_traffic_parser || null,
@@ -216,7 +216,7 @@ export function SettingsPage() {
     // Load feature settings (all stored on Service via llm_* keys).
     //
     setFeatureSettings({
-      atlasMaxTokens: cfg.llm_atlas_max_tokens || '25000',
+      orchestratorMaxTokens: cfg.llm_orchestrator_max_tokens || '25000',
     });
   }, [state.config]);
 
@@ -282,7 +282,7 @@ export function SettingsPage() {
     //
     if (newName !== oldName) {
       const updatedAssignments = { ...featureAssignments };
-      if (updatedAssignments.atlas === oldName) updatedAssignments.atlas = newName;
+      if (updatedAssignments.orchestrator === oldName) updatedAssignments.orchestrator = newName;
       if (updatedAssignments.semanticOps === oldName) updatedAssignments.semanticOps = newName;
       if (updatedAssignments.semanticParser === oldName) updatedAssignments.semanticParser = newName;
       if (updatedAssignments.trafficParser === oldName) updatedAssignments.trafficParser = newName;
@@ -305,7 +305,7 @@ export function SettingsPage() {
     // Clear feature assignments using this model.
     //
     const updatedAssignments = { ...featureAssignments };
-    if (updatedAssignments.atlas === name) updatedAssignments.atlas = null;
+    if (updatedAssignments.orchestrator === name) updatedAssignments.orchestrator = null;
     if (updatedAssignments.semanticOps === name) updatedAssignments.semanticOps = null;
     if (updatedAssignments.semanticParser === name) updatedAssignments.semanticParser = null;
     if (updatedAssignments.trafficParser === name) updatedAssignments.trafficParser = null;
@@ -334,11 +334,11 @@ export function SettingsPage() {
   const handleSaveFeatures = () => {
     setIsSavingFeatures(true);
     setConfig({
-      llm_feature_atlas: featureAssignments.atlas || '',
+      llm_feature_orchestrator: featureAssignments.orchestrator || '',
       llm_feature_semantic_ops: featureAssignments.semanticOps || '',
       llm_feature_semantic_parser: featureAssignments.semanticParser || '',
       llm_feature_traffic_parser: featureAssignments.trafficParser || '',
-      llm_atlas_max_tokens: featureSettings.atlasMaxTokens,
+      llm_orchestrator_max_tokens: featureSettings.orchestratorMaxTokens,
     });
     setTimeout(() => {
       setIsSavingFeatures(false);
@@ -348,7 +348,7 @@ export function SettingsPage() {
       //
       getConfig([
         'llm_model_definitions',
-        'llm_feature_atlas',
+        'llm_feature_orchestrator',
         'llm_feature_semantic_ops',
         'llm_feature_semantic_parser',
         'llm_feature_traffic_parser',
@@ -781,17 +781,17 @@ export function SettingsPage() {
                     <div className="space-y-3">
                       {/*
                       //
-                      // Atlas.
+                      // Orchestrator.
                       //
                       */}
                       <div className="flex items-center gap-4 p-3 bg-[var(--bg-secondary)] border border-dim">
                         <div className="w-48">
-                          <p className="text-sm font-medium text-highlight">Atlas</p>
+                          <p className="text-sm font-medium text-highlight">Orchestrator</p>
                           <p className="text-xs text-muted">Interactive AI assistant</p>
                         </div>
                         <select
-                          value={featureAssignments.atlas || ''}
-                          onChange={(e) => setFeatureAssignments(a => ({ ...a, atlas: e.target.value || null }))}
+                          value={featureAssignments.orchestrator || ''}
+                          onChange={(e) => setFeatureAssignments(a => ({ ...a, orchestrator: e.target.value || null }))}
                           className="flex-1 bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                         >
                           <option value="">Select a model...</option>
@@ -801,8 +801,8 @@ export function SettingsPage() {
                         </select>
                         <input
                           type="number"
-                          value={featureSettings.atlasMaxTokens}
-                          onChange={(e) => setFeatureSettings(s => ({ ...s, atlasMaxTokens: e.target.value }))}
+                          value={featureSettings.orchestratorMaxTokens}
+                          onChange={(e) => setFeatureSettings(s => ({ ...s, orchestratorMaxTokens: e.target.value }))}
                           placeholder="Max tokens"
                           min="1000"
                           max="100000"

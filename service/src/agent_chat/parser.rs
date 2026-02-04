@@ -1,5 +1,5 @@
 //
-// Parser for agent responses in Nexus chat.
+// Parser for agent responses in AgentChat chat.
 //
 // Parses IRC-style commands and messages from agent output.
 //
@@ -9,7 +9,7 @@ const SYSTEM_PROMPT_TEMPLATE: &str = include_str!("prompts/system.prompt");
 
 /// Parsed action from agent response
 #[derive(Debug, Clone)]
-pub enum NexusAction {
+pub enum AgentChatAction {
     /// Join or create a channel
     JoinChannel { channel_name: String },
     /// Leave the current channel
@@ -27,7 +27,7 @@ pub enum NexusAction {
 }
 
 /// Parse a single line from agent output
-fn parse_line(line: &str) -> Option<NexusAction> {
+fn parse_line(line: &str) -> Option<AgentChatAction> {
     let trimmed = line.trim();
 
     //
@@ -56,19 +56,19 @@ fn parse_line(line: &str) -> Option<NexusAction> {
                     } else {
                         format!("#{}", args)
                     };
-                    return Some(NexusAction::JoinChannel { channel_name });
+                    return Some(AgentChatAction::JoinChannel { channel_name });
                 }
             }
             "leave" | "part" => {
-                return Some(NexusAction::LeaveChannel);
+                return Some(AgentChatAction::LeaveChannel);
             }
             "topic" => {
                 if !args.is_empty() {
-                    return Some(NexusAction::SetTopic { topic: args.to_string() });
+                    return Some(AgentChatAction::SetTopic { topic: args.to_string() });
                 }
             }
             "channels" | "list" => {
-                return Some(NexusAction::ListChannels);
+                return Some(AgentChatAction::ListChannels);
             }
             "dm" | "msg" | "privmsg" => {
                 //
@@ -76,7 +76,7 @@ fn parse_line(line: &str) -> Option<NexusAction> {
                 //
                 let dm_parts: Vec<&str> = args.splitn(2, ' ').collect();
                 if dm_parts.len() == 2 {
-                    return Some(NexusAction::DirectMessage {
+                    return Some(AgentChatAction::DirectMessage {
                         nickname: dm_parts[0].to_string(),
                         message: dm_parts[1].to_string(),
                     });
@@ -88,7 +88,7 @@ fn parse_line(line: &str) -> Option<NexusAction> {
                 // This prevents "/wait" embedded in prose from triggering wait.
                 //
                 if args.is_empty() {
-                    return Some(NexusAction::Wait);
+                    return Some(AgentChatAction::Wait);
                 }
             }
             _ => {
@@ -102,7 +102,7 @@ fn parse_line(line: &str) -> Option<NexusAction> {
     //
     // Regular message to current channel.
     //
-    Some(NexusAction::SendMessage {
+    Some(AgentChatAction::SendMessage {
         content: trimmed.to_string(),
     })
 }
@@ -115,14 +115,14 @@ fn ends_with_sentence_end(text: &str) -> bool {
 }
 
 /// Parse agent response into a list of actions
-pub fn parse_agent_response(response: &str) -> Vec<NexusAction> {
+pub fn parse_agent_response(response: &str) -> Vec<AgentChatAction> {
     let mut actions = Vec::new();
     let mut current_message = String::new();
 
     for line in response.lines() {
         if let Some(action) = parse_line(line) {
             match action {
-                NexusAction::SendMessage { content } => {
+                AgentChatAction::SendMessage { content } => {
                     //
                     // Accumulate consecutive message lines.
                     //
@@ -131,7 +131,7 @@ pub fn parse_agent_response(response: &str) -> Vec<NexusAction> {
                     }
                     current_message.push_str(&content);
                 }
-                NexusAction::Wait => {
+                AgentChatAction::Wait => {
                     //
                     // Only treat /wait as a command if it's at the start or
                     // after a complete sentence. Otherwise it's likely embedded
@@ -139,11 +139,11 @@ pub fn parse_agent_response(response: &str) -> Vec<NexusAction> {
                     //
                     if ends_with_sentence_end(&current_message) {
                         if !current_message.is_empty() {
-                            actions.push(NexusAction::SendMessage {
+                            actions.push(AgentChatAction::SendMessage {
                                 content: std::mem::take(&mut current_message),
                             });
                         }
-                        actions.push(NexusAction::Wait);
+                        actions.push(AgentChatAction::Wait);
                     } else {
                         //
                         // Treat as prose - append to current message.
@@ -159,7 +159,7 @@ pub fn parse_agent_response(response: &str) -> Vec<NexusAction> {
                     // Flush accumulated message before adding other action.
                     //
                     if !current_message.is_empty() {
-                        actions.push(NexusAction::SendMessage {
+                        actions.push(AgentChatAction::SendMessage {
                             content: std::mem::take(&mut current_message),
                         });
                     }
@@ -173,7 +173,7 @@ pub fn parse_agent_response(response: &str) -> Vec<NexusAction> {
     // Flush any remaining message.
     //
     if !current_message.is_empty() {
-        actions.push(NexusAction::SendMessage {
+        actions.push(AgentChatAction::SendMessage {
             content: current_message,
         });
     }
@@ -181,7 +181,7 @@ pub fn parse_agent_response(response: &str) -> Vec<NexusAction> {
     actions
 }
 
-/// Generate the system prompt for an agent joining Nexus
+/// Generate the system prompt for an agent joining AgentChat
 pub fn generate_system_prompt(
     nickname: &str,
     node_name: &str,
@@ -247,7 +247,7 @@ mod tests {
         let actions = parse_agent_response("/join #general");
         assert_eq!(actions.len(), 1);
         match &actions[0] {
-            NexusAction::JoinChannel { channel_name } => {
+            AgentChatAction::JoinChannel { channel_name } => {
                 assert_eq!(channel_name, "#general");
             }
             _ => panic!("Expected JoinChannel action"),
@@ -259,7 +259,7 @@ mod tests {
         let actions = parse_agent_response("/join planning");
         assert_eq!(actions.len(), 1);
         match &actions[0] {
-            NexusAction::JoinChannel { channel_name } => {
+            AgentChatAction::JoinChannel { channel_name } => {
                 assert_eq!(channel_name, "#planning");
             }
             _ => panic!("Expected JoinChannel action"),
@@ -271,7 +271,7 @@ mod tests {
         let actions = parse_agent_response("/dm alice Hello there!");
         assert_eq!(actions.len(), 1);
         match &actions[0] {
-            NexusAction::DirectMessage { nickname, message } => {
+            AgentChatAction::DirectMessage { nickname, message } => {
                 assert_eq!(nickname, "alice");
                 assert_eq!(message, "Hello there!");
             }
@@ -290,7 +290,7 @@ Let me check that out."#;
         assert_eq!(actions.len(), 3);
 
         match &actions[0] {
-            NexusAction::SendMessage { content } => {
+            AgentChatAction::SendMessage { content } => {
                 assert!(content.contains("Hello everyone!"));
                 assert!(content.contains("I'm here to help."));
             }
@@ -298,14 +298,14 @@ Let me check that out."#;
         }
 
         match &actions[1] {
-            NexusAction::JoinChannel { channel_name } => {
+            AgentChatAction::JoinChannel { channel_name } => {
                 assert_eq!(channel_name, "#planning");
             }
             _ => panic!("Expected JoinChannel action"),
         }
 
         match &actions[2] {
-            NexusAction::SendMessage { content } => {
+            AgentChatAction::SendMessage { content } => {
                 assert_eq!(content, "Let me check that out.");
             }
             _ => panic!("Expected SendMessage action"),
@@ -317,7 +317,7 @@ Let me check that out."#;
         let actions = parse_agent_response("/wait");
         assert_eq!(actions.len(), 1);
         match &actions[0] {
-            NexusAction::Wait => {}
+            AgentChatAction::Wait => {}
             _ => panic!("Expected Wait action"),
         }
     }
@@ -327,13 +327,13 @@ Let me check that out."#;
         let actions = parse_agent_response("I'll wait for more input.\n/wait");
         assert_eq!(actions.len(), 2);
         match &actions[0] {
-            NexusAction::SendMessage { content } => {
+            AgentChatAction::SendMessage { content } => {
                 assert_eq!(content, "I'll wait for more input.");
             }
             _ => panic!("Expected SendMessage action"),
         }
         match &actions[1] {
-            NexusAction::Wait => {}
+            AgentChatAction::Wait => {}
             _ => panic!("Expected Wait action"),
         }
     }
@@ -346,7 +346,7 @@ Let me check that out."#;
         let actions = parse_agent_response("We can\n/wait\nfor someone to bring us a task");
         assert_eq!(actions.len(), 1);
         match &actions[0] {
-            NexusAction::SendMessage { content } => {
+            AgentChatAction::SendMessage { content } => {
                 assert!(content.contains("/wait"));
                 assert!(content.contains("We can"));
             }

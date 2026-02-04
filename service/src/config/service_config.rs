@@ -15,7 +15,7 @@ pub const LLM_FEATURE_SEMANTIC_PARSER: &str = "llm_feature_semantic_parser";
 pub const LLM_FEATURE_TRAFFIC_PARSER: &str = "llm_feature_traffic_parser";
 pub const LLM_FEATURE_SEMANTIC_OPS: &str = "llm_feature_semantic_ops";
 #[allow(dead_code)]
-pub const LLM_FEATURE_ATLAS: &str = "llm_feature_atlas";
+pub const LLM_FEATURE_ORCHESTRATOR: &str = "llm_feature_orchestrator";
 
 /// A model definition stored in config
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
@@ -101,10 +101,10 @@ impl ServiceConfig {
             .and_then(|model_ref| self.find_model_definition(model_ref))
     }
 
-    /// Get the model definition assigned to atlas feature
+    /// Get the model definition assigned to orchestrator feature
     #[allow(dead_code)]
-    pub fn get_atlas_model_def(&self) -> Option<ModelDefinition> {
-        self.get(LLM_FEATURE_ATLAS)
+    pub fn get_orchestrator_model_def(&self) -> Option<ModelDefinition> {
+        self.get(LLM_FEATURE_ORCHESTRATOR)
             .and_then(|model_ref| self.find_model_definition(model_ref))
     }
 

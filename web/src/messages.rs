@@ -9,7 +9,7 @@ use common::{
     TargetDirection, TrafficSearchFilters,
 };
 
-/// Status of an Atlas plan step
+/// Status of an Orchestrator plan step
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum PlanStepStatus {
@@ -18,16 +18,16 @@ pub enum PlanStepStatus {
     Done,
 }
 
-/// A step in the Atlas execution plan
+/// A step in the Orchestrator execution plan
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanStep {
     pub description: String,
     pub status: PlanStepStatus,
 }
 
-/// The current plan being executed by Atlas
+/// The current plan being executed by Orchestrator
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct AtlasPlan {
+pub struct OrchestratorPlan {
     pub steps: Vec<PlanStep>,
     pub summary: Option<String>,
     pub current_step_description: Option<String>,
@@ -104,16 +104,16 @@ pub enum BrowserMessage {
     OpDefGet {
         full_name: String,
     },
-    /// Start a new Atlas session
-    AtlasStart,
-    /// Send a prompt to Atlas
-    AtlasPrompt {
+    /// Start a new Orchestrator session
+    OrchestratorStart,
+    /// Send a prompt to Orchestrator
+    OrchestratorPrompt {
         message: String,
     },
-    /// Stop/interrupt Atlas session
-    AtlasStop,
-    /// Cancel current Atlas inference (keeps session active)
-    AtlasCancel,
+    /// Stop/interrupt Orchestrator session
+    OrchestratorStop,
+    /// Cancel current Orchestrator inference (keeps session active)
+    OrchestratorCancel,
 
     //
     // Traffic interception messages.
@@ -267,53 +267,53 @@ pub enum BrowserMessage {
     },
 
     //
-    // Nexus messages.
+    // AgentChat messages.
     //
-    /// Start a new Nexus session
-    NexusStart {
+    /// Start a new AgentChat session
+    AgentChatStart {
         goal: Option<String>,
         yolo_mode: bool,
     },
-    /// Stop the current Nexus session
-    NexusStop {
+    /// Stop the current AgentChat session
+    AgentChatStop {
         session_id: String,
     },
-    /// Add an agent to the Nexus session
-    NexusAddAgent {
+    /// Add an agent to the AgentChat session
+    AgentChatAddAgent {
         session_id: String,
         node_id: String,
         agent_short_name: String,
     },
-    /// Remove an agent from the Nexus session
-    NexusRemoveAgent {
+    /// Remove an agent from the AgentChat session
+    AgentChatRemoveAgent {
         session_id: String,
         agent_id: String,
     },
-    /// Reorder agents in the Nexus session
-    NexusReorderAgents {
+    /// Reorder agents in the AgentChat session
+    AgentChatReorderAgents {
         session_id: String,
         agent_ids: Vec<String>,
     },
-    /// Send a message in Nexus
-    NexusSendMessage {
+    /// Send a message in AgentChat
+    AgentChatSendMessage {
         session_id: String,
         content: String,
         channel_id: Option<String>,
         recipient_nickname: Option<String>,
     },
-    /// Join or create a channel in Nexus
-    NexusJoinChannel {
+    /// Join or create a channel in AgentChat
+    AgentChatJoinChannel {
         session_id: String,
         channel_name: String,
     },
     /// Get message history for a channel
-    NexusGetHistory {
+    AgentChatGetHistory {
         session_id: String,
         channel_id: Option<String>,
         limit: u32,
     },
-    /// Get current Nexus state
-    NexusGetState {
+    /// Get current AgentChat state
+    AgentChatGetState {
         session_id: Option<String>,
     },
 }
@@ -385,38 +385,38 @@ pub enum ServerMessage {
     OpDefError {
         message: String,
     },
-    /// Atlas session started
-    AtlasStarted,
-    /// Atlas streaming text content
-    AtlasContent {
+    /// Orchestrator session started
+    OrchestratorStarted,
+    /// Orchestrator streaming text content
+    OrchestratorContent {
         content: String,
     },
-    /// Atlas started executing a tool
-    AtlasToolExecuting {
+    /// Orchestrator started executing a tool
+    OrchestratorToolExecuting {
         name: String,
         input: Option<String>,
     },
-    /// Atlas finished executing a tool
-    AtlasToolExecuted {
+    /// Orchestrator finished executing a tool
+    OrchestratorToolExecuted {
         name: String,
         display: String,
         success: bool,
         result: String,
     },
-    /// Atlas plan updated
-    AtlasPlanUpdated {
-        plan: AtlasPlan,
+    /// Orchestrator plan updated
+    OrchestratorPlanUpdated {
+        plan: OrchestratorPlan,
     },
-    /// Atlas response complete
-    AtlasDone,
-    /// Atlas session stopped
-    AtlasStopped,
-    /// Atlas error
-    AtlasError {
+    /// Orchestrator response complete
+    OrchestratorDone,
+    /// Orchestrator session stopped
+    OrchestratorStopped,
+    /// Orchestrator error
+    OrchestratorError {
         message: String,
     },
-    /// Atlas token usage update
-    AtlasTokenUsage {
+    /// Orchestrator token usage update
+    OrchestratorTokenUsage {
         prompt_tokens: u32,
         completion_tokens: u32,
         total_tokens: u32,
@@ -561,72 +561,72 @@ pub enum ServerMessage {
     },
 
     //
-    // Nexus messages.
+    // AgentChat messages.
     //
-    /// Nexus session started
-    NexusSessionStarted {
+    /// AgentChat session started
+    AgentChatSessionStarted {
         session_id: String,
         goal: Option<String>,
     },
-    /// Nexus session stopped
-    NexusSessionStopped {
+    /// AgentChat session stopped
+    AgentChatSessionStopped {
         session_id: String,
     },
-    /// Nexus agent added
-    NexusAgentAdded {
+    /// AgentChat agent added
+    AgentChatAgentAdded {
         session_id: String,
-        agent: common::NexusAgentInfo,
+        agent: common::AgentChatAgentInfo,
     },
-    /// Nexus agent removed
-    NexusAgentRemoved {
-        session_id: String,
-        agent_id: String,
-    },
-    /// Nexus agent status changed
-    NexusAgentStatusChanged {
+    /// AgentChat agent removed
+    AgentChatAgentRemoved {
         session_id: String,
         agent_id: String,
-        status: common::NexusAgentStatus,
     },
-    /// Nexus channel created
-    NexusChannelCreated {
-        session_id: String,
-        channel: common::NexusChannelInfo,
-    },
-    /// Nexus channel updated
-    NexusChannelUpdated {
-        session_id: String,
-        channel: common::NexusChannelInfo,
-    },
-    /// Nexus agent joined channel
-    NexusAgentJoinedChannel {
+    /// AgentChat agent status changed
+    AgentChatAgentStatusChanged {
         session_id: String,
         agent_id: String,
-        channel_id: String,
+        status: common::AgentChatAgentStatus,
     },
-    /// Nexus agent left channel
-    NexusAgentLeftChannel {
+    /// AgentChat channel created
+    AgentChatChannelCreated {
+        session_id: String,
+        channel: common::AgentChatChannelInfo,
+    },
+    /// AgentChat channel updated
+    AgentChatChannelUpdated {
+        session_id: String,
+        channel: common::AgentChatChannelInfo,
+    },
+    /// AgentChat agent joined channel
+    AgentChatAgentJoinedChannel {
         session_id: String,
         agent_id: String,
         channel_id: String,
     },
-    /// Nexus message
-    NexusMessage {
+    /// AgentChat agent left channel
+    AgentChatAgentLeftChannel {
         session_id: String,
-        message: common::NexusMessageInfo,
+        agent_id: String,
+        channel_id: String,
     },
-    /// Nexus state update
-    NexusStateUpdate {
-        session: common::NexusSessionState,
+    /// AgentChat message
+    AgentChatMessage {
+        session_id: String,
+        message: common::AgentChatMessageInfo,
     },
-    /// Nexus history response
-    NexusHistoryResponse {
+    /// AgentChat state update
+    AgentChatStateUpdate {
+        session: common::AgentChatSessionState,
+    },
+    /// AgentChat history response
+    AgentChatHistoryResponse {
         session_id: String,
         channel_id: Option<String>,
-        messages: Vec<common::NexusMessageInfo>,
+        messages: Vec<common::AgentChatMessageInfo>,
     },
-    /// Nexus error
-    NexusError {
+    /// AgentChat error
+    AgentChatError {
         message: String,
     },
 }

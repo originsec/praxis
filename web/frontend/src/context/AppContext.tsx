@@ -1,13 +1,13 @@
 import { createContext, useContext, useReducer, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { wsClient } from '../api/websocket';
 import { generateUUID } from '../utils/uuid';
-import type { AtlasState } from './atlasTypes';
+import type { OrchestratorState } from './orchestratorTypes';
 
 //
-// Re-export Atlas types for consumers.
+// Re-export Orchestrator types for consumers.
 //
-export type { AtlasMessage, AtlasToolExecution } from './atlasTypes';
-import { loadPersistedAtlasState, loadRecentNodes, persistRecentNodes, persistAtlasState } from '../utils/persistence';
+export type { OrchestratorMessage, OrchestratorToolExecution } from './orchestratorTypes';
+import { loadPersistedOrchestratorState, loadRecentNodes, persistRecentNodes, persistOrchestratorState } from '../utils/persistence';
 import type {
   SystemState,
   NodeState,
@@ -19,7 +19,7 @@ import type {
   EventLogEntry,
   OperationDefinitionInfo,
   BrowserMessage,
-  AtlasPlan,
+  OrchestratorPlan,
   InterceptedTrafficEntry,
   InterceptMethod,
   InterceptRule,
@@ -33,11 +33,11 @@ import type {
   ChainDefinitionInput,
   ChainExecutionUpdate,
   DiscoveredLlmEndpoint,
-  NexusAgentInfo,
-  NexusAgentStatus,
-  NexusChannelInfo,
-  NexusMessageInfo,
-  NexusSessionState,
+  AgentChatAgentInfo,
+  AgentChatAgentStatus,
+  AgentChatChannelInfo,
+  AgentChatMessageInfo,
+  AgentChatSessionState,
 } from '../api/types';
 
 //
@@ -49,7 +49,7 @@ export interface AgentSessionMessage {
   timestamp: Date;
 }
 
-const initialAtlasState: AtlasState = {
+const initialOrchestratorState: OrchestratorState = {
   sessionActive: false,
   isStarting: false,
   messages: [],
@@ -124,17 +124,17 @@ const initialDiscoveryState: DiscoveryState = {
 };
 
 //
-// Nexus state.
+// Agent Chat state.
 //
-interface NexusState {
-  session: NexusSessionState | null;
+interface AgentChatState {
+  session: AgentChatSessionState | null;
   currentChannelId: string | null;
-  messages: NexusMessageInfo[];
+  messages: AgentChatMessageInfo[];
   isLoading: boolean;
   error: string | null;
 }
 
-const initialNexusState: NexusState = {
+const initialAgentChatState: AgentChatState = {
   session: null,
   currentChannelId: null,
   messages: [],
@@ -169,11 +169,11 @@ interface AppState {
   config: Record<string, string>;
   opDefError: string | null;
   opDefSuccess: string | null;
-  atlas: AtlasState;
+  orchestrator: OrchestratorState;
   intercept: InterceptState;
   chains: ChainState;
   discovery: DiscoveryState;
-  nexus: NexusState;
+  agentChat: AgentChatState;
   eventLogPanel: EventLogPanelState;
   //
   // Agent session messages keyed by session_id.
@@ -201,11 +201,11 @@ function createInitialState(): AppState {
     config: {},
     opDefError: null,
     opDefSuccess: null,
-    atlas: loadPersistedAtlasState(initialAtlasState),
+    orchestrator: loadPersistedOrchestratorState(initialOrchestratorState),
     intercept: initialInterceptState,
     chains: initialChainState,
     discovery: initialDiscoveryState,
-    nexus: initialNexusState,
+    agentChat: initialAgentChatState,
     eventLogPanel: initialEventLogPanelState,
     agentSessionMessages: {},
     recentlyAccessedNodeIds: loadRecentNodes(MAX_RECENT_NODES),
@@ -225,19 +225,19 @@ type Action =
   | { type: 'SET_CONFIG'; values: Record<string, string> }
   | { type: 'SET_OP_DEF_ERROR'; error: string | null }
   | { type: 'SET_OP_DEF_SUCCESS'; fullName: string | null }
-  | { type: 'ATLAS_STARTING' }
-  | { type: 'ATLAS_STARTED' }
-  | { type: 'ATLAS_STOPPED' }
-  | { type: 'ATLAS_ADD_USER_MESSAGE'; message: string }
-  | { type: 'ATLAS_ADD_CONTENT'; content: string }
-  | { type: 'ATLAS_TOOL_EXECUTING'; name: string; input?: string }
-  | { type: 'ATLAS_TOOL_EXECUTED'; name: string; display: string; success: boolean; result: string }
-  | { type: 'ATLAS_PLAN_UPDATED'; plan: AtlasPlan }
-  | { type: 'ATLAS_DONE' }
-  | { type: 'ATLAS_ERROR'; message: string }
-  | { type: 'ATLAS_CLEAR_MESSAGES' }
-  | { type: 'ATLAS_SET_LOADING'; loading: boolean }
-  | { type: 'ATLAS_TOKEN_USAGE'; promptTokens: number; completionTokens: number; totalTokens: number }
+  | { type: 'ORCHESTRATOR_STARTING' }
+  | { type: 'ORCHESTRATOR_STARTED' }
+  | { type: 'ORCHESTRATOR_STOPPED' }
+  | { type: 'ORCHESTRATOR_ADD_USER_MESSAGE'; message: string }
+  | { type: 'ORCHESTRATOR_ADD_CONTENT'; content: string }
+  | { type: 'ORCHESTRATOR_TOOL_EXECUTING'; name: string; input?: string }
+  | { type: 'ORCHESTRATOR_TOOL_EXECUTED'; name: string; display: string; success: boolean; result: string }
+  | { type: 'ORCHESTRATOR_PLAN_UPDATED'; plan: OrchestratorPlan }
+  | { type: 'ORCHESTRATOR_DONE' }
+  | { type: 'ORCHESTRATOR_ERROR'; message: string }
+  | { type: 'ORCHESTRATOR_CLEAR_MESSAGES' }
+  | { type: 'ORCHESTRATOR_SET_LOADING'; loading: boolean }
+  | { type: 'ORCHESTRATOR_TOKEN_USAGE'; promptTokens: number; completionTokens: number; totalTokens: number }
   //
   // Intercept actions.
   //
@@ -284,24 +284,24 @@ type Action =
   | { type: 'TOGGLE_EVENT_LOG_PANEL' }
   | { type: 'SET_EVENT_LOG_PANEL_HEIGHT'; height: number }
   //
-  // Nexus actions.
+  // Agent Chat actions.
   //
-  | { type: 'NEXUS_SESSION_STARTED'; sessionId: string; goal: string | null }
-  | { type: 'NEXUS_SESSION_STOPPED'; sessionId: string }
-  | { type: 'NEXUS_AGENT_ADDED'; sessionId: string; agent: NexusAgentInfo }
-  | { type: 'NEXUS_AGENT_REMOVED'; sessionId: string; agentId: string }
-  | { type: 'NEXUS_AGENT_STATUS_CHANGED'; sessionId: string; agentId: string; status: NexusAgentStatus }
-  | { type: 'NEXUS_CHANNEL_CREATED'; sessionId: string; channel: NexusChannelInfo }
-  | { type: 'NEXUS_CHANNEL_UPDATED'; sessionId: string; channel: NexusChannelInfo }
-  | { type: 'NEXUS_AGENT_JOINED_CHANNEL'; sessionId: string; agentId: string; channelId: string }
-  | { type: 'NEXUS_AGENT_LEFT_CHANNEL'; sessionId: string; agentId: string; channelId: string }
-  | { type: 'NEXUS_MESSAGE'; sessionId: string; message: NexusMessageInfo }
-  | { type: 'NEXUS_STATE_UPDATE'; session: NexusSessionState }
-  | { type: 'NEXUS_HISTORY_RESPONSE'; sessionId: string; channelId: string | null; messages: NexusMessageInfo[] }
-  | { type: 'NEXUS_ERROR'; message: string }
-  | { type: 'NEXUS_SET_CURRENT_CHANNEL'; channelId: string | null }
-  | { type: 'NEXUS_CLEAR_ERROR' }
-  | { type: 'NEXUS_SET_LOADING'; loading: boolean };
+  | { type: 'AGENT_CHAT_SESSION_STARTED'; sessionId: string; goal: string | null }
+  | { type: 'AGENT_CHAT_SESSION_STOPPED'; sessionId: string }
+  | { type: 'AGENT_CHAT_AGENT_ADDED'; sessionId: string; agent: AgentChatAgentInfo }
+  | { type: 'AGENT_CHAT_AGENT_REMOVED'; sessionId: string; agentId: string }
+  | { type: 'AGENT_CHAT_AGENT_STATUS_CHANGED'; sessionId: string; agentId: string; status: AgentChatAgentStatus }
+  | { type: 'AGENT_CHAT_CHANNEL_CREATED'; sessionId: string; channel: AgentChatChannelInfo }
+  | { type: 'AGENT_CHAT_CHANNEL_UPDATED'; sessionId: string; channel: AgentChatChannelInfo }
+  | { type: 'AGENT_CHAT_AGENT_JOINED_CHANNEL'; sessionId: string; agentId: string; channelId: string }
+  | { type: 'AGENT_CHAT_AGENT_LEFT_CHANNEL'; sessionId: string; agentId: string; channelId: string }
+  | { type: 'AGENT_CHAT_MESSAGE'; sessionId: string; message: AgentChatMessageInfo }
+  | { type: 'AGENT_CHAT_STATE_UPDATE'; session: AgentChatSessionState }
+  | { type: 'AGENT_CHAT_HISTORY_RESPONSE'; sessionId: string; channelId: string | null; messages: AgentChatMessageInfo[] }
+  | { type: 'AGENT_CHAT_ERROR'; message: string }
+  | { type: 'AGENT_CHAT_SET_CURRENT_CHANNEL'; channelId: string | null }
+  | { type: 'AGENT_CHAT_CLEAR_ERROR' }
+  | { type: 'AGENT_CHAT_SET_LOADING'; loading: boolean };
 
 function reduceCore(state: AppState, action: Action): AppState | null {
   switch (action.type) {
@@ -338,47 +338,47 @@ function reduceCore(state: AppState, action: Action): AppState | null {
   }
 }
 
-function reduceAtlas(state: AppState, action: Action): AppState | null {
+function reduceOrchestrator(state: AppState, action: Action): AppState | null {
   switch (action.type) {
-    case 'ATLAS_STARTING':
+    case 'ORCHESTRATOR_STARTING':
       return {
         ...state,
-        atlas: {
-          ...state.atlas,
+        orchestrator: {
+          ...state.orchestrator,
           isStarting: true,
         },
       };
-    case 'ATLAS_STARTED':
+    case 'ORCHESTRATOR_STARTED':
       return {
         ...state,
-        atlas: {
-          ...initialAtlasState,
+        orchestrator: {
+          ...initialOrchestratorState,
           sessionActive: true,
           isStarting: false,
           messages: [{
             id: generateUUID(),
             role: 'system',
-            content: 'Atlas session started.',
+            content: 'Orchestrator session started.',
             timestamp: new Date(),
           }],
         },
       };
-    case 'ATLAS_STOPPED':
+    case 'ORCHESTRATOR_STOPPED':
       return {
         ...state,
-        atlas: {
-          ...state.atlas,
+        orchestrator: {
+          ...state.orchestrator,
           sessionActive: false,
           isStarting: false,
           isLoading: false,
         },
       };
-    case 'ATLAS_ADD_USER_MESSAGE':
+    case 'ORCHESTRATOR_ADD_USER_MESSAGE':
       return {
         ...state,
-        atlas: {
-          ...state.atlas,
-          messages: [...state.atlas.messages, {
+        orchestrator: {
+          ...state.orchestrator,
+          messages: [...state.orchestrator.messages, {
             id: generateUUID(),
             role: 'user',
             content: action.message,
@@ -389,20 +389,20 @@ function reduceAtlas(state: AppState, action: Action): AppState | null {
           currentToolExecutions: [],
         },
       };
-    case 'ATLAS_ADD_CONTENT':
+    case 'ORCHESTRATOR_ADD_CONTENT':
       return {
         ...state,
-        atlas: {
-          ...state.atlas,
-          streamingContent: state.atlas.streamingContent + action.content,
+        orchestrator: {
+          ...state.orchestrator,
+          streamingContent: state.orchestrator.streamingContent + action.content,
         },
       };
-    case 'ATLAS_TOOL_EXECUTING':
+    case 'ORCHESTRATOR_TOOL_EXECUTING':
       return {
         ...state,
-        atlas: {
-          ...state.atlas,
-          currentToolExecutions: [...state.atlas.currentToolExecutions, {
+        orchestrator: {
+          ...state.orchestrator,
+          currentToolExecutions: [...state.orchestrator.currentToolExecutions, {
             name: action.name,
             display: 'Executing...',
             success: true,
@@ -411,49 +411,49 @@ function reduceAtlas(state: AppState, action: Action): AppState | null {
           }],
         },
       };
-    case 'ATLAS_TOOL_EXECUTED': {
-      const executions = state.atlas.currentToolExecutions.map((ex) =>
+    case 'ORCHESTRATOR_TOOL_EXECUTED': {
+      const executions = state.orchestrator.currentToolExecutions.map((ex) =>
         ex.name === action.name && ex.executing
           ? { name: action.name, display: action.display, success: action.success, executing: false, input: ex.input, result: action.result }
           : ex
       );
       return {
         ...state,
-        atlas: {
-          ...state.atlas,
+        orchestrator: {
+          ...state.orchestrator,
           currentToolExecutions: executions,
         },
       };
     }
-    case 'ATLAS_PLAN_UPDATED':
+    case 'ORCHESTRATOR_PLAN_UPDATED':
       return {
         ...state,
-        atlas: {
-          ...state.atlas,
+        orchestrator: {
+          ...state.orchestrator,
           currentPlan: action.plan,
         },
       };
-    case 'ATLAS_DONE': {
+    case 'ORCHESTRATOR_DONE': {
       //
       // Finalize the current streaming content and tool executions into a
       // message.
       //
-      const newMessages = [...state.atlas.messages];
-      if (state.atlas.streamingContent || state.atlas.currentToolExecutions.length > 0) {
+      const newMessages = [...state.orchestrator.messages];
+      if (state.orchestrator.streamingContent || state.orchestrator.currentToolExecutions.length > 0) {
         newMessages.push({
           id: generateUUID(),
           role: 'assistant',
-          content: state.atlas.streamingContent,
+          content: state.orchestrator.streamingContent,
           timestamp: new Date(),
-          toolExecutions: state.atlas.currentToolExecutions.length > 0
-            ? [...state.atlas.currentToolExecutions]
+          toolExecutions: state.orchestrator.currentToolExecutions.length > 0
+            ? [...state.orchestrator.currentToolExecutions]
             : undefined,
         });
       }
       return {
         ...state,
-        atlas: {
-          ...state.atlas,
+        orchestrator: {
+          ...state.orchestrator,
           messages: newMessages,
           isLoading: false,
           streamingContent: '',
@@ -461,8 +461,8 @@ function reduceAtlas(state: AppState, action: Action): AppState | null {
         },
       };
     }
-    case 'ATLAS_ERROR': {
-      const newMessages = [...state.atlas.messages, {
+    case 'ORCHESTRATOR_ERROR': {
+      const newMessages = [...state.orchestrator.messages, {
         id: generateUUID(),
         role: 'system' as const,
         content: `Error: ${action.message}`,
@@ -470,8 +470,8 @@ function reduceAtlas(state: AppState, action: Action): AppState | null {
       }];
       return {
         ...state,
-        atlas: {
-          ...state.atlas,
+        orchestrator: {
+          ...state.orchestrator,
           messages: newMessages,
           isStarting: false,
           isLoading: false,
@@ -480,28 +480,28 @@ function reduceAtlas(state: AppState, action: Action): AppState | null {
         },
       };
     }
-    case 'ATLAS_CLEAR_MESSAGES':
+    case 'ORCHESTRATOR_CLEAR_MESSAGES':
       return {
         ...state,
-        atlas: {
-          ...state.atlas,
+        orchestrator: {
+          ...state.orchestrator,
           messages: [],
           currentPlan: null,
         },
       };
-    case 'ATLAS_SET_LOADING':
+    case 'ORCHESTRATOR_SET_LOADING':
       return {
         ...state,
-        atlas: {
-          ...state.atlas,
+        orchestrator: {
+          ...state.orchestrator,
           isLoading: action.loading,
         },
       };
-    case 'ATLAS_TOKEN_USAGE':
+    case 'ORCHESTRATOR_TOKEN_USAGE':
       return {
         ...state,
-        atlas: {
-          ...state.atlas,
+        orchestrator: {
+          ...state.orchestrator,
           tokenUsage: {
             promptTokens: action.promptTokens,
             completionTokens: action.completionTokens,
@@ -760,10 +760,10 @@ function reduceEventLogPanel(state: AppState, action: Action): AppState | null {
   }
 }
 
-function reduceNexus(state: AppState, action: Action): AppState | null {
+function reduceAgentChat(state: AppState, action: Action): AppState | null {
   switch (action.type) {
-    case 'NEXUS_SESSION_STARTED': {
-      const newSession: NexusSessionState = {
+    case 'AGENT_CHAT_SESSION_STARTED': {
+      const newSession: AgentChatSessionState = {
         id: action.sessionId,
         goal: action.goal,
         status: 'active',
@@ -773,112 +773,112 @@ function reduceNexus(state: AppState, action: Action): AppState | null {
       };
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        agentChat: {
+          ...state.agentChat,
           session: newSession,
           messages: [],
           error: null,
         },
       };
     }
-    case 'NEXUS_SESSION_STOPPED':
+    case 'AGENT_CHAT_SESSION_STOPPED':
       return {
         ...state,
-        nexus: {
-          ...initialNexusState,
+        agentChat: {
+          ...initialAgentChatState,
         },
       };
-    case 'NEXUS_AGENT_ADDED':
-      if (!state.nexus.session || state.nexus.session.id !== action.sessionId) return state;
+    case 'AGENT_CHAT_AGENT_ADDED':
+      if (!state.agentChat.session || state.agentChat.session.id !== action.sessionId) return state;
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        agentChat: {
+          ...state.agentChat,
           session: {
-            ...state.nexus.session,
-            agents: [...state.nexus.session.agents, action.agent],
+            ...state.agentChat.session,
+            agents: [...state.agentChat.session.agents, action.agent],
           },
         },
       };
-    case 'NEXUS_AGENT_REMOVED':
-      if (!state.nexus.session || state.nexus.session.id !== action.sessionId) return state;
+    case 'AGENT_CHAT_AGENT_REMOVED':
+      if (!state.agentChat.session || state.agentChat.session.id !== action.sessionId) return state;
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        agentChat: {
+          ...state.agentChat,
           session: {
-            ...state.nexus.session,
-            agents: state.nexus.session.agents.filter(a => a.id !== action.agentId),
+            ...state.agentChat.session,
+            agents: state.agentChat.session.agents.filter(a => a.id !== action.agentId),
           },
         },
       };
-    case 'NEXUS_AGENT_STATUS_CHANGED':
-      if (!state.nexus.session || state.nexus.session.id !== action.sessionId) return state;
+    case 'AGENT_CHAT_AGENT_STATUS_CHANGED':
+      if (!state.agentChat.session || state.agentChat.session.id !== action.sessionId) return state;
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        agentChat: {
+          ...state.agentChat,
           session: {
-            ...state.nexus.session,
-            agents: state.nexus.session.agents.map(a =>
+            ...state.agentChat.session,
+            agents: state.agentChat.session.agents.map(a =>
               a.id === action.agentId ? { ...a, status: action.status } : a
             ),
           },
         },
       };
-    case 'NEXUS_CHANNEL_CREATED':
-      if (!state.nexus.session || state.nexus.session.id !== action.sessionId) return state;
+    case 'AGENT_CHAT_CHANNEL_CREATED':
+      if (!state.agentChat.session || state.agentChat.session.id !== action.sessionId) return state;
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        agentChat: {
+          ...state.agentChat,
           session: {
-            ...state.nexus.session,
-            channels: [...state.nexus.session.channels, action.channel],
+            ...state.agentChat.session,
+            channels: [...state.agentChat.session.channels, action.channel],
           },
           //
           // Auto-select the first channel if none selected.
           //
-          currentChannelId: state.nexus.currentChannelId ?? action.channel.id,
+          currentChannelId: state.agentChat.currentChannelId ?? action.channel.id,
         },
       };
-    case 'NEXUS_CHANNEL_UPDATED':
-      if (!state.nexus.session || state.nexus.session.id !== action.sessionId) return state;
+    case 'AGENT_CHAT_CHANNEL_UPDATED':
+      if (!state.agentChat.session || state.agentChat.session.id !== action.sessionId) return state;
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        agentChat: {
+          ...state.agentChat,
           session: {
-            ...state.nexus.session,
-            channels: state.nexus.session.channels.map(c =>
+            ...state.agentChat.session,
+            channels: state.agentChat.session.channels.map(c =>
               c.id === action.channel.id ? action.channel : c
             ),
           },
         },
       };
-    case 'NEXUS_AGENT_JOINED_CHANNEL':
-      if (!state.nexus.session || state.nexus.session.id !== action.sessionId) return state;
+    case 'AGENT_CHAT_AGENT_JOINED_CHANNEL':
+      if (!state.agentChat.session || state.agentChat.session.id !== action.sessionId) return state;
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        agentChat: {
+          ...state.agentChat,
           session: {
-            ...state.nexus.session,
-            agents: state.nexus.session.agents.map(a =>
+            ...state.agentChat.session,
+            agents: state.agentChat.session.agents.map(a =>
               a.id === action.agentId ? { ...a, current_channel_id: action.channelId } : a
             ),
           },
         },
       };
-    case 'NEXUS_AGENT_LEFT_CHANNEL':
-      if (!state.nexus.session || state.nexus.session.id !== action.sessionId) return state;
+    case 'AGENT_CHAT_AGENT_LEFT_CHANNEL':
+      if (!state.agentChat.session || state.agentChat.session.id !== action.sessionId) return state;
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        agentChat: {
+          ...state.agentChat,
           session: {
-            ...state.nexus.session,
-            agents: state.nexus.session.agents.map(a =>
+            ...state.agentChat.session,
+            agents: state.agentChat.session.agents.map(a =>
               a.id === action.agentId && a.current_channel_id === action.channelId
                 ? { ...a, current_channel_id: null }
                 : a
@@ -886,62 +886,62 @@ function reduceNexus(state: AppState, action: Action): AppState | null {
           },
         },
       };
-    case 'NEXUS_MESSAGE':
-      if (!state.nexus.session || state.nexus.session.id !== action.sessionId) return state;
+    case 'AGENT_CHAT_MESSAGE':
+      if (!state.agentChat.session || state.agentChat.session.id !== action.sessionId) return state;
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
-          messages: [...state.nexus.messages, action.message],
+        agentChat: {
+          ...state.agentChat,
+          messages: [...state.agentChat.messages, action.message],
         },
       };
-    case 'NEXUS_STATE_UPDATE':
+    case 'AGENT_CHAT_STATE_UPDATE':
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        agentChat: {
+          ...state.agentChat,
           session: action.session,
-          currentChannelId: state.nexus.currentChannelId ?? action.session.channels[0]?.id ?? null,
+          currentChannelId: state.agentChat.currentChannelId ?? action.session.channels[0]?.id ?? null,
         },
       };
-    case 'NEXUS_HISTORY_RESPONSE':
+    case 'AGENT_CHAT_HISTORY_RESPONSE':
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        agentChat: {
+          ...state.agentChat,
           messages: action.messages,
         },
       };
-    case 'NEXUS_ERROR':
+    case 'AGENT_CHAT_ERROR':
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        agentChat: {
+          ...state.agentChat,
           error: action.message,
           isLoading: false,
         },
       };
-    case 'NEXUS_SET_CURRENT_CHANNEL':
+    case 'AGENT_CHAT_SET_CURRENT_CHANNEL':
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        agentChat: {
+          ...state.agentChat,
           currentChannelId: action.channelId,
         },
       };
-    case 'NEXUS_CLEAR_ERROR':
+    case 'AGENT_CHAT_CLEAR_ERROR':
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        agentChat: {
+          ...state.agentChat,
           error: null,
         },
       };
-    case 'NEXUS_SET_LOADING':
+    case 'AGENT_CHAT_SET_LOADING':
       return {
         ...state,
-        nexus: {
-          ...state.nexus,
+        agentChat: {
+          ...state.agentChat,
           isLoading: action.loading,
         },
       };
@@ -953,14 +953,14 @@ function reduceNexus(state: AppState, action: Action): AppState | null {
 function reducer(state: AppState, action: Action): AppState {
   return (
     reduceCore(state, action)
-    ?? reduceAtlas(state, action)
+    ?? reduceOrchestrator(state, action)
     ?? reduceIntercept(state, action)
     ?? reduceAgentSessions(state, action)
     ?? reduceChains(state, action)
     ?? reduceRecentNodes(state, action)
     ?? reduceDiscovery(state, action)
     ?? reduceEventLogPanel(state, action)
-    ?? reduceNexus(state, action)
+    ?? reduceAgentChat(state, action)
     ?? state
   );
 }
@@ -1005,12 +1005,12 @@ interface AppContextValue {
   //
   clearOpDefStatus: () => void;
   //
-  // Atlas.
+  // Orchestrator.
   //
-  atlasStart: () => void;
-  atlasStop: () => void;
-  atlasCancel: () => void;
-  atlasPrompt: (message: string) => void;
+  orchestratorStart: () => void;
+  orchestratorStop: () => void;
+  orchestratorCancel: () => void;
+  orchestratorPrompt: (message: string) => void;
   atlasClearMessages: () => void;
   //
   // Generic send.
@@ -1067,19 +1067,19 @@ interface AppContextValue {
   toggleEventLogPanel: () => void;
   setEventLogPanelHeight: (height: number) => void;
   //
-  // Nexus.
+  // Agent Chat.
   //
-  nexusStart: (goal: string | null, yoloMode: boolean) => void;
-  nexusStop: () => void;
-  nexusAddAgent: (nodeId: string, agentShortName: string) => void;
-  nexusRemoveAgent: (agentId: string) => void;
-  nexusReorderAgents: (agentIds: string[]) => void;
-  nexusSendMessage: (content: string, channelId?: string, recipientNickname?: string) => void;
-  nexusJoinChannel: (channelName: string) => void;
-  nexusGetHistory: (channelId?: string, limit?: number) => void;
-  nexusGetState: () => void;
-  nexusSetCurrentChannel: (channelId: string | null) => void;
-  nexusClearError: () => void;
+  agentChatStart: (goal: string | null, yoloMode: boolean) => void;
+  agentChatStop: () => void;
+  agentChatAddAgent: (nodeId: string, agentShortName: string) => void;
+  agentChatRemoveAgent: (agentId: string) => void;
+  agentChatReorderAgents: (agentIds: string[]) => void;
+  agentChatSendMessage: (content: string, channelId?: string, recipientNickname?: string) => void;
+  agentChatJoinChannel: (channelName: string) => void;
+  agentChatGetHistory: (channelId?: string, limit?: number) => void;
+  agentChatGetState: () => void;
+  agentChatSetCurrentChannel: (channelId: string | null) => void;
+  agentChatClearError: () => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -1102,11 +1102,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [state.clientId]);
 
   //
-  // Persist Atlas state to sessionStorage whenever it changes.
+  // Persist Orchestrator state to sessionStorage whenever it changes.
   //
   useEffect(() => {
-    persistAtlasState(state.atlas);
-  }, [state.atlas]);
+    persistOrchestratorState(state.orchestrator);
+  }, [state.orchestrator]);
 
   //
   // Handle WebSocket messages - only set up once.
@@ -1164,35 +1164,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'SET_OP_DEF_SUCCESS', fullName: message.full_name });
           break;
         //
-        // Atlas messages.
+        // Orchestrator messages.
         //
         case 'atlas_started':
-          dispatch({ type: 'ATLAS_STARTED' });
+          dispatch({ type: 'ORCHESTRATOR_STARTED' });
           break;
         case 'atlas_stopped':
-          dispatch({ type: 'ATLAS_STOPPED' });
+          dispatch({ type: 'ORCHESTRATOR_STOPPED' });
           break;
         case 'atlas_content':
-          dispatch({ type: 'ATLAS_ADD_CONTENT', content: message.content });
+          dispatch({ type: 'ORCHESTRATOR_ADD_CONTENT', content: message.content });
           break;
         case 'atlas_tool_executing':
-          dispatch({ type: 'ATLAS_TOOL_EXECUTING', name: message.name, input: message.input });
+          dispatch({ type: 'ORCHESTRATOR_TOOL_EXECUTING', name: message.name, input: message.input });
           break;
         case 'atlas_tool_executed':
-          dispatch({ type: 'ATLAS_TOOL_EXECUTED', name: message.name, display: message.display, success: message.success, result: message.result });
+          dispatch({ type: 'ORCHESTRATOR_TOOL_EXECUTED', name: message.name, display: message.display, success: message.success, result: message.result });
           break;
-        case 'atlas_plan_updated':
-          dispatch({ type: 'ATLAS_PLAN_UPDATED', plan: message.plan });
+        case 'orchestrator_plan_updated':
+          dispatch({ type: 'ORCHESTRATOR_PLAN_UPDATED', plan: message.plan });
           break;
         case 'atlas_done':
-          dispatch({ type: 'ATLAS_DONE' });
+          dispatch({ type: 'ORCHESTRATOR_DONE' });
           break;
         case 'atlas_error':
-          dispatch({ type: 'ATLAS_ERROR', message: message.message });
+          dispatch({ type: 'ORCHESTRATOR_ERROR', message: message.message });
           break;
         case 'atlas_token_usage':
           dispatch({
-            type: 'ATLAS_TOKEN_USAGE',
+            type: 'ORCHESTRATOR_TOKEN_USAGE',
             promptTokens: message.prompt_tokens,
             completionTokens: message.completion_tokens,
             totalTokens: message.total_tokens,
@@ -1313,46 +1313,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
           break;
 
         //
-        // Nexus messages.
+        // Agent Chat messages.
         //
-        case 'nexus_session_started':
-          dispatch({ type: 'NEXUS_SESSION_STARTED', sessionId: message.session_id, goal: message.goal });
+        case 'agent_chat_session_started':
+          dispatch({ type: 'AGENT_CHAT_SESSION_STARTED', sessionId: message.session_id, goal: message.goal });
           break;
-        case 'nexus_session_stopped':
-          dispatch({ type: 'NEXUS_SESSION_STOPPED', sessionId: message.session_id });
+        case 'agent_chat_session_stopped':
+          dispatch({ type: 'AGENT_CHAT_SESSION_STOPPED', sessionId: message.session_id });
           break;
-        case 'nexus_agent_added':
-          dispatch({ type: 'NEXUS_AGENT_ADDED', sessionId: message.session_id, agent: message.agent });
+        case 'agent_chat_agent_added':
+          dispatch({ type: 'AGENT_CHAT_AGENT_ADDED', sessionId: message.session_id, agent: message.agent });
           break;
-        case 'nexus_agent_removed':
-          dispatch({ type: 'NEXUS_AGENT_REMOVED', sessionId: message.session_id, agentId: message.agent_id });
+        case 'agent_chat_agent_removed':
+          dispatch({ type: 'AGENT_CHAT_AGENT_REMOVED', sessionId: message.session_id, agentId: message.agent_id });
           break;
-        case 'nexus_agent_status_changed':
-          dispatch({ type: 'NEXUS_AGENT_STATUS_CHANGED', sessionId: message.session_id, agentId: message.agent_id, status: message.status });
+        case 'agent_chat_agent_status_changed':
+          dispatch({ type: 'AGENT_CHAT_AGENT_STATUS_CHANGED', sessionId: message.session_id, agentId: message.agent_id, status: message.status });
           break;
-        case 'nexus_channel_created':
-          dispatch({ type: 'NEXUS_CHANNEL_CREATED', sessionId: message.session_id, channel: message.channel });
+        case 'agent_chat_channel_created':
+          dispatch({ type: 'AGENT_CHAT_CHANNEL_CREATED', sessionId: message.session_id, channel: message.channel });
           break;
-        case 'nexus_channel_updated':
-          dispatch({ type: 'NEXUS_CHANNEL_UPDATED', sessionId: message.session_id, channel: message.channel });
+        case 'agent_chat_channel_updated':
+          dispatch({ type: 'AGENT_CHAT_CHANNEL_UPDATED', sessionId: message.session_id, channel: message.channel });
           break;
-        case 'nexus_agent_joined_channel':
-          dispatch({ type: 'NEXUS_AGENT_JOINED_CHANNEL', sessionId: message.session_id, agentId: message.agent_id, channelId: message.channel_id });
+        case 'agent_chat_agent_joined_channel':
+          dispatch({ type: 'AGENT_CHAT_AGENT_JOINED_CHANNEL', sessionId: message.session_id, agentId: message.agent_id, channelId: message.channel_id });
           break;
-        case 'nexus_agent_left_channel':
-          dispatch({ type: 'NEXUS_AGENT_LEFT_CHANNEL', sessionId: message.session_id, agentId: message.agent_id, channelId: message.channel_id });
+        case 'agent_chat_agent_left_channel':
+          dispatch({ type: 'AGENT_CHAT_AGENT_LEFT_CHANNEL', sessionId: message.session_id, agentId: message.agent_id, channelId: message.channel_id });
           break;
-        case 'nexus_message':
-          dispatch({ type: 'NEXUS_MESSAGE', sessionId: message.session_id, message: message.message });
+        case 'agent_chat_message':
+          dispatch({ type: 'AGENT_CHAT_MESSAGE', sessionId: message.session_id, message: message.message });
           break;
-        case 'nexus_state_update':
-          dispatch({ type: 'NEXUS_STATE_UPDATE', session: message.session });
+        case 'agent_chat_state_update':
+          dispatch({ type: 'AGENT_CHAT_STATE_UPDATE', session: message.session });
           break;
-        case 'nexus_history_response':
-          dispatch({ type: 'NEXUS_HISTORY_RESPONSE', sessionId: message.session_id, channelId: message.channel_id, messages: message.messages });
+        case 'agent_chat_history_response':
+          dispatch({ type: 'AGENT_CHAT_HISTORY_RESPONSE', sessionId: message.session_id, channelId: message.channel_id, messages: message.messages });
           break;
-        case 'nexus_error':
-          dispatch({ type: 'NEXUS_ERROR', message: message.message });
+        case 'agent_chat_error':
+          dispatch({ type: 'AGENT_CHAT_ERROR', message: message.message });
           break;
       }
     };
@@ -1491,30 +1491,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   //
-  // Atlas functions.
+  // Orchestrator functions.
   //
-  const atlasStart = useCallback(() => {
-    dispatch({ type: 'ATLAS_STARTING' });
+  const orchestratorStart = useCallback(() => {
+    dispatch({ type: 'ORCHESTRATOR_STARTING' });
     wsClient.send({ type: 'atlas_start' });
   }, []);
 
-  const atlasStop = useCallback(() => {
+  const orchestratorStop = useCallback(() => {
     wsClient.send({ type: 'atlas_stop' });
-    dispatch({ type: 'ATLAS_STOPPED' });
+    dispatch({ type: 'ORCHESTRATOR_STOPPED' });
   }, []);
 
-  const atlasCancel = useCallback(() => {
+  const orchestratorCancel = useCallback(() => {
     wsClient.send({ type: 'atlas_cancel' });
-    dispatch({ type: 'ATLAS_DONE' });
+    dispatch({ type: 'ORCHESTRATOR_DONE' });
   }, []);
 
-  const atlasPrompt = useCallback((message: string) => {
-    dispatch({ type: 'ATLAS_ADD_USER_MESSAGE', message });
+  const orchestratorPrompt = useCallback((message: string) => {
+    dispatch({ type: 'ORCHESTRATOR_ADD_USER_MESSAGE', message });
     wsClient.send({ type: 'atlas_prompt', message });
   }, []);
 
   const atlasClearMessages = useCallback(() => {
-    dispatch({ type: 'ATLAS_CLEAR_MESSAGES' });
+    dispatch({ type: 'ORCHESTRATOR_CLEAR_MESSAGES' });
   }, []);
 
   //
@@ -1728,96 +1728,96 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   //
-  // Nexus functions.
+  // Agent Chat functions.
   //
-  const nexusStart = useCallback((goal: string | null, yoloMode: boolean) => {
-    dispatch({ type: 'NEXUS_SET_LOADING', loading: true });
-    wsClient.send({ type: 'nexus_start', goal, yolo_mode: yoloMode });
+  const agentChatStart = useCallback((goal: string | null, yoloMode: boolean) => {
+    dispatch({ type: 'AGENT_CHAT_SET_LOADING', loading: true });
+    wsClient.send({ type: 'agent_chat_start', goal, yolo_mode: yoloMode });
   }, []);
 
-  const nexusStop = useCallback(() => {
-    if (state.nexus.session) {
-      wsClient.send({ type: 'nexus_stop', session_id: state.nexus.session.id });
+  const agentChatStop = useCallback(() => {
+    if (state.agentChat.session) {
+      wsClient.send({ type: 'agent_chat_stop', session_id: state.agentChat.session.id });
     }
-  }, [state.nexus.session]);
+  }, [state.agentChat.session]);
 
-  const nexusAddAgent = useCallback((nodeId: string, agentShortName: string) => {
-    if (state.nexus.session) {
+  const agentChatAddAgent = useCallback((nodeId: string, agentShortName: string) => {
+    if (state.agentChat.session) {
       wsClient.send({
-        type: 'nexus_add_agent',
-        session_id: state.nexus.session.id,
+        type: 'agent_chat_add_agent',
+        session_id: state.agentChat.session.id,
         node_id: nodeId,
         agent_short_name: agentShortName,
       });
     }
-  }, [state.nexus.session]);
+  }, [state.agentChat.session]);
 
-  const nexusRemoveAgent = useCallback((agentId: string) => {
-    if (state.nexus.session) {
+  const agentChatRemoveAgent = useCallback((agentId: string) => {
+    if (state.agentChat.session) {
       wsClient.send({
-        type: 'nexus_remove_agent',
-        session_id: state.nexus.session.id,
+        type: 'agent_chat_remove_agent',
+        session_id: state.agentChat.session.id,
         agent_id: agentId,
       });
     }
-  }, [state.nexus.session]);
+  }, [state.agentChat.session]);
 
-  const nexusReorderAgents = useCallback((agentIds: string[]) => {
-    if (state.nexus.session) {
+  const agentChatReorderAgents = useCallback((agentIds: string[]) => {
+    if (state.agentChat.session) {
       wsClient.send({
-        type: 'nexus_reorder_agents',
-        session_id: state.nexus.session.id,
+        type: 'agent_chat_reorder_agents',
+        session_id: state.agentChat.session.id,
         agent_ids: agentIds,
       });
     }
-  }, [state.nexus.session]);
+  }, [state.agentChat.session]);
 
-  const nexusSendMessage = useCallback((content: string, channelId?: string, recipientNickname?: string) => {
-    if (state.nexus.session) {
+  const agentChatSendMessage = useCallback((content: string, channelId?: string, recipientNickname?: string) => {
+    if (state.agentChat.session) {
       wsClient.send({
-        type: 'nexus_send_message',
-        session_id: state.nexus.session.id,
+        type: 'agent_chat_send_message',
+        session_id: state.agentChat.session.id,
         content,
-        channel_id: channelId ?? state.nexus.currentChannelId ?? null,
+        channel_id: channelId ?? state.agentChat.currentChannelId ?? null,
         recipient_nickname: recipientNickname ?? null,
       });
     }
-  }, [state.nexus.session, state.nexus.currentChannelId]);
+  }, [state.agentChat.session, state.agentChat.currentChannelId]);
 
-  const nexusJoinChannel = useCallback((channelName: string) => {
-    if (state.nexus.session) {
+  const agentChatJoinChannel = useCallback((channelName: string) => {
+    if (state.agentChat.session) {
       wsClient.send({
-        type: 'nexus_join_channel',
-        session_id: state.nexus.session.id,
+        type: 'agent_chat_join_channel',
+        session_id: state.agentChat.session.id,
         channel_name: channelName,
       });
     }
-  }, [state.nexus.session]);
+  }, [state.agentChat.session]);
 
-  const nexusGetHistory = useCallback((channelId?: string, limit?: number) => {
-    if (state.nexus.session) {
+  const agentChatGetHistory = useCallback((channelId?: string, limit?: number) => {
+    if (state.agentChat.session) {
       wsClient.send({
-        type: 'nexus_get_history',
-        session_id: state.nexus.session.id,
-        channel_id: channelId ?? state.nexus.currentChannelId ?? null,
+        type: 'agent_chat_get_history',
+        session_id: state.agentChat.session.id,
+        channel_id: channelId ?? state.agentChat.currentChannelId ?? null,
         limit: limit ?? 100,
       });
     }
-  }, [state.nexus.session, state.nexus.currentChannelId]);
+  }, [state.agentChat.session, state.agentChat.currentChannelId]);
 
-  const nexusGetState = useCallback(() => {
+  const agentChatGetState = useCallback(() => {
     wsClient.send({
-      type: 'nexus_get_state',
-      session_id: state.nexus.session?.id ?? null,
+      type: 'agent_chat_get_state',
+      session_id: state.agentChat.session?.id ?? null,
     });
-  }, [state.nexus.session]);
+  }, [state.agentChat.session]);
 
-  const nexusSetCurrentChannel = useCallback((channelId: string | null) => {
-    dispatch({ type: 'NEXUS_SET_CURRENT_CHANNEL', channelId });
+  const agentChatSetCurrentChannel = useCallback((channelId: string | null) => {
+    dispatch({ type: 'AGENT_CHAT_SET_CURRENT_CHANNEL', channelId });
   }, []);
 
-  const nexusClearError = useCallback(() => {
-    dispatch({ type: 'NEXUS_CLEAR_ERROR' });
+  const agentChatClearError = useCallback(() => {
+    dispatch({ type: 'AGENT_CHAT_CLEAR_ERROR' });
   }, []);
 
   const value: AppContextValue = {
@@ -1835,10 +1835,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     getConfig,
     setConfig,
     clearOpDefStatus,
-    atlasStart,
-    atlasStop,
-    atlasCancel,
-    atlasPrompt,
+    orchestratorStart,
+    orchestratorStop,
+    orchestratorCancel,
+    orchestratorPrompt,
     atlasClearMessages,
     send,
     requestTrafficLog,
@@ -1883,19 +1883,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     toggleEventLogPanel,
     setEventLogPanelHeight,
     //
-    // Nexus.
+    // Agent Chat.
     //
-    nexusStart,
-    nexusStop,
-    nexusAddAgent,
-    nexusRemoveAgent,
-    nexusReorderAgents,
-    nexusSendMessage,
-    nexusJoinChannel,
-    nexusGetHistory,
-    nexusGetState,
-    nexusSetCurrentChannel,
-    nexusClearError,
+    agentChatStart,
+    agentChatStop,
+    agentChatAddAgent,
+    agentChatRemoveAgent,
+    agentChatReorderAgents,
+    agentChatSendMessage,
+    agentChatJoinChannel,
+    agentChatGetHistory,
+    agentChatGetState,
+    agentChatSetCurrentChannel,
+    agentChatClearError,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
