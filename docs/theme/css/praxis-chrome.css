@@ -4,9 +4,10 @@
 /*
  * Hide unwanted themes from theme picker - show only Light (origin_light) and Ayu (praxis_dark).
  */
-#theme-list > button#rust,
-#theme-list > button#coal,
-#theme-list > button#navy {
+#mdbook-theme-list > li:has(#mdbook-theme-default_theme),
+#mdbook-theme-list > li:has(#mdbook-theme-rust),
+#mdbook-theme-list > li:has(#mdbook-theme-coal),
+#mdbook-theme-list > li:has(#mdbook-theme-navy) {
     display: none !important;
 }
 
