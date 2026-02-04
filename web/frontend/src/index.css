@@ -47,11 +47,26 @@ input, select, textarea {
 
 ::-webkit-scrollbar-thumb {
   border-radius: 0;
+  background-color: var(--border-color);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--border-hover);
 }
 
 /* XTerm scrollbar structure */
 .xterm-viewport::-webkit-scrollbar {
   width: 6px;
+}
+
+/* XTerm theme integration - ensure backgrounds match terminal container */
+.xterm {
+  padding: 4px;
+  background-color: transparent !important;
+}
+
+.xterm-viewport {
+  background-color: transparent !important;
 }
 
 /* Animation keyframes */
