@@ -1,10 +1,62 @@
 # Installation
 
-There are a few ways to get Praxis running. Docker is the easiest for getting started; building from source gives you more control.
+There are a few ways to get Praxis running. The one-liner scripts are the easiest for getting started; building from source gives you more control.
 
-## Docker (Recommended)
+## Quick Install (One-Liner)
 
-Docker handles all the dependencies and gives you everything in one command:
+These scripts automatically fetch the **latest release** and set everything up.
+
+### Docker (Recommended)
+
+```bash
+# Linux/macOS
+curl -fsSL https://praxis.originhq.com/docker.sh | bash
+```
+
+```powershell
+# Windows
+irm https://praxis.originhq.com/docker.ps1 | iex
+```
+
+This clones the latest release, builds with Docker Compose, and starts everything.
+
+### Native Install (Linux/macOS)
+
+```bash
+curl -fsSL https://praxis.originhq.com/install.sh | bash
+```
+
+This installs Rust if needed, builds from source, and sets up binaries in `~/.praxis/bin/`.
+
+### Native Install (Windows)
+
+```powershell
+irm https://praxis.originhq.com/install.ps1 | iex
+```
+
+### Pinning a Specific Version
+
+To install a specific version instead of latest:
+
+```bash
+# Docker (Linux/macOS)
+PRAXIS_VERSION=v0.1.0 curl -fsSL https://praxis.originhq.com/docker.sh | bash
+
+# Native (Linux/macOS)
+PRAXIS_VERSION=v0.1.0 curl -fsSL https://praxis.originhq.com/install.sh | bash
+```
+
+```powershell
+# Docker (Windows)
+$env:PRAXIS_VERSION = "v0.1.0"; irm https://praxis.originhq.com/docker.ps1 | iex
+
+# Native (Windows)
+$env:PRAXIS_VERSION = "v0.1.0"; irm https://praxis.originhq.com/install.ps1 | iex
+```
+
+## Manual Docker Setup
+
+If you prefer to clone and run Docker manually:
 
 ```bash
 git clone https://github.com/originsec/praxis.git

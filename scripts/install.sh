@@ -9,8 +9,8 @@ set -e
 # Configuration
 PRAXIS_HOME="${PRAXIS_HOME:-$HOME/.praxis}"
 PRAXIS_BIN="$PRAXIS_HOME/bin"
-PRAXIS_REPO="https://github.com/originsec/praxis"
-PRAXIS_BRANCH="${PRAXIS_BRANCH:-main}"
+PRAXIS_REPO="originsec/praxis"
+PRAXIS_VERSION="${PRAXIS_VERSION:-}"
 
 # Colors
 RED='\033[0;31m'
@@ -38,6 +38,27 @@ warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
 has_cmd() { command -v "$1" &> /dev/null; }
+
+get_latest_version() {
+    if [ -n "$PRAXIS_VERSION" ]; then
+        success "Using specified version: $PRAXIS_VERSION"
+        echo ""
+        return
+    fi
+
+    info "Fetching latest release version..."
+
+    PRAXIS_VERSION=$(curl -fsSL "https://api.github.com/repos/$PRAXIS_REPO/releases/latest" | \
+        grep '"tag_name":' | \
+        sed 's/.*"tag_name": "\([^"]*\)".*/\1/')
+
+    if [ -z "$PRAXIS_VERSION" ]; then
+        error "Could not determine latest version. Check your internet connection."
+    fi
+
+    success "Latest version: $PRAXIS_VERSION"
+    echo ""
+}
 
 check_prerequisites() {
     info "Checking prerequisites..."
@@ -104,21 +125,22 @@ install_praxis() {
     mkdir -p "$PRAXIS_BIN/nodes/linux"
     mkdir -p "$PRAXIS_BIN/nodes/windows"
 
+    local repo_url="https://github.com/$PRAXIS_REPO"
+
     info "Installing praxis_service and praxis_web..."
-    cargo install --git "$PRAXIS_REPO" --branch "$PRAXIS_BRANCH" --root "$PRAXIS_HOME" praxis_service praxis_web
+    cargo install --git "$repo_url" --tag "$PRAXIS_VERSION" --root "$PRAXIS_HOME" praxis_service praxis_web
     success "Installed praxis_service and praxis_web"
 
     info "Installing praxis_node (Linux)..."
-    cargo install --git "$PRAXIS_REPO" --branch "$PRAXIS_BRANCH" --root "$PRAXIS_HOME" praxis_node
+    cargo install --git "$repo_url" --tag "$PRAXIS_VERSION" --root "$PRAXIS_HOME" praxis_node
     mv "$PRAXIS_BIN/praxis_node" "$PRAXIS_BIN/nodes/linux/"
     success "Installed praxis_node (Linux)"
 
     if [[ "$HAS_DOCKER" == true ]]; then
         info "Installing praxis_node (Windows) via cross..."
 
-        # Clone repo temporarily for cross build
         TEMP_DIR=$(mktemp -d)
-        git clone --depth 1 --branch "$PRAXIS_BRANCH" "$PRAXIS_REPO" "$TEMP_DIR/praxis"
+        git clone --depth 1 --branch "$PRAXIS_VERSION" "$repo_url" "$TEMP_DIR/praxis"
 
         pushd "$TEMP_DIR/praxis" > /dev/null
         cross build --release --target x86_64-pc-windows-gnu -p praxis_node
@@ -196,7 +218,7 @@ RUNNER_EOF
 print_summary() {
     echo -e "${GREEN}"
     echo "=============================================="
-    echo "  Praxis installation complete!"
+    echo "  Praxis $PRAXIS_VERSION installation complete!"
     echo "=============================================="
     echo -e "${NC}"
     echo "Installed to: $PRAXIS_HOME"
@@ -230,6 +252,7 @@ print_summary() {
 
 main() {
     print_banner
+    get_latest_version
     check_prerequisites
     install_praxis
     install_runner
