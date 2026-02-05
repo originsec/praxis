@@ -421,16 +421,60 @@ impl PraxisServer {
 
         match response.result {
             NodeCommandResult::Agent(AgentCommandResult::ReconComplete { result }) => {
-                let mcp_tools_count: usize = result.tools.mcp_servers.iter().map(|s| s.tools.len()).sum();
+                let mcp_servers: Vec<_> = result.tools.mcp_servers.iter().map(|s| {
+                    json!({
+                        "name": s.name,
+                        "transport": format!("{:?}", s.transport),
+                        "command": s.command,
+                        "address": s.address,
+                        "context_path": s.context_path,
+                        "tools": s.tools.iter().map(|t| json!({
+                            "name": t.name,
+                            "description": t.description
+                        })).collect::<Vec<_>>()
+                    })
+                }).collect();
+
+                let skills: Vec<_> = result.tools.skills.iter().map(|s| {
+                    json!({
+                        "name": s.name,
+                        "description": s.description
+                    })
+                }).collect();
+
+                let config_items: Vec<_> = result.config.iter().map(|c| {
+                    json!({
+                        "path": c.path,
+                        "config_type": format!("{:?}", c.config_type)
+                    })
+                }).collect();
+
+                let sessions: Vec<_> = result.sessions.iter().map(|s| {
+                    json!({
+                        "session_id": s.session_id,
+                        "session_file": s.session_file,
+                        "context_path": s.context_path,
+                        "last_modified": s.last_modified,
+                        "message_count": s.message_count
+                    })
+                }).collect();
+
+                let metadata = result.metadata.as_ref().map(|m| {
+                    json!({
+                        "user_identities": m.user_identities,
+                        "api_keys": m.api_keys
+                    })
+                });
+
                 Ok(CallToolResult::success(vec![Content::text(
                     serde_json::to_string_pretty(&json!({
                         "status": "success",
-                        "mcp_servers": result.tools.mcp_servers.len(),
-                        "mcp_tools": mcp_tools_count,
-                        "skills": result.tools.skills.len(),
-                        "config_items": result.config.len(),
-                        "sessions": result.sessions.len(),
-                        "project_paths": result.project_paths
+                        "mcp_servers": mcp_servers,
+                        "skills": skills,
+                        "config_items": config_items,
+                        "sessions": sessions,
+                        "project_paths": result.project_paths,
+                        "metadata": metadata
                     }))
                     .unwrap(),
                 )]))
@@ -482,17 +526,68 @@ impl PraxisServer {
 
         match response.result {
             NodeCommandResult::Agent(AgentCommandResult::ReconComplete { result }) => {
-                let mcp_tools_count: usize = result.tools.mcp_servers.iter().map(|s| s.tools.len()).sum();
+                let mcp_servers: Vec<_> = result.tools.mcp_servers.iter().map(|s| {
+                    json!({
+                        "name": s.name,
+                        "transport": format!("{:?}", s.transport),
+                        "command": s.command,
+                        "address": s.address,
+                        "context_path": s.context_path,
+                        "tools": s.tools.iter().map(|t| json!({
+                            "name": t.name,
+                            "description": t.description
+                        })).collect::<Vec<_>>()
+                    })
+                }).collect();
+
+                let skills: Vec<_> = result.tools.skills.iter().map(|s| {
+                    json!({
+                        "name": s.name,
+                        "description": s.description
+                    })
+                }).collect();
+
+                let internal_tools: Vec<_> = result.tools.internal_tools.iter().map(|t| {
+                    json!({
+                        "name": t.name,
+                        "description": t.description
+                    })
+                }).collect();
+
+                let config_items: Vec<_> = result.config.iter().map(|c| {
+                    json!({
+                        "path": c.path,
+                        "config_type": format!("{:?}", c.config_type)
+                    })
+                }).collect();
+
+                let sessions: Vec<_> = result.sessions.iter().map(|s| {
+                    json!({
+                        "session_id": s.session_id,
+                        "session_file": s.session_file,
+                        "context_path": s.context_path,
+                        "last_modified": s.last_modified,
+                        "message_count": s.message_count
+                    })
+                }).collect();
+
+                let metadata = result.metadata.as_ref().map(|m| {
+                    json!({
+                        "user_identities": m.user_identities,
+                        "api_keys": m.api_keys
+                    })
+                });
+
                 Ok(CallToolResult::success(vec![Content::text(
                     serde_json::to_string_pretty(&json!({
                         "status": "success",
-                        "mcp_servers": result.tools.mcp_servers.len(),
-                        "mcp_tools": mcp_tools_count,
-                        "skills": result.tools.skills.len(),
-                        "internal_tools": result.tools.internal_tools.len(),
-                        "config_items": result.config.len(),
-                        "sessions": result.sessions.len(),
-                        "project_paths": result.project_paths
+                        "mcp_servers": mcp_servers,
+                        "skills": skills,
+                        "internal_tools": internal_tools,
+                        "config_items": config_items,
+                        "sessions": sessions,
+                        "project_paths": result.project_paths,
+                        "metadata": metadata
                     }))
                     .unwrap(),
                 )]))
@@ -1184,7 +1279,9 @@ impl ServerHandler for PraxisServer {
             },
             instructions: Some(
                 "Praxis C2 framework for orchestrating AI coding agents. \
-                Use node_list to see connected nodes, then agent_list to see agents on a node."
+                Use node_list to see connected nodes, then agent_list to see agents on a node. \
+                IMPORTANT: Always call session_close when you are done with a session to free \
+                resources and allow other clients to use the agent."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
