@@ -16,6 +16,7 @@
 - [Terminal](./usage/terminal.md)
 - [Interception](./usage/interception.md)
 - [Semantic Operations](./usage/semantic-operations.md)
+- [CLI](./usage/cli.md)
 
 # Agent Connectors
 

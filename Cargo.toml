@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["common", "node", "semantic_parser", "service", "web"]
+members = ["cli", "common", "node", "semantic_parser", "service", "web"]
 
 [workspace.package]
 version = "0.9.0"

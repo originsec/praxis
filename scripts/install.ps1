@@ -127,9 +127,9 @@ function Install-Praxis {
 
     $repoUrl = "https://github.com/$PraxisRepo"
 
-    Write-Info "Installing praxis_service and praxis_web..."
-    cargo install --git $repoUrl --tag $script:PraxisVersion --root $PraxisHome praxis_service praxis_web
-    Write-Success "Installed praxis_service and praxis_web"
+    Write-Info "Installing praxis_service, praxis_web, and praxis_cli..."
+    cargo install --git $repoUrl --tag $script:PraxisVersion --root $PraxisHome praxis_service praxis_web praxis_cli
+    Write-Success "Installed praxis_service, praxis_web, and praxis_cli"
 
     Write-Info "Installing praxis_node..."
     cargo install --git $repoUrl --tag $script:PraxisVersion --root $PraxisHome praxis_node
@@ -227,6 +227,7 @@ function Print-Summary {
     Write-Host "Binaries:"
     Write-Host "  $PraxisBin\praxis_service.exe"
     Write-Host "  $PraxisBin\praxis_web.exe"
+    Write-Host "  $PraxisBin\praxis_cli.exe"
     Write-Host "  $PraxisBin\praxis.ps1"
     Write-Host ""
     Write-Host "Node agent:"
