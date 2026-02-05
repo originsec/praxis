@@ -119,6 +119,25 @@ pub async fn discover_mcp_servers_from_configs(config_items: &[ConfigItem]) -> V
                 let Some(contents) = &item.contents else { continue };
                 match serde_json::from_str::<Value>(contents) {
                     Ok(json) => {
+                        //
+                        // Check for top-level mcpServers (global MCP servers).
+                        //
+
+                        if let Some(mcp_servers) = json.get("mcpServers") {
+                            let parsed = parse_mcp_servers_object(mcp_servers, None);
+                            if !parsed.is_empty() {
+                                common::log_info!(
+                                    "Found {} global servers in preferences",
+                                    parsed.len()
+                                );
+                            }
+                            servers.extend(parsed);
+                        }
+
+                        //
+                        // Check for per-project mcpServers.
+                        //
+
                         if let Some(projects) = json.get("projects").and_then(|p| p.as_object()) {
                             common::log_info!("preferences has {} projects", projects.len());
                             for (context_path, context_config) in projects {
