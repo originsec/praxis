@@ -3,7 +3,6 @@
 //! A WebSocket server that bridges browser clients to the Praxis service
 //! via RabbitMQ. This acts as another client from the service's perspective.
 
-mod config;
 mod messages;
 mod rabbitmq;
 mod orchestrator;
@@ -28,7 +27,6 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use uuid::Uuid;
 
-use config::ConfigManager;
 use rabbitmq::RabbitMqClient;
 use state::AppState;
 use websocket::{ws_handler, WsState};
@@ -426,17 +424,11 @@ async fn run_server(addr: SocketAddr) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to register with service: {}", e))?;
 
     //
-    // Create config manager (loads from ~/.praxis/config.json).
-    //
-    let config = ConfigManager::new();
-
-    //
     // Create WebSocket state.
     //
     let ws_state = Arc::new(WsState::new(
         Arc::clone(&app_state),
         Arc::clone(&rabbitmq),
-        Arc::clone(&config),
     ));
 
     //

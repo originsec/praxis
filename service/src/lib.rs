@@ -6,6 +6,7 @@ mod conversions;
 mod database;
 mod dispatch;
 mod handlers;
+mod mcp;
 mod messaging;
 mod agent_chat;
 mod semantic_helpers;
@@ -491,6 +492,22 @@ async fn run_main_loop() -> Result<()> {
     });
 
     //
+    // Start MCP SSE server if enabled in config.
+    //
+
+    let mcp_manager = Arc::new(mcp::McpServerManager::new());
+    {
+        let config = service_config.read().await;
+        if config.is_mcp_server_enabled() {
+            let port = config.get_mcp_server_port();
+            let url = rabbitmq_url();
+            if let Err(e) = mcp_manager.start(&url, port).await {
+                error!("Failed to start MCP server: {}", e);
+            }
+        }
+    }
+
+    //
     // Create the service context for message dispatch.
     //
     let ctx = ServiceContext {
@@ -500,11 +517,12 @@ async fn run_main_loop() -> Result<()> {
         node_handler,
         client_handler,
         database,
-        service_config,
+        service_config: service_config.clone(),
         response_tracker,
         semantic_ops_manager,
         chain_executor,
         agent_chat_manager,
+        mcp_manager,
         publish_channel,
         client_publish_channel,
         broadcast_channel,

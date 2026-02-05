@@ -20,6 +20,13 @@ pub const LLM_FEATURE_ORCHESTRATOR: &str = "llm_feature_orchestrator";
 /// Centralized application/event logging toggle
 pub const APPLICATION_LOGS_ENABLED: &str = "application_logs_enabled";
 
+/// MCP server configuration keys
+pub const MCP_SERVER_ENABLED: &str = "mcp_server_enabled";
+pub const MCP_SERVER_PORT: &str = "mcp_server_port";
+
+/// Default MCP server port
+pub const MCP_SERVER_DEFAULT_PORT: u16 = 8585;
+
 /// A model definition stored in config
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -126,5 +133,17 @@ impl ServiceConfig {
     #[allow(dead_code)]
     pub fn to_hashmap(&self) -> HashMap<String, String> {
         self.cache.clone()
+    }
+
+    /// Check if MCP server is enabled
+    pub fn is_mcp_server_enabled(&self) -> bool {
+        self.get_bool(MCP_SERVER_ENABLED, false)
+    }
+
+    /// Get the MCP server port
+    pub fn get_mcp_server_port(&self) -> u16 {
+        self.get(MCP_SERVER_PORT)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(MCP_SERVER_DEFAULT_PORT)
     }
 }

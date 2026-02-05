@@ -14,6 +14,7 @@ use crate::agent_chat::AgentChatManager;
 use crate::config::ServiceConfig;
 use crate::database::Database;
 use crate::handlers::{ClientMessageHandler, NodeMessageHandler};
+use crate::mcp::McpServerManager;
 use crate::semantic_ops::{ChainExecutor, ResponseTracker, SemanticOpsManager};
 use crate::state::{ClientRegistry, NodeRegistry, PendingCommands};
 
@@ -32,6 +33,7 @@ pub struct ServiceContext {
     pub semantic_ops_manager: Arc<SemanticOpsManager>,
     pub chain_executor: Arc<ChainExecutor>,
     pub agent_chat_manager: Arc<AgentChatManager>,
+    pub mcp_manager: Arc<McpServerManager>,
 
     //
     // Channels for publishing messages.

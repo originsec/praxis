@@ -14,7 +14,6 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
-use crate::config::ConfigManager;
 use crate::messages::ServerMessage;
 use crate::rabbitmq::RabbitMqClient;
 use crate::orchestrator::{self, OrchestratorEvent, OrchestratorSession};
@@ -26,17 +25,15 @@ mod handlers;
 pub struct WsState {
     pub app_state: Arc<AppState>,
     pub rabbitmq: Arc<RabbitMqClient>,
-    pub config: Arc<ConfigManager>,
     /// Active Orchestrator sessions keyed by connection ID
     pub orchestrator_sessions: RwLock<HashMap<String, OrchestratorSession>>,
 }
 
 impl WsState {
-    pub fn new(app_state: Arc<AppState>, rabbitmq: Arc<RabbitMqClient>, config: Arc<ConfigManager>) -> Self {
+    pub fn new(app_state: Arc<AppState>, rabbitmq: Arc<RabbitMqClient>) -> Self {
         Self {
             app_state,
             rabbitmq,
-            config,
             orchestrator_sessions: RwLock::new(HashMap::new()),
         }
     }
@@ -239,7 +236,6 @@ pub(super) async fn handle_orchestrator_start(
     let session = match orchestrator::start_orchestrator_session(
         Arc::clone(&state.app_state),
         Arc::clone(&state.rabbitmq),
-        Arc::clone(&state.config),
         event_tx,
     ).await {
         Ok(s) => s,
