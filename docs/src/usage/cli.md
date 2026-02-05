@@ -201,20 +201,20 @@ This starts the CLI in MCP server mode, communicating via stdio. The server expo
 
 ### Claude Code Integration
 
-Add to your Claude Code MCP configuration (`~/.claude/mcp.json`):
+Add the Praxis MCP server to Claude Code:
 
-```json
-{
-  "mcpServers": {
-    "praxis": {
-      "command": "/home/user/.praxis/bin/praxis_cli",
-      "args": ["--mcp"],
-      "env": {
-        "PRAXIS_RABBITMQ_URL": "amqp://praxis:praxis@localhost:5672"
-      }
-    }
-  }
-}
+```bash
+# User scope (available across all projects)
+claude mcp add praxis --scope user -- ~/.praxis/bin/praxis_cli --mcp
+
+# Or project scope (shared with team via .mcp.json)
+claude mcp add praxis -- ~/.praxis/bin/praxis_cli --mcp
+```
+
+To set a custom RabbitMQ URL, set the environment variable before running Claude Code:
+
+```bash
+export PRAXIS_RABBITMQ_URL="amqp://praxis:praxis@your-server:5672"
 ```
 
 ### Other MCP Clients

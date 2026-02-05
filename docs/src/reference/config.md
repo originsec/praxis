@@ -317,26 +317,33 @@ Contents:
 
 When running as an MCP server (`--mcp`), the CLI can be integrated with any MCP-compatible AI assistant.
 
-**Claude Code** (`~/.claude/mcp.json`):
+**Claude Code:**
+
+```bash
+# User scope (available across all projects)
+claude mcp add praxis --scope user -- ~/.praxis/bin/praxis_cli --mcp
+
+# Project scope (shared with team via .mcp.json)
+claude mcp add praxis -- ~/.praxis/bin/praxis_cli --mcp
+```
+
+**Other MCP clients** require JSON configuration:
+- Claude Desktop: `~/.config/claude-desktop/config.json` (Linux), `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
+- Cursor: Settings → Features → MCP Servers
+- Windsurf: Settings → MCP
+
+Example JSON format for other clients:
 
 ```json
 {
   "mcpServers": {
     "praxis": {
       "command": "/path/to/praxis_cli",
-      "args": ["--mcp"],
-      "env": {
-        "PRAXIS_RABBITMQ_URL": "amqp://praxis:praxis@localhost:5672"
-      }
+      "args": ["--mcp"]
     }
   }
 }
 ```
-
-**Other MCP clients** use similar configuration:
-- Claude Desktop: `~/.config/claude-desktop/config.json` (Linux), `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
-- Cursor: Settings → Features → MCP Servers
-- Windsurf: Settings → MCP
 
 ## File Locations
 
