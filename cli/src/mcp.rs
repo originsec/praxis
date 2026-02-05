@@ -1,4 +1,5 @@
 use anyhow::Result;
+use common::{AgentCommandResult, NodeCommand, NodeCommandResult, SessionCommandResult};
 use rmcp::{
     ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -304,8 +305,7 @@ impl PraxisServer {
                 )
             })?;
 
-        use common::NodeCommand;
-        client
+        let response = client
             .send_command(
                 &node.node_id,
                 NodeCommand::Agent(common::AgentCommand::Select {
@@ -315,10 +315,19 @@ impl PraxisServer {
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
 
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({ "status": "success", "agent": params.agent }))
-                .unwrap(),
-        )]))
+        match response.result {
+            NodeCommandResult::Agent(AgentCommandResult::Selected { short_name }) => {
+                Ok(CallToolResult::success(vec![Content::text(
+                    serde_json::to_string_pretty(&json!({
+                        "status": "success",
+                        "short_name": short_name
+                    }))
+                    .unwrap(),
+                )]))
+            }
+            NodeCommandResult::Error { message } => Err(rmcp::ErrorData::internal_error(message, None)),
+            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+        }
     }
 
     #[tool(description = "Request agent info update from a node")]
@@ -353,15 +362,24 @@ impl PraxisServer {
                 )
             })?;
 
-        use common::NodeCommand;
-        client
+        let response = client
             .send_command(&node.node_id, NodeCommand::Agent(common::AgentCommand::Update))
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
 
-        Ok(CallToolResult::success(vec![Content::text(
-            r#"{"status": "success", "message": "Agent update requested"}"#.to_string(),
-        )]))
+        match response.result {
+            NodeCommandResult::Agent(AgentCommandResult::UpdateSent) => {
+                Ok(CallToolResult::success(vec![Content::text(
+                    serde_json::to_string_pretty(&json!({
+                        "status": "success",
+                        "message": "Update request sent"
+                    }))
+                    .unwrap(),
+                )]))
+            }
+            NodeCommandResult::Error { message } => Err(rmcp::ErrorData::internal_error(message, None)),
+            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+        }
     }
 
     #[tool(description = "Perform reconnaissance on a node")]
@@ -396,15 +414,30 @@ impl PraxisServer {
                 )
             })?;
 
-        use common::NodeCommand;
-        client
+        let response = client
             .send_command(&node.node_id, NodeCommand::Agent(common::AgentCommand::Recon))
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
 
-        Ok(CallToolResult::success(vec![Content::text(
-            r#"{"status": "success", "message": "Recon requested"}"#.to_string(),
-        )]))
+        match response.result {
+            NodeCommandResult::Agent(AgentCommandResult::ReconComplete { result }) => {
+                let mcp_tools_count: usize = result.tools.mcp_servers.iter().map(|s| s.tools.len()).sum();
+                Ok(CallToolResult::success(vec![Content::text(
+                    serde_json::to_string_pretty(&json!({
+                        "status": "success",
+                        "mcp_servers": result.tools.mcp_servers.len(),
+                        "mcp_tools": mcp_tools_count,
+                        "skills": result.tools.skills.len(),
+                        "config_items": result.config.len(),
+                        "sessions": result.sessions.len(),
+                        "project_paths": result.project_paths
+                    }))
+                    .unwrap(),
+                )]))
+            }
+            NodeCommandResult::Error { message } => Err(rmcp::ErrorData::internal_error(message, None)),
+            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+        }
     }
 
     #[tool(description = "Perform semantic reconnaissance on a node")]
@@ -439,8 +472,7 @@ impl PraxisServer {
                 )
             })?;
 
-        use common::NodeCommand;
-        client
+        let response = client
             .send_command(
                 &node.node_id,
                 NodeCommand::Agent(common::AgentCommand::ReconSemantic),
@@ -448,9 +480,26 @@ impl PraxisServer {
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
 
-        Ok(CallToolResult::success(vec![Content::text(
-            r#"{"status": "success", "message": "Semantic recon requested"}"#.to_string(),
-        )]))
+        match response.result {
+            NodeCommandResult::Agent(AgentCommandResult::ReconComplete { result }) => {
+                let mcp_tools_count: usize = result.tools.mcp_servers.iter().map(|s| s.tools.len()).sum();
+                Ok(CallToolResult::success(vec![Content::text(
+                    serde_json::to_string_pretty(&json!({
+                        "status": "success",
+                        "mcp_servers": result.tools.mcp_servers.len(),
+                        "mcp_tools": mcp_tools_count,
+                        "skills": result.tools.skills.len(),
+                        "internal_tools": result.tools.internal_tools.len(),
+                        "config_items": result.config.len(),
+                        "sessions": result.sessions.len(),
+                        "project_paths": result.project_paths
+                    }))
+                    .unwrap(),
+                )]))
+            }
+            NodeCommandResult::Error { message } => Err(rmcp::ErrorData::internal_error(message, None)),
+            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+        }
     }
 
     #[tool(description = "Create a session with an agent")]
@@ -485,13 +534,13 @@ impl PraxisServer {
                 )
             })?;
 
-        use common::{NodeCommand, SessionCommand, SessionContext};
-        client
+        use common::{SessionCommand, SessionContext};
+        let response = client
             .send_command(
                 &node.node_id,
                 NodeCommand::Session(SessionCommand::Create {
                     context: SessionContext {
-                        working_dir: params.project,
+                        working_dir: params.project.clone(),
                         yolo_mode: params.yolo,
                     },
                 }),
@@ -499,9 +548,22 @@ impl PraxisServer {
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
 
-        Ok(CallToolResult::success(vec![Content::text(
-            r#"{"status": "success", "message": "Session created"}"#.to_string(),
-        )]))
+        match response.result {
+            NodeCommandResult::Session(SessionCommandResult::Created { session_id }) => {
+                Ok(CallToolResult::success(vec![Content::text(
+                    serde_json::to_string_pretty(&json!({
+                        "status": "success",
+                        "session_id": session_id,
+                        "session_id_short": &session_id[..8.min(session_id.len())],
+                        "yolo_mode": params.yolo,
+                        "project": params.project
+                    }))
+                    .unwrap(),
+                )]))
+            }
+            NodeCommandResult::Error { message } => Err(rmcp::ErrorData::internal_error(message, None)),
+            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+        }
     }
 
     #[tool(description = "Send a prompt to the active session")]
@@ -536,26 +598,33 @@ impl PraxisServer {
                 )
             })?;
 
-        use common::{NodeCommand, SessionCommand};
+        use common::SessionCommand;
         let transaction_id = uuid::Uuid::new_v4().to_string();
-        client
+        let response = client
             .send_command(
                 &node.node_id,
                 NodeCommand::Session(SessionCommand::Prompt {
-                    text: params.prompt,
+                    text: params.prompt.clone(),
                     transaction_id: transaction_id.clone(),
                 }),
             )
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
 
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({
-                "status": "success",
-                "message": "Prompt sent",
-                "transaction_id": transaction_id
-            })).unwrap(),
-        )]))
+        match response.result {
+            NodeCommandResult::Session(SessionCommandResult::PromptResponse { response, .. }) => {
+                Ok(CallToolResult::success(vec![Content::text(
+                    serde_json::to_string_pretty(&json!({
+                        "status": "success",
+                        "prompt": params.prompt,
+                        "response": response
+                    }))
+                    .unwrap(),
+                )]))
+            }
+            NodeCommandResult::Error { message } => Err(rmcp::ErrorData::internal_error(message, None)),
+            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+        }
     }
 
     #[tool(description = "Close the active session")]
@@ -590,15 +659,25 @@ impl PraxisServer {
                 )
             })?;
 
-        use common::{NodeCommand, SessionCommand};
-        client
+        use common::SessionCommand;
+        let response = client
             .send_command(&node.node_id, NodeCommand::Session(SessionCommand::Close))
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
 
-        Ok(CallToolResult::success(vec![Content::text(
-            r#"{"status": "success", "message": "Session closed"}"#.to_string(),
-        )]))
+        match response.result {
+            NodeCommandResult::Session(SessionCommandResult::Closed) => {
+                Ok(CallToolResult::success(vec![Content::text(
+                    serde_json::to_string_pretty(&json!({
+                        "status": "success",
+                        "message": "Session closed"
+                    }))
+                    .unwrap(),
+                )]))
+            }
+            NodeCommandResult::Error { message } => Err(rmcp::ErrorData::internal_error(message, None)),
+            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+        }
     }
 
     #[tool(description = "Search intercepted network traffic")]
