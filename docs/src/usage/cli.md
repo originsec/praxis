@@ -264,17 +264,44 @@ The MCP server exposes the following tools:
 **Traffic:**
 - `traffic_search` - Search intercepted traffic
 
-## Agentic Use (skill.md)
+## AI Agent Integration
 
-The CLI includes a `skill.md` file located at `cli/skill.md` in the repository. This file provides guidance for AI agents on how to use the Praxis CLI.
+There are two ways to integrate Praxis with AI coding agents:
 
-When integrating with an external AI agent (like Claude Code), you can include this skill.md in the agent's context. The skill instructs the agent to run `praxis_cli --fullhelp` to discover all available commands and capabilities.
+### Option 1: MCP Server (Recommended)
 
-Example workflow for an AI agent:
-1. Run `praxis_cli --fullhelp` to learn available commands
-2. Run `praxis_cli node list` to see connected nodes
-3. Select a node and agent
-4. Create a session and interact
+Use `praxis_cli --mcp` for native tool integration. The AI assistant sees Praxis tools directly in its tool list and can call them without shell access.
+
+**Pros:**
+- Native tool integration - tools appear in the assistant's tool list
+- Structured input/output - no shell parsing needed
+- Works with agents that don't have shell access
+- Cleaner error handling
+
+**Cons:**
+- Requires MCP client support (Claude Code, Cursor, Windsurf, etc.)
+- Configuration required per client
+
+### Option 2: SKILL.md (Shell-based)
+
+Include `cli/SKILL.md` in the agent's context. The agent uses shell commands to interact with Praxis.
+
+**Pros:**
+- Works with any agent that has shell access
+- No configuration needed - just add the skill file
+- Agent can combine with other shell tools
+
+**Cons:**
+- Requires shell access
+- Output parsing can be fragile
+- More verbose interactions
+
+### Which to Choose?
+
+- **Use MCP** if your AI assistant supports it and you want seamless tool integration
+- **Use SKILL.md** if you need shell-based workflows or your assistant doesn't support MCP
+
+Both approaches provide the same functionality - choose based on your environment and preferences.
 
 ## Limitations
 
