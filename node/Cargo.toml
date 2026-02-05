@@ -50,6 +50,8 @@ webpki-roots = "0.26"
 rustls-pki-types = "1"
 hyper = { version = "1.5", features = ["full"] }
 hyper-util = { version = "0.1", features = ["tokio", "server-auto", "server-graceful"] }
+h2 = "0.4"
+http = "1"
 http-body-util = "0.1"
 bytes = "1"
 rand = "0.8"

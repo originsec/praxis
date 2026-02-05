@@ -24,6 +24,7 @@
 - [Adding New Connectors](./connectors/adding-new.md)
 - [Claude Code](./connectors/claude-code.md)
 - [Codex CLI](./connectors/codex.md)
+- [Cursor Agent](./connectors/cursor.md)
 - [Gemini CLI](./connectors/gemini.md)
 - [M365 Copilot](./connectors/m365-copilot.md)
 
@@ -37,6 +38,7 @@
 # Deployment
 
 - [Local Development](./deployment/local.md)
+- [Database](./deployment/database.md)
 - [Azure](./deployment/azure.md)
 
 # Development

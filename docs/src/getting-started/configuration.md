@@ -56,11 +56,7 @@ Most configuration is done through the web UI, but some things are set via envir
 
 ### Database
 
-By default, Praxis uses SQLite stored at `~/.praxis_operations.db`. For production or multi-instance deployments, use PostgreSQL:
-
-```bash
-PRAXIS_DATABASE_URL=postgresql://user:pass@localhost:5432/praxis ./praxis_service
-```
+By default, Praxis uses SQLite stored at `~/.praxis_operations.db`. For PostgreSQL and production deployments, see [Database Configuration](../deployment/database.md).
 
 ## Model Reference Format
 

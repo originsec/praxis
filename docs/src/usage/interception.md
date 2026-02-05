@@ -161,6 +161,8 @@ The Traffic tab shows captured requests:
 
 WebSocket traffic is also supported - messages are coalesced into a single row per connection.
 
+HTTP/2 and gRPC traffic is fully supported with frame-level interception.
+
 ### Request Details
 
 Click a row to see details:
@@ -180,6 +182,42 @@ For LLM APIs, you'll see:
 - Tool call requests
 - Model responses
 - Token usage
+
+## Protocol Support
+
+### HTTP/1.1
+
+Standard HTTP traffic is fully captured with request/response headers and bodies.
+
+### WebSocket
+
+WebSocket connections are detected via HTTP 101 upgrade responses. Individual frames are captured and grouped by connection URL in the UI.
+
+### HTTP/2 and gRPC
+
+The proxy provides frame-level HTTP/2 interception for services using HTTP/2 (including gRPC streaming):
+
+**Detection**: HTTP/2 is detected by the connection preface (`PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n`)
+
+**Captured Frames**:
+- `H2_HEADERS` - Request/response headers (HPACK encoded)
+- `H2_DATA` - Request/response body data
+
+**Frame Relay**: All frame types are forwarded bidirectionally:
+- SETTINGS, WINDOW_UPDATE (flow control)
+- PING (keep-alive)
+- RST_STREAM (stream reset)
+- GOAWAY (connection close)
+
+**gRPC Streaming**: Full support for bidirectional streaming RPCs. Both client-to-server and server-to-client data frames are captured as they flow.
+
+**UI Display**: HTTP/2 traffic is grouped by URL (similar to WebSocket), showing:
+- Total frame count
+- Send/receive counts
+- Total bytes transferred
+- Individual frames expandable with payload preview
+
+**Path Extraction**: The proxy extracts the `:path` pseudo-header from HPACK-encoded HEADERS frames to provide URL context for DATA frames in the same stream.
 
 ## Traffic Rules
 

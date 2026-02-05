@@ -27,7 +27,19 @@ export interface WebSocketGroup {
   totalBytes: number;
 }
 
-export type ProtocolFilter = 'all' | 'http' | 'websocket';
+export interface H2Group {
+  url: string;
+  nodeId: string;
+  agent: string;
+  frames: InterceptedTrafficEntry[];
+  firstTimestamp: string;
+  lastTimestamp: string;
+  sendCount: number;
+  recvCount: number;
+  totalBytes: number;
+}
+
+export type ProtocolFilter = 'all' | 'http' | 'websocket' | 'h2';
 
 export interface TrafficTableProps {
   entries: InterceptedTrafficEntry[];
@@ -196,15 +208,22 @@ export function countTrafficEntries(
 ): number {
   let httpCount = 0;
   const wsGroupKeys = new Set<string>();
+  const h2GroupKeys = new Set<string>();
 
   entries.forEach((entry) => {
     if (!matchesSearchFilter(entry, searchFilter)) return;
 
     const isWs = entry.method?.startsWith('WS_');
+    const isH2 = entry.method?.startsWith('H2_');
     if (isWs) {
       if (protocolFilter === 'all' || protocolFilter === 'websocket') {
         const groupKey = `${entry.node_id}:${entry.url}`;
         wsGroupKeys.add(groupKey);
+      }
+    } else if (isH2) {
+      if (protocolFilter === 'all' || protocolFilter === 'h2') {
+        const groupKey = `${entry.node_id}:${entry.url}`;
+        h2GroupKeys.add(groupKey);
       }
     } else {
       if (protocolFilter === 'all' || protocolFilter === 'http') {
@@ -213,7 +232,7 @@ export function countTrafficEntries(
     }
   });
 
-  return httpCount + wsGroupKeys.size;
+  return httpCount + wsGroupKeys.size + h2GroupKeys.size;
 }
 
 //
@@ -343,6 +362,7 @@ export function TrafficFilterBar({
         <option value="all">All Protocols</option>
         <option value="http">HTTP Only</option>
         <option value="websocket">WebSocket Only</option>
+        <option value="h2">HTTP/2 Only</option>
       </select>
 
       <div className="flex-1" />
@@ -392,19 +412,24 @@ export function GroupedTrafficRows({
   displayLimit,
 }: TrafficTableProps) {
   const [expandedWsGroups, setExpandedWsGroups] = useState<Set<string>>(new Set());
+  const [expandedH2Groups, setExpandedH2Groups] = useState<Set<string>>(new Set());
 
   //
-  // Separate HTTP and WebSocket entries, applying search filter.
+  // Separate HTTP, WebSocket, and HTTP/2 entries, applying search filter.
   //
   const httpEntries: InterceptedTrafficEntry[] = [];
   const wsFrames: InterceptedTrafficEntry[] = [];
+  const h2Frames: InterceptedTrafficEntry[] = [];
 
   entries.forEach((entry) => {
     if (!matchesSearchFilter(entry, searchFilter)) return;
 
     const isWs = entry.method?.startsWith('WS_');
+    const isH2 = entry.method?.startsWith('H2_');
     if (isWs) {
       wsFrames.push(entry);
+    } else if (isH2) {
+      h2Frames.push(entry);
     } else {
       httpEntries.push(entry);
     }
@@ -443,11 +468,44 @@ export function GroupedTrafficRows({
   });
 
   //
+  // Group HTTP/2 frames by URL + node.
+  //
+  const h2Groups = new Map<string, H2Group>();
+  h2Frames.forEach((frame) => {
+    const groupKey = `${frame.node_id}:${frame.url}`;
+    if (!h2Groups.has(groupKey)) {
+      h2Groups.set(groupKey, {
+        url: frame.url,
+        nodeId: frame.node_id,
+        agent: frame.agent_short_name,
+        frames: [],
+        firstTimestamp: frame.timestamp,
+        lastTimestamp: frame.timestamp,
+        sendCount: 0,
+        recvCount: 0,
+        totalBytes: 0,
+      });
+    }
+    const group = h2Groups.get(groupKey)!;
+    group.frames.push(frame);
+    if (frame.timestamp < group.firstTimestamp) group.firstTimestamp = frame.timestamp;
+    if (frame.timestamp > group.lastTimestamp) group.lastTimestamp = frame.timestamp;
+    if (frame.direction === 'send') {
+      group.sendCount++;
+      group.totalBytes += frame.request_body?.length ?? 0;
+    } else {
+      group.recvCount++;
+      group.totalBytes += frame.response_body?.length ?? 0;
+    }
+  });
+
+  //
   // Build combined list maintaining order by timestamp.
   //
   type RowItem =
     | { type: 'http'; entry: InterceptedTrafficEntry }
-    | { type: 'ws_group'; group: WebSocketGroup; key: string };
+    | { type: 'ws_group'; group: WebSocketGroup; key: string }
+    | { type: 'h2_group'; group: H2Group; key: string };
 
   const rows: RowItem[] = [];
 
@@ -466,6 +524,15 @@ export function GroupedTrafficRows({
   if (protocolFilter === 'all' || protocolFilter === 'websocket') {
     wsGroups.forEach((group, key) => {
       rows.push({ type: 'ws_group', group, key });
+    });
+  }
+
+  //
+  // Add HTTP/2 groups.
+  //
+  if (protocolFilter === 'all' || protocolFilter === 'h2') {
+    h2Groups.forEach((group, key) => {
+      rows.push({ type: 'h2_group', group, key });
     });
   }
 
@@ -495,6 +562,18 @@ export function GroupedTrafficRows({
     });
   };
 
+  const toggleH2Group = (key: string) => {
+    setExpandedH2Groups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
   const colSpan = showNodeColumn ? 7 : 6;
 
   return (
@@ -510,7 +589,7 @@ export function GroupedTrafficRows({
               showNodeColumn={showNodeColumn}
             />
           );
-        } else {
+        } else if (row.type === 'ws_group') {
           const isExpanded = expandedWsGroups.has(row.key);
           return (
             <WebSocketGroupRow
@@ -518,6 +597,20 @@ export function GroupedTrafficRows({
               group={row.group}
               isExpanded={isExpanded}
               onToggle={() => toggleWsGroup(row.key)}
+              expandedFrameId={expandedRow}
+              setExpandedFrameId={setExpandedRow}
+              showNodeColumn={showNodeColumn}
+              colSpan={colSpan}
+            />
+          );
+        } else {
+          const isExpanded = expandedH2Groups.has(row.key);
+          return (
+            <H2GroupRow
+              key={row.key}
+              group={row.group}
+              isExpanded={isExpanded}
+              onToggle={() => toggleH2Group(row.key)}
               expandedFrameId={expandedRow}
               setExpandedFrameId={setExpandedRow}
               showNodeColumn={showNodeColumn}
@@ -685,6 +778,184 @@ function WebSocketFrameRow({
           </div>
           <pre className="text-[10px] font-mono bg-[var(--bg-primary)] p-2 border border-subtle overflow-auto max-h-64 whitespace-pre-wrap">
             {wsType === 'TEXT' && payload ? tryPrettyPrintJson(payload) : payload ? tryDecodeBody(payload) : '[No payload]'}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+//
+// HTTP/2 Group Row Component.
+//
+
+function H2GroupRow({
+  group,
+  isExpanded,
+  onToggle,
+  expandedFrameId,
+  setExpandedFrameId,
+  showNodeColumn,
+  colSpan,
+}: {
+  group: H2Group;
+  isExpanded: boolean;
+  onToggle: () => void;
+  expandedFrameId: number | null;
+  setExpandedFrameId: (id: number | null) => void;
+  showNodeColumn: boolean;
+  colSpan: number;
+}) {
+  const timestamp = new Date(group.lastTimestamp).toLocaleString();
+  const frameCount = group.frames.length;
+
+  return (
+    <>
+      {/*
+      //
+      // Group header row.
+      //
+      */}
+      <tr
+        className="border-b border-dim hover:bg-[var(--highlight)] cursor-pointer bg-[var(--bg-tertiary)]/50"
+        onClick={onToggle}
+      >
+        <td className="px-4 py-2">
+          {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        </td>
+        <td className="px-4 py-2 text-muted font-mono">{timestamp}</td>
+        {showNodeColumn && (
+          <td className="px-4 py-2 text-title">{group.nodeId.slice(0, 8)}</td>
+        )}
+        <td className="px-4 py-2 text-highlight">{group.agent}</td>
+        <td className="px-4 py-2">
+          <div className="flex items-center gap-1">
+            <span className="text-[var(--accent-purple)] font-mono">H2</span>
+            <span className="text-muted text-[10px] ml-1">
+              ({frameCount} frames)
+            </span>
+          </div>
+        </td>
+        <td className="px-4 py-2 text-title font-mono truncate max-w-xs" title={group.url}>
+          {group.url}
+        </td>
+        <td className="px-4 py-2">
+          <div className="flex items-center gap-2 text-[10px] font-mono">
+            <span className="text-[var(--accent-warning)]">
+              <ArrowUp size={10} className="inline" /> {group.sendCount}
+            </span>
+            <span className="text-[var(--accent-success)]">
+              <ArrowDown size={10} className="inline" /> {group.recvCount}
+            </span>
+            <span className="text-muted">
+              {formatBytes(group.totalBytes)}
+            </span>
+          </div>
+        </td>
+      </tr>
+
+      {/*
+      //
+      // Expanded frames.
+      //
+      */}
+      {isExpanded && (
+        <tr className="bg-[var(--bg-primary)]">
+          <td colSpan={colSpan} className="p-0 pl-8">
+            <div className="py-2 space-y-1">
+              {group.frames
+                .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+                .map((frame) => (
+                  <H2FrameRow
+                    key={frame.id ?? frame.timestamp}
+                    frame={frame}
+                    expanded={expandedFrameId === frame.id}
+                    onToggle={() =>
+                      setExpandedFrameId(expandedFrameId === frame.id ? null : frame.id)
+                    }
+                  />
+                ))}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+//
+// HTTP/2 Frame Row Component.
+//
+
+function H2FrameRow({
+  frame,
+  expanded,
+  onToggle,
+}: {
+  frame: InterceptedTrafficEntry;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const timestamp = new Date(frame.timestamp).toLocaleTimeString();
+  const isSend = frame.direction === 'send';
+  const h2Type = frame.method?.replace('H2_', '') ?? '';
+  const payload = isSend ? frame.request_body : frame.response_body;
+
+  //
+  // Try to decode and preview the payload.
+  //
+  const getPreview = (): string | null => {
+    if (!payload || payload.length === 0) return null;
+    try {
+      const decoded = new TextDecoder().decode(new Uint8Array(payload));
+      //
+      // Skip non-printable characters at the start (gRPC length prefix).
+      //
+      const printable = decoded.replace(/^[\x00-\x1F]+/, '').slice(0, 60);
+      if (printable.length > 0) return printable;
+    } catch {
+      // Ignore decode errors.
+    }
+    return null;
+  };
+
+  const preview = getPreview();
+
+  return (
+    <div>
+      <div
+        className="flex items-center gap-3 px-3 py-1 hover:bg-[var(--highlight)] cursor-pointer"
+        onClick={onToggle}
+      >
+        <span className="text-muted">
+          {expanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+        </span>
+        <span className="text-muted font-mono text-[10px] w-20">{timestamp}</span>
+        <div className="flex items-center gap-1 w-20">
+          {isSend ? (
+            <ArrowUp size={10} className="text-[var(--accent-warning)]" />
+          ) : (
+            <ArrowDown size={10} className="text-[var(--accent-success)]" />
+          )}
+          <span className={`font-mono text-[10px] ${isSend ? 'text-[var(--accent-warning)]' : 'text-[var(--accent-success)]'}`}>
+            {h2Type}
+          </span>
+        </div>
+        <span className="text-muted font-mono text-[10px] flex-1 truncate">
+          {preview ? (
+            <span className="italic">{preview}{preview.length >= 60 ? '...' : ''}</span>
+          ) : (
+            <span>{payload?.length ?? 0} bytes</span>
+          )}
+        </span>
+      </div>
+      {expanded && (
+        <div className="px-3 py-2 ml-6 bg-[var(--bg-tertiary)]">
+          <div className="text-muted mb-1 text-[10px] tracking-wider">
+            {h2Type} FRAME ({payload?.length ?? 0} bytes)
+          </div>
+          <pre className="text-[10px] font-mono bg-[var(--bg-primary)] p-2 border border-subtle overflow-auto max-h-64 whitespace-pre-wrap">
+            {payload ? tryPrettyPrintJson(payload) : '[No payload]'}
           </pre>
         </div>
       )}

@@ -17,10 +17,11 @@ This reference documents all configuration options for Praxis components.
 | `PRAXIS_DATABASE_URL` | `~/.praxis_operations.db` | Database connection |
 
 **Formats**:
-- `postgres://user:pass@host:5432/dbname` - PostgreSQL
-- `postgresql://user:pass@host:5432/dbname` - PostgreSQL (alternate)
+- `postgresql://user:pass@host:5432/dbname` - PostgreSQL
 - `sqlite:///path/to/file.db` - SQLite with URL prefix
 - `/path/to/file.db` - SQLite (implicit)
+
+See [Database Configuration](../deployment/database.md) for detailed setup.
 
 ### Web Component
 
@@ -268,10 +269,7 @@ Tables:
 
 ### PostgreSQL
 
-Same schema, different backend. Use for:
-- Multiple service instances
-- Better concurrent performance
-- Production deployments
+For production and multi-instance deployments, use PostgreSQL. See [Database Configuration](../deployment/database.md) for setup, migration, and tuning.
 
 ## Default Ports
 

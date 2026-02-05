@@ -120,24 +120,9 @@ Configure via environment or `.env` file:
 
 ## Database Options
 
-### SQLite (Default)
+SQLite is used by default with no configuration required.
 
-No setup required. Database file created automatically at `~/.praxis_operations.db`.
-
-### PostgreSQL
-
-Set the database URL:
-
-```bash
-export PRAXIS_DATABASE_URL=postgresql://user:pass@localhost:5432/praxis
-```
-
-Create the database first:
-```bash
-createdb praxis
-```
-
-Schema is created automatically on first run.
+For PostgreSQL or advanced configuration, see [Database Configuration](./database.md).
 
 ## Development Workflow
 

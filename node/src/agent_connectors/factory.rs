@@ -3,6 +3,8 @@
 use super::claudecode::ClaudeCodeAgent;
 #[cfg(any(target_os = "linux", windows))]
 use super::codex::CodexAgent;
+#[cfg(target_os = "linux")]
+use super::cursor::CursorAgent;
 #[allow(unused_imports)]
 use super::dummy::DummyAgent;
 use super::gemini::GeminiAgent;
@@ -23,19 +25,15 @@ impl AgentFactory {
 
         agents.push(Arc::new(ClaudeCodeAgent::new()));
         agents.push(Arc::new(GeminiAgent::new()));
+        agents.push(Arc::new(CodexAgent::new()));
 
-        #[cfg(any(target_os = "linux", windows))]
+        #[cfg(target_os = "linux")]
         {
-            agents.push(Arc::new(CodexAgent::new()));
-        }
 
-        //
-        // Clawdbot - temporarily disabled.
-        //
-        // #[cfg(not(windows))]
-        // {
-        //     agents.push(Arc::new(ClawdbotAgent::new()));
-        // }
+            agents.push(Arc::new(CursorAgent::new()));
+            // Clawdbot - temporarily disabled.
+            // agents.push(Arc::new(ClawdbotAgent::new()));
+        }
 
         #[cfg(windows)]
         {
