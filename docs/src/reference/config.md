@@ -315,7 +315,9 @@ Contents:
 
 ### MCP Server Configuration
 
-When running as an MCP server (`--mcp`), the CLI can be integrated with Claude Desktop:
+When running as an MCP server (`--mcp`), the CLI can be integrated with any MCP-compatible AI assistant.
+
+**Claude Code** (`~/.claude/mcp.json`):
 
 ```json
 {
@@ -331,10 +333,10 @@ When running as an MCP server (`--mcp`), the CLI can be integrated with Claude D
 }
 ```
 
-Config file locations:
-- Linux: `~/.config/claude-desktop/config.json`
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+**Other MCP clients** use similar configuration:
+- Claude Desktop: `~/.config/claude-desktop/config.json` (Linux), `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
+- Cursor: Settings → Features → MCP Servers
+- Windsurf: Settings → MCP
 
 ## File Locations
 

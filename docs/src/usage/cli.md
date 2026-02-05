@@ -189,7 +189,7 @@ praxis_cli --output json node list | jq '.nodes[].node_id'
 
 ## MCP Server Mode
 
-The CLI can run as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server, enabling integration with AI assistants like Claude Desktop.
+The CLI can run as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server, enabling integration with any MCP-compatible AI assistant including Claude Code, Claude Desktop, Cursor, Windsurf, and others.
 
 ### Running as MCP Server
 
@@ -199,9 +199,9 @@ praxis_cli --mcp
 
 This starts the CLI in MCP server mode, communicating via stdio. The server exposes all CLI functionality as MCP tools.
 
-### Claude Desktop Integration
+### Claude Code Integration
 
-Add to your Claude Desktop configuration (`~/.config/claude-desktop/config.json` on Linux, `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+Add to your Claude Code MCP configuration (`~/.claude/mcp.json`):
 
 ```json
 {
@@ -216,6 +216,16 @@ Add to your Claude Desktop configuration (`~/.config/claude-desktop/config.json`
   }
 }
 ```
+
+### Other MCP Clients
+
+The MCP server works with any client supporting the MCP protocol. Configuration varies by client:
+
+- **Claude Desktop**: `~/.config/claude-desktop/config.json` (Linux) or `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
+- **Cursor**: Settings → Features → MCP Servers
+- **Windsurf**: Settings → MCP
+
+Use the same server configuration format shown above.
 
 ### Available MCP Tools
 
