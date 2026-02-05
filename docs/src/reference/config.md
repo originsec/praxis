@@ -327,12 +327,7 @@ claude mcp add praxis --scope user -- ~/.praxis/bin/praxis_cli --mcp
 claude mcp add praxis -- ~/.praxis/bin/praxis_cli --mcp
 ```
 
-**Other MCP clients** require JSON configuration:
-- Claude Desktop: `~/.config/claude-desktop/config.json` (Linux), `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
-- Cursor: Settings → Features → MCP Servers
-- Windsurf: Settings → MCP
-
-Example JSON format for other clients:
+**Other MCP clients** use JSON configuration:
 
 ```json
 {

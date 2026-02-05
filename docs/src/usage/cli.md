@@ -219,13 +219,7 @@ export PRAXIS_RABBITMQ_URL="amqp://praxis:praxis@your-server:5672"
 
 ### Other MCP Clients
 
-The MCP server works with any client supporting the MCP protocol. Configuration varies by client:
-
-- **Claude Desktop**: `~/.config/claude-desktop/config.json` (Linux) or `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
-- **Cursor**: Settings → Features → MCP Servers
-- **Windsurf**: Settings → MCP
-
-Example JSON configuration:
+For other MCP-compatible clients, use JSON configuration:
 
 ```json
 {
