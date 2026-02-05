@@ -1,26 +1,26 @@
 use anyhow::Result;
 use common::{
-    publish_json, publish_json_exchange, client_queue_name, ClientDirectMessage,
+    publish_json, publish_json_exchange, ClientBroadcastMessage,
     NodeBroadcastMessage, NodeDirectMessage, NodeInformationUpdate, NodeRegistration,
-    NodeRegistrationAck, NODE_BROADCAST_EXCHANGE,
+    NodeRegistrationAck, CLIENT_BROADCAST_EXCHANGE, NODE_BROADCAST_EXCHANGE,
 };
 use lapin::Channel;
 use std::sync::Arc;
 
-use crate::state::{NodeRegistry, ClientRegistry};
+use crate::state::NodeRegistry;
 
 pub struct NodeMessageHandler {
     channel: Channel,
+    broadcast_channel: Channel,
     registry: Arc<NodeRegistry>,
-    client_registry: Arc<ClientRegistry>,
 }
 
 impl NodeMessageHandler {
-    pub fn new(channel: Channel, registry: Arc<NodeRegistry>, client_registry: Arc<ClientRegistry>) -> Self {
+    pub fn new(channel: Channel, broadcast_channel: Channel, registry: Arc<NodeRegistry>) -> Self {
         Self {
             channel,
+            broadcast_channel,
             registry,
-            client_registry,
         }
     }
 
@@ -91,29 +91,11 @@ impl NodeMessageHandler {
         Ok(())
     }
 
-    /// Broadcast current system state to all connected clients
+    /// Broadcast current system state to all clients via fanout exchange.
     async fn broadcast_state_to_clients(&self) -> Result<()> {
         let state = self.registry.build_system_state().await;
-        let clients = self.client_registry.list().await;
-
-        let mut stale_clients = Vec::new();
-
-        for client in clients {
-            let message = ClientDirectMessage::StateUpdate(state.clone());
-            let queue_name = client_queue_name(&client.id);
-            if let Err(e) = publish_json(&self.channel, &queue_name, &message).await {
-                common::log_warn!("Failed to send to client {} (removing stale): {}", client.id, e);
-                stale_clients.push(client.id.clone());
-            }
-        }
-
-        //
-        // Remove stale clients that failed to receive messages.
-        //
-        for client_id in stale_clients {
-            self.client_registry.remove(&client_id).await;
-        }
-
+        let message = ClientBroadcastMessage::StateUpdate(state);
+        publish_json_exchange(&self.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &message).await?;
         Ok(())
     }
 

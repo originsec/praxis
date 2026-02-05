@@ -91,9 +91,8 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
                 // Broadcast updated state to all clients.
                 //
                 if let Err(e) = broadcast_state_to_clients(
-                    &ctx.client_publish_channel,
+                    &ctx.broadcast_channel,
                     &ctx.node_registry,
-                    &ctx.client_registry,
                 )
                 .await
                 {
@@ -159,16 +158,8 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
                     if let Ok(Some(update)) =
                         ctx.semantic_ops_manager.get_operation_update(&operation_id).await
                     {
-                        let clients = ctx.client_registry.list().await;
-                        let message = ClientDirectMessage::SemanticOpUpdate(update);
-                        for client in clients {
-                            let _ = send_to_client(
-                                &ctx.client_publish_channel,
-                                &client.id,
-                                message.clone(),
-                            )
-                            .await;
-                        }
+                        let message = ClientBroadcastMessage::SemanticOpUpdate(update);
+                        let _ = publish_json_exchange(&ctx.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &message).await;
                     }
                 }
                 Err(e) => {
@@ -196,16 +187,8 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
                     if let Ok(Some(update)) =
                         ctx.semantic_ops_manager.get_operation_update(&operation_id).await
                     {
-                        let clients = ctx.client_registry.list().await;
-                        let message = ClientDirectMessage::SemanticOpUpdate(update);
-                        for client in clients {
-                            let _ = send_to_client(
-                                &ctx.client_publish_channel,
-                                &client.id,
-                                message.clone(),
-                            )
-                            .await;
-                        }
+                        let message = ClientBroadcastMessage::SemanticOpUpdate(update);
+                        let _ = publish_json_exchange(&ctx.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &message).await;
                     }
                 }
                 Err(e) => {

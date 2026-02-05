@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use uuid::Uuid;
 
 //
@@ -274,6 +274,13 @@ impl ServiceMcpClient {
                     state.chain_executions[idx] = execution;
                 } else {
                     state.chain_executions.push(execution);
+                }
+            }
+            ClientBroadcastMessage::SemanticOpUpdate(update) => {
+                if let Some(idx) = state.operations.iter().position(|o| o.operation_id == update.operation_id) {
+                    state.operations[idx] = update;
+                } else {
+                    state.operations.push(update);
                 }
             }
             _ => {}
@@ -578,9 +585,6 @@ impl McpServerManager {
         }
     }
 
-    pub async fn is_running(&self) -> bool {
-        self.cancellation_token.read().await.is_some()
-    }
 }
 
 impl Default for McpServerManager {

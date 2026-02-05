@@ -37,19 +37,19 @@ struct Cli {
     timeout: u64,
 
     /// Clear local state (client ID)
-    #[arg(long = "clear", exclusive = true)]
+    #[arg(long = "clear")]
     clear: bool,
 
     /// Check service connection status
-    #[arg(long = "status", exclusive = true)]
+    #[arg(long = "status")]
     status: bool,
 
     /// Run as MCP server (stdio)
-    #[arg(long = "mcp", exclusive = true)]
+    #[arg(long = "mcp")]
     mcp: bool,
 
     /// Show comprehensive help for all commands
-    #[arg(long = "fullhelp", exclusive = true, display_order = 1000)]
+    #[arg(long = "fullhelp", display_order = 1000)]
     fullhelp: bool,
 
     #[command(subcommand)]

@@ -9,7 +9,7 @@ use common::{
 use tracing::{error, info, warn};
 
 use crate::config::service_config::APPLICATION_LOGS_ENABLED;
-use crate::messaging::send_to_client;
+use crate::messaging::{broadcast_state_to_clients, send_to_client};
 use crate::semantic_helpers;
 
 use super::ServiceContext;
@@ -64,6 +64,14 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
 
             if let Some(pending) = ctx.pending_commands.remove(&response.command_id).await {
                 //
+                // Track whether we need to broadcast state to all clients
+                // after processing this response, so UIs reflect the change
+                // immediately rather than waiting for the next periodic
+                // state broadcast.
+                //
+                let mut should_broadcast_state = false;
+
+                //
                 // Update intercept state if relevant.
                 //
                 if let common::NodeCommandResult::Intercept(ref result) = response.result {
@@ -72,12 +80,35 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                             ctx.node_registry
                                 .set_intercept_active(&response.node_id, true)
                                 .await;
+                            should_broadcast_state = true;
                         }
                         common::InterceptCommandResult::Disabled => {
                             ctx.node_registry
                                 .set_intercept_active(&response.node_id, false)
                                 .await;
+                            should_broadcast_state = true;
                         }
+                    }
+                }
+
+                //
+                // Update session state if relevant.
+                //
+                if let common::NodeCommandResult::Session(ref result) = response.result {
+                    match result {
+                        common::SessionCommandResult::Created { session_id } => {
+                            ctx.node_registry
+                                .set_session_id(&response.node_id, Some(session_id.clone()))
+                                .await;
+                            should_broadcast_state = true;
+                        }
+                        common::SessionCommandResult::Closed => {
+                            ctx.node_registry
+                                .set_session_id(&response.node_id, None)
+                                .await;
+                            should_broadcast_state = true;
+                        }
+                        _ => {}
                     }
                 }
 
@@ -130,6 +161,17 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                     .await
                 {
                     warn!("AgentChat command response handling failed: {}", e);
+                }
+
+                if should_broadcast_state {
+                    if let Err(e) = broadcast_state_to_clients(
+                        &ctx.broadcast_channel,
+                        &ctx.node_registry,
+                    )
+                    .await
+                    {
+                        error!("Failed to broadcast state after session change: {}", e);
+                    }
                 }
             } else {
                 //
@@ -295,12 +337,8 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             //
             // Broadcast status to all clients.
             //
-            let clients = ctx.client_registry.list().await;
-            let message = ClientDirectMessage::InterceptStatusUpdate(status);
-            for client in clients {
-                let _ =
-                    send_to_client(&ctx.client_publish_channel, &client.id, message.clone()).await;
-            }
+            let message = ClientBroadcastMessage::InterceptStatusUpdate(status);
+            let _ = publish_json_exchange(&ctx.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &message).await;
         }
 
         NodeSignalMessage::DiscoveredLlmEndpoint(endpoint) => {

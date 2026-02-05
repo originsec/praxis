@@ -1456,6 +1456,10 @@ pub enum ClientBroadcastMessage {
     ServiceOnline,
     /// Chain execution update (progress, completion, etc.)
     ChainExecutionUpdate(ChainExecutionUpdate),
+    /// Semantic operation update (progress, completion, etc.)
+    SemanticOpUpdate(SemanticOpUpdate),
+    /// Intercept status update for a node
+    InterceptStatusUpdate(InterceptStatus),
     /// Enable/disable centralized event logging for clients
     EventLoggingSet {
         enabled: bool,

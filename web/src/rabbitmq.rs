@@ -1038,6 +1038,13 @@ impl RabbitMqClient {
                 self.state.update_chain_execution(execution.clone()).await;
                 self.state.broadcast(ServerMessage::ChainExecutionUpdate { execution });
             }
+            ClientBroadcastMessage::SemanticOpUpdate(update) => {
+                self.state.update_operation(update.clone()).await;
+                self.state.broadcast(ServerMessage::SemanticOpUpdate { update });
+            }
+            ClientBroadcastMessage::InterceptStatusUpdate(status) => {
+                self.state.broadcast(ServerMessage::InterceptStatusUpdate { status });
+            }
             ClientBroadcastMessage::EventLoggingSet { enabled } => {
                 common::logging::set_event_log_enabled(enabled);
                 common::log_info!("Event logging {}", if enabled { "enabled" } else { "disabled" });

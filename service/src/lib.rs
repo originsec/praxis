@@ -16,7 +16,7 @@ mod state;
 use anyhow::Result;
 pub use common::rabbitmq_url;
 use common::{
-    publish_json_exchange, ClientBroadcastMessage, ClientDirectMessage, ClientSignalMessage,
+    publish_json_exchange, ClientBroadcastMessage, ClientSignalMessage,
     NodeBroadcastMessage, NodeSignalMessage, CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE,
     NODE_BROADCAST_EXCHANGE, NODE_SIGNAL_QUEUE,
 };
@@ -46,7 +46,7 @@ use agent_chat::AgentChatManager;
 use config::service_config::APPLICATION_LOGS_ENABLED;
 use semantic_ops::{SemanticOpsManager, ResponseTracker, ChainExecutor};
 use state::{NodeRegistry, ClientRegistry, PendingCommands};
-use messaging::{send_to_client, broadcast_state_to_clients};
+use messaging::broadcast_state_to_clients;
 
 const RABBITMQ_RETRY_SECS: u64 = 5;
 
@@ -162,7 +162,7 @@ async fn run_main_loop() -> Result<()> {
     let node_registry = Arc::new(NodeRegistry::new());
     let client_registry = Arc::new(ClientRegistry::new());
     let pending_commands = Arc::new(PendingCommands::new());
-    let node_handler = Arc::new(NodeMessageHandler::new(publish_channel.clone(), node_registry.clone(), client_registry.clone()));
+    let node_handler = Arc::new(NodeMessageHandler::new(publish_channel.clone(), broadcast_channel.clone(), node_registry.clone()));
 
     let client_publish_channel = connection.create_channel().await?;
     let client_handler = Arc::new(ClientMessageHandler::new(client_publish_channel.clone(), client_registry.clone(), node_registry.clone()));
@@ -414,8 +414,6 @@ async fn run_main_loop() -> Result<()> {
     let period = 30;
     let broadcast_channel_clone = broadcast_channel.clone();
     let node_registry_broadcast = node_registry.clone();
-    let client_registry_broadcast = client_registry.clone();
-    let client_publish_clone = client_publish_channel.clone();
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(period));
@@ -432,7 +430,7 @@ async fn run_main_loop() -> Result<()> {
             // Wait a bit for nodes to respond, then broadcast state to clients.
             //
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            if let Err(e) = broadcast_state_to_clients(&client_publish_clone, &node_registry_broadcast, &client_registry_broadcast).await {
+            if let Err(e) = broadcast_state_to_clients(&broadcast_channel_clone, &node_registry_broadcast).await {
                 error!("Failed to broadcast state to clients: {}", e);
             }
         }
@@ -444,8 +442,7 @@ async fn run_main_loop() -> Result<()> {
     //
 
     let ops_manager_broadcast = semantic_ops_manager.clone();
-    let client_registry_ops = client_registry.clone();
-    let client_publish_ops = client_publish_channel.clone();
+    let broadcast_channel_ops = broadcast_channel.clone();
 
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
@@ -454,10 +451,9 @@ async fn run_main_loop() -> Result<()> {
 
             //
             // Always get and broadcast updates to ensure clients see completed
-            // operations
-            // (Operations are removed from running map when they complete, so
-            // we need to
-            // broadcast regardless of has_running status).
+            // operations (operations are removed from running map when they
+            // complete, so we need to broadcast regardless of has_running
+            // status).
             //
             let updates = match ops_manager_broadcast.get_all_updates().await {
                 Ok(u) => u,
@@ -467,26 +463,13 @@ async fn run_main_loop() -> Result<()> {
                 }
             };
 
-            //
-            // Skip broadcasting if there are no operations to report.
-            //
             if updates.is_empty() {
                 continue;
             }
 
-            //
-            // Broadcast updates to all clients.
-            //
-            let clients = client_registry_ops.list().await;
-
             for update in updates {
-                let message = ClientDirectMessage::SemanticOpUpdate(update);
-
-                for client in &clients {
-                    if let Err(e) = send_to_client(&client_publish_ops, &client.id, message.clone()).await {
-                        error!("Failed to send semantic op update to client {}: {}", client.id, e);
-                    }
-                }
+                let message = ClientBroadcastMessage::SemanticOpUpdate(update);
+                let _ = publish_json_exchange(&broadcast_channel_ops, CLIENT_BROADCAST_EXCHANGE, &message).await;
             }
         }
     });

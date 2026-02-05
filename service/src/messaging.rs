@@ -2,13 +2,13 @@
 
 use anyhow::Result;
 use common::{
-    publish_json, client_queue_name, node_queue_name,
-    ClientDirectMessage, NodeDirectMessage,
+    publish_json, publish_json_exchange, client_queue_name, node_queue_name,
+    ClientBroadcastMessage, ClientDirectMessage, NodeDirectMessage,
+    CLIENT_BROADCAST_EXCHANGE,
 };
 use lapin::Channel;
-use tracing::warn;
 
-use crate::state::{NodeRegistry, ClientRegistry};
+use crate::state::NodeRegistry;
 
 /// Send a message to a specific node
 pub async fn send_to_node(
@@ -32,31 +32,13 @@ pub async fn send_to_client(
     Ok(())
 }
 
-/// Broadcast state update to all clients
+/// Broadcast state update to all clients via fanout exchange.
 pub async fn broadcast_state_to_clients(
-    channel: &Channel,
+    broadcast_channel: &Channel,
     node_registry: &NodeRegistry,
-    client_registry: &ClientRegistry,
 ) -> Result<()> {
     let state = node_registry.build_system_state().await;
-    let clients = client_registry.list().await;
-
-    let mut stale_clients = Vec::new();
-
-    for client in clients {
-        let message = ClientDirectMessage::StateUpdate(state.clone());
-        if let Err(e) = send_to_client(channel, &client.id, message).await {
-            warn!("Failed to send to client {} (removing stale): {}", client.id, e);
-            stale_clients.push(client.id.clone());
-        }
-    }
-
-    //
-    // Remove stale clients that failed to receive messages.
-    //
-    for client_id in stale_clients {
-        client_registry.remove(&client_id).await;
-    }
-
+    let message = ClientBroadcastMessage::StateUpdate(state);
+    publish_json_exchange(broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &message).await?;
     Ok(())
 }
