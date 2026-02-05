@@ -1062,7 +1062,7 @@ export function SettingsPage() {
 
               <div className="max-w-2xl">
                 <div className="p-6 pt-2">
-                  <h3 className="text-md font-semibold text-[var(--accent-success)] mb-4">Praxis by [0] Origin</h3>
+                  <h3 className="text-md font-semibold text-[var(--accent-success)] mb-4">Praxis by [Ø] Origin</h3>
                   <p className="text-sm text-muted mb-6">
                     <a href="https://originhq.com" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-info)]/70 hover:text-[var(--accent-info)] hover:underline">Origin</a> is an endpoint security company building protection for the semantic era of computing. As AI agents become integral to enterprise workflows, Origin provides the visibility and control organizations need to safely grant agents the permissions they require.
                   </p>
