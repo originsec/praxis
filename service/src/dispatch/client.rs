@@ -8,7 +8,7 @@ use common::{
 };
 use tracing::{error, info, warn};
 
-use crate::config::service_config::APPLICATION_LOGS_ENABLED;
+use crate::config::service_config::{APPLICATION_LOGS_ENABLED, MCP_SERVER_ENABLED, MCP_SERVER_PORT};
 use crate::conversions::{to_common as convert_chain_element, to_database as convert_msg_chain_element};
 use crate::database::{self, OperationDefinition};
 use crate::messaging::{broadcast_state_to_clients, send_to_client, send_to_node};
@@ -368,11 +368,15 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
                 let mut config = ctx.service_config.write().await;
                 let mut save_error = None;
                 let mut event_logging_enabled: Option<bool> = None;
+                let mut mcp_server_changed = false;
                 for (key, value) in values {
                     if key == APPLICATION_LOGS_ENABLED {
                         let normalized = value.to_lowercase();
                         let enabled = !(normalized == "false" || normalized == "0" || normalized == "no");
                         event_logging_enabled = Some(enabled);
+                    }
+                    if key == MCP_SERVER_ENABLED || key == MCP_SERVER_PORT {
+                        mcp_server_changed = true;
                     }
                     if let Err(e) = config.set(key, value).await {
                         save_error = Some(e);
@@ -399,7 +403,23 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
                         let _ = publish_json_exchange(&ctx.broadcast_channel, NODE_BROADCAST_EXCHANGE, &node_message).await;
                         let client_message = ClientBroadcastMessage::EventLoggingSet { enabled };
                         let _ = publish_json_exchange(&ctx.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &client_message).await;
+                    }
 
+                    //
+                    // Handle MCP server start/stop if enabled/port changed.
+                    //
+                    if mcp_server_changed {
+                        if config.is_mcp_server_enabled() {
+                            let port = config.get_mcp_server_port();
+                            let url = common::rabbitmq_url();
+                            info!("MCP server config changed, starting on port {}", port);
+                            if let Err(e) = ctx.mcp_manager.start(&url, port).await {
+                                error!("Failed to start MCP server: {}", e);
+                            }
+                        } else {
+                            info!("MCP server config changed, stopping server");
+                            ctx.mcp_manager.stop().await;
+                        }
                     }
                 }
             }

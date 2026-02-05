@@ -1580,7 +1580,6 @@ async fn send_command_and_wait(
 pub async fn start_orchestrator_session(
     app_state: Arc<AppState>,
     rabbitmq: Arc<RabbitMqClient>,
-    _config_manager: Arc<crate::config::ConfigManager>,
     event_tx: mpsc::Sender<OrchestratorEvent>,
 ) -> Result<OrchestratorSession, String> {
     //

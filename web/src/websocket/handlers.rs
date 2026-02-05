@@ -293,28 +293,11 @@ pub async fn handle_browser_message(
 
 async fn handle_config_get(state: &Arc<WsState>, keys: Vec<String>) -> anyhow::Result<()> {
     //
-    // Split keys into local (orchestrator_*) and service (semantic_parser_*,
-    // semantic_op_*).
+    // Forward all config requests to the service via RabbitMQ. The service is
+    // the single source of truth for all configuration.
     //
-    let (local_keys, service_keys): (Vec<_>, Vec<_>) =
-        keys.into_iter().partition(|k| k.starts_with("orchestrator_"));
-
-    //
-    // Get local config values.
-    //
-    if !local_keys.is_empty() {
-        let key_refs: Vec<&str> = local_keys.iter().map(|s| s.as_str()).collect();
-        let values = state.config.get(&key_refs).await;
-        state
-            .app_state
-            .broadcast(ServerMessage::ConfigResponse { values });
-    }
-
-    //
-    // Forward service config requests to the service via RabbitMQ.
-    //
-    if !service_keys.is_empty() {
-        if let Err(e) = state.rabbitmq.get_config(service_keys).await {
+    if !keys.is_empty() {
+        if let Err(e) = state.rabbitmq.get_config(keys).await {
             common::log_error!("Failed to request service config: {}", e);
         }
     }
@@ -327,26 +310,11 @@ async fn handle_config_set(
     values: HashMap<String, String>,
 ) -> anyhow::Result<()> {
     //
-    // Split values into local (orchestrator_*) and service (semantic_parser_*,
-    // semantic_op_*).
+    // Forward all config to the service via RabbitMQ. The service is the single
+    // source of truth for all configuration.
     //
-    let (local_values, service_values): (HashMap<_, _>, HashMap<_, _>) =
-        values.into_iter().partition(|(k, _)| k.starts_with("orchestrator_"));
-
-    //
-    // Save local config values.
-    //
-    if !local_values.is_empty() {
-        if let Err(e) = state.config.set(local_values).await {
-            common::log_error!("Failed to save local config: {}", e);
-        }
-    }
-
-    //
-    // Forward service config to the service via RabbitMQ.
-    //
-    if !service_values.is_empty() {
-        if let Err(e) = state.rabbitmq.set_config(service_values).await {
+    if !values.is_empty() {
+        if let Err(e) = state.rabbitmq.set_config(values).await {
             common::log_error!("Failed to set service config: {}", e);
         }
     }

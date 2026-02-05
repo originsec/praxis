@@ -815,16 +815,20 @@ name = "common"
 version = "0.9.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "dirs",
  "indexmap",
  "lapin",
  "regex",
  "reqwest",
+ "rmcp",
+ "schemars",
  "serde",
  "serde_json",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2769,6 +2773,7 @@ name = "praxis_cli"
 version = "0.9.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "clap",
  "colored",
@@ -2776,8 +2781,6 @@ dependencies = [
  "dirs",
  "futures-util",
  "lapin",
- "rmcp",
- "schemars",
  "serde",
  "serde_json",
  "tokio",
@@ -2852,6 +2855,7 @@ name = "praxis_service"
 version = "0.9.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "common",
  "dirs",
@@ -2860,12 +2864,14 @@ dependencies = [
  "indexmap",
  "lapin",
  "regex",
+ "rmcp",
  "semantic_parser",
  "serde",
  "serde_json",
  "serde_yaml",
  "sqlx",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
  "uuid",
@@ -3227,21 +3233,30 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5947688160b56fb6c827e3c20a72c90392a1d7e9dec74749197aa1780ac42ca"
 dependencies = [
+ "axum",
  "base64",
+ "bytes",
  "chrono",
  "futures",
+ "http",
+ "http-body",
+ "http-body-util",
  "paste",
  "pin-project-lite",
  "process-wrap",
+ "rand 0.9.2",
  "rmcp-macros",
  "schemars",
  "serde",
  "serde_json",
+ "sse-stream",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "tower-service",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -4034,6 +4049,19 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "sse-stream"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb4dc4d33c68ec1f27d386b5610a351922656e1fdf5c05bbaad930cd1519479a"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "http-body",
+ "http-body-util",
+ "pin-project-lite",
 ]
 
 [[package]]

@@ -145,6 +145,12 @@ export function SettingsPage() {
   const [eventLoggingEnabled, setEventLoggingEnabled] = useState(false);
 
   //
+  // MCP Server settings.
+  //
+  const [mcpServerEnabled, setMcpServerEnabled] = useState(false);
+  const [mcpServerPort, setMcpServerPort] = useState('8585');
+
+  //
   // Load config on mount
   // All llm_* keys go to Service (not starting with orchestrator_).
   //
@@ -157,6 +163,8 @@ export function SettingsPage() {
       'llm_feature_traffic_parser',
       'llm_orchestrator_max_tokens',
       'application_logs_enabled',
+      'mcp_server_enabled',
+      'mcp_server_port',
     ]);
   }, [getConfig]);
 
@@ -236,6 +244,18 @@ export function SettingsPage() {
     } else {
       setEventLoggingEnabled(false);
     }
+
+    //
+    // Load MCP server settings.
+    //
+    if (cfg.mcp_server_enabled) {
+      const normalized = cfg.mcp_server_enabled.toLowerCase();
+      const enabled = !(normalized === 'false' || normalized === '0' || normalized === 'no');
+      setMcpServerEnabled(enabled);
+    } else {
+      setMcpServerEnabled(false);
+    }
+    setMcpServerPort(cfg.mcp_server_port || '8585');
   }, [state.config]);
 
   //
@@ -252,6 +272,32 @@ export function SettingsPage() {
     const next = !eventLoggingEnabled;
     setEventLoggingEnabled(next);
     setConfig({ application_logs_enabled: next ? 'true' : 'false' });
+  };
+
+  //
+  // Toggle MCP server.
+  //
+  const handleMcpServerToggle = () => {
+    const next = !mcpServerEnabled;
+    setMcpServerEnabled(next);
+    setConfig({ mcp_server_enabled: next ? 'true' : 'false' });
+  };
+
+  //
+  // Update MCP server port.
+  //
+  const handleMcpPortChange = (value: string) => {
+    setMcpServerPort(value);
+  };
+
+  //
+  // Save MCP server port (on blur).
+  //
+  const handleMcpPortSave = () => {
+    const port = parseInt(mcpServerPort, 10);
+    if (port > 0 && port < 65536) {
+      setConfig({ mcp_server_port: mcpServerPort });
+    }
   };
 
   //
@@ -989,6 +1035,49 @@ export function SettingsPage() {
                     {eventLoggingEnabled ? 'Enabled' : 'Disabled'}
                   </span>
                 </button>
+              </div>
+
+              {/*
+              //
+              // MCP Server.
+              //
+              */}
+              <div className="pt-4 border-t border-subtle">
+                <div className="mb-2">
+                  <h3 className="text-md font-semibold text-highlight mb-1">MCP Server</h3>
+                  <p className="text-sm text-muted">Expose Praxis tools via Model Context Protocol (SSE transport)</p>
+                </div>
+                <div className="space-y-3">
+                  <button
+                    type="button"
+                    onClick={handleMcpServerToggle}
+                    className="flex items-center gap-2 text-sm text-muted hover:text-highlight transition-colors"
+                  >
+                    {mcpServerEnabled ? (
+                      <ToggleRight size={20} className="text-muted" />
+                    ) : (
+                      <ToggleLeft size={20} className="text-muted" />
+                    )}
+                    <span className="tracking-wider">
+                      {mcpServerEnabled ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </button>
+                  {mcpServerEnabled && (
+                    <div className="flex items-center gap-3 pl-7">
+                      <label className="text-xs text-muted">Port</label>
+                      <input
+                        type="number"
+                        value={mcpServerPort}
+                        onChange={(e) => handleMcpPortChange(e.target.value)}
+                        onBlur={handleMcpPortSave}
+                        min="1"
+                        max="65535"
+                        className="w-24 bg-[var(--bg-primary)] border border-dim px-2 py-1 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
+                      />
+                      <span className="text-xs text-muted">SSE endpoint: http://localhost:{mcpServerPort}/sse</span>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/*

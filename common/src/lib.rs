@@ -2,6 +2,7 @@ pub mod messaging;
 pub mod ai;
 pub mod config;
 pub mod logging;
+pub mod mcp;
 
 pub use messaging::*;
 pub use logging::{init as init_logging, send_event, is_initialized as is_logging_initialized};
@@ -21,3 +22,5 @@ pub use ai::{
 };
 
 pub use config::{FileConfig, find_config_file, load_from_paths};
+
+pub use mcp::{McpClient, PraxisServer, run_stdio_server};
