@@ -1,5 +1,8 @@
+mod enumeration;
 mod fingerprint;
 mod intercept;
+mod mcp;
+mod recon;
 mod session;
 
 pub use session::CursorSession;
@@ -47,7 +50,7 @@ impl Agent for CursorAgent {
     }
 
     fn as_recon(&self) -> Option<&dyn crate::agent_connectors::traits::AgentRecon> {
-        None
+        Some(self)
     }
 
     async fn do_fingerprint(&self) -> bool {
