@@ -339,7 +339,10 @@ Example JSON format for other clients:
   "mcpServers": {
     "praxis": {
       "command": "/path/to/praxis_cli",
-      "args": ["--mcp"]
+      "args": ["--mcp"],
+      "env": {
+        "PRAXIS_RABBITMQ_URL": "amqp://praxis:praxis@your-server:5672"
+      }
     }
   }
 }

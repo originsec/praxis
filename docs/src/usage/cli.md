@@ -225,7 +225,21 @@ The MCP server works with any client supporting the MCP protocol. Configuration 
 - **Cursor**: Settings → Features → MCP Servers
 - **Windsurf**: Settings → MCP
 
-Use the same server configuration format shown above.
+Example JSON configuration:
+
+```json
+{
+  "mcpServers": {
+    "praxis": {
+      "command": "/home/user/.praxis/bin/praxis_cli",
+      "args": ["--mcp"],
+      "env": {
+        "PRAXIS_RABBITMQ_URL": "amqp://praxis:praxis@your-server:5672"
+      }
+    }
+  }
+}
+```
 
 ### Available MCP Tools
 
