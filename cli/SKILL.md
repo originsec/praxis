@@ -1,36 +1,19 @@
-# Praxis CLI Skill
-
-## What is Praxis?
+---
+name: praxis
+description: Interact with the Praxis C2 framework for orchestrating AI coding agents. Use when the user wants to manage nodes, agents, sessions, run operations or chains, or search intercepted traffic on the Praxis network.
+---
 
 Praxis is a Command & Control (C2) framework for orchestrating AI coding agents. It provides a unified interface to manage, monitor, and interact with AI agents (like Claude Code, Cursor, Windsurf, etc.) running on remote machines.
 
-## When to Use This Skill
+## First Step
 
-Use the `praxis_cli` command when the user wants to:
-- List or manage nodes (machines running Praxis agents)
-- List or select AI agents on nodes
-- Create sessions with agents and send prompts
-- Run semantic operations (pre-configured AI workflows)
-- Run chains (multi-step operation workflows)
-- Search intercepted network traffic
-- Interact with the Praxis C2 network programmatically
-
-## How to Use
-
-Before using any commands, first discover the full capabilities by running:
+Before using any commands, discover the full capabilities by running:
 
 ```bash
 praxis_cli --fullhelp
 ```
 
-This outputs comprehensive documentation for all commands and subcommands, including:
-- Global options (RabbitMQ URL, output format, timeout)
-- Node management commands
-- Agent management commands
-- Session commands for interacting with agents
-- Semantic operation commands
-- Chain workflow commands
-- Traffic search commands
+This outputs comprehensive documentation for all commands and subcommands.
 
 ## Key Concepts
 
