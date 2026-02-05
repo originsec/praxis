@@ -33,7 +33,7 @@ function Print-Banner {
     Write-Host "/_/   /_/   \__,_/_/|_/_/____/  " -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Praxis Installation Script for Windows"
-    Write-Host "by [0] Origin"
+    Write-Host "by [Ø] Origin"
     Write-Host ""
 }
 

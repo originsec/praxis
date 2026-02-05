@@ -25,7 +25,7 @@ print_banner() {
     echo "/_/   /_/   \__,_/_/|_/_/____/  "
     echo ""
     echo -e "${NC}Praxis Docker Setup"
-    echo "by [0] Origin"
+    echo "by [Ø] Origin"
     echo ""
 }
 

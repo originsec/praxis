@@ -15,10 +15,10 @@ WORKDIR /build
 # ==============================================================================
 FROM chef AS planner
 COPY Cargo.toml Cargo.lock ./
+COPY cli ./cli
 COPY common ./common
 COPY node ./node
 COPY semantic_parser ./semantic_parser
-COPY semantic_ops ./semantic_ops
 COPY service ./service
 COPY web ./web
 RUN cargo chef prepare --recipe-path recipe.json
@@ -67,10 +67,10 @@ RUN cargo chef cook --release --recipe-path recipe.json -p praxis_node && \
 # Stage 5: Build application (only recompiles on source changes)
 # ==============================================================================
 COPY Cargo.toml Cargo.lock ./
+COPY cli ./cli
 COPY common ./common
 COPY node ./node
 COPY semantic_parser ./semantic_parser
-COPY semantic_ops ./semantic_ops
 COPY service ./service
 COPY web ./web
 
