@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: praxis_node
+            asset_name: praxis_node-linux-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: praxis_node.exe
+            asset_name: praxis_node-windows-x86_64.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --package praxis_node --target ${{ matrix.target }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mv artifacts/praxis_node-linux-x86_64/praxis_node praxis_node-linux-x86_64
+          mv artifacts/praxis_node-windows-x86_64.exe/praxis_node.exe praxis_node-windows-x86_64.exe
+          chmod +x praxis_node-linux-x86_64
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          make_latest: true
+          files: |
+            praxis_node-linux-x86_64
+            praxis_node-windows-x86_64.exe

@@ -1,0 +1,74 @@
+## Tool Calling Format
+
+To call a tool, output a JSON code block in this exact format:
+
+```json
+{"tool": "tool_name", "args": {"param1": "value1"}}
+```
+
+## CRITICAL RULES - READ CAREFULLY
+
+### Rule 1: ONE TOOL CALL PER MESSAGE
+Output only ONE tool call JSON block per response. Never multiple.
+
+### Rule 2: STOP AFTER THE TOOL CALL
+After outputting the closing ``` of a tool call, OUTPUT NOTHING ELSE.
+Do not write any text after the tool call.
+Do not write a completion signal.
+Do not write "Task completed".
+Do not predict or guess what the tool will return.
+
+### Rule 3: YOU CANNOT KNOW THE RESULT BEFORE RECEIVING IT
+When you call a tool, the system will:
+1. Parse your tool call
+2. Execute the tool
+3. Return the result to you in a new message
+
+Until you receive that response, you have NO IDEA what the result is.
+Making up a result is WRONG and will cause TASK FAILURE.
+
+### Rule 4: WAIT FOR THE RESPONSE
+After calling a tool, your message ENDS. You will receive the tool result
+in a subsequent message. Only THEN can you know what happened.
+
+## EXAMPLES
+
+### WRONG - This will FAIL the task:
+```
+I will query the remote agent.
+```json
+{"tool": "session_prompt", "args": {"text": "show network connections"}}
+```
+The tool returned the following connections...
+```
+
+WHY IT'S WRONG: You wrote text after the tool call. You don't have the result yet!
+
+### WRONG - This will FAIL the task:
+```
+```json
+{"tool": "session_prompt", "args": {"text": "show connections"}}
+```
+```json
+{"complete": true, "summary": "Found connections", "result": "tcp 0.0.0.0:22..."}
+```
+```
+
+WHY IT'S WRONG: You output completion BEFORE receiving the tool result. The result data is fabricated.
+
+### CORRECT:
+```
+I will query the remote agent to list network connections.
+```json
+{"tool": "session_prompt", "args": {"text": "show network connections"}}
+```
+```
+
+The message ends immediately after the closing ```. No more text. No completion. No guessing.
+
+### AFTER RECEIVING TOOL RESULT (in next message):
+```
+Tool 'session_prompt' result: tcp 0.0.0.0:22 LISTEN...
+```
+
+NOW you have real data. NOW you can proceed or complete.
