@@ -218,15 +218,15 @@ function OriginLightSplash({ onComplete }: SplashScreenProps) {
         cursor: 'pointer',
       }}
     >
-      {/* Noise texture */}
+      {/* Noise texture - matches main pane but more prominent */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           backgroundImage: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22140%22%20height%3D%22140%22%20viewBox%3D%220%200%20140%20140%22%3E%3Cfilter%20id%3D%22n%22%20x%3D%220%22%20y%3D%220%22%20width%3D%22100%25%22%20height%3D%22100%25%22%3E%3CfeTurbulence%20type%3D%22fractalNoise%22%20baseFrequency%3D%220.9%22%20numOctaves%3D%224%22/%3E%3C/filter%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20filter%3D%22url%28%23n%29%22%20opacity%3D%221%22/%3E%3C/svg%3E")`,
           backgroundRepeat: 'repeat',
           backgroundSize: '140px 140px',
-          opacity: 0.25,
-          filter: 'brightness(0.5) contrast(0.15)',
+          opacity: 0.45,
+          filter: 'brightness(0.5) contrast(0.25)',
           mixBlendMode: 'multiply' as const,
         }}
       />
@@ -300,16 +300,6 @@ function OriginLightSplash({ onComplete }: SplashScreenProps) {
         </div>
       </div>
 
-      {/* Subtle grid overlay */}
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          backgroundImage:
-            'linear-gradient(rgba(24, 22, 18, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(24, 22, 18, 0.03) 1px, transparent 1px)',
-          backgroundSize: '4px 4px',
-          opacity: 0.5,
-        }}
-      />
     </div>
   );
 }
@@ -532,6 +522,19 @@ function PraxisDarkSplash({ onComplete }: SplashScreenProps) {
         cursor: 'pointer',
       }}
     >
+      {/* Noise texture - adds depth to the background */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          backgroundImage: `url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22140%22%20height%3D%22140%22%20viewBox%3D%220%200%20140%20140%22%3E%3Cfilter%20id%3D%22n%22%20x%3D%220%22%20y%3D%220%22%20width%3D%22100%25%22%20height%3D%22100%25%22%3E%3CfeTurbulence%20type%3D%22fractalNoise%22%20baseFrequency%3D%220.9%22%20numOctaves%3D%224%22/%3E%3C/filter%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20filter%3D%22url%28%23n%29%22%20opacity%3D%221%22/%3E%3C/svg%3E")`,
+          backgroundRepeat: 'repeat',
+          backgroundSize: '140px 140px',
+          opacity: 0.15,
+          filter: 'brightness(0.3) contrast(0.4)',
+          mixBlendMode: 'screen' as const,
+        }}
+      />
+
       {/*
       //
       // Matrix rain / particles background.
@@ -626,18 +629,14 @@ function PraxisDarkSplash({ onComplete }: SplashScreenProps) {
         </div>
       </div>
 
-      {/*
-      //
-      // Grid overlay.
-      //
-      */}
+      {/* Subtle grid overlay - matches main pane */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           backgroundImage:
-            'linear-gradient(rgba(31, 50, 41, 0.3) 1px, transparent 1px), linear-gradient(90deg, rgba(31, 50, 41, 0.3) 1px, transparent 1px)',
+            'linear-gradient(rgba(31, 50, 41, 0.2) 1px, transparent 1px), linear-gradient(90deg, rgba(31, 50, 41, 0.2) 1px, transparent 1px)',
           backgroundSize: '3px 3px',
-          opacity: 0.5,
+          opacity: 0.3,
         }}
       />
     </div>

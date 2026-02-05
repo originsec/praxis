@@ -284,6 +284,58 @@ Same schema, different backend. Use for:
 | PostgreSQL | 5432 | TCP |
 | Proxy (when enabled) | Dynamic | HTTP |
 
+## CLI Configuration
+
+The Praxis CLI (`praxis_cli`) stores state and can be configured via command-line options or environment variables.
+
+### CLI State File
+
+| Platform | Path |
+|----------|------|
+| Linux/macOS | `~/.praxis/cli.json` |
+| Windows | `%USERPROFILE%\.praxis\cli.json` |
+
+Contents:
+```json
+{
+  "client_id": "uuid-generated-on-first-run"
+}
+```
+
+### CLI Options
+
+| Option | Environment Variable | Default | Description |
+|--------|---------------------|---------|-------------|
+| `-r, --rabbitmq` | `PRAXIS_RABBITMQ_URL` | `amqp://praxis:praxis@localhost:5672` | RabbitMQ URL |
+| `-o, --output` | - | `text` | Output format (`text` or `json`) |
+| `-t, --timeout` | - | `300` | Command timeout in seconds |
+| `--mcp` | - | - | Run as MCP server (stdio) |
+| `--status` | - | - | Check connection status |
+| `--clear` | - | - | Clear local state |
+
+### MCP Server Configuration
+
+When running as an MCP server (`--mcp`), the CLI can be integrated with Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "praxis": {
+      "command": "/path/to/praxis_cli",
+      "args": ["--mcp"],
+      "env": {
+        "PRAXIS_RABBITMQ_URL": "amqp://praxis:praxis@localhost:5672"
+      }
+    }
+  }
+}
+```
+
+Config file locations:
+- Linux: `~/.config/claude-desktop/config.json`
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+
 ## File Locations
 
 ### Linux
@@ -291,6 +343,18 @@ Same schema, different backend. Use for:
 | File | Path |
 |------|------|
 | Database | `~/.praxis_operations.db` |
+| CLI State | `~/.praxis/cli.json` |
+| CLI Binary | `~/.praxis/bin/praxis_cli` |
+| Claude Config | `~/.claude.json` or `~/.config/claude/config.json` |
+| Gemini Config | `~/.gemini/settings.json` |
+
+### macOS
+
+| File | Path |
+|------|------|
+| Database | `~/.praxis_operations.db` |
+| CLI State | `~/.praxis/cli.json` |
+| CLI Binary | `~/.praxis/bin/praxis_cli` |
 | Claude Config | `~/.claude.json` or `~/.config/claude/config.json` |
 | Gemini Config | `~/.gemini/settings.json` |
 
@@ -299,5 +363,7 @@ Same schema, different backend. Use for:
 | File | Path |
 |------|------|
 | Database | `%USERPROFILE%\.praxis_operations.db` |
+| CLI State | `%USERPROFILE%\.praxis\cli.json` |
+| CLI Binary | `%USERPROFILE%\.praxis\bin\praxis_cli.exe` |
 | Claude Config | `%USERPROFILE%\.claude.json` |
 | Hosts File | `C:\Windows\System32\drivers\etc\hosts` |

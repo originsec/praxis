@@ -127,9 +127,9 @@ install_praxis() {
 
     local repo_url="https://github.com/$PRAXIS_REPO"
 
-    info "Installing praxis_service and praxis_web..."
-    cargo install --git "$repo_url" --tag "$PRAXIS_VERSION" --root "$PRAXIS_HOME" praxis_service praxis_web
-    success "Installed praxis_service and praxis_web"
+    info "Installing praxis_service, praxis_web, and praxis_cli..."
+    cargo install --git "$repo_url" --tag "$PRAXIS_VERSION" --root "$PRAXIS_HOME" praxis_service praxis_web praxis_cli
+    success "Installed praxis_service, praxis_web, and praxis_cli"
 
     info "Installing praxis_node (Linux)..."
     cargo install --git "$repo_url" --tag "$PRAXIS_VERSION" --root "$PRAXIS_HOME" praxis_node
@@ -226,6 +226,7 @@ print_summary() {
     echo "Binaries:"
     echo "  $PRAXIS_BIN/praxis_service"
     echo "  $PRAXIS_BIN/praxis_web"
+    echo "  $PRAXIS_BIN/praxis_cli"
     echo "  $PRAXIS_BIN/praxis.sh"
     echo ""
     echo "Node agents:"

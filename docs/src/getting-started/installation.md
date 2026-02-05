@@ -26,7 +26,11 @@ This clones the latest release, builds with Docker Compose, and starts everythin
 curl -fsSL https://praxis.originhq.com/install.sh | bash
 ```
 
-This installs Rust if needed, builds from source, and sets up binaries in `~/.praxis/bin/`.
+This installs Rust if needed, builds from source, and sets up binaries in `~/.praxis/bin/`:
+- `praxis_service` - backend service
+- `praxis_web` - web server + frontend
+- `praxis_node` - node agent
+- `praxis_cli` - command-line interface
 
 ### Native Install (Windows)
 
@@ -109,10 +113,11 @@ cd praxis
 cargo build --release
 ```
 
-This produces three binaries in `target/release/`:
+This produces four binaries in `target/release/`:
 - `praxis_service` - the backend service
 - `praxis_web` - the HTTP/WebSocket server + frontend
 - `praxis_node` - the node agent
+- `praxis_cli` - the command-line interface
 
 ### Running
 
