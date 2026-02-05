@@ -39,6 +39,10 @@ struct Cli {
     #[arg(long = "clear", exclusive = true)]
     clear: bool,
 
+    /// Check service connection status
+    #[arg(long = "status", exclusive = true)]
+    status: bool,
+
     /// Show comprehensive help for all commands
     #[arg(long = "fullhelp", exclusive = true, display_order = 1000)]
     fullhelp: bool,
@@ -203,7 +207,39 @@ async fn run() -> Result<()> {
     }
 
     //
-    // Require a command if not --fullhelp or --clear.
+    // Handle --status early.
+    //
+    if cli.status {
+        let mut cli_state = state::CliState::load()?;
+        let client_id = cli_state.get_or_create_client_id()?;
+        let short_id = client_id[..8.min(client_id.len())].to_string();
+
+        let client = client::CliClient::connect(&cli.rabbitmq_url, cli.timeout, client_id).await?;
+        let system_state = client.get_state().await;
+        client.disconnect().await;
+
+        match &cli.output {
+            OutputFormat::Json => {
+                let node_count = system_state.as_ref().map(|s| s.nodes.len()).unwrap_or(0);
+                output::print_json(&serde_json::json!({
+                    "status": "connected",
+                    "client_id": short_id,
+                    "rabbitmq_url": cli.rabbitmq_url,
+                    "node_count": node_count
+                }));
+            }
+            OutputFormat::Text => {
+                output::print_success(&format!("Connected to service (client: {})", short_id));
+                if let Some(state) = system_state {
+                    println!("  Nodes: {}", state.nodes.len());
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    //
+    // Require a command if not --fullhelp, --clear, or --status.
     //
     let command = match cli.command {
         Some(cmd) => cmd,
