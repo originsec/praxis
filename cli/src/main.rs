@@ -214,7 +214,7 @@ async fn run() -> Result<()> {
         let client_id = cli_state.get_or_create_client_id()?;
         let short_id = client_id[..8.min(client_id.len())].to_string();
 
-        let client = client::CliClient::connect(&cli.rabbitmq_url, cli.timeout, client_id).await?;
+        let client = client::CliClient::connect(&cli.rabbitmq_url, 10, client_id).await?;
         let system_state = client.get_state().await;
         client.disconnect().await;
 
