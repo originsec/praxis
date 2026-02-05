@@ -8,7 +8,7 @@ The CLI is designed for **external agent orchestration** and **programmatic expl
 
 Primary use cases:
 - Scripting and automation
-- Integration with external AI agents
+- Integration with external AI agents (via MCP server mode)
 - Headless environments without GUI access
 - Quick operations from the command line
 
@@ -49,6 +49,8 @@ The `--fullhelp` option outputs documentation for every command and subcommand, 
 | `-t, --timeout` | Command timeout in seconds | `300` |
 | `--fullhelp` | Show comprehensive help | - |
 | `--clear` | Clear local state and exit | - |
+| `--status` | Check service connection status | - |
+| `--mcp` | Run as MCP server (stdio) | - |
 
 The RabbitMQ URL can also be set via the `PRAXIS_RABBITMQ_URL` environment variable.
 
@@ -66,6 +68,16 @@ praxis_cli --clear
 ```
 
 This removes `~/.praxis/cli.json`, causing a new client ID to be generated on the next run.
+
+## Checking Connection Status
+
+Verify the CLI can connect to the Praxis service:
+
+```bash
+praxis_cli --status
+```
+
+This connects to RabbitMQ, registers with the service, and displays connection information including the number of connected nodes.
 
 ## Commands
 
@@ -99,7 +111,7 @@ praxis_cli agent recon-semantic --node abc123
 ### Sessions
 
 ```bash
-# Create a session with YOLO mode
+# Create a session with YOLO mode and working directory
 praxis_cli session create --node abc123 --yolo --project /path/to/project
 
 # Send a prompt
@@ -109,6 +121,10 @@ praxis_cli session prompt --node abc123 "list files in current directory"
 praxis_cli session close --node abc123
 ```
 
+Session options:
+- `--yolo`: Enable YOLO mode (auto-approve actions)
+- `--project <PATH>`: Set the working directory for the session
+
 ### Semantic Operations
 
 ```bash
@@ -117,6 +133,9 @@ praxis_cli op list
 
 # Run an operation
 praxis_cli op run recon::system_info --node abc123 --agent claudecode
+
+# Run with working directory
+praxis_cli op run recon::system_info --node abc123 --agent claudecode --working-dir /path/to/project
 
 # Check status
 praxis_cli op status abc123
@@ -137,11 +156,17 @@ praxis_cli chain list
 # Run a chain
 praxis_cli chain run mychain --node abc123 --agent claudecode
 
+# Run with working directory
+praxis_cli chain run mychain --node abc123 --agent claudecode --working-dir /path/to/project
+
 # Check status
 praxis_cli chain status abc123
 
 # List running executions
 praxis_cli chain running
+
+# Cancel an execution
+praxis_cli chain cancel abc123
 ```
 
 ### Traffic Search
@@ -162,6 +187,73 @@ Use `--output json` for machine-readable output:
 praxis_cli --output json node list | jq '.nodes[].node_id'
 ```
 
+## MCP Server Mode
+
+The CLI can run as a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server, enabling integration with AI assistants like Claude Desktop.
+
+### Running as MCP Server
+
+```bash
+praxis_cli --mcp
+```
+
+This starts the CLI in MCP server mode, communicating via stdio. The server exposes all CLI functionality as MCP tools.
+
+### Claude Desktop Integration
+
+Add to your Claude Desktop configuration (`~/.config/claude-desktop/config.json` on Linux, `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+
+```json
+{
+  "mcpServers": {
+    "praxis": {
+      "command": "/home/user/.praxis/bin/praxis_cli",
+      "args": ["--mcp"],
+      "env": {
+        "PRAXIS_RABBITMQ_URL": "amqp://praxis:praxis@localhost:5672"
+      }
+    }
+  }
+}
+```
+
+### Available MCP Tools
+
+The MCP server exposes the following tools:
+
+**Node Management:**
+- `node_list` - List all connected nodes
+- `node_select` - Get details for a specific node
+
+**Agent Management:**
+- `agent_list` - List agents on a node
+- `agent_select` - Get details for a specific agent
+- `agent_update` - Request agent info refresh
+- `agent_recon` - Run agent reconnaissance
+- `agent_recon_semantic` - Run semantic reconnaissance
+
+**Sessions:**
+- `session_create` - Create a new session
+- `session_prompt` - Send a prompt to the active session
+- `session_close` - Close the active session
+
+**Operations:**
+- `op_list` - List available semantic operations
+- `op_run` - Run a semantic operation
+- `op_status` - Check operation status
+- `op_cancel` - Cancel a running operation
+- `op_running` - List all running operations
+
+**Chains:**
+- `chain_list` - List available chains
+- `chain_run` - Run a chain workflow
+- `chain_status` - Check chain execution status
+- `chain_cancel` - Cancel a running chain
+- `chain_running` - List all running chain executions
+
+**Traffic:**
+- `traffic_search` - Search intercepted traffic
+
 ## Agentic Use (skill.md)
 
 The CLI includes a `skill.md` file located at `cli/skill.md` in the repository. This file provides guidance for AI agents on how to use the Praxis CLI.
@@ -181,6 +273,7 @@ The CLI currently supports a subset of Praxis features focused on orchestration:
 - Sessions and prompts
 - Semantic operations and chains
 - Traffic search
+- MCP server mode for AI assistant integration
 
 Features **not** available in the CLI:
 - AgentChat (IRC-style multi-agent chat)

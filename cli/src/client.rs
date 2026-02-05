@@ -53,7 +53,8 @@ impl CliClient {
         let client_queue = client_queue_name(&client_id);
 
         //
-        // Declare client-specific queue.
+        // Declare client-specific queue and purge any stale messages from
+        // previous CLI sessions.
         //
         channel
             .queue_declare(
@@ -61,6 +62,10 @@ impl CliClient {
                 QueueDeclareOptions::default(),
                 FieldTable::default(),
             )
+            .await?;
+
+        channel
+            .queue_purge(&client_queue, lapin::options::QueuePurgeOptions::default())
             .await?;
 
         //
@@ -125,16 +130,16 @@ impl CliClient {
         let channel = self.channel.clone();
         let client_queue = client_queue.to_string();
         let broadcast_queue = broadcast_queue.to_string();
-        let client_id_prefix = self.client_id[..8].to_string();
 
         let handle = tokio::spawn(async move {
             //
             // Consume from client-specific queue.
             //
+            let consumer_tag = format!("cli_direct_{}", uuid::Uuid::new_v4());
             let mut direct_consumer = match channel
                 .basic_consume(
                     &client_queue,
-                    "cli_direct_consumer",
+                    &consumer_tag,
                     BasicConsumeOptions::default(),
                     FieldTable::default(),
                 )
@@ -150,10 +155,11 @@ impl CliClient {
             //
             // Consume from broadcast queue.
             //
+            let broadcast_tag = format!("cli_broadcast_{}", uuid::Uuid::new_v4());
             let mut broadcast_consumer = match channel
                 .basic_consume(
                     &broadcast_queue,
-                    &format!("cli_broadcast_consumer_{}", client_id_prefix),
+                    &broadcast_tag,
                     BasicConsumeOptions::default(),
                     FieldTable::default(),
                 )
@@ -330,12 +336,24 @@ impl CliClient {
         for _ in 0..max_polls {
             tokio::time::sleep(poll_interval).await;
             let mut state = self.state.lock().await;
-            if let Some(Some(result)) = state.pending_commands.remove(&command_id) {
-                return Ok(CommandResponse {
-                    command_id: command_id.clone(),
-                    node_id: node_id.to_string(),
-                    result,
-                });
+
+            //
+            // Check if result is ready - only remove when we have a result.
+            //
+            let has_result = state
+                .pending_commands
+                .get(&command_id)
+                .map(|v| v.is_some())
+                .unwrap_or(false);
+
+            if has_result {
+                if let Some(Some(result)) = state.pending_commands.remove(&command_id) {
+                    return Ok(CommandResponse {
+                        command_id: command_id.clone(),
+                        node_id: node_id.to_string(),
+                        result,
+                    });
+                }
             }
         }
 

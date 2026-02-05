@@ -2776,6 +2776,8 @@ dependencies = [
  "dirs",
  "futures-util",
  "lapin",
+ "rmcp",
+ "schemars",
  "serde",
  "serde_json",
  "tokio",

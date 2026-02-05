@@ -1,5 +1,6 @@
 mod client;
 mod commands;
+mod mcp;
 mod output;
 mod state;
 
@@ -42,6 +43,10 @@ struct Cli {
     /// Check service connection status
     #[arg(long = "status", exclusive = true)]
     status: bool,
+
+    /// Run as MCP server (stdio)
+    #[arg(long = "mcp", exclusive = true)]
+    mcp: bool,
 
     /// Show comprehensive help for all commands
     #[arg(long = "fullhelp", exclusive = true, display_order = 1000)]
@@ -239,7 +244,14 @@ async fn run() -> Result<()> {
     }
 
     //
-    // Require a command if not --fullhelp, --clear, or --status.
+    // Handle --mcp early.
+    //
+    if cli.mcp {
+        return mcp::run_server(&cli.rabbitmq_url, cli.timeout).await;
+    }
+
+    //
+    // Require a command if not --fullhelp, --clear, --status, or --mcp.
     //
     let command = match cli.command {
         Some(cmd) => cmd,
