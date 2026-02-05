@@ -1,0 +1,90 @@
+#
+# Praxis Docker Compose Configuration
+# Includes RabbitMQ and Praxis services with optional PostgreSQL.
+#
+# Usage:
+#   docker compose up --build                    # SQLite (default)
+#   docker compose --profile postgres up --build # PostgreSQL
+#
+# Access:
+#   Web UI: http://localhost:8080
+#   RabbitMQ Management: http://localhost:15672 (praxis/praxis)
+#
+# Environment Variables:
+#   PRAXIS_DATABASE_URL - Database connection URL
+#                         Default: ~/.praxis_operations.db (SQLite)
+#   PRAXIS_RABBITMQ_URL - RabbitMQ connection URL
+#                         Default: amqp://praxis:praxis@localhost:5672
+#   PRAXIS_NOT_HIDDEN=1 - Disable hidden desktop for agent windows (Windows only)
+#                         Useful for debugging/testing DevTools-based agents
+#
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: praxis
+      RABBITMQ_DEFAULT_PASS: praxis
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  postgres:
+    image: postgres:16-alpine
+    hostname: postgres
+    environment:
+      POSTGRES_USER: praxis
+      POSTGRES_PASSWORD: praxis_db_2024
+      POSTGRES_DB: praxis
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U praxis"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    profiles:
+      - postgres
+
+  praxis:
+    build: .
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      PRAXIS_RABBITMQ_URL: amqp://praxis:praxis@rabbitmq:5672
+      RUST_LOG: info
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  praxis-postgres:
+    build: .
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      PRAXIS_RABBITMQ_URL: amqp://praxis:praxis@rabbitmq:5672
+      PRAXIS_DATABASE_URL: postgresql://praxis:praxis_db_2024@postgres:5432/praxis
+      RUST_LOG: info
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    profiles:
+      - postgres
+
+volumes:
+  rabbitmq_data:
+  postgres_data:

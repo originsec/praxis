@@ -1,0 +1,495 @@
+/* Praxis Terminal Theme - Chrome/Navigation Styles */
+/* Scoped to .light and .ayu themes */
+
+/*
+ * Hide unwanted themes from theme picker - show only Light (origin_light) and Ayu (praxis_dark).
+ */
+#mdbook-theme-list > li:has(#mdbook-theme-default_theme),
+#mdbook-theme-list > li:has(#mdbook-theme-rust),
+#mdbook-theme-list > li:has(#mdbook-theme-coal),
+#mdbook-theme-list > li:has(#mdbook-theme-navy) {
+    display: none !important;
+}
+
+/*
+ * Rename "Ayu" to "Dark" in theme picker.
+ */
+#mdbook-theme-ayu {
+    font-size: 0;
+}
+#mdbook-theme-ayu::after {
+    content: "Dark";
+    font-size: 1rem;
+}
+
+/*
+ * Light Theme - Origin Light Chrome
+ */
+
+/* Sidebar - light theme */
+.light .sidebar {
+    background-color: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+}
+
+.light .sidebar .sidebar-scrollbox {
+    padding: 1em;
+    line-height: 1.3;
+}
+
+.light .sidebar .chapter {
+    margin: 0;
+}
+
+.light .sidebar li.header-item {
+    margin: 0 !important;
+    padding: 0.3em 0 !important;
+}
+
+.light .sidebar .header-in-summary {
+    padding: 0.3em 0.8em;
+}
+
+.light .sidebar ol.section {
+    margin: 0 !important;
+    padding-left: 1em !important;
+}
+
+.light .sidebar .chapter a {
+    color: var(--text-secondary);
+    padding: 0.15em 0.8em;
+    border-radius: 2px;
+    transition: all 0.2s;
+    font-size: 0.9em;
+}
+
+.light .sidebar .chapter a:hover {
+    color: var(--text-highlight);
+    background-color: var(--bg-tertiary);
+}
+
+.light .chapter li.active > a {
+    color: var(--text-highlight);
+    background-color: var(--bg-tertiary);
+    border-left: 2px solid var(--accent-success);
+    border-inline-start-color: var(--accent-success);
+    padding-left: calc(0.8em - 2px);
+    padding-top: 0.15em;
+    padding-bottom: 0.15em;
+}
+
+/* Part titles in sidebar - light theme */
+.light .chapter li.part-title {
+    color: var(--text-muted);
+    font-size: 0.75em;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    margin-top: 1em;
+    margin-bottom: 0.25em;
+    padding: 0.15em 0.8em;
+    border-bottom: 1px solid var(--border-dim);
+}
+
+/* Sidebar toggle - light theme */
+.light .sidebar-toggle {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+}
+
+/* Menu bar - light theme */
+.light #menu-bar {
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    line-height: normal;
+}
+
+.light #menu-bar i {
+    color: var(--text-secondary);
+}
+
+.light #menu-bar i:hover {
+    color: var(--text-primary);
+}
+
+.light #menu-bar h1 {
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.9em;
+    color: var(--text-highlight);
+    margin: 0;
+    padding: 0;
+    border: none;
+}
+
+/* Icon buttons - light theme */
+.light .icon-button {
+    color: var(--text-secondary);
+    transition: color 0.2s;
+    line-height: normal;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.light .icon-button:hover {
+    color: var(--text-primary);
+}
+
+/* Theme popup - light theme */
+.light #theme-list {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+.light #theme-list li {
+    color: var(--text-primary);
+}
+
+.light #theme-list li:hover {
+    background-color: var(--bg-tertiary);
+}
+
+/* Search bar - light theme */
+.light #searchbar {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    border-radius: 2px;
+}
+
+.light #searchbar:focus {
+    border-color: var(--border-active);
+    box-shadow: 0 0 4px var(--highlight-glow);
+    outline: none;
+}
+
+.light #searchbar::placeholder {
+    color: var(--text-muted);
+}
+
+/* Search results - light theme */
+.light .search-results {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.light .search-results .search-results-title {
+    color: var(--text-highlight);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.85em;
+}
+
+.light .search-results li {
+    border-bottom: 1px solid var(--border-dim);
+}
+
+.light .search-results li:hover {
+    background-color: var(--bg-tertiary);
+}
+
+.light .search-results a {
+    color: var(--text-primary);
+}
+
+.light .search-results .teaser {
+    color: var(--text-secondary);
+    font-size: 0.9em;
+}
+
+.light mark {
+    background-color: var(--highlight-glow-strong);
+    color: var(--text-highlight);
+    padding: 0.1em 0.2em;
+    border-radius: 2px;
+}
+
+/* Navigation arrows - light theme */
+.light .nav-wrapper {
+    margin-top: 2em;
+}
+
+.light .nav-chapters {
+    color: var(--text-secondary);
+    padding: 1em;
+    transition: all 0.2s;
+}
+
+.light .nav-chapters:hover {
+    color: var(--text-highlight);
+    background-color: var(--bg-tertiary);
+}
+
+.light .previous, .light .next {
+    font-size: 0.85em;
+}
+
+/* Mobile menu - light theme */
+.light .menu-title {
+    color: var(--text-highlight);
+    font-size: 0.9em;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-top: 0 !important;
+}
+
+/* Sidebar resize handle - light theme */
+.light .sidebar-resize-handle {
+    width: 5px;
+    background-color: transparent;
+}
+
+.light .sidebar-resize-handle:hover {
+    background-color: var(--border-hover);
+}
+
+/*
+ * Dark Theme - Praxis Terminal Chrome
+ */
+
+/* Sidebar */
+.ayu .sidebar {
+    background-color: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+}
+
+.ayu .sidebar .sidebar-scrollbox {
+    padding: 1em;
+    line-height: 1.3;
+}
+
+/* Sidebar chapter list */
+.ayu .sidebar .chapter {
+    margin: 0;
+}
+
+.ayu .sidebar li.header-item {
+    margin: 0 !important;
+    padding: 0.3em 0 !important;
+}
+
+.ayu .sidebar .header-in-summary {
+    padding: 0.3em 0.8em;
+}
+
+.ayu .sidebar ol.section {
+    margin: 0 !important;
+    padding-left: 1em !important;
+}
+
+.ayu .sidebar .chapter a {
+    color: var(--text-secondary);
+    padding: 0.15em 0.8em;
+    border-radius: 2px;
+    transition: all 0.2s;
+    font-size: 0.9em;
+}
+
+.ayu .sidebar .chapter a:hover {
+    color: var(--text-highlight);
+    background-color: var(--bg-tertiary);
+    text-shadow: 0 0 8px var(--green-glow);
+}
+
+.ayu .chapter li.active > a {
+    color: var(--text-highlight);
+    background-color: var(--bg-tertiary);
+    border-left: 2px solid var(--border-color);
+    border-inline-start-color: var(--border-color);
+    padding-left: calc(0.8em - 2px);
+    padding-top: 0.15em;
+    padding-bottom: 0.15em;
+}
+
+/* Part titles in sidebar */
+.ayu .chapter li.part-title {
+    color: var(--text-muted);
+    font-size: 0.75em;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    margin-top: 1em;
+    margin-bottom: 0.25em;
+    padding: 0.15em 0.8em;
+    border-bottom: 1px solid var(--border-dim);
+}
+
+/* Sidebar toggle */
+.ayu .sidebar-toggle {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+}
+
+/* Menu bar */
+.ayu #menu-bar {
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    line-height: normal;
+}
+
+.ayu #menu-bar i {
+    color: var(--text-secondary);
+}
+
+.ayu #menu-bar i:hover {
+    color: var(--text-primary);
+}
+
+.ayu #menu-bar h1 {
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.9em;
+    color: var(--text-highlight);
+    margin: 0;
+    padding: 0;
+    border: none;
+}
+
+/* Icon buttons */
+.ayu .icon-button {
+    color: var(--text-secondary);
+    transition: color 0.2s;
+    line-height: normal;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ayu .icon-button:hover {
+    color: var(--text-primary);
+}
+
+/* Theme popup */
+.ayu #theme-list {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+.ayu #theme-list li {
+    color: var(--text-primary);
+}
+
+.ayu #theme-list li:hover {
+    background-color: var(--bg-tertiary);
+}
+
+/* Search bar */
+.ayu #searchbar {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    border-radius: 2px;
+}
+
+.ayu #searchbar:focus {
+    border-color: var(--border-active);
+    box-shadow: 0 0 8px var(--green-glow);
+    outline: none;
+}
+
+.ayu #searchbar::placeholder {
+    color: var(--text-muted);
+}
+
+/* Search results */
+.ayu .search-results {
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.ayu .search-results .search-results-title {
+    color: var(--text-highlight);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.85em;
+}
+
+.ayu .search-results li {
+    border-bottom: 1px solid var(--border-dim);
+}
+
+.ayu .search-results li:hover {
+    background-color: var(--bg-tertiary);
+}
+
+.ayu .search-results a {
+    color: var(--text-primary);
+}
+
+.ayu .search-results .teaser {
+    color: var(--text-secondary);
+    font-size: 0.9em;
+}
+
+.ayu mark {
+    background-color: var(--green-glow-strong);
+    color: var(--text-highlight);
+    padding: 0.1em 0.2em;
+    border-radius: 2px;
+}
+
+/* Navigation arrows */
+.ayu .nav-wrapper {
+    margin-top: 2em;
+}
+
+.ayu .nav-chapters {
+    color: var(--text-secondary);
+    padding: 1em;
+    transition: all 0.2s;
+}
+
+.ayu .nav-chapters:hover {
+    color: var(--text-highlight);
+    background-color: var(--bg-tertiary);
+}
+
+.ayu .previous, .ayu .next {
+    font-size: 0.85em;
+}
+
+/* Mobile menu */
+.ayu .menu-title {
+    color: var(--text-highlight);
+    font-size: 0.9em;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-top: 0 !important;
+}
+
+/* Sidebar resize handle */
+.ayu .sidebar-resize-handle {
+    width: 5px;
+    background-color: transparent;
+}
+
+.ayu .sidebar-resize-handle:hover {
+    background-color: var(--border-hover);
+}
+
+/* Print styles - keep terminal aesthetic */
+@media print {
+    .sidebar,
+    #menu-bar,
+    .nav-chapters {
+        display: none;
+    }
+
+    body {
+        background-color: #fff;
+        color: #000;
+    }
+
+    code {
+        background-color: #f0f0f0;
+        color: #6a0dad;
+    }
+
+    pre {
+        background-color: #f5f5f5 !important;
+        border: 1px solid #ccc;
+    }
+}

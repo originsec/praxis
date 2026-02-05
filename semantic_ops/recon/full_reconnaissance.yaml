@@ -1,0 +1,47 @@
+name: Full Reconnaissance Suite
+short_name: full_reconnaissance
+category: recon
+description: Comprehensive reconnaissance combining multiple operations
+agent_info: This is a comprehensive reconnaissance operation that chains together email discovery and organization mapping to build a complete picture of the target environment. Use this as a first step in any engagement to understand the landscape before proceeding with exploitation or exfiltration.
+timeout: 240
+mode: "agent"
+agent_iterations: 1
+yolo: true
+operation_chain:
+  - recon::email_discovery
+  - recon::org_mapping
+operation_prompt: |
+  Based on the colleague email addresses and organizational structure discovered in the previous operations, create a comprehensive reconnaissance report:
+
+  1. Executive Summary
+     - Total number of users/employees identified
+     - Key departments and their sizes
+     - Notable high-value targets
+     - Critical relationships identified
+
+  2. Target Prioritization
+     - High-value targets ranked by access level and influence
+     - Key decision makers
+     - Technical personnel (IT, DevOps, Security)
+     - Administrative assistants with delegation rights
+     - External relationships (vendors, partners)
+
+  3. Attack Surface Analysis
+     - Communication patterns and channels in use
+     - Technology stack inferred from email addresses and tools
+     - Potential weak points in the organizational structure
+     - Social engineering opportunities
+
+  4. Lateral Movement Opportunities
+     - Trust relationships between departments
+     - Key connectors who span multiple groups
+     - Shared resources and services
+     - Cross-team collaboration patterns
+
+  5. Next Steps Recommendations
+     - Specific operations to run next
+     - Target accounts for credential harvesting
+     - Social engineering vectors to explore
+     - Data sources for deeper reconnaissance
+
+  Present this as a professional penetration testing reconnaissance report that provides clear, actionable intelligence for the next phase of the engagement.
