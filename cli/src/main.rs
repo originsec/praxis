@@ -35,13 +35,13 @@ struct Cli {
     #[arg(short = 't', long = "timeout", default_value = "300")]
     timeout: u64,
 
-    /// Show comprehensive help for all commands
-    #[arg(long = "fullhelp", exclusive = true)]
-    fullhelp: bool,
-
-    /// Clear local state (client ID) and exit
+    /// Clear local state (client ID)
     #[arg(long = "clear", exclusive = true)]
     clear: bool,
+
+    /// Show comprehensive help for all commands
+    #[arg(long = "fullhelp", exclusive = true, display_order = 1000)]
+    fullhelp: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
