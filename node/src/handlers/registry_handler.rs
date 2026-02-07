@@ -17,7 +17,7 @@ pub async fn handle_agent_registry_update(
     // service-pushed scripts and use only the embedded ones.
     //
     #[cfg(debug_assertions)]
-    if std::env::var("PRAXIS_IGNORE_SERVICE_AGENTS").is_ok() {
+    if std::env::var("PRAXIS_IGNORE_SERVICE_AGENTS").unwrap_or_else(|_| "1".to_string()) != "0" {
         let agent_count = registry.read().await.get_all().len();
         common::log_info!(
             "PRAXIS_IGNORE_SERVICE_AGENTS set, ignoring service registry update ({} scripts skipped)",
