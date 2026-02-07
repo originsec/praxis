@@ -304,6 +304,7 @@ pub enum NodeCommand {
     Intercept(InterceptCommand),
     Terminal(TerminalCommand),
     Config(ConfigCommand),
+    AgentRegistry(AgentRegistryCommand),
     AgentDiscovery(AgentDiscoveryCommand),
 }
 ```

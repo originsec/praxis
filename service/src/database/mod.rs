@@ -7,6 +7,7 @@ mod chains;
 mod chain_executions;
 mod discovered_endpoints;
 mod event_log;
+mod lua_agent_scripts;
 mod recon;
 mod service_config;
 pub mod config;

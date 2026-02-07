@@ -7,8 +7,7 @@ pub mod codex;
 #[cfg(target_os = "linux")]
 pub mod cursor;
 pub mod dummy;
-pub mod dynamic;
-pub mod gemini;
+pub mod lua;
 #[cfg(windows)]
 pub mod m365copilot;
 #[cfg(windows)]
@@ -36,9 +35,7 @@ pub use cursor::CursorAgent;
 #[allow(unused_imports)]
 pub use dummy::DummyAgent;
 #[allow(unused_imports)]
-pub use dynamic::DynamicAgent;
-#[allow(unused_imports)]
-pub use gemini::GeminiAgent;
+pub use lua::LuaAgent;
 #[cfg(windows)]
 #[allow(unused_imports)]
 pub use m365copilot::M365CopilotAgent;

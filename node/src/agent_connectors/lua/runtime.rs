@@ -1,0 +1,809 @@
+use anyhow::{anyhow, Result};
+use mlua::{Function, Lua, LuaSerdeExt, MultiValue, Table, Value};
+use once_cell::sync::Lazy;
+use serde::Deserialize;
+use serde_json::{json, Value as JsonValue};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
+
+use common::{ReconResult, SessionContext};
+
+static COMMAND_HANDLES: Lazy<std::sync::Mutex<HashMap<String, Arc<AtomicU32>>>> =
+    Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
+
+fn lua_error<E: std::fmt::Display>(e: E) -> anyhow::Error {
+    anyhow!(e.to_string())
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CommandSpec {
+    program: String,
+    #[serde(default)]
+    args: Vec<String>,
+    cwd: Option<String>,
+    stdin: Option<String>,
+    #[serde(default)]
+    env: HashMap<String, String>,
+}
+
+pub fn parse_manifest(script: &str) -> Result<(String, String, bool, bool, bool, bool, bool)> {
+    let lua = Lua::new();
+    let table = load_connector_table(&lua, script)?;
+
+    let name: String = table
+        .get("name")
+        .map_err(lua_error)
+        .map_err(|_| anyhow!("Lua connector manifest missing required field 'name'"))?;
+    let short_name: String = table
+        .get("short_name")
+        .map_err(lua_error)
+        .map_err(|_| anyhow!("Lua connector manifest missing required field 'short_name'"))?;
+
+    let has_recon = table.contains_key("recon").map_err(lua_error)?;
+    let has_intercept_domains = table
+        .contains_key("intercept_domains")
+        .map_err(lua_error)?;
+    let has_intercept_url_pattern = table
+        .contains_key("intercept_url_pattern")
+        .map_err(lua_error)?;
+    let has_session_abort = table.contains_key("session_abort").map_err(lua_error)?;
+    let has_fingerprint = table.contains_key("fingerprint").map_err(lua_error)?;
+
+    Ok((
+        name,
+        short_name,
+        has_recon,
+        has_intercept_domains,
+        has_intercept_url_pattern,
+        has_session_abort,
+        has_fingerprint,
+    ))
+}
+
+pub fn run_fingerprint(script: &str) -> Result<bool> {
+    let lua = Lua::new();
+    let table = load_connector_table(&lua, script)?;
+    let func: Function = table
+        .get("fingerprint")
+        .map_err(lua_error)
+        .map_err(|_| anyhow!("Lua connector missing required function 'fingerprint'"))?;
+
+    let ctx = lua.to_value(&json!({})).map_err(lua_error)?;
+    let value: Value = func.call(ctx).map_err(lua_error)?;
+    parse_available(value)
+}
+
+pub fn run_fingerprint_details(script: &str) -> Result<(bool, Option<String>)> {
+    let lua = Lua::new();
+    let table = load_connector_table(&lua, script)?;
+    let func: Function = table
+        .get("fingerprint")
+        .map_err(lua_error)
+        .map_err(|_| anyhow!("Lua connector missing required function 'fingerprint'"))?;
+
+    let ctx = lua.to_value(&json!({})).map_err(lua_error)?;
+    let value: Value = func.call(ctx).map_err(lua_error)?;
+    parse_fingerprint_details(value)
+}
+
+pub fn run_intercept_domains(script: &str) -> Result<Vec<String>> {
+    let lua = Lua::new();
+    let table = load_connector_table(&lua, script)?;
+    let func: Function = table
+        .get("intercept_domains")
+        .map_err(lua_error)
+        .map_err(|_| anyhow!("Lua connector missing function 'intercept_domains'"))?;
+    let ctx = lua.to_value(&json!({})).map_err(lua_error)?;
+    let value: Value = func.call(ctx).map_err(lua_error)?;
+    parse_string_list(value)
+}
+
+pub fn run_intercept_url_pattern(script: &str) -> Result<Option<String>> {
+    let lua = Lua::new();
+    let table = load_connector_table(&lua, script)?;
+    let func: Function = table
+        .get("intercept_url_pattern")
+        .map_err(lua_error)
+        .map_err(|_| anyhow!("Lua connector missing function 'intercept_url_pattern'"))?;
+    let ctx = lua.to_value(&json!({})).map_err(lua_error)?;
+    let value: Value = func.call(ctx).map_err(lua_error)?;
+    parse_optional_string(value)
+}
+
+pub fn run_recon(script: &str, is_semantic: bool) -> Result<ReconResult> {
+    let lua = Lua::new();
+    let table = load_connector_table(&lua, script)?;
+    let func: Function = table
+        .get("recon")
+        .map_err(lua_error)
+        .map_err(|_| anyhow!("Lua connector missing function 'recon'"))?;
+    let ctx = lua.to_value(&json!({})).map_err(lua_error)?;
+    let value: Value = func.call((ctx, is_semantic)).map_err(lua_error)?;
+    let recon: ReconResult = lua.from_value(value).map_err(lua_error)?;
+    Ok(recon)
+}
+
+pub fn run_create_session(
+    script: &str,
+    context: &SessionContext,
+    process_path: Option<String>,
+) -> Result<JsonValue> {
+    let lua = Lua::new();
+    let table = load_connector_table(&lua, script)?;
+    let func: Function = table
+        .get("create_session")
+        .map_err(lua_error)
+        .map_err(|_| anyhow!("Lua connector missing required function 'create_session'"))?;
+
+    let ctx_json = json!({
+        "working_dir": context.working_dir,
+        "yolo_mode": context.yolo_mode,
+        "process_path": process_path,
+    });
+    let ctx = lua.to_value(&ctx_json).map_err(lua_error)?;
+    let value: Value = func.call(ctx).map_err(lua_error)?;
+    let state: JsonValue = lua.from_value(value).map_err(lua_error)?;
+
+    Ok(state)
+}
+
+pub fn run_session_transact(
+    script: &str,
+    context: &SessionContext,
+    state: &JsonValue,
+    prompt: &str,
+) -> Result<(String, JsonValue)> {
+    let lua = Lua::new();
+    let table = load_connector_table(&lua, script)?;
+    let func: Function = table
+        .get("session_transact")
+        .map_err(lua_error)
+        .map_err(|_| anyhow!("Lua connector missing required function 'session_transact'"))?;
+
+    let ctx = lua.to_value(context).map_err(lua_error)?;
+    let lua_state = lua.to_value(state).map_err(lua_error)?;
+    let result: Value = func.call((ctx, lua_state, prompt)).map_err(lua_error)?;
+    parse_transact_result(&lua, result)
+}
+
+pub fn run_session_close(script: &str, context: &SessionContext, state: &JsonValue) -> Result<()> {
+    let lua = Lua::new();
+    let table = load_connector_table(&lua, script)?;
+    let func: Function = table
+        .get("session_close")
+        .map_err(lua_error)
+        .map_err(|_| anyhow!("Lua connector missing required function 'session_close'"))?;
+
+    let ctx = lua.to_value(context).map_err(lua_error)?;
+    let lua_state = lua.to_value(state).map_err(lua_error)?;
+    let _: MultiValue = func.call((ctx, lua_state)).map_err(lua_error)?;
+    Ok(())
+}
+
+pub fn run_session_abort(script: &str, context: &SessionContext, state: &JsonValue) -> Result<bool> {
+    let lua = Lua::new();
+    let table = load_connector_table(&lua, script)?;
+    let func: Function = table
+        .get("session_abort")
+        .map_err(lua_error)
+        .map_err(|_| anyhow!("Lua connector missing function 'session_abort'"))?;
+
+    let ctx = lua.to_value(context).map_err(lua_error)?;
+    let lua_state = lua.to_value(state).map_err(lua_error)?;
+    let value: Value = func.call((ctx, lua_state)).map_err(lua_error)?;
+    match value {
+        Value::Boolean(b) => Ok(b),
+        _ => Ok(false),
+    }
+}
+
+fn load_connector_table(lua: &Lua, script: &str) -> Result<Table> {
+    install_shared_api(lua)?;
+    install_shared_libraries(lua)?;
+    let value: Value = lua.load(script).eval().map_err(lua_error)?;
+    match value {
+        Value::Table(t) => Ok(t),
+        _ => Err(anyhow!("Lua connector script must return a table")),
+    }
+}
+
+fn install_shared_api(lua: &Lua) -> Result<()> {
+    let praxis = lua.create_table().map_err(lua_error)?;
+
+    praxis
+        .set(
+            "os_name",
+            lua.create_function(|_, ()| {
+                #[cfg(windows)]
+                {
+                    Ok("windows".to_string())
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    Ok("linux".to_string())
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    Ok("macos".to_string())
+                }
+                #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+                {
+                    Ok("unknown".to_string())
+                }
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "uuid_v4",
+            lua.create_function(|_, ()| Ok(uuid::Uuid::new_v4().to_string()))
+                .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "now_unix",
+            lua.create_function(|_, ()| Ok(chrono::Utc::now().timestamp()))
+                .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "sha256_hex",
+            lua.create_function(|_, input: String| {
+                let mut hasher = Sha256::new();
+                hasher.update(input.as_bytes());
+                Ok(format!("{:x}", hasher.finalize()))
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "json_decode",
+            lua.create_function(|lua, input: String| {
+                let value: JsonValue = serde_json::from_str(&input)
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+                lua.to_value(&value)
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "json_encode",
+            lua.create_function(|lua, value: Value| {
+                let json: JsonValue = lua.from_value(value).map_err(lua_error).map_err(|e| {
+                    mlua::Error::RuntimeError(e.to_string())
+                })?;
+                serde_json::to_string(&json)
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "path_join",
+            lua.create_function(|_, parts: Vec<String>| {
+                let mut buf = PathBuf::new();
+                for part in parts {
+                    if part.is_empty() {
+                        continue;
+                    }
+                    buf.push(part);
+                }
+                let joined = buf.to_string_lossy().to_string().replace('\\', "/");
+                Ok(joined)
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "path_exists",
+            lua.create_function(|_, path: String| Ok(Path::new(&path).exists()))
+                .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "path_is_dir",
+            lua.create_function(|_, path: String| Ok(Path::new(&path).is_dir()))
+                .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "path_parent",
+            lua.create_function(|_, path: String| {
+                Ok(Path::new(&path)
+                    .parent()
+                    .map(|p| p.to_string_lossy().to_string()))
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "expand_path",
+            lua.create_function(|_, template: String| {
+                Ok(crate::agent_connectors::utils::expand_path(&template))
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "env_get",
+            lua.create_function(|_, key: String| Ok(std::env::var(&key).ok()))
+                .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "env_get_for_home",
+            lua.create_function(|_, (key, home): (String, Option<String>)| {
+                Ok(env_get_for_home(&key, home.as_deref()))
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "user_homes",
+            lua.create_function(|_, ()| {
+                Ok(crate::agent_connectors::utils::enumerate_user_homes()
+                    .into_iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect::<Vec<_>>())
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "extract_user_home",
+            lua.create_function(|_, path: String| {
+                Ok(crate::agent_connectors::utils::extract_user_home_from_path(&path)
+                    .map(|p| p.to_string_lossy().to_string()))
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "find_executables",
+            lua.create_function(|_, name: String| {
+                Ok(crate::utils::find_all_executables_in_path(&name))
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "read_file",
+            lua.create_function(|_, path: String| Ok(std::fs::read_to_string(path).ok()))
+                .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "read_dir",
+            lua.create_function(|lua, path: String| {
+                let mut entries = Vec::<JsonValue>::new();
+                let iter = std::fs::read_dir(&path)
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+                for entry in iter.flatten() {
+                    let p = entry.path();
+                    let md = entry.metadata().ok();
+                    let modified = md
+                        .as_ref()
+                        .and_then(|m| m.modified().ok())
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs() as i64);
+                    entries.push(json!({
+                        "path": p.to_string_lossy().to_string(),
+                        "name": p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string(),
+                        "is_dir": p.is_dir(),
+                        "is_file": p.is_file(),
+                        "modified_unix": modified
+                    }));
+                }
+                lua.to_value(&entries)
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "walk_files",
+            lua.create_function(|lua, (base, max_depth): (String, usize)| {
+                let mut out = Vec::<String>::new();
+                for entry in walkdir::WalkDir::new(base).max_depth(max_depth).into_iter().flatten()
+                {
+                    if entry.file_type().is_file() {
+                        out.push(entry.path().to_string_lossy().to_string());
+                    }
+                }
+                lua.to_value(&out)
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "command_run",
+            lua.create_function(|lua, spec: Value| {
+                let spec_json: JsonValue = lua.from_value(spec).map_err(lua_error).map_err(|e| {
+                    mlua::Error::RuntimeError(e.to_string())
+                })?;
+                let result = run_command(&spec_json, None)
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+                lua.to_value(&result)
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "command_run_handle",
+            lua.create_function(|lua, (spec, handle): (Value, String)| {
+                let spec_json: JsonValue = lua.from_value(spec).map_err(lua_error).map_err(|e| {
+                    mlua::Error::RuntimeError(e.to_string())
+                })?;
+                let result = run_command(&spec_json, Some(handle))
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+                lua.to_value(&result)
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "command_abort_handle",
+            lua.create_function(|_, handle: String| {
+                Ok(abort_handle(&handle))
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    lua.globals().set("praxis", praxis).map_err(lua_error)?;
+    Ok(())
+}
+
+fn install_shared_libraries(lua: &Lua) -> Result<()> {
+    let package: Table = lua.globals().get("package").map_err(lua_error)?;
+    let preload: Table = package.get("preload").map_err(lua_error)?;
+
+    let helpers_src = include_str!("lib/helpers.lua");
+    let helpers_loader = lua
+        .create_function(move |lua, ()| {
+            let value: Value = lua.load(helpers_src).eval().map_err(|e| {
+                mlua::Error::RuntimeError(format!("Failed to load praxis.helpers: {}", e))
+            })?;
+            Ok(value)
+        })
+        .map_err(lua_error)?;
+
+    preload
+        .set("praxis.helpers", helpers_loader)
+        .map_err(lua_error)?;
+
+    Ok(())
+}
+
+fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValue> {
+    let spec: CommandSpec = serde_json::from_value(spec_json.clone())
+        .map_err(|e| anyhow!("Invalid command spec: {}", e))?;
+    if spec.program.trim().is_empty() {
+        return Err(anyhow!("Command program is required"));
+    }
+
+    let mut cmd = crate::agent_connectors::utils::build_command(&spec.program);
+    cmd.args(&spec.args);
+
+    if let Some(cwd) = &spec.cwd {
+        cmd.current_dir(cwd);
+        crate::agent_connectors::utils::configure_command_for_directory(&mut cmd, Path::new(cwd));
+    }
+
+    for (k, v) in &spec.env {
+        cmd.env(k, v);
+    }
+
+    let result = if let Some(stdin) = &spec.stdin {
+        let pid_cell = get_handle_pid_cell(handle);
+        match crate::agent_connectors::utils::run_command_with_stdin_cancellable(
+            &mut cmd,
+            stdin,
+            pid_cell.as_ref(),
+        ) {
+            Ok(stdout) => json!({
+                "success": true,
+                "status": 0,
+                "stdout": stdout,
+                "stderr": ""
+            }),
+            Err(e) => json!({
+                "success": false,
+                "status": 1,
+                "stdout": "",
+                "stderr": e.to_string()
+            }),
+        }
+    } else {
+        let output = cmd.output()?;
+        json!({
+            "success": output.status.success(),
+            "status": output.status.code().unwrap_or_default(),
+            "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
+            "stderr": String::from_utf8_lossy(&output.stderr).to_string()
+        })
+    };
+
+    Ok(result)
+}
+
+fn get_handle_pid_cell(handle: Option<String>) -> Arc<AtomicU32> {
+    let handle = handle.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let mut map = COMMAND_HANDLES.lock().unwrap();
+    map.entry(handle)
+        .or_insert_with(|| Arc::new(AtomicU32::new(0)))
+        .clone()
+}
+
+fn abort_handle(handle: &str) -> bool {
+    let map = COMMAND_HANDLES.lock().unwrap();
+    let Some(cell) = map.get(handle) else {
+        return false;
+    };
+    let pid = cell.load(Ordering::SeqCst);
+    if pid == 0 {
+        return false;
+    }
+    let killed = crate::utils::terminate_process_tree(pid);
+    cell.store(0, Ordering::SeqCst);
+    killed > 0
+}
+
+pub fn abort_command_handle(handle: &str) -> bool {
+    abort_handle(handle)
+}
+
+fn parse_available(value: Value) -> Result<bool> {
+    match value {
+        Value::Boolean(b) => Ok(b),
+        Value::Table(t) => Ok(t.get::<bool>("available").unwrap_or(false)),
+        _ => Err(anyhow!("fingerprint must return a boolean or table")),
+    }
+}
+
+fn parse_fingerprint_details(value: Value) -> Result<(bool, Option<String>)> {
+    match value {
+        Value::Boolean(b) => Ok((b, None)),
+        Value::Table(t) => {
+            let available = t.get::<bool>("available").unwrap_or(false);
+            let process_path = match t.get::<Value>("process_path") {
+                Ok(Value::String(s)) => Some(s.to_str().map_err(lua_error)?.to_string()),
+                _ => None,
+            };
+            Ok((available, process_path))
+        }
+        _ => Err(anyhow!("fingerprint must return a boolean or table")),
+    }
+}
+
+fn parse_string_list(value: Value) -> Result<Vec<String>> {
+    match value {
+        Value::Table(t) => {
+            let mut out = Vec::new();
+            for v in t.sequence_values::<String>() {
+                out.push(v.map_err(lua_error)?);
+            }
+            Ok(out)
+        }
+        Value::Nil => Ok(Vec::new()),
+        _ => Err(anyhow!("Expected string array")),
+    }
+}
+
+fn parse_optional_string(value: Value) -> Result<Option<String>> {
+    match value {
+        Value::String(s) => Ok(Some(s.to_str().map_err(lua_error)?.to_string())),
+        Value::Nil => Ok(None),
+        _ => Err(anyhow!("Expected string or nil")),
+    }
+}
+
+fn parse_transact_result(lua: &Lua, value: Value) -> Result<(String, JsonValue)> {
+    let table = match value {
+        Value::Table(t) => t,
+        _ => return Err(anyhow!("session_transact must return a table")),
+    };
+
+    let response: String = table
+        .get("response")
+        .map_err(lua_error)
+        .map_err(|_| anyhow!("session_transact result missing 'response'"))?;
+    let state_value: Value = table.get("state").map_err(lua_error).unwrap_or(Value::Nil);
+    let state = if matches!(state_value, Value::Nil) {
+        JsonValue::Null
+    } else {
+        lua.from_value(state_value).map_err(lua_error)?
+    };
+
+    Ok((response, state))
+}
+
+#[cfg(unix)]
+fn env_get_for_home(key: &str, home: Option<&str>) -> Option<String> {
+    if let Ok(value) = std::env::var(key) {
+        if !value.is_empty() {
+            return Some(value);
+        }
+    }
+
+    let Some(home) = home else {
+        return None;
+    };
+    let home = home.trim();
+    if home.is_empty() {
+        return None;
+    }
+    let home_path = Path::new(home);
+
+    let mut target_uid: Option<u32> = None;
+    let mut target_gid: Option<u32> = None;
+    if let Ok(passwd) = std::fs::read_to_string("/etc/passwd") {
+        for line in passwd.lines() {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let parts: Vec<&str> = line.split(':').collect();
+            if parts.len() < 7 {
+                continue;
+            }
+            if parts[5] == home {
+                if let (Ok(uid), Ok(gid)) = (parts[2].parse::<u32>(), parts[3].parse::<u32>()) {
+                    target_uid = Some(uid);
+                    target_gid = Some(gid);
+                    break;
+                }
+            }
+        }
+    }
+
+    use std::os::unix::process::CommandExt;
+    if nix::unistd::Uid::effective().is_root() {
+        if let (Some(uid), Some(gid)) = (target_uid, target_gid) {
+            let mut cmd = std::process::Command::new("sh");
+            cmd.arg("-lc")
+                .arg(format!("printf %s \"${{{}-}}\"", key))
+                .env("HOME", home)
+                .uid(uid)
+                .gid(gid);
+            if let Ok(output) = cmd.output() {
+                let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !value.is_empty() {
+                    return Some(value);
+                }
+            }
+        }
+    }
+
+    let pam_env = home_path.join(".pam_environment");
+    if let Ok(contents) = std::fs::read_to_string(pam_env) {
+        for line in contents.lines() {
+            let l = line.trim();
+            if l.is_empty() || l.starts_with('#') {
+                continue;
+            }
+            if let Some((k, v)) = l.split_once('=') {
+                if k.trim() == key {
+                    let value = v.trim().trim_matches('"').to_string();
+                    if !value.is_empty() {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(windows)]
+fn env_get_for_home(key: &str, home: Option<&str>) -> Option<String> {
+    if let Ok(value) = std::env::var(key) {
+        if !value.is_empty() {
+            return Some(value);
+        }
+    }
+
+    use winreg::enums::*;
+    use winreg::RegKey;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    if let Ok(env) = hkcu.open_subkey("Environment") {
+        if let Ok(value) = env.get_value::<String, _>(key) {
+            if !value.is_empty() {
+                return Some(value);
+            }
+        }
+    }
+
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    if let Ok(env) =
+        hklm.open_subkey("SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment")
+    {
+        if let Ok(value) = env.get_value::<String, _>(key) {
+            if !value.is_empty() {
+                return Some(value);
+            }
+        }
+    }
+
+    let Some(home) = home else {
+        return None;
+    };
+    let target_home = home.replace('/', "\\").to_lowercase();
+
+    if let Ok(profile_list) =
+        hklm.open_subkey("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList")
+    {
+        for sid in profile_list.enum_keys().flatten() {
+            let Ok(profile_key) = profile_list.open_subkey(&sid) else {
+                continue;
+            };
+            let Ok(profile_path) = profile_key.get_value::<String, _>("ProfileImagePath") else {
+                continue;
+            };
+            if profile_path.replace('/', "\\").to_lowercase() != target_home {
+                continue;
+            }
+
+            let hku = RegKey::predef(HKEY_USERS);
+            if let Ok(user_env) = hku.open_subkey(format!("{}\\Environment", sid)) {
+                if let Ok(value) = user_env.get_value::<String, _>(key) {
+                    if !value.is_empty() {
+                        return Some(value);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(not(any(unix, windows)))]
+fn env_get_for_home(key: &str, _home: Option<&str>) -> Option<String> {
+    std::env::var(key).ok().filter(|v| !v.is_empty())
+}

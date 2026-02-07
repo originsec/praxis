@@ -78,6 +78,17 @@ impl NodeRegistry {
         }
     }
 
+    pub async fn set_session_id(&self, node_id: &str, session_id: Option<String>) {
+        let mut agents = self.agents.write().await;
+        if let Some(node) = agents.get_mut(node_id) {
+            if let Some(ref mut update) = node.last_update {
+                if let Some(ref mut selected) = update.selected_agent {
+                    selected.session_id = session_id;
+                }
+            }
+        }
+    }
+
     pub async fn get(&self, id: &str) -> Option<RegisteredNode> {
         let agents = self.agents.read().await;
         agents.get(id).cloned()

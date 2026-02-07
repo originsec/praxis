@@ -228,19 +228,6 @@ pub enum BrowserMessage {
         /// If Some, get endpoints for a specific node; if None, get all
         node_id: Option<String>,
     },
-    /// Create a dynamic agent from a discovered endpoint
-    CreateDynamicAgent {
-        node_id: String,
-        endpoint_id: String,
-        agent_name: String,
-        short_name: String,
-    },
-    /// Delete a dynamic agent
-    DeleteDynamicAgent {
-        node_id: String,
-        short_name: String,
-    },
-
     //
     // Node event log messages.
     //
@@ -265,6 +252,21 @@ pub enum BrowserMessage {
         node_id: String,
         agent_short_name: String,
     },
+
+    //
+    // Lua agent script messages.
+    //
+    /// Add a Lua agent script
+    LuaAgentScriptAdd {
+        name: String,
+        script: String,
+    },
+    /// Delete a Lua agent script
+    LuaAgentScriptDelete {
+        script_id: String,
+    },
+    /// List all Lua agent scripts
+    LuaAgentScriptList,
 
     //
     // AgentChat messages.
@@ -519,16 +521,6 @@ pub enum ServerMessage {
     DiscoveredEndpointsList {
         endpoints: Vec<DiscoveredLlmEndpoint>,
     },
-    /// Dynamic agent created
-    DynamicAgentCreated {
-        node_id: String,
-        short_name: String,
-    },
-    /// Dynamic agent deleted
-    DynamicAgentDeleted {
-        node_id: String,
-        short_name: String,
-    },
     /// Agent discovery error
     AgentDiscoveryError {
         message: String,
@@ -558,6 +550,24 @@ pub enum ServerMessage {
         recon_result: Option<common::ReconResult>,
         performed_at: Option<String>,
         is_semantic: Option<bool>,
+    },
+
+    //
+    // Lua agent script messages.
+    //
+    /// Lua agent script added
+    LuaAgentScriptAdded {
+        id: String,
+        name: String,
+    },
+    /// Lua agent script deleted
+    LuaAgentScriptDeleted {
+        script_id: String,
+        success: bool,
+    },
+    /// Lua agent scripts list
+    LuaAgentScriptList {
+        scripts: Vec<common::LuaAgentScriptInfo>,
     },
 
     //

@@ -23,9 +23,11 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             if let Err(e) = ctx.node_handler.handle_node_registration(registration).await {
                 error!("Failed to handle NodeRegistration: {}", e);
             }
+
             //
             // Broadcast current event logging setting so new nodes align.
             //
+
             let enabled = {
                 let config = ctx.service_config.read().await;
                 config.get_bool(APPLICATION_LOGS_ENABLED, false)
@@ -34,6 +36,30 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             let _ = publish_json_exchange(&ctx.broadcast_channel, NODE_BROADCAST_EXCHANGE, &node_message).await;
             let client_message = ClientBroadcastMessage::EventLoggingSet { enabled };
             let _ = publish_json_exchange(&ctx.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &client_message).await;
+
+            //
+            // Broadcast AgentRegistryUpdate with all stored Lua scripts so the
+            // newly registered node (and all existing nodes) rebuild their
+            // registries.
+            //
+
+            match ctx.database.get_all_lua_scripts().await {
+                Ok(scripts) => {
+                    let update = NodeBroadcastMessage::AgentRegistryUpdate { scripts };
+                    if let Err(e) = publish_json_exchange(
+                        &ctx.broadcast_channel,
+                        NODE_BROADCAST_EXCHANGE,
+                        &update,
+                    )
+                    .await
+                    {
+                        error!("Failed to broadcast AgentRegistryUpdate: {}", e);
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to load Lua scripts for registry update: {}", e);
+                }
+            }
         }
 
         NodeSignalMessage::InformationUpdate(update) => {

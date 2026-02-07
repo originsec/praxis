@@ -442,34 +442,6 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
-    /// Create a dynamic agent from a discovered endpoint
-    pub async fn create_dynamic_agent(
-        &self,
-        node_id: String,
-        endpoint_id: String,
-        agent_name: String,
-        short_name: String,
-    ) -> Result<()> {
-        let message = ClientSignalMessage::CreateDynamicAgent {
-            client_id: self.state.client_id.clone(),
-            node_id,
-            endpoint_id,
-            agent_name,
-            short_name,
-        };
-        self.publish_signal(message).await
-    }
-
-    /// Delete a dynamic agent
-    pub async fn delete_dynamic_agent(&self, node_id: String, short_name: String) -> Result<()> {
-        let message = ClientSignalMessage::DeleteDynamicAgent {
-            client_id: self.state.client_id.clone(),
-            node_id,
-            short_name,
-        };
-        self.publish_signal(message).await
-    }
-
     /// Request node event log entries
     pub async fn request_node_event_log(
         &self,
@@ -505,6 +477,34 @@ impl RabbitMqClient {
             client_id: self.state.client_id.clone(),
             node_id,
             agent_short_name,
+        };
+        self.publish_signal(message).await
+    }
+
+    //
+    // Lua agent script methods.
+    //
+
+    pub async fn add_lua_agent_script(&self, name: String, script: String) -> Result<()> {
+        let message = ClientSignalMessage::LuaAgentScriptAdd {
+            client_id: self.state.client_id.clone(),
+            name,
+            script,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn delete_lua_agent_script(&self, script_id: String) -> Result<()> {
+        let message = ClientSignalMessage::LuaAgentScriptDelete {
+            client_id: self.state.client_id.clone(),
+            script_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn list_lua_agent_scripts(&self) -> Result<()> {
+        let message = ClientSignalMessage::LuaAgentScriptList {
+            client_id: self.state.client_id.clone(),
         };
         self.publish_signal(message).await
     }
@@ -945,12 +945,6 @@ impl RabbitMqClient {
             ClientDirectMessage::DiscoveredEndpointsListResponse { endpoints } => {
                 self.state.broadcast(ServerMessage::DiscoveredEndpointsList { endpoints });
             }
-            ClientDirectMessage::DynamicAgentCreated { node_id, short_name } => {
-                self.state.broadcast(ServerMessage::DynamicAgentCreated { node_id, short_name });
-            }
-            ClientDirectMessage::DynamicAgentDeleted { node_id, short_name } => {
-                self.state.broadcast(ServerMessage::DynamicAgentDeleted { node_id, short_name });
-            }
             ClientDirectMessage::AgentDiscoveryError { message } => {
                 self.state.broadcast(ServerMessage::AgentDiscoveryError { message });
             }
@@ -970,6 +964,19 @@ impl RabbitMqClient {
             //
             ClientDirectMessage::ReconGetResponse { node_id, agent_short_name, recon_result, performed_at, is_semantic } => {
                 self.state.broadcast(ServerMessage::ReconGetResponse { node_id, agent_short_name, recon_result, performed_at, is_semantic });
+            }
+
+            //
+            // Lua agent script responses.
+            //
+            ClientDirectMessage::LuaAgentScriptAdded { id, name } => {
+                self.state.broadcast(ServerMessage::LuaAgentScriptAdded { id, name });
+            }
+            ClientDirectMessage::LuaAgentScriptDeleted { script_id, success } => {
+                self.state.broadcast(ServerMessage::LuaAgentScriptDeleted { script_id, success });
+            }
+            ClientDirectMessage::LuaAgentScriptListResponse { scripts } => {
+                self.state.broadcast(ServerMessage::LuaAgentScriptList { scripts });
             }
 
             //

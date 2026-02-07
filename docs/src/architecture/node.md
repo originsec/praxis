@@ -34,26 +34,21 @@ The node is the component that runs on target systems. It's responsible for all 
 
 ## Agent Registry
 
-The agent registry manages all supported agent connectors. On startup:
+The agent registry manages all supported agent connectors. On startup the
+registry is built via `rebuild()` which:
 
-1. Factory creates instances of all connector types
-2. Each connector runs fingerprinting
-3. Successfully fingerprinted agents are registered
-4. Registry is reported to service
+1. Creates native agents from the factory (Claude Code, Codex, etc.)
+2. Loads embedded Lua connectors (e.g. Gemini)
+3. Loads Lua connectors from `~/.praxis/agents/`
 
-```rust
-// From factory.rs
-pub fn create_all_agents(&self) -> Vec<Arc<dyn Agent>> {
-    let mut agents = Vec::new();
-    agents.push(Arc::new(ClaudeCodeAgent::new()));
-    agents.push(Arc::new(GeminiAgent::new()));
-    #[cfg(target_os = "linux")]
-    agents.push(Arc::new(CodexAgent::new()));
-    #[cfg(windows)]
-    agents.push(Arc::new(M365CopilotAgent::new()));
-    agents
-}
-```
+After the node registers with the service, the service broadcasts an
+`AgentRegistryUpdate` containing all centrally-managed Lua scripts. The node
+atomically rebuilds its registry to include these scripts alongside native and
+local Lua agents.
+
+Updates are session-gated: if a session is open when an update arrives, it is
+queued and applied after the session closes. If multiple updates arrive while a
+session is open, only the latest is kept.
 
 ## Intercept Manager
 
@@ -180,12 +175,13 @@ The runtime processes messages from the service:
 
 ```rust
 pub enum NodeCommand {
-    Agent(AgentCommand),      // Agent operations
-    Session(SessionCommand),  // Session management
-    Intercept(InterceptCommand), // Interception control
-    Terminal(TerminalCommand),   // Terminal operations
-    Config(ConfigCommand),       // Configuration
-    AgentDiscovery(AgentDiscoveryCommand), // Discovery
+    Agent(AgentCommand),
+    Session(SessionCommand),
+    Intercept(InterceptCommand),
+    Terminal(TerminalCommand),
+    Config(ConfigCommand),
+    AgentRegistry(AgentRegistryCommand),
+    AgentDiscovery(AgentDiscoveryCommand),
 }
 ```
 

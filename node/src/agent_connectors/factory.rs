@@ -7,7 +7,6 @@ use super::codex::CodexAgent;
 use super::cursor::CursorAgent;
 #[allow(unused_imports)]
 use super::dummy::DummyAgent;
-use super::gemini::GeminiAgent;
 #[cfg(windows)]
 use super::m365copilot::M365CopilotAgent;
 use super::traits::Agent;
@@ -24,7 +23,6 @@ impl AgentFactory {
         let mut agents: Vec<Arc<dyn Agent>> = Vec::new();
 
         agents.push(Arc::new(ClaudeCodeAgent::new()));
-        agents.push(Arc::new(GeminiAgent::new()));
         agents.push(Arc::new(CodexAgent::new()));
 
         #[cfg(target_os = "linux")]

@@ -99,11 +99,16 @@ async fn main() {
     common::log_info!("Node ID: {}", node_id);
 
     //
-    // All supported agent targets are held in a registry.
-    // Each agent is a self-contained implementation.
+    // All supported agent targets are held in a registry. The initial registry
+    // contains native agents plus embedded and user-dir Lua agents. Service-
+    // managed Lua scripts are pushed via AgentRegistryUpdate after the node
+    // registers.
     //
-    let factory = AgentFactory::new();
-    let registry = Arc::new(RwLock::new(AgentRegistry::load_from_factory(&factory)));
+
+    let factory = Arc::new(AgentFactory::new());
+    let mut initial_registry = AgentRegistry::new();
+    initial_registry.rebuild(&factory, &[]);
+    let registry = Arc::new(RwLock::new(initial_registry));
 
     //
     // Main reconnection loop.
@@ -158,6 +163,7 @@ async fn main() {
             result.node_queue,
             registry.clone(),
             selected_agent,
+            factory.clone(),
             shutdown_token.clone(),
         )
         .await

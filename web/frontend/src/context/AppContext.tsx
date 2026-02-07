@@ -1065,8 +1065,6 @@ interface AppContextValue {
   enableAgentDiscovery: (nodeId: string) => void;
   disableAgentDiscovery: (nodeId: string) => void;
   requestDiscoveredEndpoints: (nodeId?: string) => void;
-  createDynamicAgent: (nodeId: string, endpointId: string, agentName: string, shortName: string) => void;
-  deleteDynamicAgent: (nodeId: string, shortName: string) => void;
   clearDiscoveryError: () => void;
   //
   // Event log panel.
@@ -1284,16 +1282,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         //
         case 'discovered_endpoints_list':
           dispatch({ type: 'SET_DISCOVERED_ENDPOINTS', endpoints: message.endpoints });
-          break;
-        case 'dynamic_agent_created':
-          //
-          // TODO: Show success toast.
-          //
-          break;
-        case 'dynamic_agent_deleted':
-          //
-          // TODO: Show success toast.
-          //
           break;
         case 'agent_discovery_error':
           dispatch({ type: 'SET_DISCOVERY_ERROR', error: message.message });
@@ -1702,29 +1690,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     wsClient.send({ type: 'discovered_endpoints_request', node_id: nodeId ?? null });
   }, []);
 
-  const createDynamicAgent = useCallback((
-    nodeId: string,
-    endpointId: string,
-    agentName: string,
-    shortName: string
-  ) => {
-    wsClient.send({
-      type: 'create_dynamic_agent',
-      node_id: nodeId,
-      endpoint_id: endpointId,
-      agent_name: agentName,
-      short_name: shortName,
-    });
-  }, []);
-
-  const deleteDynamicAgent = useCallback((nodeId: string, shortName: string) => {
-    wsClient.send({
-      type: 'delete_dynamic_agent',
-      node_id: nodeId,
-      short_name: shortName,
-    });
-  }, []);
-
   const clearDiscoveryError = useCallback(() => {
     dispatch({ type: 'SET_DISCOVERY_ERROR', error: null });
   }, []);
@@ -1887,8 +1852,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     enableAgentDiscovery,
     disableAgentDiscovery,
     requestDiscoveredEndpoints,
-    createDynamicAgent,
-    deleteDynamicAgent,
     clearDiscoveryError,
     //
     // Event log panel.
