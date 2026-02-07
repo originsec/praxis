@@ -15,6 +15,8 @@ mod state;
 
 use anyhow::Result;
 pub use common::rabbitmq_url;
+
+include!(concat!(env!("OUT_DIR"), "/embedded_lua.rs"));
 use common::{
     publish_json_exchange, ClientBroadcastMessage, ClientSignalMessage,
     NodeBroadcastMessage, NodeSignalMessage, CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE,
@@ -175,6 +177,30 @@ async fn run_main_loop() -> Result<()> {
     info!("Database configuration: {}", db_config.display_name());
 
     let database = Arc::new(Database::new(&db_config).await?);
+
+    //
+    // Seed default Lua agent scripts if the table is empty.
+    //
+    match database.list_lua_agent_scripts().await {
+        Ok(scripts) if scripts.is_empty() => {
+            let mut seeded = 0usize;
+            for (name, content) in EMBEDDED_LUA_SCRIPTS {
+                let id = uuid::Uuid::new_v4().to_string();
+                if let Err(e) = database.upsert_lua_agent_script(&id, name, content).await {
+                    warn!("Failed to seed Lua agent script '{}': {}", name, e);
+                } else {
+                    seeded += 1;
+                }
+            }
+            if seeded > 0 {
+                info!("Seeded {} default Lua agent script(s)", seeded);
+            }
+        }
+        Err(e) => {
+            warn!("Failed to check Lua agent scripts for seeding: {}", e);
+        }
+        _ => {}
+    }
 
     //
     // Mark any running operations as failed (service restart).

@@ -89,6 +89,24 @@ impl Database {
         Ok(rows_affected > 0)
     }
 
+    pub async fn clear_lua_agent_scripts(&self) -> Result<u64> {
+        let rows_affected = match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query("DELETE FROM lua_agent_scripts")
+                    .execute(pool)
+                    .await?
+                    .rows_affected()
+            }
+            DatabasePool::Postgres(pool) => {
+                sqlx::query("DELETE FROM lua_agent_scripts")
+                    .execute(pool)
+                    .await?
+                    .rows_affected()
+            }
+        };
+        Ok(rows_affected)
+    }
+
     pub async fn get_all_lua_scripts(&self) -> Result<Vec<String>> {
         match &self.pool {
             DatabasePool::Sqlite(pool) => {

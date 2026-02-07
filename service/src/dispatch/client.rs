@@ -1714,6 +1714,94 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             }
         }
 
+        ClientSignalMessage::LuaAgentScriptUpdate {
+            client_id,
+            script_id,
+            name,
+            script,
+        } => {
+            info!(
+                "Received LuaAgentScriptUpdate from client {}",
+                &client_id[..8.min(client_id.len())]
+            );
+
+            match ctx.database.upsert_lua_agent_script(&script_id, &name, &script).await {
+                Ok(()) => {
+                    let _ = send_to_client(
+                        &ctx.client_publish_channel,
+                        &client_id,
+                        ClientDirectMessage::LuaAgentScriptUpdated {
+                            id: script_id.clone(),
+                            name: name.clone(),
+                        },
+                    )
+                    .await;
+
+                    if let Ok(scripts) = ctx.database.get_all_lua_scripts().await {
+                        let scripts: Vec<String> = scripts
+                            .iter()
+                            .map(|s| STANDARD.encode(s.as_bytes()))
+                            .collect();
+                        let update = NodeBroadcastMessage::AgentRegistryUpdate { scripts };
+                        let _ = publish_json_exchange(
+                            &ctx.broadcast_channel,
+                            NODE_BROADCAST_EXCHANGE,
+                            &update,
+                        )
+                        .await;
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to update Lua agent script: {}", e);
+                }
+            }
+        }
+
+        ClientSignalMessage::LuaAgentScriptResetDefaults { client_id } => {
+            info!(
+                "Received LuaAgentScriptResetDefaults from client {}",
+                &client_id[..8.min(client_id.len())]
+            );
+
+            match ctx.database.clear_lua_agent_scripts().await {
+                Ok(_) => {
+                    let mut count = 0usize;
+                    for (name, content) in crate::EMBEDDED_LUA_SCRIPTS {
+                        let id = uuid::Uuid::new_v4().to_string();
+                        if let Err(e) = ctx.database.upsert_lua_agent_script(&id, name, content).await {
+                            error!("Failed to seed Lua agent script '{}': {}", name, e);
+                        } else {
+                            count += 1;
+                        }
+                    }
+
+                    let _ = send_to_client(
+                        &ctx.client_publish_channel,
+                        &client_id,
+                        ClientDirectMessage::LuaAgentScriptDefaultsReset { count },
+                    )
+                    .await;
+
+                    if let Ok(scripts) = ctx.database.get_all_lua_scripts().await {
+                        let scripts: Vec<String> = scripts
+                            .iter()
+                            .map(|s| STANDARD.encode(s.as_bytes()))
+                            .collect();
+                        let update = NodeBroadcastMessage::AgentRegistryUpdate { scripts };
+                        let _ = publish_json_exchange(
+                            &ctx.broadcast_channel,
+                            NODE_BROADCAST_EXCHANGE,
+                            &update,
+                        )
+                        .await;
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to reset Lua agent scripts to defaults: {}", e);
+                }
+            }
+        }
+
         ClientSignalMessage::LuaAgentScriptList { client_id } => {
             info!(
                 "Received LuaAgentScriptList from client {}",

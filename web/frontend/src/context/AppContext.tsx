@@ -38,6 +38,7 @@ import type {
   AgentChatChannelInfo,
   AgentChatMessageInfo,
   AgentChatSessionState,
+  LuaAgentScriptInfo,
 } from '../api/types';
 
 //
@@ -175,6 +176,7 @@ interface AppState {
   discovery: DiscoveryState;
   agentChat: AgentChatState;
   eventLogPanel: EventLogPanelState;
+  luaAgentScripts: LuaAgentScriptInfo[];
   //
   // Agent session messages keyed by session_id.
   //
@@ -207,6 +209,7 @@ function createInitialState(): AppState {
     discovery: initialDiscoveryState,
     agentChat: initialAgentChatState,
     eventLogPanel: initialEventLogPanelState,
+    luaAgentScripts: [],
     agentSessionMessages: {},
     recentlyAccessedNodeIds: loadRecentNodes(MAX_RECENT_NODES),
   };
@@ -301,7 +304,11 @@ type Action =
   | { type: 'AGENT_CHAT_ERROR'; message: string }
   | { type: 'AGENT_CHAT_SET_CURRENT_CHANNEL'; channelId: string | null }
   | { type: 'AGENT_CHAT_CLEAR_ERROR' }
-  | { type: 'AGENT_CHAT_SET_LOADING'; loading: boolean };
+  | { type: 'AGENT_CHAT_SET_LOADING'; loading: boolean }
+  //
+  // Lua agent script actions.
+  //
+  | { type: 'SET_LUA_AGENT_SCRIPTS'; scripts: LuaAgentScriptInfo[] };
 
 function reduceCore(state: AppState, action: Action): AppState | null {
   switch (action.type) {
@@ -333,6 +340,8 @@ function reduceCore(state: AppState, action: Action): AppState | null {
       return { ...state, opDefError: action.error, opDefSuccess: null };
     case 'SET_OP_DEF_SUCCESS':
       return { ...state, opDefSuccess: action.fullName, opDefError: null };
+    case 'SET_LUA_AGENT_SCRIPTS':
+      return { ...state, luaAgentScripts: action.scripts };
     default:
       return null;
   }
@@ -1085,6 +1094,14 @@ interface AppContextValue {
   agentChatGetState: () => void;
   agentChatSetCurrentChannel: (channelId: string | null) => void;
   agentChatClearError: () => void;
+  //
+  // Lua agent scripts.
+  //
+  listLuaAgentScripts: () => void;
+  addLuaAgentScript: (name: string, script: string) => void;
+  updateLuaAgentScript: (scriptId: string, name: string, script: string) => void;
+  deleteLuaAgentScript: (scriptId: string) => void;
+  resetLuaAgentScriptDefaults: () => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -1311,6 +1328,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // Dispatch as custom event for AgentDetailPage to catch.
           //
           window.dispatchEvent(new CustomEvent('ws-message', { detail: message }));
+          break;
+
+        //
+        // Lua agent script messages.
+        //
+        case 'lua_agent_script_added':
+        case 'lua_agent_script_updated':
+        case 'lua_agent_script_deleted':
+        case 'lua_agent_script_defaults_reset':
+          wsClient.send({ type: 'lua_agent_script_list' });
+          break;
+        case 'lua_agent_script_list':
+          dispatch({ type: 'SET_LUA_AGENT_SCRIPTS', scripts: message.scripts });
           break;
 
         //
@@ -1798,6 +1828,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'AGENT_CHAT_CLEAR_ERROR' });
   }, []);
 
+  //
+  // Lua agent script functions.
+  //
+  const listLuaAgentScripts = useCallback(() => {
+    wsClient.send({ type: 'lua_agent_script_list' });
+  }, []);
+
+  const addLuaAgentScript = useCallback((name: string, script: string) => {
+    wsClient.send({ type: 'lua_agent_script_add', name, script });
+  }, []);
+
+  const updateLuaAgentScript = useCallback((scriptId: string, name: string, script: string) => {
+    wsClient.send({ type: 'lua_agent_script_update', script_id: scriptId, name, script });
+  }, []);
+
+  const deleteLuaAgentScript = useCallback((scriptId: string) => {
+    wsClient.send({ type: 'lua_agent_script_delete', script_id: scriptId });
+  }, []);
+
+  const resetLuaAgentScriptDefaults = useCallback(() => {
+    wsClient.send({ type: 'lua_agent_script_reset_defaults' });
+  }, []);
+
   const value: AppContextValue = {
     state,
     getNode,
@@ -1872,6 +1925,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     agentChatGetState,
     agentChatSetCurrentChannel,
     agentChatClearError,
+    //
+    // Lua agent scripts.
+    //
+    listLuaAgentScripts,
+    addLuaAgentScript,
+    updateLuaAgentScript,
+    deleteLuaAgentScript,
+    resetLuaAgentScriptDefaults,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

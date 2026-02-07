@@ -1407,6 +1407,15 @@ pub enum ClientSignalMessage {
     LuaAgentScriptList {
         client_id: String,
     },
+    LuaAgentScriptUpdate {
+        client_id: String,
+        script_id: String,
+        name: String,
+        script: String,
+    },
+    LuaAgentScriptResetDefaults {
+        client_id: String,
+    },
 
     //
     // AgentChat - IRC-style multi-agent chat.
@@ -1674,6 +1683,8 @@ pub enum ClientDirectMessage {
     LuaAgentScriptAdded { id: String, name: String },
     LuaAgentScriptDeleted { script_id: String, success: bool },
     LuaAgentScriptListResponse { scripts: Vec<LuaAgentScriptInfo> },
+    LuaAgentScriptUpdated { id: String, name: String },
+    LuaAgentScriptDefaultsReset { count: usize },
 
     //
     // AgentChat responses.

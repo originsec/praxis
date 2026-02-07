@@ -247,8 +247,14 @@ pub async fn handle_browser_message(
         BrowserMessage::LuaAgentScriptAdd { name, script } => {
             state.rabbitmq.add_lua_agent_script(name, script).await?;
         }
+        BrowserMessage::LuaAgentScriptUpdate { script_id, name, script } => {
+            state.rabbitmq.update_lua_agent_script(script_id, name, script).await?;
+        }
         BrowserMessage::LuaAgentScriptDelete { script_id } => {
             state.rabbitmq.delete_lua_agent_script(script_id).await?;
+        }
+        BrowserMessage::LuaAgentScriptResetDefaults => {
+            state.rabbitmq.reset_lua_agent_script_defaults().await?;
         }
         BrowserMessage::LuaAgentScriptList => {
             state.rabbitmq.list_lua_agent_scripts().await?;

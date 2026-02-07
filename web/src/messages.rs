@@ -265,6 +265,14 @@ pub enum BrowserMessage {
     LuaAgentScriptDelete {
         script_id: String,
     },
+    /// Update a Lua agent script
+    LuaAgentScriptUpdate {
+        script_id: String,
+        name: String,
+        script: String,
+    },
+    /// Reset Lua agent scripts to defaults
+    LuaAgentScriptResetDefaults,
     /// List all Lua agent scripts
     LuaAgentScriptList,
 
@@ -564,6 +572,15 @@ pub enum ServerMessage {
     LuaAgentScriptDeleted {
         script_id: String,
         success: bool,
+    },
+    /// Lua agent script updated
+    LuaAgentScriptUpdated {
+        id: String,
+        name: String,
+    },
+    /// Lua agent scripts reset to defaults
+    LuaAgentScriptDefaultsReset {
+        count: usize,
     },
     /// Lua agent scripts list
     LuaAgentScriptList {

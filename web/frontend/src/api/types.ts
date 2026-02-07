@@ -677,7 +677,9 @@ export type BrowserMessage =
   // Lua agent script messages.
   //
   | { type: 'lua_agent_script_add'; name: string; script: string }
+  | { type: 'lua_agent_script_update'; script_id: string; name: string; script: string }
   | { type: 'lua_agent_script_delete'; script_id: string }
+  | { type: 'lua_agent_script_reset_defaults' }
   | { type: 'lua_agent_script_list' }
   //
   // Agent Chat messages.
@@ -763,7 +765,9 @@ export type ServerMessage =
   // Lua agent script messages.
   //
   | { type: 'lua_agent_script_added'; id: string; name: string }
+  | { type: 'lua_agent_script_updated'; id: string; name: string }
   | { type: 'lua_agent_script_deleted'; script_id: string; success: boolean }
+  | { type: 'lua_agent_script_defaults_reset'; count: number }
   | { type: 'lua_agent_script_list'; scripts: LuaAgentScriptInfo[] }
   //
   // Agent Chat messages.

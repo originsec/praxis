@@ -16,7 +16,7 @@ fn main() {
     let dest = Path::new(&out_dir).join("embedded_lua.rs");
     let mut out = fs::File::create(&dest).unwrap();
 
-    let mut entries: Vec<String> = Vec::new();
+    let mut entries: Vec<(String, String)> = Vec::new();
 
     if scripts_dir.exists() {
         for entry in fs::read_dir(&scripts_dir).unwrap() {
@@ -24,20 +24,21 @@ fn main() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("lua") {
                 println!("cargo:rerun-if-changed={}", path.display());
+                let stem = path.file_stem().unwrap().to_string_lossy().to_string();
                 let file_name = path.file_name().unwrap().to_string_lossy().to_string();
-                entries.push(file_name);
+                entries.push((stem, file_name));
             }
         }
     }
 
-    entries.sort();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
 
-    writeln!(out, "pub const EMBEDDED_LUA_SCRIPTS: &[&str] = &[").unwrap();
-    for file_name in &entries {
+    writeln!(out, "pub const EMBEDDED_LUA_SCRIPTS: &[(&str, &str)] = &[").unwrap();
+    for (stem, file_name) in &entries {
         writeln!(
             out,
-            "    include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../agents/{}\")),",
-            file_name
+            "    (\"{}\", include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../agents/{}\"))),",
+            stem, file_name
         )
         .unwrap();
     }

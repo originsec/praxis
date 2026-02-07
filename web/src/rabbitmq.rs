@@ -494,6 +494,23 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
+    pub async fn update_lua_agent_script(&self, script_id: String, name: String, script: String) -> Result<()> {
+        let message = ClientSignalMessage::LuaAgentScriptUpdate {
+            client_id: self.state.client_id.clone(),
+            script_id,
+            name,
+            script,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn reset_lua_agent_script_defaults(&self) -> Result<()> {
+        let message = ClientSignalMessage::LuaAgentScriptResetDefaults {
+            client_id: self.state.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
     pub async fn delete_lua_agent_script(&self, script_id: String) -> Result<()> {
         let message = ClientSignalMessage::LuaAgentScriptDelete {
             client_id: self.state.client_id.clone(),
@@ -972,8 +989,14 @@ impl RabbitMqClient {
             ClientDirectMessage::LuaAgentScriptAdded { id, name } => {
                 self.state.broadcast(ServerMessage::LuaAgentScriptAdded { id, name });
             }
+            ClientDirectMessage::LuaAgentScriptUpdated { id, name } => {
+                self.state.broadcast(ServerMessage::LuaAgentScriptUpdated { id, name });
+            }
             ClientDirectMessage::LuaAgentScriptDeleted { script_id, success } => {
                 self.state.broadcast(ServerMessage::LuaAgentScriptDeleted { script_id, success });
+            }
+            ClientDirectMessage::LuaAgentScriptDefaultsReset { count } => {
+                self.state.broadcast(ServerMessage::LuaAgentScriptDefaultsReset { count });
             }
             ClientDirectMessage::LuaAgentScriptListResponse { scripts } => {
                 self.state.broadcast(ServerMessage::LuaAgentScriptList { scripts });

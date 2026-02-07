@@ -70,11 +70,33 @@ Not all agents support all features. The core capabilities - fingerprinting, tra
 
 **MCP discovery** only applies to agents that support the Model Context Protocol for tool extensions.
 
+## Lua-Based Connectors
+
+In addition to compiled Rust connectors, Praxis supports writing agent connectors in Lua. Lua scripts are stored in the service database and pushed to nodes via the agent registry.
+
+### Default Scripts
+
+Default Lua agent scripts live in the `agents/` directory at the project root. These are embedded into both the node and service binaries at build time:
+
+- **Node**: Scripts from `agents/` are compiled into the node binary and loaded on startup as fallback connectors.
+- **Service**: Scripts are embedded and seeded into the `lua_agent_scripts` database table on first startup (when the table is empty).
+
+### Managing Scripts
+
+Lua agent scripts can be managed through the **Agents** tab in the Settings page of the web UI. From there you can:
+
+- View and edit existing scripts
+- Add new scripts (manually or by uploading `.lua` files)
+- Delete scripts
+- Reset all scripts back to the built-in defaults
+
+When scripts are modified in the database, the service broadcasts an agent registry update to all connected nodes so they reload the latest scripts.
+
 ## Adding New Connectors
 
 Want to add support for another agent? See [Adding New Connectors](./adding-new.md) for a step-by-step guide.
 
-The basic process:
+For Rust connectors, the basic process is:
 1. Create a directory under `node/src/agent_connectors/`
 2. Implement the `Agent` trait
 3. Add fingerprinting logic
@@ -82,6 +104,8 @@ The basic process:
 5. Add reconnaissance (parsing config, finding sessions)
 6. Implement session management
 7. Register in the factory
+
+For Lua connectors, add a `.lua` file to the `agents/` directory or upload it through the web UI.
 
 ## Connector Selection
 

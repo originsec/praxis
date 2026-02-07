@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Server, Save, Check, List, Loader2, X, Cpu, Plus, Trash2, Edit2, Key, Info, ExternalLink, Download, Monitor, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Server, Save, Check, List, Loader2, X, Cpu, Plus, Trash2, Edit2, Key, Info, ExternalLink, Download, Monitor, ToggleLeft, ToggleRight, FileCode, Upload, RotateCcw } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getFeatureFlags } from '../utils/featureFlags';
 
-type Tab = 'llm_providers' | 'service' | 'about';
+type Tab = 'llm_providers' | 'agents' | 'service' | 'about';
 type LLMTab = 'model_definitions' | 'feature_selection';
 
 //
@@ -56,14 +56,14 @@ interface NodeDownloadInfo {
 }
 
 export function SettingsPage() {
-  const { state, getConfig, setConfig } = useApp();
+  const { state, getConfig, setConfig, listLuaAgentScripts, addLuaAgentScript, updateLuaAgentScript, deleteLuaAgentScript, resetLuaAgentScriptDefaults } = useApp();
   const [searchParams, setSearchParams] = useSearchParams();
 
   //
   // Tab from URL or default.
   //
   const tabParam = searchParams.get('tab');
-  const activeTab: Tab = tabParam === 'service' || tabParam === 'about' ? tabParam : 'llm_providers';
+  const activeTab: Tab = tabParam === 'agents' || tabParam === 'service' || tabParam === 'about' ? tabParam : 'llm_providers';
   const setActiveTab = (tab: Tab) => {
     const newParams: Record<string, string> = { tab };
     if (tab === 'llm_providers') {
@@ -151,6 +151,15 @@ export function SettingsPage() {
   const [mcpServerPort, setMcpServerPort] = useState('8585');
 
   //
+  // Agent script editor state.
+  //
+  const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null);
+  const [editingScriptName, setEditingScriptName] = useState('');
+  const [editingScriptContent, setEditingScriptContent] = useState('');
+  const [isEditingScript, setIsEditingScript] = useState(false);
+  const [isAddingScript, setIsAddingScript] = useState(false);
+
+  //
   // Load config on mount
   // All llm_* keys go to Service (not starting with orchestrator_).
   //
@@ -182,6 +191,15 @@ export function SettingsPage() {
       })
       .catch(err => console.error('Failed to fetch providers:', err));
   }, []);
+
+  //
+  // Load agent scripts when agents tab is active.
+  //
+  useEffect(() => {
+    if (activeTab === 'agents') {
+      listLuaAgentScripts();
+    }
+  }, [activeTab, listLuaAgentScripts]);
 
   //
   // Fetch downloads info when Service tab is active.
@@ -490,8 +508,80 @@ export function SettingsPage() {
     setModelChooserTarget(null);
   };
 
+  //
+  // Agent script helpers.
+  //
+  const handleSelectScript = (scriptId: string) => {
+    const script = state.luaAgentScripts.find(s => s.id === scriptId);
+    if (script) {
+      setSelectedScriptId(scriptId);
+      setEditingScriptName(script.name);
+      setEditingScriptContent(script.script);
+      setIsEditingScript(false);
+      setIsAddingScript(false);
+    }
+  };
+
+  const handleNewScript = () => {
+    setSelectedScriptId(null);
+    setEditingScriptName('');
+    setEditingScriptContent('');
+    setIsEditingScript(true);
+    setIsAddingScript(true);
+  };
+
+  const handleSaveScript = () => {
+    if (!editingScriptName.trim()) return;
+    if (isAddingScript) {
+      addLuaAgentScript(editingScriptName, editingScriptContent);
+    } else if (selectedScriptId) {
+      updateLuaAgentScript(selectedScriptId, editingScriptName, editingScriptContent);
+    }
+    setIsEditingScript(false);
+    setIsAddingScript(false);
+  };
+
+  const handleDeleteScript = (scriptId: string) => {
+    if (!confirm('Delete this agent script?')) return;
+    deleteLuaAgentScript(scriptId);
+    if (selectedScriptId === scriptId) {
+      setSelectedScriptId(null);
+      setEditingScriptName('');
+      setEditingScriptContent('');
+      setIsEditingScript(false);
+    }
+  };
+
+  const handleResetDefaults = () => {
+    if (!confirm('Reset all agent scripts to built-in defaults? This will delete all custom scripts.')) return;
+    resetLuaAgentScriptDefaults();
+    setSelectedScriptId(null);
+    setEditingScriptName('');
+    setEditingScriptContent('');
+    setIsEditingScript(false);
+    setIsAddingScript(false);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const content = ev.target?.result as string;
+      const name = file.name.replace(/\.lua$/, '');
+      setSelectedScriptId(null);
+      setEditingScriptName(name);
+      setEditingScriptContent(content);
+      setIsEditingScript(true);
+      setIsAddingScript(true);
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'llm_providers', label: 'LLM Providers', icon: <Cpu size={18} /> },
+    { id: 'agents', label: 'Agents', icon: <FileCode size={18} /> },
     { id: 'service', label: 'Service', icon: <Server size={18} /> },
     { id: 'about', label: 'About', icon: <Info size={18} /> },
   ];
@@ -982,6 +1072,156 @@ export function SettingsPage() {
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'agents' && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-highlight mb-1">Lua Agent Scripts</h2>
+                  <p className="text-sm text-muted">Manage Lua agent connector scripts stored in the service database</p>
+                </div>
+                <div className="flex gap-2">
+                  <label className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/30 transition-colors cursor-pointer">
+                    <Upload size={14} />
+                    Upload
+                    <input type="file" accept=".lua" onChange={handleFileUpload} className="hidden" />
+                  </label>
+                  <button
+                    onClick={handleNewScript}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors"
+                  >
+                    <Plus size={14} />
+                    New Script
+                  </button>
+                  <button
+                    onClick={handleResetDefaults}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/30 transition-colors"
+                    title="Reset all scripts to built-in defaults"
+                  >
+                    <RotateCcw size={14} />
+                    Reset Defaults
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex gap-4" style={{ minHeight: '400px' }}>
+                {/*
+                //
+                // Script list.
+                //
+                */}
+                <div className="w-56 border border-dim overflow-y-auto" style={{ maxHeight: '500px' }}>
+                  {state.luaAgentScripts.length === 0 ? (
+                    <div className="p-4 text-center text-muted text-sm">
+                      No scripts
+                    </div>
+                  ) : (
+                    state.luaAgentScripts.map(script => (
+                      <div
+                        key={script.id}
+                        onClick={() => handleSelectScript(script.id)}
+                        className={`flex items-center justify-between px-3 py-2 cursor-pointer transition-colors ${
+                          selectedScriptId === script.id
+                            ? 'bg-[var(--highlight)] text-title'
+                            : 'hover:bg-[var(--bg-tertiary)] text-muted'
+                        }`}
+                      >
+                        <span className="text-sm truncate">{script.name}</span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteScript(script.id); }}
+                          className="p-1 text-muted hover:text-[var(--accent-error)] transition-colors opacity-0 group-hover:opacity-100"
+                          style={{ opacity: selectedScriptId === script.id ? 1 : undefined }}
+                          title="Delete"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/*
+                //
+                // Editor panel.
+                //
+                */}
+                <div className="flex-1 flex flex-col border border-dim">
+                  {(selectedScriptId || isAddingScript) ? (
+                    <>
+                      <div className="flex items-center justify-between px-4 py-2 border-b border-dim bg-[var(--bg-secondary)]">
+                        {isEditingScript ? (
+                          <input
+                            type="text"
+                            value={editingScriptName}
+                            onChange={(e) => setEditingScriptName(e.target.value)}
+                            placeholder="Script name"
+                            className="bg-[var(--bg-primary)] border border-dim px-2 py-1 text-sm text-highlight focus:outline-none focus:border-subtle w-64"
+                          />
+                        ) : (
+                          <span className="text-sm font-medium text-highlight">{editingScriptName}</span>
+                        )}
+                        <div className="flex gap-2">
+                          {isEditingScript ? (
+                            <>
+                              <button
+                                onClick={handleSaveScript}
+                                disabled={!editingScriptName.trim()}
+                                className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors disabled:opacity-50"
+                              >
+                                <Save size={12} />
+                                Save
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (isAddingScript) {
+                                    setIsAddingScript(false);
+                                    setIsEditingScript(false);
+                                    setEditingScriptName('');
+                                    setEditingScriptContent('');
+                                  } else {
+                                    const script = state.luaAgentScripts.find(s => s.id === selectedScriptId);
+                                    if (script) {
+                                      setEditingScriptName(script.name);
+                                      setEditingScriptContent(script.script);
+                                    }
+                                    setIsEditingScript(false);
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 px-2 py-1 text-xs text-muted hover:text-title transition-colors"
+                              >
+                                <X size={12} />
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              onClick={() => setIsEditingScript(true)}
+                              className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors"
+                            >
+                              <Edit2 size={12} />
+                              Edit
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <textarea
+                        value={editingScriptContent}
+                        onChange={(e) => setEditingScriptContent(e.target.value)}
+                        readOnly={!isEditingScript}
+                        className="flex-1 bg-[var(--bg-primary)] p-4 text-sm font-mono text-highlight focus:outline-none resize-none"
+                        style={{ minHeight: '350px', tabSize: 2 }}
+                        spellCheck={false}
+                      />
+                    </>
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center text-muted text-sm">
+                      Select a script or create a new one
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 

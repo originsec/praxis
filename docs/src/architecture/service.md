@@ -178,6 +178,15 @@ CREATE TABLE traffic_log (
     -- ...
 );
 
+-- Lua agent scripts
+CREATE TABLE lua_agent_scripts (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    script TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+
 -- Chain definitions, executions, rules, etc.
 ```
 
@@ -247,16 +256,25 @@ The service sends broadcasts (fanout exchange) to keep all clients in sync:
 - `ServiceOnline` - service restart notification
 - `EventLoggingSet` - centralized logging toggle
 
+## Lua Agent Script Management
+
+The service manages Lua agent connector scripts stored in the database. Default scripts from the `agents/` directory are embedded at build time and seeded into the `lua_agent_scripts` table on first startup when the table is empty.
+
+Scripts can be added, updated, or deleted via the web UI (Settings > Agents tab). When scripts change, the service broadcasts an agent registry update so nodes reload the latest scripts.
+
+A "Reset Defaults" operation clears all scripts and re-inserts the embedded defaults.
+
 ## Startup Sequence
 
 1. Load configuration from database
-2. Connect to RabbitMQ
-3. Declare queues and broadcast exchanges
-4. Start message consumers
-5. Initialize semantic ops manager
-6. Initialize chain executor
-7. Request node re-registration (broadcast)
-8. Begin processing messages
+2. Seed default Lua agent scripts (if table is empty)
+3. Connect to RabbitMQ
+4. Declare queues and broadcast exchanges
+5. Start message consumers
+6. Initialize semantic ops manager
+7. Initialize chain executor
+8. Request node re-registration (broadcast)
+9. Begin processing messages
 
 ## Error Handling
 
