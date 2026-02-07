@@ -10,7 +10,6 @@ pub struct LuaAgentSession {
     script: String,
     context: SessionContext,
     state: Mutex<serde_json::Value>,
-    has_script_abort: bool,
 }
 
 impl LuaAgentSession {
@@ -18,7 +17,6 @@ impl LuaAgentSession {
         script: String,
         context: &SessionContext,
         process_path: Option<String>,
-        has_script_abort: bool,
     ) -> Result<Self> {
         let state = super::runtime::run_create_session(&script, context, process_path)?;
         Ok(Self {
@@ -26,7 +24,6 @@ impl LuaAgentSession {
             script,
             context: context.clone(),
             state: Mutex::new(state),
-            has_script_abort,
         })
     }
 }
@@ -68,17 +65,7 @@ impl AgentSession for LuaAgentSession {
             }
         }
 
-        if self.has_script_abort {
-            match super::runtime::run_session_abort(&self.script, &self.context, &state) {
-                Ok(result) => result,
-                Err(e) => {
-                    common::log_warn!("Lua session abort failed: {}", e);
-                    false
-                }
-            }
-        } else {
-            false
-        }
+        false
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

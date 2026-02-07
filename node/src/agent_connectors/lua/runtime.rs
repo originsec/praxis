@@ -29,7 +29,7 @@ struct CommandSpec {
     env: HashMap<String, String>,
 }
 
-pub fn parse_manifest(script: &str) -> Result<(String, String, bool, bool, bool, bool, bool)> {
+pub fn parse_manifest(script: &str) -> Result<(String, String, bool, bool, bool, bool)> {
     let lua = Lua::new();
     let table = load_connector_table(&lua, script)?;
 
@@ -49,7 +49,6 @@ pub fn parse_manifest(script: &str) -> Result<(String, String, bool, bool, bool,
     let has_intercept_url_pattern = table
         .contains_key("intercept_url_pattern")
         .map_err(lua_error)?;
-    let has_session_abort = table.contains_key("session_abort").map_err(lua_error)?;
     let has_fingerprint = table.contains_key("fingerprint").map_err(lua_error)?;
 
     Ok((
@@ -58,7 +57,6 @@ pub fn parse_manifest(script: &str) -> Result<(String, String, bool, bool, bool,
         has_recon,
         has_intercept_domains,
         has_intercept_url_pattern,
-        has_session_abort,
         has_fingerprint,
     ))
 }
@@ -181,23 +179,6 @@ pub fn run_session_close(script: &str, context: &SessionContext, state: &JsonVal
     let lua_state = lua.to_value(state).map_err(lua_error)?;
     let _: MultiValue = func.call((ctx, lua_state)).map_err(lua_error)?;
     Ok(())
-}
-
-pub fn run_session_abort(script: &str, context: &SessionContext, state: &JsonValue) -> Result<bool> {
-    let lua = Lua::new();
-    let table = load_connector_table(&lua, script)?;
-    let func: Function = table
-        .get("session_abort")
-        .map_err(lua_error)
-        .map_err(|_| anyhow!("Lua connector missing function 'session_abort'"))?;
-
-    let ctx = lua.to_value(context).map_err(lua_error)?;
-    let lua_state = lua.to_value(state).map_err(lua_error)?;
-    let value: Value = func.call((ctx, lua_state)).map_err(lua_error)?;
-    match value {
-        Value::Boolean(b) => Ok(b),
-        _ => Ok(false),
-    }
 }
 
 fn load_connector_table(lua: &Lua, script: &str) -> Result<Table> {
@@ -664,51 +645,32 @@ fn parse_transact_result(lua: &Lua, value: Value) -> Result<(String, JsonValue)>
 
 #[cfg(unix)]
 fn env_get_for_home(key: &str, home: Option<&str>) -> Option<String> {
-    if let Ok(value) = std::env::var(key) {
-        if !value.is_empty() {
-            return Some(value);
-        }
-    }
+    let current_user_home = std::env::var("HOME").ok();
+    let home = home.map(str::trim).filter(|h| !h.is_empty());
 
-    let Some(home) = home else {
-        return None;
-    };
-    let home = home.trim();
-    if home.is_empty() {
-        return None;
+    //
+    // If home is unspecified or matches the current user, just read from the
+    // process environment directly.
+    //
+
+    if home.is_none() || home == current_user_home.as_deref() {
+        return std::env::var(key).ok().filter(|v| !v.is_empty());
     }
+    let home = home.unwrap();
+
     let home_path = Path::new(home);
 
-    let mut target_uid: Option<u32> = None;
-    let mut target_gid: Option<u32> = None;
-    if let Ok(passwd) = std::fs::read_to_string("/etc/passwd") {
-        for line in passwd.lines() {
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let parts: Vec<&str> = line.split(':').collect();
-            if parts.len() < 7 {
-                continue;
-            }
-            if parts[5] == home {
-                if let (Ok(uid), Ok(gid)) = (parts[2].parse::<u32>(), parts[3].parse::<u32>()) {
-                    target_uid = Some(uid);
-                    target_gid = Some(gid);
-                    break;
-                }
-            }
-        }
-    }
-
+    use std::os::unix::fs::MetadataExt;
     use std::os::unix::process::CommandExt;
+
     if nix::unistd::Uid::effective().is_root() {
-        if let (Some(uid), Some(gid)) = (target_uid, target_gid) {
+        if let Ok(meta) = std::fs::metadata(home_path) {
             let mut cmd = std::process::Command::new("sh");
             cmd.arg("-lc")
                 .arg(format!("printf %s \"${{{}-}}\"", key))
                 .env("HOME", home)
-                .uid(uid)
-                .gid(gid);
+                .uid(meta.uid())
+                .gid(meta.gid());
             if let Ok(output) = cmd.output() {
                 let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !value.is_empty() {

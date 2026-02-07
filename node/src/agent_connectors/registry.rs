@@ -61,9 +61,9 @@ impl AgentRegistry {
 
     //
     // Atomically rebuild the entire registry from native agents + Lua scripts.
-    // Closes all existing sessions, re-creates native agents from the factory,
-    // loads embedded and user-dir Lua agents, then registers scripts from the
-    // update command.
+    // Re-creates native agents from the factory, then loads Lua scripts from
+    // the service. Falls back to embedded Lua agents when no service scripts
+    // are provided.
     //
 
     pub fn rebuild(
@@ -78,11 +78,10 @@ impl AgentRegistry {
             self.agents.push(agent);
         }
 
-        for (agent, info) in lua::load_embedded_agents() {
-            let _ = self.register_lua(agent, info);
-        }
-        for (agent, info) in lua::load_agents_from_user_dir() {
-            let _ = self.register_lua(agent, info);
+        if lua_scripts.is_empty() {
+            for (agent, info) in lua::load_embedded_agents() {
+                let _ = self.register_lua(agent, info);
+            }
         }
 
         for encoded_script in lua_scripts {
