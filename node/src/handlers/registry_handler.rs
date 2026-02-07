@@ -11,6 +11,21 @@ pub async fn handle_agent_registry_update(
     selected_agent: &Arc<Mutex<Option<Arc<dyn Agent>>>>,
     factory: &AgentFactory,
 ) -> NodeCommandResult {
+
+    //
+    // In debug builds, PRAXIS_IGNORE_SERVICE_AGENTS causes the node to ignore
+    // service-pushed scripts and use only the embedded ones.
+    //
+    #[cfg(debug_assertions)]
+    if std::env::var("PRAXIS_IGNORE_SERVICE_AGENTS").is_ok() {
+        let agent_count = registry.read().await.get_all().len();
+        common::log_info!(
+            "PRAXIS_IGNORE_SERVICE_AGENTS set, ignoring service registry update ({} scripts skipped)",
+            scripts.len()
+        );
+        return NodeCommandResult::AgentRegistry(AgentRegistryCommandResult::Updated { agent_count });
+    }
+
     let prev_short_name = {
         let locked = selected_agent.lock().unwrap();
         locked.as_ref().map(|a| a.short_name().to_string())
