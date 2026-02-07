@@ -1,27 +1,31 @@
 use anyhow::Result;
 use common::SessionContext;
-use std::sync::Mutex;
+use mlua::Lua;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 use crate::agent_connectors::traits::{AgentMode, AgentSession};
 
 pub struct LuaAgentSession {
     internal_id: Uuid,
-    script: String,
+    vm: Arc<Mutex<Lua>>,
     context: SessionContext,
     state: Mutex<serde_json::Value>,
 }
 
 impl LuaAgentSession {
     pub fn new(
-        script: String,
+        vm: Arc<Mutex<Lua>>,
         context: &SessionContext,
         process_path: Option<String>,
     ) -> Result<Self> {
-        let state = super::runtime::run_create_session(&script, context, process_path)?;
+        let state = {
+            let lua = vm.lock().unwrap();
+            super::runtime::vm_create_session(&lua, context, process_path)?
+        };
         Ok(Self {
             internal_id: Uuid::new_v4(),
-            script,
+            vm,
             context: context.clone(),
             state: Mutex::new(state),
         })
@@ -39,15 +43,18 @@ impl AgentSession for LuaAgentSession {
 
     fn transact(&self, prompt: &str) -> Result<String> {
         let current_state = self.state.lock().unwrap().clone();
+        let lua = self.vm.lock().unwrap();
         let (response, new_state) =
-            super::runtime::run_session_transact(&self.script, &self.context, &current_state, prompt)?;
+            super::runtime::vm_session_transact(&lua, &self.context, &current_state, prompt)?;
+        drop(lua);
         *self.state.lock().unwrap() = new_state;
         Ok(response)
     }
 
     fn close(&self) {
         let state = self.state.lock().unwrap().clone();
-        if let Err(e) = super::runtime::run_session_close(&self.script, &self.context, &state) {
+        let lua = self.vm.lock().unwrap();
+        if let Err(e) = super::runtime::vm_session_close(&lua, &self.context, &state) {
             common::log_warn!("Lua session close failed: {}", e);
         }
     }

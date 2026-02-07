@@ -5,8 +5,9 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use chrono::Utc;
 use common::{LuaRegisteredAgentInfo, ReconResult, SessionContext};
+use mlua::Lua;
 use once_cell::sync::OnceCell;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use crate::agent_connectors::traits::{Agent, AgentIntercept, AgentRecon, AgentSession};
 
@@ -30,7 +31,7 @@ impl LuaSource {
 pub struct LuaAgent {
     name: String,
     short_name: String,
-    script: String,
+    vm: Arc<Mutex<Lua>>,
     has_recon: bool,
     has_intercept_domains: bool,
     has_intercept_url_pattern: bool,
@@ -42,6 +43,7 @@ pub struct LuaAgent {
 
 impl LuaAgent {
     fn from_script(script: String) -> Result<Self> {
+        let lua = runtime::create_vm(&script)?;
         let (
             name,
             short_name,
@@ -49,7 +51,7 @@ impl LuaAgent {
             has_intercept_domains,
             has_intercept_url_pattern,
             has_fingerprint,
-        ) = runtime::parse_manifest(&script)?;
+        ) = runtime::vm_parse_manifest(&lua)?;
         if !has_fingerprint {
             return Err(anyhow!(
                 "Lua connector '{}' must define 'fingerprint'",
@@ -60,7 +62,7 @@ impl LuaAgent {
         Ok(Self {
             name,
             short_name,
-            script,
+            vm: Arc::new(Mutex::new(lua)),
             has_recon,
             has_intercept_domains,
             has_intercept_url_pattern,
@@ -99,7 +101,8 @@ impl Agent for LuaAgent {
     }
 
     async fn do_fingerprint(&self) -> bool {
-        match runtime::run_fingerprint_details(&self.script) {
+        let lua = self.vm.lock().unwrap();
+        match runtime::vm_fingerprint_details(&lua) {
             Ok((available, process_path)) => {
                 *self.fingerprint_process_path.write().unwrap() = process_path;
                 available
@@ -114,7 +117,7 @@ impl Agent for LuaAgent {
     fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>> {
         let process_path = self.fingerprint_process_path.read().unwrap().clone();
         match LuaAgentSession::new(
-            self.script.clone(),
+            Arc::clone(&self.vm),
             context,
             process_path,
         ) {
@@ -150,10 +153,10 @@ impl Agent for LuaAgent {
 impl AgentIntercept for LuaAgent {
     fn intercept_domains(&self) -> Vec<&str> {
         let mut domains = Vec::new();
-        for domain in self
-            .intercept_domains_cache
-            .get_or_init(|| runtime::run_intercept_domains(&self.script).unwrap_or_default())
-        {
+        for domain in self.intercept_domains_cache.get_or_init(|| {
+            let lua = self.vm.lock().unwrap();
+            runtime::vm_intercept_domains(&lua).unwrap_or_default()
+        }) {
             domains.push(domain.as_str());
         }
         domains
@@ -161,7 +164,10 @@ impl AgentIntercept for LuaAgent {
 
     fn intercept_url_pattern(&self) -> Option<&str> {
         self.intercept_url_pattern_cache
-            .get_or_init(|| runtime::run_intercept_url_pattern(&self.script).unwrap_or(None))
+            .get_or_init(|| {
+                let lua = self.vm.lock().unwrap();
+                runtime::vm_intercept_url_pattern(&lua).unwrap_or(None)
+            })
             .as_deref()
     }
 }
@@ -169,7 +175,8 @@ impl AgentIntercept for LuaAgent {
 #[async_trait]
 impl AgentRecon for LuaAgent {
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
-        match runtime::run_recon(&self.script, is_semantic) {
+        let lua = self.vm.lock().unwrap();
+        match runtime::vm_recon(&lua, is_semantic) {
             Ok(result) => Some(result),
             Err(e) => {
                 common::log_warn!("Lua recon failed for '{}': {}", self.short_name, e);

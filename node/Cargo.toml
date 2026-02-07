@@ -58,7 +58,7 @@ rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 toml = "0.8"
 nix = { version = "0.31.1", features = ["user"] }
-mlua = { version = "0.10", features = ["lua54", "vendored", "serialize"] }
+mlua = { version = "0.10", features = ["lua54", "vendored", "serialize", "send"] }
 base64 = "0.22"
 
 [target.'cfg(windows)'.dependencies]

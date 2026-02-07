@@ -71,7 +71,7 @@ function M.has_any_env_var(env_vars, homes)
 
   if #users == 0 then
     for _, key in ipairs(vars) do
-      if praxis.env_get_for_home(key, nil) ~= nil then
+      if praxis.env_get(key) ~= nil then
         return true
       end
     end
@@ -80,7 +80,7 @@ function M.has_any_env_var(env_vars, homes)
 
   for _, key in ipairs(vars) do
     for _, home in ipairs(users) do
-      if praxis.env_get_for_home(key, home) ~= nil then
+      if praxis.env_get(key, home) ~= nil then
         return true
       end
     end

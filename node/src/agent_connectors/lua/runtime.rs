@@ -29,9 +29,32 @@ struct CommandSpec {
     env: HashMap<String, String>,
 }
 
-pub fn parse_manifest(script: &str) -> Result<(String, String, bool, bool, bool, bool)> {
+//
+// Create a Lua VM pre-initialized with the shared API, helper libraries, and
+// the connector script loaded. The connector table is stored as the
+// `_connector` global for subsequent calls.
+//
+
+pub fn create_vm(script: &str) -> Result<Lua> {
     let lua = Lua::new();
-    let table = load_connector_table(&lua, script)?;
+    install_shared_api(&lua)?;
+    install_shared_libraries(&lua)?;
+    let value: Value = lua.load(script).eval().map_err(lua_error)?;
+    match value {
+        Value::Table(t) => {
+            lua.globals().set("_connector", t).map_err(lua_error)?;
+            Ok(lua)
+        }
+        _ => Err(anyhow!("Lua connector script must return a table")),
+    }
+}
+
+fn connector_table(lua: &Lua) -> Result<Table> {
+    lua.globals().get("_connector").map_err(lua_error)
+}
+
+pub fn vm_parse_manifest(lua: &Lua) -> Result<(String, String, bool, bool, bool, bool)> {
+    let table = connector_table(lua)?;
 
     let name: String = table
         .get("name")
@@ -61,22 +84,8 @@ pub fn parse_manifest(script: &str) -> Result<(String, String, bool, bool, bool,
     ))
 }
 
-pub fn run_fingerprint(script: &str) -> Result<bool> {
-    let lua = Lua::new();
-    let table = load_connector_table(&lua, script)?;
-    let func: Function = table
-        .get("fingerprint")
-        .map_err(lua_error)
-        .map_err(|_| anyhow!("Lua connector missing required function 'fingerprint'"))?;
-
-    let ctx = lua.to_value(&json!({})).map_err(lua_error)?;
-    let value: Value = func.call(ctx).map_err(lua_error)?;
-    parse_available(value)
-}
-
-pub fn run_fingerprint_details(script: &str) -> Result<(bool, Option<String>)> {
-    let lua = Lua::new();
-    let table = load_connector_table(&lua, script)?;
+pub fn vm_fingerprint_details(lua: &Lua) -> Result<(bool, Option<String>)> {
+    let table = connector_table(lua)?;
     let func: Function = table
         .get("fingerprint")
         .map_err(lua_error)
@@ -87,9 +96,8 @@ pub fn run_fingerprint_details(script: &str) -> Result<(bool, Option<String>)> {
     parse_fingerprint_details(value)
 }
 
-pub fn run_intercept_domains(script: &str) -> Result<Vec<String>> {
-    let lua = Lua::new();
-    let table = load_connector_table(&lua, script)?;
+pub fn vm_intercept_domains(lua: &Lua) -> Result<Vec<String>> {
+    let table = connector_table(lua)?;
     let func: Function = table
         .get("intercept_domains")
         .map_err(lua_error)
@@ -99,9 +107,8 @@ pub fn run_intercept_domains(script: &str) -> Result<Vec<String>> {
     parse_string_list(value)
 }
 
-pub fn run_intercept_url_pattern(script: &str) -> Result<Option<String>> {
-    let lua = Lua::new();
-    let table = load_connector_table(&lua, script)?;
+pub fn vm_intercept_url_pattern(lua: &Lua) -> Result<Option<String>> {
+    let table = connector_table(lua)?;
     let func: Function = table
         .get("intercept_url_pattern")
         .map_err(lua_error)
@@ -111,9 +118,8 @@ pub fn run_intercept_url_pattern(script: &str) -> Result<Option<String>> {
     parse_optional_string(value)
 }
 
-pub fn run_recon(script: &str, is_semantic: bool) -> Result<ReconResult> {
-    let lua = Lua::new();
-    let table = load_connector_table(&lua, script)?;
+pub fn vm_recon(lua: &Lua, is_semantic: bool) -> Result<ReconResult> {
+    let table = connector_table(lua)?;
     let func: Function = table
         .get("recon")
         .map_err(lua_error)
@@ -124,13 +130,12 @@ pub fn run_recon(script: &str, is_semantic: bool) -> Result<ReconResult> {
     Ok(recon)
 }
 
-pub fn run_create_session(
-    script: &str,
+pub fn vm_create_session(
+    lua: &Lua,
     context: &SessionContext,
     process_path: Option<String>,
 ) -> Result<JsonValue> {
-    let lua = Lua::new();
-    let table = load_connector_table(&lua, script)?;
+    let table = connector_table(lua)?;
     let func: Function = table
         .get("create_session")
         .map_err(lua_error)
@@ -148,14 +153,13 @@ pub fn run_create_session(
     Ok(state)
 }
 
-pub fn run_session_transact(
-    script: &str,
+pub fn vm_session_transact(
+    lua: &Lua,
     context: &SessionContext,
     state: &JsonValue,
     prompt: &str,
 ) -> Result<(String, JsonValue)> {
-    let lua = Lua::new();
-    let table = load_connector_table(&lua, script)?;
+    let table = connector_table(lua)?;
     let func: Function = table
         .get("session_transact")
         .map_err(lua_error)
@@ -164,12 +168,11 @@ pub fn run_session_transact(
     let ctx = lua.to_value(context).map_err(lua_error)?;
     let lua_state = lua.to_value(state).map_err(lua_error)?;
     let result: Value = func.call((ctx, lua_state, prompt)).map_err(lua_error)?;
-    parse_transact_result(&lua, result)
+    parse_transact_result(lua, result)
 }
 
-pub fn run_session_close(script: &str, context: &SessionContext, state: &JsonValue) -> Result<()> {
-    let lua = Lua::new();
-    let table = load_connector_table(&lua, script)?;
+pub fn vm_session_close(lua: &Lua, context: &SessionContext, state: &JsonValue) -> Result<()> {
+    let table = connector_table(lua)?;
     let func: Function = table
         .get("session_close")
         .map_err(lua_error)
@@ -179,16 +182,6 @@ pub fn run_session_close(script: &str, context: &SessionContext, state: &JsonVal
     let lua_state = lua.to_value(state).map_err(lua_error)?;
     let _: MultiValue = func.call((ctx, lua_state)).map_err(lua_error)?;
     Ok(())
-}
-
-fn load_connector_table(lua: &Lua, script: &str) -> Result<Table> {
-    install_shared_api(lua)?;
-    install_shared_libraries(lua)?;
-    let value: Value = lua.load(script).eval().map_err(lua_error)?;
-    match value {
-        Value::Table(t) => Ok(t),
-        _ => Err(anyhow!("Lua connector script must return a table")),
-    }
 }
 
 fn install_shared_api(lua: &Lua) -> Result<()> {
@@ -332,14 +325,6 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
     praxis
         .set(
             "env_get",
-            lua.create_function(|_, key: String| Ok(std::env::var(&key).ok()))
-                .map_err(lua_error)?,
-        )
-        .map_err(lua_error)?;
-
-    praxis
-        .set(
-            "env_get_for_home",
             lua.create_function(|_, (key, home): (String, Option<String>)| {
                 Ok(env_get_for_home(&key, home.as_deref()))
             })
@@ -576,14 +561,6 @@ fn abort_handle(handle: &str) -> bool {
 
 pub fn abort_command_handle(handle: &str) -> bool {
     abort_handle(handle)
-}
-
-fn parse_available(value: Value) -> Result<bool> {
-    match value {
-        Value::Boolean(b) => Ok(b),
-        Value::Table(t) => Ok(t.get::<bool>("available").unwrap_or(false)),
-        _ => Err(anyhow!("fingerprint must return a boolean or table")),
-    }
 }
 
 fn parse_fingerprint_details(value: Value) -> Result<(bool, Option<String>)> {
