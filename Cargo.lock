@@ -2879,6 +2879,7 @@ version = "0.9.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64",
  "brotli",
  "bytes",
  "chromiumoxide",
@@ -2943,6 +2944,7 @@ version = "0.9.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64",
  "chrono",
  "common",
  "dirs",

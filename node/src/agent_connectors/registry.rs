@@ -1,3 +1,5 @@
+use base64::{engine::general_purpose::STANDARD, Engine};
+
 use super::factory::AgentFactory;
 use super::lua::{self, LuaSource};
 use super::traits::Agent;
@@ -83,8 +85,21 @@ impl AgentRegistry {
             let _ = self.register_lua(agent, info);
         }
 
-        for script in lua_scripts {
-            match lua::create_agent_from_script(script, LuaSource::RuntimeMessage) {
+        for encoded_script in lua_scripts {
+            let script = match STANDARD.decode(encoded_script.as_bytes()) {
+                Ok(bytes) => match String::from_utf8(bytes) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        common::log_warn!("Skipping Lua script (invalid UTF-8): {}", e);
+                        continue;
+                    }
+                },
+                Err(e) => {
+                    common::log_warn!("Skipping Lua script (base64 decode failed): {}", e);
+                    continue;
+                }
+            };
+            match lua::create_agent_from_script(&script, LuaSource::RuntimeMessage) {
                 Ok((agent, info)) => {
                     let _ = self.register_lua(agent, info);
                 }

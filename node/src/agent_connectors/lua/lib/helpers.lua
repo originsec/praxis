@@ -99,6 +99,34 @@ function M.parse_json(content)
   return parsed
 end
 
+function M.new_recon_result()
+  return {
+    config_items = {},
+    raw_configs_for_mcp = {},
+    context_filenames = {},
+    project_paths = {},
+    sessions = {},
+  }
+end
+
+function M.merge_recon_result(dest, source)
+  for _, item in ipairs(source.config_items or {}) do
+    table.insert(dest.config_items, item)
+  end
+  for _, item in ipairs(source.raw_configs_for_mcp or {}) do
+    table.insert(dest.raw_configs_for_mcp, item)
+  end
+  for _, f in ipairs(source.context_filenames or {}) do
+    table.insert(dest.context_filenames, f)
+  end
+  for _, p in ipairs(source.project_paths or {}) do
+    table.insert(dest.project_paths, p)
+  end
+  for _, s in ipairs(source.sessions or {}) do
+    table.insert(dest.sessions, s)
+  end
+end
+
 function M.for_each_user_home_coalesce(fn, opts)
   opts = opts or {}
   local dedup = opts.dedup

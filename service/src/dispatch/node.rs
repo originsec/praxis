@@ -1,6 +1,7 @@
 //! Node message dispatch handlers.
 
 use anyhow::Result;
+use base64::{engine::general_purpose::STANDARD, Engine};
 use common::{
     node_semantic_queue_name, publish_json, publish_json_exchange, ClientBroadcastMessage,
     ClientDirectMessage, NodeBroadcastMessage, NodeSignalMessage, CLIENT_BROADCAST_EXCHANGE,
@@ -45,6 +46,10 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
 
             match ctx.database.get_all_lua_scripts().await {
                 Ok(scripts) => {
+                    let scripts: Vec<String> = scripts
+                        .iter()
+                        .map(|s| STANDARD.encode(s.as_bytes()))
+                        .collect();
                     let update = NodeBroadcastMessage::AgentRegistryUpdate { scripts };
                     if let Err(e) = publish_json_exchange(
                         &ctx.broadcast_channel,

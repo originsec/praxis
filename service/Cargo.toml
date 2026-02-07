@@ -36,3 +36,4 @@ hostname = "0.4"
 rmcp = { version = "0.8", features = ["server", "transport-sse-server", "schemars"] }
 async-trait = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
+base64 = "0.22"

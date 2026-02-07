@@ -1,41 +1,7 @@
 local helpers = require("praxis.helpers")
-local starts_with = helpers.starts_with
-local ends_with = helpers.ends_with
-local norm = helpers.norm
-local parent_dir = helpers.parent_dir
-local dedup = helpers.dedup
-local sort_strings = helpers.sort_strings
-
-local function new_recon_result()
-  return {
-    config_items = {},
-    raw_configs_for_mcp = {},
-    context_filenames = {},
-    project_paths = {},
-    sessions = {},
-  }
-end
-
-local function merge_recon_result(dest, source)
-  for _, item in ipairs(source.config_items or {}) do
-    table.insert(dest.config_items, item)
-  end
-  for _, item in ipairs(source.raw_configs_for_mcp or {}) do
-    table.insert(dest.raw_configs_for_mcp, item)
-  end
-  for _, f in ipairs(source.context_filenames or {}) do
-    table.insert(dest.context_filenames, f)
-  end
-  for _, p in ipairs(source.project_paths or {}) do
-    table.insert(dest.project_paths, p)
-  end
-  for _, s in ipairs(source.sessions or {}) do
-    table.insert(dest.sessions, s)
-  end
-end
 
 local function is_session_file(name)
-  return name and starts_with(name, "session-") and ends_with(name, ".json")
+  return name and helpers.starts_with(name, "session-") and helpers.ends_with(name, ".json")
 end
 
 local function pick_path()
@@ -321,7 +287,7 @@ end
 -- These apply to all users on the machine.
 --
 local function collect_system_config()
-  local result = new_recon_result()
+  local result = helpers.new_recon_result()
 
   local function add_system_file(path, config_type)
     if not praxis.path_exists(path) then
@@ -379,7 +345,7 @@ end
 -- scope should be "user" or "project".
 --
 local function collect_config_at_path(path, scope)
-  local result = new_recon_result()
+  local result = helpers.new_recon_result()
 
   local gemini_dir = praxis.path_join({ path, ".gemini" })
   if not praxis.path_is_dir(gemini_dir) then
@@ -433,27 +399,27 @@ local function find_project_directories(base_path, max_depth)
 
   local files = praxis.walk_files(base_path, max_depth) or {}
   for _, p in ipairs(files) do
-    local np = norm(p)
-    if ends_with(np, "/.gemini/settings.json") then
-      local gemini_dir = parent_dir(p)
-      local project_dir = gemini_dir and parent_dir(gemini_dir) or nil
-      if project_dir and norm(project_dir) ~= norm(base_path) then
+    local np = helpers.norm(p)
+    if helpers.ends_with(np, "/.gemini/settings.json") then
+      local gemini_dir = helpers.parent_dir(p)
+      local project_dir = gemini_dir and helpers.parent_dir(gemini_dir) or nil
+      if project_dir and helpers.norm(project_dir) ~= helpers.norm(base_path) then
         table.insert(projects, project_dir)
       end
     end
   end
 
-  return dedup(projects)
+  return helpers.dedup(projects)
 end
 
 local function run_recon(is_semantic)
-  local result = new_recon_result()
+  local result = helpers.new_recon_result()
   table.insert(result.context_filenames, "GEMINI.md")
 
   --
   -- Collect system-wide configuration.
   --
-  merge_recon_result(result, collect_system_config())
+  helpers.merge_recon_result(result, collect_system_config())
 
   --
   -- Collect user-scoped configuration and discover projects for each home.
@@ -461,14 +427,14 @@ local function run_recon(is_semantic)
   local homes = praxis.user_homes() or {}
 
   local function collect_for_home(home)
-    local home_result = new_recon_result()
+    local home_result = helpers.new_recon_result()
 
-    merge_recon_result(home_result, collect_config_at_path(home, "user"))
+    helpers.merge_recon_result(home_result, collect_config_at_path(home, "user"))
 
     local projects = find_project_directories(home, 7)
     for _, proj in ipairs(projects) do
       table.insert(home_result.project_paths, proj)
-      merge_recon_result(home_result, collect_config_at_path(proj, "project"))
+      helpers.merge_recon_result(home_result, collect_config_at_path(proj, "project"))
     end
 
     local home_sessions = discover_sessions_for_home(home)
@@ -482,11 +448,11 @@ local function run_recon(is_semantic)
   local per_home_results = helpers.for_each_user_home_coalesce(collect_for_home, { dedup = false })
 
   for _, per_home in ipairs(per_home_results) do
-    merge_recon_result(result, per_home)
+    helpers.merge_recon_result(result, per_home)
   end
 
-  result.project_paths = dedup(result.project_paths)
-  result.context_filenames = dedup(result.context_filenames)
+  result.project_paths = helpers.dedup(result.project_paths)
+  result.context_filenames = helpers.dedup(result.context_filenames)
 
   --
   -- Collect any additional context files in project directories.
@@ -518,7 +484,7 @@ local function run_recon(is_semantic)
   for _, p in ipairs(result.project_paths) do
     table.insert(candidate_paths, p)
   end
-  candidate_paths = dedup(candidate_paths)
+  candidate_paths = helpers.dedup(candidate_paths)
 
   local filtered_paths = {}
   for _, p in ipairs(candidate_paths) do
@@ -526,8 +492,8 @@ local function run_recon(is_semantic)
       table.insert(filtered_paths, p)
     end
   end
-  filtered_paths = dedup(filtered_paths)
-  sort_strings(filtered_paths)
+  filtered_paths = helpers.dedup(filtered_paths)
+  helpers.sort_strings(filtered_paths)
 
   --
   -- Extract MCP servers from all collected configs.

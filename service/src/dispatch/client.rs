@@ -1,6 +1,7 @@
 //! Client message dispatch handlers.
 
 use anyhow::Result;
+use base64::{engine::general_purpose::STANDARD, Engine};
 use common::{
     publish_json_exchange, ClientBroadcastMessage, ClientDirectMessage, ClientSignalMessage,
     CommandRequest, CommandResponse, NodeBroadcastMessage, NodeDirectMessage,
@@ -1651,6 +1652,10 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
                     // Broadcast updated registry to all nodes.
                     //
                     if let Ok(scripts) = ctx.database.get_all_lua_scripts().await {
+                        let scripts: Vec<String> = scripts
+                            .iter()
+                            .map(|s| STANDARD.encode(s.as_bytes()))
+                            .collect();
                         let update = NodeBroadcastMessage::AgentRegistryUpdate { scripts };
                         let _ = publish_json_exchange(
                             &ctx.broadcast_channel,
@@ -1689,6 +1694,10 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
 
                     if success {
                         if let Ok(scripts) = ctx.database.get_all_lua_scripts().await {
+                            let scripts: Vec<String> = scripts
+                                .iter()
+                                .map(|s| STANDARD.encode(s.as_bytes()))
+                                .collect();
                             let update = NodeBroadcastMessage::AgentRegistryUpdate { scripts };
                             let _ = publish_json_exchange(
                                 &ctx.broadcast_channel,
