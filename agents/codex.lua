@@ -3,8 +3,6 @@ local helpers = require("praxis.helpers")
 local AGENT_NAME = "Codex CLI"
 local AGENT_SHORT_NAME = "codex"
 
-local process_version = nil
-
 local function verify_binary(path)
   local result = praxis.command_run({ program = path, args = { "--version" } })
   if result.success then
@@ -79,75 +77,6 @@ local function path_has_valid_auth(path, user_homes)
   end
 
   return false
-end
-
---
--- Parse MCP servers from TOML content. Codex uses [mcp_servers.<name>] sections.
---
-
-local function parse_mcp_servers_from_toml(content, context_path)
-  local servers = {}
-  local parsed = helpers.parse_toml(content)
-  if parsed == nil or type(parsed.mcp_servers) ~= "table" then
-    return servers
-  end
-
-  for server_name, cfg in pairs(parsed.mcp_servers) do
-    if type(cfg) ~= "table" then
-      goto continue
-    end
-
-    if cfg.enabled == false then
-      goto continue
-    end
-
-    local transport = nil
-    local address = nil
-    local command = nil
-
-    if type(cfg.url) == "string" then
-      transport = "Sse"
-      address = cfg.url
-    elseif type(cfg.command) == "string" then
-      transport = "Stdio"
-      command = cfg.command
-      if type(cfg.args) == "table" then
-        local args = {}
-        for _, a in ipairs(cfg.args) do
-          if type(a) == "string" then
-            table.insert(args, a)
-          end
-        end
-        if #args > 0 then
-          command = command .. " " .. table.concat(args, " ")
-        end
-      end
-    end
-
-    if transport ~= nil then
-      table.insert(servers, {
-        name = server_name,
-        transport = transport,
-        address = address,
-        command = command,
-        tools = {},
-        context_path = context_path,
-      })
-    end
-
-    ::continue::
-  end
-  return servers
-end
-
-local function add_config_if_exists(config_items, path, config_type, include_contents)
-  if praxis.path_exists(path) then
-    table.insert(config_items, {
-      path = path,
-      config_type = config_type,
-      contents = include_contents and praxis.read_file(path) or nil,
-    })
-  end
 end
 
 --
@@ -259,28 +188,6 @@ local function discover_sessions_for_home(home)
   return sessions
 end
 
---
--- Find project directories containing .codex subdirectories.
---
-
-local function find_project_directories(base_path, max_depth)
-  local projects = {}
-
-  local files = praxis.walk_files(base_path, max_depth) or {}
-  for _, p in ipairs(files) do
-    local np = helpers.norm(p)
-    if helpers.ends_with(np, "/.codex/config.toml") then
-      local codex_dir = helpers.parent_dir(p)
-      local project_dir = codex_dir and helpers.parent_dir(codex_dir) or nil
-      if project_dir and helpers.norm(project_dir) ~= helpers.norm(base_path) then
-        table.insert(projects, project_dir)
-      end
-    end
-  end
-
-  return helpers.dedup(projects)
-end
-
 local function run_create_session(ctx)
   local working_dir = ctx.working_dir
   if working_dir == nil or working_dir == "" then
@@ -379,177 +286,35 @@ local function run_session_close(state)
   -- Codex sessions don't need explicit cleanup
 end
 
-local function run_recon(ctx)
-  local is_semantic = ctx.is_semantic
-  local result = helpers.new_recon_result()
+local recon_config = {
+  home_dir = ".codex",
 
-  local homes = praxis.user_homes() or {}
+  home_configs = {
+    { path = ".codex/config.toml", type = "global_settings", mcp = true },
+    { path = ".codex/auth.json", type = "credentials" },
+    { path = ".codex/history.jsonl", type = "session_history" },
+  },
 
-  local function collect_for_home(home)
-    local home_result = helpers.new_recon_result()
+  project_markers = { "/.codex/config.toml" },
+  project_discovery = extract_project_paths_from_config,
 
-    add_config_if_exists(home_result.config_items,
-      praxis.path_join({ home, ".codex", "config.toml" }), "global_settings", is_semantic)
-    add_config_if_exists(home_result.config_items,
-      praxis.path_join({ home, ".codex", "auth.json" }), "credentials", is_semantic)
-    add_config_if_exists(home_result.config_items,
-      praxis.path_join({ home, ".codex", "history.jsonl" }), "session_history", is_semantic)
+  project_configs = {
+    { path = ".codex/config.toml", type = "project_settings", mcp = true },
+  },
 
-    --
-    -- Track global config for MCP extraction.
-    --
+  mcp_parsers = {
+    default = helpers.parse_mcp_from_toml,
+  },
 
-    for _, item in ipairs(home_result.config_items) do
-      if item.config_type == "global_settings" then
-        local content = item.contents or praxis.read_file(item.path)
-        if content then
-          table.insert(home_result.raw_configs_for_mcp, {
-            content = content,
-            context_path = nil,
-            config_type = "global_settings",
-          })
-        end
-      end
-    end
+  auth_check = path_has_valid_auth,
+  session_discovery = discover_sessions_for_home,
 
-    --
-    -- Extract project paths from config and discover project directories.
-    --
-
-    local config_projects = extract_project_paths_from_config(home)
-    for _, p in ipairs(config_projects) do
-      table.insert(home_result.project_paths, p)
-    end
-
-    local dir_projects = find_project_directories(home, 7)
-    for _, p in ipairs(dir_projects) do
-      table.insert(home_result.project_paths, p)
-    end
-
-    --
-    -- Collect project-level configs.
-    --
-
-    for _, proj in ipairs(helpers.dedup(home_result.project_paths)) do
-      local proj_config = praxis.path_join({ proj, ".codex", "config.toml" })
-      if praxis.path_exists(proj_config) then
-        table.insert(home_result.config_items, {
-          path = proj_config,
-          config_type = "project_settings:" .. proj,
-          contents = is_semantic and praxis.read_file(proj_config) or nil,
-        })
-        local content = praxis.read_file(proj_config)
-        if content then
-          table.insert(home_result.raw_configs_for_mcp, {
-            content = content,
-            context_path = proj,
-            config_type = "project_settings:" .. proj,
-          })
-        end
-      end
-    end
-
-    local home_sessions = discover_sessions_for_home(home)
-    for _, s in ipairs(home_sessions) do
-      table.insert(home_result.sessions, s)
-    end
-
-    return home_result
-  end
-
-  local per_home_results = helpers.for_each_user_home_coalesce(collect_for_home, { dedup = false })
-
-  for _, per_home in ipairs(per_home_results) do
-    helpers.merge_recon_result(result, per_home)
-  end
-
-  result.project_paths = helpers.dedup(result.project_paths)
-
-  --
-  -- Prepend user homes with .codex directory.
-  --
-
-  local user_homes_with_codex = helpers.user_homes_with_dir(".codex")
-  local all_paths = {}
-  for _, h in ipairs(user_homes_with_codex) do
-    table.insert(all_paths, h)
-  end
-  for _, p in ipairs(result.project_paths) do
-    table.insert(all_paths, p)
-  end
-  all_paths = helpers.dedup(all_paths)
-
-  --
-  -- Filter to paths with valid auth.
-  --
-
-  local filtered_paths = {}
-  for _, p in ipairs(all_paths) do
-    if path_has_valid_auth(p, homes) then
-      table.insert(filtered_paths, p)
-    end
-  end
-  filtered_paths = helpers.dedup(filtered_paths)
-  helpers.sort_strings(filtered_paths)
-
-  --
-  -- Extract MCP servers from TOML configs.
-  --
-
-  local mcp_servers = {}
-  for _, item in ipairs(result.raw_configs_for_mcp) do
-    local servers = parse_mcp_servers_from_toml(item.content, item.context_path)
-    for _, s in ipairs(servers) do
-      table.insert(mcp_servers, s)
-    end
-  end
-
-  local mcp_seen = {}
-  local mcp_unique = {}
-  for _, s in ipairs(mcp_servers) do
-    local key = (s.name or "") .. "::" .. (s.context_path or "")
-    if not mcp_seen[key] then
-      mcp_seen[key] = true
-      table.insert(mcp_unique, s)
-    end
-  end
-
-  --
-  -- Semantic enrichment.
-  --
-
-  local internal_tools = {}
-  local metadata = nil
-
-  if is_semantic then
-    local session_fns = {
-      create = run_create_session,
-      transact = run_session_transact,
-      close = run_session_close,
-    }
-    internal_tools = helpers.discover_internal_tools({
-      process_path = ctx.process_path,
-      working_dir = filtered_paths[1],
-    }, session_fns)
-    metadata = helpers.extract_metadata(result.config_items)
-
-    for _, item in ipairs(result.config_items) do
-      item.contents = nil
-    end
-  end
-
-  return {
-    tools = {
-      mcp_servers = mcp_unique,
-      skills = {},
-      internal_tools = internal_tools,
-    },
-    config = result.config_items,
-    sessions = result.sessions,
-    project_paths = filtered_paths,
-    metadata = metadata,
-  }
-end
+  session_fns = {
+    create = run_create_session,
+    transact = run_session_transact,
+    close = run_session_close,
+  },
+}
 
 return {
   name = AGENT_NAME,
@@ -557,16 +322,15 @@ return {
 
   fingerprint = function(_ctx)
     local path, version = pick_path()
-    process_version = version
     return {
       available = path ~= nil,
       process_path = path,
-      version = process_version,
+      version = version,
     }
   end,
 
   recon = function(ctx)
-    return run_recon(ctx)
+    return helpers.run_standard_recon(ctx, recon_config)
   end,
 
   create_session = function(ctx)

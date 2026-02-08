@@ -6,8 +6,6 @@ local AGENT_SHORT_NAME = "claudecode"
 local INTERCEPT_DOMAINS = { "api.anthropic.com", "a-api.anthropic.com" }
 local INTERCEPT_URL_PATTERN = "messages"
 
-local process_version = nil
-
 local function verify_binary(path)
   local result = praxis.command_run({ program = path, args = { "--version" } })
   if result.success then
@@ -77,66 +75,35 @@ local function path_has_valid_auth(path, user_homes)
 end
 
 --
--- Parse MCP servers from JSON config content. Handles the mcpServers key
--- format used by Claude Code configs.
+-- Custom MCP parser for the preferences config (.claude.json). Handles
+-- top-level mcpServers and per-project mcpServers under projects[path].
 --
 
-local function parse_mcp_servers_from_json(content, context_path)
+local function parse_preferences_mcp(content, context_path)
   local servers = {}
-  local json_obj = helpers.parse_json(content)
-  if json_obj == nil or type(json_obj.mcpServers) ~= "table" then
+  local parsed = helpers.parse_json(content)
+  if not parsed then
     return servers
   end
 
-  for server_name, cfg in pairs(json_obj.mcpServers) do
-    local transport = nil
-    local address = nil
-    local command = nil
+  local top = helpers.parse_mcp_from_json(content, context_path)
+  for _, s in ipairs(top) do
+    table.insert(servers, s)
+  end
 
-    if type(cfg) == "table" and type(cfg.command) == "string" then
-      transport = "Stdio"
-      command = cfg.command
-      if type(cfg.args) == "table" then
-        local args = {}
-        for _, a in ipairs(cfg.args) do
-          if type(a) == "string" then
-            table.insert(args, a)
-          end
-        end
-        if #args > 0 then
-          command = command .. " " .. table.concat(args, " ")
+  if type(parsed.projects) == "table" then
+    for ctx_path, ctx_config in pairs(parsed.projects) do
+      if type(ctx_config) == "table" and type(ctx_config.mcpServers) == "table" then
+        local ctx_content = praxis.json_encode(ctx_config)
+        local ctx_servers = helpers.parse_mcp_from_json(ctx_content, ctx_path)
+        for _, s in ipairs(ctx_servers) do
+          table.insert(servers, s)
         end
       end
-    elseif type(cfg) == "table" and type(cfg.url) == "string" then
-      transport = "Sse"
-      address = cfg.url
-    elseif type(cfg) == "table" and type(cfg.httpUrl) == "string" then
-      transport = "Sse"
-      address = cfg.httpUrl
-    end
-
-    if transport ~= nil then
-      table.insert(servers, {
-        name = server_name,
-        transport = transport,
-        address = address,
-        command = command,
-        tools = {},
-        context_path = context_path,
-      })
     end
   end
+
   return servers
-end
-
-local function add_config_if_exists(config_items, path, config_type, include_contents)
-  if praxis.path_exists(path) then
-    table.insert(config_items, {
-      path = path,
-      config_type = config_type,
-      contents = include_contents and praxis.read_file(path) or nil,
-    })
-  end
 end
 
 local function discover_sessions_for_home(home)
@@ -187,104 +154,6 @@ local function discover_sessions_for_home(home)
   end
 
   return sessions
-end
-
---
--- Collect global and user-level configuration files.
---
-
-local function collect_config_for_home(home, include_contents)
-  local result = helpers.new_recon_result()
-
-  add_config_if_exists(result.config_items, praxis.path_join({ home, ".claude", "settings.json" }), "global_settings", include_contents)
-  add_config_if_exists(result.config_items, praxis.path_join({ home, ".claude.json" }), "preferences", include_contents)
-  add_config_if_exists(result.config_items, praxis.path_join({ home, ".claude", "CLAUDE.md" }), "global_instructions", include_contents)
-
-  --
-  -- Track configs that may contain MCP servers for later extraction.
-  --
-
-  for _, item in ipairs(result.config_items) do
-    if item.config_type == "global_settings" or item.config_type == "preferences" then
-      local content = item.contents or praxis.read_file(item.path)
-      if content then
-        table.insert(result.raw_configs_for_mcp, {
-          content = content,
-          context_path = nil,
-          config_type = item.config_type,
-        })
-      end
-    end
-  end
-
-  return result
-end
-
---
--- Find project directories containing .claude subdirectories.
---
-
-local function find_project_directories(base_path, max_depth)
-  local projects = {}
-
-  local files = praxis.walk_files(base_path, max_depth) or {}
-  for _, p in ipairs(files) do
-    local np = helpers.norm(p)
-    if helpers.ends_with(np, "/.claude/settings.json")
-        or helpers.ends_with(np, "/claude.md")
-        or helpers.ends_with(np, "/CLAUDE.md") then
-      local parent = helpers.parent_dir(p)
-      if helpers.ends_with(helpers.norm(parent or ""), "/.claude") then
-        parent = helpers.parent_dir(parent)
-      end
-      if parent and helpers.norm(parent) ~= helpers.norm(base_path) then
-        table.insert(projects, parent)
-      end
-    end
-  end
-
-  return helpers.dedup(projects)
-end
-
---
--- Collect project-level configuration files.
---
-
-local function collect_config_for_project(project_path, include_contents)
-  local result = helpers.new_recon_result()
-
-  add_config_if_exists(result.config_items,
-    praxis.path_join({ project_path, ".claude", "settings.json" }),
-    "project_settings:" .. project_path, include_contents)
-  add_config_if_exists(result.config_items,
-    praxis.path_join({ project_path, ".claude", "settings.local.json" }),
-    "project_settings_local:" .. project_path, include_contents)
-  add_config_if_exists(result.config_items,
-    praxis.path_join({ project_path, "CLAUDE.md" }),
-    "project_instructions:" .. project_path, include_contents)
-  add_config_if_exists(result.config_items,
-    praxis.path_join({ project_path, ".mcp.json" }),
-    "project_mcp:" .. project_path, include_contents)
-
-  --
-  -- Track project configs for MCP extraction.
-  --
-
-  for _, item in ipairs(result.config_items) do
-    if helpers.starts_with(item.config_type, "project_mcp:")
-        or helpers.starts_with(item.config_type, "project_settings:") then
-      local content = item.contents or praxis.read_file(item.path)
-      if content then
-        table.insert(result.raw_configs_for_mcp, {
-          content = content,
-          context_path = project_path,
-          config_type = item.config_type,
-        })
-      end
-    end
-  end
-
-  return result
 end
 
 local function run_create_session(ctx)
@@ -355,195 +224,39 @@ local function run_session_close(state)
   -- Claude Code sessions don't need explicit cleanup
 end
 
-local function run_recon(ctx)
-  local result = helpers.new_recon_result()
+local recon_config = {
+  home_dir = ".claude",
 
-  local homes = praxis.user_homes() or {}
+  home_configs = {
+    { path = ".claude/settings.json", type = "global_settings", mcp = true },
+    { path = ".claude.json", type = "preferences", mcp = "preferences" },
+    { path = ".claude/CLAUDE.md", type = "global_instructions" },
+  },
 
-  --
-  -- Collect config and sessions for each user home.
-  --
+  project_markers = { "/.claude/settings.json", "/claude.md", "/CLAUDE.md" },
 
-  local function collect_for_home(home)
-    local home_result = helpers.new_recon_result()
+  project_configs = {
+    { path = ".claude/settings.json", type = "project_settings", mcp = true },
+    { path = ".claude/settings.local.json", type = "project_settings_local" },
+    { path = "CLAUDE.md", type = "project_instructions" },
+    { path = ".mcp.json", type = "project_mcp", mcp = "project_mcp" },
+  },
 
-    helpers.merge_recon_result(home_result, collect_config_for_home(home, ctx.is_semantic))
+  mcp_parsers = {
+    default = helpers.parse_mcp_from_json,
+    preferences = parse_preferences_mcp,
+    project_mcp = helpers.parse_mcp_from_json_flexible,
+  },
 
-    local projects = find_project_directories(home, 7)
-    for _, proj in ipairs(projects) do
-      table.insert(home_result.project_paths, proj)
-      helpers.merge_recon_result(home_result, collect_config_for_project(proj, ctx.is_semantic))
-    end
+  auth_check = path_has_valid_auth,
+  session_discovery = discover_sessions_for_home,
 
-    local home_sessions = discover_sessions_for_home(home)
-    for _, s in ipairs(home_sessions) do
-      table.insert(home_result.sessions, s)
-    end
-
-    return home_result
-  end
-
-  local per_home_results = helpers.for_each_user_home_coalesce(collect_for_home, { dedup = false })
-
-  for _, per_home in ipairs(per_home_results) do
-    helpers.merge_recon_result(result, per_home)
-  end
-
-  result.project_paths = helpers.dedup(result.project_paths)
-
-  --
-  -- Prepend user homes with .claude directory to project paths.
-  --
-
-  local user_homes_with_claude = helpers.user_homes_with_dir(".claude")
-  local all_paths = {}
-  for _, h in ipairs(user_homes_with_claude) do
-    table.insert(all_paths, h)
-  end
-  for _, p in ipairs(result.project_paths) do
-    table.insert(all_paths, p)
-  end
-  all_paths = helpers.dedup(all_paths)
-
-  --
-  -- Filter to paths with valid auth.
-  --
-
-  local filtered_paths = {}
-  for _, p in ipairs(all_paths) do
-    if path_has_valid_auth(p, homes) then
-      table.insert(filtered_paths, p)
-    end
-  end
-  filtered_paths = helpers.dedup(filtered_paths)
-  helpers.sort_strings(filtered_paths)
-
-  --
-  -- Extract MCP servers from collected configs.
-  --
-
-  local mcp_servers = {}
-
-  for _, item in ipairs(result.raw_configs_for_mcp) do
-    local content = item.content
-    local parsed = helpers.parse_json(content)
-    if parsed then
-      if item.config_type == "preferences" then
-        --
-        -- Preferences: top-level mcpServers and per-project mcpServers.
-        --
-
-        local top_servers = parse_mcp_servers_from_json(content, nil)
-        for _, s in ipairs(top_servers) do
-          table.insert(mcp_servers, s)
-        end
-
-        if type(parsed.projects) == "table" then
-          for ctx_path, ctx_config in pairs(parsed.projects) do
-            if type(ctx_config) == "table" and type(ctx_config.mcpServers) == "table" then
-              local ctx_content = praxis.json_encode(ctx_config)
-              local ctx_servers = parse_mcp_servers_from_json(ctx_content, ctx_path)
-              for _, s in ipairs(ctx_servers) do
-                table.insert(mcp_servers, s)
-              end
-            end
-          end
-        end
-      elseif helpers.starts_with(item.config_type, "project_mcp:") then
-        --
-        -- Project MCP: root object contains server definitions directly.
-        --
-
-        for server_name, cfg in pairs(parsed) do
-          if type(cfg) == "table" then
-            local transport = nil
-            local address = nil
-            local command = nil
-
-            if type(cfg.command) == "string" then
-              transport = "Stdio"
-              command = cfg.command
-              if type(cfg.args) == "table" then
-                local args = {}
-                for _, a in ipairs(cfg.args) do
-                  if type(a) == "string" then table.insert(args, a) end
-                end
-                if #args > 0 then
-                  command = command .. " " .. table.concat(args, " ")
-                end
-              end
-            elseif type(cfg.url) == "string" then
-              transport = "Sse"
-              address = cfg.url
-            end
-
-            if transport then
-              table.insert(mcp_servers, {
-                name = server_name,
-                transport = transport,
-                address = address,
-                command = command,
-                tools = {},
-                context_path = item.context_path,
-              })
-            end
-          end
-        end
-      else
-        local servers = parse_mcp_servers_from_json(content, item.context_path)
-        for _, s in ipairs(servers) do
-          table.insert(mcp_servers, s)
-        end
-      end
-    end
-  end
-
-  local mcp_seen = {}
-  local mcp_unique = {}
-  for _, s in ipairs(mcp_servers) do
-    local key = (s.name or "") .. "::" .. (s.context_path or "")
-    if not mcp_seen[key] then
-      mcp_seen[key] = true
-      table.insert(mcp_unique, s)
-    end
-  end
-
-  --
-  -- Semantic enrichment: discover internal tools and extract metadata.
-  --
-
-  local internal_tools = {}
-  local metadata = nil
-
-  if ctx.is_semantic then
-    local session_fns = {
-      create = run_create_session,
-      transact = run_session_transact,
-      close = run_session_close,
-    }
-    internal_tools = helpers.discover_internal_tools({
-      process_path = ctx.process_path,
-      working_dir = filtered_paths[1],
-    }, session_fns)
-    metadata = helpers.extract_metadata(result.config_items)
-
-    for _, item in ipairs(result.config_items) do
-      item.contents = nil
-    end
-  end
-
-  return {
-    tools = {
-      mcp_servers = mcp_unique,
-      skills = {},
-      internal_tools = internal_tools,
-    },
-    config = result.config_items,
-    sessions = result.sessions,
-    project_paths = filtered_paths,
-    metadata = metadata,
-  }
-end
+  session_fns = {
+    create = run_create_session,
+    transact = run_session_transact,
+    close = run_session_close,
+  },
+}
 
 return {
   name = AGENT_NAME,
@@ -551,7 +264,6 @@ return {
 
   fingerprint = function(_ctx)
     local path, version = pick_path()
-    process_version = version
     return {
       available = path ~= nil,
       process_path = path,
@@ -568,7 +280,7 @@ return {
   end,
 
   recon = function(ctx)
-    return run_recon(ctx)
+    return helpers.run_standard_recon(ctx, recon_config)
   end,
 
   create_session = function(ctx)
