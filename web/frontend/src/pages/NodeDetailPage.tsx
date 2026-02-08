@@ -261,7 +261,7 @@ export function NodeDetailPage() {
   ];
 
   return (
-    <div className="flex flex-col h-full gap-6">
+    <div className="flex flex-col h-full gap-4 md:gap-6">
       {/*
       //
       // Back link.
@@ -280,20 +280,20 @@ export function NodeDetailPage() {
       // Node header.
       //
       */}
-      <div className="bg-card ascii-box border border-subtle p-6">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-4">
+      <div className="bg-card ascii-box border border-subtle p-4 md:p-6">
+        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+          <div className="flex items-start md:items-center gap-3 md:gap-4">
             <div className="p-3  bg-[var(--bg-secondary)]">
               <Server size={28} className="text-[var(--accent-success)]" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-highlight">{node.machine_name || 'Unknown'}</h1>
+              <h1 className="text-xl md:text-2xl font-bold text-highlight">{node.machine_name || 'Unknown'}</h1>
               <p className="text-muted text-sm mt-1">{node.os_details}</p>
               <p className="text-muted text-xs font-mono mt-1">{node.node_id}</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="text-right">
+          <div className="flex items-start sm:items-center gap-3 md:gap-4">
+            <div className="text-left sm:text-right">
               <div className="flex items-center gap-2 text-sm text-muted">
                 <Clock size={14} />
                 Last seen: {new Date(node.last_update).toLocaleString()}
@@ -309,8 +309,8 @@ export function NodeDetailPage() {
       // Tabs.
       //
       */}
-      <div className="border-b border-subtle">
-        <div className="flex gap-1">
+      <div className="border-b border-subtle overflow-x-auto">
+        <div className="flex gap-1 min-w-max">
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -342,7 +342,8 @@ export function NodeDetailPage() {
               <p className="text-muted">This node hasn't reported any available agents</p>
             </div>
           ) : (
-            <table className="w-full text-xs">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-xs">
               <thead>
                 <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
                   <th className="text-left px-4 py-2 text-muted tracking-wider">AGENT</th>
@@ -424,6 +425,7 @@ export function NodeDetailPage() {
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}
@@ -432,7 +434,7 @@ export function NodeDetailPage() {
         <div className="flex-1 flex flex-col bg-card ascii-box border border-subtle overflow-hidden">
           {terminalId ? (
             <div className="flex-1 flex flex-col min-h-0">
-              <div className="px-4 py-2 border-b border-subtle flex items-center justify-between bg-[var(--bg-secondary)]">
+              <div className="px-4 py-2 border-b border-subtle flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 bg-[var(--bg-secondary)]">
                 <span className="text-sm text-muted font-mono">Terminal: {terminalId.slice(0, 8)}...</span>
                 <button
                   onClick={handleCloseTerminal}
@@ -701,8 +703,8 @@ function NodeInterceptTab({
       //
       */}
       <div className="bg-card ascii-box border border-subtle p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-start sm:items-center gap-3 sm:gap-4">
             <div
               className={`p-3 ${
                 node.intercept_active ? 'bg-[var(--accent-warning)]/20' : 'bg-[var(--bg-secondary)]'
@@ -775,7 +777,7 @@ function NodeInterceptTab({
       //
       */}
       {trafficTotalCount > 0 && (
-        <div className="flex items-center justify-between text-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs">
           <div className="text-muted">
             Showing {Math.min(countTrafficEntries(trafficLog, protocolFilter, searchFilter), DISPLAY_LIMIT)} entries (of {trafficTotalCount} total)
           </div>

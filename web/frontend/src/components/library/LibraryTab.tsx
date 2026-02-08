@@ -522,14 +522,14 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
       // Toolbar: Filter, Search, Add.
       //
       */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-wrap">
           {/*
           //
           // Type filter.
           //
           */}
-          <div className="flex gap-1">
+          <div className="flex gap-1 overflow-x-auto">
             {[
               { value: 'all', label: 'All' },
               { value: 'operation', label: 'Operations' },
@@ -538,7 +538,7 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
               <button
                 key={f.value}
                 onClick={() => setFilter(f.value as FilterType)}
-                className={`px-3 py-1.5 text-sm transition-colors ${
+                className={`px-2.5 md:px-3 py-1.5 text-xs md:text-sm whitespace-nowrap transition-colors ${
                   filter === f.value
                     ? 'bg-[var(--accent-info)]/20 text-[var(--accent-info)] border border-[var(--accent-info)]/50'
                     : 'text-muted hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
@@ -554,14 +554,14 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
           // Search.
           //
           */}
-          <div className="relative">
+          <div className="relative min-w-0 flex-1 md:flex-none">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
             <input
               type="text"
               placeholder="Search..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 pr-3 py-1.5 text-sm bg-[var(--bg-secondary)] border border-subtle focus:outline-none focus:border-[var(--border-active)] w-48"
+              className="pl-9 pr-3 py-1.5 text-sm bg-[var(--bg-secondary)] border border-subtle focus:outline-none focus:border-[var(--border-active)] w-full md:w-48"
             />
           </div>
         </div>
@@ -571,10 +571,10 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
         // Add button with dropdown.
         //
         */}
-        <div className="relative" ref={addMenuRef}>
+        <div className="relative self-start md:self-auto" ref={addMenuRef}>
           <button
             onClick={() => setShowAddMenu(!showAddMenu)}
-            className="inline-flex items-center gap-2 px-3 py-1.5 text-xs tracking-wider bg-[var(--accent-success)]/20 text-[var(--accent-success)] border border-dim hover:border-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors"
+            className="inline-flex items-center gap-1.5 px-2.5 md:px-3 py-1.5 text-xs tracking-wider bg-[var(--accent-success)]/20 text-[var(--accent-success)] border border-dim hover:border-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors"
           >
             <Plus size={14} />
             Add
@@ -582,7 +582,7 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
           </button>
 
           {showAddMenu && (
-            <div className="absolute right-0 mt-1 w-48 bg-[var(--bg-secondary)] border border-dim z-50">
+            <div className="absolute left-0 md:left-auto md:right-0 mt-1 w-52 max-w-[calc(100vw-2rem)] bg-[var(--bg-secondary)] border border-dim z-50">
               <button
                 onClick={handleAddOperation}
                 className="flex items-center gap-2 w-full px-3 py-2.5 text-xs tracking-wider text-highlight border-b border-dim last:border-0 hover:bg-[var(--highlight)] transition-colors text-left"
@@ -626,8 +626,8 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
             : 'No chains defined.'}
         </div>
       ) : (
-        <div className="border border-subtle ascii-box">
-          <table className="w-full text-xs">
+        <div className="border border-subtle ascii-box overflow-x-auto">
+          <table className="w-full min-w-[760px] text-xs">
             <thead>
               <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
                 <th className="text-left px-4 py-2 text-muted tracking-wider w-8">TYPE</th>

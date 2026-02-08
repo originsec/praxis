@@ -1,9 +1,13 @@
-import { Wifi, WifiOff, RefreshCw, Sun, Moon } from 'lucide-react';
+import { Wifi, WifiOff, RefreshCw, Sun, Moon, Menu } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useLocation } from 'react-router-dom';
 
-export function Header() {
+interface HeaderProps {
+  onOpenMobileNav?: () => void;
+}
+
+export function Header({ onOpenMobileNav }: HeaderProps) {
   const { state } = useApp();
   const { isDark, toggleTheme } = useTheme();
   const location = useLocation();
@@ -34,7 +38,16 @@ export function Header() {
       // Left side - page title.
       //
       */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-2 md:gap-4">
+        {onOpenMobileNav && (
+          <button
+            onClick={onOpenMobileNav}
+            className="md:hidden p-1 rounded hover:bg-[var(--highlight)] transition-colors"
+            title="Open navigation"
+          >
+            <Menu size={16} className="text-muted" />
+          </button>
+        )}
         <span className="text-xs text-muted tracking-wider">{getPageTitle()}</span>
       </div>
 
@@ -43,13 +56,13 @@ export function Header() {
       // Right side - status.
       //
       */}
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-2 md:gap-6">
         {/*
         //
         // Stats.
         //
         */}
-        <div className="flex items-center gap-4 text-xs">
+        <div className="hidden md:flex items-center gap-4 text-xs">
           <div className="flex items-center gap-2">
             <span className="text-muted">NODES:</span>
             <span className="text-highlight font-medium">{nodeCount}</span>
@@ -68,7 +81,7 @@ export function Header() {
         // Connection status.
         //
         */}
-        <div className="flex items-center gap-2 text-xs">
+        <div className="flex items-center gap-1.5 md:gap-2 text-[10px] md:text-xs">
           {state.connected ? (
             <>
               <Wifi size={12} className="status-online" />

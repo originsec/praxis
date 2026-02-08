@@ -46,14 +46,14 @@ export function EventsPage() {
   };
 
   return (
-    <div className="p-6 space-y-4 h-full flex flex-col">
+    <div className="p-3 md:p-6 space-y-4 h-full flex flex-col">
       {/*
       //
       // Page header.
       //
       */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-center gap-2 md:gap-3">
           <ScrollText className="text-[var(--accent-success)]" size={20} />
           <h1 className="text-lg font-bold tracking-wider text-highlight">EVENTS</h1>
         </div>
@@ -84,7 +84,7 @@ export function EventsPage() {
       // Filter.
       //
       */}
-      <div className="flex items-center gap-4 p-4 border border-subtle ascii-box">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-3 md:p-4 border border-subtle ascii-box">
         <input
           type="text"
           value={filter}
@@ -116,7 +116,7 @@ export function EventsPage() {
             {filteredEvents.map((event, idx) => (
               <div
                 key={idx}
-                className="flex gap-4 py-2 border-b border-dim last:border-0 hover:bg-[var(--bg-secondary)]"
+                className="flex flex-col sm:flex-row sm:items-start gap-1 sm:gap-4 py-2 border-b border-dim last:border-0 hover:bg-[var(--bg-secondary)]"
               >
                 <span className="text-muted whitespace-nowrap">
                   {new Date(event.timestamp).toLocaleTimeString()}

@@ -286,18 +286,18 @@ export function TrafficFilterBar({
   const agentOptions = getAgentOptions();
 
   return (
-    <div className="flex items-center gap-4 p-4 border border-subtle ascii-box">
+    <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:gap-4 p-4 border border-subtle ascii-box">
       {/*
       //
       // Unified Search Filter.
       //
       */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 w-full lg:w-auto">
         <Search size={14} className="text-muted" />
         <input
           type="text"
           placeholder="Search..."
-          className="bg-transparent border-b border-subtle text-xs text-title px-2 py-1 w-48 focus:border-[var(--accent-success)] outline-none"
+          className="bg-transparent border-b border-subtle text-xs text-title px-2 py-1 w-full lg:w-48 focus:border-[var(--accent-success)] outline-none"
           value={searchFilter}
           onChange={(e) => setSearchFilter(e.target.value)}
         />
@@ -365,35 +365,37 @@ export function TrafficFilterBar({
         <option value="h2">HTTP/2 Only</option>
       </select>
 
-      <div className="flex-1" />
+      <div className="hidden lg:block flex-1" />
 
       {/*
       //
       // Refresh Button.
       //
       */}
-      <button
-        onClick={onRefresh}
-        className="flex items-center gap-2 px-3 py-1 text-xs text-muted hover:text-[var(--accent-info)] border border-subtle hover:border-[var(--accent-info)] hover:bg-[var(--accent-info)]/10 transition-colors"
-      >
-        <RefreshCw size={12} />
-        REFRESH
-      </button>
+      <div className="flex items-center gap-2 lg:ml-auto">
+        <button
+          onClick={onRefresh}
+          className="flex items-center gap-2 px-3 py-1 text-xs text-muted hover:text-[var(--accent-info)] border border-subtle hover:border-[var(--accent-info)] hover:bg-[var(--accent-info)]/10 transition-colors"
+        >
+          <RefreshCw size={12} />
+          REFRESH
+        </button>
 
       {/*
       //
       // Clear Button (optional).
       //
       */}
-      {onClear && (
-        <button
-          onClick={onClear}
-          className="flex items-center gap-2 px-3 py-1 text-xs text-muted hover:text-[var(--accent-error)] border border-subtle hover:border-[var(--accent-error)] hover:bg-[var(--accent-error)]/10 transition-colors"
-        >
-          <Trash2 size={12} />
-          CLEAR
-        </button>
-      )}
+        {onClear && (
+          <button
+            onClick={onClear}
+            className="flex items-center gap-2 px-3 py-1 text-xs text-muted hover:text-[var(--accent-error)] border border-subtle hover:border-[var(--accent-error)] hover:bg-[var(--accent-error)]/10 transition-colors"
+          >
+            <Trash2 size={12} />
+            CLEAR
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -1145,13 +1147,16 @@ export function ScrollableTrafficTable({
 
   return (
     <div className={containerClass} style={containerStyle}>
-      <table className="w-full text-xs table-fixed">
+      <div className="overflow-x-auto">
+      <table className="w-full min-w-[920px] text-xs table-fixed">
         <thead>
           <TrafficTableHeader showNodeColumn={showNodeColumn} />
         </thead>
       </table>
+      </div>
       <div className="flex-1 overflow-y-auto">
-        <table className="w-full text-xs table-fixed">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[920px] text-xs table-fixed">
           <tbody>
             <GroupedTrafficRows
               entries={entries}
@@ -1171,6 +1176,7 @@ export function ScrollableTrafficTable({
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

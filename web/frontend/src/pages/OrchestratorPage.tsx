@@ -248,7 +248,7 @@ function ChatMessage({ message }: { message: OrchestratorMessage }) {
       className={`flex ${isUser ? 'justify-end' : isSystem ? 'justify-center' : 'justify-start'}`}
     >
       <div
-        className={`max-w-[85%] ascii-box px-4 py-3 ${
+        className={`w-full md:max-w-[85%] ascii-box px-3 md:px-4 py-3 ${
           isUser
             ? 'bg-[var(--accent-purple)]/20 text-[var(--text-primary)]'
             : isSystem
@@ -303,7 +303,7 @@ function StreamingMessage({
 }) {
   return (
     <div className="flex justify-start">
-      <div className="max-w-[85%] ascii-box px-4 py-3 bg-[var(--bg-secondary)] text-[var(--text-highlight)]/80">
+      <div className="w-full md:max-w-[85%] ascii-box px-3 md:px-4 py-3 bg-[var(--bg-secondary)] text-[var(--text-highlight)]/80">
         <div className="flex items-center gap-2 mb-2 text-[var(--accent-success)]">
           <Bot size={16} />
           <span className="text-xs font-medium">Orchestrator</span>
@@ -412,14 +412,14 @@ export function OrchestratorPage() {
       // Header.
       //
       */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-4 md:mb-6">
+        <div className="flex items-start md:items-center gap-3">
           <div className="p-3 bg-[var(--accent-purple)]/20">
             <Sparkles size={32} className="text-[var(--accent-purple)]" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-highlight">Orchestrator</h1>
+              <h1 className="text-xl md:text-2xl font-bold text-highlight">Orchestrator</h1>
               <span className="px-2 py-0.5 text-xs font-medium bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] rounded">
                 Experimental
               </span>
@@ -435,7 +435,7 @@ export function OrchestratorPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 md:gap-3">
           {/*
           //
           // Export button.
@@ -486,7 +486,7 @@ export function OrchestratorPage() {
       //
       */}
       {!isConfigured && (
-        <div className="mb-4 p-4 bg-[var(--accent-warning)]/10 border border-[var(--accent-warning)]/30  flex items-start gap-3">
+        <div className="mb-4 p-3 md:p-4 bg-[var(--accent-warning)]/10 border border-[var(--accent-warning)]/30  flex items-start gap-3">
           <AlertCircle size={20} className="text-[var(--accent-warning)] mt-0.5 flex-shrink-0" />
           <div>
             <p className="text-sm font-medium text-[var(--accent-warning)]">
@@ -519,7 +519,7 @@ export function OrchestratorPage() {
         // Messages.
         //
         */}
-        <div className="flex-1 overflow-auto p-6 space-y-4">
+        <div className="flex-1 overflow-auto p-3 md:p-6 space-y-4">
           {orchestrator.messages.map((msg) => (
             <ChatMessage key={msg.id} message={msg} />
           ))}
@@ -545,7 +545,7 @@ export function OrchestratorPage() {
         //
         */}
         <div className="p-4 border-t border-subtle">
-          <div className="flex gap-3">
+          <div className="flex gap-2 md:gap-3">
             <input
               ref={inputRef}
               type="text"
@@ -586,8 +586,8 @@ export function OrchestratorPage() {
       // Status footer.
       //
       */}
-      <div className="mt-4 flex items-center justify-between text-sm text-muted">
-        <div className="flex items-center gap-4">
+      <div className="mt-3 md:mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs md:text-sm text-muted">
+        <div className="flex flex-wrap items-center gap-2 md:gap-4">
           <span>{state.systemState?.nodes.length ?? 0} nodes connected</span>
           <span>
             {state.operations.filter((op) => op.status === 'Running').length} operations running

@@ -607,19 +607,19 @@ export function SettingsPage() {
         <p className="text-muted mt-1">Configure your Praxis instance</p>
       </div>
 
-      <div className="flex gap-6">
+      <div className="flex flex-col md:flex-row gap-4 md:gap-6">
         {/*
         //
         // Sidebar tabs.
         //
         */}
-        <div className="w-52 space-y-1">
+        <div className="w-full md:w-52 flex md:block gap-2 md:gap-0 md:space-y-1 overflow-x-auto">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               style={{ cursor: 'pointer' }}
-              className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+              className={`w-full md:w-full min-w-44 md:min-w-0 flex items-center gap-3 px-4 py-3 text-left transition-colors ${
                 activeTab === tab.id
                   ? 'bg-[var(--highlight)] text-title border-l-2 border-[var(--border-active)]'
                   : 'text-muted hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
@@ -636,7 +636,7 @@ export function SettingsPage() {
         // Content.
         //
         */}
-        <div className="flex-1 bg-card ascii-box border border-subtle p-6">
+        <div className="flex-1 bg-card ascii-box border border-subtle p-4 md:p-6">
           {activeTab === 'llm_providers' && (
             <div className="space-y-6">
               <div>
@@ -649,7 +649,7 @@ export function SettingsPage() {
               // LLM Subtabs.
               //
               */}
-              <div className="flex gap-2 border-b border-subtle">
+              <div className="flex gap-2 border-b border-subtle overflow-x-auto">
                 {[
                   { id: 'model_definitions' as LLMTab, label: 'Model Definitions' },
                   { id: 'feature_selection' as LLMTab, label: 'Feature Configuration' },
@@ -675,7 +675,7 @@ export function SettingsPage() {
               */}
               {activeLLMTab === 'model_definitions' && (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                     <p className="text-sm text-muted">
                       Define model credentials that can be assigned to different features.
                     </p>
@@ -705,7 +705,7 @@ export function SettingsPage() {
                         </button>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-xs tracking-wider text-muted mb-1.5">Provider</label>
                           <select
@@ -803,7 +803,7 @@ export function SettingsPage() {
                             // Editing mode.
                             //
                             <div className="space-y-4">
-                              <div className="grid grid-cols-2 gap-4">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                   <label className="block text-xs tracking-wider text-muted mb-1.5">Provider</label>
                                   <select
@@ -871,7 +871,7 @@ export function SettingsPage() {
                             //
                             // Display mode.
                             //
-                            <div className="flex items-center justify-between">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                               <div>
                                 <p className="font-mono text-sm text-highlight">{model.name}</p>
                                 <p className="text-xs text-muted mt-1">
@@ -957,8 +957,8 @@ export function SettingsPage() {
                       //
                       */}
                       {getFeatureFlags().orchestrator && (
-                      <div className="flex items-center gap-4 p-3 bg-[var(--bg-secondary)] border border-dim">
-                        <div className="w-48">
+                      <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4 p-3 bg-[var(--bg-secondary)] border border-dim">
+                        <div className="w-full md:w-48">
                           <p className="text-sm font-medium text-highlight">Orchestrator</p>
                           <p className="text-xs text-muted">Interactive AI assistant</p>
                         </div>
@@ -979,7 +979,7 @@ export function SettingsPage() {
                           placeholder="Max tokens"
                           min="1000"
                           max="100000"
-                          className="w-28 bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
+                          className="w-full md:w-28 bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                           title="Max tokens"
                         />
                       </div>
@@ -990,8 +990,8 @@ export function SettingsPage() {
                       // Semantic Operations.
                       //
                       */}
-                      <div className="flex items-center gap-4 p-3 bg-[var(--bg-secondary)] border border-dim">
-                        <div className="w-48">
+                      <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4 p-3 bg-[var(--bg-secondary)] border border-dim">
+                        <div className="w-full md:w-48">
                           <p className="text-sm font-medium text-highlight">Semantic Operations</p>
                           <p className="text-xs text-muted">Default model for ops</p>
                         </div>
@@ -1012,8 +1012,8 @@ export function SettingsPage() {
                       // Semantic Parser.
                       //
                       */}
-                      <div className="flex items-center gap-4 p-3 bg-[var(--bg-secondary)] border border-dim">
-                        <div className="w-48">
+                      <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4 p-3 bg-[var(--bg-secondary)] border border-dim">
+                        <div className="w-full md:w-48">
                           <p className="text-sm font-medium text-highlight">Semantic Parser</p>
                           <p className="text-xs text-muted">Tool call parsing</p>
                         </div>
@@ -1034,8 +1034,8 @@ export function SettingsPage() {
                       // Traffic Parser.
                       //
                       */}
-                      <div className="flex items-center gap-4 p-3 bg-[var(--bg-secondary)] border border-dim">
-                        <div className="w-48">
+                      <div className="flex flex-col md:flex-row md:items-center gap-3 md:gap-4 p-3 bg-[var(--bg-secondary)] border border-dim">
+                        <div className="w-full md:w-48">
                           <p className="text-sm font-medium text-highlight">Traffic Parser</p>
                           <p className="text-xs text-muted">Traffic summarization</p>
                         </div>
@@ -1085,13 +1085,13 @@ export function SettingsPage() {
           )}
 
           {activeTab === 'agents' && (
-            <div className="flex flex-col" style={{ height: 'calc(100vh - 16rem)' }}>
-              <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-col md:h-[calc(100vh-16rem)]">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
                 <div>
                   <h2 className="text-lg font-semibold text-highlight mb-1">Agent Definitions</h2>
                   <p className="text-sm text-muted">Manage Lua agent connector scripts stored in the service database</p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <label className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-md bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/30 transition-colors cursor-pointer">
                     <Upload size={14} />
                     Upload
@@ -1108,13 +1108,13 @@ export function SettingsPage() {
                 </div>
               </div>
 
-              <div className="flex gap-4 flex-1 min-h-0">
+              <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0">
                 {/*
                 //
                 // Script list.
                 //
                 */}
-                <div className="w-56 flex-shrink-0 border border-dim overflow-y-auto">
+                <div className="w-full lg:w-56 flex-shrink-0 border border-dim overflow-y-auto max-h-56 lg:max-h-none">
                   {state.luaAgentScripts.length === 0 ? (
                     <div className="p-4 text-center text-muted text-sm">
                       No scripts
@@ -1153,14 +1153,14 @@ export function SettingsPage() {
                 <div className="flex-1 flex flex-col border border-dim min-h-0">
                   {(selectedScriptId || isAddingScript) ? (
                     <>
-                      <div className="flex items-center justify-between px-4 py-2 border-b border-dim bg-[var(--bg-secondary)] flex-shrink-0">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-2 border-b border-dim bg-[var(--bg-secondary)] flex-shrink-0">
                         {isEditingScript ? (
                           <input
                             type="text"
                             value={editingScriptName}
                             onChange={(e) => setEditingScriptName(e.target.value)}
                             placeholder="Script name"
-                            className="bg-[var(--bg-primary)] border border-dim rounded px-2 py-1 text-sm text-highlight focus:outline-none focus:border-subtle w-64"
+                            className="bg-[var(--bg-primary)] border border-dim rounded px-2 py-1 text-sm text-highlight focus:outline-none focus:border-subtle w-full md:w-64"
                           />
                         ) : (
                           <span className="text-sm font-medium text-highlight">{editingScriptName}</span>
@@ -1467,7 +1467,7 @@ export function SettingsPage() {
               </div>
 
               <div className="max-w-2xl">
-                <div className="p-6 pt-2">
+                <div className="p-4 md:p-6 pt-2">
                   <h3 className="text-md font-semibold text-[var(--accent-success)] mb-4">Praxis by [Ø] Origin</h3>
                   <p className="text-sm text-muted mb-6">
                     <a href="https://originhq.com" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-info)]/70 hover:text-[var(--accent-info)] hover:underline">Origin</a> is an endpoint security company building protection for the semantic era of computing. As AI agents become integral to enterprise workflows, Origin provides the visibility and control organizations need to safely grant agents the permissions they require.
@@ -1475,7 +1475,7 @@ export function SettingsPage() {
                   <p className="text-sm text-muted mb-8">
                     <a href="https://github.com/originsec/praxis" target="_blank" rel="noopener noreferrer" className="text-[var(--accent-info)]/70 hover:text-[var(--accent-info)] hover:underline">Praxis</a> is Origin's experimental research platform for exploring the adversarial boundaries of legitimate semantic tools. By understanding how computer-use agents and their underlying capabilities can be leveraged offensively, we build better defenses for the endpoints they operate on.
                   </p>
-                  <div className="flex gap-4">
+                      <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
                     <a
                       href="https://originhq.com"
                       target="_blank"

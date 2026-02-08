@@ -678,6 +678,22 @@ async fn handle_command(
         NodeCommand::Agent(cmd) => {
             let is_recon = matches!(cmd, common::AgentCommand::Recon | common::AgentCommand::ReconSemantic);
             let is_semantic = matches!(cmd, common::AgentCommand::ReconSemantic);
+            if is_recon {
+                let selected_short = selected_agent
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .map(|a| a.short_name().to_string())
+                    .unwrap_or_else(|| "<none>".to_string());
+                common::log_info!(
+                    "Received recon command_id={} node={} command={:?} is_semantic={} selected_agent={}",
+                    request.command_id,
+                    node_id,
+                    cmd,
+                    is_semantic,
+                    selected_short
+                );
+            }
             let result = handle_agent_command(cmd, registry, selected_agent).await;
 
             //

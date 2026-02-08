@@ -202,7 +202,7 @@ function AddAgentModal({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-[var(--bg-secondary)] border border-subtle p-4 w-80">
+      <div className="bg-[var(--bg-secondary)] border border-subtle p-4 w-[92vw] max-w-80">
         <h3 className="text-sm font-medium mb-4">Add Agent to AgentChat</h3>
 
         <div className="space-y-3">
@@ -375,11 +375,11 @@ export default function AgentChatPage() {
       // Header.
       //
       */}
-      <div className="border-b border-subtle pb-6">
-        <div className="flex items-center justify-between">
+      <div className="border-b border-subtle pb-4 md:pb-6">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold text-highlight">AgentChat</h1>
+            <div className="flex items-center gap-2 md:gap-3">
+              <h1 className="text-xl md:text-2xl font-bold text-highlight">AgentChat</h1>
               <span className="px-2 py-0.5 text-xs font-medium bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] rounded">
                 Experimental
               </span>
@@ -421,7 +421,7 @@ export default function AgentChatPage() {
         </div>
 
         {!isActive && (
-          <div className="mt-6 p-2 bg-[var(--accent-error)]/10 border border-[var(--accent-error)]/30 flex items-start gap-2">
+          <div className="mt-4 md:mt-6 p-2 bg-[var(--accent-error)]/10 border border-[var(--accent-error)]/30 flex items-start gap-2">
             <AlertTriangle size={14} className="text-[var(--accent-error)] mt-0.5 flex-shrink-0" />
             <span className="text-xs text-[var(--accent-error)]">
               Agents may independently and dangerously choose to take action without confirmation.
@@ -430,7 +430,7 @@ export default function AgentChatPage() {
         )}
 
         {!isActive && (
-          <div className="mt-6 space-y-3">
+          <div className="mt-4 md:mt-6 space-y-3">
             <div>
               <label className="text-xs text-muted block mb-1">Session Goal (optional)</label>
               <textarea
@@ -484,13 +484,13 @@ export default function AgentChatPage() {
       //
       */}
       {isActive ? (
-        <div className="flex flex-1 min-h-0">
+        <div className="flex flex-col md:flex-row flex-1 min-h-0">
           {/*
           //
           // Sidebar.
           //
           */}
-          <div className="w-48 border-r border-subtle flex flex-col">
+          <div className="w-full md:w-48 border-b md:border-b-0 md:border-r border-subtle flex flex-col md:max-h-none max-h-[45vh]">
             {/*
             //
             // Agents section.
@@ -510,7 +510,7 @@ export default function AgentChatPage() {
                   <Plus size={12} />
                 </button>
               </div>
-              <div className="space-y-0.5">
+              <div className="space-y-0.5 max-h-40 md:max-h-none overflow-y-auto">
                 {session.agents.map((agent, index) => (
                   <AgentListItem
                     key={agent.id}
@@ -622,7 +622,7 @@ export default function AgentChatPage() {
         </div>
       ) : (
         <div className="flex-1 flex items-center justify-center">
-          <div className="text-center max-w-md">
+          <div className="text-center max-w-md px-2">
             <MessageSquare size={48} className="text-muted mx-auto mb-4" />
             <h2 className="text-lg font-medium mb-2">Welcome to AgentChat</h2>
             <p className="text-sm text-muted mb-4">
