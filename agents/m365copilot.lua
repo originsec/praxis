@@ -7,11 +7,6 @@ local AGENT_SHORT_NAME = "m365copilot"
 local INTERCEPT_DOMAINS = { "substrate.office.com" }
 local INTERCEPT_URL_PATTERN = "m365Copilot/Chathub"
 
-local INPUT_SELECTOR = '#m365-chat-editor-target-element'
-local MESSAGE_SELECTOR = 'div[data-testid="markdown-reply"]'
-local SEND_BUTTON_SELECTOR = 'button[aria-label="Send"]:not([aria-disabled="true"])'
-local STOP_BUTTON_SELECTOR = 'button[aria-label="Stop generating"]'
-
 local WORKING_DIR_WORK = "Work"
 local WORKING_DIR_WEB = "Web"
 
@@ -24,27 +19,31 @@ local process_path = nil
 -- M365-specific adapter for the generic devtools transact loop.
 --
 
+local INPUT_SELECTOR = '#m365-chat-editor-target-element'
+local MESSAGE_SELECTOR = 'div[data-testid="markdown-reply"]'
+local SEND_BUTTON_SELECTOR = 'button[aria-label="Send"]:not([aria-disabled="true"])'
+local STOP_BUTTON_SELECTOR = 'button[aria-label="Stop generating"]'
+
 local m365_adapter = {
   input_selector = INPUT_SELECTOR,
   message_selector = MESSAGE_SELECTOR,
 
   check_response_state = function(handle, initial_count)
-    local result = praxis.cdp_evaluate(handle, [[
-      (function() {
-        var contentElements = document.querySelectorAll('div[data-testid="markdown-reply"]');
-        var responseText = '';
-        if (contentElements.length > 0) {
-          var lastContent = contentElements[contentElements.length - 1];
-          responseText = (lastContent.innerText || lastContent.textContent || '').trim();
-        }
-        var stopButton = document.querySelector('button[aria-label="Stop generating"]');
-        return {
-          responseText: responseText,
-          messageCount: contentElements.length,
-          isGenerating: stopButton !== null
-        };
-      })()
-    ]])
+    local js = "(function() {"
+      .. "var contentElements = document.querySelectorAll('" .. MESSAGE_SELECTOR .. "');"
+      .. "var responseText = '';"
+      .. "if (contentElements.length > 0) {"
+      .. "  var lastContent = contentElements[contentElements.length - 1];"
+      .. "  responseText = (lastContent.innerText || lastContent.textContent || '').trim();"
+      .. "}"
+      .. "var stopButton = document.querySelector('" .. STOP_BUTTON_SELECTOR .. "');"
+      .. "return {"
+      .. "  responseText: responseText,"
+      .. "  messageCount: contentElements.length,"
+      .. "  isGenerating: stopButton !== null"
+      .. "};"
+      .. "})()"
+    local result = praxis.cdp_evaluate(handle, js)
 
     local message_count = (result and result.messageCount) or 0
     local is_generating = (result and result.isGenerating) or false
