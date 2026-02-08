@@ -79,7 +79,7 @@ function M.transact(handle, adapter, prompt)
   local idle_checks = 0
 
   for _ = 1, max_iterations do
-    praxis.cdp_evaluate(handle, "new Promise(r => setTimeout(r, " .. poll_interval_ms .. "))")
+    praxis.sleep_ms(poll_interval_ms)
 
     local ok, state = pcall(adapter.check_response_state, handle, initial_count)
     if ok and state then

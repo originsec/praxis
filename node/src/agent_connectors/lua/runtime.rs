@@ -674,6 +674,17 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         )
         .map_err(lua_error)?;
 
+    praxis
+        .set(
+            "sleep_ms",
+            lua.create_function(|_, ms: u64| {
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+                Ok(())
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
     super::cdp::install_cdp_api(lua, &praxis)?;
 
     lua.globals().set("praxis", praxis).map_err(lua_error)?;
