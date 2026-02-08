@@ -16,6 +16,7 @@ const AGENT_SHORTNAME: &str = "clawdbot";
 
 pub struct ClawdbotAgent {
     pub(crate) process_path: OnceCell<String>,
+    fingerprint_at: RwLock<Option<std::time::Instant>>,
     session: RwLock<Option<Arc<dyn AgentSession>>>,
 }
 
@@ -23,6 +24,7 @@ impl ClawdbotAgent {
     pub fn new() -> Self {
         Self {
             process_path: OnceCell::new(),
+            fingerprint_at: RwLock::new(None),
             session: RwLock::new(None),
         }
     }
@@ -49,7 +51,16 @@ impl Agent for ClawdbotAgent {
     }
 
     async fn do_fingerprint(&self) -> bool {
-        self.do_fingerprint_impl().await
+        if let Some(at) = *self.fingerprint_at.read().unwrap() {
+            if at.elapsed() < std::time::Duration::from_secs(60) {
+                return true;
+            }
+        }
+        let available = self.do_fingerprint_impl().await;
+        if available {
+            *self.fingerprint_at.write().unwrap() = Some(std::time::Instant::now());
+        }
+        available
     }
 
     fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>> {

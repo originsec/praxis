@@ -8,6 +8,7 @@ use common::{LuaRegisteredAgentInfo, ReconResult, SessionContext};
 use mlua::Lua;
 use once_cell::sync::OnceCell;
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
 
 use crate::agent_connectors::traits::{Agent, AgentIntercept, AgentRecon, AgentSession};
 
@@ -41,6 +42,7 @@ pub struct LuaAgent {
     intercept_url_pattern_cache: OnceCell<Option<String>>,
     fingerprint_process_path: RwLock<Option<String>>,
     fingerprint_version: RwLock<Option<String>>,
+    fingerprint_at: RwLock<Option<Instant>>,
     session: RwLock<Option<Arc<dyn AgentSession>>>,
 }
 
@@ -68,6 +70,7 @@ impl LuaAgent {
             intercept_url_pattern_cache: OnceCell::new(),
             fingerprint_process_path: RwLock::new(None),
             fingerprint_version: RwLock::new(None),
+            fingerprint_at: RwLock::new(None),
             session: RwLock::new(None),
         })
     }
@@ -100,8 +103,14 @@ impl Agent for LuaAgent {
     }
 
     async fn do_fingerprint(&self) -> bool {
+        if let Some(at) = *self.fingerprint_at.read().unwrap() {
+            if at.elapsed() < std::time::Duration::from_secs(60) {
+                return true;
+            }
+        }
+
         let lua = self.vm.lock().unwrap();
-        match runtime::vm_fingerprint_details(&lua) {
+        let available = match runtime::vm_fingerprint_details(&lua) {
             Ok(details) => {
                 *self.fingerprint_process_path.write().unwrap() = details.process_path;
                 *self.fingerprint_version.write().unwrap() = details.version;
@@ -111,7 +120,12 @@ impl Agent for LuaAgent {
                 common::log_warn!("Lua fingerprint failed for '{}': {}", self.short_name, e);
                 false
             }
+        };
+
+        if available {
+            *self.fingerprint_at.write().unwrap() = Some(Instant::now());
         }
+        available
     }
 
     fn version(&self) -> Option<String> {

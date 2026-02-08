@@ -19,6 +19,7 @@ const AGENT_SHORTNAME: &str = "m365copilot";
 
 pub struct M365CopilotAgent {
     pub(crate) process_path: RwLock<Option<String>>,
+    fingerprint_at: RwLock<Option<std::time::Instant>>,
     session: RwLock<Option<Arc<dyn AgentSession>>>,
 }
 
@@ -26,6 +27,7 @@ impl M365CopilotAgent {
     pub fn new() -> Self {
         Self {
             process_path: RwLock::new(None),
+            fingerprint_at: RwLock::new(None),
             session: RwLock::new(None),
         }
     }
@@ -56,7 +58,16 @@ impl Agent for M365CopilotAgent {
     }
 
     async fn do_fingerprint(&self) -> bool {
-        self.do_fingerprint_impl().await
+        if let Some(at) = *self.fingerprint_at.read().unwrap() {
+            if at.elapsed() < std::time::Duration::from_secs(60) {
+                return true;
+            }
+        }
+        let available = self.do_fingerprint_impl().await;
+        if available {
+            *self.fingerprint_at.write().unwrap() = Some(std::time::Instant::now());
+        }
+        available
     }
 
     fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>> {
