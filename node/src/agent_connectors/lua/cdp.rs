@@ -26,6 +26,8 @@ fn check_shutdown() -> Result<()> {
 struct CdpConnection {
     page: Page,
     process_id: Option<u32>,
+    #[cfg(windows)]
+    _hidden_desktop: Option<crate::utils::HiddenDesktop>,
 }
 
 static CDP_CONNECTIONS: Lazy<Mutex<HashMap<String, CdpConnection>>> =
@@ -49,12 +51,13 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
 // DevTools endpoint to become available, and connect via chromiumoxide.
 //
 // Config table fields:
-//   process_path       (string)  Path to the executable
-//   debug_port_env_var (string)  Env var name for the debug port argument
-//   debug_port_format  (string)  Format string, e.g. "--remote-debugging-port={}"
-//   base_port          (number)  Base port number
-//   port_range         (number)  Range for random port selection
-//   kill_existing      (bool?)   Whether to kill existing processes first
+//   process_path        (string)  Path to the executable
+//   debug_port_env_var  (string)  Env var name for the debug port argument
+//   debug_port_format   (string)  Format string, e.g. "--remote-debugging-port={}"
+//   base_port           (number)  Base port number
+//   port_range          (number)  Range for random port selection
+//   kill_existing       (bool?)   Whether to kill existing processes first
+//   use_hidden_desktop  (bool?)   Spawn on hidden desktop (Windows, default true)
 //
 
 fn cdp_spawn_and_connect(config: &Table) -> Result<String> {
@@ -72,6 +75,7 @@ fn cdp_spawn_and_connect(config: &Table) -> Result<String> {
         .map_err(|e| anyhow!("missing base_port: {}", e))?;
     let port_range: u16 = config.get("port_range").unwrap_or(778);
     let kill_existing: bool = config.get("kill_existing").unwrap_or(true);
+    let use_hidden_desktop: bool = config.get("use_hidden_desktop").unwrap_or(true);
 
     //
     // Close all existing CDP connections and terminate their process trees,
@@ -94,15 +98,72 @@ fn cdp_spawn_and_connect(config: &Table) -> Result<String> {
 
     let debug_arg = debug_port_format.replace("{}", &port.to_string());
 
-    let process = std::process::Command::new(&process_path)
-        .env(&debug_port_env_var, &debug_arg)
-        .spawn()
-        .map_err(|e| anyhow!("failed to spawn {}: {}", process_path, e))?;
+    //
+    // On Windows, spawn on a hidden desktop if enabled and PRAXIS_NOT_HIDDEN
+    // is not set. Otherwise spawn normally and minimize after connect.
+    //
 
-    let pid = process.id();
-    common::log_info!("CDP: spawned process with PID {}", pid);
+    #[cfg(windows)]
+    let (pid, should_minimize, hidden_desktop) = {
+        let want_hidden = use_hidden_desktop
+            && std::env::var("PRAXIS_NOT_HIDDEN")
+                .map(|v| v != "1")
+                .unwrap_or(true);
+
+        if want_hidden {
+            let desktop = crate::utils::HiddenDesktop::new();
+            if let Some(ref d) = desktop {
+                let pid = crate::utils::spawn_on_hidden_desktop(
+                    &process_path,
+                    &debug_port_env_var,
+                    &debug_arg,
+                    &d.name,
+                )?;
+                common::log_info!("CDP: spawned on hidden desktop '{}' with PID {}", d.name, pid);
+                (pid, false, desktop)
+            } else {
+                common::log_warn!("CDP: failed to create hidden desktop, spawning normally");
+                let process = std::process::Command::new(&process_path)
+                    .env(&debug_port_env_var, &debug_arg)
+                    .spawn()
+                    .map_err(|e| anyhow!("failed to spawn {}: {}", process_path, e))?;
+                (process.id(), true, None)
+            }
+        } else {
+            let process = std::process::Command::new(&process_path)
+                .env(&debug_port_env_var, &debug_arg)
+                .spawn()
+                .map_err(|e| anyhow!("failed to spawn {}: {}", process_path, e))?;
+            let pid = process.id();
+            common::log_info!("CDP: spawned with PID {} (will minimize after connect)", pid);
+            (pid, true, None)
+        }
+    };
+
+    #[cfg(not(windows))]
+    let pid = {
+        let _ = use_hidden_desktop;
+        let process = std::process::Command::new(&process_path)
+            .env(&debug_port_env_var, &debug_arg)
+            .spawn()
+            .map_err(|e| anyhow!("failed to spawn {}: {}", process_path, e))?;
+        let pid = process.id();
+        common::log_info!("CDP: spawned with PID {}", pid);
+        pid
+    };
 
     let page = block_on(connect_to_devtools(port))?;
+
+    //
+    // Minimize the window after DevTools connects if not on a hidden desktop.
+    //
+
+    #[cfg(windows)]
+    if should_minimize {
+        if crate::utils::minimize_process_window(pid) {
+            common::log_info!("CDP: minimized process window");
+        }
+    }
 
     let handle = uuid::Uuid::new_v4().to_string();
     let mut map = CDP_CONNECTIONS.lock().unwrap();
@@ -111,6 +172,8 @@ fn cdp_spawn_and_connect(config: &Table) -> Result<String> {
         CdpConnection {
             page,
             process_id: Some(pid),
+            #[cfg(windows)]
+            _hidden_desktop: hidden_desktop,
         },
     );
 
@@ -132,6 +195,8 @@ fn cdp_connect(port: u16) -> Result<String> {
         CdpConnection {
             page,
             process_id: None,
+            #[cfg(windows)]
+            _hidden_desktop: None,
         },
     );
 
