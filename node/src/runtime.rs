@@ -606,6 +606,7 @@ async fn handle_broadcast_message(
             );
         }
         NodeBroadcastMessage::AgentRegistryUpdate { scripts } => {
+            common::log_info!("Received AgentRegistryUpdate with {} scripts", scripts.len());
             let has_session = selected_agent
                 .lock()
                 .unwrap()
