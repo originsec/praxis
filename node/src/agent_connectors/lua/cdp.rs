@@ -146,11 +146,12 @@ fn cdp_connect(port: u16) -> Result<String> {
 async fn connect_to_devtools(port: u16) -> Result<Page> {
     let ws_url = format!("http://127.0.0.1:{}", port);
 
+    let max_attempts = 5;
     let mut connected = false;
-    for attempt in 0..30 {
+    for attempt in 0..max_attempts {
         check_shutdown()?;
-        common::log_debug!("CDP: connection attempt {} to {}", attempt + 1, ws_url);
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        common::log_debug!("CDP: connection attempt {}/{} to {}", attempt + 1, max_attempts, ws_url);
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
         let version_url = format!("http://127.0.0.1:{}/json/version", port);
         if let Ok(response) = reqwest::get(&version_url).await {
@@ -163,7 +164,7 @@ async fn connect_to_devtools(port: u16) -> Result<Page> {
 
     if !connected {
         return Err(anyhow!(
-            "DevTools endpoint not available after 30 seconds"
+            "DevTools endpoint not available after {} attempts", max_attempts
         ));
     }
 
@@ -186,17 +187,17 @@ async fn connect_to_devtools(port: u16) -> Result<Page> {
         }
     });
 
-    for attempt in 0..30 {
+    for attempt in 0..max_attempts {
         check_shutdown()?;
         let pages = browser.pages().await?;
         if let Some(page) = pages.into_iter().next() {
             return Ok(page);
         }
-        common::log_debug!("CDP: no pages yet, attempt {}/30", attempt + 1);
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        common::log_debug!("CDP: no pages yet, attempt {}/{}", attempt + 1, max_attempts);
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
 
-    Err(anyhow!("No pages found in browser after 30 seconds"))
+    Err(anyhow!("No pages found in browser after {} attempts", max_attempts))
 }
 
 fn with_connection<F, R>(handle: &str, f: F) -> Result<R>
