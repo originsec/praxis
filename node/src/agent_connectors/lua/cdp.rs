@@ -289,6 +289,16 @@ fn close_all_connections() {
 }
 
 fn cdp_close(handle: &str) -> Result<()> {
+    cleanup_connection(handle);
+    Ok(())
+}
+
+//
+// Remove a CDP connection from the map and terminate its process tree.
+// Callable from Rust (session close/drop safety net) without going through Lua.
+//
+
+pub fn cleanup_connection(handle: &str) {
     let mut map = CDP_CONNECTIONS.lock().unwrap();
     if let Some(conn) = map.remove(handle) {
         if let Some(pid) = conn.process_id {
@@ -296,7 +306,6 @@ fn cdp_close(handle: &str) -> Result<()> {
             crate::utils::terminate_process_tree(pid);
         }
     }
-    Ok(())
 }
 
 fn cdp_process_id(handle: &str) -> Result<Option<u32>> {

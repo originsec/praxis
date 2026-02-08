@@ -63,19 +63,42 @@ impl AgentSession for LuaAgentSession {
         if let Err(e) = super::runtime::vm_session_close(&lua, &self.context, &state) {
             common::log_warn!("Lua session close failed: {}", e);
         }
+        drop(lua);
+
+        //
+        // Safety net: kill process by PID and clean up CDP connection from Rust,
+        // even if the Lua session_close callback failed or didn't run properly.
+        // Both operations are idempotent.
+        //
+
+        if let Some(pid) = state.get("process_id").and_then(|v| v.as_u64()) {
+            crate::utils::terminate_process_tree(pid as u32);
+        }
+        if let Some(handle) = state.get("cdp_handle").and_then(|v| v.as_str()) {
+            super::cdp::cleanup_connection(handle);
+        }
     }
 
     fn abort_transaction(&self) -> bool {
         let state = self.state.lock().unwrap().clone();
 
         //
-        // Common native cancellation path: if session state carries a
-        // command handle, terminate that process tree.
+        // CLI agents: terminate via command handle.
         //
+
         if let Some(handle) = state.get("handle").and_then(|v| v.as_str()) {
             if super::runtime::abort_command_handle(handle) {
                 return true;
             }
+        }
+
+        //
+        // CDP/DevTools agents: terminate via process ID stored in session state.
+        //
+
+        if let Some(pid) = state.get("process_id").and_then(|v| v.as_u64()) {
+            crate::utils::terminate_process_tree(pid as u32);
+            return true;
         }
 
         false

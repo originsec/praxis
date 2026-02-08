@@ -166,6 +166,15 @@ return {
     --
 
     local discovery_handle = nil
+    if not process_path then
+      praxis.log_warn("m365copilot: skipping discovery, no process_path (fingerprint not run?)")
+      return {
+        tools = { internal_tools = {}, mcp_servers = {}, skills = {} },
+        project_paths = {},
+        metadata = nil,
+      }
+    end
+
     local ok, err = pcall(function()
       discovery_handle = devtools.connect({
         process_path = process_path,
