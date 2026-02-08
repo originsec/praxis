@@ -224,7 +224,7 @@ local function discover_sessions_for_home(home)
       table.insert(sessions, {
         session_id = chat_id,
         context_path = context_path .. ":" .. project_hash,
-        session_file = entry.path,
+        session_file = store_db .. "::" .. chat_id,
         last_modified = last_modified,
         message_count = message_count,
         content = nil,
@@ -599,5 +599,25 @@ return {
 
   session_close = function(_ctx, state)
     run_session_close(state)
+  end,
+
+  --
+  -- Read session content from a virtual path (store.db::key). Extracts
+  -- hex-encoded JSON metadata from the SQLite meta table.
+  --
+
+  read_session_content = function(session_file)
+    local db_path, key = string.match(session_file, "^(.+)::(.+)$")
+    if not db_path or not key then
+      return nil
+    end
+
+    local hex_meta = praxis.sqlite_query(db_path,
+      "SELECT value FROM meta WHERE key='0';")
+    if not hex_meta then
+      return nil
+    end
+
+    return praxis.hex_decode(hex_meta)
   end,
 }

@@ -11,33 +11,6 @@ use tokio::sync::RwLock;
 
 const MAX_CONTENT_SIZE: usize = 14 * 1024 * 1024;
 
-//
-// Read a directory-based session by concatenating all readable text files
-// within it, sorted by filename.
-//
-
-fn read_directory_contents(dir: &Path) -> std::io::Result<String> {
-    let mut entries: Vec<_> = std::fs::read_dir(dir)?
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_file())
-        .collect();
-    entries.sort_by_key(|e| e.file_name());
-
-    let mut combined = String::new();
-    for entry in entries {
-        match std::fs::read_to_string(entry.path()) {
-            Ok(content) => {
-                if !combined.is_empty() {
-                    combined.push('\n');
-                }
-                combined.push_str(&content);
-            }
-            Err(_) => continue,
-        }
-    }
-    Ok(combined)
-}
-
 fn truncate_content(content: String) -> (String, bool) {
     if content.len() <= MAX_CONTENT_SIZE {
         return (content, false);
@@ -289,40 +262,19 @@ pub async fn handle_agent_command(
         }
         AgentCommand::GetSessionContent { session_file } => {
             //
-            // Validate path is within a valid user home directory for security.
-            //
-            let target_path = Path::new(&session_file);
-            let canonical_path = match target_path.canonicalize() {
-                Ok(p) => p,
-                Err(e) => {
-                    return NodeCommandResult::Agent(AgentCommandResult::SessionContent {
-                        session_file,
-                        content: None,
-                        error: Some(format!("Invalid path: {}", e)),
-                    });
-                }
-            };
-
-            if !is_path_in_valid_home(&canonical_path) {
-                return NodeCommandResult::Agent(AgentCommandResult::SessionContent {
-                    session_file,
-                    content: None,
-                    error: Some("Path must be within a valid user home directory".to_string()),
-                });
-            }
-
-            //
-            // Read the session content. If the path is a directory (e.g. Cursor
-            // chat sessions), concatenate all files within it.
+            // Delegate to the selected agent's read_session_content, which
+            // handles virtual paths (e.g. SQLite-backed sessions) as well as
+            // plain files. Path validation is the agent's responsibility for
+            // virtual paths; for real files the default impl reads directly.
             //
 
-            let read_result = if canonical_path.is_dir() {
-                read_directory_contents(&canonical_path)
-            } else {
-                std::fs::read_to_string(&session_file)
-            };
-            match read_result {
-                Ok(content) => {
+            let locked = selected_agent.lock().unwrap();
+            let agent = locked.as_ref();
+
+            let content = agent.and_then(|a| a.read_session_content(&session_file));
+
+            match content {
+                Some(content) => {
                     let (content, truncated) = truncate_content(content);
                     if truncated {
                         common::log_warn!(
@@ -341,12 +293,12 @@ pub async fn handle_agent_command(
                         },
                     })
                 }
-                Err(e) => {
-                    common::log_warn!("Failed to read session file {}: {}", session_file, e);
+                None => {
+                    common::log_warn!("Failed to read session file: {}", session_file);
                     NodeCommandResult::Agent(AgentCommandResult::SessionContent {
                         session_file,
                         content: None,
-                        error: Some(format!("Failed to read file: {}", e)),
+                        error: Some("Failed to read session content".to_string()),
                     })
                 }
             }

@@ -36,6 +36,7 @@ pub struct LuaAgent {
     has_create_session: bool,
     has_intercept_domains: bool,
     has_intercept_url_pattern: bool,
+    has_read_session_content: bool,
     intercept_domains_cache: OnceCell<Vec<String>>,
     intercept_url_pattern_cache: OnceCell<Option<String>>,
     fingerprint_process_path: RwLock<Option<String>>,
@@ -45,30 +46,23 @@ pub struct LuaAgent {
 impl LuaAgent {
     fn from_script(script: String) -> Result<Self> {
         let lua = runtime::create_vm(&script)?;
-        let (
-            name,
-            short_name,
-            has_recon,
-            has_create_session,
-            has_intercept_domains,
-            has_intercept_url_pattern,
-            has_fingerprint,
-        ) = runtime::vm_parse_manifest(&lua)?;
-        if !has_fingerprint {
+        let manifest = runtime::vm_parse_manifest(&lua)?;
+        if !manifest.has_fingerprint {
             return Err(anyhow!(
                 "Lua connector '{}' must define 'fingerprint'",
-                short_name
+                manifest.short_name
             ));
         }
 
         Ok(Self {
-            name,
-            short_name,
+            name: manifest.name,
+            short_name: manifest.short_name,
             vm: Arc::new(Mutex::new(lua)),
-            has_recon,
-            has_create_session,
-            has_intercept_domains,
-            has_intercept_url_pattern,
+            has_recon: manifest.has_recon,
+            has_create_session: manifest.has_create_session,
+            has_intercept_domains: manifest.has_intercept_domains,
+            has_intercept_url_pattern: manifest.has_intercept_url_pattern,
+            has_read_session_content: manifest.has_read_session_content,
             intercept_domains_cache: OnceCell::new(),
             intercept_url_pattern_cache: OnceCell::new(),
             fingerprint_process_path: RwLock::new(None),
@@ -150,6 +144,22 @@ impl Agent for LuaAgent {
 
     fn get_session(&self) -> Option<Arc<dyn AgentSession>> {
         self.session.read().unwrap().clone()
+    }
+
+    fn read_session_content(&self, session_file: &str) -> Option<String> {
+        if self.has_read_session_content {
+            let lua = self.vm.lock().unwrap();
+            match runtime::vm_read_session_content(&lua, session_file) {
+                Ok(content) => return content,
+                Err(e) => {
+                    common::log_warn!(
+                        "Lua read_session_content failed for '{}': {}",
+                        self.short_name, e
+                    );
+                }
+            }
+        }
+        std::fs::read_to_string(session_file).ok()
     }
 }
 

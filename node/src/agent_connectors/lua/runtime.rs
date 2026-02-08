@@ -53,7 +53,18 @@ fn connector_table(lua: &Lua) -> Result<Table> {
     lua.globals().get("_connector").map_err(lua_error)
 }
 
-pub fn vm_parse_manifest(lua: &Lua) -> Result<(String, String, bool, bool, bool, bool, bool)> {
+pub struct LuaManifest {
+    pub name: String,
+    pub short_name: String,
+    pub has_recon: bool,
+    pub has_create_session: bool,
+    pub has_intercept_domains: bool,
+    pub has_intercept_url_pattern: bool,
+    pub has_fingerprint: bool,
+    pub has_read_session_content: bool,
+}
+
+pub fn vm_parse_manifest(lua: &Lua) -> Result<LuaManifest> {
     let table = connector_table(lua)?;
 
     let name: String = table
@@ -74,8 +85,11 @@ pub fn vm_parse_manifest(lua: &Lua) -> Result<(String, String, bool, bool, bool,
         .contains_key("intercept_url_pattern")
         .map_err(lua_error)?;
     let has_fingerprint = table.contains_key("fingerprint").map_err(lua_error)?;
+    let has_read_session_content = table
+        .contains_key("read_session_content")
+        .map_err(lua_error)?;
 
-    Ok((
+    Ok(LuaManifest {
         name,
         short_name,
         has_recon,
@@ -83,7 +97,8 @@ pub fn vm_parse_manifest(lua: &Lua) -> Result<(String, String, bool, bool, bool,
         has_intercept_domains,
         has_intercept_url_pattern,
         has_fingerprint,
-    ))
+        has_read_session_content,
+    })
 }
 
 pub fn vm_fingerprint_details(lua: &Lua) -> Result<(bool, Option<String>)> {
@@ -183,6 +198,17 @@ pub fn vm_session_close(lua: &Lua, context: &SessionContext, state: &JsonValue) 
     let lua_state = lua.to_value(state).map_err(lua_error)?;
     let _: MultiValue = func.call((ctx, lua_state)).map_err(lua_error)?;
     Ok(())
+}
+
+pub fn vm_read_session_content(lua: &Lua, session_file: &str) -> Result<Option<String>> {
+    let table = connector_table(lua)?;
+    let func: Function = table.get("read_session_content").map_err(lua_error)?;
+    let result: Value = func.call(session_file.to_string()).map_err(lua_error)?;
+    match result {
+        Value::Nil => Ok(None),
+        Value::String(s) => Ok(Some(s.to_str().map_err(lua_error)?.to_string())),
+        _ => Ok(None),
+    }
 }
 
 fn install_shared_api(lua: &Lua) -> Result<()> {

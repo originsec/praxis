@@ -101,4 +101,14 @@ pub trait Agent: Send + Sync {
     fn has_session(&self) -> bool {
         self.get_session().is_some()
     }
+
+    //
+    // Read session content for a given session_file path. Agents can override
+    // this to handle virtual paths (e.g. SQLite-backed sessions). The default
+    // reads the file directly.
+    //
+
+    fn read_session_content(&self, session_file: &str) -> Option<String> {
+        std::fs::read_to_string(session_file).ok()
+    }
 }
