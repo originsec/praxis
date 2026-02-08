@@ -551,6 +551,61 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         .map_err(lua_error)?;
 
     //
+    // SQLite query helper. Runs a read-only SQL query via the sqlite3 CLI and
+    // returns stdout as a string. Returns nil on error.
+    //
+
+    praxis
+        .set(
+            "sqlite_query",
+            lua.create_function(|_, (db_path, sql): (String, String)| {
+                let output = std::process::Command::new("sqlite3")
+                    .arg(&db_path)
+                    .arg(&sql)
+                    .output();
+
+                match output {
+                    Ok(out) if out.status.success() => {
+                        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                        Ok(Some(stdout))
+                    }
+                    _ => Ok(None),
+                }
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    //
+    // Hex decode helper. Decodes a hex string to its UTF-8 representation.
+    // Returns nil on invalid input.
+    //
+
+    praxis
+        .set(
+            "hex_decode",
+            lua.create_function(|_, hex_str: String| {
+                let hex_str = hex_str.trim();
+                if hex_str.len() % 2 != 0 {
+                    return Ok(None);
+                }
+                let bytes: Result<Vec<u8>, _> = (0..hex_str.len())
+                    .step_by(2)
+                    .map(|i| u8::from_str_radix(&hex_str[i..i + 2], 16))
+                    .collect();
+                match bytes {
+                    Ok(b) => match String::from_utf8(b) {
+                        Ok(s) => Ok(Some(s)),
+                        Err(_) => Ok(None),
+                    },
+                    Err(_) => Ok(None),
+                }
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    //
     // Semantic parser helpers. These block on async calls to the semantic
     // parser service and should only be called during semantic recon.
     //

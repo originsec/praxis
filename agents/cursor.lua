@@ -196,14 +196,31 @@ local function discover_sessions_for_home(home)
 
       local chat_id = entry.name or ""
 
-      --
-      -- Count files in chat directory as proxy for message count.
-      --
-
-      local chat_files = praxis.read_dir(entry.path) or {}
       local message_count = 0
-      for _, _ in ipairs(chat_files) do
-        message_count = message_count + 1
+      local content = nil
+      local store_db = praxis.path_join({ entry.path, "store.db" })
+
+      if praxis.path_exists(store_db) then
+
+        --
+        -- Cursor stores chats in SQLite with hex-encoded JSON metadata
+        -- and protobuf blobs. Extract what we can.
+        --
+
+        local count_str = praxis.sqlite_query(store_db, "SELECT count(*) FROM blobs;")
+        if count_str then
+          message_count = tonumber(count_str) or 0
+        end
+
+        local hex_meta = praxis.sqlite_query(store_db, "SELECT value FROM meta WHERE key='0';")
+        if hex_meta then
+          content = praxis.hex_decode(hex_meta)
+        end
+      else
+        local chat_files = praxis.read_dir(entry.path) or {}
+        for _, _ in ipairs(chat_files) do
+          message_count = message_count + 1
+        end
       end
 
       local last_modified = ""
@@ -214,10 +231,10 @@ local function discover_sessions_for_home(home)
       table.insert(sessions, {
         session_id = chat_id,
         context_path = context_path .. ":" .. project_hash,
-        session_file = entry.path,
+        session_file = store_db,
         last_modified = last_modified,
         message_count = message_count,
-        content = nil,
+        content = content,
       })
 
       ::continue_entry::

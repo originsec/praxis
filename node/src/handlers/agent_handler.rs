@@ -12,8 +12,8 @@ use tokio::sync::RwLock;
 const MAX_CONTENT_SIZE: usize = 14 * 1024 * 1024;
 
 //
-// Read a directory's contents by concatenating all files within it, sorted by
-// filename. Used for agents like Cursor where sessions are directories.
+// Read a directory-based session by concatenating all readable text files
+// within it, sorted by filename.
 //
 
 fn read_directory_contents(dir: &Path) -> std::io::Result<String> {
@@ -32,7 +32,7 @@ fn read_directory_contents(dir: &Path) -> std::io::Result<String> {
                 }
                 combined.push_str(&content);
             }
-            Err(_) => continue, // skip non-text files
+            Err(_) => continue,
         }
     }
     Ok(combined)
