@@ -13,7 +13,7 @@ type FilterStatus = 'all' | 'Running' | 'Completed' | 'Failed' | 'Cancelled' | '
 type MainTab = 'runs' | 'library';
 
 export function OperationsPage() {
-  const { state, send, cancelOperation, removeOperation, clearOperations, runChain, cancelChainExecution, removeChainExecution, clearChainExecutions, requestChainExecutions, requestChainDefList, requestChain } = useApp();
+  const { state, send, cancelOperation, removeOperation, clearOperations, runChain, cancelChainExecution, removeChainExecution, clearChainExecutions, requestChainExecutions, requestChainDefList, requestChain, requestOperations } = useApp();
   const operations = state.operations;
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -91,13 +91,14 @@ export function OperationsPage() {
   }, [isConnected, send, requestChainDefList]);
 
   //
-  // Fetch chain executions when on runs tab and connected.
+  // Fetch chain executions and operations when on runs tab and connected.
   //
   useEffect(() => {
     if (isConnected && mainTab === 'runs') {
       requestChainExecutions();
+      requestOperations();
     }
-  }, [mainTab, isConnected, requestChainExecutions]);
+  }, [mainTab, isConnected, requestChainExecutions, requestOperations]);
 
   const handleRunOperation = (opFullName: string, nodeId: string, agentName: string) => {
     send({
