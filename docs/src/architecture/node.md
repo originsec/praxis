@@ -37,7 +37,7 @@ The node is the component that runs on target systems. It's responsible for all 
 The agent registry manages all supported agent connectors. On startup the
 registry is built via `rebuild()` which:
 
-1. Creates native agents from the factory (platform-specific connectors like M365 Copilot)
+1. Creates native agents from the factory (currently unused; all agents are Lua-based)
 2. Loads Lua connectors from the service (delivered in the `RegistrationAck` message)
 3. Falls back to embedded Lua scripts if no service scripts are provided
 

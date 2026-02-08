@@ -2,7 +2,7 @@
 
 This guide walks through creating a connector for a new AI agent.
 
-**Prefer Lua connectors** for CLI-based agents. Lua scripts are easier to write, can be updated at runtime via the web UI without recompiling, and share common helpers for executable discovery, version extraction, and multi-user support. Use Rust connectors only when you need OS-level capabilities (DevTools, UI automation, process injection) that aren't exposed through the Lua API.
+**Prefer Lua connectors** for all agents. Lua scripts are easier to write, can be updated at runtime via the web UI without recompiling, and share common helpers for executable discovery, version extraction, and multi-user support. For browser-based agents, the `praxis.devtools` Lua library and `praxis.cdp_*` native API provide Chrome DevTools Protocol support (see M365 Copilot as an example). Use Rust connectors only when you need OS-level capabilities that aren't exposed through the Lua API.
 
 ## Lua Connector (Recommended for CLI agents)
 
@@ -116,6 +116,8 @@ The `praxis` global provides filesystem operations (`path_exists`, `path_join`, 
 
 The `helpers` module (`require("praxis.helpers")`) provides `find_executable`, `expand_path`, `starts_with`, `ends_with`, `dedup`, `parse_json`, `parse_toml`, `user_homes_with_dir`, `for_each_user_home_coalesce`, `new_recon_result`, `merge_recon_result`, `discover_internal_tools`, and `extract_metadata`.
 
+The `devtools` module (`require("praxis.devtools")`) provides `connect`, `transact`, and `close` for browser-based agents using Chrome DevTools Protocol. The native `praxis.cdp_*` functions (`cdp_spawn_and_connect`, `cdp_evaluate`, `cdp_click`, `cdp_type_text`, `cdp_press_key`, `cdp_wait_for_element`, `cdp_find_elements`, `cdp_close`, `cdp_process_id`) provide low-level CDP operations.
+
 ### Deploying
 
 - **Embedded**: Add the `.lua` file to `agents/` and rebuild. It will be compiled into both node and service binaries.
@@ -125,7 +127,7 @@ The `helpers` module (`require("praxis.helpers")`) provides `find_executable`, `
 
 ## Rust Connector (for native/OS-level agents)
 
-Use this approach only when Lua cannot access the required OS capabilities. The M365 Copilot connector is the primary example — it uses Windows DevTools and UI Automation APIs.
+Use this approach only when Lua cannot access the required OS capabilities.
 
 ### Step 1: Create the Directory Structure
 

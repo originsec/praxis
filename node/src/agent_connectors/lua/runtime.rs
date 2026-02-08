@@ -674,6 +674,8 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         )
         .map_err(lua_error)?;
 
+    super::cdp::install_cdp_api(lua, &praxis)?;
+
     lua.globals().set("praxis", praxis).map_err(lua_error)?;
     Ok(())
 }
@@ -694,6 +696,20 @@ fn install_shared_libraries(lua: &Lua) -> Result<()> {
 
     preload
         .set("praxis.helpers", helpers_loader)
+        .map_err(lua_error)?;
+
+    let devtools_src = include_str!("lib/devtools.lua");
+    let devtools_loader = lua
+        .create_function(move |lua, ()| {
+            let value: Value = lua.load(devtools_src).eval().map_err(|e| {
+                mlua::Error::RuntimeError(format!("Failed to load praxis.devtools: {}", e))
+            })?;
+            Ok(value)
+        })
+        .map_err(lua_error)?;
+
+    preload
+        .set("praxis.devtools", devtools_loader)
         .map_err(lua_error)?;
 
     Ok(())
@@ -735,69 +751,56 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
 
     let pid_cell = get_handle_pid_cell(handle);
 
-    let result = if let Some(stdin) = &spec.stdin {
-        match crate::agent_connectors::utils::run_command_with_stdin_cancellable(
-            &mut cmd,
-            stdin,
-            &pid_cell,
-        ) {
-            Ok(stdout) => json!({
-                "success": true,
-                "status": 0,
-                "stdout": stdout,
-                "stderr": ""
-            }),
-            Err(e) => json!({
-                "success": false,
-                "status": 1,
-                "stdout": "",
-                "stderr": e.to_string()
-            }),
-        }
+    use std::process::Stdio;
+
+    if spec.stdin.is_some() {
+        cmd.stdin(Stdio::piped());
     } else {
-        //
-        // No stdin: spawn child and track PID for cancellation.
-        //
+        cmd.stdin(Stdio::null());
+    }
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
-        use std::process::Stdio;
-        cmd.stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+    let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy()).collect();
+    common::log_info!(
+        "command: {} {}",
+        cmd.get_program().to_string_lossy(),
+        args.join(" ")
+    );
 
-        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy()).collect();
-        common::log_info!(
-            "command: {} {}",
-            cmd.get_program().to_string_lossy(),
-            args.join(" ")
-        );
+    let result = match cmd.spawn() {
+        Ok(mut child) => {
+            pid_cell.store(child.id(), Ordering::SeqCst);
 
-        match cmd.spawn() {
-            Ok(child) => {
-                pid_cell.store(child.id(), Ordering::SeqCst);
-                let output = child.wait_with_output();
-                pid_cell.store(0, Ordering::SeqCst);
-                match output {
-                    Ok(output) => json!({
-                        "success": output.status.success(),
-                        "status": output.status.code().unwrap_or_default(),
-                        "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
-                        "stderr": String::from_utf8_lossy(&output.stderr).to_string()
-                    }),
-                    Err(e) => json!({
-                        "success": false,
-                        "status": 1,
-                        "stdout": "",
-                        "stderr": e.to_string()
-                    }),
+            if let Some(input) = &spec.stdin {
+                if let Some(mut stdin_pipe) = child.stdin.take() {
+                    use std::io::Write;
+                    let _ = stdin_pipe.write_all(input.as_bytes());
                 }
             }
-            Err(e) => json!({
-                "success": false,
-                "status": 1,
-                "stdout": "",
-                "stderr": e.to_string()
-            }),
+
+            let output = child.wait_with_output();
+            pid_cell.store(0, Ordering::SeqCst);
+            match output {
+                Ok(output) => json!({
+                    "success": output.status.success(),
+                    "status": output.status.code().unwrap_or_default(),
+                    "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
+                    "stderr": String::from_utf8_lossy(&output.stderr).to_string()
+                }),
+                Err(e) => json!({
+                    "success": false,
+                    "status": 1,
+                    "stdout": "",
+                    "stderr": e.to_string()
+                }),
+            }
         }
+        Err(e) => json!({
+            "success": false,
+            "status": 1,
+            "stdout": "",
+            "stderr": e.to_string()
+        }),
     };
 
     Ok(result)

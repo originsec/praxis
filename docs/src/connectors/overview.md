@@ -22,7 +22,7 @@ A connector handles four main capabilities:
 | [`codex`](./codex.md) | Codex CLI (OpenAI) | Linux, Windows | CLI | Lua |
 | [`cursor`](./cursor.md) | Cursor Agent CLI | Linux only | CLI | Lua |
 | [`gemini`](./gemini.md) | Gemini CLI | Linux, Windows | CLI | Lua |
-| [`m365copilot`](./m365-copilot.md) | Microsoft 365 Copilot | Windows only | DevTools / UIAutomation | Native |
+| [`m365copilot`](./m365-copilot.md) | Microsoft 365 Copilot | Windows only | DevTools | Lua |
 
 Want to add support for another agent? Contributions welcome! See [Adding New Connectors](./adding-new.md).
 
@@ -114,7 +114,7 @@ When a node starts, it runs fingerprinting for all registered connectors. Any ag
 
 Fingerprint results are cached for 60 seconds when the agent is available. Agents that are not found are re-checked on every cycle so they are discovered as soon as they are installed.
 
-The factory in `node/src/agent_connectors/factory.rs` creates native connector instances for platform-specific agents (e.g. M365 Copilot on Windows). Most connectors (Claude Code, Codex, Cursor, Gemini) are Lua-based and loaded from embedded scripts or the service database.
+All connectors (Claude Code, Codex, Cursor, Gemini, M365 Copilot) are Lua-based and loaded from embedded scripts or the service database. Browser-based agents like M365 Copilot use the `praxis.cdp_*` native API and `praxis.devtools` Lua library for Chrome DevTools Protocol interaction.
 
 ## Development Builds
 

@@ -131,8 +131,7 @@ Each agent connector may have specific configuration. See individual connector d
 
 #### M365 Copilot
 
-- Mode: DevTools (default) or UIAutomation
-- Browser: Microsoft Edge
+- Mode: DevTools (via CDP)
 - Platform: Windows only
 
 ## Operation Definitions

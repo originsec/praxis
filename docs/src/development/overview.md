@@ -39,14 +39,13 @@ The agent that runs on target machines:
 ```
 node/src/
 ├── agent_connectors/    # Per-agent implementations
-│   ├── lua/             # Lua connector runtime
-│   └── m365copilot/     # Native connector (Windows only)
+│   └── lua/             # Lua connector runtime + CDP helpers
 ├── intercept/           # Traffic interception
 ├── terminal/            # PTY terminal
 └── runtime.rs           # Main event loop
 ```
 
-Lua-based agent scripts (Claude Code, Codex, Cursor, Gemini) live in `agents/` at the project root and are embedded into the binary at build time.
+Lua-based agent scripts (Claude Code, Codex, Cursor, Gemini, M365 Copilot) live in `agents/` at the project root and are embedded into the binary at build time.
 
 ### Service (`service/`)
 
@@ -130,7 +129,7 @@ See [Semantic Parser](semantic-parser.md) for details.
 
 See [Adding New Connectors](../connectors/adding-new.md). Prefer Lua-based connectors for CLI agents — they can be developed and tested at runtime via the web UI without recompiling.
 
-Lua agent scripts live in `agents/` at the project root and are embedded into binaries at build time. The shared helper library is at `node/src/agent_connectors/lua/lib/helpers.lua`.
+Lua agent scripts live in `agents/` at the project root and are embedded into binaries at build time. Shared libraries are at `node/src/agent_connectors/lua/lib/` (`helpers.lua` for common utilities, `devtools.lua` for CDP/DevTools support).
 
 ### Adding Operations
 
