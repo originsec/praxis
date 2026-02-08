@@ -398,21 +398,7 @@ export function AgentDetailPage() {
       return;
     }
     const session = reconResult.sessions[selectedSessionIdx];
-    if (!session || !nodeId) return;
-
-    //
-    // If session content was pre-populated during recon (e.g. Cursor SQLite
-    // sessions), use it directly instead of fetching from the node.
-    //
-
-    if (session.content) {
-      setSessionContent(session.content);
-      setSessionContentError(null);
-      setIsLoadingSessionContent(false);
-      return;
-    }
-
-    if (!session.session_file) return;
+    if (!session?.session_file || !nodeId) return;
 
     //
     // Fetch session content from node.
