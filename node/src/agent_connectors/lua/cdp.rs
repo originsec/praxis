@@ -59,10 +59,13 @@ fn cdp_spawn_and_connect(config: &Table) -> Result<String> {
     let kill_existing: bool = config.get("kill_existing").unwrap_or(true);
 
     //
-    // Kill existing processes with the same name if requested.
+    // Close all existing CDP connections and terminate their process trees,
+    // then kill any remaining processes with the same name.
     //
 
     if kill_existing {
+        close_all_connections();
+
         if let Some(process_name) = std::path::Path::new(&process_path).file_name() {
             if let Some(name) = process_name.to_str() {
                 crate::utils::kill_processes_by_name(name);
@@ -270,6 +273,19 @@ fn cdp_wait_for_element(handle: &str, selector: &str, retries: u32, delay_ms: u6
             Ok(false)
         })
     })
+}
+
+fn close_all_connections() {
+    let mut map = CDP_CONNECTIONS.lock().unwrap();
+    let handles: Vec<String> = map.keys().cloned().collect();
+    for handle in &handles {
+        if let Some(conn) = map.remove(handle) {
+            if let Some(pid) = conn.process_id {
+                common::log_info!("CDP: closing previous connection, terminating PID {}", pid);
+                crate::utils::terminate_process_tree(pid);
+            }
+        }
+    }
 }
 
 fn cdp_close(handle: &str) -> Result<()> {
