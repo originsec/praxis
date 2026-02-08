@@ -28,6 +28,7 @@ pub enum ToolDiscoveryPrompt {
 }
 
 impl ToolDiscoveryPrompt {
+    #[allow(dead_code)]
     pub fn as_str(&self) -> &'static str {
         match self {
             ToolDiscoveryPrompt::ListInternalTools => {
@@ -48,6 +49,7 @@ impl ToolDiscoveryPrompt {
 // Config files are batched together until this threshold would be exceeded.
 //
 
+#[allow(dead_code)]
 const METADATA_BATCH_CHAR_THRESHOLD: usize = 15000;
 
 //
@@ -534,6 +536,7 @@ pub fn run_command_with_stdin(cmd: &mut Command, input: &str) -> Result<String> 
 // Execute a command with stdin input and cancellation support via PID tracking.
 //
 
+#[allow(dead_code)]
 pub fn run_command_with_stdin_cancellable(
     cmd: &mut Command,
     input: &str,
@@ -639,6 +642,7 @@ pub fn run_command_with_stdin_cancellable(
 // The agent_name parameter is used for logging.
 // The prompt_type parameter selects which discovery prompt to use.
 //
+#[allow(dead_code)]
 pub async fn discover_internal_tools_semantically<F>(
     agent_name: &str,
     prompt_type: ToolDiscoveryPrompt,
@@ -756,6 +760,7 @@ where
 // before sending to semantic parser for efficiency.
 //
 
+#[allow(dead_code)]
 pub async fn extract_metadata_from_configs(
     agent_name: &str,
     config_items: &[common::ConfigItem],
@@ -931,6 +936,7 @@ pub async fn extract_metadata_from_configs(
 // Process a batch of config files through the semantic parser.
 //
 
+#[allow(dead_code)]
 async fn process_metadata_batch(
     semantic_client: &crate::utils::semantic_parser::SemanticParserClient,
     agent_name: &str,

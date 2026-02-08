@@ -6,6 +6,7 @@ use windows::{
 };
 
 #[cfg(windows)]
+#[allow(dead_code)]
 pub fn get_package_install_path(package_family_name: &str) -> Option<String> {
     let wide_family_name: Vec<u16> = package_family_name
         .encode_utf16()

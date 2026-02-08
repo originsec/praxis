@@ -11,6 +11,8 @@ mod windows_packages;
 pub use process::*;
 pub use system::*;
 #[cfg(windows)]
+#[allow(unused_imports)]
 pub use ui_automation::*;
 #[cfg(windows)]
+#[allow(unused_imports)]
 pub use windows_packages::*;
