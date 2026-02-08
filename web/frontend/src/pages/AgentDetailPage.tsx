@@ -683,10 +683,10 @@ export function AgentDetailPage() {
       const previousPerformedAt = reconPerformedAt;
 
       //
-      // Trigger node to perform recon (fire and forget).
+      // Trigger recon on the intended agent, not just whichever agent is
+      // currently selected on the node.
       //
       const command = semantic ? 'ReconSemantic' : 'Recon';
-      sendCommand(nodeId, { Agent: command }).catch(() => {});
 
       //
       // Poll service until performed_at changes (meaning new data arrived).
@@ -730,6 +730,31 @@ export function AgentDetailPage() {
       };
 
       window.addEventListener('ws-message', handleWsMessage);
+
+      //
+      // Ensure the target agent is selected before issuing recon.
+      //
+      (async () => {
+        try {
+          const selectResp = await sendCommand(nodeId, {
+            Agent: { Select: { short_name: agentShortName } },
+          });
+          if ('Error' in selectResp.result) {
+            throw new Error(selectResp.result.Error.message);
+          }
+
+          const reconResp = await sendCommand(nodeId, { Agent: command });
+          if ('Error' in reconResp.result) {
+            throw new Error(reconResp.result.Error.message);
+          }
+        } catch {
+          clearInterval(pollInterval);
+          clearTimeout(timeout);
+          window.removeEventListener('ws-message', handleWsMessage);
+          setIsLoadingRecon(false);
+          resolve();
+        }
+      })();
 
       //
       // Initial poll request (in case the node is very fast).
@@ -953,7 +978,7 @@ export function AgentDetailPage() {
   const allServers = reconResult?.tools.mcp_servers ?? [];
 
   return (
-    <div className="space-y-6 h-full flex flex-col">
+    <div className="space-y-4 md:space-y-6 md:h-full flex flex-col">
       {/*
       //
       // Back link.
@@ -972,14 +997,14 @@ export function AgentDetailPage() {
       // Agent header.
       //
       */}
-      <div className="bg-card ascii-box border border-subtle p-6">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-4">
+      <div className="bg-card ascii-box border border-subtle p-4 md:p-6">
+        <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
+          <div className="flex items-start md:items-center gap-3 md:gap-4">
             <div className="p-3  bg-[var(--accent-success)]/20">
               <Bot size={28} className="text-[var(--accent-success)]" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-highlight">
+              <h1 className="text-xl md:text-2xl font-bold text-highlight">
                 {agentName}
                 {discoveredAgent?.version && (
                   <span className="text-sm font-normal text-muted ml-2">v{discoveredAgent.version}</span>
@@ -997,22 +1022,22 @@ export function AgentDetailPage() {
               )}
             </div>
           </div>
-          <div className="flex flex-col items-end gap-2">
+          <div className="flex flex-col items-start xl:items-end gap-2 w-full xl:w-auto">
             {/*
             //
             // Top row: Run Op + Run Chain + Start/Close Session.
             //
             */}
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
               <button
                 onClick={() => setShowRunOpModal(true)}
-                className="inline-flex items-center gap-2 px-4 py-2  bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/30 transition-colors"
+                className="inline-flex items-center gap-2 px-3 md:px-4 py-2 text-sm whitespace-nowrap bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/30 transition-colors"
               >
                 <Zap size={16} /> Run Op
               </button>
               <button
                 onClick={() => setShowRunChainModal(true)}
-                className="inline-flex items-center gap-2 px-4 py-2  bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/30 transition-colors"
+                className="inline-flex items-center gap-2 px-3 md:px-4 py-2 text-sm whitespace-nowrap bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/30 transition-colors"
               >
                 <GitBranch size={16} /> Run Chain
               </button>
@@ -1020,7 +1045,7 @@ export function AgentDetailPage() {
                 <button
                   onClick={handleCloseSession}
                   disabled={isClosingSession}
-                  className="inline-flex items-center gap-2 px-4 py-2  bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-2 px-3 md:px-4 py-2 text-sm whitespace-nowrap bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors disabled:opacity-50"
                 >
                   {isClosingSession ? (
                     <><Loader2 size={16} className="animate-spin" /> Closing...</>
@@ -1032,7 +1057,7 @@ export function AgentDetailPage() {
                 <button
                   onClick={handleCreateSession}
                   disabled={!discoveredAgent?.available || isCreatingSession || isLoadingRecon}
-                  className="inline-flex items-center gap-2 px-4 py-2  bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-2 px-3 md:px-4 py-2 text-sm whitespace-nowrap bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors disabled:opacity-50"
                 >
                   {isCreatingSession ? (
                     <><Loader2 size={16} className="animate-spin" /> Starting...</>
@@ -1052,20 +1077,20 @@ export function AgentDetailPage() {
             // Project path selector row.
             //
             */}
-            <div className={`flex items-center gap-2 ${hasSession ? 'opacity-50' : ''}`}>
+            <div className={`flex flex-wrap items-center gap-2 ${hasSession ? 'opacity-50' : ''}`}>
               {isLoadingRecon ? (
                 <span className="text-xs text-muted flex items-center gap-1">
                   <Loader2 size={12} className="animate-spin" />
                   Refreshing recon...
                 </span>
               ) : projectPaths.length > 0 ? (
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 max-w-full">
                   <FolderOpen size={14} className="text-muted" />
                   <select
                     value={selectedProjectPath ?? projectPaths[0] ?? ''}
                     onChange={(e) => setSelectedProjectPath(e.target.value || null)}
                     disabled={hasSession}
-                    className="bg-[var(--bg-secondary)] border border-subtle px-2 py-1 text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--border-active)] max-w-[200px] disabled:cursor-not-allowed"
+                    className="bg-[var(--bg-secondary)] border border-subtle px-2 py-1 text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--border-active)] max-w-[58vw] sm:max-w-[260px] disabled:cursor-not-allowed"
                     title={hasSession ? "Close session to change project path" : "Select project directory for session"}
                   >
                     {projectPaths.map((path) => (
@@ -1106,8 +1131,8 @@ export function AgentDetailPage() {
       // Tabs.
       //
       */}
-      <div className="border-b border-subtle">
-        <div className="flex gap-1">
+      <div className="border-b border-subtle overflow-x-auto">
+        <div className="flex gap-1 min-w-max">
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -1135,9 +1160,9 @@ export function AgentDetailPage() {
       // Tab content.
       //
       */}
-      <div className="flex-1 min-h-0">
+      <div className="md:flex-1 md:min-h-0">
         {activeTab === 'session' && (
-          <div className="bg-card ascii-box border border-subtle h-full flex flex-col overflow-hidden">
+          <div className="bg-card ascii-box border border-subtle md:h-full flex flex-col overflow-auto md:overflow-hidden">
             {!hasSession ? (
               <div className="flex-1 flex items-center justify-center p-8">
                 <div className="text-center">
@@ -1181,7 +1206,7 @@ export function AgentDetailPage() {
             //
             */}
             {messages.length === 0 && !isLoading ? (
-              <div className="flex-1 flex items-center justify-center">
+              <div className="flex-1 flex items-center justify-center px-4 py-8 md:py-12">
                 <div className="text-center">
                   <Bot size={48} className="mx-auto mb-4 text-muted opacity-50" />
                   <p className="text-muted">Send a message to start the conversation</p>
@@ -1371,17 +1396,17 @@ export function AgentDetailPage() {
 
 
         {activeTab === 'recon' && (
-          <div className="bg-card ascii-box border border-subtle h-full flex flex-col">
+          <div className="bg-card ascii-box border border-subtle md:h-full flex flex-col overflow-auto md:overflow-hidden">
             {/*
             //
             // Recon subtabs.
             //
             */}
-            <div className="px-4 py-2 border-b border-subtle flex items-center justify-between bg-[var(--bg-secondary)]">
-              <div className="flex gap-1">
+            <div className="px-3 md:px-4 py-2 border-b border-subtle flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between bg-[var(--bg-secondary)]">
+              <div className="flex gap-1 overflow-x-auto w-full lg:w-auto">
                 <button
                   onClick={() => setReconSubTab('config')}
-                  className={`px-3 py-1.5 text-sm  transition-colors ${
+                  className={`px-3 py-1.5 text-sm whitespace-nowrap transition-colors ${
                     reconSubTab === 'config'
                       ? 'bg-[var(--highlight)] text-title'
                       : 'text-muted hover:text-[var(--text-primary)]'
@@ -1399,7 +1424,7 @@ export function AgentDetailPage() {
                 </button>
                 <button
                   onClick={() => setReconSubTab('tools')}
-                  className={`px-3 py-1.5 text-sm  transition-colors ${
+                  className={`px-3 py-1.5 text-sm whitespace-nowrap transition-colors ${
                     reconSubTab === 'tools'
                       ? 'bg-[var(--highlight)] text-title'
                       : 'text-muted hover:text-[var(--text-primary)]'
@@ -1420,7 +1445,7 @@ export function AgentDetailPage() {
                 </button>
                 <button
                   onClick={() => setReconSubTab('sessions')}
-                  className={`px-3 py-1.5 text-sm  transition-colors ${
+                  className={`px-3 py-1.5 text-sm whitespace-nowrap transition-colors ${
                     reconSubTab === 'sessions'
                       ? 'bg-[var(--highlight)] text-title'
                       : 'text-muted hover:text-[var(--text-primary)]'
@@ -1437,10 +1462,35 @@ export function AgentDetailPage() {
                   </span>
                 </button>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center flex-wrap gap-2 sm:gap-3 w-full lg:w-auto lg:justify-end">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={handleDiscoverTools}
+                    disabled={isDiscoveringTools || !discoveredAgent?.available}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-[var(--accent-info)]/20 text-[var(--accent-info)] text-sm whitespace-nowrap hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50"
+                  >
+                    {isDiscoveringTools ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" /> Discovering...
+                      </>
+                    ) : (
+                      <>
+                        <Search size={14} /> Discover
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={() => handleRecon(false)}
+                    disabled={isLoadingRecon || !discoveredAgent?.available}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] text-sm whitespace-nowrap hover:bg-[var(--accent-purple)]/30 transition-colors disabled:opacity-50"
+                  >
+                    <RefreshCw size={14} className={isLoadingRecon ? 'animate-spin' : ''} />
+                    {isLoadingRecon ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                </div>
                 {reconPerformedAt && (
                   <Tooltip content={`Last ${reconIsSemantic ? 'semantic ' : ''}recon: ${new Date(reconPerformedAt).toLocaleString()}`}>
-                    <span className="text-xs text-muted flex items-center gap-1">
+                    <span className="text-xs text-muted flex items-center gap-1 whitespace-nowrap">
                       <Clock size={12} />
                       {(() => {
                         const date = new Date(reconPerformedAt);
@@ -1458,31 +1508,6 @@ export function AgentDetailPage() {
                     </span>
                   </Tooltip>
                 )}
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleDiscoverTools}
-                    disabled={isDiscoveringTools || !discoveredAgent?.available}
-                    className="inline-flex items-center gap-2 px-3 py-1.5  bg-[var(--accent-info)]/20 text-[var(--accent-info)] text-sm hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50"
-                  >
-                    {isDiscoveringTools ? (
-                      <>
-                        <Loader2 size={14} className="animate-spin" /> Discovering...
-                      </>
-                    ) : (
-                      <>
-                        <Search size={14} /> Discover
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => handleRecon(false)}
-                    disabled={isLoadingRecon || !discoveredAgent?.available}
-                    className="inline-flex items-center gap-2 px-3 py-1.5  bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] text-sm hover:bg-[var(--accent-purple)]/30 transition-colors disabled:opacity-50"
-                  >
-                    <RefreshCw size={14} className={isLoadingRecon ? 'animate-spin' : ''} />
-                    {isLoadingRecon ? 'Refreshing...' : 'Refresh'}
-                  </button>
-                </div>
               </div>
             </div>
 
@@ -1606,14 +1631,14 @@ export function AgentDetailPage() {
                       });
 
                       return (
-                        <div className="h-full flex flex-col">
-                          <div className="flex-1 flex min-h-0 p-4 gap-4">
+                        <div className="md:h-full flex flex-col">
+                          <div className="flex-1 flex flex-col xl:flex-row min-h-0 p-4 gap-4">
                             {/*
                             //
                             // Left panel: Server list grouped by context.
                             //
                             */}
-                            <div className="w-56 flex-shrink-0 flex flex-col border border-subtle rounded overflow-hidden bg-[var(--bg-secondary)]">
+                            <div className="w-full xl:w-56 flex-shrink-0 flex flex-col border border-subtle rounded overflow-hidden bg-[var(--bg-secondary)] max-h-64 xl:max-h-none">
                               <div className="px-3 py-2 border-b border-subtle bg-[var(--bg-tertiary)]">
                                 <span className="text-xs text-muted uppercase tracking-wider">
                                   {allServers.length} server{allServers.length !== 1 ? 's' : ''} • {allServers.reduce((sum, s) => sum + s.tools.length, 0)} tools
@@ -1712,7 +1737,7 @@ export function AgentDetailPage() {
                               ) : (
                                 <>
                                   <div className="px-4 py-2 border-b border-subtle bg-[var(--bg-tertiary)] flex-shrink-0">
-                                    <div className="flex items-center justify-between">
+                                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                                       <div className="flex items-center gap-2">
                                         <Wrench size={16} className="text-[var(--accent-info)]" />
                                         <span className="font-medium text-[var(--accent-info)]">
@@ -1741,7 +1766,7 @@ export function AgentDetailPage() {
                                     )}
                                   </div>
                                   <div className="flex-1 overflow-y-auto bg-[var(--bg-secondary)] p-4 scrollbar-on-hover">
-                                    <div className="grid grid-cols-2 gap-3">
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                                       {allServers[selectedServerIdx].tools.map((tool) => (
                                         <div
                                           key={tool.name}
@@ -1899,13 +1924,13 @@ export function AgentDetailPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex-1 flex min-h-0 p-4 pt-2 gap-4">
+                  <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 pt-2 gap-4">
                     {/*
                     //
                     // Left panel: File list grouped by directory.
                     //
                     */}
-                    <div className="w-64 flex-shrink-0 flex flex-col border border-subtle rounded overflow-hidden bg-[var(--bg-secondary)]">
+                    <div className="w-full lg:w-64 flex-shrink-0 flex flex-col border border-subtle rounded overflow-hidden bg-[var(--bg-secondary)] max-h-56 lg:max-h-none">
                       <div className="px-3 py-2 border-b border-subtle bg-[var(--bg-tertiary)]">
                         <span className="text-[10px] text-muted uppercase tracking-wider">
                           {reconResult.config.length} file{reconResult.config.length !== 1 ? 's' : ''}
@@ -2027,7 +2052,7 @@ export function AgentDetailPage() {
                           // File header.
                           //
                           */}
-                          <div className="px-4 py-2 border-b border-subtle bg-[var(--bg-tertiary)] flex items-center justify-between flex-shrink-0">
+                            <div className="px-4 py-2 border-b border-subtle bg-[var(--bg-tertiary)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 flex-shrink-0">
                             <div className="flex items-center gap-2 min-w-0">
                               <span className="font-mono text-sm truncate text-[var(--accent-info)]">
                                 {reconResult.config[selectedConfigIdx].path}
@@ -2114,7 +2139,7 @@ export function AgentDetailPage() {
             //
             */}
             {reconSubTab === 'sessions' && (
-              <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+              <div className="flex-1 flex flex-col min-h-0 overflow-auto md:overflow-hidden">
                 {!reconResult?.sessions || reconResult.sessions.length === 0 ? (
                   <div className="flex-1 flex items-center justify-center p-8">
                     <div className="text-center">
@@ -2124,13 +2149,13 @@ export function AgentDetailPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex-1 flex min-h-0 p-4 pt-2 gap-4 overflow-hidden">
+                  <div className="flex-1 flex flex-col lg:flex-row min-h-0 p-4 pt-2 gap-4 overflow-hidden">
                     {/*
                     //
                     // Left panel: Session list.
                     //
                     */}
-                    <div className="w-64 flex-shrink-0 flex flex-col border border-subtle rounded overflow-hidden bg-[var(--bg-secondary)]">
+                    <div className="w-full lg:w-64 flex-shrink-0 flex flex-col border border-subtle rounded overflow-hidden bg-[var(--bg-secondary)] max-h-56 lg:max-h-none">
                       <div className="px-3 py-2 border-b border-subtle bg-[var(--bg-tertiary)]">
                         <span className="text-[10px] text-muted uppercase tracking-wider">
                           {reconResult.sessions.length} session{reconResult.sessions.length !== 1 ? 's' : ''}
@@ -2243,7 +2268,7 @@ export function AgentDetailPage() {
 
                         return (
                           <>
-                            <div className="px-4 py-2 border-b border-subtle bg-[var(--bg-tertiary)] flex items-center justify-between flex-shrink-0">
+                            <div className="px-4 py-2 border-b border-subtle bg-[var(--bg-tertiary)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 flex-shrink-0">
                               <span className="text-xs font-mono text-muted truncate">
                                 {session.session_id}
                               </span>

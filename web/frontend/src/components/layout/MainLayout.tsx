@@ -11,6 +11,7 @@ import { GlobalEventLogPanel } from '../event-log/GlobalEventLogPanel';
 export function MainLayout() {
   const { state, toggleEventLogPanel, setEventLogPanelHeight } = useApp();
   const [isResizing, setIsResizing] = useState(false);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const eventLoggingEnabled = (() => {
     const value = state.config.application_logs_enabled;
     if (!value) return false;
@@ -44,9 +45,28 @@ export function MainLayout() {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar />
+      <div className="hidden md:block">
+        <Sidebar />
+      </div>
+
+      {isMobileNavOpen && (
+        <button
+          className="md:hidden fixed inset-0 z-40 bg-black/50"
+          onClick={() => setIsMobileNavOpen(false)}
+          aria-label="Close navigation"
+        />
+      )}
+
+      <div
+        className={`md:hidden fixed left-0 top-0 z-50 h-full transition-transform duration-200 ${
+          isMobileNavOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <Sidebar onNavigate={() => setIsMobileNavOpen(false)} />
+      </div>
+
       <div className="flex-1 flex flex-col overflow-hidden">
-        <Header />
+        <Header onOpenMobileNav={() => setIsMobileNavOpen(true)} />
         <VersionUpdateBanner />
         <ConfigWarningBanner />
 
@@ -56,7 +76,7 @@ export function MainLayout() {
         //
         */}
         <main
-          className="flex-1 overflow-auto p-6"
+          className="flex-1 overflow-auto p-4 md:p-6"
           style={state.eventLogPanel.isOpen ? {
             height: `calc(100% - ${state.eventLogPanel.height}px)`
           } : undefined}

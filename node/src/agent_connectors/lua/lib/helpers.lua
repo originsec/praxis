@@ -707,6 +707,7 @@ end
 
 function M.run_standard_recon(ctx, config)
   local result = M.new_recon_result()
+  local is_semantic = (ctx and ctx.is_semantic == true)
 
   if config.context_filenames then
     for _, f in ipairs(config.context_filenames) do
@@ -719,7 +720,7 @@ function M.run_standard_recon(ctx, config)
   --
 
   if config.system_configs then
-    M.merge_recon_result(result, config.system_configs(ctx.is_semantic))
+    M.merge_recon_result(result, config.system_configs(is_semantic))
   end
 
   --
@@ -735,7 +736,7 @@ function M.run_standard_recon(ctx, config)
     M.merge_recon_result(home_result,
       M.collect_configs(home, config.home_configs, {
         scope = "home",
-        include_contents = ctx.is_semantic,
+        include_contents = is_semantic,
       }))
 
     --
@@ -765,7 +766,7 @@ function M.run_standard_recon(ctx, config)
       M.merge_recon_result(home_result,
         M.collect_configs(proj, config.project_configs, {
           scope = "project",
-          include_contents = ctx.is_semantic,
+          include_contents = is_semantic,
         }))
     end
 
@@ -833,7 +834,7 @@ function M.run_standard_recon(ctx, config)
   local internal_tools = {}
   local metadata = nil
 
-  if ctx.is_semantic then
+  if is_semantic then
     internal_tools = M.discover_internal_tools({
       process_path = ctx.process_path,
       working_dir = filtered_paths[1],

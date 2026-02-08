@@ -63,14 +63,14 @@ export function NodesPage() {
       // Page header.
       //
       */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-highlight">Nodes</h1>
           <p className="text-muted mt-1">
             <span className="text-highlight font-medium">{nodes.length}</span> node{nodes.length !== 1 ? 's' : ''} connected
           </p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4">
           {nodes.some(n => getNodeStatus(n.last_update) === 'offline') && (
             <button
               onClick={() => {
@@ -101,8 +101,65 @@ export function NodesPage() {
           </p>
         </div>
       ) : (
-        <div className="border border-subtle ascii-box">
-          <table className="w-full text-xs">
+        <>
+        <div className="md:hidden space-y-3">
+          {nodes.map((node) => (
+            <div
+              key={node.node_id}
+              onClick={() => navigate(`/nodes/${node.node_id}`)}
+              className="border border-subtle ascii-box p-3 bg-card cursor-pointer"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-medium text-highlight truncate">{node.machine_name || 'Unknown'}</p>
+                  <p className="text-muted text-xs mt-0.5 truncate">{node.os_details}</p>
+                  <p className="text-muted font-mono text-[10px] mt-1 truncate">{node.node_id}</p>
+                  <div className="mt-2">
+                    <StatusBadge status={getNodeStatus(node.last_update)} />
+                  </div>
+                </div>
+                <div onClick={(e) => e.stopPropagation()}>
+                  <button
+                    onClick={() => removeNode(node.node_id)}
+                    className="p-1 hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
+                    title="Remove node"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                <div className="text-muted">
+                  Agents:{' '}
+                  <span className="text-highlight">
+                    {node.discovered_agents.filter((a) => a.available).length}
+                  </span>
+                </div>
+                <div className="text-muted">
+                  Session:{' '}
+                  <span className={node.selected_agent?.session_id ? 'text-[var(--accent-success)]' : 'text-muted'}>
+                    {node.selected_agent?.session_id ? node.selected_agent.short_name : '-'}
+                  </span>
+                </div>
+                <div className="text-muted">
+                  Intercept:{' '}
+                  <span className="text-title">
+                    {!node.intercept_supported ? 'Unsupported' : node.intercept_active ? 'Active' : '-'}
+                  </span>
+                </div>
+                <div className="text-muted flex items-center gap-1">
+                  <Clock size={11} />
+                  <span>{formatLastSeen(node.last_update)}</span>
+                </div>
+              </div>
+
+            </div>
+          ))}
+        </div>
+
+        <div className="hidden md:block border border-subtle ascii-box overflow-x-auto">
+          <table className="w-full min-w-[820px] text-xs">
             <thead>
               <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
                 <th className="text-left px-4 py-2 text-muted tracking-wider">NODE</th>
@@ -186,6 +243,7 @@ export function NodesPage() {
             </tbody>
           </table>
         </div>
+        </>
       )}
     </div>
   );

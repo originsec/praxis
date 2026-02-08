@@ -185,18 +185,18 @@ export function OperationsPage() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6">
       {/*
       //
       // Page header.
       //
       */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-highlight">Operations</h1>
           <p className="text-muted mt-1">Semantic operations and automation tasks</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           {mainTab === 'runs' && (
             <>
               <button
@@ -205,24 +205,24 @@ export function OperationsPage() {
                   setShowRunModal(true);
                 }}
                 disabled={definitions.length === 0}
-                className="inline-flex items-center gap-2 px-3 py-2 text-sm  bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/30 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/30 transition-colors disabled:opacity-50"
               >
-                <Play size={16} />
+                <Play size={14} />
                 Run Op
               </button>
               <button
                 onClick={() => setShowRunChainModal(true)}
                 disabled={chains.length === 0}
-                className="inline-flex items-center gap-2 px-3 py-2 text-sm  bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50"
               >
-                <GitBranch size={16} />
+                <GitBranch size={14} />
                 Run Chain
               </button>
               <button
                 onClick={() => { clearOperations(); clearChainExecutions(); }}
-                className="inline-flex items-center gap-2 px-3 py-2 text-sm  border border-subtle hover:bg-[var(--bg-tertiary)] text-muted hover:text-[var(--text-primary)] transition-colors"
+                className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm border border-subtle hover:bg-[var(--bg-tertiary)] text-muted hover:text-[var(--text-primary)] transition-colors"
               >
-                <Trash2 size={16} />
+                <Trash2 size={14} />
                 Clear Finished
               </button>
             </>
@@ -235,7 +235,7 @@ export function OperationsPage() {
       // Main tabs.
       //
       */}
-      <div className="flex gap-4 border-b border-subtle">
+      <div className="flex gap-4 border-b border-subtle overflow-x-auto">
         <button
           onClick={() => setMainTab('runs')}
           className={`pb-3 px-1 text-sm font-medium transition-colors border-b-2 ${
@@ -265,7 +265,7 @@ export function OperationsPage() {
           // Filters.
           //
           */}
-          <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {filters.map((f) => {
           const opCount = operations.filter((op) => op.status === f.value).length;
           const chainCount = chainExecutions.filter((exec) => exec.status === f.value).length;
@@ -316,8 +316,8 @@ export function OperationsPage() {
               </p>
             </div>
           ) : (
-            <div className="border border-subtle ascii-box">
-              <table className="w-full text-xs">
+            <div className="border border-subtle ascii-box overflow-x-auto">
+              <table className="w-full min-w-[980px] text-xs">
                 <thead>
                   <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
                     <th className="text-left px-4 py-2 text-muted tracking-wider">CHAIN</th>
@@ -416,8 +416,8 @@ export function OperationsPage() {
               </p>
             </div>
           ) : (
-            <div className="border border-subtle ascii-box">
-              <table className="w-full text-xs">
+            <div className="border border-subtle ascii-box overflow-x-auto">
+              <table className="w-full min-w-[1080px] text-xs">
                 <thead>
                   <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
                     <th className="text-left px-4 py-2 text-muted tracking-wider">OPERATION</th>

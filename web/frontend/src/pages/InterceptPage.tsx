@@ -55,7 +55,7 @@ export function InterceptPage() {
   }, [requestInterceptRules]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 md:space-y-6">
       {/*
       //
       // Header.
@@ -73,7 +73,7 @@ export function InterceptPage() {
       // Tab Navigation.
       //
       */}
-      <div className="flex gap-4 border-b border-subtle">
+      <div className="flex gap-4 border-b border-subtle overflow-x-auto">
         <TabButton
           active={activeTab === 'traffic'}
           onClick={() => setActiveTab('traffic')}
@@ -251,7 +251,7 @@ function TrafficLogTab() {
       // Pagination.
       //
       */}
-      <div className="flex items-center justify-between text-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs">
         <div className="text-muted">
           Showing {Math.min(countTrafficEntries(state.intercept.trafficLog, protocolFilter, searchFilter), DISPLAY_LIMIT)} entries (of {state.intercept.trafficTotalCount} total)
         </div>
@@ -285,7 +285,7 @@ function TrafficLogTab() {
       */}
       {showClearConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-[var(--bg-secondary)] border border-subtle ascii-box p-6 w-[400px]">
+          <div className="bg-[var(--bg-secondary)] border border-subtle ascii-box p-4 md:p-6 w-[92vw] max-w-[400px]">
             <h2 className="text-sm font-bold tracking-wider text-title mb-4">CLEAR TRAFFIC LOG</h2>
             <p className="text-xs text-muted mb-6">
               Are you sure you want to clear all traffic entries? This action cannot be undone.
@@ -331,7 +331,7 @@ function MatchesTab() {
       // Filters.
       //
       */}
-      <div className="flex items-center gap-4 p-4 border border-subtle ascii-box">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-4 border border-subtle ascii-box">
         <select
           className="bg-[var(--bg-tertiary)] border border-subtle text-xs text-title px-2 py-1 outline-none"
           value={selectedRuleId ?? ''}
@@ -359,8 +359,8 @@ function MatchesTab() {
       // Matches Table.
       //
       */}
-      <div className="border border-subtle ascii-box">
-        <table className="w-full text-xs">
+      <div className="border border-subtle ascii-box overflow-x-auto">
+        <table className="w-full min-w-[920px] text-xs">
           <thead>
             <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
               <th className="text-left px-4 py-2 text-muted tracking-wider w-8"></th>
@@ -420,7 +420,7 @@ function MatchesTab() {
                           // Match Info.
                           //
                           */}
-                          <div className="flex gap-4 text-xs">
+                          <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 text-xs">
                             <div>
                               <span className="text-muted">Traffic Timestamp:</span>{' '}
                               <span className="text-title font-mono">
@@ -464,7 +464,7 @@ function MatchesTab() {
                           // HTTP request/response content.
                           //
                           */}
-                          <div className="grid grid-cols-2 gap-4">
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                             {entry.request_headers && (
                               <div>
                                 <div className="text-muted mb-2 tracking-wider">REQUEST HEADERS</div>
@@ -558,7 +558,7 @@ function RulesTab() {
       // Actions.
       //
       */}
-      <div className="flex items-center justify-end gap-4">
+      <div className="flex items-center justify-end gap-2 sm:gap-4">
         <button
           onClick={() => setShowCreateModal(true)}
           className="inline-flex items-center gap-2 px-3 py-1.5 text-xs tracking-wider bg-[var(--accent-success)]/20 text-[var(--accent-success)] border border-dim hover:border-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors"
@@ -584,8 +584,8 @@ function RulesTab() {
       // Rules Table.
       //
       */}
-      <div className="border border-subtle ascii-box">
-        <table className="w-full text-xs">
+      <div className="border border-subtle ascii-box overflow-x-auto">
+        <table className="w-full min-w-[860px] text-xs">
           <thead>
             <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
               <th className="text-left px-4 py-2 text-muted tracking-wider">STATUS</th>
@@ -666,7 +666,7 @@ function RulesTab() {
       */}
       {ruleToDelete && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-[var(--bg-secondary)] border border-subtle ascii-box p-6 w-[400px]">
+          <div className="bg-[var(--bg-secondary)] border border-subtle ascii-box p-4 md:p-6 w-[92vw] max-w-[400px]">
             <h2 className="text-sm font-bold tracking-wider text-title mb-4">DELETE RULE</h2>
             <p className="text-xs text-muted mb-2">
               Are you sure you want to delete this rule?
