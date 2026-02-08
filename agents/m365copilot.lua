@@ -280,6 +280,9 @@ return {
   end,
 
   create_session = function(ctx)
+    praxis.kill_processes_by_name(PROCESS_NAME)
+    praxis.sleep_ms(500)
+
     local cdp_handle = devtools.connect({
       process_path = ctx.process_path,
       debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",

@@ -676,6 +676,17 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
 
     praxis
         .set(
+            "kill_processes_by_name",
+            lua.create_function(|_, name: String| {
+                crate::utils::kill_processes_by_name(&name);
+                Ok(())
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
             "sleep_ms",
             lua.create_function(|_, ms: u64| {
                 std::thread::sleep(std::time::Duration::from_millis(ms));
