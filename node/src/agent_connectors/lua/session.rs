@@ -1,6 +1,7 @@
 use anyhow::Result;
 use common::SessionContext;
 use mlua::Lua;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -11,6 +12,7 @@ pub struct LuaAgentSession {
     vm: Arc<Mutex<Lua>>,
     context: SessionContext,
     state: Mutex<serde_json::Value>,
+    closed: AtomicBool,
 }
 
 impl LuaAgentSession {
@@ -28,6 +30,7 @@ impl LuaAgentSession {
             vm,
             context: context.clone(),
             state: Mutex::new(state),
+            closed: AtomicBool::new(false),
         })
     }
 }
@@ -52,6 +55,9 @@ impl AgentSession for LuaAgentSession {
     }
 
     fn close(&self) {
+        if self.closed.swap(true, Ordering::SeqCst) {
+            return;
+        }
         let state = self.state.lock().unwrap().clone();
         let lua = self.vm.lock().unwrap();
         if let Err(e) = super::runtime::vm_session_close(&lua, &self.context, &state) {
