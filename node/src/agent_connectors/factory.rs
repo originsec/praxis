@@ -15,7 +15,7 @@ impl AgentFactory {
     }
 
     pub fn create_all_agents(&self) -> Vec<Arc<dyn Agent>> {
-        let mut agents: Vec<Arc<dyn Agent>> = Vec::new();
+        let agents: Vec<Arc<dyn Agent>> = Vec::new();
 
         //
         // Native connectors: clawdbot, m365copilot.

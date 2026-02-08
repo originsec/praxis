@@ -57,7 +57,6 @@ pub struct LuaManifest {
     pub name: String,
     pub short_name: String,
     pub has_recon: bool,
-    pub has_create_session: bool,
     pub has_intercept_domains: bool,
     pub has_intercept_url_pattern: bool,
     pub has_fingerprint: bool,
@@ -77,7 +76,6 @@ pub fn vm_parse_manifest(lua: &Lua) -> Result<LuaManifest> {
         .map_err(|_| anyhow!("Lua connector manifest missing required field 'short_name'"))?;
 
     let has_recon = table.contains_key("recon").map_err(lua_error)?;
-    let has_create_session = table.contains_key("create_session").map_err(lua_error)?;
     let has_intercept_domains = table
         .contains_key("intercept_domains")
         .map_err(lua_error)?;
@@ -93,7 +91,6 @@ pub fn vm_parse_manifest(lua: &Lua) -> Result<LuaManifest> {
         name,
         short_name,
         has_recon,
-        has_create_session,
         has_intercept_domains,
         has_intercept_url_pattern,
         has_fingerprint,
@@ -775,7 +772,7 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
         );
 
         match cmd.spawn() {
-            Ok(mut child) => {
+            Ok(child) => {
                 pid_cell.store(child.id(), Ordering::SeqCst);
                 let output = child.wait_with_output();
                 pid_cell.store(0, Ordering::SeqCst);

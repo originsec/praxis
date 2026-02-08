@@ -20,28 +20,6 @@ impl AgentRegistry {
         }
     }
 
-    //
-    // Load agents from the factory.
-    //
-
-    pub fn load_from_factory(factory: &AgentFactory) -> Self {
-        let mut registry = Self::new();
-
-        for agent in factory.create_all_agents() {
-            registry.register(agent);
-        }
-
-        common::log_info!(
-            "AgentRegistry: Loaded {} agents",
-            registry.agents.len()
-        );
-        registry
-    }
-
-    pub fn register(&mut self, agent: Arc<dyn Agent>) {
-        self.agents.push(agent);
-    }
-
     pub fn register_lua(
         &mut self,
         agent: Arc<dyn Agent>,
@@ -133,6 +111,7 @@ impl AgentRegistry {
             .cloned()
     }
 
+    #[allow(dead_code)]
     pub fn unregister(&mut self, short_name: &str) -> bool {
         for agent in &self.agents {
             if agent.short_name() == short_name {
@@ -145,6 +124,7 @@ impl AgentRegistry {
         self.agents.len() < len_before
     }
 
+    #[allow(dead_code)]
     pub fn unregister_lua(&mut self, short_name: &str) -> bool {
         if !self.lua_agents.contains_key(short_name) {
             return false;
