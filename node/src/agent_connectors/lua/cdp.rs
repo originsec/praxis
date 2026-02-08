@@ -74,8 +74,8 @@ fn cdp_spawn_and_connect(config: &Table) -> Result<String> {
         .get("base_port")
         .map_err(|e| anyhow!("missing base_port: {}", e))?;
     let port_range: u16 = config.get("port_range").unwrap_or(778);
-    let kill_existing: bool = config.get("kill_existing").unwrap_or(true);
-    let use_hidden_desktop: bool = config.get("use_hidden_desktop").unwrap_or(true);
+    let kill_existing = config.get::<Option<bool>>("kill_existing").unwrap_or(None).unwrap_or(true);
+    let use_hidden_desktop = config.get::<Option<bool>>("use_hidden_desktop").unwrap_or(None).unwrap_or(true);
 
     //
     // Close all existing CDP connections and terminate their process trees,
