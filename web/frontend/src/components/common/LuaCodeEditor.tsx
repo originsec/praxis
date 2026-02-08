@@ -1,5 +1,27 @@
 import { useRef, useCallback } from 'react';
-import { Highlight, Prism, themes } from 'prism-react-renderer';
+import { Highlight, Prism } from 'prism-react-renderer';
+import type { PrismTheme } from 'prism-react-renderer';
+
+//
+// Custom theme using CSS variables so it adapts to the active theme.
+//
+
+const luaTheme: PrismTheme = {
+  plain: {
+    color: 'var(--text-primary)',
+    backgroundColor: 'var(--bg-primary)',
+  },
+  styles: [
+    { types: ['comment'], style: { color: 'var(--text-muted)' } },
+    { types: ['string', 'char'], style: { color: 'var(--accent-warning)' } },
+    { types: ['number'], style: { color: 'var(--accent-info)' } },
+    { types: ['keyword'], style: { color: 'var(--accent-purple)' } },
+    { types: ['function'], style: { color: 'var(--text-highlight)' } },
+    { types: ['operator'], style: { color: 'var(--text-secondary)' } },
+    { types: ['punctuation'], style: { color: 'var(--text-secondary)' } },
+    { types: ['boolean'], style: { color: 'var(--accent-info)' } },
+  ],
+};
 
 //
 // Register Lua language with Prism.
@@ -47,7 +69,7 @@ export function LuaCodeEditor({ value, onChange, readOnly = false }: LuaCodeEdit
     <div className="relative flex-1 overflow-hidden" style={{ minHeight: 0 }}>
       <Highlight
         prism={Prism}
-        theme={themes.vsDark}
+        theme={luaTheme}
         code={value}
         language="lua"
       >
