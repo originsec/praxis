@@ -135,11 +135,7 @@ local function do_recon(ctx)
   local ok, err = pcall(function()
     discovery_handle = devtools.connect({
       process_path = process_path,
-      debug_port_e
-local INPUT_SELECTOR = '#m365-chat-editor-target-element'
-local MESSAGE_SELECTOR = 'div[data-testid="markdown-reply"]'
-local SEND_BUTTON_SELECTOR = 'button[aria-label="Send"]:not([aria-disabled="true"])'
-local STOP_BUTTON_SELECTOR = 'button[aria-label="Stop generating"]'nv_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+      debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
       debug_port_format = "--remote-debugging-port={}",
       base_port = 9222,
       port_range = 778,
