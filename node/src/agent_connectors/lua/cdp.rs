@@ -105,10 +105,17 @@ fn cdp_spawn_and_connect(config: &Table) -> Result<String> {
 
     #[cfg(windows)]
     let (pid, should_minimize, hidden_desktop) = {
-        let want_hidden = use_hidden_desktop
-            && std::env::var("PRAXIS_NOT_HIDDEN")
-                .map(|v| v != "1")
-                .unwrap_or(true);
+        let not_hidden = std::env::var("PRAXIS_NOT_HIDDEN")
+            .map(|v| v == "1")
+            .unwrap_or(cfg!(debug_assertions));
+        let want_hidden = use_hidden_desktop && !not_hidden;
+
+        if !want_hidden {
+            common::log_debug!(
+                "CDP: hidden desktop disabled (use_hidden_desktop={}, not_hidden={})",
+                use_hidden_desktop, not_hidden
+            );
+        }
 
         if want_hidden {
             let desktop = crate::utils::HiddenDesktop::new();
