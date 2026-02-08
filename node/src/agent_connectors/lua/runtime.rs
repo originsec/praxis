@@ -525,6 +525,32 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         .map_err(lua_error)?;
 
     //
+    // Logging helpers so Lua scripts can emit diagnostics.
+    //
+
+    praxis
+        .set(
+            "log_info",
+            lua.create_function(|_, msg: String| {
+                common::log_info!("lua: {}", msg);
+                Ok(())
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "log_warn",
+            lua.create_function(|_, msg: String| {
+                common::log_warn!("lua: {}", msg);
+                Ok(())
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    //
     // Semantic parser helpers. These block on async calls to the semantic
     // parser service and should only be called during semantic recon.
     //

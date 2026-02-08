@@ -11,6 +11,33 @@ use tokio::sync::RwLock;
 
 const MAX_CONTENT_SIZE: usize = 14 * 1024 * 1024;
 
+//
+// Read a directory's contents by concatenating all files within it, sorted by
+// filename. Used for agents like Cursor where sessions are directories.
+//
+
+fn read_directory_contents(dir: &Path) -> std::io::Result<String> {
+    let mut entries: Vec<_> = std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_file())
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+
+    let mut combined = String::new();
+    for entry in entries {
+        match std::fs::read_to_string(entry.path()) {
+            Ok(content) => {
+                if !combined.is_empty() {
+                    combined.push('\n');
+                }
+                combined.push_str(&content);
+            }
+            Err(_) => continue, // skip non-text files
+        }
+    }
+    Ok(combined)
+}
+
 fn truncate_content(content: String) -> (String, bool) {
     if content.len() <= MAX_CONTENT_SIZE {
         return (content, false);
@@ -285,9 +312,16 @@ pub async fn handle_agent_command(
             }
 
             //
-            // Read the session file.
+            // Read the session content. If the path is a directory (e.g. Cursor
+            // chat sessions), concatenate all files within it.
             //
-            match std::fs::read_to_string(&session_file) {
+
+            let read_result = if canonical_path.is_dir() {
+                read_directory_contents(&canonical_path)
+            } else {
+                std::fs::read_to_string(&session_file)
+            };
+            match read_result {
                 Ok(content) => {
                     let (content, truncated) = truncate_content(content);
                     if truncated {

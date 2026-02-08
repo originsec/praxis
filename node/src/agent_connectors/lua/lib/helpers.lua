@@ -207,14 +207,21 @@ end
 function M.discover_internal_tools(session_opts, session_fns)
   local state = session_fns.create(session_opts)
   if state == nil then
+    praxis.log_warn("discover_internal_tools: create returned nil")
     return {}
   end
 
+  praxis.log_info("discover_internal_tools: session created, sending prompt")
   local tools = {}
   local ok, result = pcall(session_fns.transact, state,
     "List all your internal/built-in tools. For each tool, give its name and a brief description.")
   if ok and result then
-    tools = praxis.semantic_discover_internal_tools(result.response or "")
+    local response = result.response or ""
+    praxis.log_info("discover_internal_tools: got response (" .. #response .. " bytes)")
+    tools = praxis.semantic_discover_internal_tools(response)
+    praxis.log_info("discover_internal_tools: parsed " .. #tools .. " tools")
+  elseif not ok then
+    praxis.log_warn("discover_internal_tools: transact failed: " .. tostring(result))
   end
   pcall(session_fns.close, state)
   return tools
