@@ -12,3 +12,8 @@ authors = ["Origin <team@originhq.com>"]
 
 [workspace.metadata.release]
 shared-version = true
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
