@@ -440,9 +440,20 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         .set(
             "walk_files",
             lua.create_function(|lua, (base, max_depth): (String, usize)| {
+                use crate::agent_connectors::utils::SKIP_DIRS;
+
                 let mut out = Vec::<String>::new();
-                for entry in walkdir::WalkDir::new(base).max_depth(max_depth).into_iter().flatten()
-                {
+                let walker = walkdir::WalkDir::new(base)
+                    .max_depth(max_depth)
+                    .into_iter()
+                    .filter_entry(|e| {
+                        if !e.file_type().is_dir() {
+                            return true;
+                        }
+                        let name = e.file_name().to_string_lossy();
+                        !SKIP_DIRS.contains(&name.as_ref())
+                    });
+                for entry in walker.flatten() {
                     if entry.file_type().is_file() {
                         out.push(entry.path().to_string_lossy().to_string());
                     }

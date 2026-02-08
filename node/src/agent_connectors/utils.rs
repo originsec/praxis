@@ -209,7 +209,11 @@ pub fn enumerate_user_homes() -> Vec<PathBuf> {
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
                 if path.is_dir() {
-                    homes.push(path);
+                    let name = entry.file_name();
+                    let name = name.to_string_lossy();
+                    if !name.starts_with('.') {
+                        homes.push(path);
+                    }
                 }
             }
         }
