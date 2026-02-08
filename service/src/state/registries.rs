@@ -82,8 +82,8 @@ impl NodeRegistry {
         let mut agents = self.agents.write().await;
         if let Some(node) = agents.get_mut(node_id) {
             if let Some(ref mut update) = node.last_update {
-                if let Some(ref mut selected) = update.selected_agent {
-                    selected.session_id = session_id;
+                if let Some(ref mut agent) = update.selected_agent {
+                    agent.session_id = session_id;
                 }
             }
         }
