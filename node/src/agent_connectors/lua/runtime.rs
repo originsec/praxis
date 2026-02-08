@@ -138,13 +138,23 @@ pub fn vm_intercept_url_pattern(lua: &Lua) -> Result<Option<String>> {
     parse_optional_string(value)
 }
 
-pub fn vm_recon(lua: &Lua, is_semantic: bool) -> Result<ReconResult> {
+pub fn vm_recon(
+    lua: &Lua,
+    is_semantic: bool,
+    process_path: Option<&str>,
+) -> Result<ReconResult> {
     let table = connector_table(lua)?;
     let func: Function = table
         .get("recon")
         .map_err(lua_error)
         .map_err(|_| anyhow!("Lua connector missing function 'recon'"))?;
-    let value: Value = func.call(is_semantic).map_err(lua_error)?;
+    let ctx = lua
+        .to_value(&json!({
+            "is_semantic": is_semantic,
+            "process_path": process_path,
+        }))
+        .map_err(lua_error)?;
+    let value: Value = func.call(ctx).map_err(lua_error)?;
     let recon: ReconResult = lua.from_value(value).map_err(lua_error)?;
     Ok(recon)
 }

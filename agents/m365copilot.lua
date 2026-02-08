@@ -9,20 +9,20 @@ local INTERCEPT_URL_PATTERN = "m365Copilot/Chathub"
 
 local WORKING_DIR_WORK = "Work"
 local WORKING_DIR_WEB = "Web"
+local TOGGLE_WORK_SELECTOR = 'button[data-testid="toggle-work"]'
+local TOGGLE_WEB_SELECTOR = 'button[data-testid="toggle-web"]'
 
 local PROCESS_NAME = "M365Copilot.exe"
 local PACKAGE_FAMILY = "Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe"
-
-local process_path = nil
-
---
--- M365-specific adapter for the generic devtools transact loop.
---
 
 local INPUT_SELECTOR = '#m365-chat-editor-target-element'
 local MESSAGE_SELECTOR = 'div[data-testid="markdown-reply"]'
 local SEND_BUTTON_SELECTOR = 'button[aria-label="Send"]:not([aria-disabled="true"])'
 local STOP_BUTTON_SELECTOR = 'button[aria-label="Stop generating"]'
+
+--
+-- M365-specific adapter for the generic devtools transact loop.
+--
 
 local m365_adapter = {
   input_selector = INPUT_SELECTOR,
@@ -81,9 +81,9 @@ local function post_initialize(handle, working_dir)
 
   local toggle_selector
   if wd == WORKING_DIR_WORK then
-    toggle_selector = 'button[data-testid="toggle-work"]'
+    toggle_selector = TOGGLE_WORK_SELECTOR
   elseif wd == WORKING_DIR_WEB then
-    toggle_selector = 'button[data-testid="toggle-web"]'
+    toggle_selector = TOGGLE_WEB_SELECTOR
   else
     praxis.log_warn("m365copilot: unknown working_dir '" .. wd .. "'")
     return
@@ -105,10 +105,13 @@ local function post_initialize(handle, working_dir)
   end
 end
 
-local function do_recon(is_semantic)
+local function do_recon(ctx)
   if praxis.os_name() ~= "windows" then
     return nil
   end
+
+  local is_semantic = ctx.is_semantic
+  local process_path = ctx.process_path
 
   local identities = {}
   local project_paths = {}
@@ -132,7 +135,11 @@ local function do_recon(is_semantic)
   local ok, err = pcall(function()
     discovery_handle = devtools.connect({
       process_path = process_path,
-      debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+      debug_port_e
+local INPUT_SELECTOR = '#m365-chat-editor-target-element'
+local MESSAGE_SELECTOR = 'div[data-testid="markdown-reply"]'
+local SEND_BUTTON_SELECTOR = 'button[aria-label="Send"]:not([aria-disabled="true"])'
+local STOP_BUTTON_SELECTOR = 'button[aria-label="Stop generating"]'nv_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
       debug_port_format = "--remote-debugging-port={}",
       base_port = 9222,
       port_range = 778,
@@ -154,13 +161,13 @@ local function do_recon(is_semantic)
       if profile.displayName then table.insert(identities, profile.displayName) end
     end
 
-    local toggles = praxis.cdp_evaluate(discovery_handle, [[
-      (function() {
-        var workBtn = document.querySelector('button[data-testid="toggle-work"]');
-        var webBtn = document.querySelector('button[data-testid="toggle-web"]');
-        return { hasWork: workBtn !== null, hasWeb: webBtn !== null };
-      })()
-    ]])
+    local toggles = praxis.cdp_evaluate(discovery_handle,
+      "(function() {"
+      .. "var workBtn = document.querySelector('" .. TOGGLE_WORK_SELECTOR .. "');"
+      .. "var webBtn = document.querySelector('" .. TOGGLE_WEB_SELECTOR .. "');"
+      .. "return { hasWork: workBtn !== null, hasWeb: webBtn !== null };"
+      .. "})()"
+    )
 
     if toggles then
       if toggles.hasWork then table.insert(project_paths, WORKING_DIR_WORK) end
@@ -257,10 +264,10 @@ return {
   short_name = AGENT_SHORT_NAME,
 
   fingerprint = function(_ctx)
-    process_path = do_fingerprint()
+    local path = do_fingerprint()
     return {
-      available = process_path ~= nil,
-      process_path = process_path,
+      available = path ~= nil,
+      process_path = path,
     }
   end,
 
@@ -272,8 +279,8 @@ return {
     return INTERCEPT_URL_PATTERN
   end,
 
-  recon = function(is_semantic)
-    return do_recon(is_semantic)
+  recon = function(ctx)
+    return do_recon(ctx)
   end,
 
   create_session = function(ctx)

@@ -10,7 +10,6 @@ local INTERCEPT_DOMAINS = {
   "cursor.sh",
 }
 
-local process_path = nil
 local process_version = nil
 
 local function verify_binary(path)
@@ -309,7 +308,7 @@ end
 
 local function run_create_session(ctx)
   local working_dir = ctx.working_dir
-  local pp = ctx.process_path or process_path
+  local pp = ctx.process_path
   if pp == nil or pp == "" then
     return nil
   end
@@ -406,7 +405,9 @@ local function run_session_close(state)
   end
 end
 
-local function run_recon(is_semantic)
+local function run_recon(ctx)
+  local is_semantic = ctx.is_semantic
+  local process_path = ctx.process_path
   local result = helpers.new_recon_result()
 
   local homes = praxis.user_homes() or {}
@@ -555,6 +556,7 @@ local function run_recon(is_semantic)
       close = run_session_close,
     }
     internal_tools = helpers.discover_internal_tools({
+      process_path = ctx.process_path,
       working_dir = filtered_paths[1],
     }, session_fns)
     metadata = helpers.extract_metadata(result.config_items)
@@ -582,10 +584,11 @@ return {
   short_name = AGENT_SHORT_NAME,
 
   fingerprint = function(_ctx)
-    process_path, process_version = pick_path()
+    local path, version = pick_path()
+    process_version = version
     return {
-      available = process_path ~= nil,
-      process_path = process_path,
+      available = path ~= nil,
+      process_path = path,
       version = process_version,
     }
   end,
@@ -594,8 +597,8 @@ return {
     return INTERCEPT_DOMAINS
   end,
 
-  recon = function(is_semantic)
-    return run_recon(is_semantic)
+  recon = function(ctx)
+    return run_recon(ctx)
   end,
 
   create_session = function(ctx)

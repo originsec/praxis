@@ -213,8 +213,9 @@ impl AgentRecon for LuaAgent {
         }
 
         let mut result = {
+            let process_path = self.fingerprint_process_path.read().unwrap().clone();
             let lua = self.vm.lock().unwrap();
-            match runtime::vm_recon(&lua, is_semantic) {
+            match runtime::vm_recon(&lua, is_semantic, process_path.as_deref()) {
                 Ok(result) => result,
                 Err(e) => {
                     common::log_warn!("Lua recon failed for '{}': {}", self.short_name, e);

@@ -3,7 +3,6 @@ local helpers = require("praxis.helpers")
 local AGENT_NAME = "Codex CLI"
 local AGENT_SHORT_NAME = "codex"
 
-local process_path = nil
 local process_version = nil
 
 local function verify_binary(path)
@@ -291,7 +290,7 @@ local function run_create_session(ctx)
 
   return {
     handle = praxis.uuid_v4(),
-    process_path = ctx.process_path or process_path,
+    process_path = ctx.process_path,
     working_dir = working_dir,
     yolo_mode = ctx.yolo_mode == true,
     has_first_prompt = false,
@@ -380,7 +379,8 @@ local function run_session_close(state)
   -- Codex sessions don't need explicit cleanup
 end
 
-local function run_recon(is_semantic)
+local function run_recon(ctx)
+  local is_semantic = ctx.is_semantic
   local result = helpers.new_recon_result()
 
   local homes = praxis.user_homes() or {}
@@ -528,6 +528,7 @@ local function run_recon(is_semantic)
       close = run_session_close,
     }
     internal_tools = helpers.discover_internal_tools({
+      process_path = ctx.process_path,
       working_dir = filtered_paths[1],
     }, session_fns)
     metadata = helpers.extract_metadata(result.config_items)
@@ -555,16 +556,17 @@ return {
   short_name = AGENT_SHORT_NAME,
 
   fingerprint = function(_ctx)
-    process_path, process_version = pick_path()
+    local path, version = pick_path()
+    process_version = version
     return {
-      available = process_path ~= nil,
-      process_path = process_path,
+      available = path ~= nil,
+      process_path = path,
       version = process_version,
     }
   end,
 
-  recon = function(is_semantic)
-    return run_recon(is_semantic)
+  recon = function(ctx)
+    return run_recon(ctx)
   end,
 
   create_session = function(ctx)

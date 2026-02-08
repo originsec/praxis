@@ -6,7 +6,6 @@ local AGENT_SHORT_NAME = "claudecode"
 local INTERCEPT_DOMAINS = { "api.anthropic.com", "a-api.anthropic.com" }
 local INTERCEPT_URL_PATTERN = "messages"
 
-local process_path = nil
 local process_version = nil
 
 local function verify_binary(path)
@@ -297,7 +296,7 @@ local function run_create_session(ctx)
 
   return {
     handle = praxis.uuid_v4(),
-    process_path = ctx.process_path or process_path,
+    process_path = ctx.process_path,
     working_dir = working_dir,
     yolo_mode = ctx.yolo_mode == true,
     external_session_id = nil,
@@ -356,7 +355,7 @@ local function run_session_close(state)
   -- Claude Code sessions don't need explicit cleanup
 end
 
-local function run_recon(is_semantic)
+local function run_recon(ctx)
   local result = helpers.new_recon_result()
 
   local homes = praxis.user_homes() or {}
@@ -368,12 +367,12 @@ local function run_recon(is_semantic)
   local function collect_for_home(home)
     local home_result = helpers.new_recon_result()
 
-    helpers.merge_recon_result(home_result, collect_config_for_home(home, is_semantic))
+    helpers.merge_recon_result(home_result, collect_config_for_home(home, ctx.is_semantic))
 
     local projects = find_project_directories(home, 7)
     for _, proj in ipairs(projects) do
       table.insert(home_result.project_paths, proj)
-      helpers.merge_recon_result(home_result, collect_config_for_project(proj, is_semantic))
+      helpers.merge_recon_result(home_result, collect_config_for_project(proj, ctx.is_semantic))
     end
 
     local home_sessions = discover_sessions_for_home(home)
@@ -516,13 +515,14 @@ local function run_recon(is_semantic)
   local internal_tools = {}
   local metadata = nil
 
-  if is_semantic then
+  if ctx.is_semantic then
     local session_fns = {
       create = run_create_session,
       transact = run_session_transact,
       close = run_session_close,
     }
     internal_tools = helpers.discover_internal_tools({
+      process_path = ctx.process_path,
       working_dir = filtered_paths[1],
     }, session_fns)
     metadata = helpers.extract_metadata(result.config_items)
@@ -550,11 +550,12 @@ return {
   short_name = AGENT_SHORT_NAME,
 
   fingerprint = function(_ctx)
-    process_path, process_version = pick_path()
+    local path, version = pick_path()
+    process_version = version
     return {
-      available = process_path ~= nil,
-      process_path = process_path,
-      version = process_version,
+      available = path ~= nil,
+      process_path = path,
+      version = version,
     }
   end,
 
@@ -566,8 +567,8 @@ return {
     return INTERCEPT_URL_PATTERN
   end,
 
-  recon = function(is_semantic)
-    return run_recon(is_semantic)
+  recon = function(ctx)
+    return run_recon(ctx)
   end,
 
   create_session = function(ctx)

@@ -8,7 +8,6 @@ local INTERCEPT_DOMAINS = {
   "cloudcode-pa.googleapis.com",
 }
 
-local process_path = nil
 local process_version = nil
 
 local function is_session_file(name)
@@ -396,7 +395,7 @@ local function run_create_session(ctx)
 
   return {
     handle = praxis.uuid_v4(),
-    process_path = ctx.process_path or process_path,
+    process_path = ctx.process_path,
     working_dir = working_dir,
     yolo_mode = ctx.yolo_mode == true,
     external_session_id = nil,
@@ -449,7 +448,8 @@ local function run_session_close(state)
   end
 end
 
-local function run_recon(is_semantic)
+local function run_recon(ctx)
+  local is_semantic = ctx.is_semantic
   local result = helpers.new_recon_result()
   table.insert(result.context_filenames, "GEMINI.md")
 
@@ -600,6 +600,7 @@ local function run_recon(is_semantic)
       close = run_session_close,
     }
     internal_tools = helpers.discover_internal_tools({
+      process_path = ctx.process_path,
       working_dir = filtered_paths[1],
     }, session_fns)
     metadata = helpers.extract_metadata(result.config_items)
@@ -631,10 +632,11 @@ return {
   short_name = AGENT_SHORT_NAME,
 
   fingerprint = function(_ctx)
-    process_path, process_version = pick_path()
+    local path, version = pick_path()
+    process_version = version
     return {
-      available = process_path ~= nil,
-      process_path = process_path,
+      available = path ~= nil,
+      process_path = path,
       version = process_version,
     }
   end,
@@ -643,8 +645,8 @@ return {
     return INTERCEPT_DOMAINS
   end,
 
-  recon = function(is_semantic)
-    return run_recon(is_semantic)
+  recon = function(ctx)
+    return run_recon(ctx)
   end,
 
   create_session = function(ctx)
