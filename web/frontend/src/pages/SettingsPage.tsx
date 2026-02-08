@@ -1096,7 +1096,7 @@ export function SettingsPage() {
             <div className="flex flex-col" style={{ height: 'calc(100vh - 16rem)' }}>
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h2 className="text-lg font-semibold text-highlight mb-1">Lua Agent Scripts</h2>
+                  <h2 className="text-lg font-semibold text-highlight mb-1">Agent Definitions</h2>
                   <p className="text-sm text-muted">Manage Lua agent connector scripts stored in the service database</p>
                 </div>
                 <div className="flex gap-2">
@@ -1105,13 +1105,6 @@ export function SettingsPage() {
                     Upload
                     <input type="file" accept=".lua" onChange={handleFileUpload} className="hidden" />
                   </label>
-                  <button
-                    onClick={handleNewScript}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-md bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors"
-                  >
-                    <Plus size={14} />
-                    New Script
-                  </button>
                   <button
                     onClick={handleResetDefaults}
                     className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-md bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/30 transition-colors"

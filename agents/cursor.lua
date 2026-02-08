@@ -10,8 +10,6 @@ local INTERCEPT_DOMAINS = {
   "cursor.sh",
 }
 
-local process_version = nil
-
 local function verify_binary(path)
   local result = praxis.command_run({ program = path, args = { "--version" } })
   if result.success then
@@ -70,77 +68,6 @@ local function path_has_valid_auth(path, user_homes, cursor_agent_path)
   end
 
   return check_user_logged_in(cursor_agent_path, path)
-end
-
---
--- Parse MCP servers from JSON config content.
---
-
-local function parse_mcp_servers_from_json(content, context_path)
-  local servers = {}
-  local json_obj = helpers.parse_json(content)
-  if json_obj == nil then
-    return servers
-  end
-
-  --
-  -- Try mcpServers key first, then treat root as server definitions.
-  --
-
-  local mcp_obj = json_obj.mcpServers or json_obj
-
-  for server_name, cfg in pairs(mcp_obj) do
-    if type(cfg) ~= "table" then
-      goto continue
-    end
-
-    local transport = nil
-    local address = nil
-    local command = nil
-
-    if type(cfg.command) == "string" then
-      transport = "Stdio"
-      command = cfg.command
-      if type(cfg.args) == "table" then
-        local args = {}
-        for _, a in ipairs(cfg.args) do
-          if type(a) == "string" then
-            table.insert(args, a)
-          end
-        end
-        if #args > 0 then
-          command = command .. " " .. table.concat(args, " ")
-        end
-      end
-    elseif type(cfg.url) == "string" then
-      transport = "Sse"
-      address = cfg.url
-    end
-
-    if transport ~= nil then
-      table.insert(servers, {
-        name = server_name,
-        transport = transport,
-        address = address,
-        command = command,
-        tools = {},
-        context_path = context_path,
-      })
-    end
-
-    ::continue::
-  end
-  return servers
-end
-
-local function add_config_if_exists(config_items, path, config_type, include_contents)
-  if praxis.path_exists(path) then
-    table.insert(config_items, {
-      path = path,
-      config_type = config_type,
-      contents = include_contents and praxis.read_file(path) or nil,
-    })
-  end
 end
 
 --
@@ -249,29 +176,6 @@ local function discover_sessions_for_home(home)
   end
 
   return sessions
-end
-
---
--- Find project directories containing .cursor subdirectories.
---
-
-local function find_project_directories(base_path, max_depth)
-  local projects = {}
-
-  local files = praxis.walk_files(base_path, max_depth) or {}
-  for _, p in ipairs(files) do
-    local np = helpers.norm(p)
-    if helpers.ends_with(np, "/.cursor/cli.json")
-        or helpers.ends_with(np, "/.cursor/mcp.json") then
-      local cursor_dir = helpers.parent_dir(p)
-      local project_dir = cursor_dir and helpers.parent_dir(cursor_dir) or nil
-      if project_dir and helpers.norm(project_dir) ~= helpers.norm(base_path) then
-        table.insert(projects, project_dir)
-      end
-    end
-  end
-
-  return helpers.dedup(projects)
 end
 
 --
@@ -405,179 +309,149 @@ local function run_session_close(state)
   end
 end
 
-local function run_recon(ctx)
-  local is_semantic = ctx.is_semantic
-  local process_path = ctx.process_path
-  local result = helpers.new_recon_result()
+--
+-- Extract 32-byte SHA-256 hash refs from repeated protobuf field 1.
+-- Uses varint decoding for tags and lengths to support multi-byte tags.
+--
 
-  local homes = praxis.user_homes() or {}
+local function read_varint_from_hex(hex, pos)
+  local value = 0
+  local shift = 0
 
-  local function collect_for_home(home)
-    local home_result = helpers.new_recon_result()
-
-    --
-    -- Global config.
-    --
-
-    add_config_if_exists(home_result.config_items,
-      praxis.path_join({ home, ".cursor", "cli-config.json" }),
-      "global_settings", is_semantic)
-
-    for _, item in ipairs(home_result.config_items) do
-      if item.config_type == "global_settings" then
-        local content = item.contents or praxis.read_file(item.path)
-        if content then
-          table.insert(home_result.raw_configs_for_mcp, {
-            content = content,
-            context_path = nil,
-            config_type = "global_settings",
-          })
-        end
-      end
+  while pos + 1 <= #hex do
+    local byte = tonumber(hex:sub(pos, pos + 1), 16)
+    if not byte then
+      return nil, pos
     end
 
-    --
-    -- Discover trusted workspaces and project directories.
-    --
+    value = value + ((byte % 128) * (2 ^ shift))
+    pos = pos + 2
 
-    local trusted = discover_trusted_workspaces(home)
-    for _, p in ipairs(trusted) do
-      table.insert(home_result.project_paths, p)
+    if byte < 128 then
+      return value, pos
     end
 
-    local dir_projects = find_project_directories(home, 7)
-    for _, p in ipairs(dir_projects) do
-      table.insert(home_result.project_paths, p)
-    end
-
-    --
-    -- Collect project-level configs.
-    --
-
-    for _, proj in ipairs(helpers.dedup(home_result.project_paths)) do
-      add_config_if_exists(home_result.config_items,
-        praxis.path_join({ proj, ".cursor", "cli.json" }),
-        "project_settings:" .. proj, is_semantic)
-      add_config_if_exists(home_result.config_items,
-        praxis.path_join({ proj, ".cursor", "mcp.json" }),
-        "project_mcp:" .. proj, is_semantic)
-
-      for _, item in ipairs(home_result.config_items) do
-        if helpers.starts_with(item.config_type, "project_mcp:" .. proj)
-            or helpers.starts_with(item.config_type, "project_settings:" .. proj) then
-          local content = item.contents or praxis.read_file(item.path)
-          if content then
-            table.insert(home_result.raw_configs_for_mcp, {
-              content = content,
-              context_path = proj,
-              config_type = item.config_type,
-            })
-          end
-        end
-      end
-    end
-
-    local home_sessions = discover_sessions_for_home(home)
-    for _, s in ipairs(home_sessions) do
-      table.insert(home_result.sessions, s)
-    end
-
-    return home_result
-  end
-
-  local per_home_results = helpers.for_each_user_home_coalesce(collect_for_home, { dedup = false })
-
-  for _, per_home in ipairs(per_home_results) do
-    helpers.merge_recon_result(result, per_home)
-  end
-
-  result.project_paths = helpers.dedup(result.project_paths)
-
-  --
-  -- Prepend user homes with .cursor directory.
-  --
-
-  local user_homes_with_cursor = helpers.user_homes_with_dir(".cursor")
-  local all_paths = {}
-  for _, h in ipairs(user_homes_with_cursor) do
-    table.insert(all_paths, h)
-  end
-  for _, p in ipairs(result.project_paths) do
-    table.insert(all_paths, p)
-  end
-  all_paths = helpers.dedup(all_paths)
-
-  --
-  -- Filter to paths with valid auth.
-  --
-
-  local filtered_paths = {}
-  for _, p in ipairs(all_paths) do
-    if path_has_valid_auth(p, homes, process_path) then
-      table.insert(filtered_paths, p)
-    end
-  end
-  filtered_paths = helpers.dedup(filtered_paths)
-  helpers.sort_strings(filtered_paths)
-
-  --
-  -- Extract MCP servers from JSON configs.
-  --
-
-  local mcp_servers = {}
-  for _, item in ipairs(result.raw_configs_for_mcp) do
-    local servers = parse_mcp_servers_from_json(item.content, item.context_path)
-    for _, s in ipairs(servers) do
-      table.insert(mcp_servers, s)
+    shift = shift + 7
+    if shift > 63 then
+      return nil, pos
     end
   end
 
-  local mcp_seen = {}
-  local mcp_unique = {}
-  for _, s in ipairs(mcp_servers) do
-    local key = (s.name or "") .. "::" .. (s.context_path or "")
-    if not mcp_seen[key] then
-      mcp_seen[key] = true
-      table.insert(mcp_unique, s)
-    end
-  end
-
-  --
-  -- Semantic enrichment.
-  --
-
-  local internal_tools = {}
-  local metadata = nil
-
-  if is_semantic then
-    local session_fns = {
-      create = run_create_session,
-      transact = run_session_transact,
-      close = run_session_close,
-    }
-    internal_tools = helpers.discover_internal_tools({
-      process_path = ctx.process_path,
-      working_dir = filtered_paths[1],
-    }, session_fns)
-    metadata = helpers.extract_metadata(result.config_items)
-
-    for _, item in ipairs(result.config_items) do
-      item.contents = nil
-    end
-  end
-
-  return {
-    tools = {
-      mcp_servers = mcp_unique,
-      skills = {},
-      internal_tools = internal_tools,
-    },
-    config = result.config_items,
-    sessions = result.sessions,
-    project_paths = filtered_paths,
-    metadata = metadata,
-  }
+  return nil, pos
 end
+
+local function extract_protobuf_field1_hashes(root_hex)
+  local hashes = {}
+  if type(root_hex) ~= "string" or #root_hex == 0 then
+    return hashes
+  end
+
+  local pos = 1
+  while pos + 1 <= #root_hex do
+    local tag, next_pos = read_varint_from_hex(root_hex, pos)
+    if not tag then
+      break
+    end
+    pos = next_pos
+
+    local field_num = math.floor(tag / 8)
+    local wire_type = tag % 8
+
+    if wire_type == 0 then
+      local _, skip_pos = read_varint_from_hex(root_hex, pos)
+      if not skip_pos then
+        break
+      end
+      pos = skip_pos
+    elseif wire_type == 2 then
+      local length, len_pos = read_varint_from_hex(root_hex, pos)
+      if not length or not len_pos then
+        break
+      end
+      pos = len_pos
+      local data_end = pos + (length * 2) - 1
+      if data_end > #root_hex then
+        break
+      end
+      if field_num == 1 and length == 32 then
+        table.insert(hashes, root_hex:sub(pos, data_end):lower())
+      end
+      pos = data_end + 1
+    elseif wire_type == 5 then
+      pos = pos + 8
+    elseif wire_type == 1 then
+      pos = pos + 16
+    else
+      break
+    end
+  end
+
+  return hashes
+end
+
+local function build_session_metadata_line(meta, message_count)
+  local created_at_text = "unknown"
+  if meta and type(meta.createdAt) == "number" then
+    local created_unix = math.floor(meta.createdAt / 1000)
+    created_at_text = os.date("!%Y-%m-%dT%H:%M:%SZ", created_unix)
+  end
+
+  local content = table.concat({
+    "(Cursor session metadata)",
+    "name: " .. tostring(meta and meta.name or ""),
+    "agentId: " .. tostring(meta and meta.agentId or ""),
+    "mode: " .. tostring(meta and meta.mode or ""),
+    "createdAt: " .. created_at_text,
+    "lastUsedModel: " .. tostring(meta and meta.lastUsedModel or ""),
+    "latestRootBlobId: " .. tostring(meta and meta.latestRootBlobId or ""),
+    "messageCount: " .. tostring(message_count or 0),
+  }, "\n")
+
+  local payload = {
+    role = "system",
+    content = content,
+    praxis_meta = {
+      source = "cursor",
+      sessionName = meta and meta.name or nil,
+      agentId = meta and meta.agentId or nil,
+      mode = meta and meta.mode or nil,
+      createdAt = meta and meta.createdAt or nil,
+      lastUsedModel = meta and meta.lastUsedModel or nil,
+      latestRootBlobId = meta and meta.latestRootBlobId or nil,
+      messageCount = message_count or 0,
+    },
+  }
+  return praxis.json_encode(payload)
+end
+
+local recon_config = {
+  home_dir = ".cursor",
+
+  home_configs = {
+    { path = ".cursor/cli-config.json", type = "global_settings", mcp = true },
+  },
+
+  project_markers = { "/.cursor/cli.json", "/.cursor/mcp.json" },
+  project_discovery = discover_trusted_workspaces,
+
+  project_configs = {
+    { path = ".cursor/cli.json", type = "project_settings", mcp = true },
+    { path = ".cursor/mcp.json", type = "project_mcp", mcp = true },
+  },
+
+  mcp_parsers = {
+    default = helpers.parse_mcp_from_json_flexible,
+  },
+
+  auth_check = path_has_valid_auth,
+  session_discovery = discover_sessions_for_home,
+
+  session_fns = {
+    create = run_create_session,
+    transact = run_session_transact,
+    close = run_session_close,
+  },
+}
 
 return {
   name = AGENT_NAME,
@@ -585,11 +459,10 @@ return {
 
   fingerprint = function(_ctx)
     local path, version = pick_path()
-    process_version = version
     return {
       available = path ~= nil,
       process_path = path,
-      version = process_version,
+      version = version,
     }
   end,
 
@@ -598,7 +471,7 @@ return {
   end,
 
   recon = function(ctx)
-    return run_recon(ctx)
+    return helpers.run_standard_recon(ctx, recon_config)
   end,
 
   create_session = function(ctx)
@@ -653,60 +526,47 @@ return {
     end
     root_hex = root_hex:gsub("%s+", "")
 
+    local message_hashes = extract_protobuf_field1_hashes(root_hex)
+
     --
-    -- Parse protobuf wire format to extract field 1 hash refs.
+    -- Fallback: if the root blob is empty (SHA-256 of ""), find the
+    -- latest state snapshot by selecting the largest binary blob.
+    -- State snapshots grow monotonically so the largest is the most
+    -- recent and contains all accumulated message references.
     --
 
-    local message_hashes = {}
-    local pos = 1
-    local len = #root_hex
-
-    while pos < len do
-      local tag_hex = root_hex:sub(pos, pos + 1)
-      local tag = tonumber(tag_hex, 16)
-      if not tag then break end
-      pos = pos + 2
-
-      local field_num = math.floor(tag / 8)
-      local wire_type = tag % 8
-
-      if wire_type == 0 then
-        repeat
-          local b = tonumber(root_hex:sub(pos, pos + 1), 16)
-          pos = pos + 2
-          if not b then break end
-        until b < 128
-
-      elseif wire_type == 2 then
-        local length = 0
-        local shift = 0
-        repeat
-          local b = tonumber(root_hex:sub(pos, pos + 1), 16)
-          pos = pos + 2
-          if not b then break end
-          length = length + (b % 128) * (2 ^ shift)
-          shift = shift + 7
-        until b < 128
-
-        if field_num == 1 and length == 32 then
-          local hash = root_hex:sub(pos, pos + 63):lower()
-          if #hash == 64 then
-            table.insert(message_hashes, hash)
-          end
-        end
-        pos = pos + (length * 2)
-
-      elseif wire_type == 5 then
-        pos = pos + 8
-      elseif wire_type == 1 then
-        pos = pos + 16
-      else
-        break
+    if #message_hashes == 0 then
+      local fallback_hex = praxis.sqlite_query(db_path,
+        "SELECT hex(data) FROM blobs"
+        .. " WHERE length(data) > 0 AND substr(hex(data),1,2) != '7B'"
+        .. " ORDER BY length(data) DESC LIMIT 1;")
+      if fallback_hex then
+        fallback_hex = fallback_hex:gsub("%s+", "")
+        message_hashes = extract_protobuf_field1_hashes(fallback_hex)
       end
     end
 
     if #message_hashes == 0 then
-      return nil
+      --
+      -- Some Cursor sessions are valid but empty (e.g. only metadata and an
+      -- empty root blob). Return metadata content so UI has something useful
+      -- to display instead of a read failure.
+      --
+      return build_session_metadata_line(meta, 0)
+    end
+
+    --
+    -- Deduplicate hashes while preserving order. State snapshots in
+    -- multi-turn conversations repeat the same message refs.
+    --
+
+    local seen = {}
+    local unique_hashes = {}
+    for _, hash in ipairs(message_hashes) do
+      if not seen[hash] then
+        seen[hash] = true
+        table.insert(unique_hashes, hash)
+      end
     end
 
     --
@@ -714,13 +574,17 @@ return {
     --
 
     local lines = {}
-    for _, hash in ipairs(message_hashes) do
+    for _, hash in ipairs(unique_hashes) do
       local msg = praxis.sqlite_query(db_path,
         "SELECT data FROM blobs WHERE id='" .. hash .. "';")
       if msg and msg:sub(1, 1) == "{" then
         local trimmed = msg:gsub("%s+$", "")
         table.insert(lines, trimmed)
       end
+    end
+
+    if #lines == 0 then
+      return build_session_metadata_line(meta, #unique_hashes)
     end
 
     return table.concat(lines, "\n")

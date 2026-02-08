@@ -8,8 +8,6 @@ local INTERCEPT_DOMAINS = {
   "cloudcode-pa.googleapis.com",
 }
 
-local process_version = nil
-
 local function is_session_file(name)
   return name and helpers.starts_with(name, "session-") and helpers.ends_with(name, ".json")
 end
@@ -90,54 +88,6 @@ local function extract_context_filenames(json_obj)
     end
   end
   return out
-end
-
-local function parse_mcp_servers_from_config(content, context_path)
-  local servers = {}
-  local json_obj = helpers.parse_json(content)
-  if json_obj == nil or type(json_obj.mcpServers) ~= "table" then
-    return servers
-  end
-
-  for server_name, cfg in pairs(json_obj.mcpServers) do
-    local transport = nil
-    local address = nil
-    local command = nil
-
-    if type(cfg) == "table" and type(cfg.command) == "string" then
-      transport = "Stdio"
-      command = cfg.command
-      if type(cfg.args) == "table" then
-        local args = {}
-        for _, a in ipairs(cfg.args) do
-          if type(a) == "string" then
-            table.insert(args, a)
-          end
-        end
-        if #args > 0 then
-          command = command .. " " .. table.concat(args, " ")
-        end
-      end
-    elseif type(cfg) == "table" and type(cfg.url) == "string" then
-      transport = "Sse"
-      address = cfg.url
-    elseif type(cfg) == "table" and type(cfg.httpUrl) == "string" then
-      transport = "Sse"
-      address = cfg.httpUrl
-    end
-
-    if transport ~= nil then
-      table.insert(servers, {
-        name = server_name,
-        transport = transport,
-        address = address,
-        command = command,
-        tools = {},
-        context_path = context_path,
-      })
-    end
-  end
-  return servers
 end
 
 local function discover_sessions_for_home(home)
@@ -246,20 +196,11 @@ local function find_latest_session_id_from_storage(working_dir)
   return nil
 end
 
-local function add_config_if_exists(config_items, path, config_type, include_contents)
-  if praxis.path_exists(path) then
-    table.insert(config_items, {
-      path = path,
-      config_type = config_type,
-      contents = include_contents and praxis.read_file(path) or nil,
-    })
-  end
-end
-
 --
 -- Collect system-wide configuration (system defaults and system settings).
 -- These apply to all users on the machine.
 --
+
 local function collect_system_config(include_contents)
   local result = helpers.new_recon_result()
 
@@ -280,7 +221,11 @@ local function collect_system_config(include_contents)
     if not parsed then
       return
     end
-    table.insert(result.raw_configs_for_mcp, { content = content, context_path = nil })
+    table.insert(result.raw_configs_for_mcp, {
+      content = content,
+      context_path = nil,
+      mcp_key = "default",
+    })
     local found = extract_context_filenames(parsed)
     for _, f in ipairs(found) do
       table.insert(result.context_filenames, f)
@@ -312,78 +257,6 @@ local function collect_system_config(include_contents)
   add_system_file(system_settings_path, "system_settings")
 
   return result
-end
-
---
--- Collect configuration from any path (user home or project directory).
--- scope should be "user" or "project".
---
-local function collect_config_at_path(path, scope, include_contents)
-  local result = helpers.new_recon_result()
-
-  local gemini_dir = praxis.path_join({ path, ".gemini" })
-  if not praxis.path_is_dir(gemini_dir) then
-    return result
-  end
-
-  local prefix = scope == "user" and "user" or ("project:" .. path)
-
-  if scope == "user" then
-    local google_accounts = praxis.path_join({ gemini_dir, "google_accounts.json" })
-    add_config_if_exists(result.config_items, google_accounts, "user_google_accounts", include_contents)
-
-    local oauth_creds = praxis.path_join({ gemini_dir, "oauth_creds.json" })
-    add_config_if_exists(result.config_items, oauth_creds, "user_oauth_creds", include_contents)
-  end
-
-  local context_file = praxis.path_join({ gemini_dir, "GEMINI.md" })
-  add_config_if_exists(result.config_items, context_file, prefix .. "_context", include_contents)
-
-  local settings_path = praxis.path_join({ gemini_dir, "settings.json" })
-  if praxis.path_exists(settings_path) then
-    table.insert(result.config_items, {
-      path = settings_path,
-      config_type = prefix .. "_settings",
-      contents = include_contents and praxis.read_file(settings_path) or nil,
-    })
-
-    local content = praxis.read_file(settings_path)
-    if content then
-      local parsed = helpers.parse_json(content)
-      if parsed then
-        local context_path = scope == "project" and path or nil
-        table.insert(result.raw_configs_for_mcp, { content = content, context_path = context_path })
-
-        local found = extract_context_filenames(parsed)
-        for _, f in ipairs(found) do
-          table.insert(result.context_filenames, f)
-        end
-      end
-    end
-  end
-
-  return result
-end
-
---
--- Find project directories under a base path that contain a .gemini subdirectory.
---
-local function find_project_directories(base_path, max_depth)
-  local projects = {}
-
-  local files = praxis.walk_files(base_path, max_depth) or {}
-  for _, p in ipairs(files) do
-    local np = helpers.norm(p)
-    if helpers.ends_with(np, "/.gemini/settings.json") then
-      local gemini_dir = helpers.parent_dir(p)
-      local project_dir = gemini_dir and helpers.parent_dir(gemini_dir) or nil
-      if project_dir and helpers.norm(project_dir) ~= helpers.norm(base_path) then
-        table.insert(projects, project_dir)
-      end
-    end
-  end
-
-  return helpers.dedup(projects)
 end
 
 local function run_create_session(ctx)
@@ -448,52 +321,40 @@ local function run_session_close(state)
   end
 end
 
-local function run_recon(ctx)
-  local is_semantic = ctx.is_semantic
-  local result = helpers.new_recon_result()
-  table.insert(result.context_filenames, "GEMINI.md")
+--
+-- Post-collection hook: extract context filenames from settings configs,
+-- discover custom context files in projects, and collect environment
+-- variables.
+--
+
+local function post_collect(result, ctx)
 
   --
-  -- Collect system-wide configuration.
+  -- Extract context filenames from all settings config items.
   --
-  helpers.merge_recon_result(result, collect_system_config(is_semantic))
 
-  --
-  -- Collect user-scoped configuration and discover projects for each home.
-  --
-  local homes = praxis.user_homes() or {}
-
-  local function collect_for_home(home)
-    local home_result = helpers.new_recon_result()
-
-    helpers.merge_recon_result(home_result, collect_config_at_path(home, "user", is_semantic))
-
-    local projects = find_project_directories(home, 7)
-    for _, proj in ipairs(projects) do
-      table.insert(home_result.project_paths, proj)
-      helpers.merge_recon_result(home_result, collect_config_at_path(proj, "project", is_semantic))
+  for _, item in ipairs(result.config_items) do
+    if helpers.ends_with(item.config_type, "_settings")
+        or helpers.starts_with(item.config_type, "project_settings:") then
+      local content = item.contents or praxis.read_file(item.path)
+      if content then
+        local parsed = helpers.parse_json(content)
+        if parsed then
+          local found = extract_context_filenames(parsed)
+          for _, f in ipairs(found) do
+            table.insert(result.context_filenames, f)
+          end
+        end
+      end
     end
-
-    local home_sessions = discover_sessions_for_home(home)
-    for _, s in ipairs(home_sessions) do
-      table.insert(home_result.sessions, s)
-    end
-
-    return home_result
   end
 
-  local per_home_results = helpers.for_each_user_home_coalesce(collect_for_home, { dedup = false })
-
-  for _, per_home in ipairs(per_home_results) do
-    helpers.merge_recon_result(result, per_home)
-  end
-
-  result.project_paths = helpers.dedup(result.project_paths)
   result.context_filenames = helpers.dedup(result.context_filenames)
 
   --
-  -- Collect any additional context files in project directories.
+  -- Discover custom context files in project directories.
   --
+
   for _, proj in ipairs(result.project_paths) do
     for _, fname in ipairs(result.context_filenames) do
       if fname ~= "GEMINI.md" then
@@ -502,7 +363,7 @@ local function run_recon(ctx)
           table.insert(result.config_items, {
             path = p,
             config_type = "project_context:" .. proj,
-            contents = is_semantic and praxis.read_file(p) or nil,
+            contents = ctx.is_semantic and praxis.read_file(p) or nil,
           })
         end
       end
@@ -510,52 +371,9 @@ local function run_recon(ctx)
   end
 
   --
-  -- Filter paths to those with valid auth.
-  --
-  local candidate_paths = {}
-  for _, h in ipairs(homes) do
-    if praxis.path_is_dir(praxis.path_join({ h, ".gemini" })) then
-      table.insert(candidate_paths, h)
-    end
-  end
-  for _, p in ipairs(result.project_paths) do
-    table.insert(candidate_paths, p)
-  end
-  candidate_paths = helpers.dedup(candidate_paths)
-
-  local filtered_paths = {}
-  for _, p in ipairs(candidate_paths) do
-    if path_has_valid_auth(p) then
-      table.insert(filtered_paths, p)
-    end
-  end
-  filtered_paths = helpers.dedup(filtered_paths)
-  helpers.sort_strings(filtered_paths)
-
-  --
-  -- Extract MCP servers from all collected configs.
-  --
-  local mcp_servers = {}
-  for _, item in ipairs(result.raw_configs_for_mcp) do
-    local parsed = parse_mcp_servers_from_config(item.content, item.context_path)
-    for _, server in ipairs(parsed) do
-      table.insert(mcp_servers, server)
-    end
-  end
-
-  local mcp_seen = {}
-  local mcp_unique = {}
-  for _, s in ipairs(mcp_servers) do
-    local key = (s.name or "") .. "::" .. (s.context_path or "")
-    if not mcp_seen[key] then
-      mcp_seen[key] = true
-      table.insert(mcp_unique, s)
-    end
-  end
-
-  --
   -- Collect environment variables.
   --
+
   local env_lines = {}
   local env_vars = {
     "GEMINI_API_KEY",
@@ -585,47 +403,42 @@ local function run_recon(ctx)
       contents = table.concat(env_lines, "\n"),
     })
   end
-
-  --
-  -- Semantic enrichment: discover internal tools and extract metadata.
-  --
-
-  local internal_tools = {}
-  local metadata = nil
-
-  if is_semantic then
-    local session_fns = {
-      create = run_create_session,
-      transact = run_session_transact,
-      close = run_session_close,
-    }
-    internal_tools = helpers.discover_internal_tools({
-      process_path = ctx.process_path,
-      working_dir = filtered_paths[1],
-    }, session_fns)
-    metadata = helpers.extract_metadata(result.config_items)
-
-    --
-    -- Strip contents from config items after metadata extraction.
-    --
-
-    for _, item in ipairs(result.config_items) do
-      item.contents = nil
-    end
-  end
-
-  return {
-    tools = {
-      mcp_servers = mcp_unique,
-      skills = {},
-      internal_tools = internal_tools,
-    },
-    config = result.config_items,
-    sessions = result.sessions,
-    project_paths = filtered_paths,
-    metadata = metadata,
-  }
 end
+
+local recon_config = {
+  home_dir = ".gemini",
+
+  system_configs = collect_system_config,
+  context_filenames = { "GEMINI.md" },
+
+  home_configs = {
+    { path = ".gemini/google_accounts.json", type = "user_google_accounts" },
+    { path = ".gemini/oauth_creds.json", type = "user_oauth_creds" },
+    { path = ".gemini/GEMINI.md", type = "user_context" },
+    { path = ".gemini/settings.json", type = "user_settings", mcp = true },
+  },
+
+  project_markers = { "/.gemini/settings.json" },
+
+  project_configs = {
+    { path = ".gemini/GEMINI.md", type = "project_context" },
+    { path = ".gemini/settings.json", type = "project_settings", mcp = true },
+  },
+
+  mcp_parsers = {
+    default = helpers.parse_mcp_from_json,
+  },
+
+  auth_check = path_has_valid_auth,
+  session_discovery = discover_sessions_for_home,
+  post_collect = post_collect,
+
+  session_fns = {
+    create = run_create_session,
+    transact = run_session_transact,
+    close = run_session_close,
+  },
+}
 
 return {
   name = AGENT_NAME,
@@ -633,11 +446,10 @@ return {
 
   fingerprint = function(_ctx)
     local path, version = pick_path()
-    process_version = version
     return {
       available = path ~= nil,
       process_path = path,
-      version = process_version,
+      version = version,
     }
   end,
 
@@ -646,7 +458,7 @@ return {
   end,
 
   recon = function(ctx)
-    return run_recon(ctx)
+    return helpers.run_standard_recon(ctx, recon_config)
   end,
 
   create_session = function(ctx)

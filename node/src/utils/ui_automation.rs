@@ -22,6 +22,7 @@ unsafe impl Send for UIAutomationControl {}
 unsafe impl Sync for UIAutomationControl {}
 
 #[cfg(windows)]
+#[allow(dead_code)]
 impl UIAutomationControl {
     #[allow(dead_code)]
     pub fn new(window_name_prefix: &str) -> uiautomation::Result<Self> {

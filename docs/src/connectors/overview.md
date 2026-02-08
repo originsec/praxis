@@ -87,7 +87,7 @@ Default Lua agent scripts live in the `agents/` directory at the project root. T
 Lua agent scripts can be managed through the **Agents** tab in the Settings page of the web UI. From there you can:
 
 - View and edit existing scripts
-- Add new scripts (manually or by uploading `.lua` files)
+- Upload new `.lua` scripts
 - Delete scripts
 - Reset all scripts back to the built-in defaults
 
