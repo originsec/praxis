@@ -12,6 +12,9 @@ local WORKING_DIR_WEB = "Web"
 local PROCESS_NAME = "M365Copilot.exe"
 local PACKAGE_FAMILY = "Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe"
 
+local INTERCEPT_DOMAINS = { "substrate.office.com" }
+local INTERCEPT_URL_PATTERN = "m365Copilot/Chathub"
+
 local process_path = nil
 
 --
@@ -148,11 +151,11 @@ return {
   end,
 
   intercept_domains = function(_ctx)
-    return { "substrate.office.com" }
+    return INTERCEPT_DOMAINS
   end,
 
   intercept_url_pattern = function(_ctx)
-    return "m365Copilot/Chathub"
+    return INTERCEPT_URL_PATTERN
   end,
 
   recon = function(is_semantic)
