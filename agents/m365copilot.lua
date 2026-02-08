@@ -186,24 +186,9 @@ local function do_recon(ctx)
         working_dir = WORKING_DIR_WORK,
       },
       {
-        create = function(opts)
-          local h = devtools.connect({
-            process_path = opts.process_path,
-            debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-            debug_port_format = "--remote-debugging-port={}",
-            base_port = 9222,
-            port_range = 778,
-          })
-          post_initialize(h, opts.working_dir)
-          return { cdp_handle = h }
-        end,
-        transact = function(state, prompt)
-          local response = devtools.transact(state.cdp_handle, m365_adapter, prompt)
-          return { response = response, state = state }
-        end,
-        close = function(state)
-          devtools.close(state.cdp_handle)
-        end,
+        create = run_create_session,
+        transact = run_session_transact,
+        close = run_session_close,
       }
     )
   end
@@ -222,6 +207,37 @@ local function do_recon(ctx)
     project_paths = project_paths,
     metadata = metadata,
   }
+end
+
+local function run_create_session(ctx)
+  praxis.kill_processes_by_name(PROCESS_NAME)
+  praxis.sleep_ms(500)
+
+  local cdp_handle = devtools.connect({
+    process_path = ctx.process_path,
+    debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+    debug_port_format = "--remote-debugging-port={}",
+    base_port = 9222,
+    port_range = 778,
+  })
+  post_initialize(cdp_handle, ctx.working_dir)
+  return {
+    handle = cdp_handle,
+    cdp_handle = cdp_handle,
+    working_dir = ctx.working_dir,
+    process_id = praxis.cdp_process_id(cdp_handle),
+  }
+end
+
+local function run_session_transact(state, prompt)
+  local response = devtools.transact(state.cdp_handle, m365_adapter, prompt)
+  return { response = response, state = state }
+end
+
+local function run_session_close(state)
+  if state and state.cdp_handle then
+    devtools.close(state.cdp_handle)
+  end
 end
 
 local function do_fingerprint()
@@ -280,40 +296,14 @@ return {
   end,
 
   create_session = function(ctx)
-    praxis.kill_processes_by_name(PROCESS_NAME)
-    praxis.sleep_ms(500)
-
-    local cdp_handle = devtools.connect({
-      process_path = ctx.process_path,
-      debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-      debug_port_format = "--remote-debugging-port={}",
-      base_port = 9222,
-      port_range = 778,
-    })
-
-    post_initialize(cdp_handle, ctx.working_dir)
-
-    local pid = praxis.cdp_process_id(cdp_handle)
-
-    return {
-      handle = cdp_handle,
-      cdp_handle = cdp_handle,
-      working_dir = ctx.working_dir,
-      process_id = pid,
-    }
+    return run_create_session(ctx)
   end,
 
   session_transact = function(_ctx, state, prompt)
-    local response = devtools.transact(state.cdp_handle, m365_adapter, prompt)
-    return {
-      response = response,
-      state = state,
-    }
+    return run_session_transact(state, prompt)
   end,
 
   session_close = function(_ctx, state)
-    if state and state.cdp_handle then
-      devtools.close(state.cdp_handle)
-    end
+    run_session_close(state)
   end,
 }
