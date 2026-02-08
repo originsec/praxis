@@ -602,22 +602,115 @@ return {
   end,
 
   --
-  -- Read session content from a virtual path (store.db::key). Extracts
-  -- hex-encoded JSON metadata from the SQLite meta table.
+  -- Read session content from a virtual path (store.db::session_id).
+  -- Decodes the Cursor chat format: SQLite with content-addressed blobs.
+  -- The state blob (protobuf) contains ordered SHA-256 refs to JSON
+  -- message blobs. Returns JSONL (one message per line).
   --
 
   read_session_content = function(session_file)
-    local db_path, key = string.match(session_file, "^(.+)::(.+)$")
-    if not db_path or not key then
+    local db_path = string.match(session_file, "^(.+)::.+$")
+    if not db_path then
       return nil
     end
+
+    --
+    -- Get root blob ID from session metadata.
+    --
 
     local hex_meta = praxis.sqlite_query(db_path,
       "SELECT value FROM meta WHERE key='0';")
     if not hex_meta then
       return nil
     end
+    local meta = helpers.parse_json(praxis.hex_decode(hex_meta) or "")
+    if not meta or not meta.latestRootBlobId then
+      return nil
+    end
 
-    return praxis.hex_decode(hex_meta)
+    --
+    -- Read the root state blob as hex. It's a protobuf where repeated
+    -- field 1 (tag 0x0A) entries contain raw 32-byte SHA-256 hashes
+    -- pointing to the conversation messages in order.
+    --
+
+    local root_hex = praxis.sqlite_query(db_path,
+      "SELECT hex(data) FROM blobs WHERE id='" .. meta.latestRootBlobId .. "';")
+    if not root_hex then
+      return nil
+    end
+    root_hex = root_hex:gsub("%s+", "")
+
+    --
+    -- Parse protobuf wire format to extract field 1 hash refs.
+    --
+
+    local message_hashes = {}
+    local pos = 1
+    local len = #root_hex
+
+    while pos < len do
+      local tag_hex = root_hex:sub(pos, pos + 1)
+      local tag = tonumber(tag_hex, 16)
+      if not tag then break end
+      pos = pos + 2
+
+      local field_num = math.floor(tag / 8)
+      local wire_type = tag % 8
+
+      if wire_type == 0 then
+        repeat
+          local b = tonumber(root_hex:sub(pos, pos + 1), 16)
+          pos = pos + 2
+          if not b then break end
+        until b < 128
+
+      elseif wire_type == 2 then
+        local length = 0
+        local shift = 0
+        repeat
+          local b = tonumber(root_hex:sub(pos, pos + 1), 16)
+          pos = pos + 2
+          if not b then break end
+          length = length + (b % 128) * (2 ^ shift)
+          shift = shift + 7
+        until b < 128
+
+        if field_num == 1 and length == 32 then
+          local hash = root_hex:sub(pos, pos + 63):lower()
+          if #hash == 64 then
+            table.insert(message_hashes, hash)
+          end
+        end
+        pos = pos + (length * 2)
+
+      elseif wire_type == 5 then
+        pos = pos + 8
+      elseif wire_type == 1 then
+        pos = pos + 16
+      else
+        break
+      end
+    end
+
+    if #message_hashes == 0 then
+      return nil
+    end
+
+    --
+    -- Fetch each message blob (raw JSON) and output as JSONL.
+    --
+
+    local lines = {}
+    for _, hash in ipairs(message_hashes) do
+      local msg = praxis.sqlite_query(db_path,
+        "SELECT data FROM blobs WHERE id='" .. hash .. "';")
+      if msg and msg:sub(1, 1) == "{" then
+        local trimmed = msg:gsub("%s+$", "")
+        table.insert(lines, trimmed)
+      end
+    end
+
+    return table.concat(lines, "\n")
   end,
 }
