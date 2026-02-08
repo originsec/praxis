@@ -12,6 +12,8 @@ local WORKING_DIR_WEB = "Web"
 local PROCESS_NAME = "M365Copilot.exe"
 local PACKAGE_FAMILY = "Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe"
 
+local process_path = nil
+
 --
 -- M365-specific adapter for the generic devtools transact loop.
 --
@@ -109,7 +111,8 @@ return {
 
     local paths = praxis.find_executables(PROCESS_NAME) or {}
     if #paths > 0 then
-      return { available = true, process_path = paths[1] }
+      process_path = paths[1]
+      return { available = true, process_path = process_path }
     end
 
     --
@@ -131,7 +134,8 @@ return {
       if install_path and #install_path > 0 then
         local exe_path = praxis.path_join({ install_path, PROCESS_NAME })
         if praxis.path_exists(exe_path) then
-          return { available = true, process_path = exe_path }
+          process_path = exe_path
+          return { available = true, process_path = process_path }
         end
       end
     end
@@ -164,7 +168,7 @@ return {
     local discovery_handle = nil
     local ok, err = pcall(function()
       discovery_handle = devtools.connect({
-        process_path = _G._connector_process_path,
+        process_path = process_path,
         debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
         debug_port_format = "--remote-debugging-port={}",
         base_port = 9222,
@@ -224,7 +228,7 @@ return {
     if is_semantic then
       internal_tools = helpers.discover_internal_tools(
         {
-          process_path = _G._connector_process_path,
+          process_path = process_path,
           working_dir = WORKING_DIR_WORK,
         },
         {
