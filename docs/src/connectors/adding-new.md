@@ -16,13 +16,14 @@ For **browser-based agents** (e.g. M365 Copilot), use the `praxis.devtools` libr
 
 ### Script Structure
 
-A Lua connector returns a table with a `name`, `short_name`, and callback functions:
+A Lua connector returns a table with `name`, `short_name`, and callback functions. For CLI agents, follow the same high-level structure used by `agents/gemini.lua`:
 
 ```lua
 local helpers = require("praxis.helpers")
 
-local process_path = nil
-local process_version = nil
+local AGENT_NAME = "Example AI"
+local AGENT_SHORT_NAME = "exampleai"
+local INTERCEPT_DOMAINS = { "api.exampleai.com" }
 
 local function verify_binary(path)
   local result = praxis.command_run({ program = path, args = { "--version" } })
@@ -48,11 +49,11 @@ local function pick_path()
 end
 
 return {
-  name = "Example AI",
-  short_name = "exampleai",
+  name = AGENT_NAME,
+  short_name = AGENT_SHORT_NAME,
 
   fingerprint = function(_ctx)
-    process_path, process_version = pick_path()
+    local process_path, process_version = pick_path()
     return {
       available = process_path ~= nil,
       process_path = process_path,
@@ -60,23 +61,24 @@ return {
     }
   end,
 
-  -- Optional: traffic interception domains
+  -- Optional: traffic interception domains.
   intercept_domains = function(_ctx)
-    return { "api.exampleai.com" }
+    return INTERCEPT_DOMAINS
   end,
 
-  -- Optional: reconnaissance
-  recon = function(is_semantic)
-    -- Discover config files, sessions, tools
-    return { config = {}, sessions = {}, project_paths = {} }
+  -- Optional but recommended: reconnaissance.
+  -- Use run_standard_recon + declarative recon_config.
+  recon = function(ctx)
+    return helpers.run_standard_recon(ctx, recon_config)
   end,
 
-  -- Required for sessions
+  -- Required for sessions.
   create_session = function(ctx)
     return {
       handle = praxis.uuid_v4(),
-      process_path = ctx.process_path or process_path,
+      process_path = ctx.process_path,
       working_dir = ctx.working_dir,
+      yolo_mode = ctx.yolo_mode == true,
     }
   end,
 
@@ -91,10 +93,46 @@ return {
   end,
 
   session_close = function(_ctx, state)
-    -- Cleanup if needed
+    -- Cleanup if needed.
   end,
 }
 ```
+
+Recommended pattern for recon config (same style as Gemini/Cursor/ClaudeCode):
+
+```lua
+local recon_config = {
+  home_dir = ".exampleai",
+
+  home_configs = {
+    { path = ".exampleai/settings.json", type = "global_settings", mcp = true },
+  },
+
+  project_markers = { "/.exampleai/settings.json" },
+
+  project_configs = {
+    { path = ".exampleai/settings.json", type = "project_settings", mcp = true },
+  },
+
+  mcp_parsers = {
+    default = helpers.parse_mcp_from_json_flexible,
+  },
+
+  auth_check = path_has_valid_auth,
+  session_discovery = discover_sessions_for_home,
+
+  session_fns = {
+    create = run_create_session,
+    transact = run_session_transact,
+    close = run_session_close,
+  },
+}
+```
+
+Key points:
+- `recon` receives a context object: `recon = function(ctx) ... end`
+- Semantic vs non-semantic recon is driven by `ctx.is_semantic` inside helpers
+- Avoid mutable global process state; return `process_path` from `fingerprint` and consume it via `ctx.process_path`
 
 ### `helpers.find_executable` Config
 
@@ -127,7 +165,7 @@ The `praxis` global provides:
 - **CDP**: `cdp_spawn_and_connect`, `cdp_connect`, `cdp_evaluate`, `cdp_click`, `cdp_type_text`, `cdp_press_key`, `cdp_wait_for_element`, `cdp_find_elements`, `cdp_close`, `cdp_process_id`
 - **Utilities**: `json_decode`, `toml_decode`, `uuid_v4`, `now_unix`, `sleep_ms`, `log_info`, `log_warn`
 
-The `helpers` module (`require("praxis.helpers")`) provides `find_executable`, `expand_path`, `starts_with`, `ends_with`, `dedup`, `parse_json`, `parse_toml`, `user_homes_with_dir`, `for_each_user_home_coalesce`, `new_recon_result`, `merge_recon_result`, `discover_internal_tools`, and `extract_metadata`.
+The `helpers` module (`require("praxis.helpers")`) provides `find_executable`, `expand_path`, `starts_with`, `ends_with`, `dedup`, `parse_json`, `parse_toml`, `user_homes_with_dir`, `for_each_user_home_coalesce`, `run_standard_recon`, `collect_configs`, `extract_mcp_servers`, and parser helpers such as `parse_mcp_from_json`, `parse_mcp_from_json_flexible`, and `parse_mcp_from_toml`.
 
 The `devtools` module (`require("praxis.devtools")`) provides `connect`, `transact`, and `close` for browser-based agents using Chrome DevTools Protocol. See [DevTools-Based Agents](#devtools-based-agents-browser-automation) below.
 
@@ -228,91 +266,155 @@ local my_adapter = {
 
 ### Full Example
 
-Here is a minimal DevTools-based agent:
+Here is an M365-style DevTools-based agent template:
 
 ```lua
+local helpers = require("praxis.helpers")
 local devtools = require("praxis.devtools")
 
+local AGENT_NAME = "My DevTools Agent"
+local AGENT_SHORT_NAME = "mydevtools"
+
 local PROCESS_NAME = "MyAgent.exe"
-local process_path = nil
+local INPUT_SELECTOR = '#chat-input'
+local MESSAGE_SELECTOR = 'div.assistant-message'
+local SEND_BUTTON_SELECTOR = 'button[aria-label=\"Send\"]:not([aria-disabled=\"true\"])'
+local STOP_BUTTON_SELECTOR = 'button[aria-label=\"Stop generating\"]'
 
 local my_adapter = {
-  input_selector = '#chat-input',
-  message_selector = 'div.assistant-message',
+  input_selector = INPUT_SELECTOR,
+  message_selector = MESSAGE_SELECTOR,
 
   check_response_state = function(handle, initial_count)
-    local result = praxis.cdp_evaluate(handle, [[
-      (function() {
-        var msgs = document.querySelectorAll('div.assistant-message');
-        var text = msgs.length > 0
-          ? msgs[msgs.length - 1].innerText.trim() : '';
-        var busy = document.querySelector('.spinner') !== null;
-        return { text: text, count: msgs.length, busy: busy };
-      })()
-    ]])
-    local count = (result and result.count) or 0
-    local busy = (result and result.busy) or false
-    local text = (result and result.text) or ""
+    local js = "(function() {"
+      .. "var msgs = document.querySelectorAll('" .. MESSAGE_SELECTOR .. "');"
+      .. "var text = '';"
+      .. "if (msgs.length > 0) {"
+      .. "  var last = msgs[msgs.length - 1];"
+      .. "  text = (last.innerText || last.textContent || '').trim();"
+      .. "}"
+      .. "var stopBtn = document.querySelector('" .. STOP_BUTTON_SELECTOR .. "');"
+      .. "return { responseText: text, messageCount: msgs.length, isGenerating: stopBtn !== null };"
+      .. "})()"
+    local result = praxis.cdp_evaluate(handle, js)
+
+    local message_count = (result and result.messageCount) or 0
+    local is_generating = (result and result.isGenerating) or false
+    local response_text = (result and result.responseText) or ""
+    local has_new_messages = message_count > initial_count
+
     local response = nil
-    if count > initial_count and not busy and #text > 0 then
-      response = text
+    if has_new_messages and not is_generating and #response_text > 0 then
+      response = response_text
     end
+
     return {
       response = response,
-      is_generating = busy,
-      has_new_messages = count > initial_count,
+      is_generating = is_generating,
+      has_new_messages = has_new_messages,
     }
+  end,
+
+  wait_for_submit_ready = function(handle)
+    praxis.cdp_wait_for_element(handle, SEND_BUTTON_SELECTOR, 100, 100)
   end,
 }
 
+local function post_initialize(handle, _working_dir)
+  -- Wait for the chat UI to be ready.
+  praxis.cdp_wait_for_element(handle, INPUT_SELECTOR, 30, 300)
+
+  -- Optional: click mode toggle, open fresh chat, dismiss banners, etc.
+  -- pcall(praxis.cdp_click, handle, 'button[data-testid=\"new-chat\"]')
+end
+
+local function run_create_session(ctx)
+  praxis.kill_processes_by_name(PROCESS_NAME)
+  praxis.sleep_ms(500)
+
+  local cdp_handle = devtools.connect({
+    process_path = ctx.process_path,
+    debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+    debug_port_format = "--remote-debugging-port={}",
+    base_port = 9222,
+    port_range = 778,
+  })
+
+  post_initialize(cdp_handle, ctx.working_dir)
+
+  return {
+    handle = cdp_handle,
+    cdp_handle = cdp_handle,
+    working_dir = ctx.working_dir,
+    process_id = praxis.cdp_process_id(cdp_handle),
+  }
+end
+
+local function run_session_transact(state, prompt)
+  local response = devtools.transact(state.cdp_handle, my_adapter, prompt)
+  return { response = response, state = state }
+end
+
+local function run_session_close(state)
+  if state and state.cdp_handle then
+    devtools.close(state.cdp_handle)
+  end
+end
+
+local function do_recon(ctx)
+  if praxis.os_name() ~= "windows" then
+    return nil
+  end
+
+  local internal_tools = {}
+  if ctx.is_semantic == true then
+    internal_tools = helpers.discover_internal_tools(
+      { process_path = ctx.process_path, working_dir = nil },
+      { create = run_create_session, transact = run_session_transact, close = run_session_close }
+    )
+  end
+
+  return {
+    tools = { internal_tools = internal_tools, mcp_servers = {}, skills = {} },
+    project_paths = {},
+    metadata = nil,
+  }
+end
+
+local function do_fingerprint()
+  if praxis.os_name() ~= "windows" then
+    return nil
+  end
+  local paths = praxis.find_executables(PROCESS_NAME) or {}
+  if #paths > 0 then
+    return paths[1]
+  end
+  return nil
+end
+
 return {
-  name = "My Agent",
-  short_name = "myagent",
+  name = AGENT_NAME,
+  short_name = AGENT_SHORT_NAME,
 
   fingerprint = function(_ctx)
-    if praxis.os_name() ~= "windows" then
-      return { available = false }
-    end
-    local paths = praxis.find_executables(PROCESS_NAME) or {}
-    if #paths > 0 then
-      process_path = paths[1]
-      return { available = true, process_path = process_path }
-    end
-    return { available = false }
+    local path = do_fingerprint()
+    return { available = path ~= nil, process_path = path }
+  end,
+
+  recon = function(ctx)
+    return do_recon(ctx)
   end,
 
   create_session = function(ctx)
-    praxis.kill_processes_by_name(PROCESS_NAME)
-    praxis.sleep_ms(500)
-
-    local handle = devtools.connect({
-      process_path = ctx.process_path,
-      debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-      debug_port_format = "--remote-debugging-port={}",
-      base_port = 9222,
-      port_range = 778,
-    })
-
-    -- Wait for the UI to be ready
-    praxis.cdp_wait_for_element(handle, my_adapter.input_selector, 30, 300)
-
-    local pid = praxis.cdp_process_id(handle)
-    return {
-      handle = handle,
-      cdp_handle = handle,
-      process_id = pid,
-    }
+    return run_create_session(ctx)
   end,
 
   session_transact = function(_ctx, state, prompt)
-    local response = devtools.transact(state.cdp_handle, my_adapter, prompt)
-    return { response = response, state = state }
+    return run_session_transact(state, prompt)
   end,
 
   session_close = function(_ctx, state)
-    if state and state.cdp_handle then
-      devtools.close(state.cdp_handle)
-    end
+    run_session_close(state)
   end,
 }
 ```
