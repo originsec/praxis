@@ -179,27 +179,30 @@ async fn run_main_loop() -> Result<()> {
     let database = Arc::new(Database::new(&db_config).await?);
 
     //
-    // Seed default Lua agent scripts if the table is empty.
+    // Seed any missing default Lua agent scripts into the database.
     //
     match database.list_lua_agent_scripts().await {
-        Ok(scripts) if scripts.is_empty() => {
+        Ok(existing) => {
+            let existing_names: std::collections::HashSet<&str> =
+                existing.iter().map(|s| s.name.as_str()).collect();
             let mut seeded = 0usize;
             for (name, content) in EMBEDDED_LUA_SCRIPTS {
-                let id = uuid::Uuid::new_v4().to_string();
-                if let Err(e) = database.upsert_lua_agent_script(&id, name, content).await {
-                    warn!("Failed to seed Lua agent script '{}': {}", name, e);
-                } else {
-                    seeded += 1;
+                if !existing_names.contains(name) {
+                    let id = uuid::Uuid::new_v4().to_string();
+                    if let Err(e) = database.upsert_lua_agent_script(&id, name, content).await {
+                        warn!("Failed to seed Lua agent script '{}': {}", name, e);
+                    } else {
+                        seeded += 1;
+                    }
                 }
             }
             if seeded > 0 {
-                info!("Seeded {} default Lua agent script(s)", seeded);
+                info!("Seeded {} new default Lua agent script(s)", seeded);
             }
         }
         Err(e) => {
             warn!("Failed to check Lua agent scripts for seeding: {}", e);
         }
-        _ => {}
     }
 
     //

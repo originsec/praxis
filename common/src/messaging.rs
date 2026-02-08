@@ -248,10 +248,13 @@ pub struct McpServer {
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ReconTools {
     /// MCP servers with their tools
+    #[serde(default)]
     pub mcp_servers: Vec<McpServer>,
     /// Skills (slash commands like /commit, /review)
+    #[serde(default)]
     pub skills: Vec<AgentTool>,
     /// Internal tools (like Bash, Read, Write, Grep) - only via ReconSemantic
+    #[serde(default)]
     pub internal_tools: Vec<AgentTool>,
 }
 

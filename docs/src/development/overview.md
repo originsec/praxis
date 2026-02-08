@@ -39,14 +39,14 @@ The agent that runs on target machines:
 ```
 node/src/
 ├── agent_connectors/    # Per-agent implementations
-│   ├── claudecode/
-│   ├── codex/
-│   ├── gemini/
-│   └── m365copilot/     # Windows only
+│   ├── lua/             # Lua connector runtime
+│   └── m365copilot/     # Native connector (Windows only)
 ├── intercept/           # Traffic interception
 ├── terminal/            # PTY terminal
 └── runtime.rs           # Main event loop
 ```
+
+Lua-based agent scripts (Claude Code, Codex, Cursor, Gemini) live in `agents/` at the project root and are embedded into the binary at build time.
 
 ### Service (`service/`)
 

@@ -37,8 +37,8 @@ The node is the component that runs on target systems. It's responsible for all 
 The agent registry manages all supported agent connectors. On startup the
 registry is built via `rebuild()` which:
 
-1. Creates native agents from the factory (Claude Code, Codex, etc.)
-2. Loads embedded Lua connectors (e.g. Gemini)
+1. Creates native agents from the factory (platform-specific connectors like M365 Copilot)
+2. Loads embedded Lua connectors (Claude Code, Codex, Cursor, Gemini)
 3. Loads Lua connectors from `~/.praxis/agents/`
 
 After the node registers with the service, the service broadcasts an

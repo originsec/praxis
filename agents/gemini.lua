@@ -1,5 +1,7 @@
 local helpers = require("praxis.helpers")
 
+local process_path = nil
+
 local function is_session_file(name)
   return name and helpers.starts_with(name, "session-") and helpers.ends_with(name, ".json")
 end
@@ -272,12 +274,12 @@ local function find_latest_session_id_from_storage(working_dir)
   return nil
 end
 
-local function add_config_if_exists(config_items, path, config_type)
+local function add_config_if_exists(config_items, path, config_type, include_contents)
   if praxis.path_exists(path) then
     table.insert(config_items, {
       path = path,
       config_type = config_type,
-      contents = nil,
+      contents = include_contents and praxis.read_file(path) or nil,
     })
   end
 end
@@ -286,19 +288,19 @@ end
 -- Collect system-wide configuration (system defaults and system settings).
 -- These apply to all users on the machine.
 --
-local function collect_system_config()
+local function collect_system_config(include_contents)
   local result = helpers.new_recon_result()
 
   local function add_system_file(path, config_type)
     if not praxis.path_exists(path) then
       return
     end
+    local content = praxis.read_file(path)
     table.insert(result.config_items, {
       path = path,
       config_type = config_type,
-      contents = nil,
+      contents = include_contents and content or nil,
     })
-    local content = praxis.read_file(path)
     if not content then
       return
     end
@@ -344,7 +346,7 @@ end
 -- Collect configuration from any path (user home or project directory).
 -- scope should be "user" or "project".
 --
-local function collect_config_at_path(path, scope)
+local function collect_config_at_path(path, scope, include_contents)
   local result = helpers.new_recon_result()
 
   local gemini_dir = praxis.path_join({ path, ".gemini" })
@@ -356,21 +358,21 @@ local function collect_config_at_path(path, scope)
 
   if scope == "user" then
     local google_accounts = praxis.path_join({ gemini_dir, "google_accounts.json" })
-    add_config_if_exists(result.config_items, google_accounts, "user_google_accounts")
+    add_config_if_exists(result.config_items, google_accounts, "user_google_accounts", include_contents)
 
     local oauth_creds = praxis.path_join({ gemini_dir, "oauth_creds.json" })
-    add_config_if_exists(result.config_items, oauth_creds, "user_oauth_creds")
+    add_config_if_exists(result.config_items, oauth_creds, "user_oauth_creds", include_contents)
   end
 
   local context_file = praxis.path_join({ gemini_dir, "GEMINI.md" })
-  add_config_if_exists(result.config_items, context_file, prefix .. "_context")
+  add_config_if_exists(result.config_items, context_file, prefix .. "_context", include_contents)
 
   local settings_path = praxis.path_join({ gemini_dir, "settings.json" })
   if praxis.path_exists(settings_path) then
     table.insert(result.config_items, {
       path = settings_path,
       config_type = prefix .. "_settings",
-      contents = nil,
+      contents = include_contents and praxis.read_file(settings_path) or nil,
     })
 
     local content = praxis.read_file(settings_path)
@@ -412,6 +414,68 @@ local function find_project_directories(base_path, max_depth)
   return helpers.dedup(projects)
 end
 
+local function run_create_session(ctx)
+  local working_dir = ctx.working_dir
+  if working_dir == nil or working_dir == "" then
+    local homes = helpers.user_homes_with_dir(".gemini")
+    working_dir = homes[1]
+  end
+
+  return {
+    handle = praxis.uuid_v4(),
+    process_path = ctx.process_path or process_path,
+    working_dir = working_dir,
+    yolo_mode = ctx.yolo_mode == true,
+    external_session_id = nil,
+  }
+end
+
+local function run_session_transact(state, prompt)
+  local args = {}
+  if state.yolo_mode then
+    table.insert(args, "-y")
+  end
+  if state.external_session_id ~= nil and state.external_session_id ~= "" then
+    table.insert(args, "-r")
+    table.insert(args, state.external_session_id)
+  end
+
+  local spec = {
+    program = state.process_path,
+    args = args,
+    cwd = state.working_dir,
+    stdin = prompt,
+  }
+
+  local result = praxis.command_run_handle(spec, state.handle)
+  if not result.success then
+    error("Gemini command failed: " .. tostring(result.stderr or "unknown error"))
+  end
+
+  if state.external_session_id == nil or state.external_session_id == "" then
+    local discovered = find_latest_session_id_from_storage(state.working_dir)
+    if discovered ~= nil then
+      state.external_session_id = discovered
+    end
+  end
+
+  return {
+    response = result.stdout or "",
+    state = state,
+  }
+end
+
+local function run_session_close(state)
+  if state.external_session_id ~= nil and state.external_session_id ~= "" then
+    local spec = {
+      program = state.process_path,
+      args = { "--delete-session", state.external_session_id },
+      cwd = state.working_dir,
+    }
+    pcall(praxis.command_run, spec)
+  end
+end
+
 local function run_recon(is_semantic)
   local result = helpers.new_recon_result()
   table.insert(result.context_filenames, "GEMINI.md")
@@ -419,7 +483,7 @@ local function run_recon(is_semantic)
   --
   -- Collect system-wide configuration.
   --
-  helpers.merge_recon_result(result, collect_system_config())
+  helpers.merge_recon_result(result, collect_system_config(is_semantic))
 
   --
   -- Collect user-scoped configuration and discover projects for each home.
@@ -429,12 +493,12 @@ local function run_recon(is_semantic)
   local function collect_for_home(home)
     local home_result = helpers.new_recon_result()
 
-    helpers.merge_recon_result(home_result, collect_config_at_path(home, "user"))
+    helpers.merge_recon_result(home_result, collect_config_at_path(home, "user", is_semantic))
 
     local projects = find_project_directories(home, 7)
     for _, proj in ipairs(projects) do
       table.insert(home_result.project_paths, proj)
-      helpers.merge_recon_result(home_result, collect_config_at_path(proj, "project"))
+      helpers.merge_recon_result(home_result, collect_config_at_path(proj, "project", is_semantic))
     end
 
     local home_sessions = discover_sessions_for_home(home)
@@ -465,7 +529,7 @@ local function run_recon(is_semantic)
           table.insert(result.config_items, {
             path = p,
             config_type = "project_context:" .. proj,
-            contents = nil,
+            contents = is_semantic and praxis.read_file(p) or nil,
           })
         end
       end
@@ -549,90 +613,55 @@ local function run_recon(is_semantic)
     })
   end
 
-  return {
-    tools = {
-      mcp_servers = mcp_unique,
-      skills = {},
-      internal_tools = is_semantic and {} or {},
-    },
-    config = result.config_items,
-    sessions = result.sessions,
-    project_paths = filtered_paths,
-    metadata = nil,
-  }
-end
+  --
+  -- Semantic enrichment: discover internal tools and extract metadata.
+  --
 
-local function run_create_session(ctx)
-  local working_dir = ctx.working_dir
-  if working_dir == nil or working_dir == "" then
-    local homes = helpers.user_homes_with_dir(".gemini")
-    working_dir = homes[1]
-  end
+  local internal_tools = {}
+  local metadata = nil
 
-  return {
-    handle = praxis.uuid_v4(),
-    process_path = ctx.process_path,
-    working_dir = working_dir,
-    yolo_mode = ctx.yolo_mode == true,
-    external_session_id = nil,
-  }
-end
+  if is_semantic then
+    local session_fns = {
+      create = run_create_session,
+      transact = run_session_transact,
+      close = run_session_close,
+    }
+    internal_tools = helpers.discover_internal_tools({
+      working_dir = filtered_paths[1],
+    }, session_fns)
+    metadata = helpers.extract_metadata(result.config_items)
 
-local function run_session_transact(state, prompt)
-  local args = {}
-  if state.yolo_mode then
-    table.insert(args, "-y")
-  end
-  if state.external_session_id ~= nil and state.external_session_id ~= "" then
-    table.insert(args, "-r")
-    table.insert(args, state.external_session_id)
-  end
+    --
+    -- Strip contents from config items after metadata extraction.
+    --
 
-  local spec = {
-    program = state.process_path,
-    args = args,
-    cwd = state.working_dir,
-    stdin = prompt,
-  }
-
-  local result = praxis.command_run_handle(spec, state.handle)
-  if not result.success then
-    error("Gemini command failed: " .. tostring(result.stderr or "unknown error"))
-  end
-
-  if state.external_session_id == nil or state.external_session_id == "" then
-    local discovered = find_latest_session_id_from_storage(state.working_dir)
-    if discovered ~= nil then
-      state.external_session_id = discovered
+    for _, item in ipairs(result.config_items) do
+      item.contents = nil
     end
   end
 
   return {
-    response = result.stdout or "",
-    state = state,
+    tools = {
+      mcp_servers = mcp_unique,
+      skills = {},
+      internal_tools = internal_tools,
+    },
+    config = result.config_items,
+    sessions = result.sessions,
+    project_paths = filtered_paths,
+    metadata = metadata,
   }
 end
 
-local function run_session_close(state)
-  if state.external_session_id ~= nil and state.external_session_id ~= "" then
-    local spec = {
-      program = state.process_path,
-      args = { "--delete-session", state.external_session_id },
-      cwd = state.working_dir,
-    }
-    pcall(praxis.command_run, spec)
-  end
-end
-
 return {
-  name = "Gemini CLI (Lua)",
-  short_name = "gemini-lua",
+  name = "Gemini CLI",
+  short_name = "gemini",
 
   fingerprint = function(_ctx)
-    local path = pick_path()
+    process_path = pick_path()
     return {
-      available = path ~= nil,
-      process_path = path,
+      available = process_path ~= nil,
+      process_path = process_path,
     }
   end,
 
@@ -643,7 +672,7 @@ return {
     }
   end,
 
-  recon = function(_ctx, is_semantic)
+  recon = function(is_semantic)
     return run_recon(is_semantic)
   end,
 

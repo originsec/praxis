@@ -99,6 +99,17 @@ function M.parse_json(content)
   return parsed
 end
 
+function M.parse_toml(content)
+  if content == nil then
+    return nil
+  end
+  local ok, parsed = pcall(praxis.toml_decode, content)
+  if not ok or type(parsed) ~= "table" then
+    return nil
+  end
+  return parsed
+end
+
 function M.new_recon_result()
   return {
     config_items = {},
@@ -186,6 +197,31 @@ function M.for_each_user_home_coalesce(fn, opts)
   end
 
   return out
+end
+
+--
+-- Discover internal tools by creating a temporary session, asking the agent
+-- to list its tools, then parsing the response with the semantic parser.
+-- session_fns = { create = fn, transact = fn, close = fn }
+--
+function M.discover_internal_tools(session_opts, session_fns)
+  local state = session_fns.create(session_opts)
+  if state == nil then
+    return {}
+  end
+
+  local tools = {}
+  local ok, result = pcall(session_fns.transact, state,
+    "List all your internal/built-in tools. For each tool, give its name and a brief description.")
+  if ok and result then
+    tools = praxis.semantic_discover_internal_tools(result.response or "")
+  end
+  pcall(session_fns.close, state)
+  return tools
+end
+
+function M.extract_metadata(config_items)
+  return praxis.semantic_extract_metadata(config_items)
 end
 
 return M

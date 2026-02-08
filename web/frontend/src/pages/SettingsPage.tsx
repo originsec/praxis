@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Server, Save, Check, List, Loader2, X, Cpu, Plus, Trash2, Edit2, Key, Info, ExternalLink, Download, Monitor, ToggleLeft, ToggleRight, FileCode, Upload, RotateCcw } from 'lucide-react';
+import { Server, Save, Check, List, Loader2, X, Cpu, Plus, Trash2, Edit2, Key, Info, ExternalLink, Download, Monitor, ToggleLeft, ToggleRight, FileCode, Upload, RotateCcw, AlertTriangle } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getFeatureFlags } from '../utils/featureFlags';
+import { Modal } from '../components/common/Modal';
+import { LuaCodeEditor } from '../components/common/LuaCodeEditor';
 
 type Tab = 'llm_providers' | 'agents' | 'service' | 'about';
 type LLMTab = 'model_definitions' | 'feature_selection';
@@ -158,6 +160,9 @@ export function SettingsPage() {
   const [editingScriptContent, setEditingScriptContent] = useState('');
   const [isEditingScript, setIsEditingScript] = useState(false);
   const [isAddingScript, setIsAddingScript] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletingScriptId, setDeletingScriptId] = useState<string | null>(null);
 
   //
   // Load config on mount
@@ -542,24 +547,36 @@ export function SettingsPage() {
   };
 
   const handleDeleteScript = (scriptId: string) => {
-    if (!confirm('Delete this agent script?')) return;
-    deleteLuaAgentScript(scriptId);
-    if (selectedScriptId === scriptId) {
-      setSelectedScriptId(null);
-      setEditingScriptName('');
-      setEditingScriptContent('');
-      setIsEditingScript(false);
+    setDeletingScriptId(scriptId);
+    setShowDeleteModal(true);
+  };
+
+  const handleConfirmDelete = () => {
+    if (deletingScriptId) {
+      deleteLuaAgentScript(deletingScriptId);
+      if (selectedScriptId === deletingScriptId) {
+        setSelectedScriptId(null);
+        setEditingScriptName('');
+        setEditingScriptContent('');
+        setIsEditingScript(false);
+      }
     }
+    setShowDeleteModal(false);
+    setDeletingScriptId(null);
   };
 
   const handleResetDefaults = () => {
-    if (!confirm('Reset all agent scripts to built-in defaults? This will delete all custom scripts.')) return;
+    setShowResetModal(true);
+  };
+
+  const handleConfirmReset = () => {
     resetLuaAgentScriptDefaults();
     setSelectedScriptId(null);
     setEditingScriptName('');
     setEditingScriptContent('');
     setIsEditingScript(false);
     setIsAddingScript(false);
+    setShowResetModal(false);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1076,28 +1093,28 @@ export function SettingsPage() {
           )}
 
           {activeTab === 'agents' && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
+            <div className="flex flex-col" style={{ height: 'calc(100vh - 16rem)' }}>
+              <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className="text-lg font-semibold text-highlight mb-1">Lua Agent Scripts</h2>
                   <p className="text-sm text-muted">Manage Lua agent connector scripts stored in the service database</p>
                 </div>
                 <div className="flex gap-2">
-                  <label className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/30 transition-colors cursor-pointer">
+                  <label className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-md bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/30 transition-colors cursor-pointer">
                     <Upload size={14} />
                     Upload
                     <input type="file" accept=".lua" onChange={handleFileUpload} className="hidden" />
                   </label>
                   <button
                     onClick={handleNewScript}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors"
+                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-md bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors"
                   >
                     <Plus size={14} />
                     New Script
                   </button>
                   <button
                     onClick={handleResetDefaults}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/30 transition-colors"
+                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-md bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/30 transition-colors"
                     title="Reset all scripts to built-in defaults"
                   >
                     <RotateCcw size={14} />
@@ -1106,13 +1123,13 @@ export function SettingsPage() {
                 </div>
               </div>
 
-              <div className="flex gap-4" style={{ minHeight: '400px' }}>
+              <div className="flex gap-4 flex-1 min-h-0">
                 {/*
                 //
                 // Script list.
                 //
                 */}
-                <div className="w-56 border border-dim overflow-y-auto" style={{ maxHeight: '500px' }}>
+                <div className="w-56 flex-shrink-0 border border-dim overflow-y-auto">
                   {state.luaAgentScripts.length === 0 ? (
                     <div className="p-4 text-center text-muted text-sm">
                       No scripts
@@ -1122,7 +1139,7 @@ export function SettingsPage() {
                       <div
                         key={script.id}
                         onClick={() => handleSelectScript(script.id)}
-                        className={`flex items-center justify-between px-3 py-2 cursor-pointer transition-colors ${
+                        className={`group flex items-center justify-between px-3 py-2 cursor-pointer transition-colors ${
                           selectedScriptId === script.id
                             ? 'bg-[var(--highlight)] text-title'
                             : 'hover:bg-[var(--bg-tertiary)] text-muted'
@@ -1131,8 +1148,9 @@ export function SettingsPage() {
                         <span className="text-sm truncate">{script.name}</span>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleDeleteScript(script.id); }}
-                          className="p-1 text-muted hover:text-[var(--accent-error)] transition-colors opacity-0 group-hover:opacity-100"
-                          style={{ opacity: selectedScriptId === script.id ? 1 : undefined }}
+                          className={`p-1 text-muted hover:text-[var(--accent-error)] transition-colors flex-shrink-0 ${
+                            selectedScriptId === script.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                          }`}
                           title="Delete"
                         >
                           <Trash2 size={14} />
@@ -1147,17 +1165,17 @@ export function SettingsPage() {
                 // Editor panel.
                 //
                 */}
-                <div className="flex-1 flex flex-col border border-dim">
+                <div className="flex-1 flex flex-col border border-dim min-h-0">
                   {(selectedScriptId || isAddingScript) ? (
                     <>
-                      <div className="flex items-center justify-between px-4 py-2 border-b border-dim bg-[var(--bg-secondary)]">
+                      <div className="flex items-center justify-between px-4 py-2 border-b border-dim bg-[var(--bg-secondary)] flex-shrink-0">
                         {isEditingScript ? (
                           <input
                             type="text"
                             value={editingScriptName}
                             onChange={(e) => setEditingScriptName(e.target.value)}
                             placeholder="Script name"
-                            className="bg-[var(--bg-primary)] border border-dim px-2 py-1 text-sm text-highlight focus:outline-none focus:border-subtle w-64"
+                            className="bg-[var(--bg-primary)] border border-dim rounded px-2 py-1 text-sm text-highlight focus:outline-none focus:border-subtle w-64"
                           />
                         ) : (
                           <span className="text-sm font-medium text-highlight">{editingScriptName}</span>
@@ -1168,7 +1186,7 @@ export function SettingsPage() {
                               <button
                                 onClick={handleSaveScript}
                                 disabled={!editingScriptName.trim()}
-                                className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors disabled:opacity-50"
+                                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors disabled:opacity-50"
                               >
                                 <Save size={12} />
                                 Save
@@ -1198,7 +1216,7 @@ export function SettingsPage() {
                           ) : (
                             <button
                               onClick={() => setIsEditingScript(true)}
-                              className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors"
+                              className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors"
                             >
                               <Edit2 size={12} />
                               Edit
@@ -1206,13 +1224,10 @@ export function SettingsPage() {
                           )}
                         </div>
                       </div>
-                      <textarea
+                      <LuaCodeEditor
                         value={editingScriptContent}
-                        onChange={(e) => setEditingScriptContent(e.target.value)}
+                        onChange={setEditingScriptContent}
                         readOnly={!isEditingScript}
-                        className="flex-1 bg-[var(--bg-primary)] p-4 text-sm font-mono text-highlight focus:outline-none resize-none"
-                        style={{ minHeight: '350px', tabSize: 2 }}
-                        spellCheck={false}
                       />
                     </>
                   ) : (
@@ -1222,6 +1237,83 @@ export function SettingsPage() {
                   )}
                 </div>
               </div>
+
+              {/*
+              //
+              // Reset defaults confirmation modal.
+              //
+              */}
+              {/*
+              //
+              // Delete script confirmation modal.
+              //
+              */}
+              <Modal
+                isOpen={showDeleteModal}
+                onClose={() => { setShowDeleteModal(false); setDeletingScriptId(null); }}
+                title="Delete Agent Script"
+                size="sm"
+              >
+                <div className="space-y-4">
+                  <div className="flex gap-3 p-3 rounded bg-[var(--accent-error)]/10 border border-[var(--accent-error)]/20">
+                    <AlertTriangle size={20} className="text-[var(--accent-error)] flex-shrink-0 mt-0.5" />
+                    <div className="text-sm">
+                      <p className="text-[var(--accent-error)] font-medium mb-1">Delete this agent script?</p>
+                      <p className="text-muted">This will permanently remove the script. This action cannot be undone.</p>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => { setShowDeleteModal(false); setDeletingScriptId(null); }}
+                      className="px-3 py-1.5 text-sm rounded-md text-muted hover:text-title transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleConfirmDelete}
+                      className="px-3 py-1.5 text-sm rounded-md bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </Modal>
+
+              {/*
+              //
+              // Reset defaults confirmation modal.
+              //
+              */}
+              <Modal
+                isOpen={showResetModal}
+                onClose={() => setShowResetModal(false)}
+                title="Reset Agent Scripts"
+                size="sm"
+              >
+                <div className="space-y-4">
+                  <div className="flex gap-3 p-3 rounded bg-[var(--accent-warning)]/10 border border-[var(--accent-warning)]/20">
+                    <AlertTriangle size={20} className="text-[var(--accent-warning)] flex-shrink-0 mt-0.5" />
+                    <div className="text-sm">
+                      <p className="text-[var(--accent-warning)] font-medium mb-1">This action cannot be undone</p>
+                      <p className="text-muted">All custom and modified agent scripts will be permanently deleted and replaced with the built-in defaults.</p>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => setShowResetModal(false)}
+                      className="px-3 py-1.5 text-sm rounded-md text-muted hover:text-title transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleConfirmReset}
+                      className="px-3 py-1.5 text-sm rounded-md bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/30 transition-colors"
+                    >
+                      Reset to Defaults
+                    </button>
+                  </div>
+                </div>
+              </Modal>
             </div>
           )}
 

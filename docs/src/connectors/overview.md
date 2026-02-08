@@ -16,13 +16,13 @@ A connector handles four main capabilities:
 
 ## Current Connectors
 
-| Connector | Agent | Platform | Session Mode |
-|-----------|-------|----------|--------------|
-| [`claudecode`](./claude-code.md) | Claude Code CLI | Linux, Windows | CLI (PTY) |
-| [`codex`](./codex.md) | Codex CLI (OpenAI) | Linux, Windows | CLI |
-| [`cursor`](./cursor.md) | Cursor Agent CLI | Linux only | CLI |
-| [`gemini`](./gemini.md) | Gemini CLI | Linux, Windows | CLI (PTY) |
-| [`m365copilot`](./m365-copilot.md) | Microsoft 365 Copilot | Windows only | DevTools / UIAutomation |
+| Connector | Agent | Platform | Session Mode | Type |
+|-----------|-------|----------|--------------|------|
+| [`claudecode`](./claude-code.md) | Claude Code CLI | Linux, Windows | CLI (PTY) | Lua |
+| [`codex`](./codex.md) | Codex CLI (OpenAI) | Linux, Windows | CLI | Lua |
+| [`cursor`](./cursor.md) | Cursor Agent CLI | Linux only | CLI | Lua |
+| [`gemini`](./gemini.md) | Gemini CLI | Linux, Windows | CLI | Lua |
+| [`m365copilot`](./m365-copilot.md) | Microsoft 365 Copilot | Windows only | DevTools / UIAutomation | Native |
 
 Want to add support for another agent? Contributions welcome! See [Adding New Connectors](./adding-new.md).
 
@@ -111,19 +111,4 @@ For Lua connectors, add a `.lua` file to the `agents/` directory or upload it th
 
 When a node starts, it runs fingerprinting for all registered connectors. Any agent that fingerprints successfully gets added to the node's agent list and reported to the service.
 
-The factory in `node/src/agent_connectors/factory.rs` creates all connector instances:
-
-```rust
-pub fn create_all_agents(&self) -> Vec<Arc<dyn Agent>> {
-    let mut agents: Vec<Arc<dyn Agent>> = Vec::new();
-    agents.push(Arc::new(ClaudeCodeAgent::new()));
-    agents.push(Arc::new(GeminiAgent::new()));
-    #[cfg(any(target_os = "linux", windows))]
-    agents.push(Arc::new(CodexAgent::new()));
-    #[cfg(target_os = "linux")]
-    agents.push(Arc::new(CursorAgent::new()));
-    #[cfg(windows)]
-    agents.push(Arc::new(M365CopilotAgent::new()));
-    agents
-}
-```
+The factory in `node/src/agent_connectors/factory.rs` creates native connector instances for platform-specific agents (e.g. M365 Copilot on Windows). Most connectors (Claude Code, Codex, Cursor, Gemini) are Lua-based and loaded from embedded scripts or the service database.

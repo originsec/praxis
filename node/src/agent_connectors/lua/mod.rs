@@ -33,6 +33,7 @@ pub struct LuaAgent {
     short_name: String,
     vm: Arc<Mutex<Lua>>,
     has_recon: bool,
+    has_create_session: bool,
     has_intercept_domains: bool,
     has_intercept_url_pattern: bool,
     intercept_domains_cache: OnceCell<Vec<String>>,
@@ -48,6 +49,7 @@ impl LuaAgent {
             name,
             short_name,
             has_recon,
+            has_create_session,
             has_intercept_domains,
             has_intercept_url_pattern,
             has_fingerprint,
@@ -64,6 +66,7 @@ impl LuaAgent {
             short_name,
             vm: Arc::new(Mutex::new(lua)),
             has_recon,
+            has_create_session,
             has_intercept_domains,
             has_intercept_url_pattern,
             intercept_domains_cache: OnceCell::new(),
@@ -175,14 +178,33 @@ impl AgentIntercept for LuaAgent {
 #[async_trait]
 impl AgentRecon for LuaAgent {
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
-        let lua = self.vm.lock().unwrap();
-        match runtime::vm_recon(&lua, is_semantic) {
-            Ok(result) => Some(result),
-            Err(e) => {
-                common::log_warn!("Lua recon failed for '{}': {}", self.short_name, e);
-                None
-            }
+        if is_semantic {
+            self.close_session();
         }
+
+        let mut result = {
+            let lua = self.vm.lock().unwrap();
+            match runtime::vm_recon(&lua, is_semantic) {
+                Ok(result) => result,
+                Err(e) => {
+                    common::log_warn!("Lua recon failed for '{}': {}", self.short_name, e);
+                    return None;
+                }
+            }
+        };
+
+        //
+        // Fetch MCP server tools. Lua scripts return servers with empty tool
+        // lists; we populate them here using the shared async fetcher.
+        //
+
+        if !result.tools.mcp_servers.is_empty() {
+            let servers = std::mem::take(&mut result.tools.mcp_servers);
+            result.tools.mcp_servers =
+                crate::utils::mcp::fetch_all_mcp_server_tools(servers).await;
+        }
+
+        Some(result)
     }
 }
 
@@ -208,7 +230,7 @@ pub fn load_embedded_agents() -> Vec<(Arc<dyn Agent>, LuaRegisteredAgentInfo)> {
     for script in EMBEDDED_LUA_SCRIPTS {
         match create_agent_from_script(script, LuaSource::Embedded) {
             Ok(item) => agents.push(item),
-            Err(e) => common::log_warn!("Failed to load embedded Lua connector: {}", e),
+            Err(e) => tracing::warn!("Failed to load embedded Lua connector: {}", e),
         }
     }
     agents

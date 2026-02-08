@@ -53,7 +53,7 @@ fn connector_table(lua: &Lua) -> Result<Table> {
     lua.globals().get("_connector").map_err(lua_error)
 }
 
-pub fn vm_parse_manifest(lua: &Lua) -> Result<(String, String, bool, bool, bool, bool)> {
+pub fn vm_parse_manifest(lua: &Lua) -> Result<(String, String, bool, bool, bool, bool, bool)> {
     let table = connector_table(lua)?;
 
     let name: String = table
@@ -66,6 +66,7 @@ pub fn vm_parse_manifest(lua: &Lua) -> Result<(String, String, bool, bool, bool,
         .map_err(|_| anyhow!("Lua connector manifest missing required field 'short_name'"))?;
 
     let has_recon = table.contains_key("recon").map_err(lua_error)?;
+    let has_create_session = table.contains_key("create_session").map_err(lua_error)?;
     let has_intercept_domains = table
         .contains_key("intercept_domains")
         .map_err(lua_error)?;
@@ -78,6 +79,7 @@ pub fn vm_parse_manifest(lua: &Lua) -> Result<(String, String, bool, bool, bool,
         name,
         short_name,
         has_recon,
+        has_create_session,
         has_intercept_domains,
         has_intercept_url_pattern,
         has_fingerprint,
@@ -124,8 +126,7 @@ pub fn vm_recon(lua: &Lua, is_semantic: bool) -> Result<ReconResult> {
         .get("recon")
         .map_err(lua_error)
         .map_err(|_| anyhow!("Lua connector missing function 'recon'"))?;
-    let ctx = lua.to_value(&json!({})).map_err(lua_error)?;
-    let value: Value = func.call((ctx, is_semantic)).map_err(lua_error)?;
+    let value: Value = func.call(is_semantic).map_err(lua_error)?;
     let recon: ReconResult = lua.from_value(value).map_err(lua_error)?;
     Ok(recon)
 }
@@ -422,6 +423,55 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
 
     praxis
         .set(
+            "remove_dir",
+            lua.create_function(|_, path: String| {
+                std::fs::remove_dir_all(&path)
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+                Ok(true)
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "glob_files",
+            lua.create_function(|lua, pattern: String| {
+                let mut paths = Vec::<String>::new();
+                if let Ok(entries) = glob::glob(&pattern) {
+                    for entry in entries.flatten() {
+                        paths.push(entry.to_string_lossy().to_string());
+                    }
+                }
+                lua.to_value(&paths)
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "count_file_lines",
+            lua.create_function(|_, path: String| {
+                let count = match std::fs::File::open(&path) {
+                    Ok(file) => {
+                        use std::io::BufRead;
+                        std::io::BufReader::new(file)
+                            .lines()
+                            .filter_map(|l| l.ok())
+                            .filter(|l| !l.trim().is_empty())
+                            .count()
+                    }
+                    Err(_) => 0,
+                };
+                Ok(count)
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
             "command_run",
             lua.create_function(|lua, spec: Value| {
                 let spec_json: JsonValue = lua.from_value(spec).map_err(lua_error).map_err(|e| {
@@ -460,6 +510,49 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         )
         .map_err(lua_error)?;
 
+    praxis
+        .set(
+            "toml_decode",
+            lua.create_function(|lua, input: String| {
+                let value: toml::Value = toml::from_str(&input)
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+                let json: JsonValue = serde_json::to_value(&value)
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+                lua.to_value(&json)
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    //
+    // Semantic parser helpers. These block on async calls to the semantic
+    // parser service and should only be called during semantic recon.
+    //
+
+    praxis
+        .set(
+            "semantic_discover_internal_tools",
+            lua.create_function(|lua, response_text: String| {
+                let tools = semantic_discover_internal_tools(&response_text);
+                lua.to_value(&tools)
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "semantic_extract_metadata",
+            lua.create_function(|lua, config_items: Value| {
+                let items: Vec<common::ConfigItem> =
+                    lua.from_value(config_items).unwrap_or_default();
+                let metadata = semantic_extract_metadata(&items);
+                lua.to_value(&metadata)
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
     lua.globals().set("praxis", praxis).map_err(lua_error)?;
     Ok(())
 }
@@ -486,7 +579,22 @@ fn install_shared_libraries(lua: &Lua) -> Result<()> {
 }
 
 fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValue> {
-    let spec: CommandSpec = serde_json::from_value(spec_json.clone())
+    //
+    // Empty Lua tables are ambiguous and mlua serializes them as JSON objects
+    // rather than arrays. Normalize the args field so serde can deserialize it
+    // into Vec<String>.
+    //
+
+    let mut spec_value = spec_json.clone();
+    if let Some(obj) = spec_value.as_object_mut() {
+        if let Some(args) = obj.get("args") {
+            if args.is_object() && args.as_object().map_or(false, |m| m.is_empty()) {
+                obj.insert("args".to_string(), json!([]));
+            }
+        }
+    }
+
+    let spec: CommandSpec = serde_json::from_value(spec_value)
         .map_err(|e| anyhow!("Invalid command spec: {}", e))?;
     if spec.program.trim().is_empty() {
         return Err(anyhow!("Command program is required"));
@@ -504,12 +612,13 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
         cmd.env(k, v);
     }
 
+    let pid_cell = get_handle_pid_cell(handle);
+
     let result = if let Some(stdin) = &spec.stdin {
-        let pid_cell = get_handle_pid_cell(handle);
         match crate::agent_connectors::utils::run_command_with_stdin_cancellable(
             &mut cmd,
             stdin,
-            pid_cell.as_ref(),
+            &pid_cell,
         ) {
             Ok(stdout) => json!({
                 "success": true,
@@ -525,13 +634,49 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
             }),
         }
     } else {
-        let output = cmd.output()?;
-        json!({
-            "success": output.status.success(),
-            "status": output.status.code().unwrap_or_default(),
-            "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
-            "stderr": String::from_utf8_lossy(&output.stderr).to_string()
-        })
+        //
+        // No stdin: spawn child and track PID for cancellation.
+        //
+
+        use std::process::Stdio;
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy()).collect();
+        common::log_info!(
+            "command: {} {}",
+            cmd.get_program().to_string_lossy(),
+            args.join(" ")
+        );
+
+        match cmd.spawn() {
+            Ok(mut child) => {
+                pid_cell.store(child.id(), Ordering::SeqCst);
+                let output = child.wait_with_output();
+                pid_cell.store(0, Ordering::SeqCst);
+                match output {
+                    Ok(output) => json!({
+                        "success": output.status.success(),
+                        "status": output.status.code().unwrap_or_default(),
+                        "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
+                        "stderr": String::from_utf8_lossy(&output.stderr).to_string()
+                    }),
+                    Err(e) => json!({
+                        "success": false,
+                        "status": 1,
+                        "stdout": "",
+                        "stderr": e.to_string()
+                    }),
+                }
+            }
+            Err(e) => json!({
+                "success": false,
+                "status": 1,
+                "stdout": "",
+                "stderr": e.to_string()
+            }),
+        }
     };
 
     Ok(result)
@@ -561,6 +706,126 @@ fn abort_handle(handle: &str) -> bool {
 
 pub fn abort_command_handle(handle: &str) -> bool {
     abort_handle(handle)
+}
+
+//
+// Semantic parser helpers for Lua agents. These block on async calls using
+// tokio::task::block_in_place so they can be called from synchronous Lua
+// functions while the perform_recon future is being polled.
+//
+
+fn semantic_discover_internal_tools(response_text: &str) -> Vec<common::AgentTool> {
+    let client = match crate::utils::semantic_parser::get_client() {
+        Some(c) => c,
+        None => return Vec::new(),
+    };
+
+    let cleaned = response_text.replace("Generating response", "");
+
+    let result = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(client.parse(
+            crate::utils::semantic_parser::INTERNAL_TOOLS_PROMPT.to_string(),
+            cleaned,
+            crate::utils::semantic_parser::INTERNAL_TOOLS_SCHEMA.to_string(),
+        ))
+    });
+
+    match result {
+        Ok(resp) if resp.success => {
+            if let Some(json) = resp.json {
+                if let Some(tools) =
+                    crate::utils::semantic_parser::parse_internal_tools_from_json(&json)
+                {
+                    return tools;
+                }
+            }
+            Vec::new()
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn semantic_extract_metadata(
+    config_items: &[common::ConfigItem],
+) -> Option<common::ReconMetadata> {
+    if config_items.is_empty() {
+        return None;
+    }
+
+    let client = match crate::utils::semantic_parser::get_client() {
+        Some(c) => c,
+        None => return None,
+    };
+
+    let mut all_user_identities = Vec::new();
+    let mut all_api_keys = Vec::new();
+    let mut current_batch = String::new();
+    let batch_threshold = 8000;
+
+    let mut flush = |batch: &mut String| {
+        if batch.is_empty() {
+            return;
+        }
+        let text = std::mem::take(batch);
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(client.parse(
+                crate::utils::semantic_parser::METADATA_EXTRACTION_PROMPT.to_string(),
+                text,
+                crate::utils::semantic_parser::METADATA_EXTRACTION_SCHEMA.to_string(),
+            ))
+        });
+
+        if let Ok(resp) = result {
+            if resp.success {
+                if let Some(json) = resp.json {
+                    if let Some(metadata) =
+                        crate::utils::semantic_parser::parse_metadata_from_json(&json)
+                    {
+                        all_user_identities.extend(metadata.user_identities);
+                        all_api_keys.extend(metadata.api_keys);
+                    }
+                }
+            }
+        }
+    };
+
+    for item in config_items {
+        let Some(contents) = &item.contents else {
+            continue;
+        };
+        if contents.is_empty() {
+            continue;
+        }
+
+        let entry = format!("--- {} ({})\n{}\n\n", item.path, item.config_type, contents);
+        if current_batch.len() + entry.len() > batch_threshold && !current_batch.is_empty() {
+            flush(&mut current_batch);
+        }
+        current_batch.push_str(&entry);
+    }
+    flush(&mut current_batch);
+
+    if all_user_identities.is_empty() && all_api_keys.is_empty() {
+        return None;
+    }
+
+    all_user_identities.sort();
+    all_user_identities.dedup();
+    all_api_keys.sort();
+    all_api_keys.dedup();
+
+    Some(common::ReconMetadata {
+        user_identities: if all_user_identities.is_empty() {
+            None
+        } else {
+            Some(all_user_identities)
+        },
+        api_keys: if all_api_keys.is_empty() {
+            None
+        } else {
+            Some(all_api_keys)
+        },
+    })
 }
 
 fn parse_fingerprint_details(value: Value) -> Result<(bool, Option<String>)> {

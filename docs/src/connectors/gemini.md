@@ -1,6 +1,6 @@
 # Gemini CLI Connector
 
-The Gemini connector enables interaction with Google's Gemini CLI agent.
+The Gemini connector enables interaction with Google's Gemini CLI agent. It is implemented as a Lua agent script (`agents/gemini.lua`).
 
 ## Overview
 
@@ -70,21 +70,7 @@ When semantic recon is enabled, the connector also creates a session and queries
 
 ## Session Management
 
-Sessions are created by spawning Gemini CLI in a PTY (pseudo-terminal):
-
-```diagram
-┌───────────────────────────────────────────────────────┐
-│                      Praxis Node                      │
-│                                                       │
-│  ┌─────────────────────────────────┐                  │
-│  │          PTY Session            │                  │
-│  │                                 │                  │
-│  │  gemini ────────────────────────┼──▶ Gemini Process│
-│  │    │                            │                  │
-│  │    └─ stdin/stdout              │                  │
-│  └─────────────────────────────────┘                  │
-└───────────────────────────────────────────────────────┘
-```
+Sessions are created by spawning Gemini CLI as a subprocess with stdin/stdout communication.
 
 ### Session Context
 
