@@ -156,7 +156,7 @@ export function Sidebar() {
       //
       */}
       <div className="p-3 border-t border-subtle text-center">
-        <span className="footer-text">©2025 ORIGIN</span>
+        <span className="footer-text">©2026 ORIGIN</span>
       </div>
     </div>
   );

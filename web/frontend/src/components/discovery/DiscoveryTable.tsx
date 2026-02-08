@@ -1,17 +1,15 @@
-import { Cpu, Lock, Plus, RefreshCw } from 'lucide-react';
+import { Cpu, Lock, RefreshCw } from 'lucide-react';
 import type { DiscoveredLlmEndpoint } from '../../api/types';
 
 interface DiscoveryTableProps {
   endpoints: DiscoveredLlmEndpoint[];
   showNodeColumn: boolean;
-  onCreateAgent: (endpoint: DiscoveredLlmEndpoint) => void;
   isLoading?: boolean;
 }
 
 export function DiscoveryTable({
   endpoints,
   showNodeColumn,
-  onCreateAgent,
   isLoading,
 }: DiscoveryTableProps) {
   if (endpoints.length === 0 && !isLoading) {
@@ -38,13 +36,12 @@ export function DiscoveryTable({
           <th className="text-left px-4 py-2 text-muted tracking-wider">MODELS</th>
           <th className="text-left px-4 py-2 text-muted tracking-wider">KEY</th>
           <th className="text-left px-4 py-2 text-muted tracking-wider">DISCOVERED</th>
-          <th className="px-4 py-2"></th>
         </tr>
       </thead>
       <tbody>
         {isLoading && endpoints.length === 0 && (
           <tr>
-            <td colSpan={showNodeColumn ? 7 : 6} className="px-4 py-8 text-center text-muted">
+            <td colSpan={showNodeColumn ? 6 : 5} className="px-4 py-8 text-center text-muted">
               <RefreshCw size={16} className="inline mr-2 animate-spin" />
               Loading discovered endpoints...
             </td>
@@ -90,15 +87,6 @@ export function DiscoveryTable({
               </td>
               <td className="px-4 py-2 text-muted font-mono">
                 {new Date(endpoint.discovered_at).toLocaleString()}
-              </td>
-              <td className="px-4 py-2">
-                <button
-                  onClick={() => onCreateAgent(endpoint)}
-                  className="flex items-center gap-1 px-3 py-1 text-[var(--accent-success)] border border-[var(--accent-success)] hover:bg-[var(--accent-success)] hover:text-[var(--bg-primary)] transition-colors"
-                >
-                  <Plus size={12} />
-                  CREATE
-                </button>
               </td>
             </tr>
           );

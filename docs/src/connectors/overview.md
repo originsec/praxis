@@ -6,7 +6,7 @@ Agent connectors are the modules that let Praxis interact with specific AI agent
 
 A connector handles four main capabilities:
 
-**Fingerprinting** - Detecting whether an agent is installed and getting its process path. This usually means checking for config files, finding running processes, or looking in common installation locations.
+**Fingerprinting** - Detecting whether an agent is installed, finding its executable path, and extracting its version. The `helpers.find_executable` Lua helper searches PATH, explicit directories, and version manager installations. Version is extracted by running `--version` and parsing the output.
 
 **Interception** - Knowing which domains the agent talks to so traffic can be captured.
 
@@ -16,13 +16,13 @@ A connector handles four main capabilities:
 
 ## Current Connectors
 
-| Connector | Agent | Platform | Session Mode |
-|-----------|-------|----------|--------------|
-| [`claudecode`](./claude-code.md) | Claude Code CLI | Linux, Windows | CLI (PTY) |
-| [`codex`](./codex.md) | Codex CLI (OpenAI) | Linux, Windows | CLI |
-| [`cursor`](./cursor.md) | Cursor Agent CLI | Linux only | CLI |
-| [`gemini`](./gemini.md) | Gemini CLI | Linux, Windows | CLI (PTY) |
-| [`m365copilot`](./m365-copilot.md) | Microsoft 365 Copilot | Windows only | DevTools / UIAutomation |
+| Connector | Agent | Platform | Session Mode | Type |
+|-----------|-------|----------|--------------|------|
+| [`claudecode`](./claude-code.md) | Claude Code CLI | Linux, Windows | CLI (PTY) | Lua |
+| [`codex`](./codex.md) | Codex CLI (OpenAI) | Linux, Windows | CLI | Lua |
+| [`cursor`](./cursor.md) | Cursor Agent CLI | Linux only | CLI | Lua |
+| [`gemini`](./gemini.md) | Gemini CLI | Linux, Windows | CLI | Lua |
+| [`m365copilot`](./m365-copilot.md) | Microsoft 365 Copilot | Windows only | DevTools | Lua |
 
 Want to add support for another agent? Contributions welcome! See [Adding New Connectors](./adding-new.md).
 
@@ -37,7 +37,8 @@ Connectors implement a set of Rust traits:
 trait Agent {
     fn name(&self) -> &str;
     fn short_name(&self) -> &str;
-    async fn do_fingerprint(&self) -> bool;
+    async fn do_fingerprint(&self) -> bool;  // cached for 60s when available
+    fn version(&self) -> Option<String>;     // extracted during fingerprinting
     fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>>;
     // ...
 }
@@ -70,11 +71,33 @@ Not all agents support all features. The core capabilities - fingerprinting, tra
 
 **MCP discovery** only applies to agents that support the Model Context Protocol for tool extensions.
 
+## Lua-Based Connectors
+
+In addition to compiled Rust connectors, Praxis supports writing agent connectors in Lua. Lua scripts are stored in the service database and pushed to nodes via the agent registry.
+
+### Default Scripts
+
+Default Lua agent scripts live in the `agents/` directory at the project root. These are embedded into both the node and service binaries at build time:
+
+- **Node**: Scripts from `agents/` are compiled into the node binary and loaded on startup as fallback connectors.
+- **Service**: Scripts are embedded and seeded into the `lua_agent_scripts` database table on first startup (when the table is empty).
+
+### Managing Scripts
+
+Lua agent scripts can be managed through the **Agents** tab in the Settings page of the web UI. From there you can:
+
+- View and edit existing scripts
+- Add new scripts (manually or by uploading `.lua` files)
+- Delete scripts
+- Reset all scripts back to the built-in defaults
+
+When scripts are modified in the database, the service broadcasts an agent registry update to all connected nodes so they reload the latest scripts.
+
 ## Adding New Connectors
 
 Want to add support for another agent? See [Adding New Connectors](./adding-new.md) for a step-by-step guide.
 
-The basic process:
+For Rust connectors, the basic process is:
 1. Create a directory under `node/src/agent_connectors/`
 2. Implement the `Agent` trait
 3. Add fingerprinting logic
@@ -83,23 +106,20 @@ The basic process:
 6. Implement session management
 7. Register in the factory
 
+For Lua connectors, add a `.lua` file to the `agents/` directory or upload it through the web UI.
+
 ## Connector Selection
 
-When a node starts, it runs fingerprinting for all registered connectors. Any agent that fingerprints successfully gets added to the node's agent list and reported to the service.
+When a node starts, it runs fingerprinting for all registered connectors. Any agent that fingerprints successfully gets added to the node's agent list and reported to the service. Agent version is also extracted and displayed in the web UI.
 
-The factory in `node/src/agent_connectors/factory.rs` creates all connector instances:
+Fingerprint results are cached for 60 seconds when the agent is available. Agents that are not found are re-checked on every cycle so they are discovered as soon as they are installed.
 
-```rust
-pub fn create_all_agents(&self) -> Vec<Arc<dyn Agent>> {
-    let mut agents: Vec<Arc<dyn Agent>> = Vec::new();
-    agents.push(Arc::new(ClaudeCodeAgent::new()));
-    agents.push(Arc::new(GeminiAgent::new()));
-    #[cfg(any(target_os = "linux", windows))]
-    agents.push(Arc::new(CodexAgent::new()));
-    #[cfg(target_os = "linux")]
-    agents.push(Arc::new(CursorAgent::new()));
-    #[cfg(windows)]
-    agents.push(Arc::new(M365CopilotAgent::new()));
-    agents
-}
+All connectors (Claude Code, Codex, Cursor, Gemini, M365 Copilot) are Lua-based and loaded from embedded scripts or the service database. Browser-based agents like M365 Copilot use the `praxis.cdp_*` native API and `praxis.devtools` Lua library for Chrome DevTools Protocol interaction.
+
+## Development Builds
+
+In debug builds, the environment variable `PRAXIS_IGNORE_SERVICE_AGENTS` controls whether the node uses Lua scripts pushed from the service or only its embedded scripts. It defaults to `1` (ignore service scripts) for development convenience. Set it to `0` to test service-managed scripts:
+
+```bash
+PRAXIS_IGNORE_SERVICE_AGENTS=0 cargo run --bin praxis_node
 ```

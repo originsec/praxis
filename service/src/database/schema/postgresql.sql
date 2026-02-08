@@ -247,4 +247,13 @@ CREATE TABLE IF NOT EXISTS agent_chat_messages (
     timestamp TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_agent_chat_messages_channel ON agent_chat_messages(channel_id);
-CREATE INDEX IF NOT EXISTS idx_agent_chat_messages_timestamp ON agent_chat_messages(timestamp)
+CREATE INDEX IF NOT EXISTS idx_agent_chat_messages_timestamp ON agent_chat_messages(timestamp);
+
+-- Lua agent scripts (centrally managed by service)
+CREATE TABLE IF NOT EXISTS lua_agent_scripts (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    script TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)

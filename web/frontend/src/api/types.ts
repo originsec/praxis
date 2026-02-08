@@ -22,6 +22,7 @@ export interface DiscoveredAgent {
   name: string;
   short_name: string;
   available: boolean;
+  version?: string;
 }
 
 export interface SelectedAgent {
@@ -113,7 +114,12 @@ export type NodeCommand =
   | { Session: SessionCommand }
   | { Intercept: InterceptCommand }
   | { Terminal: TerminalCommand }
-  | { Config: ConfigCommand };
+  | { Config: ConfigCommand }
+  | { AgentRegistry: AgentRegistryCommand };
+
+export type AgentRegistryCommand =
+  | { Update: { scripts: string[] } }
+  | 'List';
 
 export type AgentCommand =
   | 'Update'
@@ -164,7 +170,28 @@ export type NodeCommandResult =
   | { Intercept: InterceptCommandResult }
   | { Terminal: TerminalCommandResult }
   | { Config: ConfigCommandResult }
+  | { AgentRegistry: AgentRegistryCommandResult }
   | { Error: { message: string } };
+
+export interface LuaRegisteredAgentInfo {
+  name: string;
+  short_name: string;
+  source: string;
+  source_path?: string | null;
+  loaded_at: string;
+}
+
+export type AgentRegistryCommandResult =
+  | { Updated: { agent_count: number } }
+  | { Listed: { agents: LuaRegisteredAgentInfo[] } };
+
+export interface LuaAgentScriptInfo {
+  id: string;
+  name: string;
+  script: string;
+  created_at: string;
+  updated_at: string;
+}
 
 export type AgentCommandResult =
   | 'UpdateSent'
@@ -638,8 +665,6 @@ export type BrowserMessage =
   | { type: 'agent_discovery_enable'; node_id: string }
   | { type: 'agent_discovery_disable'; node_id: string }
   | { type: 'discovered_endpoints_request'; node_id: string | null }
-  | { type: 'create_dynamic_agent'; node_id: string; endpoint_id: string; agent_name: string; short_name: string }
-  | { type: 'delete_dynamic_agent'; node_id: string; short_name: string }
   //
   // Node event log messages.
   //
@@ -649,6 +674,14 @@ export type BrowserMessage =
   // Recon messages.
   //
   | { type: 'recon_get'; node_id: string; agent_short_name: string }
+  //
+  // Lua agent script messages.
+  //
+  | { type: 'lua_agent_script_add'; name: string; script: string }
+  | { type: 'lua_agent_script_update'; script_id: string; name: string; script: string }
+  | { type: 'lua_agent_script_delete'; script_id: string }
+  | { type: 'lua_agent_script_reset_defaults' }
+  | { type: 'lua_agent_script_list' }
   //
   // Agent Chat messages.
   //
@@ -719,8 +752,6 @@ export type ServerMessage =
   // Agent discovery messages.
   //
   | { type: 'discovered_endpoints_list'; endpoints: DiscoveredLlmEndpoint[] }
-  | { type: 'dynamic_agent_created'; node_id: string; short_name: string }
-  | { type: 'dynamic_agent_deleted'; node_id: string; short_name: string }
   | { type: 'agent_discovery_error'; message: string }
   //
   // Node event log messages.
@@ -731,6 +762,14 @@ export type ServerMessage =
   // Recon messages.
   //
   | { type: 'recon_get_response'; node_id: string; agent_short_name: string; recon_result: ReconResult | null; performed_at: string | null; is_semantic: boolean | null }
+  //
+  // Lua agent script messages.
+  //
+  | { type: 'lua_agent_script_added'; id: string; name: string }
+  | { type: 'lua_agent_script_updated'; id: string; name: string }
+  | { type: 'lua_agent_script_deleted'; script_id: string; success: boolean }
+  | { type: 'lua_agent_script_defaults_reset'; count: number }
+  | { type: 'lua_agent_script_list'; scripts: LuaAgentScriptInfo[] }
   //
   // Agent Chat messages.
   //

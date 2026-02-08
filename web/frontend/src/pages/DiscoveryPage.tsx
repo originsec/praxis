@@ -1,20 +1,14 @@
 import { useState, useEffect } from 'react';
-import { RefreshCw, X, Filter } from 'lucide-react';
+import { RefreshCw, Filter } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { DiscoveryTable } from '../components/discovery';
-import type { DiscoveredLlmEndpoint } from '../api/types';
 
 export function DiscoveryPage() {
   const {
     state,
     requestDiscoveredEndpoints,
-    createDynamicAgent,
   } = useApp();
 
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [selectedEndpoint, setSelectedEndpoint] = useState<DiscoveredLlmEndpoint | null>(null);
-  const [agentName, setAgentName] = useState('');
-  const [shortName, setShortName] = useState('');
   const [nodeFilter, setNodeFilter] = useState<string | null>(null);
 
   //
@@ -46,27 +40,6 @@ export function DiscoveryPage() {
 
   const handleRefresh = () => {
     requestDiscoveredEndpoints();
-  };
-
-  const handleCreateAgent = (endpoint: DiscoveredLlmEndpoint) => {
-    setSelectedEndpoint(endpoint);
-    //
-    // Pre-fill agent name from domain or IP.
-    //
-    const baseName = endpoint.domain || endpoint.ip_address;
-    setAgentName(`${baseName} Agent`);
-    setShortName(baseName.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase().slice(0, 20));
-    setShowCreateModal(true);
-  };
-
-  const handleConfirmCreate = () => {
-    if (selectedEndpoint && agentName && shortName) {
-      createDynamicAgent(selectedEndpoint.node_id, selectedEndpoint.id, agentName, shortName);
-      setShowCreateModal(false);
-      setSelectedEndpoint(null);
-      setAgentName('');
-      setShortName('');
-    }
   };
 
   return (
@@ -158,102 +131,9 @@ export function DiscoveryPage() {
         <DiscoveryTable
           endpoints={filteredEndpoints}
           showNodeColumn={true}
-          onCreateAgent={handleCreateAgent}
           isLoading={state.discovery.isLoading}
         />
       </div>
-
-      {/*
-      //
-      // Create Agent Modal.
-      //
-      */}
-      {showCreateModal && selectedEndpoint && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-card ascii-box border border-subtle p-6 max-w-md w-full mx-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-title font-semibold text-lg">Create Dynamic Agent</h3>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="text-muted hover:text-title transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <p className="text-muted text-sm mb-4">
-              Create an agent from the discovered endpoint at{' '}
-              <span className="font-mono text-highlight">{selectedEndpoint.base_url}</span>
-            </p>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-muted mb-1">Node</label>
-                <div className="px-3 py-2 bg-[var(--bg-tertiary)] text-muted text-sm">
-                  {getNodeName(selectedEndpoint.node_id)}
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm text-muted mb-1">Agent Name</label>
-                <input
-                  type="text"
-                  value={agentName}
-                  onChange={(e) => setAgentName(e.target.value)}
-                  className="w-full px-3 py-2 bg-[var(--bg-secondary)] border border-subtle text-title focus:border-[var(--accent-info)] outline-none"
-                  placeholder="My LLM Agent"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-muted mb-1">Short Name (identifier)</label>
-                <input
-                  type="text"
-                  value={shortName}
-                  onChange={(e) => setShortName(e.target.value.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase())}
-                  className="w-full px-3 py-2 bg-[var(--bg-secondary)] border border-subtle text-title font-mono focus:border-[var(--accent-info)] outline-none"
-                  placeholder="my_llm_agent"
-                />
-                <p className="text-xs text-muted mt-1">Lowercase letters, numbers, and underscores only</p>
-              </div>
-              {selectedEndpoint.models.length > 0 && (
-                <div>
-                  <label className="block text-sm text-muted mb-1">Available Models</label>
-                  <div className="flex flex-wrap gap-1">
-                    {selectedEndpoint.models.slice(0, 5).map((model) => (
-                      <span
-                        key={model}
-                        className="px-2 py-0.5 bg-[var(--bg-tertiary)] text-muted text-xs"
-                      >
-                        {model}
-                      </span>
-                    ))}
-                    {selectedEndpoint.models.length > 5 && (
-                      <span className="text-muted text-xs">+{selectedEndpoint.models.length - 5} more</span>
-                    )}
-                  </div>
-                </div>
-              )}
-              {!selectedEndpoint.api_key && (
-                <div className="bg-[var(--accent-warning)]/10 border border-[var(--accent-warning)]/30 p-3 text-xs text-[var(--accent-warning)]">
-                  No API key was detected. The agent may not work without credentials.
-                </div>
-              )}
-            </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="px-4 py-2 text-sm text-muted hover:text-title transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmCreate}
-                disabled={!agentName || !shortName}
-                className="px-4 py-2 text-sm bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Create Agent
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

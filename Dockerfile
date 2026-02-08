@@ -15,6 +15,7 @@ WORKDIR /build
 # ==============================================================================
 FROM chef AS planner
 COPY Cargo.toml Cargo.lock ./
+COPY agents ./agents
 COPY cli ./cli
 COPY common ./common
 COPY node ./node
@@ -67,6 +68,7 @@ RUN cargo chef cook --release --recipe-path recipe.json -p praxis_node && \
 # Stage 5: Build application (only recompiles on source changes)
 # ==============================================================================
 COPY Cargo.toml Cargo.lock ./
+COPY agents ./agents
 COPY cli ./cli
 COPY common ./common
 COPY node ./node

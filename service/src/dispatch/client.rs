@@ -1,6 +1,7 @@
 //! Client message dispatch handlers.
 
 use anyhow::Result;
+use base64::{engine::general_purpose::STANDARD, Engine};
 use common::{
     publish_json_exchange, ClientBroadcastMessage, ClientDirectMessage, ClientSignalMessage,
     CommandRequest, CommandResponse, NodeBroadcastMessage, NodeDirectMessage,
@@ -1050,102 +1051,6 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             .await;
         }
 
-        ClientSignalMessage::CreateDynamicAgent {
-            client_id,
-            node_id,
-            endpoint_id,
-            agent_name,
-            short_name,
-        } => {
-            info!(
-                "Received CreateDynamicAgent from client {} for node {}",
-                &client_id[..8.min(client_id.len())],
-                &node_id[..8.min(node_id.len())]
-            );
-
-            let command_id = uuid::Uuid::new_v4().to_string();
-            let request = CommandRequest {
-                command_id: command_id.clone(),
-                client_id: client_id.clone(),
-                node_id: node_id.clone(),
-                command: common::NodeCommand::CreateDynamicAgent(
-                    common::CreateDynamicAgentRequest {
-                        endpoint_id,
-                        agent_name,
-                        short_name,
-                    },
-                ),
-            };
-
-            if ctx.node_registry.get(&node_id).await.is_some() {
-                ctx.pending_commands
-                    .add(command_id.clone(), client_id.clone())
-                    .await;
-                let node_message = NodeDirectMessage::Command(request);
-                if let Err(e) = send_to_node(&ctx.publish_channel, &node_id, node_message).await {
-                    error!(
-                        "Failed to send CreateDynamicAgent to node {}: {}",
-                        node_id, e
-                    );
-                    ctx.pending_commands.remove(&command_id).await;
-                }
-            } else {
-                let _ = send_to_client(
-                    &ctx.client_publish_channel,
-                    &client_id,
-                    ClientDirectMessage::AgentDiscoveryError {
-                        message: format!("Node '{}' not found", node_id),
-                    },
-                )
-                .await;
-            }
-        }
-
-        ClientSignalMessage::DeleteDynamicAgent {
-            client_id,
-            node_id,
-            short_name,
-        } => {
-            info!(
-                "Received DeleteDynamicAgent from client {} for node {}",
-                &client_id[..8.min(client_id.len())],
-                &node_id[..8.min(node_id.len())]
-            );
-
-            let command_id = uuid::Uuid::new_v4().to_string();
-            let request = CommandRequest {
-                command_id: command_id.clone(),
-                client_id: client_id.clone(),
-                node_id: node_id.clone(),
-                command: common::NodeCommand::DeleteDynamicAgent(
-                    common::DeleteDynamicAgentRequest { short_name },
-                ),
-            };
-
-            if ctx.node_registry.get(&node_id).await.is_some() {
-                ctx.pending_commands
-                    .add(command_id.clone(), client_id.clone())
-                    .await;
-                let node_message = NodeDirectMessage::Command(request);
-                if let Err(e) = send_to_node(&ctx.publish_channel, &node_id, node_message).await {
-                    error!(
-                        "Failed to send DeleteDynamicAgent to node {}: {}",
-                        node_id, e
-                    );
-                    ctx.pending_commands.remove(&command_id).await;
-                }
-            } else {
-                let _ = send_to_client(
-                    &ctx.client_publish_channel,
-                    &client_id,
-                    ClientDirectMessage::AgentDiscoveryError {
-                        message: format!("Node '{}' not found", node_id),
-                    },
-                )
-                .await;
-            }
-        }
-
         //
         // Node Event Log.
         //
@@ -1713,6 +1618,227 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
                 }
                 Err(e) => {
                     error!("Failed to clear chain executions: {}", e);
+                }
+            }
+        }
+
+        //
+        // Lua agent scripts CRUD.
+        //
+        ClientSignalMessage::LuaAgentScriptAdd {
+            client_id,
+            name,
+            script,
+        } => {
+            info!(
+                "Received LuaAgentScriptAdd from client {}",
+                &client_id[..8.min(client_id.len())]
+            );
+
+            let id = uuid::Uuid::new_v4().to_string();
+            match ctx.database.upsert_lua_agent_script(&id, &name, &script).await {
+                Ok(()) => {
+                    let _ = send_to_client(
+                        &ctx.client_publish_channel,
+                        &client_id,
+                        ClientDirectMessage::LuaAgentScriptAdded {
+                            id: id.clone(),
+                            name: name.clone(),
+                        },
+                    )
+                    .await;
+
+                    //
+                    // Broadcast updated registry to all nodes.
+                    //
+                    if let Ok(scripts) = ctx.database.get_all_lua_scripts().await {
+                        let script_count = scripts.len();
+                        let scripts: Vec<String> = scripts
+                            .iter()
+                            .map(|s| STANDARD.encode(s.as_bytes()))
+                            .collect();
+                        let update = NodeBroadcastMessage::AgentRegistryUpdate { scripts };
+                        match publish_json_exchange(
+                            &ctx.broadcast_channel,
+                            NODE_BROADCAST_EXCHANGE,
+                            &update,
+                        )
+                        .await
+                        {
+                            Ok(_) => info!("Broadcast AgentRegistryUpdate ({} scripts) after add", script_count),
+                            Err(e) => error!("Failed to broadcast AgentRegistryUpdate after add: {}", e),
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to add Lua agent script: {}", e);
+                }
+            }
+        }
+
+        ClientSignalMessage::LuaAgentScriptDelete {
+            client_id,
+            script_id,
+        } => {
+            info!(
+                "Received LuaAgentScriptDelete from client {}",
+                &client_id[..8.min(client_id.len())]
+            );
+
+            match ctx.database.delete_lua_agent_script(&script_id).await {
+                Ok(success) => {
+                    let _ = send_to_client(
+                        &ctx.client_publish_channel,
+                        &client_id,
+                        ClientDirectMessage::LuaAgentScriptDeleted {
+                            script_id: script_id.clone(),
+                            success,
+                        },
+                    )
+                    .await;
+
+                    if success {
+                        if let Ok(scripts) = ctx.database.get_all_lua_scripts().await {
+                            let script_count = scripts.len();
+                            let scripts: Vec<String> = scripts
+                                .iter()
+                                .map(|s| STANDARD.encode(s.as_bytes()))
+                                .collect();
+                            let update = NodeBroadcastMessage::AgentRegistryUpdate { scripts };
+                            match publish_json_exchange(
+                                &ctx.broadcast_channel,
+                                NODE_BROADCAST_EXCHANGE,
+                                &update,
+                            )
+                            .await
+                            {
+                                Ok(_) => info!("Broadcast AgentRegistryUpdate ({} scripts) after delete", script_count),
+                                Err(e) => error!("Failed to broadcast AgentRegistryUpdate after delete: {}", e),
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to delete Lua agent script: {}", e);
+                }
+            }
+        }
+
+        ClientSignalMessage::LuaAgentScriptUpdate {
+            client_id,
+            script_id,
+            name,
+            script,
+        } => {
+            info!(
+                "Received LuaAgentScriptUpdate from client {}",
+                &client_id[..8.min(client_id.len())]
+            );
+
+            match ctx.database.upsert_lua_agent_script(&script_id, &name, &script).await {
+                Ok(()) => {
+                    let _ = send_to_client(
+                        &ctx.client_publish_channel,
+                        &client_id,
+                        ClientDirectMessage::LuaAgentScriptUpdated {
+                            id: script_id.clone(),
+                            name: name.clone(),
+                        },
+                    )
+                    .await;
+
+                    if let Ok(scripts) = ctx.database.get_all_lua_scripts().await {
+                        let script_count = scripts.len();
+                        let scripts: Vec<String> = scripts
+                            .iter()
+                            .map(|s| STANDARD.encode(s.as_bytes()))
+                            .collect();
+                        let update = NodeBroadcastMessage::AgentRegistryUpdate { scripts };
+                        match publish_json_exchange(
+                            &ctx.broadcast_channel,
+                            NODE_BROADCAST_EXCHANGE,
+                            &update,
+                        )
+                        .await
+                        {
+                            Ok(_) => info!("Broadcast AgentRegistryUpdate ({} scripts) after update", script_count),
+                            Err(e) => error!("Failed to broadcast AgentRegistryUpdate after update: {}", e),
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to update Lua agent script: {}", e);
+                }
+            }
+        }
+
+        ClientSignalMessage::LuaAgentScriptResetDefaults { client_id } => {
+            info!(
+                "Received LuaAgentScriptResetDefaults from client {}",
+                &client_id[..8.min(client_id.len())]
+            );
+
+            match ctx.database.clear_lua_agent_scripts().await {
+                Ok(_) => {
+                    let mut count = 0usize;
+                    for (name, content) in crate::EMBEDDED_LUA_SCRIPTS {
+                        let id = uuid::Uuid::new_v4().to_string();
+                        if let Err(e) = ctx.database.upsert_lua_agent_script(&id, name, content).await {
+                            error!("Failed to seed Lua agent script '{}': {}", name, e);
+                        } else {
+                            count += 1;
+                        }
+                    }
+
+                    let _ = send_to_client(
+                        &ctx.client_publish_channel,
+                        &client_id,
+                        ClientDirectMessage::LuaAgentScriptDefaultsReset { count },
+                    )
+                    .await;
+
+                    if let Ok(scripts) = ctx.database.get_all_lua_scripts().await {
+                        let script_count = scripts.len();
+                        let scripts: Vec<String> = scripts
+                            .iter()
+                            .map(|s| STANDARD.encode(s.as_bytes()))
+                            .collect();
+                        let update = NodeBroadcastMessage::AgentRegistryUpdate { scripts };
+                        match publish_json_exchange(
+                            &ctx.broadcast_channel,
+                            NODE_BROADCAST_EXCHANGE,
+                            &update,
+                        )
+                        .await
+                        {
+                            Ok(_) => info!("Broadcast AgentRegistryUpdate ({} scripts) after reset defaults", script_count),
+                            Err(e) => error!("Failed to broadcast AgentRegistryUpdate after reset defaults: {}", e),
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to reset Lua agent scripts to defaults: {}", e);
+                }
+            }
+        }
+
+        ClientSignalMessage::LuaAgentScriptList { client_id } => {
+            info!(
+                "Received LuaAgentScriptList from client {}",
+                &client_id[..8.min(client_id.len())]
+            );
+
+            match ctx.database.list_lua_agent_scripts().await {
+                Ok(scripts) => {
+                    let _ = send_to_client(
+                        &ctx.client_publish_channel,
+                        &client_id,
+                        ClientDirectMessage::LuaAgentScriptListResponse { scripts },
+                    )
+                    .await;
+                }
+                Err(e) => {
+                    error!("Failed to list Lua agent scripts: {}", e);
                 }
             }
         }

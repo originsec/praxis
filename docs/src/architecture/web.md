@@ -127,6 +127,10 @@ web/frontend/src/
 
 **NodeList** - Sidebar showing all connected nodes and their agents.
 
+**NodeDetailPage** - Shows node info and an agents table with columns for name, short name, version, and session status.
+
+**AgentDetailPage** - Agent header with name, version, and session controls. Includes session interaction panel, recon results, and operation/chain runners.
+
 **ReconPanel** - Displays reconnaissance results organized by category.
 
 **SessionPanel** - Interactive session interface for sending prompts.

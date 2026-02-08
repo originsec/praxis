@@ -39,14 +39,13 @@ The agent that runs on target machines:
 ```
 node/src/
 ├── agent_connectors/    # Per-agent implementations
-│   ├── claudecode/
-│   ├── codex/
-│   ├── gemini/
-│   └── m365copilot/     # Windows only
+│   └── lua/             # Lua connector runtime + CDP helpers
 ├── intercept/           # Traffic interception
 ├── terminal/            # PTY terminal
 └── runtime.rs           # Main event loop
 ```
+
+Lua-based agent scripts (Claude Code, Codex, Cursor, Gemini, M365 Copilot) live in `agents/` at the project root and are embedded into the binary at build time.
 
 ### Service (`service/`)
 
@@ -100,7 +99,15 @@ See [Semantic Parser](semantic-parser.md) for details.
 3. Build: `cargo build`
 4. Run service: `cargo run --bin praxis_service`
 5. Run web: `cargo run --bin praxis_web`
-6. Run node (optional): `cargo run --bin praxis_node`
+6. Run node: `cargo run --bin praxis_node`
+
+### Environment Variables for Development
+
+| Variable | Default (debug) | Description |
+|----------|----------------|-------------|
+| `PRAXIS_IGNORE_SERVICE_AGENTS` | `1` | When `1`, node ignores Lua scripts pushed from the service and uses only embedded scripts. Set to `0` to test service-managed agent scripts. |
+| `PRAXIS_DATABASE_URL` | SQLite in home dir | Database connection string |
+| `PRAXIS_RABBITMQ_URL` | `amqp://praxis:praxis@localhost:5672` | RabbitMQ connection |
 
 ### Making Changes
 
@@ -120,7 +127,9 @@ See [Semantic Parser](semantic-parser.md) for details.
 
 ### Adding Agent Connectors
 
-See [Adding New Connectors](../connectors/adding-new.md).
+See [Adding New Connectors](../connectors/adding-new.md). Prefer Lua-based connectors for CLI agents — they can be developed and tested at runtime via the web UI without recompiling.
+
+Lua agent scripts live in `agents/` at the project root and are embedded into binaries at build time. Shared libraries are at `node/src/agent_connectors/lua/lib/` (`helpers.lua` for common utilities, `devtools.lua` for CDP/DevTools support).
 
 ### Adding Operations
 

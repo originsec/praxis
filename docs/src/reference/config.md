@@ -34,7 +34,7 @@ See [Database Configuration](../deployment/database.md) for detailed setup.
 | Variable | Effect |
 |----------|--------|
 | `PRAXIS_SKIP_FRONTEND` | Skip frontend build during `cargo build` |
-| `PRAXIS_NOT_HIDDEN` | Don't use hidden desktop for DevTools mode (debugging) |
+| `PRAXIS_NOT_HIDDEN` | Disable hidden desktop for DevTools agents. Defaults to `1` in debug builds (visible for development) and `0` in release builds (hidden for production). Set to `1` to make the browser window visible for debugging. |
 
 ### Logging
 
@@ -131,8 +131,7 @@ Each agent connector may have specific configuration. See individual connector d
 
 #### M365 Copilot
 
-- Mode: DevTools (default) or UIAutomation
-- Browser: Microsoft Edge
+- Mode: DevTools (via CDP)
 - Platform: Windows only
 
 ## Operation Definitions

@@ -1,6 +1,7 @@
 //! Node message dispatch handlers.
 
 use anyhow::Result;
+use base64::{engine::general_purpose::STANDARD, Engine};
 use common::{
     node_semantic_queue_name, publish_json, publish_json_exchange, ClientBroadcastMessage,
     ClientDirectMessage, NodeBroadcastMessage, NodeSignalMessage, CLIENT_BROADCAST_EXCHANGE,
@@ -20,12 +21,35 @@ use super::ServiceContext;
 pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<()> {
     match message {
         NodeSignalMessage::Registration(registration) => {
-            if let Err(e) = ctx.node_handler.handle_node_registration(registration).await {
+            //
+            // Load Lua scripts and include them in the ack sent to the node's
+            // direct queue. This avoids a race where a fanout broadcast arrives
+            // before the node binds its consumer to the exchange.
+            //
+
+            let lua_scripts = match ctx.database.get_all_lua_scripts().await {
+                Ok(scripts) => scripts
+                    .iter()
+                    .map(|s| STANDARD.encode(s.as_bytes()))
+                    .collect(),
+                Err(e) => {
+                    error!("Failed to load Lua scripts for registration ack: {}", e);
+                    Vec::new()
+                }
+            };
+
+            if let Err(e) = ctx
+                .node_handler
+                .handle_node_registration(registration, lua_scripts)
+                .await
+            {
                 error!("Failed to handle NodeRegistration: {}", e);
             }
+
             //
             // Broadcast current event logging setting so new nodes align.
             //
+
             let enabled = {
                 let config = ctx.service_config.read().await;
                 config.get_bool(APPLICATION_LOGS_ENABLED, false)

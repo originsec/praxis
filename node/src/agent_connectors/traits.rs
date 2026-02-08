@@ -95,10 +95,24 @@ pub trait Agent: Send + Sync {
 
     async fn do_fingerprint(&self) -> bool;
 
+    fn version(&self) -> Option<String> {
+        None
+    }
+
     fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>>;
     fn close_session(&self);
     fn get_session(&self) -> Option<Arc<dyn AgentSession>>;
     fn has_session(&self) -> bool {
         self.get_session().is_some()
+    }
+
+    //
+    // Read session content for a given session_file path. Agents can override
+    // this to handle virtual paths (e.g. SQLite-backed sessions). The default
+    // reads the file directly.
+    //
+
+    fn read_session_content(&self, session_file: &str) -> Option<String> {
+        std::fs::read_to_string(session_file).ok()
     }
 }

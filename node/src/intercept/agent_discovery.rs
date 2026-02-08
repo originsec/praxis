@@ -111,6 +111,7 @@ impl AgentDiscoveryManager {
     }
 
     /// Get a discovered endpoint by ID
+    #[allow(dead_code)]
     pub async fn get_endpoint_by_id(&self, endpoint_id: &str) -> Option<DiscoveredLlmEndpoint> {
         let endpoints = self.discovered_endpoints.read().await;
         endpoints.iter().find(|e| e.id == endpoint_id).cloned()

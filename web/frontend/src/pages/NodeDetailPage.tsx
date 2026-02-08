@@ -347,6 +347,7 @@ export function NodeDetailPage() {
                 <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
                   <th className="text-left px-4 py-2 text-muted tracking-wider">AGENT</th>
                   <th className="text-left px-4 py-2 text-muted tracking-wider">SHORT NAME</th>
+                  <th className="text-left px-4 py-2 text-muted tracking-wider">VERSION</th>
                   <th className="text-left px-4 py-2 text-muted tracking-wider">SESSION</th>
                   <th className="px-4 py-2"></th>
                 </tr>
@@ -377,6 +378,9 @@ export function NodeDetailPage() {
                       </td>
                       <td className="px-4 py-3 font-mono text-muted">
                         {agent.short_name}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-muted">
+                        {agent.version || '-'}
                       </td>
                       <td className="px-4 py-3">
                         {hasSession ? (

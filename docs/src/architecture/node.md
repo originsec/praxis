@@ -34,26 +34,38 @@ The node is the component that runs on target systems. It's responsible for all 
 
 ## Agent Registry
 
-The agent registry manages all supported agent connectors. On startup:
+The agent registry manages all supported agent connectors. On startup the
+registry is built via `rebuild()` which:
 
-1. Factory creates instances of all connector types
-2. Each connector runs fingerprinting
-3. Successfully fingerprinted agents are registered
-4. Registry is reported to service
+1. Creates native agents from the factory (currently unused; all agents are Lua-based)
+2. Loads Lua connectors from the service (delivered in the `RegistrationAck` message)
+3. Falls back to embedded Lua scripts if no service scripts are provided
 
-```rust
-// From factory.rs
-pub fn create_all_agents(&self) -> Vec<Arc<dyn Agent>> {
-    let mut agents = Vec::new();
-    agents.push(Arc::new(ClaudeCodeAgent::new()));
-    agents.push(Arc::new(GeminiAgent::new()));
-    #[cfg(target_os = "linux")]
-    agents.push(Arc::new(CodexAgent::new()));
-    #[cfg(windows)]
-    agents.push(Arc::new(M365CopilotAgent::new()));
-    agents
-}
-```
+The service includes all stored Lua scripts in the `NodeRegistrationAck` sent
+to the node's direct queue during registration. This avoids a race condition
+where a fanout broadcast could arrive before the node's exchange consumer is
+ready. On re-registration (e.g. after connection loss), scripts are also
+delivered via the ack.
+
+Subsequent script changes (add/edit/delete via the web UI) are broadcast to
+nodes via `AgentRegistryUpdate` on the fanout exchange.
+
+Updates are session-gated: if a session is open when an update arrives, it is
+queued and applied after the session closes. If multiple updates arrive while a
+session is open, only the latest is kept.
+
+### Fingerprint Caching
+
+Fingerprinting runs `--version` on each agent binary to verify availability and
+extract the version string. Results are cached for 60 seconds when the agent is
+available. Unavailable agents (not installed) are re-checked on every cycle so
+they are discovered as soon as they appear.
+
+### Development Builds
+
+In debug builds, `PRAXIS_IGNORE_SERVICE_AGENTS=1` (the default) causes the node
+to ignore service-pushed scripts and use only embedded Lua scripts. Set to `0`
+to test with service-managed scripts.
 
 ## Intercept Manager
 
@@ -154,10 +166,11 @@ Sessions allow direct interaction with agents:
 
 ### Browser-based Agents
 
-1. App with webview launched with debugging enabled
-2. CDP connection established
-3. Prompts injected via DOM manipulation
-4. Responses extracted from page
+1. App with webview launched with debugging enabled (on a hidden desktop in release builds; visible in debug builds by default)
+2. CDP connection established via chromiumoxide
+3. Prompts injected via DOM manipulation (InsertText + Enter)
+4. Responses polled from page via JavaScript evaluation
+5. Abort kills the entire process tree; Drop safety net cleans up even on Lua errors
 
 ### Session Context
 
@@ -180,12 +193,13 @@ The runtime processes messages from the service:
 
 ```rust
 pub enum NodeCommand {
-    Agent(AgentCommand),      // Agent operations
-    Session(SessionCommand),  // Session management
-    Intercept(InterceptCommand), // Interception control
-    Terminal(TerminalCommand),   // Terminal operations
-    Config(ConfigCommand),       // Configuration
-    AgentDiscovery(AgentDiscoveryCommand), // Discovery
+    Agent(AgentCommand),
+    Session(SessionCommand),
+    Intercept(InterceptCommand),
+    Terminal(TerminalCommand),
+    Config(ConfigCommand),
+    AgentRegistry(AgentRegistryCommand),
+    AgentDiscovery(AgentDiscoveryCommand),
 }
 ```
 

@@ -224,21 +224,6 @@ pub async fn handle_browser_message(
         BrowserMessage::DiscoveredEndpointsRequest { node_id } => {
             state.rabbitmq.request_discovered_endpoints(node_id).await?;
         }
-        BrowserMessage::CreateDynamicAgent {
-            node_id,
-            endpoint_id,
-            agent_name,
-            short_name,
-        } => {
-            state
-                .rabbitmq
-                .create_dynamic_agent(node_id, endpoint_id, agent_name, short_name)
-                .await?;
-        }
-        BrowserMessage::DeleteDynamicAgent { node_id, short_name } => {
-            state.rabbitmq.delete_dynamic_agent(node_id, short_name).await?;
-        }
-
         //
         // Application log messages.
         //
@@ -254,6 +239,25 @@ pub async fn handle_browser_message(
         //
         BrowserMessage::ReconGet { node_id, agent_short_name } => {
             state.rabbitmq.get_recon(node_id, agent_short_name).await?;
+        }
+
+        //
+        // Lua agent script messages.
+        //
+        BrowserMessage::LuaAgentScriptAdd { name, script } => {
+            state.rabbitmq.add_lua_agent_script(name, script).await?;
+        }
+        BrowserMessage::LuaAgentScriptUpdate { script_id, name, script } => {
+            state.rabbitmq.update_lua_agent_script(script_id, name, script).await?;
+        }
+        BrowserMessage::LuaAgentScriptDelete { script_id } => {
+            state.rabbitmq.delete_lua_agent_script(script_id).await?;
+        }
+        BrowserMessage::LuaAgentScriptResetDefaults => {
+            state.rabbitmq.reset_lua_agent_script_defaults().await?;
+        }
+        BrowserMessage::LuaAgentScriptList => {
+            state.rabbitmq.list_lua_agent_scripts().await?;
         }
 
         //

@@ -1,8 +1,8 @@
-use crate::agent_connectors::{Agent, AgentRegistry};
+use crate::agent_connectors::{Agent, AgentFactory, AgentRegistry};
 use crate::app::{NodeState, registration::publish_registration};
 use crate::handlers::{
-    handle_agent_command, handle_agent_discovery_command, handle_config_command,
-    handle_create_dynamic_agent, handle_delete_dynamic_agent, handle_intercept_command,
+    handle_agent_command, handle_agent_discovery_command, handle_agent_registry_list,
+    handle_agent_registry_update, handle_config_command, handle_intercept_command,
     handle_session_command, handle_terminal_command, TransactionManager,
 };
 use crate::terminal::TerminalOutputEvent;
@@ -26,9 +26,11 @@ pub async fn run(
     node_queue: String,
     registry: Arc<RwLock<AgentRegistry>>,
     selected_agent: Arc<Mutex<Option<Arc<dyn Agent>>>>,
+    factory: Arc<AgentFactory>,
     shutdown_token: CancellationToken,
+    lua_scripts: Vec<String>,
 ) -> anyhow::Result<()> {
-    listen_to_queues(channel, node_id, node_queue, registry, selected_agent, shutdown_token).await
+    listen_to_queues(channel, node_id, node_queue, registry, selected_agent, factory, shutdown_token, lua_scripts).await
 }
 
 async fn listen_to_queues(
@@ -37,7 +39,9 @@ async fn listen_to_queues(
     node_queue: String,
     registry: Arc<RwLock<AgentRegistry>>,
     selected_agent: Arc<Mutex<Option<Arc<dyn Agent>>>>,
+    factory: Arc<AgentFactory>,
     shutdown_token: CancellationToken,
+    lua_scripts: Vec<String>,
 ) -> anyhow::Result<()> {
     //
     // Create a private broadcast queue bound to the fanout exchange.
@@ -401,6 +405,31 @@ async fn listen_to_queues(
     // Listen to both queues concurrently and handle messages as they arrive.
     //
 
+    //
+    // Pending registry update: queued if a session is open when a broadcast
+    // AgentRegistryUpdate arrives. Executed after session close.
+    //
+
+    let mut pending_registry_update: Option<Vec<String>> = None;
+
+    //
+    // Rebuild agent registry with Lua scripts received in the RegistrationAck.
+    //
+
+    if !lua_scripts.is_empty() {
+        common::log_info!(
+            "Rebuilding agent registry with {} scripts from service",
+            lua_scripts.len()
+        );
+        handle_agent_registry_update(
+            lua_scripts,
+            &registry,
+            &selected_agent,
+            &factory,
+        )
+        .await;
+    }
+
     common::log_info!(
         "Listening to queues: {} (exchange), {}",
         NODE_BROADCAST_EXCHANGE,
@@ -474,6 +503,8 @@ async fn listen_to_queues(
                                 &registry,
                                 &selected_agent,
                                 &node_state,
+                                &factory,
+                                &mut pending_registry_update,
                             )
                             .await;
                         }
@@ -490,24 +521,24 @@ async fn listen_to_queues(
                     Ok(delivery) => {
                         match serde_json::from_slice::<NodeDirectMessage>(&delivery.data) {
                             Ok(message) => match message {
-                                NodeDirectMessage::RegistrationAck(_ack) => {
-                                    common::log_info!("Received registration acknowledgment from service");
-                                    //
-                                    // Send initial node information update.
-                                    //
-                                    if let Err(e) = send_node_information_update(
-                                        &channel,
-                                        &node_id,
-                                        &registry,
-                                        &selected_agent,
-                                        &node_state,
-                                    )
-                                    .await
-                                    {
-                                        common::log_error!(
-                                            "Failed to send initial information update: {}",
-                                            e
+                                NodeDirectMessage::RegistrationAck(ack) => {
+                                    if !ack.lua_scripts.is_empty() {
+                                        common::log_info!(
+                                            "Re-registration: rebuilding registry with {} scripts",
+                                            ack.lua_scripts.len()
                                         );
+                                        handle_agent_registry_update(
+                                            ack.lua_scripts,
+                                            &registry,
+                                            &selected_agent,
+                                            &factory,
+                                        )
+                                        .await;
+                                        if let Err(e) = send_node_information_update(
+                                            &channel, &node_id, &registry, &selected_agent, &node_state,
+                                        ).await {
+                                            common::log_error!("Failed to send info update after re-registration: {}", e);
+                                        }
                                     }
                                 }
                                 NodeDirectMessage::Command(cmd_request) => {
@@ -519,6 +550,8 @@ async fn listen_to_queues(
                                         &selected_agent,
                                         &node_state,
                                         &transaction_manager,
+                                        &factory,
+                                        &mut pending_registry_update,
                                     )
                                     .await;
                                 }
@@ -567,6 +600,8 @@ async fn handle_broadcast_message(
     registry: &Arc<RwLock<AgentRegistry>>,
     selected_agent: &Arc<Mutex<Option<Arc<dyn Agent>>>>,
     node_state: &Arc<RwLock<NodeState>>,
+    factory: &AgentFactory,
+    pending_registry_update: &mut Option<Vec<String>>,
 ) {
     match message {
         NodeBroadcastMessage::NodeInformationUpdateRequest => {
@@ -590,6 +625,32 @@ async fn handle_broadcast_message(
                 if enabled { "enabled" } else { "disabled" }
             );
         }
+        NodeBroadcastMessage::AgentRegistryUpdate { scripts } => {
+            common::log_info!("Received AgentRegistryUpdate with {} scripts", scripts.len());
+            let has_session = selected_agent
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|a| a.has_session())
+                .unwrap_or(false);
+
+            if has_session {
+                *pending_registry_update = Some(scripts);
+                common::log_info!("Registry update queued (session open)");
+            } else {
+                handle_agent_registry_update(
+                    scripts, registry, selected_agent, factory,
+                )
+                .await;
+                if let Err(e) = send_node_information_update(
+                    channel, node_id, registry, selected_agent, node_state,
+                )
+                .await
+                {
+                    common::log_error!("Failed to send info update after registry rebuild: {}", e);
+                }
+            }
+        }
     }
 }
 
@@ -602,6 +663,8 @@ async fn handle_command(
     selected_agent: &Arc<Mutex<Option<Arc<dyn Agent>>>>,
     node_state: &Arc<RwLock<NodeState>>,
     transaction_manager: &Arc<TransactionManager>,
+    factory: &Arc<AgentFactory>,
+    pending_registry_update: &mut Option<Vec<String>>,
 ) {
     //
     // Check if this is a fire-and-forget command (no response needed).
@@ -706,14 +769,16 @@ async fn handle_command(
             handle_terminal_command(cmd, &request.client_id, node_state).await
         }
         NodeCommand::Config(cmd) => handle_config_command(cmd, node_state).await,
+        NodeCommand::AgentRegistry(cmd) => match cmd {
+            common::AgentRegistryCommand::Update { scripts } => {
+                handle_agent_registry_update(scripts, registry, selected_agent, &factory).await
+            }
+            common::AgentRegistryCommand::List => {
+                handle_agent_registry_list(registry).await
+            }
+        },
         NodeCommand::AgentDiscovery(cmd) => {
             handle_agent_discovery_command(cmd, node_state).await
-        }
-        NodeCommand::CreateDynamicAgent(req) => {
-            handle_create_dynamic_agent(req, node_state, registry).await
-        }
-        NodeCommand::DeleteDynamicAgent(req) => {
-            handle_delete_dynamic_agent(req, registry).await
         }
     };
 
@@ -723,6 +788,11 @@ async fn handle_command(
     if is_fire_and_forget {
         return;
     }
+
+    let is_session_close = matches!(
+        result,
+        NodeCommandResult::Session(common::SessionCommandResult::Closed)
+    );
 
     //
     // Send response back to the server.
@@ -745,6 +815,24 @@ async fn handle_command(
         send_node_information_update(channel, node_id, registry, selected_agent, node_state).await
     {
         common::log_error!("Failed to send information update after command: {}", e);
+    }
+
+    //
+    // After session close, drain any pending registry update.
+    //
+
+    if is_session_close {
+        if let Some(scripts) = pending_registry_update.take() {
+            common::log_info!("Executing queued registry update after session close");
+            handle_agent_registry_update(scripts, registry, selected_agent, factory).await;
+            if let Err(e) = send_node_information_update(
+                channel, node_id, registry, selected_agent, node_state,
+            )
+            .await
+            {
+                common::log_error!("Failed to send info update after deferred registry rebuild: {}", e);
+            }
+        }
     }
 }
 
@@ -773,6 +861,7 @@ async fn send_node_information_update(
                 name: agent.name().to_string(),
                 short_name: agent.short_name().to_string(),
                 available,
+                version: agent.version(),
             });
         }
     }

@@ -121,6 +121,8 @@ pub struct DiscoveredAgent {
     pub name: String,
     pub short_name: String,
     pub available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 //
@@ -172,22 +174,27 @@ pub enum AgentDiscoveryCommandResult {
     Error { message: String },
 }
 
-/// Request to create a dynamic agent from a discovered endpoint
+/// Info about a Lua agent script stored in the service database
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CreateDynamicAgentRequest {
-    /// ID of the discovered endpoint to create agent from
-    pub endpoint_id: String,
-    /// Display name for the agent
-    pub agent_name: String,
-    /// Short name for the agent (used in commands)
-    pub short_name: String,
+pub struct LuaAgentScriptInfo {
+    pub id: String,
+    pub name: String,
+    pub script: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
-/// Request to delete a dynamic agent
+/// Metadata for a registered Lua connector
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct DeleteDynamicAgentRequest {
-    /// Short name of the dynamic agent to delete
+pub struct LuaRegisteredAgentInfo {
+    pub name: String,
     pub short_name: String,
+    /// Source kind for the script (e.g. "startup_file", "runtime_message", "embedded")
+    pub source: String,
+    /// Optional source path when loaded from disk
+    pub source_path: Option<String>,
+    /// When the connector was loaded
+    pub loaded_at: DateTime<Utc>,
 }
 
 /// MCP transport type
@@ -243,10 +250,13 @@ pub struct McpServer {
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ReconTools {
     /// MCP servers with their tools
+    #[serde(default)]
     pub mcp_servers: Vec<McpServer>,
     /// Skills (slash commands like /commit, /review)
+    #[serde(default)]
     pub skills: Vec<AgentTool>,
     /// Internal tools (like Bash, Read, Write, Grep) - only via ReconSemantic
+    #[serde(default)]
     pub internal_tools: Vec<AgentTool>,
 }
 
@@ -387,6 +397,10 @@ pub enum NodeBroadcastMessage {
     EventLoggingSet {
         enabled: bool,
     },
+    /// Atomic agent registry update: rebuild registry from native agents + these scripts.
+    AgentRegistryUpdate {
+        scripts: Vec<String>,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -399,6 +413,8 @@ pub struct EventLogEntry {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeRegistrationAck {
     pub id: String,
+    #[serde(default)]
+    pub lua_scripts: Vec<String>,
 }
 
 //
@@ -548,6 +564,15 @@ pub enum ConfigCommand {
     SetReportInterval { interval_secs: u64 },
 }
 
+/// Agent registry commands — manage the full set of agents on a node.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum AgentRegistryCommand {
+    /// Atomic update: rebuild entire registry from native agents + these scripts.
+    Update { scripts: Vec<String> },
+    /// List currently registered Lua connectors.
+    List,
+}
+
 /// Top-level command envelope
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum NodeCommand {
@@ -556,12 +581,9 @@ pub enum NodeCommand {
     Intercept(InterceptCommand),
     Terminal(TerminalCommand),
     Config(ConfigCommand),
+    AgentRegistry(AgentRegistryCommand),
     /// Agent discovery commands (discover LLM endpoints on the network)
     AgentDiscovery(AgentDiscoveryCommand),
-    /// Create a dynamic agent from a discovered endpoint
-    CreateDynamicAgent(CreateDynamicAgentRequest),
-    /// Delete a dynamic agent
-    DeleteDynamicAgent(DeleteDynamicAgentRequest),
 }
 
 /// Command request sent from client to server (and relayed to node)
@@ -639,6 +661,15 @@ pub enum ConfigCommandResult {
     ReportIntervalSet { interval_secs: u64 },
 }
 
+/// Result of an agent registry command.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum AgentRegistryCommandResult {
+    /// Registry updated successfully.
+    Updated { agent_count: usize },
+    /// Lua agents listed.
+    Listed { agents: Vec<LuaRegisteredAgentInfo> },
+}
+
 /// Top-level command result envelope
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum NodeCommandResult {
@@ -647,12 +678,9 @@ pub enum NodeCommandResult {
     Intercept(InterceptCommandResult),
     Terminal(TerminalCommandResult),
     Config(ConfigCommandResult),
+    AgentRegistry(AgentRegistryCommandResult),
     /// Agent discovery command result
     AgentDiscovery(AgentDiscoveryCommandResult),
-    /// Dynamic agent created
-    DynamicAgentCreated { short_name: String },
-    /// Dynamic agent deleted
-    DynamicAgentDeleted { short_name: String },
     Error { message: String },
 }
 
@@ -1341,21 +1369,6 @@ pub enum ClientSignalMessage {
         /// Optional node_id filter. If None, returns all endpoints across all nodes.
         node_id: Option<String>,
     },
-    /// Create a dynamic agent from a discovered endpoint
-    CreateDynamicAgent {
-        client_id: String,
-        node_id: String,
-        endpoint_id: String,
-        agent_name: String,
-        short_name: String,
-    },
-    /// Delete a dynamic agent
-    DeleteDynamicAgent {
-        client_id: String,
-        node_id: String,
-        short_name: String,
-    },
-
     //
     // Node Event Log.
     //
@@ -1384,6 +1397,31 @@ pub enum ClientSignalMessage {
         client_id: String,
         node_id: String,
         agent_short_name: String,
+    },
+
+    //
+    // Lua agent scripts (stored in service database).
+    //
+    LuaAgentScriptAdd {
+        client_id: String,
+        name: String,
+        script: String,
+    },
+    LuaAgentScriptDelete {
+        client_id: String,
+        script_id: String,
+    },
+    LuaAgentScriptList {
+        client_id: String,
+    },
+    LuaAgentScriptUpdate {
+        client_id: String,
+        script_id: String,
+        name: String,
+        script: String,
+    },
+    LuaAgentScriptResetDefaults {
+        client_id: String,
     },
 
     //
@@ -1612,16 +1650,6 @@ pub enum ClientDirectMessage {
     DiscoveredEndpointsListResponse {
         endpoints: Vec<DiscoveredLlmEndpoint>,
     },
-    /// Dynamic agent created successfully
-    DynamicAgentCreated {
-        node_id: String,
-        short_name: String,
-    },
-    /// Dynamic agent deleted successfully
-    DynamicAgentDeleted {
-        node_id: String,
-        short_name: String,
-    },
     /// Agent discovery error
     AgentDiscoveryError {
         message: String,
@@ -1655,6 +1683,15 @@ pub enum ClientDirectMessage {
         /// Whether this was a semantic recon
         is_semantic: Option<bool>,
     },
+
+    //
+    // Lua agent script responses.
+    //
+    LuaAgentScriptAdded { id: String, name: String },
+    LuaAgentScriptDeleted { script_id: String, success: bool },
+    LuaAgentScriptListResponse { scripts: Vec<LuaAgentScriptInfo> },
+    LuaAgentScriptUpdated { id: String, name: String },
+    LuaAgentScriptDefaultsReset { count: usize },
 
     //
     // AgentChat responses.

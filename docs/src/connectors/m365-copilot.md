@@ -4,105 +4,89 @@ The M365 Copilot connector enables interaction with Microsoft 365 Copilot. **Win
 
 ## Overview
 
-Microsoft 365 Copilot is different from CLI-based agents-it runs in a browser. The connector supports two interaction modes: DevTools Protocol (default) and UI Automation.
+Microsoft 365 Copilot runs in a WebView2 browser component. The connector uses Chrome DevTools Protocol (CDP) via the `praxis.devtools` Lua library to interact with the Copilot UI programmatically.
+
+## Architecture
+
+```diagram
+agents/m365copilot.lua        ← Agent-specific: selectors, recon JS, config
+    ↓ uses
+praxis.devtools               ← Lua helper: generic transact loop, lifecycle
+    ↓ uses
+praxis.cdp_*                  ← Native Rust: CDP connection, JS eval, DOM ops
+```
+
+The M365 connector is a Lua agent (`agents/m365copilot.lua`) that uses the shared `praxis.devtools` library for DevTools session management and the native `praxis.cdp_*` API for CDP operations.
 
 ## Fingerprinting
 
-The connector checks for Copilot availability - whether the M365 Copilot web interface is accessible.
+The connector checks for Copilot availability:
+1. Searches for `M365Copilot.exe` in running processes
+2. Checks the Windows package install location (`Microsoft.MicrosoftOfficeHub`)
 
 ## Interception
 
-Traffic is intercepted for domains related to M365 Copilot:
-- `substrate.office.com`
-- Related Microsoft backend services
-
-The URL pattern filters for Copilot-specific API calls.
-
-## Session Modes
-
-### DevTools Mode (Default)
-
-Uses Chrome DevTools Protocol to interact with Copilot:
-
-```diagram
-┌───────────────────────────────────────────────────────┐
-│                      Praxis Node                      │
-│                                                       │
-│  ┌─────────────────────────────────────────────────┐  │
-│  │              DevTools Adapter                   │  │
-│  │                                                 │  │
-│  │  Browser ──CDP Connection──▶ Copilot Page       │  │
-│  │   │                          │                  │  │
-│  │   └─ Hidden Desktop ─────────┘                  │  │
-│  └─────────────────────────────────────────────────┘  │
-└───────────────────────────────────────────────────────┘
-```
-
-**How it works:**
-1. Launches app with webview component and remote debugging enabled
-2. Navigates to M365 Copilot
-3. Uses CDP to inject prompts and extract responses
-4. Runs on a hidden desktop to avoid interfering with user activity
-
-Set `PRAXIS_NOT_HIDDEN=1` to disable the hidden desktop. When disabled, the app spawns normally and is minimized after it's ready - useful for debugging.
-
-**Advantages:**
-- More reliable than UI automation
-- Faster response extraction
-- Works without visible UI
-
-### UI Automation Mode
-
-Uses Windows UI Automation to interact with the browser UI directly. **This mode is currently disabled in the default configuration and is not recommended for use.**
-
-**How it works:**
-1. Finds the browser window with Copilot
-2. Locates input and output elements via UI Automation
-3. Simulates typing and reads responses
-
-**Disadvantages:**
-- Flaky element detection
-- Slower and more fragile
-- Requires visible window
-- Breaks frequently with UI changes
-
-
-## Reconnaissance
-
-### Static Recon
-
-Limited compared to CLI agents:
-- Browser profile information
-- Copilot configuration (if accessible)
-
-### Semantic Recon
-
-Semantic recon attempts to discover:
-- Available Copilot capabilities
-- Connected M365 services
-- User context
+Traffic is intercepted for:
+- Domain: `substrate.office.com`
+- URL pattern: `m365Copilot/Chathub`
 
 ## Session Management
 
 ### Creating Sessions
 
 When you create a session:
-1. App with webview component launches with debugging port
-2. Hidden desktop is created (if enabled)
-3. CDP connection is established
-4. Copilot page loads and authenticates
+1. All running `M365Copilot.exe` processes are killed by name
+2. All existing CDP connections are drained and their process trees terminated
+3. App is launched with a random debugging port via `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`
+4. On Windows, the process is spawned on a **hidden desktop** so the window is invisible (release builds by default; debug builds default to visible). Override with `PRAXIS_NOT_HIDDEN=1` to show the window, or `PRAXIS_NOT_HIDDEN=0` to hide it in debug builds. If the hidden desktop cannot be created, the window is **minimized** after DevTools connects.
+5. CDP connection is established via chromiumoxide (5 attempts, 2s interval)
+6. Post-initialization: waits for input element, clicks Work/Web toggle, opens new private chat
 
 ### Transacting
 
-Prompts are sent by:
-1. Finding the input field via CDP
-2. Injecting the prompt text
-3. Triggering submission
-4. Waiting for and extracting the response
+The `praxis.devtools` library provides a generic transact loop:
+1. Waits for input element (`#m365-chat-editor-target-element`)
+2. Counts existing messages
+3. Clicks input, inserts text via CDP `InsertText` (handles emojis/special chars), presses Enter
+4. Polls for response (250ms interval, 120s max)
+5. Detects idle state (no activity for ~3s) and retries up to 3 times
 
-### Authentication
+Response completion is detected by checking:
+- New `div[data-testid="markdown-reply"]` elements
+- Absence of "Stop generating" button
+- Non-empty response text
 
-M365 Copilot requires Microsoft authentication. The session uses the user's existing browser profile and login state.
+### Aborting
+
+CDP sessions support `abort_transaction` — when a transaction is cancelled (e.g. via the web UI), the entire process tree is terminated by PID. The session state stores the `process_id` which the Rust session layer uses for process-level cancellation.
+
+### Cleanup Safety Net
+
+When a session is closed (or dropped), the Rust layer performs cleanup even if the Lua `session_close` callback fails:
+- Kills the process tree by PID
+- Removes the CDP connection handle from the global map
+
+This prevents orphaned browser processes after crashes or Lua errors.
+
+### Working Directories
+
+M365 Copilot supports two working directories that map to toggle buttons:
+- **Work** - Enterprise/organizational context
+- **Web** - Web search context
+
+## Reconnaissance
+
+### Static Recon
+
+Discovers user identity and available toggles by executing JavaScript in a temporary DevTools session:
+- User identity via `nestedAppAuthService` profile object (UPN and display name)
+- Available toggles (Work/Web) by checking for toggle button elements
+
+Recon requires a valid `process_path` from a prior fingerprint. If fingerprint hasn't run, recon returns empty results.
+
+### Semantic Recon
+
+Creates a temporary session and asks Copilot to list its tools, then parses the response with the semantic parser. Uses a dual-prompt fallback: tries a JSON-format prompt first, and if zero tools are parsed, retries with a high-level overview prompt.
 
 ## Requirements
 
@@ -115,19 +99,19 @@ M365 Copilot requires Microsoft authentication. The session uses the user's exis
 ### "Agent not fingerprinted"
 
 - Verify the user has M365 Copilot access
-- Check that Copilot works manually in a browser
+- Check that `M365Copilot.exe` is installed
 
 ### "Session creation failed"
 
-- Check app can launch with debugging enabled
+- Check that the app can launch with debugging enabled
 - Verify M365 authentication is valid
-- Look for firewall blocking debugging ports
+- Look for firewall blocking debugging ports (9222-9999 range)
 - Check node logs for CDP errors
+- Set `PRAXIS_NOT_HIDDEN=1` to see the app window for debugging
 
 ### "Responses not captured"
 
-- UI may have changed; report as an issue
-- Try DevTools mode if using UI Automation
+- UI selectors may have changed; report as an issue
 - Check for Copilot page structure changes
 
 ## Limitations

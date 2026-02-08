@@ -1157,6 +1157,7 @@ impl NodeInterceptManager {
     }
 
     /// Get a reference to the agent discovery manager (Arc-wrapped)
+    #[allow(dead_code)]
     pub fn agent_discovery(&self) -> &Arc<RwLock<AgentDiscoveryManager>> {
         &self.agent_discovery
     }

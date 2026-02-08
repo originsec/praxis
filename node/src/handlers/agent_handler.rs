@@ -5,6 +5,39 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
 
 //
+// Maximum content size for file reads sent over RabbitMQ. Leave headroom
+// below the 16MB default message limit for JSON envelope overhead.
+//
+
+const MAX_CONTENT_SIZE: usize = 14 * 1024 * 1024;
+
+fn truncate_content(content: String) -> (String, bool) {
+    if content.len() <= MAX_CONTENT_SIZE {
+        return (content, false);
+    }
+
+    //
+    // Truncate at the last newline before the limit to avoid splitting
+    // lines (important for JSONL session files).
+    //
+
+    let end = match content[..MAX_CONTENT_SIZE].rfind('\n') {
+        Some(pos) => pos + 1,
+        None => {
+            let mut end = MAX_CONTENT_SIZE;
+            while !content.is_char_boundary(end) {
+                end -= 1;
+            }
+            end
+        }
+    };
+
+    let mut truncated = content;
+    truncated.truncate(end);
+    (truncated, true)
+}
+
+//
 // Check if a path is within any valid user home directory. Uses the same
 // enumeration logic as recon to ensure consistency.
 //
@@ -229,46 +262,43 @@ pub async fn handle_agent_command(
         }
         AgentCommand::GetSessionContent { session_file } => {
             //
-            // Validate path is within a valid user home directory for security.
+            // Delegate to the selected agent's read_session_content, which
+            // handles virtual paths (e.g. SQLite-backed sessions) as well as
+            // plain files. Path validation is the agent's responsibility for
+            // virtual paths; for real files the default impl reads directly.
             //
-            let target_path = Path::new(&session_file);
-            let canonical_path = match target_path.canonicalize() {
-                Ok(p) => p,
-                Err(e) => {
-                    return NodeCommandResult::Agent(AgentCommandResult::SessionContent {
-                        session_file,
-                        content: None,
-                        error: Some(format!("Invalid path: {}", e)),
-                    });
-                }
-            };
 
-            if !is_path_in_valid_home(&canonical_path) {
-                return NodeCommandResult::Agent(AgentCommandResult::SessionContent {
-                    session_file,
-                    content: None,
-                    error: Some("Path must be within a valid user home directory".to_string()),
-                });
-            }
+            let locked = selected_agent.lock().unwrap();
+            let agent = locked.as_ref();
 
-            //
-            // Read the session file.
-            //
-            match std::fs::read_to_string(&session_file) {
-                Ok(content) => {
+            let content = agent.and_then(|a| a.read_session_content(&session_file));
+
+            match content {
+                Some(content) => {
+                    let (content, truncated) = truncate_content(content);
+                    if truncated {
+                        common::log_warn!(
+                            "Session file {} truncated to {} bytes",
+                            session_file, content.len()
+                        );
+                    }
                     common::log_info!("Read session file: {}", session_file);
                     NodeCommandResult::Agent(AgentCommandResult::SessionContent {
                         session_file,
                         content: Some(content),
-                        error: None,
+                        error: if truncated {
+                            Some("Content truncated due to size limit".to_string())
+                        } else {
+                            None
+                        },
                     })
                 }
-                Err(e) => {
-                    common::log_warn!("Failed to read session file {}: {}", session_file, e);
+                None => {
+                    common::log_warn!("Failed to read session file: {}", session_file);
                     NodeCommandResult::Agent(AgentCommandResult::SessionContent {
                         session_file,
                         content: None,
-                        error: Some(format!("Failed to read file: {}", e)),
+                        error: Some("Failed to read session content".to_string()),
                     })
                 }
             }
@@ -302,11 +332,22 @@ pub async fn handle_agent_command(
             //
             match std::fs::read_to_string(&config_path) {
                 Ok(content) => {
+                    let (content, truncated) = truncate_content(content);
+                    if truncated {
+                        common::log_warn!(
+                            "Config file {} truncated to {} bytes",
+                            config_path, content.len()
+                        );
+                    }
                     common::log_info!("Read config file: {}", config_path);
                     NodeCommandResult::Agent(AgentCommandResult::ConfigContent {
                         config_path,
                         content: Some(content),
-                        error: None,
+                        error: if truncated {
+                            Some("Content truncated due to size limit".to_string())
+                        } else {
+                            None
+                        },
                     })
                 }
                 Err(e) => {
