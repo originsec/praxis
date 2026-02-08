@@ -6,7 +6,7 @@ Agent connectors are the modules that let Praxis interact with specific AI agent
 
 A connector handles four main capabilities:
 
-**Fingerprinting** - Detecting whether an agent is installed and getting its process path. This usually means checking for config files, finding running processes, or looking in common installation locations.
+**Fingerprinting** - Detecting whether an agent is installed, finding its executable path, and extracting its version. The `helpers.find_executable` Lua helper searches PATH, explicit directories, and version manager installations. Version is extracted by running `--version` and parsing the output.
 
 **Interception** - Knowing which domains the agent talks to so traffic can be captured.
 
@@ -37,7 +37,8 @@ Connectors implement a set of Rust traits:
 trait Agent {
     fn name(&self) -> &str;
     fn short_name(&self) -> &str;
-    async fn do_fingerprint(&self) -> bool;
+    async fn do_fingerprint(&self) -> bool;  // cached for 60s when available
+    fn version(&self) -> Option<String>;     // extracted during fingerprinting
     fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>>;
     // ...
 }
@@ -109,6 +110,16 @@ For Lua connectors, add a `.lua` file to the `agents/` directory or upload it th
 
 ## Connector Selection
 
-When a node starts, it runs fingerprinting for all registered connectors. Any agent that fingerprints successfully gets added to the node's agent list and reported to the service.
+When a node starts, it runs fingerprinting for all registered connectors. Any agent that fingerprints successfully gets added to the node's agent list and reported to the service. Agent version is also extracted and displayed in the web UI.
+
+Fingerprint results are cached for 60 seconds when the agent is available. Agents that are not found are re-checked on every cycle so they are discovered as soon as they are installed.
 
 The factory in `node/src/agent_connectors/factory.rs` creates native connector instances for platform-specific agents (e.g. M365 Copilot on Windows). Most connectors (Claude Code, Codex, Cursor, Gemini) are Lua-based and loaded from embedded scripts or the service database.
+
+## Development Builds
+
+In debug builds, the environment variable `PRAXIS_IGNORE_SERVICE_AGENTS` controls whether the node uses Lua scripts pushed from the service or only its embedded scripts. It defaults to `1` (ignore service scripts) for development convenience. Set it to `0` to test service-managed scripts:
+
+```bash
+PRAXIS_IGNORE_SERVICE_AGENTS=0 cargo run --bin praxis_node
+```

@@ -38,17 +38,34 @@ The agent registry manages all supported agent connectors. On startup the
 registry is built via `rebuild()` which:
 
 1. Creates native agents from the factory (platform-specific connectors like M365 Copilot)
-2. Loads embedded Lua connectors (Claude Code, Codex, Cursor, Gemini)
-3. Loads Lua connectors from `~/.praxis/agents/`
+2. Loads Lua connectors from the service (delivered in the `RegistrationAck` message)
+3. Falls back to embedded Lua scripts if no service scripts are provided
 
-After the node registers with the service, the service broadcasts an
-`AgentRegistryUpdate` containing all centrally-managed Lua scripts. The node
-atomically rebuilds its registry to include these scripts alongside native and
-local Lua agents.
+The service includes all stored Lua scripts in the `NodeRegistrationAck` sent
+to the node's direct queue during registration. This avoids a race condition
+where a fanout broadcast could arrive before the node's exchange consumer is
+ready. On re-registration (e.g. after connection loss), scripts are also
+delivered via the ack.
+
+Subsequent script changes (add/edit/delete via the web UI) are broadcast to
+nodes via `AgentRegistryUpdate` on the fanout exchange.
 
 Updates are session-gated: if a session is open when an update arrives, it is
 queued and applied after the session closes. If multiple updates arrive while a
 session is open, only the latest is kept.
+
+### Fingerprint Caching
+
+Fingerprinting runs `--version` on each agent binary to verify availability and
+extract the version string. Results are cached for 60 seconds when the agent is
+available. Unavailable agents (not installed) are re-checked on every cycle so
+they are discovered as soon as they appear.
+
+### Development Builds
+
+In debug builds, `PRAXIS_IGNORE_SERVICE_AGENTS=1` (the default) causes the node
+to ignore service-pushed scripts and use only embedded Lua scripts. Set to `0`
+to test with service-managed scripts.
 
 ## Intercept Manager
 

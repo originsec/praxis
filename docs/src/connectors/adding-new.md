@@ -1,18 +1,133 @@
 # Adding New Connectors
 
-This guide walks through creating a connector for a new AI agent. We'll use a hypothetical "ExampleAI" CLI tool as our example.
+This guide walks through creating a connector for a new AI agent.
 
-## Overview
+**Prefer Lua connectors** for CLI-based agents. Lua scripts are easier to write, can be updated at runtime via the web UI without recompiling, and share common helpers for executable discovery, version extraction, and multi-user support. Use Rust connectors only when you need OS-level capabilities (DevTools, UI automation, process injection) that aren't exposed through the Lua API.
 
-A connector needs to implement:
+## Lua Connector (Recommended for CLI agents)
 
-1. **Fingerprinting** - Detect if the agent is installed
-2. **The Agent trait** - Core functionality
-3. **Optionally: AgentIntercept** - Traffic interception domains
-4. **Optionally: AgentRecon** - Reconnaissance capability
-5. **Session management** - Interactive sessions
+Lua agent scripts live in `agents/` at the project root and are embedded into binaries at build time. They can also be uploaded via the web UI (Settings > Agents).
 
-## Step 1: Create the Directory Structure
+### Script Structure
+
+A Lua connector returns a table with a `name`, `short_name`, and callback functions:
+
+```lua
+local helpers = require("praxis.helpers")
+
+local process_path = nil
+local process_version = nil
+
+local function verify_binary(path)
+  local result = praxis.command_run({ program = path, args = { "--version" } })
+  if result.success then
+    local version = (result.stdout or ""):match("(%d[%d%.%-a-zA-Z]*)")
+    return true, version
+  end
+  return false, nil
+end
+
+local function pick_path()
+  return helpers.find_executable({
+    name = "exampleai",
+    global_dirs = {
+      default = { "/usr/local/bin", "/usr/bin" },
+    },
+    home_dirs = {
+      default = { "${HOME}/.local/bin" },
+      windows = { "${USERPROFILE}\\.local\\bin" },
+    },
+    verify = verify_binary,
+  })
+end
+
+return {
+  name = "Example AI",
+  short_name = "exampleai",
+
+  fingerprint = function(_ctx)
+    process_path, process_version = pick_path()
+    return {
+      available = process_path ~= nil,
+      process_path = process_path,
+      version = process_version,
+    }
+  end,
+
+  -- Optional: traffic interception domains
+  intercept_domains = function(_ctx)
+    return { "api.exampleai.com" }
+  end,
+
+  -- Optional: reconnaissance
+  recon = function(is_semantic)
+    -- Discover config files, sessions, tools
+    return { config = {}, sessions = {}, project_paths = {} }
+  end,
+
+  -- Required for sessions
+  create_session = function(ctx)
+    return {
+      handle = praxis.uuid_v4(),
+      process_path = ctx.process_path or process_path,
+      working_dir = ctx.working_dir,
+    }
+  end,
+
+  session_transact = function(_ctx, state, prompt)
+    local result = praxis.command_run_handle({
+      program = state.process_path,
+      args = { "--prompt", "-" },
+      cwd = state.working_dir,
+      stdin = prompt,
+    }, state.handle)
+    return { response = result.stdout or "", state = state }
+  end,
+
+  session_close = function(_ctx, state)
+    -- Cleanup if needed
+  end,
+}
+```
+
+### `helpers.find_executable` Config
+
+The `find_executable` helper searches for an agent binary in 4 phases:
+
+1. **PATH search** via `praxis.find_executables(name)` - searches the system PATH
+2. **Global directories** - explicit absolute paths (e.g. `/usr/local/bin`)
+3. **Home directories** - templates expanded per user home (e.g. `${HOME}/.local/bin`)
+4. **Glob patterns** - for version manager installations (e.g. nvm, mise)
+
+On Windows, `.cmd` is tried before `.exe` for each directory. The `verify` function receives a candidate path and returns `(passed, version)`.
+
+Config fields:
+- `name` (string) - executable name for PATH search and path construction
+- `global_dirs` (table) - `{ default = {...}, windows = {...} }` absolute directories
+- `home_dirs` (table) - same shape, directory templates with `${HOME}` etc.
+- `glob_paths` (table) - full glob patterns (wildcards embedded in path)
+- `verify` (function) - `fn(path) -> passed, version`
+
+OS resolution: `tbl[os_name] or tbl.default or {}` where `os_name` is `"linux"`, `"macos"`, or `"windows"`.
+
+### Available Lua APIs
+
+The `praxis` global provides filesystem operations (`path_exists`, `path_join`, `read_file`, `walk_files`, `glob_files`), command execution (`command_run`, `command_run_handle`), environment access (`os_name`, `user_homes`, `env_get`, `expand_path`), and utilities (`json_decode`, `toml_decode`, `uuid_v4`, `now_unix`, `log_info`, `log_warn`).
+
+The `helpers` module (`require("praxis.helpers")`) provides `find_executable`, `expand_path`, `starts_with`, `ends_with`, `dedup`, `parse_json`, `parse_toml`, `user_homes_with_dir`, `for_each_user_home_coalesce`, `new_recon_result`, `merge_recon_result`, `discover_internal_tools`, and `extract_metadata`.
+
+### Deploying
+
+- **Embedded**: Add the `.lua` file to `agents/` and rebuild. It will be compiled into both node and service binaries.
+- **Runtime**: Upload via Settings > Agents in the web UI. The script is stored in the service database and pushed to all connected nodes.
+
+---
+
+## Rust Connector (for native/OS-level agents)
+
+Use this approach only when Lua cannot access the required OS capabilities. The M365 Copilot connector is the primary example — it uses Windows DevTools and UI Automation APIs.
+
+### Step 1: Create the Directory Structure
 
 Create a new directory under `node/src/agent_connectors/`:
 
