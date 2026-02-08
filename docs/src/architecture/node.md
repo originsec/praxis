@@ -166,10 +166,11 @@ Sessions allow direct interaction with agents:
 
 ### Browser-based Agents
 
-1. App with webview launched with debugging enabled
-2. CDP connection established
-3. Prompts injected via DOM manipulation
-4. Responses extracted from page
+1. App with webview launched with debugging enabled (on a hidden desktop by default)
+2. CDP connection established via chromiumoxide
+3. Prompts injected via DOM manipulation (InsertText + Enter)
+4. Responses polled from page via JavaScript evaluation
+5. Abort kills the entire process tree; Drop safety net cleans up even on Lua errors
 
 ### Session Context
 

@@ -34,7 +34,7 @@ See [Database Configuration](../deployment/database.md) for detailed setup.
 | Variable | Effect |
 |----------|--------|
 | `PRAXIS_SKIP_FRONTEND` | Skip frontend build during `cargo build` |
-| `PRAXIS_NOT_HIDDEN` | Don't use hidden desktop for DevTools mode (debugging) |
+| `PRAXIS_NOT_HIDDEN` | Set to `1` to disable hidden desktop for DevTools agents (makes the browser window visible for debugging) |
 
 ### Logging
 

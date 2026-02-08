@@ -4,9 +4,15 @@ This guide walks through creating a connector for a new AI agent.
 
 **Prefer Lua connectors** for all agents. Lua scripts are easier to write, can be updated at runtime via the web UI without recompiling, and share common helpers for executable discovery, version extraction, and multi-user support. For browser-based agents, the `praxis.devtools` Lua library and `praxis.cdp_*` native API provide Chrome DevTools Protocol support (see M365 Copilot as an example). Use Rust connectors only when you need OS-level capabilities that aren't exposed through the Lua API.
 
-## Lua Connector (Recommended for CLI agents)
+## Lua Connector (Recommended)
 
 Lua agent scripts live in `agents/` at the project root and are embedded into binaries at build time. They can also be uploaded via the web UI (Settings > Agents).
+
+### CLI Agents vs Browser-Based Agents
+
+For **CLI agents** (e.g. Claude Code, Gemini CLI), use `praxis.command_run` / `praxis.command_run_handle` to spawn processes and interact via stdin/stdout.
+
+For **browser-based agents** (e.g. M365 Copilot), use the `praxis.devtools` library and `praxis.cdp_*` native API to drive the agent via Chrome DevTools Protocol. See [DevTools-Based Agents](#devtools-based-agents-browser-automation) below.
 
 ### Script Structure
 
@@ -112,16 +118,229 @@ OS resolution: `tbl[os_name] or tbl.default or {}` where `os_name` is `"linux"`,
 
 ### Available Lua APIs
 
-The `praxis` global provides filesystem operations (`path_exists`, `path_join`, `read_file`, `walk_files`, `glob_files`), command execution (`command_run`, `command_run_handle`), environment access (`os_name`, `user_homes`, `env_get`, `expand_path`), and utilities (`json_decode`, `toml_decode`, `uuid_v4`, `now_unix`, `log_info`, `log_warn`).
+The `praxis` global provides:
+
+- **Filesystem**: `path_exists`, `path_join`, `read_file`, `walk_files`, `glob_files`
+- **Commands**: `command_run`, `command_run_handle`, `command_abort_handle`
+- **Environment**: `os_name`, `user_homes`, `env_get`, `expand_path`
+- **Process**: `find_executables`, `kill_processes_by_name`
+- **CDP**: `cdp_spawn_and_connect`, `cdp_connect`, `cdp_evaluate`, `cdp_click`, `cdp_type_text`, `cdp_press_key`, `cdp_wait_for_element`, `cdp_find_elements`, `cdp_close`, `cdp_process_id`
+- **Utilities**: `json_decode`, `toml_decode`, `uuid_v4`, `now_unix`, `sleep_ms`, `log_info`, `log_warn`
 
 The `helpers` module (`require("praxis.helpers")`) provides `find_executable`, `expand_path`, `starts_with`, `ends_with`, `dedup`, `parse_json`, `parse_toml`, `user_homes_with_dir`, `for_each_user_home_coalesce`, `new_recon_result`, `merge_recon_result`, `discover_internal_tools`, and `extract_metadata`.
 
-The `devtools` module (`require("praxis.devtools")`) provides `connect`, `transact`, and `close` for browser-based agents using Chrome DevTools Protocol. The native `praxis.cdp_*` functions (`cdp_spawn_and_connect`, `cdp_evaluate`, `cdp_click`, `cdp_type_text`, `cdp_press_key`, `cdp_wait_for_element`, `cdp_find_elements`, `cdp_close`, `cdp_process_id`) provide low-level CDP operations.
+The `devtools` module (`require("praxis.devtools")`) provides `connect`, `transact`, and `close` for browser-based agents using Chrome DevTools Protocol. See [DevTools-Based Agents](#devtools-based-agents-browser-automation) below.
 
 ### Deploying
 
 - **Embedded**: Add the `.lua` file to `agents/` and rebuild. It will be compiled into both node and service binaries.
 - **Runtime**: Upload via Settings > Agents in the web UI. The script is stored in the service database and pushed to all connected nodes.
+
+---
+
+## DevTools-Based Agents (Browser Automation)
+
+For agents that run in a browser or WebView (e.g. M365 Copilot), Praxis provides a CDP (Chrome DevTools Protocol) stack. The architecture has three layers:
+
+```
+your_agent.lua               ← Agent-specific: CSS selectors, response parsing
+    ↓ uses
+require("praxis.devtools")   ← Generic transact loop, connect/close lifecycle
+    ↓ uses
+praxis.cdp_*                 ← Native Rust: CDP connection, JS eval, DOM ops
+```
+
+### The `devtools` Module
+
+`require("praxis.devtools")` provides three functions:
+
+| Function | Description |
+|----------|-------------|
+| `devtools.connect(config)` | Spawn a process with a debug port, connect via CDP, return a handle string |
+| `devtools.transact(handle, adapter, prompt)` | Send a prompt and poll for response using the adapter's selectors |
+| `devtools.close(handle)` | Close the CDP connection and terminate the process tree |
+
+The `connect` config table:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `process_path` | string | Path to the executable |
+| `debug_port_env_var` | string | Environment variable for the debug port argument |
+| `debug_port_format` | string | Format string, e.g. `"--remote-debugging-port={}"` |
+| `base_port` | number | Base port number (random offset added) |
+| `port_range` | number | Range for random port selection (default 778) |
+| `kill_existing` | bool | Kill existing processes first (default true) |
+| `use_hidden_desktop` | bool | Spawn on hidden desktop on Windows (default true) |
+
+### The Adapter Table
+
+The `transact` function takes an adapter table that defines how to interact with the specific agent's UI:
+
+```lua
+local my_adapter = {
+  -- CSS selector for the text input element (required)
+  input_selector = '#chat-input',
+
+  -- CSS selector for response message elements (required)
+  message_selector = 'div.response-message',
+
+  -- Check response state by running JS in the page (required)
+  -- Returns: { response = string|nil, is_generating = bool, has_new_messages = bool }
+  check_response_state = function(handle, initial_count)
+    local result = praxis.cdp_evaluate(handle, [[
+      (function() {
+        var messages = document.querySelectorAll('div.response-message');
+        var text = '';
+        if (messages.length > 0) {
+          text = messages[messages.length - 1].innerText.trim();
+        }
+        var loading = document.querySelector('.loading-indicator');
+        return {
+          responseText: text,
+          messageCount: messages.length,
+          isGenerating: loading !== null
+        };
+      })()
+    ]])
+
+    local count = (result and result.messageCount) or 0
+    local generating = (result and result.isGenerating) or false
+    local text = (result and result.responseText) or ""
+
+    local response = nil
+    if count > initial_count and not generating and #text > 0 then
+      response = text
+    end
+
+    return {
+      response = response,
+      is_generating = generating,
+      has_new_messages = count > initial_count,
+    }
+  end,
+
+  -- Optional: wait for submit button to be enabled before pressing Enter
+  wait_for_submit_ready = function(handle)
+    praxis.cdp_wait_for_element(handle, 'button.send:not([disabled])', 50, 100)
+  end,
+}
+```
+
+### Full Example
+
+Here is a minimal DevTools-based agent:
+
+```lua
+local devtools = require("praxis.devtools")
+
+local PROCESS_NAME = "MyAgent.exe"
+local process_path = nil
+
+local my_adapter = {
+  input_selector = '#chat-input',
+  message_selector = 'div.assistant-message',
+
+  check_response_state = function(handle, initial_count)
+    local result = praxis.cdp_evaluate(handle, [[
+      (function() {
+        var msgs = document.querySelectorAll('div.assistant-message');
+        var text = msgs.length > 0
+          ? msgs[msgs.length - 1].innerText.trim() : '';
+        var busy = document.querySelector('.spinner') !== null;
+        return { text: text, count: msgs.length, busy: busy };
+      })()
+    ]])
+    local count = (result and result.count) or 0
+    local busy = (result and result.busy) or false
+    local text = (result and result.text) or ""
+    local response = nil
+    if count > initial_count and not busy and #text > 0 then
+      response = text
+    end
+    return {
+      response = response,
+      is_generating = busy,
+      has_new_messages = count > initial_count,
+    }
+  end,
+}
+
+return {
+  name = "My Agent",
+  short_name = "myagent",
+
+  fingerprint = function(_ctx)
+    if praxis.os_name() ~= "windows" then
+      return { available = false }
+    end
+    local paths = praxis.find_executables(PROCESS_NAME) or {}
+    if #paths > 0 then
+      process_path = paths[1]
+      return { available = true, process_path = process_path }
+    end
+    return { available = false }
+  end,
+
+  create_session = function(ctx)
+    praxis.kill_processes_by_name(PROCESS_NAME)
+    praxis.sleep_ms(500)
+
+    local handle = devtools.connect({
+      process_path = ctx.process_path,
+      debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+      debug_port_format = "--remote-debugging-port={}",
+      base_port = 9222,
+      port_range = 778,
+    })
+
+    -- Wait for the UI to be ready
+    praxis.cdp_wait_for_element(handle, my_adapter.input_selector, 30, 300)
+
+    local pid = praxis.cdp_process_id(handle)
+    return {
+      handle = handle,
+      cdp_handle = handle,
+      process_id = pid,
+    }
+  end,
+
+  session_transact = function(_ctx, state, prompt)
+    local response = devtools.transact(state.cdp_handle, my_adapter, prompt)
+    return { response = response, state = state }
+  end,
+
+  session_close = function(_ctx, state)
+    if state and state.cdp_handle then
+      devtools.close(state.cdp_handle)
+    end
+  end,
+}
+```
+
+### Session State Keys
+
+For CDP sessions to support abort and cleanup, the session state returned by `create_session` should include:
+
+- `handle` — used by the Rust session layer for command abort lookup
+- `cdp_handle` — the CDP connection handle string (cleaned up by Rust on drop)
+- `process_id` — the spawned process PID (killed by Rust on abort or drop)
+
+### CDP API Reference
+
+Low-level functions available on the `praxis` global:
+
+| Function | Arguments | Returns | Description |
+|----------|-----------|---------|-------------|
+| `cdp_spawn_and_connect` | config table | handle string | Spawn process, connect via CDP |
+| `cdp_connect` | port (number) | handle string | Connect to existing DevTools endpoint |
+| `cdp_evaluate` | handle, js (string) | value | Execute JavaScript, return result |
+| `cdp_find_elements` | handle, selector | count (number) | Count matching DOM elements |
+| `cdp_click` | handle, selector | — | Click an element |
+| `cdp_type_text` | handle, text | — | Insert text via CDP InsertText (handles emojis) |
+| `cdp_press_key` | handle, selector, key | — | Press a key on an element |
+| `cdp_wait_for_element` | handle, selector, retries, delay_ms | bool | Poll for element existence |
+| `cdp_close` | handle | — | Close connection, terminate process |
+| `cdp_process_id` | handle | number or nil | Get PID of spawned process |
 
 ---
 
