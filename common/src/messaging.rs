@@ -413,6 +413,8 @@ pub struct EventLogEntry {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeRegistrationAck {
     pub id: String,
+    #[serde(default)]
+    pub lua_scripts: Vec<String>,
 }
 
 //

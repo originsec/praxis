@@ -6,13 +6,14 @@ use tokio_util::sync::CancellationToken;
 use crate::utils;
 use common::{
     publish_json, node_queue_name, rabbitmq_url, NodeDirectMessage, NodeRegistration,
-    NodeSignalMessage, NODE_SIGNAL_QUEUE,
+    NodeRegistrationAck, NodeSignalMessage, NODE_SIGNAL_QUEUE,
 };
 
 pub struct RegistrationResult {
     pub node_id: String,
     pub node_queue: String,
     pub channel: Channel,
+    pub lua_scripts: Vec<String>,
 }
 
 pub async fn publish_registration(channel: &Channel, node_id: &str) -> Result<()> {
@@ -36,7 +37,7 @@ pub async fn wait_for_registration_ack(
     channel: &Channel,
     node_queue: &str,
     shutdown_token: &CancellationToken,
-) -> Result<bool> {
+) -> Result<Option<NodeRegistrationAck>> {
     let consumer_tag = "node-registration-consumer";
     let mut consumer = channel
         .basic_consume(
@@ -54,11 +55,11 @@ pub async fn wait_for_registration_ack(
             while let Some(delivery_result) = consumer.next().await {
                 match delivery_result {
                     Ok(delivery) => {
-                        if let Ok(NodeDirectMessage::RegistrationAck(_)) =
+                        if let Ok(NodeDirectMessage::RegistrationAck(ack)) =
                             serde_json::from_slice::<NodeDirectMessage>(&delivery.data)
                         {
                             delivery.ack(BasicAckOptions::default()).await.ok();
-                            return Ok(true);
+                            return Ok(Some(ack));
                         }
                     }
                     Err(e) => {
@@ -76,7 +77,7 @@ pub async fn wait_for_registration_ack(
             }
         }
         _ = shutdown_token.cancelled() => {
-            Ok(false)
+            Ok(None)
         }
     };
 
@@ -199,14 +200,15 @@ pub async fn register_with_service(
         // Wait for acknowledgment.
         //
         match wait_for_registration_ack(&channel, &node_queue, &shutdown_token).await {
-            Ok(true) => {
+            Ok(Some(ack)) => {
                 return Ok(Some(RegistrationResult {
                     node_id,
                     node_queue,
                     channel,
+                    lua_scripts: ack.lua_scripts,
                 }));
             }
-            Ok(false) => {
+            Ok(None) => {
                 return Ok(None);
             }
             Err(e) => {

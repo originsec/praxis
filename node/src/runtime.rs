@@ -28,8 +28,9 @@ pub async fn run(
     selected_agent: Arc<Mutex<Option<Arc<dyn Agent>>>>,
     factory: Arc<AgentFactory>,
     shutdown_token: CancellationToken,
+    lua_scripts: Vec<String>,
 ) -> anyhow::Result<()> {
-    listen_to_queues(channel, node_id, node_queue, registry, selected_agent, factory, shutdown_token).await
+    listen_to_queues(channel, node_id, node_queue, registry, selected_agent, factory, shutdown_token, lua_scripts).await
 }
 
 async fn listen_to_queues(
@@ -40,6 +41,7 @@ async fn listen_to_queues(
     selected_agent: Arc<Mutex<Option<Arc<dyn Agent>>>>,
     factory: Arc<AgentFactory>,
     shutdown_token: CancellationToken,
+    lua_scripts: Vec<String>,
 ) -> anyhow::Result<()> {
     //
     // Create a private broadcast queue bound to the fanout exchange.
@@ -410,6 +412,24 @@ async fn listen_to_queues(
 
     let mut pending_registry_update: Option<Vec<String>> = None;
 
+    //
+    // Rebuild agent registry with Lua scripts received in the RegistrationAck.
+    //
+
+    if !lua_scripts.is_empty() {
+        common::log_info!(
+            "Rebuilding agent registry with {} scripts from service",
+            lua_scripts.len()
+        );
+        handle_agent_registry_update(
+            lua_scripts,
+            &registry,
+            &selected_agent,
+            &factory,
+        )
+        .await;
+    }
+
     common::log_info!(
         "Listening to queues: {} (exchange), {}",
         NODE_BROADCAST_EXCHANGE,
@@ -501,24 +521,24 @@ async fn listen_to_queues(
                     Ok(delivery) => {
                         match serde_json::from_slice::<NodeDirectMessage>(&delivery.data) {
                             Ok(message) => match message {
-                                NodeDirectMessage::RegistrationAck(_ack) => {
-                                    common::log_info!("Received registration acknowledgment from service");
-                                    //
-                                    // Send initial node information update.
-                                    //
-                                    if let Err(e) = send_node_information_update(
-                                        &channel,
-                                        &node_id,
-                                        &registry,
-                                        &selected_agent,
-                                        &node_state,
-                                    )
-                                    .await
-                                    {
-                                        common::log_error!(
-                                            "Failed to send initial information update: {}",
-                                            e
+                                NodeDirectMessage::RegistrationAck(ack) => {
+                                    if !ack.lua_scripts.is_empty() {
+                                        common::log_info!(
+                                            "Re-registration: rebuilding registry with {} scripts",
+                                            ack.lua_scripts.len()
                                         );
+                                        handle_agent_registry_update(
+                                            ack.lua_scripts,
+                                            &registry,
+                                            &selected_agent,
+                                            &factory,
+                                        )
+                                        .await;
+                                        if let Err(e) = send_node_information_update(
+                                            &channel, &node_id, &registry, &selected_agent, &node_state,
+                                        ).await {
+                                            common::log_error!("Failed to send info update after re-registration: {}", e);
+                                        }
                                     }
                                 }
                                 NodeDirectMessage::Command(cmd_request) => {

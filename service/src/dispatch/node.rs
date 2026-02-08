@@ -21,7 +21,28 @@ use super::ServiceContext;
 pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<()> {
     match message {
         NodeSignalMessage::Registration(registration) => {
-            if let Err(e) = ctx.node_handler.handle_node_registration(registration).await {
+            //
+            // Load Lua scripts and include them in the ack sent to the node's
+            // direct queue. This avoids a race where a fanout broadcast arrives
+            // before the node binds its consumer to the exchange.
+            //
+
+            let lua_scripts = match ctx.database.get_all_lua_scripts().await {
+                Ok(scripts) => scripts
+                    .iter()
+                    .map(|s| STANDARD.encode(s.as_bytes()))
+                    .collect(),
+                Err(e) => {
+                    error!("Failed to load Lua scripts for registration ack: {}", e);
+                    Vec::new()
+                }
+            };
+
+            if let Err(e) = ctx
+                .node_handler
+                .handle_node_registration(registration, lua_scripts)
+                .await
+            {
                 error!("Failed to handle NodeRegistration: {}", e);
             }
 
@@ -37,36 +58,6 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             let _ = publish_json_exchange(&ctx.broadcast_channel, NODE_BROADCAST_EXCHANGE, &node_message).await;
             let client_message = ClientBroadcastMessage::EventLoggingSet { enabled };
             let _ = publish_json_exchange(&ctx.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &client_message).await;
-
-            //
-            // Broadcast AgentRegistryUpdate with all stored Lua scripts so the
-            // newly registered node (and all existing nodes) rebuild their
-            // registries.
-            //
-
-            match ctx.database.get_all_lua_scripts().await {
-                Ok(scripts) => {
-                    let script_count = scripts.len();
-                    let scripts: Vec<String> = scripts
-                        .iter()
-                        .map(|s| STANDARD.encode(s.as_bytes()))
-                        .collect();
-                    let update = NodeBroadcastMessage::AgentRegistryUpdate { scripts };
-                    match publish_json_exchange(
-                        &ctx.broadcast_channel,
-                        NODE_BROADCAST_EXCHANGE,
-                        &update,
-                    )
-                    .await
-                    {
-                        Ok(_) => info!("Broadcast AgentRegistryUpdate ({} scripts) on node registration", script_count),
-                        Err(e) => error!("Failed to broadcast AgentRegistryUpdate: {}", e),
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to load Lua scripts for registry update: {}", e);
-                }
-            }
         }
 
         NodeSignalMessage::InformationUpdate(update) => {

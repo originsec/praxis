@@ -165,6 +165,7 @@ async fn main() {
             selected_agent,
             factory.clone(),
             shutdown_token.clone(),
+            result.lua_scripts,
         )
         .await
         {
