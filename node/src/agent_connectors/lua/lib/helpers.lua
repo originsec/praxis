@@ -205,26 +205,42 @@ end
 -- session_fns = { create = fn, transact = fn, close = fn }
 --
 function M.discover_internal_tools(session_opts, session_fns)
-  local state = session_fns.create(session_opts)
-  if state == nil then
-    praxis.log_warn("discover_internal_tools: create returned nil")
-    return {}
+  local prompts = {
+    "What tools do you have that you can use to help me? High level overview. "
+      .. "Respond as json in format - complete this json: "
+      .. "{ tools: [{'toolName': toolname, 'toolDescription:' ...",
+    "What tools do you have that you can use to help me? High level overview "
+      .. "of each tool with a name an description. Don't leave any out...",
+  }
+
+  for i, prompt in ipairs(prompts) do
+    local state = session_fns.create(session_opts)
+    if state == nil then
+      praxis.log_warn("discover_internal_tools: create returned nil")
+      return {}
+    end
+
+    praxis.log_info("discover_internal_tools: attempt " .. i .. "/" .. #prompts)
+    local tools = {}
+    local ok, result = pcall(session_fns.transact, state, prompt)
+    if ok and result then
+      local response = result.response or ""
+      praxis.log_info("discover_internal_tools: got response (" .. #response .. " bytes)")
+      tools = praxis.semantic_discover_internal_tools(response)
+      praxis.log_info("discover_internal_tools: parsed " .. #tools .. " tools")
+    elseif not ok then
+      praxis.log_warn("discover_internal_tools: transact failed: " .. tostring(result))
+    end
+    pcall(session_fns.close, state)
+
+    if #tools > 0 then
+      return tools
+    end
+
+    praxis.log_info("discover_internal_tools: 0 tools found, trying next prompt")
   end
 
-  praxis.log_info("discover_internal_tools: session created, sending prompt")
-  local tools = {}
-  local ok, result = pcall(session_fns.transact, state,
-    "List all your internal/built-in tools. For each tool, give its name and a brief description.")
-  if ok and result then
-    local response = result.response or ""
-    praxis.log_info("discover_internal_tools: got response (" .. #response .. " bytes)")
-    tools = praxis.semantic_discover_internal_tools(response)
-    praxis.log_info("discover_internal_tools: parsed " .. #tools .. " tools")
-  elseif not ok then
-    praxis.log_warn("discover_internal_tools: transact failed: " .. tostring(result))
-  end
-  pcall(session_fns.close, state)
-  return tools
+  return {}
 end
 
 function M.extract_metadata(config_items)
