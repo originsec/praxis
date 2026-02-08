@@ -527,14 +527,6 @@ export function SettingsPage() {
     }
   };
 
-  const handleNewScript = () => {
-    setSelectedScriptId(null);
-    setEditingScriptName('');
-    setEditingScriptContent('');
-    setIsEditingScript(true);
-    setIsAddingScript(true);
-  };
-
   const handleSaveScript = () => {
     if (!editingScriptName.trim()) return;
     if (isAddingScript) {
