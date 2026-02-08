@@ -170,7 +170,7 @@ The `connect` config table:
 | `base_port` | number | Base port number (random offset added) |
 | `port_range` | number | Range for random port selection (default 778) |
 | `kill_existing` | bool | Kill existing processes first (default true) |
-| `use_hidden_desktop` | bool | Spawn on hidden desktop on Windows (default true) |
+| `use_hidden_desktop` | bool | Spawn on hidden desktop on Windows (default true). In debug builds, `PRAXIS_NOT_HIDDEN` defaults to `1` (visible); in release builds it defaults to `0` (hidden). |
 
 ### The Adapter Table
 

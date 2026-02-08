@@ -166,7 +166,7 @@ Sessions allow direct interaction with agents:
 
 ### Browser-based Agents
 
-1. App with webview launched with debugging enabled (on a hidden desktop by default)
+1. App with webview launched with debugging enabled (on a hidden desktop in release builds; visible in debug builds by default)
 2. CDP connection established via chromiumoxide
 3. Prompts injected via DOM manipulation (InsertText + Enter)
 4. Responses polled from page via JavaScript evaluation
