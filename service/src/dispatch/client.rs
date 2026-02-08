@@ -1652,17 +1652,22 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
                     // Broadcast updated registry to all nodes.
                     //
                     if let Ok(scripts) = ctx.database.get_all_lua_scripts().await {
+                        let script_count = scripts.len();
                         let scripts: Vec<String> = scripts
                             .iter()
                             .map(|s| STANDARD.encode(s.as_bytes()))
                             .collect();
                         let update = NodeBroadcastMessage::AgentRegistryUpdate { scripts };
-                        let _ = publish_json_exchange(
+                        match publish_json_exchange(
                             &ctx.broadcast_channel,
                             NODE_BROADCAST_EXCHANGE,
                             &update,
                         )
-                        .await;
+                        .await
+                        {
+                            Ok(_) => info!("Broadcast AgentRegistryUpdate ({} scripts) after add", script_count),
+                            Err(e) => error!("Failed to broadcast AgentRegistryUpdate after add: {}", e),
+                        }
                     }
                 }
                 Err(e) => {
@@ -1694,17 +1699,22 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
 
                     if success {
                         if let Ok(scripts) = ctx.database.get_all_lua_scripts().await {
+                            let script_count = scripts.len();
                             let scripts: Vec<String> = scripts
                                 .iter()
                                 .map(|s| STANDARD.encode(s.as_bytes()))
                                 .collect();
                             let update = NodeBroadcastMessage::AgentRegistryUpdate { scripts };
-                            let _ = publish_json_exchange(
+                            match publish_json_exchange(
                                 &ctx.broadcast_channel,
                                 NODE_BROADCAST_EXCHANGE,
                                 &update,
                             )
-                            .await;
+                            .await
+                            {
+                                Ok(_) => info!("Broadcast AgentRegistryUpdate ({} scripts) after delete", script_count),
+                                Err(e) => error!("Failed to broadcast AgentRegistryUpdate after delete: {}", e),
+                            }
                         }
                     }
                 }
@@ -1738,17 +1748,22 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
                     .await;
 
                     if let Ok(scripts) = ctx.database.get_all_lua_scripts().await {
+                        let script_count = scripts.len();
                         let scripts: Vec<String> = scripts
                             .iter()
                             .map(|s| STANDARD.encode(s.as_bytes()))
                             .collect();
                         let update = NodeBroadcastMessage::AgentRegistryUpdate { scripts };
-                        let _ = publish_json_exchange(
+                        match publish_json_exchange(
                             &ctx.broadcast_channel,
                             NODE_BROADCAST_EXCHANGE,
                             &update,
                         )
-                        .await;
+                        .await
+                        {
+                            Ok(_) => info!("Broadcast AgentRegistryUpdate ({} scripts) after update", script_count),
+                            Err(e) => error!("Failed to broadcast AgentRegistryUpdate after update: {}", e),
+                        }
                     }
                 }
                 Err(e) => {
@@ -1783,17 +1798,22 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
                     .await;
 
                     if let Ok(scripts) = ctx.database.get_all_lua_scripts().await {
+                        let script_count = scripts.len();
                         let scripts: Vec<String> = scripts
                             .iter()
                             .map(|s| STANDARD.encode(s.as_bytes()))
                             .collect();
                         let update = NodeBroadcastMessage::AgentRegistryUpdate { scripts };
-                        let _ = publish_json_exchange(
+                        match publish_json_exchange(
                             &ctx.broadcast_channel,
                             NODE_BROADCAST_EXCHANGE,
                             &update,
                         )
-                        .await;
+                        .await
+                        {
+                            Ok(_) => info!("Broadcast AgentRegistryUpdate ({} scripts) after reset defaults", script_count),
+                            Err(e) => error!("Failed to broadcast AgentRegistryUpdate after reset defaults: {}", e),
+                        }
                     }
                 }
                 Err(e) => {
