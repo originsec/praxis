@@ -1,5 +1,13 @@
 local helpers = require("praxis.helpers")
 
+local AGENT_NAME = "Gemini CLI"
+local AGENT_SHORT_NAME = "gemini"
+
+local INTERCEPT_DOMAINS = {
+  "generativelanguage.googleapis.com",
+  "cloudcode-pa.googleapis.com",
+}
+
 local process_path = nil
 local process_version = nil
 
@@ -619,8 +627,8 @@ local function run_recon(is_semantic)
 end
 
 return {
-  name = "Gemini CLI",
-  short_name = "gemini",
+  name = AGENT_NAME,
+  short_name = AGENT_SHORT_NAME,
 
   fingerprint = function(_ctx)
     process_path, process_version = pick_path()
@@ -632,10 +640,7 @@ return {
   end,
 
   intercept_domains = function(_ctx)
-    return {
-      "generativelanguage.googleapis.com",
-      "cloudcode-pa.googleapis.com",
-    }
+    return INTERCEPT_DOMAINS
   end,
 
   recon = function(is_semantic)

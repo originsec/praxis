@@ -1,5 +1,15 @@
 local helpers = require("praxis.helpers")
 
+local AGENT_NAME = "Cursor Agent"
+local AGENT_SHORT_NAME = "cursor"
+
+local INTERCEPT_DOMAINS = {
+  "api.cursor.sh",
+  "agent.api5.cursor.sh",
+  "api2.cursor.sh",
+  "cursor.sh",
+}
+
 local process_path = nil
 local process_version = nil
 
@@ -568,8 +578,8 @@ local function run_recon(is_semantic)
 end
 
 return {
-  name = "Cursor Agent",
-  short_name = "cursor",
+  name = AGENT_NAME,
+  short_name = AGENT_SHORT_NAME,
 
   fingerprint = function(_ctx)
     process_path, process_version = pick_path()
@@ -581,12 +591,7 @@ return {
   end,
 
   intercept_domains = function(_ctx)
-    return {
-      "api.cursor.sh",
-      "agent.api5.cursor.sh",
-      "api2.cursor.sh",
-      "cursor.sh",
-    }
+    return INTERCEPT_DOMAINS
   end,
 
   recon = function(is_semantic)

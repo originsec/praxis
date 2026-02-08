@@ -1,5 +1,11 @@
 local helpers = require("praxis.helpers")
 
+local AGENT_NAME = "Claude Code"
+local AGENT_SHORT_NAME = "claudecode"
+
+local INTERCEPT_DOMAINS = { "api.anthropic.com", "a-api.anthropic.com" }
+local INTERCEPT_URL_PATTERN = "messages"
+
 local process_path = nil
 local process_version = nil
 
@@ -540,8 +546,8 @@ local function run_recon(is_semantic)
 end
 
 return {
-  name = "Claude Code",
-  short_name = "claudecode",
+  name = AGENT_NAME,
+  short_name = AGENT_SHORT_NAME,
 
   fingerprint = function(_ctx)
     process_path, process_version = pick_path()
@@ -553,14 +559,11 @@ return {
   end,
 
   intercept_domains = function(_ctx)
-    return {
-      "api.anthropic.com",
-      "a-api.anthropic.com",
-    }
+    return INTERCEPT_DOMAINS
   end,
 
   intercept_url_pattern = function(_ctx)
-    return "messages"
+    return INTERCEPT_URL_PATTERN
   end,
 
   recon = function(is_semantic)

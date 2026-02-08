@@ -1,6 +1,12 @@
 local helpers = require("praxis.helpers")
 local devtools = require("praxis.devtools")
 
+local AGENT_NAME = "Microsoft 365 Copilot"
+local AGENT_SHORT_NAME = "m365copilot"
+
+local INTERCEPT_DOMAINS = { "substrate.office.com" }
+local INTERCEPT_URL_PATTERN = "m365Copilot/Chathub"
+
 local INPUT_SELECTOR = '#m365-chat-editor-target-element'
 local MESSAGE_SELECTOR = 'div[data-testid="markdown-reply"]'
 local SEND_BUTTON_SELECTOR = 'button[aria-label="Send"]:not([aria-disabled="true"])'
@@ -11,12 +17,6 @@ local WORKING_DIR_WEB = "Web"
 
 local PROCESS_NAME = "M365Copilot.exe"
 local PACKAGE_FAMILY = "Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe"
-
-local AGENT_NAME = "Microsoft 365 Copilot"
-local AGENT_SHORT_NAME = "m365copilot"
-
-local INTERCEPT_DOMAINS = { "substrate.office.com" }
-local INTERCEPT_URL_PATTERN = "m365Copilot/Chathub"
 
 local process_path = nil
 

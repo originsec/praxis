@@ -1,5 +1,8 @@
 local helpers = require("praxis.helpers")
 
+local AGENT_NAME = "Codex CLI"
+local AGENT_SHORT_NAME = "codex"
+
 local process_path = nil
 local process_version = nil
 
@@ -548,8 +551,8 @@ local function run_recon(is_semantic)
 end
 
 return {
-  name = "Codex CLI",
-  short_name = "codex",
+  name = AGENT_NAME,
+  short_name = AGENT_SHORT_NAME,
 
   fingerprint = function(_ctx)
     process_path, process_version = pick_path()
