@@ -1,72 +1,37 @@
 local helpers = require("praxis.helpers")
 
 local process_path = nil
+local process_version = nil
 
 local function is_session_file(name)
   return name and helpers.starts_with(name, "session-") and helpers.ends_with(name, ".json")
 end
 
+local function verify_binary(path)
+  local result = praxis.command_run({ program = path, args = { "--version" } })
+  if result.success then
+    local version = (result.stdout or ""):match("(%d[%d%.%-a-zA-Z]*)")
+    return true, version
+  end
+  return false, nil
+end
+
 local function pick_path()
-  local os_name = praxis.os_name()
-  local paths = praxis.find_executables("gemini") or {}
-  if os_name == "windows" then
-    for _, p in ipairs(paths) do
-      if string.lower(p):sub(-4) == ".cmd" then
-        return p
-      end
-    end
-    if #paths > 0 then
-      return paths[1]
-    end
-  else
-    if #paths > 0 then
-      return paths[1]
-    end
-  end
-
-  local explicit_home = {}
-  local explicit_global = {}
-  if os_name == "windows" then
-    explicit_home = {
-      "${USERPROFILE}\\.local\\bin\\gemini.cmd",
-      "${USERPROFILE}\\AppData\\Local\\gemini\\gemini.cmd",
-      "${USERPROFILE}\\AppData\\Roaming\\npm\\gemini.cmd",
-      "${USERPROFILE}\\.local\\bin\\gemini.exe",
-      "${USERPROFILE}\\AppData\\Local\\gemini\\gemini.exe",
-    }
-  else
-    explicit_home = {
-      "${HOME}/.local/bin/gemini",
-    }
-    explicit_global = {
-      "/usr/bin/gemini",
-      "/usr/local/bin/gemini",
-    }
-  end
-
-  for _, p in ipairs(explicit_global) do
-    local expanded = helpers.expand_path(p)
-    if praxis.path_exists(expanded) then
-      return expanded
-    end
-  end
-
-  local homes = praxis.user_homes() or {}
-
-  for _, template in ipairs(explicit_home) do
-    for _, home in ipairs(homes) do
-      local p = helpers.expand_path(template, home)
-      if praxis.path_exists(p) then
-        return p
-      end
-    end
-    local env_expanded = helpers.expand_path(template)
-    if praxis.path_exists(env_expanded) then
-      return env_expanded
-    end
-  end
-
-  return nil
+  return helpers.find_executable({
+    name = "gemini",
+    global_dirs = {
+      default = { "/usr/bin", "/usr/local/bin" },
+    },
+    home_dirs = {
+      default = { "${HOME}/.local/bin" },
+      windows = {
+        "${USERPROFILE}\\.local\\bin",
+        "${USERPROFILE}\\AppData\\Local\\gemini",
+        "${USERPROFILE}\\AppData\\Roaming\\npm",
+      },
+    },
+    verify = verify_binary,
+  })
 end
 
 local function has_auth_env_vars(homes)
@@ -658,10 +623,11 @@ return {
   short_name = "gemini",
 
   fingerprint = function(_ctx)
-    process_path = pick_path()
+    process_path, process_version = pick_path()
     return {
       available = process_path ~= nil,
       process_path = process_path,
+      version = process_version,
     }
   end,
 

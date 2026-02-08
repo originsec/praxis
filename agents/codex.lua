@@ -1,108 +1,47 @@
 local helpers = require("praxis.helpers")
 
 local process_path = nil
+local process_version = nil
 
 local function verify_binary(path)
-  local os_name = praxis.os_name()
-
-  local result
-  if os_name == "windows" and string.lower(path):sub(-4) == ".cmd" then
-    result = praxis.command_run({
-      program = "cmd.exe",
-      args = { "/c", path, "--version" },
-    })
-  else
-    result = praxis.command_run({
-      program = path,
-      args = { "--version" },
-    })
-  end
-
+  local result = praxis.command_run({ program = path, args = { "--version" } })
   if result.success then
-    return string.lower(result.stdout or ""):find("codex") ~= nil
+    local version = (result.stdout or ""):match("(%d[%d%.%-a-zA-Z]*)")
+    return string.lower(result.stdout or ""):find("codex") ~= nil, version
   end
-  return false
+  return false, nil
 end
 
 local function pick_path()
-  local paths = praxis.find_executables("codex") or {}
-
-  for _, p in ipairs(paths) do
-    if verify_binary(p) then
-      return p
-    end
-  end
-
-  local os_name = praxis.os_name()
-
-  local explicit_home = {}
-  local explicit_global = {}
-  if os_name == "windows" then
-    explicit_home = {
-      "${LOCALAPPDATA}\\Microsoft\\WinGet\\Links\\codex.exe",
-      "${APPDATA}\\npm\\codex.cmd",
-      "${USERPROFILE}\\.volta\\bin\\codex.exe",
-      "${USERPROFILE}\\.npm-global\\codex.cmd",
-    }
-  else
-    explicit_global = {
-      "/usr/local/bin/codex",
-      "/usr/bin/codex",
-    }
-    explicit_home = {
-      "${HOME}/.local/bin/codex",
-      "${HOME}/.npm-global/bin/codex",
-      "${HOME}/.volta/bin/codex",
-    }
-  end
-
-  for _, p in ipairs(explicit_global) do
-    if praxis.path_exists(p) and verify_binary(p) then
-      return p
-    end
-  end
-
-  local homes = praxis.user_homes() or {}
-  for _, template in ipairs(explicit_home) do
-    for _, home in ipairs(homes) do
-      local p = helpers.expand_path(template, home)
-      if praxis.path_exists(p) and verify_binary(p) then
-        return p
-      end
-    end
-    local env_expanded = helpers.expand_path(template)
-    if praxis.path_exists(env_expanded) and verify_binary(env_expanded) then
-      return env_expanded
-    end
-  end
-
-  --
-  -- Check version manager installations via glob patterns.
-  --
-
-  local glob_templates = {}
-  if os_name == "windows" then
-    glob_templates = {
-      "${APPDATA}\\nvm\\*\\codex.cmd",
-    }
-  else
-    glob_templates = {
-      "${HOME}/.local/share/mise/installs/node/*/bin/codex",
-      "${HOME}/.nvm/versions/node/*/bin/codex",
-    }
-  end
-
-  for _, template in ipairs(glob_templates) do
-    local pattern = helpers.expand_path(template)
-    local matches = praxis.glob_files(pattern) or {}
-    for _, p in ipairs(matches) do
-      if verify_binary(p) then
-        return p
-      end
-    end
-  end
-
-  return nil
+  return helpers.find_executable({
+    name = "codex",
+    global_dirs = {
+      default = { "/usr/local/bin", "/usr/bin" },
+    },
+    home_dirs = {
+      default = {
+        "${HOME}/.local/bin",
+        "${HOME}/.npm-global/bin",
+        "${HOME}/.volta/bin",
+      },
+      windows = {
+        "${LOCALAPPDATA}\\Microsoft\\WinGet\\Links",
+        "${APPDATA}\\npm",
+        "${USERPROFILE}\\.volta\\bin",
+        "${USERPROFILE}\\.npm-global",
+      },
+    },
+    glob_paths = {
+      default = {
+        "${HOME}/.local/share/mise/installs/node/*/bin/codex",
+        "${HOME}/.nvm/versions/node/*/bin/codex",
+      },
+      windows = {
+        "${APPDATA}\\nvm\\*\\codex.cmd",
+      },
+    },
+    verify = verify_binary,
+  })
 end
 
 local function has_auth_env_vars(homes)
@@ -613,10 +552,11 @@ return {
   short_name = "codex",
 
   fingerprint = function(_ctx)
-    process_path = pick_path()
+    process_path, process_version = pick_path()
     return {
       available = process_path ~= nil,
       process_path = process_path,
+      version = process_version,
     }
   end,
 

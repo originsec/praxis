@@ -101,7 +101,13 @@ pub fn vm_parse_manifest(lua: &Lua) -> Result<LuaManifest> {
     })
 }
 
-pub fn vm_fingerprint_details(lua: &Lua) -> Result<(bool, Option<String>)> {
+pub struct FingerprintDetails {
+    pub available: bool,
+    pub process_path: Option<String>,
+    pub version: Option<String>,
+}
+
+pub fn vm_fingerprint_details(lua: &Lua) -> Result<FingerprintDetails> {
     let table = connector_table(lua)?;
     let func: Function = table
         .get("fingerprint")
@@ -935,16 +941,28 @@ fn semantic_extract_metadata(
     })
 }
 
-fn parse_fingerprint_details(value: Value) -> Result<(bool, Option<String>)> {
+fn parse_fingerprint_details(value: Value) -> Result<FingerprintDetails> {
     match value {
-        Value::Boolean(b) => Ok((b, None)),
+        Value::Boolean(b) => Ok(FingerprintDetails {
+            available: b,
+            process_path: None,
+            version: None,
+        }),
         Value::Table(t) => {
             let available = t.get::<bool>("available").unwrap_or(false);
             let process_path = match t.get::<Value>("process_path") {
                 Ok(Value::String(s)) => Some(s.to_str().map_err(lua_error)?.to_string()),
                 _ => None,
             };
-            Ok((available, process_path))
+            let version = match t.get::<Value>("version") {
+                Ok(Value::String(s)) => Some(s.to_str().map_err(lua_error)?.to_string()),
+                _ => None,
+            };
+            Ok(FingerprintDetails {
+                available,
+                process_path,
+                version,
+            })
         }
         _ => Err(anyhow!("fingerprint must return a boolean or table")),
     }

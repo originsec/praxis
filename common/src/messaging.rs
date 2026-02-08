@@ -121,6 +121,8 @@ pub struct DiscoveredAgent {
     pub name: String,
     pub short_name: String,
     pub available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 //

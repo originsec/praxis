@@ -231,4 +231,115 @@ function M.extract_metadata(config_items)
   return praxis.semantic_extract_metadata(config_items)
 end
 
+--
+-- Search for an executable using a 4-phase strategy:
+--   1) PATH search via find_executables
+--   2) Explicit global (absolute) directories
+--   3) Home-relative directories expanded per user home
+--   4) Glob patterns for version manager installations
+--
+-- Returns: path, version (two values; version from last successful verify)
+--
+-- Config fields:
+--   name        (string)   executable name for PATH search + path construction
+--   global_dirs (table?)   { default = {...}, windows = {...} }
+--   home_dirs   (table?)   same shape, directory templates with ${HOME} etc.
+--   glob_paths  (table?)   same shape, full glob patterns (name baked in)
+--   verify      (fn?)      fn(path) -> passed, version
+--
+
+function M.find_executable(cfg)
+  local os_name = praxis.os_name()
+  local verify = cfg.verify
+  local name = cfg.name
+  local is_windows = os_name == "windows"
+  local last_version = nil
+
+  local function resolve(tbl)
+    if not tbl then return {} end
+    return tbl[os_name] or tbl.default or {}
+  end
+
+  local function candidates(dir)
+    if is_windows then
+      return {
+        praxis.path_join({ dir, name .. ".cmd" }),
+        praxis.path_join({ dir, name .. ".exe" }),
+      }
+    end
+    return { praxis.path_join({ dir, name }) }
+  end
+
+  local function try_verify(path)
+    if not verify then return true end
+    local passed, version = verify(path)
+    if passed then last_version = version end
+    return passed
+  end
+
+  local function check(path)
+    if not praxis.path_exists(path) then return false end
+    return try_verify(path)
+  end
+
+  --
+  -- Phase 1: PATH search. On Windows, prefer .cmd over other extensions.
+  --
+
+  local paths = praxis.find_executables(name) or {}
+  if is_windows then
+    table.sort(paths, function(a, b)
+      local a_cmd = string.lower(a):sub(-4) == ".cmd"
+      local b_cmd = string.lower(b):sub(-4) == ".cmd"
+      if a_cmd ~= b_cmd then return a_cmd end
+      return false
+    end)
+  end
+  for _, p in ipairs(paths) do
+    if try_verify(p) then return p, last_version end
+  end
+
+  --
+  -- Phase 2: explicit global (absolute) directories.
+  --
+
+  for _, dir in ipairs(resolve(cfg.global_dirs)) do
+    for _, p in ipairs(candidates(dir)) do
+      if check(p) then return p, last_version end
+    end
+  end
+
+  --
+  -- Phase 3: home-relative directories, expanded per user home + env fallback.
+  --
+
+  local homes = praxis.user_homes() or {}
+  for _, dir_template in ipairs(resolve(cfg.home_dirs)) do
+    for _, home in ipairs(homes) do
+      local dir = M.expand_path(dir_template, home)
+      for _, p in ipairs(candidates(dir)) do
+        if check(p) then return p, last_version end
+      end
+    end
+    local dir = M.expand_path(dir_template)
+    for _, p in ipairs(candidates(dir)) do
+      if check(p) then return p, last_version end
+    end
+  end
+
+  --
+  -- Phase 4: glob patterns (version manager installations).
+  --
+
+  for _, template in ipairs(resolve(cfg.glob_paths)) do
+    local pattern = M.expand_path(template)
+    local matches = praxis.glob_files(pattern) or {}
+    for _, p in ipairs(matches) do
+      if try_verify(p) then return p, last_version end
+    end
+  end
+
+  return nil, nil
+end
+
 return M

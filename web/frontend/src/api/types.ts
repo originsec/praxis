@@ -22,6 +22,7 @@ export interface DiscoveredAgent {
   name: string;
   short_name: string;
   available: boolean;
+  version?: string;
 }
 
 export interface SelectedAgent {

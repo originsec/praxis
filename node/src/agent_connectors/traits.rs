@@ -95,6 +95,10 @@ pub trait Agent: Send + Sync {
 
     async fn do_fingerprint(&self) -> bool;
 
+    fn version(&self) -> Option<String> {
+        None
+    }
+
     fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>>;
     fn close_session(&self);
     fn get_session(&self) -> Option<Arc<dyn AgentSession>>;

@@ -1,25 +1,28 @@
 local helpers = require("praxis.helpers")
 
 local process_path = nil
+local process_version = nil
+
+local function verify_binary(path)
+  local result = praxis.command_run({ program = path, args = { "--version" } })
+  if result.success then
+    local version = (result.stdout or ""):match("(%d[%d%.%-a-zA-Z]*)")
+    return true, version
+  end
+  return false, nil
+end
 
 local function pick_path()
-  local paths = praxis.find_executables("cursor-agent") or {}
-  if #paths > 0 then
-    return paths[1]
-  end
-
-  local explicit = {
-    "/usr/bin/cursor-agent",
-    helpers.expand_path("${HOME}/.local/bin/cursor-agent"),
-  }
-
-  for _, p in ipairs(explicit) do
-    if praxis.path_exists(p) then
-      return p
-    end
-  end
-
-  return nil
+  return helpers.find_executable({
+    name = "cursor-agent",
+    global_dirs = {
+      default = { "/usr/bin" },
+    },
+    home_dirs = {
+      default = { "${HOME}/.local/bin" },
+    },
+    verify = verify_binary,
+  })
 end
 
 local function has_auth_env_vars(homes)
@@ -569,10 +572,11 @@ return {
   short_name = "cursor",
 
   fingerprint = function(_ctx)
-    process_path = pick_path()
+    process_path, process_version = pick_path()
     return {
       available = process_path ~= nil,
       process_path = process_path,
+      version = process_version,
     }
   end,
 

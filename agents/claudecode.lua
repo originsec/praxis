@@ -1,66 +1,29 @@
 local helpers = require("praxis.helpers")
 
 local process_path = nil
+local process_version = nil
 
-local function pick_path()
-  local paths = praxis.find_executables("claude") or {}
-
-  for _, p in ipairs(paths) do
-    if verify_binary(p) then
-      return p
-    end
+local function verify_binary(path)
+  local result = praxis.command_run({ program = path, args = { "--version" } })
+  if result.success then
+    local version = (result.stdout or ""):match("(%d[%d%.%-a-zA-Z]*)")
+    return string.lower(result.stdout or ""):find("claude") ~= nil, version
   end
-
-  local os_name = praxis.os_name()
-
-  local explicit_home = {}
-  local explicit_global = {}
-  if os_name == "windows" then
-    explicit_home = {
-      "${USERPROFILE}\\.local\\bin\\claude.exe",
-    }
-  else
-    explicit_global = {
-      "/usr/local/bin/claude",
-      "/usr/bin/claude",
-    }
-    explicit_home = {
-      "${HOME}/.local/bin/claude",
-    }
-  end
-
-  for _, p in ipairs(explicit_global) do
-    if praxis.path_exists(p) and verify_binary(p) then
-      return p
-    end
-  end
-
-  local homes = praxis.user_homes() or {}
-  for _, template in ipairs(explicit_home) do
-    for _, home in ipairs(homes) do
-      local p = helpers.expand_path(template, home)
-      if praxis.path_exists(p) and verify_binary(p) then
-        return p
-      end
-    end
-    local env_expanded = helpers.expand_path(template)
-    if praxis.path_exists(env_expanded) and verify_binary(env_expanded) then
-      return env_expanded
-    end
-  end
-
-  return nil
+  return false, nil
 end
 
-function verify_binary(path)
-  local result = praxis.command_run({
-    program = path,
-    args = { "--version" },
+local function pick_path()
+  return helpers.find_executable({
+    name = "claude",
+    global_dirs = {
+      default = { "/usr/local/bin", "/usr/bin" },
+    },
+    home_dirs = {
+      default = { "${HOME}/.local/bin" },
+      windows = { "${USERPROFILE}\\.local\\bin" },
+    },
+    verify = verify_binary,
   })
-  if result.success then
-    return string.lower(result.stdout or ""):find("claude") ~= nil
-  end
-  return false
 end
 
 local function has_auth_env_vars(homes)
@@ -581,10 +544,11 @@ return {
   short_name = "claudecode",
 
   fingerprint = function(_ctx)
-    process_path = pick_path()
+    process_path, process_version = pick_path()
     return {
       available = process_path ~= nil,
       process_path = process_path,
+      version = process_version,
     }
   end,
 

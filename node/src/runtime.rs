@@ -840,6 +840,7 @@ async fn send_node_information_update(
                 name: agent.name().to_string(),
                 short_name: agent.short_name().to_string(),
                 available,
+                version: agent.version(),
             });
         }
     }

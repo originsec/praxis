@@ -979,7 +979,12 @@ export function AgentDetailPage() {
               <Bot size={28} className="text-[var(--accent-success)]" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-highlight">{agentName}</h1>
+              <h1 className="text-2xl font-bold text-highlight">
+                {agentName}
+                {discoveredAgent?.version && (
+                  <span className="text-sm font-normal text-muted ml-2">v{discoveredAgent.version}</span>
+                )}
+              </h1>
               <p className="text-muted text-sm mt-1">
                 {node.machine_name}
                 {node.os_details && <span className="text-xs ml-2 opacity-70">({node.os_details})</span>}

@@ -40,6 +40,7 @@ pub struct LuaAgent {
     intercept_domains_cache: OnceCell<Vec<String>>,
     intercept_url_pattern_cache: OnceCell<Option<String>>,
     fingerprint_process_path: RwLock<Option<String>>,
+    fingerprint_version: RwLock<Option<String>>,
     session: RwLock<Option<Arc<dyn AgentSession>>>,
 }
 
@@ -66,6 +67,7 @@ impl LuaAgent {
             intercept_domains_cache: OnceCell::new(),
             intercept_url_pattern_cache: OnceCell::new(),
             fingerprint_process_path: RwLock::new(None),
+            fingerprint_version: RwLock::new(None),
             session: RwLock::new(None),
         })
     }
@@ -100,15 +102,20 @@ impl Agent for LuaAgent {
     async fn do_fingerprint(&self) -> bool {
         let lua = self.vm.lock().unwrap();
         match runtime::vm_fingerprint_details(&lua) {
-            Ok((available, process_path)) => {
-                *self.fingerprint_process_path.write().unwrap() = process_path;
-                available
+            Ok(details) => {
+                *self.fingerprint_process_path.write().unwrap() = details.process_path;
+                *self.fingerprint_version.write().unwrap() = details.version;
+                details.available
             }
             Err(e) => {
                 common::log_warn!("Lua fingerprint failed for '{}': {}", self.short_name, e);
                 false
             }
         }
+    }
+
+    fn version(&self) -> Option<String> {
+        self.fingerprint_version.read().unwrap().clone()
     }
 
     fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>> {
