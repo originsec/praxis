@@ -12,6 +12,9 @@ local WORKING_DIR_WEB = "Web"
 local PROCESS_NAME = "M365Copilot.exe"
 local PACKAGE_FAMILY = "Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe"
 
+local AGENT_NAME = "Microsoft 365 Copilot"
+local AGENT_SHORT_NAME = "m365copilot"
+
 local INTERCEPT_DOMAINS = { "substrate.office.com" }
 local INTERCEPT_URL_PATTERN = "m365Copilot/Chathub"
 
@@ -103,51 +106,163 @@ local function post_initialize(handle, working_dir)
   end
 end
 
-return {
-  name = "Microsoft 365 Copilot",
-  short_name = "m365copilot",
+local function do_recon(is_semantic)
+  if praxis.os_name() ~= "windows" then
+    return nil
+  end
 
-  fingerprint = function(_ctx)
-    if praxis.os_name() ~= "windows" then
-      return { available = false }
-    end
+  local identities = {}
+  local project_paths = {}
+  local internal_tools = {}
 
-    --
-    -- Check for running process.
-    --
+  --
+  -- Create a temporary DevTools session to discover identities and project
+  -- paths by running JavaScript in the M365 Copilot WebView.
+  --
 
-    local paths = praxis.find_executables(PROCESS_NAME) or {}
-    if #paths > 0 then
-      process_path = paths[1]
-      return { available = true, process_path = process_path }
-    end
+  if not process_path then
+    praxis.log_warn("m365copilot: skipping discovery, no process_path (fingerprint not run?)")
+    return {
+      tools = { internal_tools = {}, mcp_servers = {}, skills = {} },
+      project_paths = {},
+      metadata = nil,
+    }
+  end
 
-    --
-    -- Check Windows package install location. The package family name is used
-    -- to locate the install directory via the Windows package manager APIs
-    -- exposed through praxis.command_run.
-    --
-
-    local result = praxis.command_run({
-      program = "powershell",
-      args = {
-        "-NoProfile", "-Command",
-        "(Get-AppxPackage -Name 'Microsoft.MicrosoftOfficeHub' | Select-Object -First 1).InstallLocation"
-      },
+  local discovery_handle = nil
+  local ok, err = pcall(function()
+    discovery_handle = devtools.connect({
+      process_path = process_path,
+      debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+      debug_port_format = "--remote-debugging-port={}",
+      base_port = 9222,
+      port_range = 778,
     })
 
-    if result and result.success then
-      local install_path = (result.stdout or ""):match("^%s*(.-)%s*$")
-      if install_path and #install_path > 0 then
-        local exe_path = praxis.path_join({ install_path, PROCESS_NAME })
-        if praxis.path_exists(exe_path) then
-          process_path = exe_path
-          return { available = true, process_path = process_path }
-        end
-      end
+    local profile = praxis.cdp_evaluate(discovery_handle, [[
+      (function() {
+        try {
+          var entry = Object.entries(window)
+            .filter(function(e) { return /nestedAppAuthService/i.test(e[0]); })[0];
+          if (entry) return entry[1].user.profile;
+        } catch(e) {}
+        return null;
+      })()
+    ]])
+
+    if profile then
+      if profile.upn then table.insert(identities, profile.upn) end
+      if profile.displayName then table.insert(identities, profile.displayName) end
     end
 
-    return { available = false }
+    local toggles = praxis.cdp_evaluate(discovery_handle, [[
+      (function() {
+        var workBtn = document.querySelector('button[data-testid="toggle-work"]');
+        var webBtn = document.querySelector('button[data-testid="toggle-web"]');
+        return { hasWork: workBtn !== null, hasWeb: webBtn !== null };
+      })()
+    ]])
+
+    if toggles then
+      if toggles.hasWork then table.insert(project_paths, WORKING_DIR_WORK) end
+      if toggles.hasWeb then table.insert(project_paths, WORKING_DIR_WEB) end
+    end
+  end)
+
+  if discovery_handle then
+    pcall(devtools.close, discovery_handle)
+  end
+
+  if not ok then
+    praxis.log_warn("m365copilot: discovery failed: " .. tostring(err))
+  end
+
+  if is_semantic then
+    internal_tools = helpers.discover_internal_tools(
+      {
+        process_path = process_path,
+        working_dir = WORKING_DIR_WORK,
+      },
+      {
+        create = function(opts)
+          local h = devtools.connect({
+            process_path = opts.process_path,
+            debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+            debug_port_format = "--remote-debugging-port={}",
+            base_port = 9222,
+            port_range = 778,
+          })
+          post_initialize(h, opts.working_dir)
+          return { cdp_handle = h }
+        end,
+        transact = function(state, prompt)
+          local response = devtools.transact(state.cdp_handle, m365_adapter, prompt)
+          return { response = response, state = state }
+        end,
+        close = function(state)
+          devtools.close(state.cdp_handle)
+        end,
+      }
+    )
+  end
+
+  local metadata = nil
+  if #identities > 0 then
+    metadata = { user_identities = identities }
+  end
+
+  return {
+    tools = {
+      internal_tools = internal_tools,
+      mcp_servers = {},
+      skills = {},
+    },
+    project_paths = project_paths,
+    metadata = metadata,
+  }
+end
+
+local function do_fingerprint()
+  if praxis.os_name() ~= "windows" then
+    return nil
+  end
+
+  local paths = praxis.find_executables(PROCESS_NAME) or {}
+  if #paths > 0 then
+    return paths[1]
+  end
+
+  local result = praxis.command_run({
+    program = "powershell",
+    args = {
+      "-NoProfile", "-Command",
+      "(Get-AppxPackage -Name 'Microsoft.MicrosoftOfficeHub' | Select-Object -First 1).InstallLocation"
+    },
+  })
+
+  if result and result.success then
+    local install_path = (result.stdout or ""):match("^%s*(.-)%s*$")
+    if install_path and #install_path > 0 then
+      local exe_path = praxis.path_join({ install_path, PROCESS_NAME })
+      if praxis.path_exists(exe_path) then
+        return exe_path
+      end
+    end
+  end
+
+  return nil
+end
+
+return {
+  name = AGENT_NAME,
+  short_name = AGENT_SHORT_NAME,
+
+  fingerprint = function(_ctx)
+    process_path = do_fingerprint()
+    return {
+      available = process_path ~= nil,
+      process_path = process_path,
+    }
   end,
 
   intercept_domains = function(_ctx)
@@ -159,131 +274,7 @@ return {
   end,
 
   recon = function(is_semantic)
-    if praxis.os_name() ~= "windows" then
-      return nil
-    end
-
-    local identities = {}
-    local project_paths = {}
-    local internal_tools = {}
-
-    --
-    -- Create a temporary DevTools session to discover identities and project
-    -- paths by running JavaScript in the M365 Copilot WebView.
-    --
-
-    local discovery_handle = nil
-    if not process_path then
-      praxis.log_warn("m365copilot: skipping discovery, no process_path (fingerprint not run?)")
-      return {
-        tools = { internal_tools = {}, mcp_servers = {}, skills = {} },
-        project_paths = {},
-        metadata = nil,
-      }
-    end
-
-    local ok, err = pcall(function()
-      discovery_handle = devtools.connect({
-        process_path = process_path,
-        debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-        debug_port_format = "--remote-debugging-port={}",
-        base_port = 9222,
-        port_range = 778,
-      })
-
-      --
-      -- Discover user identity.
-      --
-
-      local profile = praxis.cdp_evaluate(discovery_handle, [[
-        (function() {
-          try {
-            var entry = Object.entries(window)
-              .filter(function(e) { return /nestedAppAuthService/i.test(e[0]); })[0];
-            if (entry) return entry[1].user.profile;
-          } catch(e) {}
-          return null;
-        })()
-      ]])
-
-      if profile then
-        if profile.upn then table.insert(identities, profile.upn) end
-        if profile.displayName then table.insert(identities, profile.displayName) end
-      end
-
-      --
-      -- Discover available toggles (Work/Web).
-      --
-
-      local toggles = praxis.cdp_evaluate(discovery_handle, [[
-        (function() {
-          var workBtn = document.querySelector('button[data-testid="toggle-work"]');
-          var webBtn = document.querySelector('button[data-testid="toggle-web"]');
-          return { hasWork: workBtn !== null, hasWeb: webBtn !== null };
-        })()
-      ]])
-
-      if toggles then
-        if toggles.hasWork then table.insert(project_paths, WORKING_DIR_WORK) end
-        if toggles.hasWeb then table.insert(project_paths, WORKING_DIR_WEB) end
-      end
-    end)
-
-    if discovery_handle then
-      pcall(devtools.close, discovery_handle)
-    end
-
-    if not ok then
-      praxis.log_warn("m365copilot: discovery failed: " .. tostring(err))
-    end
-
-    --
-    -- Semantic recon: discover internal tools via the helpers library.
-    --
-
-    if is_semantic then
-      internal_tools = helpers.discover_internal_tools(
-        {
-          process_path = process_path,
-          working_dir = WORKING_DIR_WORK,
-        },
-        {
-          create = function(opts)
-            local h = devtools.connect({
-              process_path = opts.process_path,
-              debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-              debug_port_format = "--remote-debugging-port={}",
-              base_port = 9222,
-              port_range = 778,
-            })
-            post_initialize(h, opts.working_dir)
-            return { cdp_handle = h }
-          end,
-          transact = function(state, prompt)
-            local response = devtools.transact(state.cdp_handle, m365_adapter, prompt)
-            return { response = response, state = state }
-          end,
-          close = function(state)
-            devtools.close(state.cdp_handle)
-          end,
-        }
-      )
-    end
-
-    local metadata = nil
-    if #identities > 0 then
-      metadata = { user_identities = identities }
-    end
-
-    return {
-      tools = {
-        internal_tools = internal_tools,
-        mcp_servers = {},
-        skills = {},
-      },
-      project_paths = project_paths,
-      metadata = metadata,
-    }
+    return do_recon(is_semantic)
   end,
 
   create_session = function(ctx)
