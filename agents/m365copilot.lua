@@ -105,6 +105,37 @@ local function post_initialize(handle, working_dir)
   end
 end
 
+local function run_create_session(ctx)
+  praxis.kill_processes_by_name(PROCESS_NAME)
+  praxis.sleep_ms(500)
+
+  local cdp_handle = devtools.connect({
+    process_path = ctx.process_path,
+    debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+    debug_port_format = "--remote-debugging-port={}",
+    base_port = 9222,
+    port_range = 778,
+  })
+  post_initialize(cdp_handle, ctx.working_dir)
+  return {
+    handle = cdp_handle,
+    cdp_handle = cdp_handle,
+    working_dir = ctx.working_dir,
+    process_id = praxis.cdp_process_id(cdp_handle),
+  }
+end
+
+local function run_session_transact(state, prompt)
+  local response = devtools.transact(state.cdp_handle, m365_adapter, prompt)
+  return { response = response, state = state }
+end
+
+local function run_session_close(state)
+  if state and state.cdp_handle then
+    devtools.close(state.cdp_handle)
+  end
+end
+
 local function do_recon(ctx)
   if praxis.os_name() ~= "windows" then
     return nil
@@ -207,37 +238,6 @@ local function do_recon(ctx)
     project_paths = project_paths,
     metadata = metadata,
   }
-end
-
-local function run_create_session(ctx)
-  praxis.kill_processes_by_name(PROCESS_NAME)
-  praxis.sleep_ms(500)
-
-  local cdp_handle = devtools.connect({
-    process_path = ctx.process_path,
-    debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-    debug_port_format = "--remote-debugging-port={}",
-    base_port = 9222,
-    port_range = 778,
-  })
-  post_initialize(cdp_handle, ctx.working_dir)
-  return {
-    handle = cdp_handle,
-    cdp_handle = cdp_handle,
-    working_dir = ctx.working_dir,
-    process_id = praxis.cdp_process_id(cdp_handle),
-  }
-end
-
-local function run_session_transact(state, prompt)
-  local response = devtools.transact(state.cdp_handle, m365_adapter, prompt)
-  return { response = response, state = state }
-end
-
-local function run_session_close(state)
-  if state and state.cdp_handle then
-    devtools.close(state.cdp_handle)
-  end
 end
 
 local function do_fingerprint()
