@@ -6,7 +6,22 @@ use futures::StreamExt;
 use mlua::{Lua, LuaSerdeExt, Table};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+
+static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+pub fn request_shutdown() {
+    SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
+}
+
+fn check_shutdown() -> Result<()> {
+    if SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {
+        Err(anyhow!("shutdown requested"))
+    } else {
+        Ok(())
+    }
+}
 
 struct CdpConnection {
     page: Page,
@@ -133,6 +148,7 @@ async fn connect_to_devtools(port: u16) -> Result<Page> {
 
     let mut connected = false;
     for attempt in 0..30 {
+        check_shutdown()?;
         common::log_debug!("CDP: connection attempt {} to {}", attempt + 1, ws_url);
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
@@ -171,6 +187,7 @@ async fn connect_to_devtools(port: u16) -> Result<Page> {
     });
 
     for attempt in 0..30 {
+        check_shutdown()?;
         let pages = browser.pages().await?;
         if let Some(page) = pages.into_iter().next() {
             return Ok(page);
@@ -265,6 +282,7 @@ fn cdp_wait_for_element(handle: &str, selector: &str, retries: u32, delay_ms: u6
         let selector = selector.to_string();
         block_on(async {
             for _ in 0..retries {
+                check_shutdown()?;
                 if conn.page.find_element(&selector).await.is_ok() {
                     return Ok(true);
                 }

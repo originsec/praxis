@@ -44,6 +44,7 @@ fn setup_shutdown_signal() -> CancellationToken {
                 .expect("Failed to register Ctrl+C handler");
             tracing::info!("Received Ctrl+C");
         }
+        agent_connectors::lua::cdp::request_shutdown();
         token_clone.cancel();
     });
 
