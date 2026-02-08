@@ -69,7 +69,11 @@ local m365_adapter = {
 local function post_initialize(handle, working_dir)
   praxis.cdp_wait_for_element(handle, INPUT_SELECTOR, 30, 300)
 
-  local wd = working_dir or WORKING_DIR_WORK
+  local wd = WORKING_DIR_WORK
+  if type(working_dir) == "string" and #working_dir > 0 then
+    wd = working_dir
+  end
+
   local toggle_selector
   if wd == WORKING_DIR_WORK then
     toggle_selector = 'button[data-testid="toggle-work"]'

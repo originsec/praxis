@@ -179,7 +179,7 @@ async fn connect_to_devtools(port: u16) -> Result<Page> {
                 {
                     common::log_debug!("CDP: browser connection closed");
                 } else if err_str.contains("did not match any variant") {
-                    common::log_debug!("CDP: unrecognized message (harmless)");
+                    // Silently ignore — chromiumoxide doesn't recognize some CDP messages
                 } else {
                     common::log_error!("CDP: browser handler error: {}", e);
                 }
