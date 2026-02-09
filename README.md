@@ -120,6 +120,8 @@ Full documentation is available at **[originsec.github.io/praxis](https://origin
 
 Apache 2.0 — see [LICENSE](https://github.com/originsec/praxis/blob/main/LICENSE) and [NOTICE](https://github.com/originsec/praxis/blob/main/NOTICE)
 
+To explore alternate licensing arrangements, please contact legal@preludesecurity.com
+
 ## By Origin
 
 [Origin](https://originhq.com) is an endpoint security company building protection for the semantic era of computing. As AI agents become integral to enterprise workflows, Origin provides the visibility and control organizations need to safely grant agents the permissions they require.
