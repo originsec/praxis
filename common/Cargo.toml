@@ -1,0 +1,28 @@
+[package]
+name = "common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared types and utilities for the Praxis framework"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+regex = "1.10"
+dirs = "5.0"
+reqwest = { version = "0.12", features = ["json"] }
+indexmap = { version = "2.0", features = ["serde"] }
+lapin = "2.5"
+tokio = { version = "1", features = ["sync"] }
+tracing = "0.1"
+rmcp = { version = "0.8", features = ["server", "transport-io", "transport-sse-server", "schemars"] }
+schemars = "1"
+uuid = { version = "1", features = ["v4"] }
+async-trait = "0.1"
+
+[lib]
+name = "common"
+path = "src/lib.rs"

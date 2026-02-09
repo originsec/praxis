@@ -1,0 +1,480 @@
+/*
+ * Origin Light Theme - Component Styles
+ * Clean aesthetic with subtle texture and soft shadows
+ */
+
+/*
+ * Font override - use Inter sans-serif for light theme.
+ */
+html[data-theme="origin_light"] body {
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+/*
+ * Subtle noise texture background - light theme only.
+ */
+html[data-theme="origin_light"] body::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22140%22%20height%3D%22140%22%20viewBox%3D%220%200%20140%20140%22%3E%3Cfilter%20id%3D%22n%22%20x%3D%220%22%20y%3D%220%22%20width%3D%22100%25%22%20height%3D%22100%25%22%3E%3CfeTurbulence%20type%3D%22fractalNoise%22%20baseFrequency%3D%220.9%22%20numOctaves%3D%224%22/%3E%3C/filter%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20filter%3D%22url%28%23n%29%22%20opacity%3D%221%22/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 140px 140px;
+  opacity: 0.25;
+  filter: brightness(0.5) contrast(0.1);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Scrollbar colors */
+* {
+  scrollbar-color: var(--border-color) transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-hover);
+}
+
+.scrollbar-on-hover {
+  scrollbar-color: transparent transparent;
+}
+
+.scrollbar-on-hover::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+.scrollbar-on-hover:hover {
+  scrollbar-color: var(--border-color) transparent;
+}
+
+.scrollbar-on-hover:hover::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+}
+
+/* Border utility classes */
+.border-subtle {
+  border-color: var(--border-color);
+}
+
+.border-dim {
+  border-color: var(--border-dim);
+}
+
+.border-active {
+  border-color: var(--border-active);
+}
+
+/* Background utility classes */
+.bg-panel {
+  background-color: var(--bg-secondary);
+}
+
+.bg-card {
+  background-color: var(--bg-tertiary);
+}
+
+/* Text utility classes */
+.text-title {
+  color: var(--text-title);
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+.text-highlight {
+  color: var(--text-highlight);
+}
+
+.text-value {
+  color: var(--text-highlight);
+  font-weight: 500;
+}
+
+/* Status colors */
+.status-online {
+  color: var(--accent-success);
+}
+
+.status-warning {
+  color: var(--accent-warning);
+}
+
+.status-offline {
+  color: var(--accent-error);
+}
+
+.status-info {
+  color: var(--accent-info);
+}
+
+/* Panel styling with subtle shadow - light theme */
+html[data-theme="origin_light"] .terminal-panel {
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  box-shadow: 0 1px 3px var(--shadow-subtle), 0 1px 2px var(--shadow-subtle);
+}
+
+html[data-theme="origin_light"] .terminal-panel:hover {
+  border-color: var(--border-hover);
+}
+
+/* Subtle border effect - light theme */
+html[data-theme="origin_light"] .glow-border {
+  box-shadow: 0 0 0 1px var(--border-hover);
+}
+
+/* Text emphasis (no glow in light theme) */
+html[data-theme="origin_light"] .text-glow {
+  color: var(--text-title);
+  font-weight: 500;
+}
+
+html[data-theme="origin_light"] .text-glow-strong {
+  color: var(--text-title);
+  font-weight: 600;
+}
+
+/* Button style - light theme */
+html[data-theme="origin_light"] .btn-retro {
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  padding: 0.75rem 1.5rem;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 2px var(--shadow-subtle);
+}
+
+html[data-theme="origin_light"] .btn-retro:hover {
+  border-color: var(--border-active);
+  color: var(--text-title);
+  background: var(--bg-tertiary);
+  box-shadow: 0 2px 4px var(--shadow-medium);
+}
+
+html[data-theme="origin_light"] .btn-retro-danger {
+  border-color: var(--accent-error);
+  color: var(--accent-error);
+}
+
+html[data-theme="origin_light"] .btn-retro-danger:hover {
+  background: rgba(168, 98, 98, 0.08);
+}
+
+/* Primary button - filled - light theme */
+html[data-theme="origin_light"] .btn-primary {
+  background: var(--text-primary);
+  color: var(--bg-secondary);
+  border-color: var(--text-primary);
+}
+
+html[data-theme="origin_light"] .btn-primary:hover {
+  background: var(--text-highlight);
+  border-color: var(--text-highlight);
+  color: var(--bg-secondary);
+  box-shadow: 0 2px 8px var(--shadow-medium);
+}
+
+/* XTerm styling */
+.xterm {
+  padding: 8px;
+}
+
+.xterm-viewport::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+.xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+}
+
+/* Selection styling - light theme */
+html[data-theme="origin_light"] ::selection {
+  background: var(--accent-success);
+  color: var(--bg-secondary);
+}
+
+/* Input styling - light theme */
+html[data-theme="origin_light"] input,
+html[data-theme="origin_light"] select,
+html[data-theme="origin_light"] textarea {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+
+html[data-theme="origin_light"] input:focus,
+html[data-theme="origin_light"] select:focus,
+html[data-theme="origin_light"] textarea:focus {
+  outline: none;
+  border-color: var(--border-active) !important;
+  box-shadow: 0 0 0 2px var(--highlight);
+}
+
+/* ASCII art style headers - light theme */
+html[data-theme="origin_light"] .ascii-header {
+  font-family: monospace;
+  white-space: pre;
+  color: var(--text-title);
+}
+
+/* Table header color */
+th {
+  color: var(--text-secondary);
+}
+
+/* Footer text color */
+.footer-text {
+  color: var(--text-secondary);
+}
+
+/* Box styling for panels - light theme */
+html[data-theme="origin_light"] .ascii-box {
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  box-shadow: 0 1px 3px var(--shadow-subtle);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+html[data-theme="origin_light"] .ascii-box:hover {
+  border-color: var(--border-hover);
+}
+
+html[data-theme="origin_light"] .ascii-box > table > thead > tr:first-child > th:first-child {
+  border-top-left-radius: 3px;
+}
+
+html[data-theme="origin_light"] .ascii-box > table > thead > tr:first-child > th:last-child {
+  border-top-right-radius: 3px;
+}
+
+html[data-theme="origin_light"] .ascii-box > div:first-child {
+  border-top-left-radius: 3px;
+  border-top-right-radius: 3px;
+}
+
+/* Card with border - light theme */
+html[data-theme="origin_light"] .card-ascii::before {
+  border: 1px solid var(--border-color);
+}
+
+/* Sparkline-style background pattern - light theme */
+html[data-theme="origin_light"] .sparkline-bg {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--border-dim) 0px,
+    var(--border-dim) 1px,
+    transparent 1px,
+    transparent 4px
+  );
+}
+
+/* Status indicator dot colors - light theme (no glow) */
+html[data-theme="origin_light"] .status-dot-online {
+  background: var(--accent-success);
+}
+
+html[data-theme="origin_light"] .status-dot-offline {
+  background: var(--accent-error);
+}
+
+html[data-theme="origin_light"] .status-dot-warning {
+  background: var(--accent-warning);
+}
+
+/* Label color - light theme */
+html[data-theme="origin_light"] .label-upper {
+  color: var(--text-secondary);
+}
+
+/* Tooltip styling - light theme */
+html[data-theme="origin_light"] .tooltip-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+html[data-theme="origin_light"] .tooltip-wrapper .tooltip-content {
+  visibility: hidden;
+  opacity: 0;
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  transform: translateY(-6px);
+  background: var(--text-primary);
+  color: var(--bg-secondary);
+  padding: 6px 10px;
+  border-radius: 3px;
+  font-size: 10px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 99999;
+  border: 1px solid var(--text-primary);
+  box-shadow: 0 2px 8px var(--shadow-medium);
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+}
+
+html[data-theme="origin_light"] .tooltip-wrapper .tooltip-content::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 12px;
+  border: 4px solid transparent;
+  border-top-color: var(--text-primary);
+}
+
+html[data-theme="origin_light"] .tooltip-wrapper:hover .tooltip-content {
+  visibility: visible;
+  opacity: 1;
+}
+
+html[data-theme="origin_light"] .tooltip-content-floating {
+  position: fixed;
+  background: var(--text-primary);
+  color: var(--bg-secondary);
+  padding: 6px 10px;
+  border-radius: 3px;
+  font-size: 10px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 99999;
+  border: 1px solid var(--text-primary);
+  box-shadow: 0 2px 8px var(--shadow-medium);
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  transform: translateX(-50%);
+}
+
+/* Markdown prose styling */
+.prose {
+  line-height: 1.6;
+}
+
+.prose p {
+  margin: 0.5em 0;
+}
+
+.prose p:first-child {
+  margin-top: 0;
+}
+
+.prose p:last-child {
+  margin-bottom: 0;
+}
+
+.prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
+  color: var(--text-title);
+  font-weight: 600;
+  margin: 1em 0 0.5em 0;
+}
+
+.prose h1:first-child, .prose h2:first-child, .prose h3:first-child {
+  margin-top: 0;
+}
+
+.prose h1 { font-size: 1.5em; }
+.prose h2 { font-size: 1.25em; }
+.prose h3 { font-size: 1.1em; }
+
+.prose code {
+  background: var(--bg-tertiary);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+  color: var(--accent-info);
+}
+
+.prose pre {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0.75em 1em;
+  overflow-x: auto;
+  margin: 0.75em 0;
+}
+
+.prose pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.85em;
+  color: var(--text-primary);
+}
+
+.prose ul, .prose ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+.prose li {
+  margin: 0.25em 0;
+}
+
+.prose ul {
+  list-style-type: disc;
+}
+
+.prose ol {
+  list-style-type: decimal;
+}
+
+.prose blockquote {
+  border-left: 3px solid var(--accent-purple);
+  padding-left: 1em;
+  margin: 0.75em 0;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.prose a {
+  color: var(--accent-info);
+  text-decoration: underline;
+}
+
+.prose a:hover {
+  color: var(--text-highlight);
+}
+
+.prose strong {
+  color: var(--text-title);
+  font-weight: 600;
+}
+
+.prose em {
+  font-style: italic;
+}
+
+.prose hr {
+  border: none;
+  border-top: 1px solid var(--border-color);
+  margin: 1em 0;
+}
+
+.prose table {
+  width: 100%;
+  margin: 0.75em 0;
+  border-collapse: collapse;
+}
+
+.prose th, .prose td {
+  border: 1px solid var(--border-color);
+  padding: 0.5em 0.75em;
+  text-align: left;
+}
+
+.prose th {
+  background: var(--bg-tertiary);
+  font-weight: 600;
+}

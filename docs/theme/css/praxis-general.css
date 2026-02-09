@@ -1,0 +1,543 @@
+/* Praxis Terminal Theme - General Styles */
+/* Scoped to .light and .ayu themes */
+
+/*
+ * Light Theme - Origin Light
+ */
+html.light {
+    font-family: var(--font-mono);
+    color-scheme: light;
+    background-color: var(--bg-primary);
+}
+
+.light body {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    line-height: 1.7;
+    background-color: var(--bg-primary);
+    color: var(--text-secondary);
+}
+
+/* Headings - light theme */
+.light h1, .light h2, .light h3, .light h4, .light h5, .light h6 {
+    font-family: var(--font-mono);
+    color: var(--text-highlight);
+    font-weight: 500;
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+    border-bottom: none;
+}
+
+.light h1 {
+    font-size: 1.6em;
+    color: var(--text-highlight);
+}
+
+.light h1 a,
+.light h1 a.header,
+.light #mdbook-content h1 a,
+.light .content h1 a,
+.light main h1 a {
+    color: var(--text-highlight);
+}
+
+.light h2 {
+    font-size: 1.3em;
+    color: var(--text-highlight);
+    margin-top: 2em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid var(--border-dim);
+}
+
+.light h3 {
+    font-size: 1.1em;
+    color: var(--text-highlight);
+}
+
+.light h4, .light h5, .light h6 {
+    font-size: 1em;
+    color: var(--text-primary);
+}
+
+/* Paragraphs - light theme */
+.light p {
+    margin: 1em 0;
+}
+
+/* Links - light theme */
+.light a {
+    color: var(--accent-info);
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+.light a:hover {
+    color: var(--text-highlight);
+}
+
+/* Code blocks - light theme */
+.light code {
+    font-family: var(--font-mono);
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border-dim);
+    border-radius: 2px;
+    padding: 0.1em 0.4em;
+    font-size: 0.9em;
+    color: var(--accent-purple);
+}
+
+.light pre {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 1em;
+    overflow-x: auto;
+    box-shadow: 2px 2px 0 0 rgba(0, 0, 0, 0.08);
+    line-height: 1.35;
+}
+
+/* Center diagrams (use ```diagram in markdown) */
+.light pre code.language-diagram {
+    display: block;
+}
+.light pre:has(code.language-diagram) {
+    width: fit-content;
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.light pre code {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: var(--text-primary);
+    line-height: 1.35;
+}
+
+/* Remove hljs background - light theme */
+.light .hljs {
+    background: transparent;
+}
+
+/* Inline code in headings - light theme */
+.light h1 code, .light h2 code, .light h3 code, .light h4 code {
+    color: var(--accent-purple);
+    background-color: var(--bg-tertiary);
+    font-size: 0.85em;
+}
+
+/* Tables - light theme */
+.light table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.5em 0;
+    font-size: 0.9em;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-secondary);
+}
+
+.light table thead tr {
+    background-color: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.light table th {
+    color: var(--text-muted);
+    font-weight: 500;
+    padding: 0.5em 1em;
+    text-align: left;
+    text-transform: uppercase;
+    font-size: 0.7em;
+    letter-spacing: 0.1em;
+}
+
+.light table td {
+    padding: 0.5em 1em;
+    border: none;
+    border-bottom: 1px solid var(--border-dim);
+}
+
+.light table tbody tr {
+    background-color: transparent;
+}
+
+.light table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* Blockquotes - light theme */
+.light blockquote {
+    background-color: var(--bg-tertiary);
+    border-left: 3px solid var(--border-active);
+    margin: 1.5em 0;
+    padding: 1em 1.5em;
+    color: var(--text-secondary);
+}
+
+.light blockquote p {
+    margin: 0;
+}
+
+/* Lists - light theme */
+.light ul, .light ol {
+    margin: 1em 0;
+    padding-left: 2.5em;
+}
+
+.light li {
+    margin: 0.5em 0;
+}
+
+.light li::marker {
+    color: var(--text-secondary);
+}
+
+/* Strong and emphasis - light theme */
+.light strong, .light b {
+    color: var(--text-highlight);
+    font-weight: 600;
+}
+
+.light em, .light i {
+    color: var(--text-secondary);
+}
+
+/* Horizontal rules - light theme */
+.light hr {
+    border: none;
+    border-top: 1px solid var(--border-color);
+    margin: 2em 0;
+}
+
+/* Images - light theme */
+.light img {
+    max-width: 100%;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+/* Selection - light theme */
+.light ::selection {
+    background-color: var(--highlight-glow-strong);
+    color: var(--text-highlight);
+}
+
+/* Custom scrollbar - light theme */
+.light ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.light ::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+}
+
+.light ::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
+.light ::-webkit-scrollbar-thumb:hover {
+    background: var(--border-hover);
+}
+
+/* Warning/Note boxes - light theme */
+.light .warning {
+    background-color: rgba(178, 160, 100, 0.15);
+    border-left: 3px solid var(--accent-warning);
+    padding: 1em;
+    margin: 1.5em 0;
+}
+
+/* Chapter navigation - light theme */
+.light .nav-chapters {
+    font-size: 0.9em;
+}
+
+/* Page title area - light theme */
+.light #content > main > h1:first-child {
+    margin-top: 0;
+    padding-top: 0.5em;
+}
+
+/*
+ * Dark Theme - Praxis Terminal
+ */
+
+/* Grid background pattern - only for ayu theme */
+html.ayu {
+    font-family: var(--font-mono);
+    color-scheme: dark;
+    background-color: var(--bg-primary);
+    background-image:
+        linear-gradient(rgba(31, 50, 41, 0.15) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(31, 50, 41, 0.15) 1px, transparent 1px);
+    background-size: 3px 3px;
+    background-attachment: fixed;
+}
+
+.ayu body {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    line-height: 1.7;
+    background-color: transparent;
+    color: var(--text-secondary);
+}
+
+/* Make content areas transparent so grid shows through */
+.ayu .page-wrapper,
+.ayu .page,
+.ayu #mdbook-page-wrapper,
+.ayu #mdbook-content,
+.ayu .content,
+.ayu main {
+    background: transparent;
+}
+
+/* Main content */
+.ayu #content main {
+    padding: 1em 2em;
+}
+
+/* Override any blue borders */
+.ayu .pagetoc a,
+.ayu .pagetoc,
+.ayu #pagetoc,
+.ayu [class*="toc"],
+.ayu .chapter-item {
+    border-inline-start-color: var(--border-color);
+}
+
+/* Headings - match web UI style */
+.ayu h1, .ayu h2, .ayu h3, .ayu h4, .ayu h5, .ayu h6 {
+    font-family: var(--font-mono);
+    color: var(--text-highlight);
+    font-weight: 500;
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+    border-bottom: none;
+}
+
+.ayu h1 {
+    font-size: 1.6em;
+    color: rgb(242, 255, 213);
+}
+
+.ayu h1 a,
+.ayu h1 a.header,
+.ayu #mdbook-content h1 a,
+.ayu .content h1 a,
+.ayu main h1 a {
+    color: rgb(242, 255, 213);
+}
+
+.ayu h2 {
+    font-size: 1.3em;
+    color: var(--text-highlight);
+    margin-top: 2em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid var(--border-dim);
+}
+
+.ayu h3 {
+    font-size: 1.1em;
+    color: var(--text-highlight);
+}
+
+.ayu h4, .ayu h5, .ayu h6 {
+    font-size: 1em;
+    color: var(--text-primary);
+}
+
+/* Paragraphs */
+.ayu p {
+    margin: 1em 0;
+}
+
+/* Links */
+.ayu a {
+    color: var(--accent-info);
+    text-decoration: none;
+    transition: color 0.2s, text-shadow 0.2s;
+}
+
+.ayu a:hover {
+    color: var(--text-highlight);
+    text-shadow: 0 0 8px var(--green-glow);
+}
+
+/* Code blocks */
+.ayu code {
+    font-family: var(--font-mono);
+    background-color: var(--bg-tertiary);
+    border: 1px solid var(--border-dim);
+    border-radius: 2px;
+    padding: 0.1em 0.4em;
+    font-size: 0.9em;
+    color: var(--accent-purple);
+}
+
+.ayu pre {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 1em;
+    overflow-x: auto;
+    box-shadow: 3px 3px 0 0 rgba(0, 0, 0, 0.3);
+    line-height: 1.35;
+}
+
+.ayu pre code {
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: #c5c9b8;
+    line-height: 1.35;
+}
+
+/* Remove hljs background */
+.ayu .hljs {
+    background: transparent;
+}
+
+/* Inline code in headings */
+.ayu h1 code, .ayu h2 code, .ayu h3 code, .ayu h4 code {
+    color: var(--accent-purple);
+    background-color: var(--bg-tertiary);
+    font-size: 0.85em;
+}
+
+/* Tables - matching web UI style */
+.ayu table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.5em 0;
+    font-size: 0.9em;
+    border: 1px solid rgb(31, 50, 41);
+    background-color: rgb(20, 31, 25);
+}
+
+.ayu table thead tr {
+    background-color: var(--bg-tertiary);
+    border-bottom: 1px solid rgb(31, 50, 41);
+}
+
+.ayu table th {
+    color: var(--text-muted);
+    font-weight: 500;
+    padding: 0.5em 1em;
+    text-align: left;
+    text-transform: uppercase;
+    font-size: 0.7em;
+    letter-spacing: 0.1em;
+}
+
+.ayu table td {
+    padding: 0.5em 1em;
+    border: none;
+    border-bottom: 1px solid rgb(31, 50, 41);
+}
+
+.ayu table tbody tr {
+    background-color: transparent;
+}
+
+.ayu table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* Blockquotes */
+.ayu blockquote {
+    background-color: var(--bg-tertiary);
+    border-left: 3px solid var(--border-active);
+    margin: 1.5em 0;
+    padding: 1em 1.5em;
+    color: var(--text-secondary);
+}
+
+.ayu blockquote p {
+    margin: 0;
+}
+
+/* Lists */
+.ayu ul, .ayu ol {
+    margin: 1em 0;
+    padding-left: 2.5em;
+}
+
+.ayu li {
+    margin: 0.5em 0;
+}
+
+.ayu li::marker {
+    color: var(--text-secondary);
+}
+
+/* Strong and emphasis */
+.ayu strong, .ayu b {
+    color: var(--text-highlight);
+    font-weight: 600;
+}
+
+.ayu em, .ayu i {
+    color: var(--text-secondary);
+}
+
+/* Horizontal rules */
+.ayu hr {
+    border: none;
+    border-top: 1px solid var(--border-color);
+    margin: 2em 0;
+}
+
+/* Images */
+.ayu img {
+    max-width: 100%;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+/* Selection */
+.ayu ::selection {
+    background-color: var(--green-glow-strong);
+    color: var(--text-highlight);
+}
+
+/* Custom scrollbar */
+.ayu ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.ayu ::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+}
+
+.ayu ::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
+.ayu ::-webkit-scrollbar-thumb:hover {
+    background: var(--border-hover);
+}
+
+/* Warning/Note boxes */
+.ayu .warning {
+    background-color: rgba(255, 215, 0, 0.1);
+    border-left: 3px solid var(--accent-warning);
+    padding: 1em;
+    margin: 1.5em 0;
+}
+
+/* Chapter navigation */
+.ayu .nav-chapters {
+    font-size: 0.9em;
+}
+
+/* Page title area */
+.ayu #content > main > h1:first-child {
+    margin-top: 0;
+    padding-top: 0.5em;
+}

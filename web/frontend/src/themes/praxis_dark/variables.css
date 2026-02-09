@@ -1,0 +1,56 @@
+/*
+ * Praxis Dark Theme - CSS Variables
+ * Retro terminal aesthetic with green phosphor glow
+ */
+
+html[data-theme="praxis_dark"] {
+  /* Theme identifier */
+  --theme-name: 'praxis_dark';
+  --theme-is-dark: 1;
+
+  --bg-primary: #030712;
+  --bg-secondary: #050807;
+  --bg-tertiary: #0a0f0c;
+  --border-color: #1f3229;
+  --border-dim: #141f19;
+  --border-hover: #5c9c66;
+  --border-active: #9ee675;
+  --text-primary: #9ee675;
+  --text-secondary: #5c9c66;
+  --text-title: #9ee675;
+  --text-highlight: #f2ffd5;
+  --text-muted: #4a5d52;
+  --accent-success: #9ee675;
+  --accent-warning: #ffd700;
+  --accent-error: #f87171;
+  --accent-info: #00ffff;
+  --accent-purple: #cc66ff;
+
+  /* Agent nickname colors - vibrant neon */
+  --agent-color-1: #9ee675;
+  --agent-color-2: #00ffff;
+  --agent-color-3: #cc66ff;
+  --agent-color-4: #ffd700;
+  --agent-color-5: #ff9966;
+  --agent-color-6: #66ccff;
+  --agent-color-7: #ff66b2;
+  --agent-color-8: #99ff99;
+  --highlight: #0a0f0c;
+  --green-glow: rgba(158, 230, 117, 0.15);
+  --green-glow-strong: rgba(158, 230, 117, 0.4);
+
+  /* Splash screen colors - green phosphor theme */
+  --splash-bg: #030712;
+  --splash-logo: #f2ffd5;
+  --splash-logo-dim: #5c9c66;
+  --splash-glow: rgba(158, 230, 117, 0.6);
+  --splash-glow-weak: rgba(158, 230, 117, 0.3);
+  --splash-matrix-color: rgb(30, 80, 40);
+
+  color-scheme: dark;
+}
+
+html[data-theme="praxis_dark"] body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}

@@ -1,0 +1,21 @@
+[book]
+title = "Praxis Documentation"
+authors = ["Origin HQ"]
+description = "Documentation for the Praxis platform"
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+
+[output.html]
+theme = "theme"
+git-repository-url = "https://github.com/originsec/praxis"
+edit-url-template = "https://github.com/originsec/praxis/edit/main/docs/src/{path}"
+default-theme = "light"
+preferred-dark-theme = "light"
+additional-css = [
+    "theme/css/praxis-variables.css",
+    "theme/css/praxis-general.css",
+    "theme/css/praxis-chrome.css"
+]

@@ -1,0 +1,77 @@
+[package]
+name = "praxis_node"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Praxis node agent - runs on target systems to execute operations"
+
+
+[dependencies]
+async-trait = "0.1.89"
+regex = "1.10"
+fancy-regex = "0.14"
+indexmap = { version = "2.0", features = ["serde"] }
+uuid = { version = "1.7", features = ["v4"] }
+tokio = { version = "1.49.0", features = ["full"] }
+futures = "0.3"
+once_cell = "1.19"
+sysinfo = "0.37.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+glob = "0.3"
+anyhow = "1.0.100"
+lapin = "2.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tracing = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5.0"
+walkdir = "2"
+common = { path = "../common" }
+portable-pty = "0.8"
+rmcp = { version = "0.8", features = ["client", "transport-child-process"] }
+# Traffic interception dependencies
+flate2 = "1"
+brotli = "7"
+zstd = "0.13"
+# VPN packet routing dependencies
+socket2 = { version = "0.5", features = ["all"] }
+etherparse = "0.16"
+hickory-resolver = { version = "0.24", features = ["tokio-runtime"] }
+dashmap = "6"
+tokio-util = { version = "0.7", features = ["rt"] }
+time = "0.3"
+rcgen = "0.13"
+rustls = { version = "0.23", features = ["ring"] }
+tokio-rustls = "0.26"
+rustls-pemfile = "2"
+webpki-roots = "0.26"
+rustls-pki-types = "1"
+hyper = { version = "1.5", features = ["full"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto", "server-graceful"] }
+h2 = "0.4"
+http = "1"
+http-body-util = "0.1"
+bytes = "1"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+toml = "0.8"
+nix = { version = "0.31.1", features = ["user"] }
+mlua = { version = "0.10", features = ["lua54", "vendored", "serialize", "send"] }
+base64 = "0.22"
+chromiumoxide = { version = "0.7", features = ["tokio-runtime"], default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = ["Management_Deployment", "Foundation_Collections", "ApplicationModel", "Storage_Search", "Win32_Storage_Packaging_Appx", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_StationsAndDesktops", "Win32_Security", "Win32_System_Threading", "Win32_Graphics_Gdi"] }
+windows-env = "0.2"
+uiautomation = { version = "0.24.2", features = ["all"] }
+winreg = "0.55"
+wintun = "0.5"
+if-addrs = "0.13"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tun = "0.7"

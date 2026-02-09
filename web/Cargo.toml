@@ -1,0 +1,37 @@
+[package]
+name = "praxis_web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Praxis web server - WebSocket bridge and web UI for the Praxis framework"
+
+[lib]
+name = "praxis_web"
+path = "src/lib.rs"
+
+[[bin]]
+name = "praxis_web"
+path = "src/main.rs"
+
+[build-dependencies]
+anyhow = "1.0"
+
+[dependencies]
+common = { path = "../common" }
+tokio = { version = "1", features = ["full"] }
+lapin = "2.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+futures-util = "0.3"
+anyhow = "1.0"
+axum = { version = "0.8", features = ["ws"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors"] }
+dirs = "5"
+rust-embed = { version = "8", features = ["axum"] }
+mime_guess = "2"

@@ -1,0 +1,10 @@
+Third-Party Notices
+===================
+
+This project includes third-party components.
+
+1) Wintun prebuilt binary (wintun.dll)
+--------------------------------------
+- Copyright: WireGuard LLC
+- Component location: `node/assets/wintun_amd64.dll`
+- License text: `node/assets/LICENSE-WINTUN-PREBUILT`

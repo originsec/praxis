@@ -1,0 +1,33 @@
+[package]
+name = "semantic_parser"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Semantic parser library for extracting structured data from unstructured text using AI"
+readme = "README.md"
+keywords = ["ai", "llm", "slm", "parser", "semantic", "nlp", "extraction", "json", "struct", "structured"]
+categories = ["text-processing", "parsing"]
+
+[dependencies]
+common = { path = "../common" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["full"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lib]
+name = "semantic_parser"
+path = "src/lib.rs"
+
+[[example]]
+name = "basic"
+path = "examples/basic.rs"
+
+[[example]]
+name = "typed"
+path = "examples/typed.rs"

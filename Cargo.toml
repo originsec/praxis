@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = ["cli", "common", "node", "semantic_parser", "service", "web"]
+
+[workspace.package]
+version = "0.9.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/originsec/praxis"
+homepage = "https://praxis.originhq.com"
+authors = ["Origin <team@originhq.com>"]
+
+[workspace.metadata.release]
+shared-version = true
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
