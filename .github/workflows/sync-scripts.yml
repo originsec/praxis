@@ -1,8 +1,10 @@
 name: Sync Install Scripts
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
   sync:
