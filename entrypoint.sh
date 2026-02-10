@@ -24,7 +24,7 @@ done
 #
 # Wait for PostgreSQL if configured.
 #
-if [ -n "$PRAXIS_DATABASE_URL" ]; then
+if echo "$PRAXIS_DATABASE_URL" | grep -qE '^postgres(ql)?://'; then
     POSTGRES_HOST=$(echo "$PRAXIS_DATABASE_URL" | sed -E 's|.*@([^/:]+):([0-9]+).*|\1|')
     POSTGRES_PORT=$(echo "$PRAXIS_DATABASE_URL" | sed -E 's|.*@([^/:]+):([0-9]+).*|\2|')
 
