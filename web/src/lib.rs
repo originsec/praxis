@@ -223,6 +223,7 @@ async fn get_downloads_info() -> Json<DownloadsInfoResponse> {
     let platforms = vec![
         ("linux", "praxis_node_linux"),
         ("windows", "praxis_node_windows.exe"),
+        ("macos-arm64", "praxis_node_macos_arm64"),
     ];
 
     let nodes: Vec<NodeDownloadInfo> = platforms
@@ -253,10 +254,13 @@ async fn download_node(Path(platform): Path<String>) -> impl IntoResponse {
     let filename = match platform.as_str() {
         "linux" => "praxis_node_linux",
         "windows" => "praxis_node_windows.exe",
+        "macos-arm64" => "praxis_node_macos_arm64",
         _ => {
             return Response::builder()
                 .status(StatusCode::NOT_FOUND)
-                .body(Body::from("Invalid platform. Use 'linux' or 'windows'."))
+                .body(Body::from(
+                    "Invalid platform. Use 'linux', 'windows', or 'macos-arm64'.",
+                ))
                 .unwrap();
         }
     };

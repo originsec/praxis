@@ -74,6 +74,10 @@ This starts:
 
 Open **http://localhost:8080** and you're in.
 
+To make macOS node binaries downloadable in the Web UI when running with Docker,
+place `praxis_node_macos_arm64` in `~/.praxis/bin/nodes/`. The compose file
+mounts that directory into the container by default.
+
 The RabbitMQ management UI at **http://localhost:15672** uses credentials `praxis/praxis`.
 
 ### Useful Docker Commands
@@ -156,11 +160,15 @@ Each tagged release publishes node binaries for Linux and Windows:
 - [Latest Release](https://github.com/originsec/praxis/releases/latest)
 - `praxis_node-linux-x86_64` - Linux binary
 - `praxis_node-windows-x86_64.exe` - Windows binary
+- `praxis_node-macos-arm64` - macOS (Apple Silicon) binary
 
 ### Building Yourself
 
 ```bash
 # Linux (native)
+cargo build --release -p praxis_node
+
+# macOS (Apple Silicon, native)
 cargo build --release -p praxis_node
 
 # Windows (cross-compile from Linux)

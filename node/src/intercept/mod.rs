@@ -36,10 +36,7 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use tokio_util::sync::CancellationToken;
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-
 use crate::agent_connectors::Agent;
-#[cfg(any(target_os = "windows", target_os = "linux"))]
 use dns_resolver::DomainResolver;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use packet_engine::PacketEngine;
