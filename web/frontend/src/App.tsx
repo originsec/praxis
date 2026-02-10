@@ -15,6 +15,7 @@ import { ToolkitPage } from './pages/ToolkitPage';
 import { OperationsPage } from './pages/OperationsPage';
 import { EventsPage } from './pages/EventsPage';
 import { InterceptPage } from './pages/InterceptPage';
+import { HuntingPage } from './pages/HuntingPage';
 // import { DiscoveryPage } from './pages/DiscoveryPage';  // Hidden - feature not ready
 import { SettingsPage } from './pages/SettingsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
@@ -51,6 +52,7 @@ export default function App() {
               <Route path="/operations" element={<OperationsPage />} />
               <Route path="/events" element={<EventsPage />} />
               <Route path="/intercept" element={<InterceptPage />} />
+              <Route path="/hunting" element={<HuntingPage />} />
               <Route path="/agent-chat" element={flags.agentChat ? <AgentChatPage /> : <AgentChatComingSoonPage />} />
               {/* <Route path="/discovery" element={<DiscoveryPage />} /> */}  {/* Hidden - feature not ready */}
               <Route path="/settings" element={<SettingsPage />} />

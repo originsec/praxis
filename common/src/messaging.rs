@@ -1425,6 +1425,14 @@ pub enum ClientSignalMessage {
     },
 
     //
+    // Hunting - KQL query interface.
+    //
+    HuntingQuery {
+        client_id: String,
+        query: String,
+    },
+
+    //
     // AgentChat - IRC-style multi-agent chat.
     //
     /// Start a new AgentChat session
@@ -1692,6 +1700,18 @@ pub enum ClientDirectMessage {
     LuaAgentScriptListResponse { scripts: Vec<LuaAgentScriptInfo> },
     LuaAgentScriptUpdated { id: String, name: String },
     LuaAgentScriptDefaultsReset { count: usize },
+
+    //
+    // Hunting responses.
+    //
+    HuntingQueryResponse {
+        columns: Vec<String>,
+        rows: Vec<Vec<serde_json::Value>>,
+        total_count: usize,
+    },
+    HuntingQueryError {
+        message: String,
+    },
 
     //
     // AgentChat responses.

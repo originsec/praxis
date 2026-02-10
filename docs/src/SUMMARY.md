@@ -15,6 +15,7 @@
 - [Sessions](./usage/sessions.md)
 - [Terminal](./usage/terminal.md)
 - [Interception](./usage/interception.md)
+- [Hunting](./usage/hunting.md)
 - [Semantic Operations](./usage/semantic-operations.md)
 - [CLI](./usage/cli.md)
 

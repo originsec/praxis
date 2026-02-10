@@ -135,6 +135,25 @@ interface AgentChatState {
   error: string | null;
 }
 
+//
+// Hunting state.
+//
+interface HuntingState {
+  isRunning: boolean;
+  columns: string[];
+  rows: unknown[][];
+  totalCount: number;
+  error: string | null;
+}
+
+const initialHuntingState: HuntingState = {
+  isRunning: false,
+  columns: [],
+  rows: [],
+  totalCount: 0,
+  error: null,
+};
+
 const initialAgentChatState: AgentChatState = {
   session: null,
   currentChannelId: null,
@@ -172,6 +191,7 @@ interface AppState {
   opDefSuccess: string | null;
   orchestrator: OrchestratorState;
   intercept: InterceptState;
+  hunting: HuntingState;
   chains: ChainState;
   discovery: DiscoveryState;
   agentChat: AgentChatState;
@@ -205,6 +225,7 @@ function createInitialState(): AppState {
     opDefSuccess: null,
     orchestrator: loadPersistedOrchestratorState(initialOrchestratorState),
     intercept: initialInterceptState,
+    hunting: initialHuntingState,
     chains: initialChainState,
     discovery: initialDiscoveryState,
     agentChat: initialAgentChatState,
@@ -241,6 +262,12 @@ type Action =
   | { type: 'ORCHESTRATOR_CLEAR_MESSAGES' }
   | { type: 'ORCHESTRATOR_SET_LOADING'; loading: boolean }
   | { type: 'ORCHESTRATOR_TOKEN_USAGE'; promptTokens: number; completionTokens: number; totalTokens: number }
+  //
+  // Hunting actions.
+  //
+  | { type: 'HUNTING_QUERY_START' }
+  | { type: 'HUNTING_QUERY_RESPONSE'; columns: string[]; rows: unknown[][]; totalCount: number }
+  | { type: 'HUNTING_QUERY_ERROR'; message: string }
   //
   // Intercept actions.
   //
@@ -625,6 +652,34 @@ function reduceIntercept(state: AppState, action: Action): AppState | null {
   }
 }
 
+function reduceHunting(state: AppState, action: Action): AppState | null {
+  switch (action.type) {
+    case 'HUNTING_QUERY_START':
+      return {
+        ...state,
+        hunting: { ...state.hunting, isRunning: true, error: null },
+      };
+    case 'HUNTING_QUERY_RESPONSE':
+      return {
+        ...state,
+        hunting: {
+          isRunning: false,
+          columns: action.columns,
+          rows: action.rows,
+          totalCount: action.totalCount,
+          error: null,
+        },
+      };
+    case 'HUNTING_QUERY_ERROR':
+      return {
+        ...state,
+        hunting: { ...state.hunting, isRunning: false, error: action.message },
+      };
+    default:
+      return null;
+  }
+}
+
 function reduceAgentSessions(state: AppState, action: Action): AppState | null {
   switch (action.type) {
     case 'AGENT_SESSION_ADD_MESSAGE': {
@@ -971,6 +1026,7 @@ function reducer(state: AppState, action: Action): AppState {
     reduceCore(state, action)
     ?? reduceOrchestrator(state, action)
     ?? reduceIntercept(state, action)
+    ?? reduceHunting(state, action)
     ?? reduceAgentSessions(state, action)
     ?? reduceChains(state, action)
     ?? reduceRecentNodes(state, action)
@@ -1094,6 +1150,10 @@ interface AppContextValue {
   agentChatGetState: () => void;
   agentChatSetCurrentChannel: (channelId: string | null) => void;
   agentChatClearError: () => void;
+  //
+  // Hunting.
+  //
+  huntingQuery: (query: string) => void;
   //
   // Lua agent scripts.
   //
@@ -1302,6 +1362,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           break;
         case 'agent_discovery_error':
           dispatch({ type: 'SET_DISCOVERY_ERROR', error: message.message });
+          break;
+
+        //
+        // Hunting messages.
+        //
+        case 'hunting_query_response':
+          dispatch({ type: 'HUNTING_QUERY_RESPONSE', columns: message.columns, rows: message.rows, totalCount: message.total_count });
+          break;
+        case 'hunting_query_error':
+          dispatch({ type: 'HUNTING_QUERY_ERROR', message: message.message });
           break;
 
         //
@@ -1829,6 +1899,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   //
+  // Hunting functions.
+  //
+  const huntingQuery = useCallback((query: string) => {
+    dispatch({ type: 'HUNTING_QUERY_START' });
+    wsClient.send({ type: 'hunting_query', query });
+  }, []);
+
+  //
   // Lua agent script functions.
   //
   const listLuaAgentScripts = useCallback(() => {
@@ -1925,6 +2003,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     agentChatGetState,
     agentChatSetCurrentChannel,
     agentChatClearError,
+    //
+    // Hunting.
+    //
+    huntingQuery,
     //
     // Lua agent scripts.
     //

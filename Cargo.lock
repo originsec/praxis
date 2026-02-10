@@ -2074,6 +2074,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "kqlparser"
+version = "0.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f503319b7f4b0de3d628689164e6034e30a461e3b80338e072cbb043c53b8708"
+dependencies = [
+ "nom",
+]
+
+[[package]]
 name = "lapin"
 version = "2.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2951,6 +2960,7 @@ dependencies = [
  "futures-util",
  "hostname",
  "indexmap",
+ "kqlparser",
  "lapin",
  "regex",
  "rmcp",

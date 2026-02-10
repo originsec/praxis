@@ -683,6 +683,10 @@ export type BrowserMessage =
   | { type: 'lua_agent_script_reset_defaults' }
   | { type: 'lua_agent_script_list' }
   //
+  // Hunting messages.
+  //
+  | { type: 'hunting_query'; query: string }
+  //
   // Agent Chat messages.
   //
   | { type: 'agent_chat_start'; goal: string | null; yolo_mode: boolean }
@@ -770,6 +774,11 @@ export type ServerMessage =
   | { type: 'lua_agent_script_deleted'; script_id: string; success: boolean }
   | { type: 'lua_agent_script_defaults_reset'; count: number }
   | { type: 'lua_agent_script_list'; scripts: LuaAgentScriptInfo[] }
+  //
+  // Hunting messages.
+  //
+  | { type: 'hunting_query_response'; columns: string[]; rows: unknown[][]; total_count: number }
+  | { type: 'hunting_query_error'; message: string }
   //
   // Agent Chat messages.
   //

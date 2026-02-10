@@ -277,6 +277,13 @@ pub enum BrowserMessage {
     LuaAgentScriptList,
 
     //
+    // Hunting messages.
+    //
+    HuntingQuery {
+        query: String,
+    },
+
+    //
     // AgentChat messages.
     //
     /// Start a new AgentChat session
@@ -585,6 +592,18 @@ pub enum ServerMessage {
     /// Lua agent scripts list
     LuaAgentScriptList {
         scripts: Vec<common::LuaAgentScriptInfo>,
+    },
+
+    //
+    // Hunting messages.
+    //
+    HuntingQueryResponse {
+        columns: Vec<String>,
+        rows: Vec<Vec<serde_json::Value>>,
+        total_count: usize,
+    },
+    HuntingQueryError {
+        message: String,
     },
 
     //
