@@ -254,7 +254,7 @@ local function do_fingerprint()
     program = "powershell",
     args = {
       "-NoProfile", "-Command",
-      "(Get-AppxPackage -Name 'Microsoft.MicrosoftOfficeHub' | Select-Object -First 1).InstallLocation"
+      "Get-AppxPackage -Name 'Microsoft.MicrosoftOfficeHub' | Select-Object -First 1 -ExpandProperty InstallLocation"
     },
   })
 
