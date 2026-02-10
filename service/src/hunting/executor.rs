@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use kqlparser::ast::{Expr, Literal, Operator, Source, Statement, TabularExpression};
-use kqlparser::parser::parse;
 use serde_json::Value;
+
+use super::parser::ast::{Expr, JoinKey, Literal, Operator, Source, Statement, TabularExpression};
+use super::parser::parser::parse;
 
 use crate::database::Database;
 use crate::state::NodeRegistry;
@@ -105,6 +106,7 @@ pub async fn execute_hunting_query(
     for operator in &tabular.operators {
         match operator {
             Operator::Where(expr) => {
+                validate_column_refs(expr, &current_columns)?;
                 rows = rows
                     .into_iter()
                     .filter(|row| eval_where_expr(expr, &current_columns, row))
@@ -112,6 +114,10 @@ pub async fn execute_hunting_query(
             }
 
             Operator::Project(projections) => {
+                for (_, expr) in projections {
+                    validate_column_refs(expr, &current_columns)?;
+                }
+
                 let proj_names: Vec<String> = projections
                     .iter()
                     .map(|(alias, expr)| {
@@ -244,7 +250,7 @@ pub async fn execute_hunting_query(
                 rows.truncate(limit);
             }
 
-            Operator::Join(_options, right_expr, on_keys) => {
+            Operator::Join(_options, right_expr, join_keys) => {
                 let (right_columns, right_rows) = materialize_tabular_expression(
                     right_expr, database, node_registry,
                 ).await?;
@@ -252,7 +258,7 @@ pub async fn execute_hunting_query(
                 apply_join(
                     &mut current_columns, &mut rows,
                     &right_columns, &right_rows,
-                    on_keys,
+                    join_keys,
                 );
             }
 
@@ -482,20 +488,15 @@ fn apply_join(
     left_rows: &mut Vec<Vec<Value>>,
     right_columns: &[String],
     right_rows: &[Vec<Value>],
-    on_keys: &[String],
+    join_keys: &[JoinKey],
 ) {
-    //
-    // Resolve key column indices on each side.
-    //
-
-    let left_key_indices: Vec<usize> = on_keys
+    let left_key_indices: Vec<usize> = join_keys
         .iter()
-        .filter_map(|k| left_columns.iter().position(|c| c.eq_ignore_ascii_case(k)))
+        .filter_map(|k| left_columns.iter().position(|c| c.eq_ignore_ascii_case(&k.left)))
         .collect();
-
-    let right_key_indices: Vec<usize> = on_keys
+    let right_key_indices: Vec<usize> = join_keys
         .iter()
-        .filter_map(|k| right_columns.iter().position(|c| c.eq_ignore_ascii_case(k)))
+        .filter_map(|k| right_columns.iter().position(|c| c.eq_ignore_ascii_case(&k.right)))
         .collect();
 
     if left_key_indices.is_empty() || left_key_indices.len() != right_key_indices.len() {
@@ -671,6 +672,49 @@ async fn materialize_traffic_match_logs(
         .collect();
 
     Ok((columns, rows))
+}
+
+//
+// Validate that all Ident references in an expression exist as columns.
+//
+
+fn validate_column_refs(expr: &Expr, columns: &[String]) -> Result<()> {
+    match expr {
+        Expr::Ident(name) => {
+            if !columns.iter().any(|c| c.eq_ignore_ascii_case(name)) {
+                return Err(anyhow!(
+                    "Unknown column '{}'. Available columns: {}",
+                    name,
+                    columns.join(", ")
+                ));
+            }
+            Ok(())
+        }
+        Expr::Equals(l, r)
+        | Expr::NotEquals(l, r)
+        | Expr::Less(l, r)
+        | Expr::Greater(l, r)
+        | Expr::LessOrEqual(l, r)
+        | Expr::GreaterOrEqual(l, r)
+        | Expr::And(l, r)
+        | Expr::Or(l, r)
+        | Expr::Add(l, r)
+        | Expr::Substract(l, r)
+        | Expr::Multiply(l, r)
+        | Expr::Divide(l, r)
+        | Expr::Modulo(l, r)
+        | Expr::Index(l, r) => {
+            validate_column_refs(l, columns)?;
+            validate_column_refs(r, columns)
+        }
+        Expr::Func(_, args) => {
+            for arg in args {
+                validate_column_refs(arg, columns)?;
+            }
+            Ok(())
+        }
+        Expr::Literal(_) => Ok(()),
+    }
 }
 
 //

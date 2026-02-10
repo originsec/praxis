@@ -139,6 +139,7 @@ interface AgentChatState {
 // Hunting state.
 //
 interface HuntingState {
+  query: string;
   isRunning: boolean;
   columns: string[];
   rows: unknown[][];
@@ -147,6 +148,7 @@ interface HuntingState {
 }
 
 const initialHuntingState: HuntingState = {
+  query: '',
   isRunning: false,
   columns: [],
   rows: [],
@@ -265,6 +267,7 @@ type Action =
   //
   // Hunting actions.
   //
+  | { type: 'HUNTING_SET_QUERY'; query: string }
   | { type: 'HUNTING_QUERY_START' }
   | { type: 'HUNTING_QUERY_RESPONSE'; columns: string[]; rows: unknown[][]; totalCount: number }
   | { type: 'HUNTING_QUERY_ERROR'; message: string }
@@ -654,6 +657,11 @@ function reduceIntercept(state: AppState, action: Action): AppState | null {
 
 function reduceHunting(state: AppState, action: Action): AppState | null {
   switch (action.type) {
+    case 'HUNTING_SET_QUERY':
+      return {
+        ...state,
+        hunting: { ...state.hunting, query: action.query },
+      };
     case 'HUNTING_QUERY_START':
       return {
         ...state,
@@ -663,6 +671,7 @@ function reduceHunting(state: AppState, action: Action): AppState | null {
       return {
         ...state,
         hunting: {
+          ...state.hunting,
           isRunning: false,
           columns: action.columns,
           rows: action.rows,
@@ -1153,6 +1162,7 @@ interface AppContextValue {
   //
   // Hunting.
   //
+  huntingSetQuery: (query: string) => void;
   huntingQuery: (query: string) => void;
   //
   // Lua agent scripts.
@@ -1901,6 +1911,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   //
   // Hunting functions.
   //
+  const huntingSetQuery = useCallback((query: string) => {
+    dispatch({ type: 'HUNTING_SET_QUERY', query });
+  }, []);
+
   const huntingQuery = useCallback((query: string) => {
     dispatch({ type: 'HUNTING_QUERY_START' });
     wsClient.send({ type: 'hunting_query', query });
@@ -2006,6 +2020,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     //
     // Hunting.
     //
+    huntingSetQuery,
     huntingQuery,
     //
     // Lua agent scripts.

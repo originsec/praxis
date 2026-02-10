@@ -4,7 +4,6 @@ import { useApp } from '../context/AppContext';
 import { KqlCodeEditor } from '../components/hunting/KqlCodeEditor';
 import { HuntingResultsTable } from '../components/hunting/HuntingResultsTable';
 
-const DEFAULT_QUERY = 'TrafficLogs\n| take 10';
 const DEFAULT_EDITOR_HEIGHT = 200;
 const MIN_EDITOR_HEIGHT = 80;
 const MAX_EDITOR_HEIGHT = 600;
@@ -105,7 +104,7 @@ const TABLES: TableInfo[] = [
     source: 'Database',
     columns: [
       { name: 'timestamp', description: 'Capture time' },
-      { name: 'id', description: 'Traffic entry ID' },
+      { name: 'traffic_id', description: 'Traffic entry ID' },
       { name: 'node_id', description: 'Capturing node' },
       { name: 'agent_short_name', description: 'Associated agent' },
       { name: 'intercept_method', description: 'proxy, vpn, hosts, tproxy' },
@@ -141,7 +140,7 @@ const TABLES: TableInfo[] = [
   },
 ];
 
-function TableReference({ onInsertTable }: { onInsertTable: (name: string) => void }) {
+function TableReference() {
   const [expandedTable, setExpandedTable] = useState<string | null>(null);
 
   return (
@@ -169,11 +168,7 @@ function TableReference({ onInsertTable }: { onInsertTable: (name: string) => vo
                 />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
-                    <span
-                      className="text-xs text-highlight font-mono cursor-pointer hover:underline"
-                      onClick={(e) => { e.stopPropagation(); onInsertTable(table.name); }}
-                      title={`Insert ${table.name}`}
-                    >
+                    <span className="text-xs text-highlight font-mono">
                       {table.name}
                     </span>
                     <span className="text-[9px] text-muted opacity-60">
@@ -252,8 +247,8 @@ function HorizontalResizeHandle({ onDrag }: { onDrag: (deltaY: number) => void }
 }
 
 export function HuntingPage() {
-  const { state, huntingQuery } = useApp();
-  const [query, setQuery] = useState(DEFAULT_QUERY);
+  const { state, huntingQuery, huntingSetQuery } = useApp();
+  const query = state.hunting.query;
   const [showReference, setShowReference] = useState(true);
   const [editorHeight, setEditorHeight] = useState(DEFAULT_EDITOR_HEIGHT);
   const resultsRef = useRef<HTMLDivElement>(null);
@@ -264,10 +259,6 @@ export function HuntingPage() {
       huntingQuery(query.trim());
     }
   }, [query, state.hunting.isRunning, huntingQuery]);
-
-  const handleInsertTable = useCallback((tableName: string) => {
-    setQuery(tableName + '\n| take 10');
-  }, []);
 
   const handleEditorResize = useCallback((deltaY: number) => {
     setEditorHeight((prev) => Math.min(MAX_EDITOR_HEIGHT, Math.max(MIN_EDITOR_HEIGHT, prev + deltaY)));
@@ -342,7 +333,7 @@ export function HuntingPage() {
           </div>
           <KqlCodeEditor
             value={query}
-            onChange={setQuery}
+            onChange={huntingSetQuery}
             onCtrlEnter={handleRun}
             readOnly={state.hunting.isRunning}
           />
@@ -350,7 +341,7 @@ export function HuntingPage() {
 
         {showReference && (
           <div className="w-72 border-l border-subtle flex-shrink-0">
-            <TableReference onInsertTable={handleInsertTable} />
+            <TableReference />
           </div>
         )}
       </div>

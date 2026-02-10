@@ -11,7 +11,7 @@ Intercepted HTTP traffic stored in the database.
 | Column | Description |
 |--------|-------------|
 | timestamp | When the traffic was captured |
-| id | Traffic entry ID (correlation key for TrafficMatchLogs) |
+| traffic_id | Traffic entry ID (join key for TrafficMatchLogs) |
 | node_id | Node that captured the traffic |
 | agent_short_name | Agent associated with this traffic |
 | intercept_method | Method used (proxy, vpn, hosts, tproxy) |
@@ -32,7 +32,7 @@ Traffic that matched intercept rules, joined with traffic details.
 | Column | Description |
 |--------|-------------|
 | timestamp | When the match occurred |
-| traffic_id | ID of the matched traffic entry (correlates to `id` in TrafficLogs) |
+| traffic_id | ID of the matched traffic entry (join key for TrafficLogs) |
 | node_id | Node that captured the traffic |
 | agent_short_name | Agent associated with this traffic |
 | rule_id | ID of the matching rule |
@@ -140,7 +140,12 @@ User identities and API keys extracted from agent configurations.
 | `count` | Count rows | `TrafficLogs \| count` |
 | `distinct` | Unique values | `TrafficLogs \| distinct host` |
 | `summarize` | Aggregate | `TrafficLogs \| summarize count() by host` |
-| `join` | Join two tables | `TrafficLogs \| join (TrafficMatchLogs) on id` |
+| `join` | Join two tables | `TrafficLogs \| join (TrafficMatchLogs) on traffic_id` |
+
+Join supports qualified keys when column names differ between tables:
+```
+LeftTable | join (RightTable) on $left.col_a == $right.col_b
+```
 
 ### Supported Expressions
 
@@ -179,7 +184,7 @@ ReconMetadataLogs | where entry_type == "api_key"
 TrafficMatchLogs | project timestamp, rule_name, url, summary | take 50
 
 // Join traffic with matches to see matched URLs with rule names
-TrafficLogs | join (TrafficMatchLogs) on id | project timestamp, url, rule_name, summary
+TrafficLogs | join (TrafficMatchLogs) on traffic_id | project timestamp, url, rule_name, summary
 
 // Find traffic with large responses
 TrafficLogs | where response_status == 200 | project timestamp, url, host | take 100
@@ -187,6 +192,6 @@ TrafficLogs | where response_status == 200 | project timestamp, url, host | take
 
 ## KQL Parser
 
-The hunting feature uses the [kqlparser](https://github.com/irtimmer/rust-kql) crate for parsing KQL syntax. Not all KQL features from the full Kusto specification are supported. Check the kqlparser GitHub repository for the current list of supported and unsupported features.
+The hunting feature uses a vendored fork of the [kqlparser](https://github.com/irtimmer/rust-kql) crate (v0.0.4, Apache-2.0) for parsing KQL syntax. The vendored copy lives in `service/src/hunting/parser/` and includes fixes for multiline join expressions and native `$left`/`$right` join key syntax. Not all KQL features from the full Kusto specification are supported.
 
 Results are capped at 10,000 rows from the service. The `total_count` field reflects the actual count before capping.

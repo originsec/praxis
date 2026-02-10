@@ -48,7 +48,7 @@ pub fn resolve_table(name: &str) -> Option<VirtualTable> {
 pub fn table_columns(table: VirtualTable) -> Vec<&'static str> {
     match table {
         VirtualTable::TrafficLogs => vec![
-            "timestamp", "id", "node_id", "agent_short_name", "intercept_method",
+            "timestamp", "traffic_id", "node_id", "agent_short_name", "intercept_method",
             "direction", "method", "url", "host", "request_headers", "request_body",
             "response_status", "response_headers", "response_body",
         ],

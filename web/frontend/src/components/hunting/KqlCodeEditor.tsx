@@ -46,7 +46,7 @@ interface TableSchema {
 }
 
 const TABLE_SCHEMAS: TableSchema[] = [
-  { name: 'TrafficLogs', columns: ['timestamp', 'id', 'node_id', 'agent_short_name', 'intercept_method', 'direction', 'method', 'url', 'host', 'request_headers', 'request_body', 'response_status', 'response_headers', 'response_body'] },
+  { name: 'TrafficLogs', columns: ['timestamp', 'traffic_id', 'node_id', 'agent_short_name', 'intercept_method', 'direction', 'method', 'url', 'host', 'request_headers', 'request_body', 'response_status', 'response_headers', 'response_body'] },
   { name: 'TrafficMatchLogs', columns: ['timestamp', 'traffic_id', 'node_id', 'agent_short_name', 'rule_id', 'rule_name', 'summary', 'method', 'url', 'host', 'direction', 'response_status'] },
   { name: 'NodeLogs', columns: ['timestamp', 'node_id', 'machine_name', 'os_details', 'intercept_active'] },
   { name: 'AgentLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'agent_name', 'version'] },
@@ -67,7 +67,7 @@ const KQL_FUNCTIONS = [
   'avg', 'min', 'max', 'dcount', 'tostring', 'toint', 'tolong',
 ];
 
-const KQL_KEYWORDS = ['and', 'or', 'not', 'by', 'on', 'asc', 'desc', 'true', 'false', 'null'];
+const KQL_KEYWORDS = ['and', 'or', 'not', 'by', 'on', '$left', '$right', 'asc', 'desc', 'true', 'false', 'null'];
 
 interface Suggestion {
   label: string;
@@ -124,22 +124,26 @@ function getCompletionContext(textBeforeCursor: string): Suggestion[] {
   const lastPipeSegment = getLastPipeSegment(textBeforeCursor);
   const segOp = lastPipeSegment.trim().split(/\s+/)[0]?.toLowerCase();
 
-  if (partial && ['where', 'extend', 'summarize'].includes(segOp ?? '')) {
-    const items: Suggestion[] = [];
-    if (table) {
-      items.push(...table.columns.map(c => ({ label: c, kind: 'column' as const })));
+  if (['where', 'extend', 'summarize'].includes(segOp ?? '')) {
+    const wordCount = lastPipeSegment.trim().split(/\s+/).length;
+    if (wordCount > 1 || partial !== segOp) {
+      const items: Suggestion[] = [];
+      if (table) {
+        items.push(...table.columns.map(c => ({ label: c, kind: 'column' as const })));
+      }
+      items.push(...KQL_FUNCTIONS.map(f => ({ label: f, kind: 'function' as const })));
+      items.push(...KQL_KEYWORDS.map(k => ({ label: k, kind: 'keyword' as const })));
+      return filterSuggestions(items, partial);
     }
-    items.push(...KQL_FUNCTIONS.map(f => ({ label: f, kind: 'function' as const })));
-    items.push(...KQL_KEYWORDS.map(k => ({ label: k, kind: 'keyword' as const })));
-    return filterSuggestions(items, partial);
   }
 
   //
   // After project/project-away/sort/order/distinct/top — suggest columns.
   //
 
-  if (partial && ['project', 'project-away', 'sort', 'order', 'distinct', 'top'].includes(segOp ?? '')) {
-    if (table) {
+  if (['project', 'project-away', 'sort', 'order', 'distinct', 'top', 'join'].includes(segOp ?? '')) {
+    const wordCount = lastPipeSegment.trim().split(/\s+/).length;
+    if ((wordCount > 1 || partial !== segOp) && table) {
       const items: Suggestion[] = table.columns.map(c => ({ label: c, kind: 'column' }));
       return filterSuggestions(items, partial);
     }
