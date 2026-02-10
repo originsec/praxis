@@ -772,10 +772,9 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
     let mut cmd = crate::agent_connectors::utils::build_command(&spec.program);
     cmd.args(&spec.args);
 
-    if let Some(cwd) = &spec.cwd {
-        cmd.current_dir(cwd);
-        crate::agent_connectors::utils::configure_command_for_directory(&mut cmd, Path::new(cwd));
-    }
+    let cwd = spec.cwd.as_deref().filter(|s| !s.is_empty()).unwrap_or("/tmp");
+    cmd.current_dir(cwd);
+    crate::agent_connectors::utils::configure_command_for_directory(&mut cmd, Path::new(cwd));
 
     for (k, v) in &spec.env {
         cmd.env(k, v);

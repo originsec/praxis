@@ -190,7 +190,7 @@ end
 
 local function run_create_session(ctx)
   local working_dir = ctx.working_dir
-  if working_dir == nil or working_dir == "" then
+  if type(working_dir) ~= "string" or working_dir == "" then
     local homes = helpers.user_homes_with_dir(".codex")
     working_dir = homes[1]
   end

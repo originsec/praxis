@@ -133,6 +133,10 @@ impl Agent for LuaAgent {
 
     fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>> {
         let process_path = self.fingerprint_process_path.read().unwrap().clone();
+        common::log_info!(
+            "Lua agent '{}': create_session (process_path={:?}, working_dir={:?}, yolo={})",
+            self.short_name, process_path, context.working_dir, context.yolo_mode
+        );
         match LuaAgentSession::new(
             Arc::clone(&self.vm),
             context,

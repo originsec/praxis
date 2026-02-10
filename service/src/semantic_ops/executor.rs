@@ -484,10 +484,18 @@ pub async fn execute_agent_mode(
         //
         // Execute non-streaming request.
         //
-        let response = client
-            .chat_completion(request)
-            .await
-            .context("Failed to complete AI request")?;
+        let response = tokio::select! {
+            result = client.chat_completion(request) => {
+                result.context("Failed to complete AI request")?
+            }
+            _ = &mut cancel_rx => {
+                let _ = database.append_output(operation_id, &fmt_error("Operation cancelled")).await;
+                if !use_existing_session {
+                    let _ = close_session(node_id, rabbitmq_channel).await;
+                }
+                return Err(anyhow::anyhow!("Operation cancelled"));
+            }
+        };
 
         //
         // Extract response text.
@@ -533,27 +541,33 @@ pub async fn execute_agent_mode(
                 //
                 // Send prompt to the remote agent.
                 //
-                match send_remote_prompt(
-                    operation_id,
-                    node_id,
-                    prompt_text,
-                    rabbitmq_channel,
-                    response_tracker.clone(),
-                    spec.timeout,
-                )
-                .await
-                {
-                    Ok(response) => {
-                        //
-                        // Log tool result.
-                        //
-                        let _ = database.append_output(operation_id, &fmt_incoming("Tool result", &response)).await;
-                        response
+                tokio::select! {
+                    result = send_remote_prompt(
+                        operation_id,
+                        node_id,
+                        prompt_text,
+                        rabbitmq_channel,
+                        response_tracker.clone(),
+                        spec.timeout,
+                    ) => {
+                        match result {
+                            Ok(response) => {
+                                let _ = database.append_output(operation_id, &fmt_incoming("Tool result", &response)).await;
+                                response
+                            }
+                            Err(e) => {
+                                let error_msg = format!("Tool error: {}", e);
+                                let _ = database.append_output(operation_id, &fmt_error(&error_msg)).await;
+                                error_msg
+                            }
+                        }
                     }
-                    Err(e) => {
-                        let error_msg = format!("Tool error: {}", e);
-                        let _ = database.append_output(operation_id, &fmt_error(&error_msg)).await;
-                        error_msg
+                    _ = &mut cancel_rx => {
+                        let _ = database.append_output(operation_id, &fmt_error("Operation cancelled")).await;
+                        if !use_existing_session {
+                            let _ = close_session(node_id, rabbitmq_channel).await;
+                        }
+                        return Err(anyhow::anyhow!("Operation cancelled"));
                     }
                 }
             } else {

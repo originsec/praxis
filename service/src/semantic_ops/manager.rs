@@ -251,6 +251,20 @@ impl SemanticOpsManager {
             }
 
             //
+            // Immediately abort any running command on the node by closing
+            // the session. This sends SessionCommand::Close which triggers
+            // cancel_all_for_session(force=true) on the node, killing the
+            // running process without waiting for the executor to check
+            // the cancel signal.
+            //
+
+            let _ = crate::semantic_ops::executor::close_session(
+                &node_id,
+                &self.rabbitmq_channel,
+            )
+            .await;
+
+            //
             // Update database.
             //
             self.database.update_status(

@@ -24,17 +24,23 @@ use super::graph::ExecutionGraph;
 use super::implicit::is_implicit_chain;
 use super::state::{ChainExecutionRegistry, ChainExecutionState};
 
+struct CancelHandle {
+    cancel_tx: oneshot::Sender<()>,
+    node_id: String,
+    rabbitmq_channel: Channel,
+}
+
 /// Chain executor handles running operation chains
 pub struct ChainExecutor {
     pub registry: Arc<ChainExecutionRegistry>,
-    cancel_senders: Arc<TokioRwLock<HashMap<String, oneshot::Sender<()>>>>,
+    cancel_handles: Arc<TokioRwLock<HashMap<String, CancelHandle>>>,
 }
 
 impl ChainExecutor {
     pub fn new() -> Self {
         Self {
             registry: Arc::new(ChainExecutionRegistry::new()),
-            cancel_senders: Arc::new(TokioRwLock::new(HashMap::new())),
+            cancel_handles: Arc::new(TokioRwLock::new(HashMap::new())),
         }
     }
 
@@ -111,10 +117,14 @@ impl ChainExecutor {
         // Create cancellation channel.
         //
         let (cancel_tx, cancel_rx) = oneshot::channel();
-        self.cancel_senders
+        self.cancel_handles
             .write()
             .await
-            .insert(execution_id.clone(), cancel_tx);
+            .insert(execution_id.clone(), CancelHandle {
+                cancel_tx,
+                node_id: node_id.clone(),
+                rabbitmq_channel: rabbitmq_channel.clone(),
+            });
 
         //
         // Broadcast initial state.
@@ -135,7 +145,7 @@ impl ChainExecutor {
         let exec_id = execution_id.clone();
         let state_clone = state_arc.clone();
         let _registry_clone = self.registry.clone();
-        let cancel_senders = self.cancel_senders.clone();
+        let cancel_handles = self.cancel_handles.clone();
         let database_clone = database.clone();
         let working_dir_clone = working_dir.clone();
 
@@ -246,7 +256,7 @@ impl ChainExecutor {
             //
             // Cleanup.
             //
-            cancel_senders.write().await.remove(&exec_id);
+            cancel_handles.write().await.remove(&exec_id);
 
             //
             // Keep execution in registry for a bit so clients can see final
@@ -260,8 +270,14 @@ impl ChainExecutor {
 
     /// Cancel a running chain execution
     pub async fn cancel(&self, execution_id: &str) -> bool {
-        if let Some(tx) = self.cancel_senders.write().await.remove(execution_id) {
-            let _ = tx.send(());
+        if let Some(handle) = self.cancel_handles.write().await.remove(execution_id) {
+            let _ = handle.cancel_tx.send(());
+
+            //
+            // Immediately abort any running command on the node.
+            //
+
+            let _ = close_session(&handle.node_id, &handle.rabbitmq_channel).await;
             true
         } else {
             false
