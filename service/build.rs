@@ -43,4 +43,10 @@ fn main() {
         .unwrap();
     }
     writeln!(out, "];").unwrap();
+
+    writeln!(
+        out,
+        "pub const EMBEDDED_LUA_SCRIPTS_VERSION: &str = env!(\"CARGO_PKG_VERSION\");"
+    )
+    .unwrap();
 }

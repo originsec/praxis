@@ -238,6 +238,35 @@ impl Database {
             }
         }
 
+        //
+        // Migration: Add disabled, is_builtin, version columns to lua_agent_scripts.
+        // Needed for script versioning, disable/enable, and builtin tagging.
+        //
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let _ = sqlx::query("ALTER TABLE lua_agent_scripts ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0")
+                    .execute(pool)
+                    .await;
+                let _ = sqlx::query("ALTER TABLE lua_agent_scripts ADD COLUMN is_builtin INTEGER NOT NULL DEFAULT 0")
+                    .execute(pool)
+                    .await;
+                let _ = sqlx::query("ALTER TABLE lua_agent_scripts ADD COLUMN version TEXT")
+                    .execute(pool)
+                    .await;
+            }
+            DatabasePool::Postgres(pool) => {
+                let _ = sqlx::query("ALTER TABLE lua_agent_scripts ADD COLUMN IF NOT EXISTS disabled SMALLINT NOT NULL DEFAULT 0")
+                    .execute(pool)
+                    .await;
+                let _ = sqlx::query("ALTER TABLE lua_agent_scripts ADD COLUMN IF NOT EXISTS is_builtin SMALLINT NOT NULL DEFAULT 0")
+                    .execute(pool)
+                    .await;
+                let _ = sqlx::query("ALTER TABLE lua_agent_scripts ADD COLUMN IF NOT EXISTS version TEXT")
+                    .execute(pool)
+                    .await;
+            }
+        }
+
         Ok(())
     }
 

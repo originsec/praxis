@@ -32,6 +32,15 @@
 
 - Never use `common::log_*` macros in `node/src/runtime.rs` event log forwarder task. These macros send to the event log channel, which the forwarder processes, creating an infinite recursion loop when RabbitMQ fails. Use `tracing::*` directly instead.
 
+## Database Migrations
+
+- Any DB schema changes must include a migration in `service/src/database/mod.rs` `run_migrations()`.
+- Migrations must be idempotent (safe to run multiple times).
+- Migrations must work for both SQLite and PostgreSQL.
+- For SQLite, use `ALTER TABLE ... ADD COLUMN` and ignore errors (no `IF NOT EXISTS` support for columns).
+- For PostgreSQL, use `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`.
+- The `service_config` table can store version tracking keys (e.g., `builtin_scripts_version`) to coordinate data migrations across service upgrades.
+
 ## Documentation
 
 - Documentation lives in `docs/` and is built with mdBook.

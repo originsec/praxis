@@ -1636,7 +1636,7 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             );
 
             let id = uuid::Uuid::new_v4().to_string();
-            match ctx.database.upsert_lua_agent_script(&id, &name, &script).await {
+            match ctx.database.upsert_lua_agent_script(&id, &name, &script, false, false, None).await {
                 Ok(()) => {
                     let _ = send_to_client(
                         &ctx.client_publish_channel,
@@ -1735,8 +1735,8 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
                 &client_id[..8.min(client_id.len())]
             );
 
-            match ctx.database.upsert_lua_agent_script(&script_id, &name, &script).await {
-                Ok(()) => {
+            match ctx.database.update_lua_agent_script_content(&script_id, &name, &script).await {
+                Ok(_) => {
                     let _ = send_to_client(
                         &ctx.client_publish_channel,
                         &client_id,
@@ -1783,7 +1783,9 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
                     let mut count = 0usize;
                     for (name, content) in crate::EMBEDDED_LUA_SCRIPTS {
                         let id = uuid::Uuid::new_v4().to_string();
-                        if let Err(e) = ctx.database.upsert_lua_agent_script(&id, name, content).await {
+                        if let Err(e) = ctx.database.upsert_lua_agent_script(
+                            &id, name, content, false, true, Some(crate::EMBEDDED_LUA_SCRIPTS_VERSION),
+                        ).await {
                             error!("Failed to seed Lua agent script '{}': {}", name, e);
                         } else {
                             count += 1;
@@ -1839,6 +1841,55 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
                 }
                 Err(e) => {
                     error!("Failed to list Lua agent scripts: {}", e);
+                }
+            }
+        }
+
+        ClientSignalMessage::LuaAgentScriptToggleDisabled {
+            client_id,
+            script_id,
+            disabled,
+        } => {
+            info!(
+                "Received LuaAgentScriptToggleDisabled from client {}",
+                &client_id[..8.min(client_id.len())]
+            );
+
+            match ctx.database.set_lua_agent_script_disabled(&script_id, disabled).await {
+                Ok(success) => {
+                    let _ = send_to_client(
+                        &ctx.client_publish_channel,
+                        &client_id,
+                        ClientDirectMessage::LuaAgentScriptDisabledToggled {
+                            script_id: script_id.clone(),
+                            disabled,
+                        },
+                    )
+                    .await;
+
+                    if success {
+                        if let Ok(scripts) = ctx.database.get_all_lua_scripts().await {
+                            let script_count = scripts.len();
+                            let scripts: Vec<String> = scripts
+                                .iter()
+                                .map(|s| STANDARD.encode(s.as_bytes()))
+                                .collect();
+                            let update = NodeBroadcastMessage::AgentRegistryUpdate { scripts };
+                            match publish_json_exchange(
+                                &ctx.broadcast_channel,
+                                NODE_BROADCAST_EXCHANGE,
+                                &update,
+                            )
+                            .await
+                            {
+                                Ok(_) => info!("Broadcast AgentRegistryUpdate ({} scripts) after toggle disabled", script_count),
+                                Err(e) => error!("Failed to broadcast AgentRegistryUpdate after toggle disabled: {}", e),
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to toggle disabled for script {}: {}", script_id, e);
                 }
             }
         }

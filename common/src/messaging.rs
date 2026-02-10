@@ -180,6 +180,12 @@ pub struct LuaAgentScriptInfo {
     pub id: String,
     pub name: String,
     pub script: String,
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default)]
+    pub is_builtin: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -1423,6 +1429,11 @@ pub enum ClientSignalMessage {
     LuaAgentScriptResetDefaults {
         client_id: String,
     },
+    LuaAgentScriptToggleDisabled {
+        client_id: String,
+        script_id: String,
+        disabled: bool,
+    },
 
     //
     // AgentChat - IRC-style multi-agent chat.
@@ -1692,6 +1703,7 @@ pub enum ClientDirectMessage {
     LuaAgentScriptListResponse { scripts: Vec<LuaAgentScriptInfo> },
     LuaAgentScriptUpdated { id: String, name: String },
     LuaAgentScriptDefaultsReset { count: usize },
+    LuaAgentScriptDisabledToggled { script_id: String, disabled: bool },
 
     //
     // AgentChat responses.

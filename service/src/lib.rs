@@ -179,29 +179,60 @@ async fn run_main_loop() -> Result<()> {
     let database = Arc::new(Database::new(&db_config).await?);
 
     //
-    // Seed any missing default Lua agent scripts into the database.
+    // Seed or update built-in Lua agent scripts. New scripts are inserted,
+    // existing builtin scripts are updated when the service version changes.
     //
-    match database.list_lua_agent_scripts().await {
-        Ok(existing) => {
-            let existing_names: std::collections::HashSet<&str> =
-                existing.iter().map(|s| s.name.as_str()).collect();
-            let mut seeded = 0usize;
-            for (name, content) in EMBEDDED_LUA_SCRIPTS {
-                if !existing_names.contains(name) {
-                    let id = uuid::Uuid::new_v4().to_string();
-                    if let Err(e) = database.upsert_lua_agent_script(&id, name, content).await {
-                        warn!("Failed to seed Lua agent script '{}': {}", name, e);
-                    } else {
-                        seeded += 1;
+    {
+        let current_version = EMBEDDED_LUA_SCRIPTS_VERSION;
+        let last_version = database.get_config("builtin_scripts_version").await.unwrap_or(None);
+        let should_update = last_version.as_deref() != Some(current_version);
+
+        match database.list_lua_agent_scripts().await {
+            Ok(existing) => {
+                let existing_by_name: std::collections::HashMap<&str, &common::LuaAgentScriptInfo> =
+                    existing.iter().map(|s| (s.name.as_str(), s)).collect();
+                let mut seeded = 0usize;
+                let mut updated = 0usize;
+
+                for (name, content) in EMBEDDED_LUA_SCRIPTS {
+                    match existing_by_name.get(name) {
+                        None => {
+                            let id = uuid::Uuid::new_v4().to_string();
+                            if let Err(e) = database.upsert_lua_agent_script(
+                                &id, name, content, false, true, Some(current_version),
+                            ).await {
+                                warn!("Failed to seed Lua agent script '{}': {}", name, e);
+                            } else {
+                                seeded += 1;
+                            }
+                        }
+                        Some(s) if s.is_builtin && should_update => {
+                            if let Err(e) = database.upsert_lua_agent_script(
+                                &s.id, name, content, s.disabled, true, Some(current_version),
+                            ).await {
+                                warn!("Failed to update builtin script '{}': {}", name, e);
+                            } else {
+                                updated += 1;
+                            }
+                        }
+                        _ => {}
                     }
                 }
+
+                if seeded > 0 {
+                    info!("Seeded {} new default Lua agent script(s)", seeded);
+                }
+                if updated > 0 {
+                    info!("Updated {} builtin Lua agent script(s) to version {}", updated, current_version);
+                }
+
+                if should_update {
+                    let _ = database.set_config("builtin_scripts_version", current_version).await;
+                }
             }
-            if seeded > 0 {
-                info!("Seeded {} new default Lua agent script(s)", seeded);
+            Err(e) => {
+                warn!("Failed to check Lua agent scripts for seeding: {}", e);
             }
-        }
-        Err(e) => {
-            warn!("Failed to check Lua agent scripts for seeding: {}", e);
         }
     }
 

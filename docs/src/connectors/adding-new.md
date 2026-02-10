@@ -8,6 +8,8 @@ This guide walks through creating a connector for a new AI agent.
 
 Lua agent scripts live in `agents/` at the project root and are embedded into binaries at build time. They can also be uploaded via the web UI (Settings > Agents).
 
+> **Tip**: Scripts uploaded or created through the web UI are tagged as user scripts and won't be overwritten by Praxis updates. If you want to customize a built-in script, create a copy with your changes and disable the original.
+
 ### CLI Agents vs Browser-Based Agents
 
 For **CLI agents** (e.g. Claude Code, Gemini CLI), use `praxis.command_run` / `praxis.command_run_handle` to spawn processes and interact via stdin/stdout.

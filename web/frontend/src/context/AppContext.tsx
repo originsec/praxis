@@ -1102,6 +1102,7 @@ interface AppContextValue {
   updateLuaAgentScript: (scriptId: string, name: string, script: string) => void;
   deleteLuaAgentScript: (scriptId: string) => void;
   resetLuaAgentScriptDefaults: () => void;
+  toggleLuaAgentScriptDisabled: (scriptId: string, disabled: boolean) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -1337,6 +1338,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         case 'lua_agent_script_updated':
         case 'lua_agent_script_deleted':
         case 'lua_agent_script_defaults_reset':
+        case 'lua_agent_script_disabled_toggled':
           wsClient.send({ type: 'lua_agent_script_list' });
           break;
         case 'lua_agent_script_list':
@@ -1851,6 +1853,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     wsClient.send({ type: 'lua_agent_script_reset_defaults' });
   }, []);
 
+  const toggleLuaAgentScriptDisabled = useCallback((scriptId: string, disabled: boolean) => {
+    wsClient.send({ type: 'lua_agent_script_toggle_disabled', script_id: scriptId, disabled });
+  }, []);
+
   const value: AppContextValue = {
     state,
     getNode,
@@ -1933,6 +1939,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     updateLuaAgentScript,
     deleteLuaAgentScript,
     resetLuaAgentScriptDefaults,
+    toggleLuaAgentScriptDisabled,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

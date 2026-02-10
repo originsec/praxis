@@ -80,7 +80,30 @@ In addition to compiled Rust connectors, Praxis supports writing agent connector
 Default Lua agent scripts live in the `agents/` directory at the project root. These are embedded into both the node and service binaries at build time:
 
 - **Node**: Scripts from `agents/` are compiled into the node binary and loaded on startup as fallback connectors.
-- **Service**: Scripts are embedded and seeded into the `lua_agent_scripts` database table on first startup (when the table is empty).
+- **Service**: Scripts are embedded and seeded into the `lua_agent_scripts` database table on first startup. Built-in scripts are tagged with the current Praxis version.
+
+When Praxis is upgraded to a newer version, built-in scripts are automatically updated to the latest version. User-added scripts are never modified by updates.
+
+### Built-in vs User Scripts
+
+Scripts are tagged as either **built-in** or **user**. Built-in scripts ship with Praxis and are automatically updated when the service version changes. User scripts are created through the web UI or uploaded manually and are never overwritten by updates.
+
+Built-in scripts show a "builtin" badge in the web UI script list.
+
+> **Note**: If you need to customize a built-in script, the recommended approach is to:
+> 1. Create a new script with your modifications (Settings > Agents > Upload or create new)
+> 2. Disable the original built-in script using the toggle in the script list
+> 3. Your custom script will be used instead and won't be overwritten on updates
+>
+> Editing a built-in script directly is possible but not recommended, as your changes will be replaced on the next Praxis update.
+
+### Disabling Scripts
+
+Scripts can be individually enabled or disabled via the toggle icon in the script list. Disabled scripts are not sent to nodes, so the agents they define won't be available. This is useful for:
+
+- Temporarily removing an agent without deleting the script
+- Replacing a built-in script with a custom version
+- Testing by toggling scripts on and off
 
 ### Managing Scripts
 
@@ -88,6 +111,7 @@ Lua agent scripts can be managed through the **Agents** tab in the Settings page
 
 - View and edit existing scripts
 - Upload new `.lua` scripts
+- Enable or disable individual scripts
 - Delete scripts
 - Reset all scripts back to the built-in defaults
 

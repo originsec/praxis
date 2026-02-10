@@ -58,7 +58,7 @@ interface NodeDownloadInfo {
 }
 
 export function SettingsPage() {
-  const { state, getConfig, setConfig, listLuaAgentScripts, addLuaAgentScript, updateLuaAgentScript, deleteLuaAgentScript, resetLuaAgentScriptDefaults } = useApp();
+  const { state, getConfig, setConfig, listLuaAgentScripts, addLuaAgentScript, updateLuaAgentScript, deleteLuaAgentScript, resetLuaAgentScriptDefaults, toggleLuaAgentScriptDisabled } = useApp();
   const [searchParams, setSearchParams] = useSearchParams();
 
   //
@@ -163,6 +163,7 @@ export function SettingsPage() {
   const [showResetModal, setShowResetModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletingScriptId, setDeletingScriptId] = useState<string | null>(null);
+  const [showBuiltinWarning, setShowBuiltinWarning] = useState(false);
 
   //
   // Load config on mount
@@ -1127,19 +1128,41 @@ export function SettingsPage() {
                         className={`group flex items-center justify-between px-3 py-2 cursor-pointer transition-colors ${
                           selectedScriptId === script.id
                             ? 'bg-[var(--highlight)] text-title'
-                            : 'hover:bg-[var(--bg-tertiary)] text-muted'
+                            : script.disabled
+                              ? 'hover:bg-[var(--bg-tertiary)] text-muted opacity-50'
+                              : 'hover:bg-[var(--bg-tertiary)] text-muted'
                         }`}
                       >
-                        <span className="text-sm truncate">{script.name}</span>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleDeleteScript(script.id); }}
-                          className={`p-1 text-muted hover:text-[var(--accent-error)] transition-colors flex-shrink-0 ${
-                            selectedScriptId === script.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                          }`}
-                          title="Delete"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-sm truncate">{script.name}</span>
+                          {script.is_builtin && (
+                            <span className="text-[10px] px-1 py-0.5 rounded bg-[var(--accent-info)]/20 text-[var(--accent-info)] flex-shrink-0">
+                              builtin
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-0.5 flex-shrink-0">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); toggleLuaAgentScriptDisabled(script.id, !script.disabled); }}
+                            className={`p-1 transition-colors ${
+                              script.disabled
+                                ? 'text-[var(--accent-warning)]'
+                                : 'text-muted hover:text-[var(--accent-success)] opacity-0 group-hover:opacity-100'
+                            }`}
+                            title={script.disabled ? 'Enable' : 'Disable'}
+                          >
+                            {script.disabled ? <ToggleLeft size={14} /> : <ToggleRight size={14} />}
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeleteScript(script.id); }}
+                            className={`p-1 text-muted hover:text-[var(--accent-error)] transition-colors ${
+                              selectedScriptId === script.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                            }`}
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </div>
                     ))
                   )}
@@ -1163,7 +1186,22 @@ export function SettingsPage() {
                             className="bg-[var(--bg-primary)] border border-dim rounded px-2 py-1 text-sm text-highlight focus:outline-none focus:border-subtle w-full md:w-64"
                           />
                         ) : (
-                          <span className="text-sm font-medium text-highlight">{editingScriptName}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-highlight">{editingScriptName}</span>
+                            {(() => {
+                              const script = state.luaAgentScripts.find(s => s.id === selectedScriptId);
+                              return (
+                                <>
+                                  {script?.is_builtin && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent-info)]/20 text-[var(--accent-info)]">builtin</span>
+                                  )}
+                                  {script?.disabled && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent-warning)]/20 text-[var(--accent-warning)]">disabled</span>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
                         )}
                         <div className="flex gap-2">
                           {isEditingScript ? (
@@ -1200,7 +1238,14 @@ export function SettingsPage() {
                             </>
                           ) : (
                             <button
-                              onClick={() => setIsEditingScript(true)}
+                              onClick={() => {
+                                const script = state.luaAgentScripts.find(s => s.id === selectedScriptId);
+                                if (script?.is_builtin) {
+                                  setShowBuiltinWarning(true);
+                                } else {
+                                  setIsEditingScript(true);
+                                }
+                              }}
                               className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors"
                             >
                               <Edit2 size={12} />
@@ -1295,6 +1340,42 @@ export function SettingsPage() {
                       className="px-3 py-1.5 text-sm rounded-md bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/30 transition-colors"
                     >
                       Reset to Defaults
+                    </button>
+                  </div>
+                </div>
+              </Modal>
+
+              {/*
+              //
+              // Builtin script edit warning modal.
+              //
+              */}
+              <Modal
+                isOpen={showBuiltinWarning}
+                onClose={() => setShowBuiltinWarning(false)}
+                title="Editing Built-in Script"
+                size="sm"
+              >
+                <div className="space-y-4">
+                  <div className="flex gap-3 p-3 rounded bg-[var(--accent-warning)]/10 border border-[var(--accent-warning)]/20">
+                    <AlertTriangle size={20} className="text-[var(--accent-warning)] flex-shrink-0 mt-0.5" />
+                    <div className="text-sm">
+                      <p className="text-[var(--accent-warning)] font-medium mb-1">This is a built-in script</p>
+                      <p className="text-muted">Changes to built-in scripts may be overwritten when Praxis is updated. Consider creating a new script with your changes and disabling this one instead.</p>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => setShowBuiltinWarning(false)}
+                      className="px-3 py-1.5 text-sm rounded-md text-muted hover:text-title transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => { setShowBuiltinWarning(false); setIsEditingScript(true); }}
+                      className="px-3 py-1.5 text-sm rounded-md bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/30 transition-colors"
+                    >
+                      Edit Anyway
                     </button>
                   </div>
                 </div>

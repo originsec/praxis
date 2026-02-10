@@ -189,6 +189,9 @@ export interface LuaAgentScriptInfo {
   id: string;
   name: string;
   script: string;
+  disabled: boolean;
+  is_builtin: boolean;
+  version: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -682,6 +685,7 @@ export type BrowserMessage =
   | { type: 'lua_agent_script_delete'; script_id: string }
   | { type: 'lua_agent_script_reset_defaults' }
   | { type: 'lua_agent_script_list' }
+  | { type: 'lua_agent_script_toggle_disabled'; script_id: string; disabled: boolean }
   //
   // Agent Chat messages.
   //
@@ -770,6 +774,7 @@ export type ServerMessage =
   | { type: 'lua_agent_script_deleted'; script_id: string; success: boolean }
   | { type: 'lua_agent_script_defaults_reset'; count: number }
   | { type: 'lua_agent_script_list'; scripts: LuaAgentScriptInfo[] }
+  | { type: 'lua_agent_script_disabled_toggled'; script_id: string; disabled: boolean }
   //
   // Agent Chat messages.
   //

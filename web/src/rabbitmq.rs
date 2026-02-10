@@ -526,6 +526,15 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
+    pub async fn toggle_lua_agent_script_disabled(&self, script_id: String, disabled: bool) -> Result<()> {
+        let message = ClientSignalMessage::LuaAgentScriptToggleDisabled {
+            client_id: self.state.client_id.clone(),
+            script_id,
+            disabled,
+        };
+        self.publish_signal(message).await
+    }
+
     //
     // AgentChat methods.
     //
@@ -1000,6 +1009,9 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::LuaAgentScriptListResponse { scripts } => {
                 self.state.broadcast(ServerMessage::LuaAgentScriptList { scripts });
+            }
+            ClientDirectMessage::LuaAgentScriptDisabledToggled { script_id, disabled } => {
+                self.state.broadcast(ServerMessage::LuaAgentScriptDisabledToggled { script_id, disabled });
             }
 
             //

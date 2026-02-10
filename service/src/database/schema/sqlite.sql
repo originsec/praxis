@@ -259,6 +259,9 @@ CREATE TABLE IF NOT EXISTS lua_agent_scripts (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     script TEXT NOT NULL,
+    disabled INTEGER NOT NULL DEFAULT 0,
+    is_builtin INTEGER NOT NULL DEFAULT 0,
+    version TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 )

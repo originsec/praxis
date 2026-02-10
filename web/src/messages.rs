@@ -275,6 +275,11 @@ pub enum BrowserMessage {
     LuaAgentScriptResetDefaults,
     /// List all Lua agent scripts
     LuaAgentScriptList,
+    /// Toggle disabled state for a Lua agent script
+    LuaAgentScriptToggleDisabled {
+        script_id: String,
+        disabled: bool,
+    },
 
     //
     // AgentChat messages.
@@ -585,6 +590,11 @@ pub enum ServerMessage {
     /// Lua agent scripts list
     LuaAgentScriptList {
         scripts: Vec<common::LuaAgentScriptInfo>,
+    },
+    /// Lua agent script disabled state toggled
+    LuaAgentScriptDisabledToggled {
+        script_id: String,
+        disabled: bool,
     },
 
     //

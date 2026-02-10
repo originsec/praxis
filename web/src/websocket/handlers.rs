@@ -259,6 +259,9 @@ pub async fn handle_browser_message(
         BrowserMessage::LuaAgentScriptList => {
             state.rabbitmq.list_lua_agent_scripts().await?;
         }
+        BrowserMessage::LuaAgentScriptToggleDisabled { script_id, disabled } => {
+            state.rabbitmq.toggle_lua_agent_script_disabled(script_id, disabled).await?;
+        }
 
         //
         // AgentChat messages.

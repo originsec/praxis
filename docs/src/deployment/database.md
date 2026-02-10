@@ -126,8 +126,13 @@ The schema is created automatically. Key tables:
 | `recon_results` | Agent reconnaissance data |
 | `event_log` | Centralized logging |
 | `service_config` | Key-value configuration |
+| `lua_agent_scripts` | Lua agent connector scripts |
 
 Traffic data is automatically pruned after 7 days.
+
+### Schema Migrations
+
+Schema migrations run automatically on service startup. The service applies idempotent `ALTER TABLE` statements to add new columns introduced in newer versions. No manual migration steps are required when upgrading Praxis. The `service_config` table stores version tracking keys (e.g., `builtin_scripts_version`) to coordinate data migrations like updating built-in scripts.
 
 ## Migration: SQLite to PostgreSQL
 
