@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 import { Highlight, Prism } from 'prism-react-renderer';
 import type { PrismTheme } from 'prism-react-renderer';
 
@@ -36,6 +36,180 @@ const kqlTheme: PrismTheme = {
   'punctuation': /[[\](){},;.]/,
 };
 
+//
+// Autocomplete data.
+//
+
+interface TableSchema {
+  name: string;
+  columns: string[];
+}
+
+const TABLE_SCHEMAS: TableSchema[] = [
+  { name: 'TrafficLogs', columns: ['timestamp', 'id', 'node_id', 'agent_short_name', 'intercept_method', 'direction', 'method', 'url', 'host', 'request_headers', 'request_body', 'response_status', 'response_headers', 'response_body'] },
+  { name: 'TrafficMatchLogs', columns: ['timestamp', 'traffic_id', 'node_id', 'agent_short_name', 'rule_id', 'rule_name', 'summary', 'method', 'url', 'host', 'direction', 'response_status'] },
+  { name: 'NodeLogs', columns: ['timestamp', 'node_id', 'machine_name', 'os_details', 'intercept_active'] },
+  { name: 'AgentLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'agent_name', 'version'] },
+  { name: 'ReconLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'is_semantic', 'mcp_server_count', 'skill_count', 'internal_tool_count', 'config_count', 'session_count', 'project_path_count'] },
+  { name: 'ReconToolLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'tool_type', 'server_name', 'tool_name', 'tool_description', 'transport'] },
+  { name: 'ReconSessionLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'session_id', 'context_path', 'last_modified', 'message_count'] },
+  { name: 'ReconMetadataLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'entry_type', 'value'] },
+];
+
+const KQL_OPERATORS = [
+  'where', 'project', 'project-away', 'sort', 'order', 'take', 'limit',
+  'extend', 'summarize', 'count', 'distinct', 'top', 'join',
+];
+
+const KQL_FUNCTIONS = [
+  'contains', 'startswith', 'endswith', 'has', 'strlen', 'tolower', 'toupper',
+  'isnotempty', 'isnull', 'isempty', 'isnotnull', 'now', 'count', 'sum',
+  'avg', 'min', 'max', 'dcount', 'tostring', 'toint', 'tolong',
+];
+
+const KQL_KEYWORDS = ['and', 'or', 'not', 'by', 'on', 'asc', 'desc', 'true', 'false', 'null'];
+
+interface Suggestion {
+  label: string;
+  kind: 'table' | 'column' | 'operator' | 'function' | 'keyword';
+}
+
+//
+// Determine which table the query references (first line before any pipe).
+//
+
+function detectTable(text: string): TableSchema | null {
+  const firstLine = text.split('\n')[0].trim();
+  const tableName = firstLine.split(/\s|\|/)[0];
+  return TABLE_SCHEMAS.find(t => t.name.toLowerCase() === tableName.toLowerCase()) ?? null;
+}
+
+//
+// Determine the autocomplete context from text before cursor.
+//
+
+function getCompletionContext(textBeforeCursor: string): Suggestion[] {
+  const trimmed = textBeforeCursor.trimEnd();
+  const table = detectTable(textBeforeCursor);
+
+  //
+  // Get the current word being typed (partial match).
+  //
+
+  const wordMatch = textBeforeCursor.match(/(\w[\w-]*)$/);
+  const partial = wordMatch ? wordMatch[1].toLowerCase() : '';
+
+  //
+  // After a pipe — only suggest if user has started typing an operator name.
+  //
+
+  if (/\|\s+\w[\w-]*$/.test(textBeforeCursor) && partial) {
+    const items: Suggestion[] = KQL_OPERATORS.map(op => ({ label: op, kind: 'operator' }));
+    return filterSuggestions(items, partial);
+  }
+
+  //
+  // After `join (` — suggest table names for the right-hand side.
+  //
+
+  if (/join\s*\(\s*$/.test(trimmed) || /join\s*\(\s*\w[\w]*$/.test(textBeforeCursor)) {
+    const items: Suggestion[] = TABLE_SCHEMAS.map(t => ({ label: t.name, kind: 'table' }));
+    return filterSuggestions(items, partial);
+  }
+
+  //
+  // After where/extend/summarize ... by — suggest columns + functions.
+  //
+
+  const lastPipeSegment = getLastPipeSegment(textBeforeCursor);
+  const segOp = lastPipeSegment.trim().split(/\s+/)[0]?.toLowerCase();
+
+  if (partial && ['where', 'extend', 'summarize'].includes(segOp ?? '')) {
+    const items: Suggestion[] = [];
+    if (table) {
+      items.push(...table.columns.map(c => ({ label: c, kind: 'column' as const })));
+    }
+    items.push(...KQL_FUNCTIONS.map(f => ({ label: f, kind: 'function' as const })));
+    items.push(...KQL_KEYWORDS.map(k => ({ label: k, kind: 'keyword' as const })));
+    return filterSuggestions(items, partial);
+  }
+
+  //
+  // After project/project-away/sort/order/distinct/top — suggest columns.
+  //
+
+  if (partial && ['project', 'project-away', 'sort', 'order', 'distinct', 'top'].includes(segOp ?? '')) {
+    if (table) {
+      const items: Suggestion[] = table.columns.map(c => ({ label: c, kind: 'column' }));
+      return filterSuggestions(items, partial);
+    }
+  }
+
+  //
+  // Start of query — only suggest table names if no table has been detected
+  // yet (i.e. the user hasn't typed a valid table name on the first line).
+  //
+
+  if (!table && !textBeforeCursor.includes('|')) {
+    const items: Suggestion[] = TABLE_SCHEMAS.map(t => ({ label: t.name, kind: 'table' }));
+    return filterSuggestions(items, partial);
+  }
+
+  //
+  // Table exists but no pipe yet and no partial word — nothing to suggest.
+  // User needs to type `|` next.
+  //
+
+  if (table && !textBeforeCursor.includes('|') && !partial) {
+    return [];
+  }
+
+  //
+  // Generic fallback: columns + functions + keywords.
+  //
+
+  if (partial.length > 0) {
+    const items: Suggestion[] = [];
+    if (table) {
+      items.push(...table.columns.map(c => ({ label: c, kind: 'column' as const })));
+    }
+    items.push(...KQL_FUNCTIONS.map(f => ({ label: f, kind: 'function' as const })));
+    items.push(...KQL_KEYWORDS.map(k => ({ label: k, kind: 'keyword' as const })));
+    items.push(...KQL_OPERATORS.map(o => ({ label: o, kind: 'operator' as const })));
+    return filterSuggestions(items, partial);
+  }
+
+  return [];
+}
+
+function getLastPipeSegment(text: string): string {
+  const pipes = text.split('|');
+  return pipes[pipes.length - 1] ?? '';
+}
+
+function filterSuggestions(items: Suggestion[], partial: string): Suggestion[] {
+  if (!partial) return items;
+  return items.filter(s => s.label.toLowerCase().startsWith(partial) && s.label.toLowerCase() !== partial);
+}
+
+//
+// Kind icons/colors for the suggestion dropdown.
+//
+
+function kindLabel(kind: Suggestion['kind']): { text: string; className: string } {
+  switch (kind) {
+    case 'table': return { text: 'TBL', className: 'text-[var(--accent-info)]' };
+    case 'column': return { text: 'COL', className: 'text-[var(--accent-success)]' };
+    case 'operator': return { text: 'OP', className: 'text-[var(--accent-purple)]' };
+    case 'function': return { text: 'FN', className: 'text-[var(--accent-warning)]' };
+    case 'keyword': return { text: 'KW', className: 'text-[var(--accent-purple)]' };
+  }
+}
+
+//
+// Editor component.
+//
+
 interface KqlCodeEditorProps {
   value: string;
   onChange?: (value: string) => void;
@@ -46,20 +220,182 @@ interface KqlCodeEditorProps {
 export function KqlCodeEditor({ value, onChange, onCtrlEnter, readOnly = false }: KqlCodeEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const preRef = useRef<HTMLPreElement>(null);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
+  const [showDropdown, setShowDropdown] = useState(false);
+  const focusedRef = useRef(false);
 
   const handleScroll = useCallback(() => {
     if (textareaRef.current && preRef.current) {
       preRef.current.scrollTop = textareaRef.current.scrollTop;
       preRef.current.scrollLeft = textareaRef.current.scrollLeft;
     }
+    setShowDropdown(false);
   }, []);
+
+  const handleFocus = useCallback(() => {
+    focusedRef.current = true;
+  }, []);
+
+  const handleBlur = useCallback(() => {
+    focusedRef.current = false;
+    //
+    // Small delay so clicking a suggestion in the dropdown fires before we
+    // hide it.
+    //
+    setTimeout(() => {
+      if (!focusedRef.current) setShowDropdown(false);
+    }, 150);
+  }, []);
+
+  //
+  // Apply a suggestion: replace the partial word before cursor with the full
+  // suggestion.
+  //
+
+  const applySuggestion = useCallback((suggestion: Suggestion) => {
+    const textarea = textareaRef.current;
+    if (!textarea || !onChange) return;
+
+    const cursorPos = textarea.selectionStart;
+    const textBefore = value.slice(0, cursorPos);
+    const textAfter = value.slice(cursorPos);
+
+    //
+    // Find the partial word to replace.
+    //
+
+    const wordMatch = textBefore.match(/(\w[\w-]*)$/);
+    const replaceStart = wordMatch ? cursorPos - wordMatch[1].length : cursorPos;
+
+    let insert = suggestion.label;
+    if (suggestion.kind === 'function') insert += '(';
+
+    const newValue = value.slice(0, replaceStart) + insert + textAfter;
+    onChange(newValue);
+    setShowDropdown(false);
+
+    //
+    // Set cursor position after the inserted text.
+    //
+
+    const newCursorPos = replaceStart + insert.length;
+    requestAnimationFrame(() => {
+      textarea.selectionStart = newCursorPos;
+      textarea.selectionEnd = newCursorPos;
+      textarea.focus();
+    });
+  }, [value, onChange]);
+
+  //
+  // Compute cursor pixel position for dropdown placement.
+  //
+
+  const updateDropdownPosition = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const cursorPos = textarea.selectionStart;
+    const textBefore = value.slice(0, cursorPos);
+    const lines = textBefore.split('\n');
+    const lineIdx = lines.length - 1;
+    const colIdx = lines[lineIdx].length;
+
+    const lineHeight = 16.5; // 11px * 1.5
+    const charWidth = 6.6; // approximate for 11px monospace
+
+    const top = (lineIdx + 1) * lineHeight + 12 - textarea.scrollTop;
+    const left = colIdx * charWidth + 48 - textarea.scrollLeft;
+
+    setDropdownPos({ top, left });
+  }, [value]);
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    onChange?.(e.target.value);
+  }, [onChange]);
+
+  //
+  // Update suggestions on value or cursor change.
+  //
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea || readOnly || !focusedRef.current) {
+      setShowDropdown(false);
+      return;
+    }
+
+    const update = () => {
+      if (!focusedRef.current) {
+        setShowDropdown(false);
+        return;
+      }
+
+      const cursorPos = textarea.selectionStart;
+      const textBefore = value.slice(0, cursorPos);
+
+      //
+      // Don't show if cursor is inside a string.
+      //
+
+      const quotes = (textBefore.match(/"/g) || []).length;
+      if (quotes % 2 !== 0) {
+        setShowDropdown(false);
+        return;
+      }
+
+      const items = getCompletionContext(textBefore);
+      setSuggestions(items);
+      setSelectedIdx(0);
+
+      if (items.length > 0) {
+        updateDropdownPosition();
+        setShowDropdown(true);
+      } else {
+        setShowDropdown(false);
+      }
+    };
+
+    //
+    // Delay slightly so selectionStart is updated after onChange.
+    //
+
+    const timer = setTimeout(update, 10);
+    return () => clearTimeout(timer);
+  }, [value, readOnly, updateDropdownPosition]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
+      setShowDropdown(false);
       onCtrlEnter?.();
+      return;
     }
-  }, [onCtrlEnter]);
+
+    if (!showDropdown || suggestions.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedIdx((prev) => (prev + 1) % suggestions.length);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedIdx((prev) => (prev - 1 + suggestions.length) % suggestions.length);
+      return;
+    }
+    if (e.key === 'Tab' || e.key === 'Enter') {
+      e.preventDefault();
+      applySuggestion(suggestions[selectedIdx]);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setShowDropdown(false);
+      return;
+    }
+  }, [showDropdown, suggestions, selectedIdx, applySuggestion, onCtrlEnter]);
 
   return (
     <div className="relative flex-1 overflow-hidden" style={{ minHeight: 0 }}>
@@ -119,9 +455,11 @@ export function KqlCodeEditor({ value, onChange, onCtrlEnter, readOnly = false }
       <textarea
         ref={textareaRef}
         value={value}
-        onChange={(e) => onChange?.(e.target.value)}
+        onChange={handleChange}
         onScroll={handleScroll}
         onKeyDown={handleKeyDown}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
         readOnly={readOnly}
         spellCheck={false}
         className="absolute inset-0 w-full h-full resize-none focus:outline-none"
@@ -139,6 +477,50 @@ export function KqlCodeEditor({ value, onChange, onCtrlEnter, readOnly = false }
           tabSize: 2,
         }}
       />
+
+      {/*
+      //
+      // Autocomplete dropdown.
+      //
+      */}
+      {showDropdown && suggestions.length > 0 && (
+        <div
+          className="absolute z-50 border border-subtle bg-[var(--bg-secondary)] shadow-lg overflow-hidden"
+          style={{
+            top: dropdownPos.top,
+            left: dropdownPos.left,
+            maxHeight: '160px',
+            minWidth: '200px',
+            maxWidth: '320px',
+          }}
+        >
+          <div className="overflow-y-auto" style={{ maxHeight: '160px' }}>
+            {suggestions.slice(0, 20).map((s, idx) => {
+              const kl = kindLabel(s.kind);
+              return (
+                <div
+                  key={`${s.kind}-${s.label}`}
+                  className={`flex items-center gap-2 px-3 py-1 cursor-pointer text-xs ${
+                    idx === selectedIdx
+                      ? 'bg-[var(--highlight)] text-title'
+                      : 'text-title hover:bg-[var(--highlight)]'
+                  }`}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    applySuggestion(s);
+                  }}
+                  onMouseEnter={() => setSelectedIdx(idx)}
+                >
+                  <span className={`text-[9px] font-mono w-6 flex-shrink-0 ${kl.className}`}>
+                    {kl.text}
+                  </span>
+                  <span className="font-mono truncate">{s.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

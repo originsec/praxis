@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Play, Loader2, AlertTriangle, BookOpen, ChevronRight, GripHorizontal } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { KqlCodeEditor } from '../components/hunting/KqlCodeEditor';
@@ -17,6 +17,88 @@ interface TableInfo {
 }
 
 const TABLES: TableInfo[] = [
+  {
+    name: 'AgentLogs',
+    description: 'Discovered agents across nodes',
+    source: 'In-memory',
+    columns: [
+      { name: 'timestamp', description: 'Last update' },
+      { name: 'node_id', description: 'Node identifier' },
+      { name: 'agent_short_name', description: 'Agent short name' },
+      { name: 'agent_name', description: 'Display name' },
+      { name: 'version', description: 'Agent version' },
+    ],
+  },
+  {
+    name: 'NodeLogs',
+    description: 'Connected nodes',
+    source: 'In-memory',
+    columns: [
+      { name: 'timestamp', description: 'Last update' },
+      { name: 'node_id', description: 'Node identifier' },
+      { name: 'machine_name', description: 'Hostname' },
+      { name: 'os_details', description: 'OS info' },
+      { name: 'intercept_active', description: 'Interception active' },
+    ],
+  },
+  {
+    name: 'ReconLogs',
+    description: 'Recon summary per node+agent',
+    source: 'Database',
+    columns: [
+      { name: 'timestamp', description: 'Recon time' },
+      { name: 'node_id', description: 'Node identifier' },
+      { name: 'agent_short_name', description: 'Agent short name' },
+      { name: 'is_semantic', description: 'Semantic recon' },
+      { name: 'mcp_server_count', description: 'MCP servers found' },
+      { name: 'skill_count', description: 'Skills found' },
+      { name: 'internal_tool_count', description: 'Internal tools found' },
+      { name: 'config_count', description: 'Config items found' },
+      { name: 'session_count', description: 'Sessions found' },
+      { name: 'project_path_count', description: 'Project paths found' },
+    ],
+  },
+  {
+    name: 'ReconMetadataLogs',
+    description: 'User identities and API keys from recon',
+    source: 'Database',
+    columns: [
+      { name: 'timestamp', description: 'Recon time' },
+      { name: 'node_id', description: 'Node identifier' },
+      { name: 'agent_short_name', description: 'Agent short name' },
+      { name: 'entry_type', description: 'user_identity or api_key' },
+      { name: 'value', description: 'The identity or key' },
+    ],
+  },
+  {
+    name: 'ReconSessionLogs',
+    description: 'Sessions discovered during recon',
+    source: 'Database',
+    columns: [
+      { name: 'timestamp', description: 'Recon time' },
+      { name: 'node_id', description: 'Node identifier' },
+      { name: 'agent_short_name', description: 'Agent short name' },
+      { name: 'session_id', description: 'Session identifier' },
+      { name: 'context_path', description: 'Project/context path' },
+      { name: 'last_modified', description: 'Session last modified' },
+      { name: 'message_count', description: 'Messages in session' },
+    ],
+  },
+  {
+    name: 'ReconToolLogs',
+    description: 'Individual tools from recon (MCP, skills, internal)',
+    source: 'Database',
+    columns: [
+      { name: 'timestamp', description: 'Recon time' },
+      { name: 'node_id', description: 'Node identifier' },
+      { name: 'agent_short_name', description: 'Agent short name' },
+      { name: 'tool_type', description: 'mcp, skill, or internal' },
+      { name: 'server_name', description: 'MCP server (null for skills)' },
+      { name: 'tool_name', description: 'Tool name' },
+      { name: 'tool_description', description: 'Tool description' },
+      { name: 'transport', description: 'MCP transport type' },
+    ],
+  },
   {
     name: 'TrafficLogs',
     description: 'Intercepted HTTP traffic',
@@ -55,89 +137,6 @@ const TABLES: TableInfo[] = [
       { name: 'host', description: 'Host/domain' },
       { name: 'direction', description: 'send or receive' },
       { name: 'response_status', description: 'HTTP status code' },
-    ],
-  },
-  {
-    name: 'NodeLogs',
-    description: 'Connected nodes',
-    source: 'In-memory',
-    columns: [
-      { name: 'timestamp', description: 'Last update' },
-      { name: 'node_id', description: 'Node identifier' },
-      { name: 'machine_name', description: 'Hostname' },
-      { name: 'os_details', description: 'OS info' },
-      { name: 'intercept_active', description: 'Interception active' },
-    ],
-  },
-  {
-    name: 'AgentLogs',
-    description: 'Discovered agents across nodes',
-    source: 'In-memory',
-    columns: [
-      { name: 'timestamp', description: 'Last update' },
-      { name: 'node_id', description: 'Node identifier' },
-      { name: 'agent_short_name', description: 'Agent short name' },
-      { name: 'agent_name', description: 'Display name' },
-      { name: 'available', description: 'Agent available' },
-      { name: 'version', description: 'Agent version' },
-    ],
-  },
-  {
-    name: 'ReconLogs',
-    description: 'Recon summary per node+agent',
-    source: 'Database',
-    columns: [
-      { name: 'timestamp', description: 'Recon time' },
-      { name: 'node_id', description: 'Node identifier' },
-      { name: 'agent_short_name', description: 'Agent short name' },
-      { name: 'is_semantic', description: 'Semantic recon' },
-      { name: 'mcp_server_count', description: 'MCP servers found' },
-      { name: 'skill_count', description: 'Skills found' },
-      { name: 'internal_tool_count', description: 'Internal tools found' },
-      { name: 'config_count', description: 'Config items found' },
-      { name: 'session_count', description: 'Sessions found' },
-      { name: 'project_path_count', description: 'Project paths found' },
-    ],
-  },
-  {
-    name: 'ReconToolLogs',
-    description: 'Individual tools from recon (MCP, skills, internal)',
-    source: 'Database',
-    columns: [
-      { name: 'timestamp', description: 'Recon time' },
-      { name: 'node_id', description: 'Node identifier' },
-      { name: 'agent_short_name', description: 'Agent short name' },
-      { name: 'tool_type', description: 'mcp, skill, or internal' },
-      { name: 'server_name', description: 'MCP server (null for skills)' },
-      { name: 'tool_name', description: 'Tool name' },
-      { name: 'tool_description', description: 'Tool description' },
-      { name: 'transport', description: 'MCP transport type' },
-    ],
-  },
-  {
-    name: 'ReconSessionLogs',
-    description: 'Sessions discovered during recon',
-    source: 'Database',
-    columns: [
-      { name: 'timestamp', description: 'Recon time' },
-      { name: 'node_id', description: 'Node identifier' },
-      { name: 'agent_short_name', description: 'Agent short name' },
-      { name: 'session_id', description: 'Session identifier' },
-      { name: 'context_path', description: 'Project/context path' },
-      { name: 'last_modified', description: 'Session last modified' },
-      { name: 'message_count', description: 'Messages in session' },
-    ],
-  },
-  {
-    name: 'ReconMetadataLogs',
-    description: 'User identities and API keys from recon',
-    source: 'Database',
-    columns: [
-      { name: 'timestamp', description: 'Recon time' },
-      { name: 'node_id', description: 'Node identifier' },
-      { name: 'agent_short_name', description: 'Agent short name' },
-      { name: 'entry_type', description: 'user_identity or api_key' },
-      { name: 'value', description: 'The identity or key' },
     ],
   },
 ];
@@ -257,6 +256,8 @@ export function HuntingPage() {
   const [query, setQuery] = useState(DEFAULT_QUERY);
   const [showReference, setShowReference] = useState(true);
   const [editorHeight, setEditorHeight] = useState(DEFAULT_EDITOR_HEIGHT);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const [resultsMaxHeight, setResultsMaxHeight] = useState('70vh');
 
   const handleRun = useCallback(() => {
     if (query.trim() && !state.hunting.isRunning) {
@@ -272,28 +273,36 @@ export function HuntingPage() {
     setEditorHeight((prev) => Math.min(MAX_EDITOR_HEIGHT, Math.max(MIN_EDITOR_HEIGHT, prev + deltaY)));
   }, []);
 
+  //
+  // Compute the results table max height so it never extends below the
+  // viewport. Recalculate when the editor height changes or the window
+  // resizes.
+  //
+
+  useEffect(() => {
+    const update = () => {
+      if (resultsRef.current) {
+        const top = resultsRef.current.getBoundingClientRect().top;
+        const padding = 24; // bottom padding matching page padding
+        const available = window.innerHeight - top - padding;
+        setResultsMaxHeight(`${Math.max(200, available)}px`);
+      }
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [editorHeight, state.hunting.error]);
+
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="space-y-4 md:space-y-6">
       {/*
       //
-      // Header.
+      // Header — matches intercept page style.
       //
       */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-subtle">
-        <h1 className="text-sm font-bold tracking-wider text-title">HUNTING</h1>
-        <span className="text-xs text-muted">KQL Query Interface</span>
-        <div className="flex-1" />
-        <button
-          onClick={() => setShowReference(!showReference)}
-          className={`flex items-center gap-1.5 px-2 py-1 text-[10px] tracking-wider transition-colors ${
-            showReference
-              ? 'text-title bg-[var(--highlight)] border border-subtle'
-              : 'text-muted hover:text-title border border-transparent'
-          }`}
-        >
-          <BookOpen size={10} />
-          SCHEMA
-        </button>
+      <div>
+        <h1 className="text-2xl font-bold text-highlight">Hunting</h1>
+        <p className="text-muted mt-1">KQL query interface</p>
       </div>
 
       {/*
@@ -301,9 +310,9 @@ export function HuntingPage() {
       // Editor + Reference panel.
       //
       */}
-      <div className="flex flex-shrink-0" style={{ height: editorHeight }}>
+      <div className="flex border border-subtle ascii-box" style={{ height: editorHeight }}>
         <div className="flex-1 flex flex-col min-w-0">
-          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-subtle bg-[var(--bg-secondary)]">
+          <div className="flex items-center gap-2 px-4 py-1.5 border-b border-subtle bg-[var(--bg-secondary)]">
             <button
               onClick={handleRun}
               disabled={state.hunting.isRunning || !query.trim()}
@@ -318,6 +327,18 @@ export function HuntingPage() {
               RUN
             </button>
             <span className="text-[10px] text-muted tracking-wider">CTRL+ENTER</span>
+            <div className="flex-1" />
+            <button
+              onClick={() => setShowReference(!showReference)}
+              className={`flex items-center gap-1.5 px-2 py-1 text-[10px] tracking-wider transition-colors ${
+                showReference
+                  ? 'text-title bg-[var(--highlight)] border border-subtle'
+                  : 'text-muted hover:text-title border border-transparent'
+              }`}
+            >
+              <BookOpen size={10} />
+              SCHEMA
+            </button>
           </div>
           <KqlCodeEditor
             value={query}
@@ -347,7 +368,7 @@ export function HuntingPage() {
       //
       */}
       {state.hunting.error && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-[var(--accent-error)]/10 border-b border-[var(--accent-error)]/30 text-xs text-[var(--accent-error)]">
+        <div className="flex items-center gap-2 px-4 py-2 bg-[var(--accent-error)]/10 border border-[var(--accent-error)]/30 ascii-box text-xs text-[var(--accent-error)]">
           <AlertTriangle size={12} />
           {state.hunting.error}
         </div>
@@ -358,11 +379,13 @@ export function HuntingPage() {
       // Results table.
       //
       */}
-      <HuntingResultsTable
-        columns={state.hunting.columns}
-        rows={state.hunting.rows}
-        totalCount={state.hunting.totalCount}
-      />
+      <div ref={resultsRef} className="border border-subtle ascii-box flex flex-col overflow-hidden" style={{ maxHeight: resultsMaxHeight }}>
+        <HuntingResultsTable
+          columns={state.hunting.columns}
+          rows={state.hunting.rows}
+          totalCount={state.hunting.totalCount}
+        />
+      </div>
     </div>
   );
 }

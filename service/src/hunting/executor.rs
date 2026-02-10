@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use kqlparser::ast::{Expr, Literal, Operator, Source, Statement};
+use kqlparser::ast::{Expr, Literal, Operator, Source, Statement, TabularExpression};
 use kqlparser::parser::parse;
 use serde_json::Value;
 
@@ -244,6 +244,18 @@ pub async fn execute_hunting_query(
                 rows.truncate(limit);
             }
 
+            Operator::Join(_options, right_expr, on_keys) => {
+                let (right_columns, right_rows) = materialize_tabular_expression(
+                    right_expr, database, node_registry,
+                ).await?;
+
+                apply_join(
+                    &mut current_columns, &mut rows,
+                    &right_columns, &right_rows,
+                    on_keys,
+                );
+            }
+
             other => {
                 return Err(anyhow!("Unsupported operator: {:?}", std::mem::discriminant(other)));
             }
@@ -384,6 +396,177 @@ async fn materialize_table(
         VirtualTable::TrafficLogs => materialize_traffic_logs(database, hints).await,
         VirtualTable::TrafficMatchLogs => materialize_traffic_match_logs(database, hints).await,
     }
+}
+
+//
+// Materialize a full TabularExpression (source + operators). Used for the
+// right-hand side of a join.
+//
+
+async fn materialize_tabular_expression(
+    expr: &TabularExpression,
+    database: &Arc<Database>,
+    node_registry: &Arc<NodeRegistry>,
+) -> Result<(Vec<String>, Vec<Vec<Value>>)> {
+    let table_name = match &expr.source {
+        Source::Reference(name) => name.clone(),
+        _ => return Err(anyhow!("Join: only table references are supported as right-side source")),
+    };
+
+    let table = resolve_table(&table_name)
+        .ok_or_else(|| anyhow!("Join: unknown table '{}'", table_name))?;
+
+    let hints = extract_pushdown_hints(&expr.operators, table);
+    let (mut columns, mut rows) = materialize_table(table, database, node_registry, &hints).await?;
+
+    //
+    // Apply any operators on the right side (e.g. where filters).
+    //
+
+    for operator in &expr.operators {
+        match operator {
+            Operator::Where(filter_expr) => {
+                rows = rows
+                    .into_iter()
+                    .filter(|row| eval_where_expr(filter_expr, &columns, row))
+                    .collect();
+            }
+            Operator::Take(n) => {
+                rows.truncate((*n as usize).min(MAX_RESULT_ROWS));
+            }
+            Operator::Project(projections) => {
+                let proj_names: Vec<String> = projections
+                    .iter()
+                    .map(|(alias, e)| {
+                        alias.clone().unwrap_or_else(|| {
+                            if let Expr::Ident(name) = e { name.clone() } else { "?".to_string() }
+                        })
+                    })
+                    .collect();
+                let indices: Vec<Option<usize>> = projections
+                    .iter()
+                    .map(|(_, e)| {
+                        if let Expr::Ident(name) = e {
+                            columns.iter().position(|c| c.eq_ignore_ascii_case(name))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                rows = rows
+                    .into_iter()
+                    .map(|row| {
+                        indices.iter().map(|idx| {
+                            idx.and_then(|i| row.get(i).cloned()).unwrap_or(Value::Null)
+                        }).collect()
+                    })
+                    .collect();
+                columns = proj_names;
+            }
+            _ => {}
+        }
+    }
+
+    Ok((columns, rows))
+}
+
+//
+// Inner join: for each left row, find matching right rows by key equality and
+// produce merged rows with columns from both sides. Right-side columns that
+// duplicate a left-side name are prefixed with the right table name or
+// suffixed with `1`.
+//
+
+fn apply_join(
+    left_columns: &mut Vec<String>,
+    left_rows: &mut Vec<Vec<Value>>,
+    right_columns: &[String],
+    right_rows: &[Vec<Value>],
+    on_keys: &[String],
+) {
+    //
+    // Resolve key column indices on each side.
+    //
+
+    let left_key_indices: Vec<usize> = on_keys
+        .iter()
+        .filter_map(|k| left_columns.iter().position(|c| c.eq_ignore_ascii_case(k)))
+        .collect();
+
+    let right_key_indices: Vec<usize> = on_keys
+        .iter()
+        .filter_map(|k| right_columns.iter().position(|c| c.eq_ignore_ascii_case(k)))
+        .collect();
+
+    if left_key_indices.is_empty() || left_key_indices.len() != right_key_indices.len() {
+        return;
+    }
+
+    //
+    // Determine which right columns to add (skip join key columns that already
+    // exist on the left).
+    //
+
+    let left_names_lower: std::collections::HashSet<String> = left_columns
+        .iter()
+        .map(|c| c.to_lowercase())
+        .collect();
+
+    let right_col_mapping: Vec<(usize, String)> = right_columns
+        .iter()
+        .enumerate()
+        .filter(|(_, name)| !left_names_lower.contains(&name.to_lowercase()))
+        .map(|(i, name)| (i, name.clone()))
+        .collect();
+
+    //
+    // Build a lookup index on the right side keyed by join values.
+    //
+
+    let mut right_index: std::collections::HashMap<Vec<String>, Vec<usize>> =
+        std::collections::HashMap::new();
+
+    for (row_idx, row) in right_rows.iter().enumerate() {
+        let key: Vec<String> = right_key_indices
+            .iter()
+            .map(|&i| row.get(i).map(|v| v.to_string()).unwrap_or_default())
+            .collect();
+        right_index.entry(key).or_default().push(row_idx);
+    }
+
+    //
+    // Produce joined rows.
+    //
+
+    let mut joined_rows = Vec::new();
+    for left_row in left_rows.iter() {
+        let left_key: Vec<String> = left_key_indices
+            .iter()
+            .map(|&i| left_row.get(i).map(|v| v.to_string()).unwrap_or_default())
+            .collect();
+
+        if let Some(matching_indices) = right_index.get(&left_key) {
+            for &right_idx in matching_indices {
+                let right_row = &right_rows[right_idx];
+                let mut merged = left_row.clone();
+                for (col_idx, _) in &right_col_mapping {
+                    merged.push(
+                        right_row.get(*col_idx).cloned().unwrap_or(Value::Null)
+                    );
+                }
+                joined_rows.push(merged);
+            }
+        }
+    }
+
+    //
+    // Update columns and rows.
+    //
+
+    for (_, name) in &right_col_mapping {
+        left_columns.push(name.clone());
+    }
+    *left_rows = joined_rows;
 }
 
 fn traffic_direction_from_hint(s: &str) -> Option<common::TrafficDirection> {

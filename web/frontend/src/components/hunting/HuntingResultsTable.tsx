@@ -25,16 +25,30 @@ export function HuntingResultsTable({ columns, rows, totalCount }: HuntingResult
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [colWidths, setColWidths] = useState<number[]>([]);
   const [sort, setSort] = useState<SortState | null>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   //
-  // Reset state when columns change (new query).
+  // Reset state when columns change (new query). Distribute initial widths
+  // to fill available space.
   //
 
   useEffect(() => {
     setPage(0);
     setExpandedRow(null);
-    setColWidths(columns.map(() => DEFAULT_COL_WIDTH));
     setSort(null);
+
+    //
+    // Compute initial column widths. If the container is wider than the
+    // default total, distribute space evenly so columns fill the width.
+    //
+
+    const containerWidth = containerRef.current?.clientWidth ?? 0;
+    const available = containerWidth - EXPAND_COL_WIDTH;
+    const perCol = columns.length > 0
+      ? Math.max(DEFAULT_COL_WIDTH, Math.floor(available / columns.length))
+      : DEFAULT_COL_WIDTH;
+    setColWidths(columns.map(() => perCol));
   }, [columns]);
 
   useEffect(() => {
@@ -45,6 +59,47 @@ export function HuntingResultsTable({ columns, rows, totalCount }: HuntingResult
     setColWidths((prev) => {
       const next = [...prev];
       next[colIdx] = Math.max(MIN_COL_WIDTH, (next[colIdx] ?? DEFAULT_COL_WIDTH) + delta);
+      return next;
+    });
+  }, []);
+
+  //
+  // Double-click on a column separator: auto-expand by measuring the widest
+  // visible cell content for that column.
+  //
+
+  const handleAutoExpand = useCallback((colIdx: number) => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    //
+    // Measure cell widths in the body table (second table in container).
+    //
+
+    const bodyTable = container.querySelectorAll('table')[1];
+    if (!bodyTable) return;
+
+    const cells = bodyTable.querySelectorAll(`td:nth-child(${colIdx + 2})`); // +2: 1-indexed + expand col
+    let maxWidth = MIN_COL_WIDTH;
+    cells.forEach((cell) => {
+      maxWidth = Math.max(maxWidth, cell.scrollWidth + 16); // +16 for padding
+    });
+
+    //
+    // Also measure the header text.
+    //
+
+    const headerTable = container.querySelector('table');
+    if (headerTable) {
+      const th = headerTable.querySelectorAll('th')[colIdx + 1]; // +1 for expand col
+      if (th) {
+        maxWidth = Math.max(maxWidth, th.scrollWidth + 16);
+      }
+    }
+
+    setColWidths((prev) => {
+      const next = [...prev];
+      next[colIdx] = Math.max(next[colIdx], maxWidth);
       return next;
     });
   }, []);
@@ -96,12 +151,14 @@ export function HuntingResultsTable({ columns, rows, totalCount }: HuntingResult
   const safePage = Math.min(page, totalPages - 1);
   const pageRows = sortedRows.slice(safePage * ROWS_PER_PAGE, (safePage + 1) * ROWS_PER_PAGE);
   const colSpan = columns.length + 1;
-  const totalWidth = EXPAND_COL_WIDTH + colWidths.reduce((s, w) => s + w, 0);
+  const totalColWidth = EXPAND_COL_WIDTH + colWidths.reduce((s, w) => s + w, 0);
+  const tableWidth = Math.max(totalColWidth, containerRef.current?.clientWidth ?? 0);
 
   if (columns.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center text-muted text-xs">
-        Run a query to see results
+      <div className="flex-1 flex flex-col items-center justify-center py-16 text-muted">
+        <div className="text-sm">Run a query to see results</div>
+        <div className="text-xs mt-2 opacity-60">Write KQL above and press Ctrl+Enter</div>
       </div>
     );
   }
@@ -113,7 +170,7 @@ export function HuntingResultsTable({ columns, rows, totalCount }: HuntingResult
       // Filter bar.
       //
       */}
-      <div className="flex items-center gap-4 p-3 border-b border-subtle">
+      <div className="flex items-center gap-4 p-4 border-b border-subtle">
         <div className="flex items-center gap-2">
           <Search size={14} className="text-muted" />
           <input
@@ -158,9 +215,9 @@ export function HuntingResultsTable({ columns, rows, totalCount }: HuntingResult
       // Table.
       //
       */}
-      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-        <div className="overflow-x-auto flex-shrink-0">
-          <table className="text-xs" style={{ width: totalWidth, tableLayout: 'fixed' }}>
+      <div ref={containerRef} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+        <div ref={headerRef} className="overflow-x-hidden flex-shrink-0">
+          <table className="text-xs" style={{ width: tableWidth, tableLayout: 'fixed' }}>
             <ColGroup colWidths={colWidths} />
             <thead>
               <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
@@ -170,6 +227,7 @@ export function HuntingResultsTable({ columns, rows, totalCount }: HuntingResult
                     key={col}
                     colIdx={idx}
                     onResize={handleResize}
+                    onAutoExpand={handleAutoExpand}
                     onSort={handleSort}
                     sortDir={sort?.colIdx === idx ? sort.dir : null}
                   >
@@ -180,8 +238,15 @@ export function HuntingResultsTable({ columns, rows, totalCount }: HuntingResult
             </thead>
           </table>
         </div>
-        <div className="flex-1 overflow-y-auto overflow-x-auto">
-          <table className="text-xs" style={{ width: totalWidth, tableLayout: 'fixed' }}>
+        <div
+          className="flex-1 overflow-auto"
+          onScroll={(e) => {
+            if (headerRef.current) {
+              headerRef.current.scrollLeft = e.currentTarget.scrollLeft;
+            }
+          }}
+        >
+          <table className="text-xs" style={{ width: tableWidth, tableLayout: 'fixed' }}>
             <ColGroup colWidths={colWidths} />
             <tbody>
               {pageRows.length === 0 ? (
@@ -237,12 +302,14 @@ function ColGroup({ colWidths }: { colWidths: number[] }) {
 function ResizableTh({
   colIdx,
   onResize,
+  onAutoExpand,
   onSort,
   sortDir,
   children,
 }: {
   colIdx: number;
   onResize: (colIdx: number, delta: number) => void;
+  onAutoExpand: (colIdx: number) => void;
   onSort: (colIdx: number) => void;
   sortDir: SortDir | null;
   children: React.ReactNode;
@@ -282,6 +349,12 @@ function ResizableTh({
     document.body.style.userSelect = 'none';
   }, [colIdx, onResize]);
 
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onAutoExpand(colIdx);
+  }, [colIdx, onAutoExpand]);
+
   const handleHeaderClick = useCallback(() => {
     //
     // Don't sort if we just finished a resize drag.
@@ -302,6 +375,7 @@ function ResizableTh({
       </span>
       <div
         onMouseDown={handleMouseDown}
+        onDoubleClick={handleDoubleClick}
         onClick={(e) => e.stopPropagation()}
         className="absolute top-0 right-0 w-[5px] h-full cursor-col-resize group"
       >

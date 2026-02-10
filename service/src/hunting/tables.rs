@@ -61,8 +61,7 @@ pub fn table_columns(table: VirtualTable) -> Vec<&'static str> {
             "timestamp", "node_id", "machine_name", "os_details", "intercept_active",
         ],
         VirtualTable::AgentLogs => vec![
-            "timestamp", "node_id", "agent_short_name", "agent_name", "available",
-            "version",
+            "timestamp", "node_id", "agent_short_name", "agent_name", "version",
         ],
         VirtualTable::ReconLogs => vec![
             "timestamp", "node_id", "agent_short_name", "is_semantic",
@@ -136,7 +135,6 @@ pub async fn materialize_agent_logs(
                 Value::String(node.id.clone()),
                 Value::String(agent.short_name.clone()),
                 Value::String(agent.name.clone()),
-                Value::Bool(agent.available),
                 agent
                     .version
                     .as_ref()

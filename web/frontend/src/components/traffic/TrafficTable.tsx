@@ -1147,15 +1147,14 @@ export function ScrollableTrafficTable({
 
   return (
     <div className={containerClass} style={containerStyle}>
-      <div className="overflow-x-auto">
-      <table className="w-full min-w-[920px] text-xs table-fixed">
-        <thead>
-          <TrafficTableHeader showNodeColumn={showNodeColumn} />
-        </thead>
-      </table>
+      <div className="overflow-x-hidden flex-shrink-0">
+        <table className="w-full min-w-[920px] text-xs table-fixed">
+          <thead>
+            <TrafficTableHeader showNodeColumn={showNodeColumn} />
+          </thead>
+        </table>
       </div>
-      <div className="flex-1 overflow-y-auto">
-        <div className="overflow-x-auto">
+      <div className="flex-1 overflow-auto">
         <table className="w-full min-w-[920px] text-xs table-fixed">
           <tbody>
             <GroupedTrafficRows
@@ -1176,7 +1175,6 @@ export function ScrollableTrafficTable({
             )}
           </tbody>
         </table>
-        </div>
       </div>
     </div>
   );

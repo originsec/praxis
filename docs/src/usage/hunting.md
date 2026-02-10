@@ -66,7 +66,6 @@ Discovered agents across all nodes (in-memory).
 | node_id | Node identifier |
 | agent_short_name | Agent short name |
 | agent_name | Agent display name |
-| available | Whether the agent is available |
 | version | Agent version (if known) |
 
 ### ReconLogs
@@ -141,6 +140,7 @@ User identities and API keys extracted from agent configurations.
 | `count` | Count rows | `TrafficLogs \| count` |
 | `distinct` | Unique values | `TrafficLogs \| distinct host` |
 | `summarize` | Aggregate | `TrafficLogs \| summarize count() by host` |
+| `join` | Join two tables | `TrafficLogs \| join (TrafficMatchLogs) on id` |
 
 ### Supported Expressions
 
@@ -177,6 +177,9 @@ ReconMetadataLogs | where entry_type == "api_key"
 
 // Correlate traffic matches with rules
 TrafficMatchLogs | project timestamp, rule_name, url, summary | take 50
+
+// Join traffic with matches to see matched URLs with rule names
+TrafficLogs | join (TrafficMatchLogs) on id | project timestamp, url, rule_name, summary
 
 // Find traffic with large responses
 TrafficLogs | where response_status == 200 | project timestamp, url, host | take 100
