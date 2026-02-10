@@ -76,7 +76,8 @@ Open **http://localhost:8080** and you're in.
 
 To make macOS node binaries downloadable in the Web UI when running with Docker,
 place `praxis_node_macos_arm64` in `~/.praxis/bin/nodes/`. The compose file
-mounts that directory into the container by default.
+mounts that directory into the container by default and keeps the built-in Linux
+and Windows binaries available.
 
 The RabbitMQ management UI at **http://localhost:15672** uses credentials `praxis/praxis`.
 

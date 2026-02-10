@@ -202,24 +202,35 @@ struct ProvidersResponse {
     providers: Vec<ProviderInfo>,
 }
 
-fn get_nodes_dir() -> PathBuf {
+fn get_nodes_dirs() -> Vec<PathBuf> {
+    if let Ok(dirs) = std::env::var("PRAXIS_NODES_DIRS") {
+        let parsed: Vec<PathBuf> = dirs
+            .split(',')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .collect();
+        if !parsed.is_empty() {
+            return parsed;
+        }
+    }
+
     std::env::var("PRAXIS_NODES_DIR")
-        .map(PathBuf::from)
+        .map(|dir| vec![PathBuf::from(dir)])
         .unwrap_or_else(|_| {
             //
             // Fallback to ~/.praxis/bin/nodes for local development.
             //
-            dirs::home_dir()
+            let fallback = dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".praxis")
                 .join("bin")
-                .join("nodes")
+                .join("nodes");
+            vec![fallback]
         })
 }
 
 async fn get_downloads_info() -> Json<DownloadsInfoResponse> {
-    let nodes_dir = get_nodes_dir();
-
     let platforms = vec![
         ("linux", "praxis_node_linux"),
         ("windows", "praxis_node_windows.exe"),
@@ -229,13 +240,17 @@ async fn get_downloads_info() -> Json<DownloadsInfoResponse> {
     let nodes: Vec<NodeDownloadInfo> = platforms
         .into_iter()
         .map(|(platform, filename)| {
-            let path = nodes_dir.join(filename);
-            let (available, size) = if path.exists() {
-                let size = std::fs::metadata(&path).ok().map(|m| m.len());
-                (true, size)
-            } else {
-                (false, None)
-            };
+            let nodes_dirs = get_nodes_dirs();
+            let mut available = false;
+            let mut size = None;
+            for dir in nodes_dirs {
+                let path = dir.join(filename);
+                if path.exists() {
+                    size = std::fs::metadata(&path).ok().map(|m| m.len());
+                    available = true;
+                    break;
+                }
+            }
             NodeDownloadInfo {
                 platform: platform.to_string(),
                 filename: filename.to_string(),
@@ -249,8 +264,6 @@ async fn get_downloads_info() -> Json<DownloadsInfoResponse> {
 }
 
 async fn download_node(Path(platform): Path<String>) -> impl IntoResponse {
-    let nodes_dir = get_nodes_dir();
-
     let filename = match platform.as_str() {
         "linux" => "praxis_node_linux",
         "windows" => "praxis_node_windows.exe",
@@ -265,29 +278,30 @@ async fn download_node(Path(platform): Path<String>) -> impl IntoResponse {
         }
     };
 
-    let path = nodes_dir.join(filename);
-
-    match tokio::fs::read(&path).await {
-        Ok(data) => {
+    let nodes_dirs = get_nodes_dirs();
+    for dir in nodes_dirs {
+        let path = dir.join(filename);
+        if let Ok(data) = tokio::fs::read(&path).await {
             let content_type = "application/octet-stream";
             let content_disposition = format!("attachment; filename=\"{}\"", filename);
 
-            Response::builder()
+            return Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, content_type)
                 .header(header::CONTENT_DISPOSITION, content_disposition)
                 .header(header::CONTENT_LENGTH, data.len())
                 .body(Body::from(data))
-                .unwrap()
+                .unwrap();
         }
-        Err(_) => Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Body::from(format!(
-                "Node binary for '{}' not found. Build with Docker or run install.sh first.",
-                platform
-            )))
-            .unwrap(),
     }
+
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .body(Body::from(format!(
+            "Node binary for '{}' not found. Build with Docker or run install.sh first.",
+            platform
+        )))
+        .unwrap()
 }
 
 //

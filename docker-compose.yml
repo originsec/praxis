@@ -64,13 +64,13 @@ services:
     environment:
       PRAXIS_RABBITMQ_URL: amqp://praxis:praxis@rabbitmq:5672
       PRAXIS_DATABASE_URL: /app/data/praxis_operations.db
-      PRAXIS_NODES_DIR: /app/nodes
+      PRAXIS_NODES_DIRS: /app/nodes,/app/nodes-host
       RUST_LOG: info
     ports:
       - "8080:8080"
     volumes:
       - praxis_data:/app/data
-      - ${PRAXIS_NODES_DIR_HOST:-${HOME}/.praxis/bin/nodes}:/app/nodes
+      - ${PRAXIS_NODES_DIR_HOST:-${HOME}/.praxis/bin/nodes}:/app/nodes-host
     restart: unless-stopped
 
   praxis-postgres:
@@ -83,12 +83,12 @@ services:
     environment:
       PRAXIS_RABBITMQ_URL: amqp://praxis:praxis@rabbitmq:5672
       PRAXIS_DATABASE_URL: postgresql://praxis:praxis_db_2024@postgres:5432/praxis
-      PRAXIS_NODES_DIR: /app/nodes
+      PRAXIS_NODES_DIRS: /app/nodes,/app/nodes-host
       RUST_LOG: info
     ports:
       - "8080:8080"
     volumes:
-      - ${PRAXIS_NODES_DIR_HOST:-${HOME}/.praxis/bin/nodes}:/app/nodes
+      - ${PRAXIS_NODES_DIR_HOST:-${HOME}/.praxis/bin/nodes}:/app/nodes-host
     restart: unless-stopped
     profiles:
       - postgres
