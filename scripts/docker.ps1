@@ -74,13 +74,13 @@ function Check-Docker {
     }
     Write-Success "Found Docker"
 
-    $dockerInfo = docker info 2>&1
+    $dockerInfo = & { $ErrorActionPreference = 'Continue'; docker info 2>&1 }
     if ($LASTEXITCODE -ne 0) {
         Write-Err "Docker daemon not running. Please start Docker Desktop."
     }
     Write-Success "Docker daemon running"
 
-    $composeVersion = docker compose version 2>&1
+    $composeVersion = & { $ErrorActionPreference = 'Continue'; docker compose version 2>&1 }
     if ($LASTEXITCODE -eq 0) {
         $script:ComposeCmd = "docker compose"
         Write-Success "Found Docker Compose (plugin)"
