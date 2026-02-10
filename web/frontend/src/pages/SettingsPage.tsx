@@ -202,10 +202,10 @@ export function SettingsPage() {
   // Load agent scripts when agents tab is active.
   //
   useEffect(() => {
-    if (activeTab === 'agents') {
+    if (activeTab === 'agents' && state.connected) {
       listLuaAgentScripts();
     }
-  }, [activeTab, listLuaAgentScripts]);
+  }, [activeTab, state.connected, listLuaAgentScripts]);
 
   //
   // Fetch downloads info when Service tab is active.
@@ -1136,7 +1136,7 @@ export function SettingsPage() {
                         <div className="flex items-center gap-1.5 min-w-0">
                           <span className="text-sm truncate">{script.name}</span>
                           {script.is_builtin && (
-                            <span className="text-[10px] px-1 py-0.5 rounded bg-[var(--accent-info)]/20 text-[var(--accent-info)] flex-shrink-0">
+                            <span className="text-[8px] leading-tight px-1 rounded bg-[var(--accent-info)]/15 text-[var(--accent-info)]/70 flex-shrink-0">
                               builtin
                             </span>
                           )}
@@ -1178,13 +1178,20 @@ export function SettingsPage() {
                     <>
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-2 border-b border-dim bg-[var(--bg-secondary)] flex-shrink-0">
                         {isEditingScript ? (
-                          <input
-                            type="text"
-                            value={editingScriptName}
-                            onChange={(e) => setEditingScriptName(e.target.value)}
-                            placeholder="Script name"
-                            className="bg-[var(--bg-primary)] border border-dim rounded px-2 py-1 text-sm text-highlight focus:outline-none focus:border-subtle w-full md:w-64"
-                          />
+                          (() => {
+                            const script = state.luaAgentScripts.find(s => s.id === selectedScriptId);
+                            return script?.is_builtin ? (
+                              <span className="text-sm font-medium text-highlight">{editingScriptName}</span>
+                            ) : (
+                              <input
+                                type="text"
+                                value={editingScriptName}
+                                onChange={(e) => setEditingScriptName(e.target.value)}
+                                placeholder="Script name"
+                                className="bg-[var(--bg-primary)] border border-dim rounded px-2 py-1 text-sm text-highlight focus:outline-none focus:border-subtle w-full md:w-64"
+                              />
+                            );
+                          })()
                         ) : (
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-medium text-highlight">{editingScriptName}</span>
@@ -1193,10 +1200,10 @@ export function SettingsPage() {
                               return (
                                 <>
                                   {script?.is_builtin && (
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent-info)]/20 text-[var(--accent-info)]">builtin</span>
+                                    <span className="text-[8px] leading-tight px-1 rounded bg-[var(--accent-info)]/15 text-[var(--accent-info)]/70">builtin</span>
                                   )}
                                   {script?.disabled && (
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent-warning)]/20 text-[var(--accent-warning)]">disabled</span>
+                                    <span className="text-[8px] leading-tight px-1 rounded bg-[var(--accent-warning)]/15 text-[var(--accent-warning)]/70">disabled</span>
                                   )}
                                 </>
                               );
