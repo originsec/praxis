@@ -63,9 +63,12 @@ services:
         condition: service_healthy
     environment:
       PRAXIS_RABBITMQ_URL: amqp://praxis:praxis@rabbitmq:5672
+      PRAXIS_DATABASE_URL: /app/data/praxis_operations.db
       RUST_LOG: info
     ports:
       - "8080:8080"
+    volumes:
+      - praxis_data:/app/data
     restart: unless-stopped
 
   praxis-postgres:
@@ -88,3 +91,4 @@ services:
 volumes:
   rabbitmq_data:
   postgres_data:
+  praxis_data:
