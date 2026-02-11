@@ -5,9 +5,11 @@ use chromiumoxide::page::Page;
 use futures::StreamExt;
 use mlua::{Lua, LuaSerdeExt, Table};
 use once_cell::sync::Lazy;
+use serde_json::json;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use tokio_tungstenite::tungstenite::Message;
 
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
@@ -23,11 +25,97 @@ fn check_shutdown() -> Result<()> {
     }
 }
 
+//
+// Raw WebSocket CDP client for Node.js inspector protocol.
+// Sends Runtime.evaluate and returns the result.
+//
+
+struct RawCdpWs {
+    write: Arc<Mutex<futures::stream::SplitSink<
+        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+        Message,
+    >>>,
+    read: Arc<tokio::sync::Mutex<futures::stream::SplitStream<
+        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    >>>,
+    next_id: AtomicU64,
+}
+
+impl RawCdpWs {
+    async fn connect(url: &str) -> Result<Self> {
+        let (ws, _) = tokio_tungstenite::connect_async(url).await
+            .map_err(|e| anyhow!("WebSocket connect failed: {}", e))?;
+        let (write, read) = futures::StreamExt::split(ws);
+        Ok(Self {
+            write: Arc::new(Mutex::new(write)),
+            read: Arc::new(tokio::sync::Mutex::new(read)),
+            next_id: AtomicU64::new(1),
+        })
+    }
+
+    async fn evaluate(&self, expression: &str) -> Result<serde_json::Value> {
+        use futures::SinkExt;
+
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let msg = json!({
+            "id": id,
+            "method": "Runtime.evaluate",
+            "params": {
+                "expression": expression,
+                "returnByValue": true,
+                "awaitPromise": true,
+            }
+        });
+
+        {
+            let mut write = self.write.lock().unwrap();
+            block_on(write.send(Message::Text(msg.to_string().into())))
+                .map_err(|e| anyhow!("WS send failed: {}", e))?;
+        }
+
+        //
+        // Read messages until we find the response matching our id.
+        //
+
+        let mut read = self.read.lock().await;
+        loop {
+            let msg = futures::StreamExt::next(&mut *read)
+                .await
+                .ok_or_else(|| anyhow!("WebSocket closed"))??;
+
+            if let Message::Text(text) = msg {
+                let resp: serde_json::Value = serde_json::from_str(&text)?;
+                if resp.get("id").and_then(|v| v.as_u64()) == Some(id) {
+                    if let Some(err) = resp.get("error") {
+                        return Err(anyhow!("CDP error: {}", err));
+                    }
+                    let result = resp.get("result")
+                        .and_then(|r| r.get("result"))
+                        .and_then(|r| r.get("value"))
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    return Ok(result);
+                }
+            }
+        }
+    }
+
+    async fn close(&self) -> Result<()> {
+        use futures::SinkExt;
+        let mut write = self.write.lock().unwrap();
+        let _ = block_on(write.close());
+        Ok(())
+    }
+}
+
+enum CdpBackend {
+    Chrome(Page),
+    NodeInspector(RawCdpWs),
+}
+
 struct CdpConnection {
-    page: Page,
+    backend: CdpBackend,
     process_id: Option<u32>,
-    #[cfg(windows)]
-    _hidden_desktop: Option<crate::utils::HiddenDesktop>,
 }
 
 static CDP_CONNECTIONS: Lazy<Mutex<HashMap<String, CdpConnection>>> =
@@ -47,35 +135,50 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
 }
 
 //
-// Spawn a process with a debug port environment variable, wait for the
-// DevTools endpoint to become available, and connect via chromiumoxide.
+// Spawn a process with DevTools debugging enabled, wait for the endpoint to
+// become available, and connect via chromiumoxide.
+//
+// Supports two modes:
+//   - Environment variable (WebView2): set debug_port_env_var + debug_port_format
+//   - CLI argument (Electron): set debug_port_cli_arg
 //
 // Config table fields:
 //   process_path        (string)  Path to the executable
-//   debug_port_env_var  (string)  Env var name for the debug port argument
-//   debug_port_format   (string)  Format string, e.g. "--remote-debugging-port={}"
+//   debug_port_env_var  (string?) Env var name for the debug port argument
+//   debug_port_format   (string?) Format string, e.g. "--remote-debugging-port={}"
+//   debug_port_cli_arg  (string?) CLI arg format string, e.g. "--remote-debugging-port={}"
 //   base_port           (number)  Base port number
 //   port_range          (number)  Range for random port selection
 //   kill_existing       (bool?)   Whether to kill existing processes first
 //   use_hidden_desktop  (bool?)   Spawn on hidden desktop (Windows, default true)
 //
 
-fn cdp_spawn_and_connect(config: &Table) -> Result<String> {
+fn cdp_spawn_and_connect(config: &Table) -> Result<(String, Option<String>)> {
     let process_path: String = config
         .get("process_path")
         .map_err(|e| anyhow!("missing process_path: {}", e))?;
-    let debug_port_env_var: String = config
-        .get("debug_port_env_var")
-        .map_err(|e| anyhow!("missing debug_port_env_var: {}", e))?;
-    let debug_port_format: String = config
-        .get("debug_port_format")
-        .map_err(|e| anyhow!("missing debug_port_format: {}", e))?;
+    let debug_port_env_var: Option<String> = config.get("debug_port_env_var").unwrap_or(None);
+    let debug_port_format: Option<String> = config.get("debug_port_format").unwrap_or(None);
+    let debug_port_cli_arg: Option<String> = config.get("debug_port_cli_arg").unwrap_or(None);
     let base_port: u16 = config
         .get("base_port")
         .map_err(|e| anyhow!("missing base_port: {}", e))?;
     let port_range: u16 = config.get("port_range").unwrap_or(778);
     let kill_existing = config.get::<Option<bool>>("kill_existing").unwrap_or(None).unwrap_or(true);
     let use_hidden_desktop = config.get::<Option<bool>>("use_hidden_desktop").unwrap_or(None).unwrap_or(true);
+
+    //
+    // Determine debug port delivery mode: env var or CLI arg.
+    //
+
+    let use_env = debug_port_env_var.is_some() && debug_port_format.is_some();
+    let use_cli = debug_port_cli_arg.is_some();
+
+    if !use_env && !use_cli {
+        return Err(anyhow!(
+            "must provide either debug_port_env_var+debug_port_format or debug_port_cli_arg"
+        ));
+    }
 
     //
     // Close all existing CDP connections and terminate their process trees,
@@ -96,96 +199,70 @@ fn cdp_spawn_and_connect(config: &Table) -> Result<String> {
     let port = base_port + (rand::random::<u16>() % port_range);
     common::log_info!("CDP: using port {}", port);
 
-    let debug_arg = debug_port_format.replace("{}", &port.to_string());
+    let port_str = port.to_string();
 
     //
-    // On Windows, spawn on a hidden desktop if enabled and PRAXIS_NOT_HIDDEN
-    // is not set. Otherwise spawn normally and minimize after connect.
+    // Build env var and CLI arg vectors based on the selected mode.
+    //
+
+    let env_pair: Option<(String, String)> = if use_env {
+        let fmt = debug_port_format.as_ref().unwrap();
+        Some((
+            debug_port_env_var.as_ref().unwrap().clone(),
+            fmt.replace("{}", &port_str),
+        ))
+    } else {
+        None
+    };
+
+    let cli_args: Vec<String> = if use_cli {
+        let fmt = debug_port_cli_arg.as_ref().unwrap();
+        vec![fmt.replace("{}", &port_str)]
+    } else {
+        vec![]
+    };
+
+    let spawn_result = crate::utils::spawn_process_detached(
+        &process_path,
+        env_pair.as_ref().map(|(k, v)| (k.as_str(), v.as_str())),
+        &cli_args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+        use_hidden_desktop,
+    )?;
+
+    let pid = spawn_result.pid;
+
+    //
+    // Store the hidden desktop handle in the shared registry so Lua can
+    // manage its lifetime via the session state.
     //
 
     #[cfg(windows)]
-    let (pid, should_minimize, hidden_desktop) = {
-        let not_hidden = std::env::var("PRAXIS_NOT_HIDDEN")
-            .map(|v| v == "1")
-            .unwrap_or(cfg!(debug_assertions));
-        let want_hidden = use_hidden_desktop && !not_hidden;
-
-        if !want_hidden {
-            common::log_debug!(
-                "CDP: hidden desktop disabled (use_hidden_desktop={}, not_hidden={})",
-                use_hidden_desktop, not_hidden
-            );
-        }
-
-        if want_hidden {
-            let desktop = crate::utils::HiddenDesktop::new();
-            if let Some(ref d) = desktop {
-                let pid = crate::utils::spawn_on_hidden_desktop(
-                    &process_path,
-                    &debug_port_env_var,
-                    &debug_arg,
-                    &d.name,
-                )?;
-                common::log_info!("CDP: spawned on hidden desktop '{}' with PID {}", d.name, pid);
-                (pid, false, desktop)
-            } else {
-                common::log_warn!("CDP: failed to create hidden desktop, spawning normally");
-                let process = std::process::Command::new(&process_path)
-                    .env(&debug_port_env_var, &debug_arg)
-                    .spawn()
-                    .map_err(|e| anyhow!("failed to spawn {}: {}", process_path, e))?;
-                (process.id(), true, None)
-            }
-        } else {
-            let process = std::process::Command::new(&process_path)
-                .env(&debug_port_env_var, &debug_arg)
-                .spawn()
-                .map_err(|e| anyhow!("failed to spawn {}: {}", process_path, e))?;
-            let pid = process.id();
-            common::log_info!("CDP: spawned with PID {} (will minimize after connect)", pid);
-            (pid, true, None)
-        }
+    let desktop_id: Option<String> = {
+        spawn_result.hidden_desktop.map(|d| {
+            let id = uuid::Uuid::new_v4().to_string();
+            super::runtime::store_desktop_handle(&id, d);
+            id
+        })
     };
 
     #[cfg(not(windows))]
-    let pid = {
-        let _ = use_hidden_desktop;
-        let process = std::process::Command::new(&process_path)
-            .env(&debug_port_env_var, &debug_arg)
-            .spawn()
-            .map_err(|e| anyhow!("failed to spawn {}: {}", process_path, e))?;
-        let pid = process.id();
-        common::log_info!("CDP: spawned with PID {}", pid);
-        pid
-    };
+    let desktop_id: Option<String> = None;
 
-    let page = block_on(connect_to_devtools(port))?;
-
-    //
-    // Minimize the window after DevTools connects if not on a hidden desktop.
-    //
-
-    #[cfg(windows)]
-    if should_minimize {
-        if crate::utils::minimize_process_window(pid) {
-            common::log_info!("CDP: minimized process window");
-        }
-    }
+    let ws_url = block_on(discover_ws_url(port))?;
+    let page = block_on(connect_to_devtools_chrome(&ws_url))?;
 
     let handle = uuid::Uuid::new_v4().to_string();
     let mut map = CDP_CONNECTIONS.lock().unwrap();
     map.insert(
         handle.clone(),
         CdpConnection {
-            page,
+            backend: CdpBackend::Chrome(page),
             process_id: Some(pid),
-            #[cfg(windows)]
-            _hidden_desktop: hidden_desktop,
         },
     );
 
     common::log_info!("CDP: connected, handle={}", handle);
-    Ok(handle)
+    Ok((handle, desktop_id))
 }
 
 //
@@ -193,17 +270,31 @@ fn cdp_spawn_and_connect(config: &Table) -> Result<String> {
 //
 
 fn cdp_connect(port: u16) -> Result<String> {
-    let page = block_on(connect_to_devtools(port))?;
+    let ws_url = block_on(discover_ws_url(port))?;
+    common::log_info!("CDP: connecting to {}", ws_url);
+
+    let backend = block_on(async {
+        //
+        // Try chromiumoxide first (Chrome/WebView2 with pages). If it fails
+        // to find pages, fall back to raw WebSocket (Node.js inspector).
+        //
+
+        if let Ok(page) = connect_to_devtools_chrome(&ws_url).await {
+            return Ok(CdpBackend::Chrome(page));
+        }
+
+        common::log_info!("CDP: no pages found, using raw WebSocket for Node.js inspector");
+        let raw = RawCdpWs::connect(&ws_url).await?;
+        Ok::<_, anyhow::Error>(CdpBackend::NodeInspector(raw))
+    })?;
 
     let handle = uuid::Uuid::new_v4().to_string();
     let mut map = CDP_CONNECTIONS.lock().unwrap();
     map.insert(
         handle.clone(),
         CdpConnection {
-            page,
+            backend,
             process_id: None,
-            #[cfg(windows)]
-            _hidden_desktop: None,
         },
     );
 
@@ -211,65 +302,77 @@ fn cdp_connect(port: u16) -> Result<String> {
 }
 
 //
-// Shared DevTools connection logic. Polls /json/version then connects via
-// chromiumoxide. Same retry logic as GenericDevToolsSession::connect_to_devtools.
+// Discover the WebSocket debugger URL by polling /json/version (Chrome) and
+// /json (Node.js) until the endpoint responds.
 //
 
-async fn connect_to_devtools(port: u16) -> Result<Page> {
-    let ws_url = format!("http://127.0.0.1:{}", port);
-
+async fn discover_ws_url(port: u16) -> Result<String> {
+    let base_url = format!("http://127.0.0.1:{}", port);
     let max_attempts = 5;
-    let mut connected = false;
+
     for attempt in 0..max_attempts {
         check_shutdown()?;
-        common::log_debug!("CDP: connection attempt {}/{} to {}", attempt + 1, max_attempts, ws_url);
+        common::log_debug!("CDP: discovery attempt {}/{} on port {}", attempt + 1, max_attempts, port);
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-        let version_url = format!("http://127.0.0.1:{}/json/version", port);
+        let version_url = format!("{}/json/version", base_url);
         if let Ok(response) = reqwest::get(&version_url).await {
-            if response.status().is_success() {
-                connected = true;
-                break;
+            if let Ok(body) = response.json::<serde_json::Value>().await {
+                if let Some(url) = body.get("webSocketDebuggerUrl").and_then(|v| v.as_str()) {
+                    return Ok(url.to_string());
+                }
+            }
+        }
+
+        let list_url = format!("{}/json", base_url);
+        if let Ok(response) = reqwest::get(&list_url).await {
+            if let Ok(body) = response.json::<serde_json::Value>().await {
+                if let Some(arr) = body.as_array() {
+                    for target in arr {
+                        if let Some(url) = target.get("webSocketDebuggerUrl").and_then(|v| v.as_str()) {
+                            return Ok(url.to_string());
+                        }
+                    }
+                }
             }
         }
     }
 
-    if !connected {
-        return Err(anyhow!(
-            "DevTools endpoint not available after {} attempts", max_attempts
-        ));
-    }
+    Err(anyhow!("DevTools not available after {} attempts", max_attempts))
+}
 
-    let (browser, mut handler) = Browser::connect(&ws_url).await?;
+//
+// Connect via chromiumoxide (Chrome/WebView2 with pages).
+//
+
+async fn connect_to_devtools_chrome(ws_url: &str) -> Result<Page> {
+    let (browser, mut handler) = Browser::connect(ws_url).await?;
 
     tokio::spawn(async move {
         while let Some(event) = handler.next().await {
             if let Err(e) = event {
                 let err_str = e.to_string();
-                if err_str.contains("ResetWithoutClosingHandshake")
-                    || err_str.contains("Connection reset")
+                if !err_str.contains("ResetWithoutClosingHandshake")
+                    && !err_str.contains("Connection reset")
+                    && !err_str.contains("did not match any variant")
                 {
-                    common::log_debug!("CDP: browser connection closed");
-                } else if err_str.contains("did not match any variant") {
-                    // Silently ignore — chromiumoxide doesn't recognize some CDP messages
-                } else {
                     common::log_error!("CDP: browser handler error: {}", e);
                 }
             }
         }
     });
 
-    for attempt in 0..max_attempts {
+    for attempt in 0..3 {
         check_shutdown()?;
         let pages = browser.pages().await?;
         if let Some(page) = pages.into_iter().next() {
             return Ok(page);
         }
-        common::log_debug!("CDP: no pages yet, attempt {}/{}", attempt + 1, max_attempts);
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        common::log_debug!("CDP: no pages yet, attempt {}/3", attempt + 1);
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
     }
 
-    Err(anyhow!("No pages found in browser after {} attempts", max_attempts))
+    Err(anyhow!("No pages found"))
 }
 
 fn with_connection<F, R>(handle: &str, f: F) -> Result<R>
@@ -283,21 +386,32 @@ where
     f(conn)
 }
 
+fn require_page(conn: &CdpConnection) -> Result<&Page> {
+    match &conn.backend {
+        CdpBackend::Chrome(page) => Ok(page),
+        CdpBackend::NodeInspector(_) => Err(anyhow!("operation not supported on Node.js inspector connection")),
+    }
+}
+
 fn cdp_evaluate(handle: &str, js: &str) -> Result<serde_json::Value> {
     with_connection(handle, |conn| {
         let js = js.to_string();
-        block_on(async {
-            let result = conn.page.evaluate(js).await?;
-            Ok(result.into_value()?)
-        })
+        match &conn.backend {
+            CdpBackend::Chrome(page) => block_on(async {
+                let result = page.evaluate(js).await?;
+                Ok(result.into_value()?)
+            }),
+            CdpBackend::NodeInspector(raw) => block_on(raw.evaluate(&js)),
+        }
     })
 }
 
 fn cdp_find_elements(handle: &str, selector: &str) -> Result<usize> {
     with_connection(handle, |conn| {
+        let page = require_page(conn)?;
         let selector = selector.to_string();
         block_on(async {
-            let elements = conn.page.find_elements(selector).await.unwrap_or_default();
+            let elements = page.find_elements(selector).await.unwrap_or_default();
             Ok(elements.len())
         })
     })
@@ -305,10 +419,10 @@ fn cdp_find_elements(handle: &str, selector: &str) -> Result<usize> {
 
 fn cdp_click(handle: &str, selector: &str) -> Result<()> {
     with_connection(handle, |conn| {
+        let page = require_page(conn)?;
         let selector = selector.to_string();
         block_on(async {
-            let element = conn
-                .page
+            let element = page
                 .find_element(selector)
                 .await
                 .map_err(|e| anyhow!("element not found: {}", e))?;
@@ -320,10 +434,10 @@ fn cdp_click(handle: &str, selector: &str) -> Result<()> {
 
 fn cdp_type_text(handle: &str, text: &str) -> Result<()> {
     with_connection(handle, |conn| {
+        let page = require_page(conn)?;
         let text = text.to_string();
         block_on(async {
-            conn.page
-                .execute(InsertTextParams::new(text))
+            page.execute(InsertTextParams::new(text))
                 .await
                 .map_err(|e| anyhow!("InsertText failed: {}", e))?;
             Ok(())
@@ -333,11 +447,11 @@ fn cdp_type_text(handle: &str, text: &str) -> Result<()> {
 
 fn cdp_press_key(handle: &str, selector: &str, key: &str) -> Result<()> {
     with_connection(handle, |conn| {
+        let page = require_page(conn)?;
         let selector = selector.to_string();
         let key = key.to_string();
         block_on(async {
-            let element = conn
-                .page
+            let element = page
                 .find_element(selector)
                 .await
                 .map_err(|e| anyhow!("element not found: {}", e))?;
@@ -352,11 +466,12 @@ fn cdp_press_key(handle: &str, selector: &str, key: &str) -> Result<()> {
 
 fn cdp_wait_for_element(handle: &str, selector: &str, retries: u32, delay_ms: u64) -> Result<bool> {
     with_connection(handle, |conn| {
+        let page = require_page(conn)?;
         let selector = selector.to_string();
         block_on(async {
             for _ in 0..retries {
                 check_shutdown()?;
-                if conn.page.find_element(&selector).await.is_ok() {
+                if page.find_element(&selector).await.is_ok() {
                     return Ok(true);
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
@@ -371,6 +486,9 @@ fn close_all_connections() {
     let handles: Vec<String> = map.keys().cloned().collect();
     for handle in &handles {
         if let Some(conn) = map.remove(handle) {
+            if let CdpBackend::NodeInspector(raw) = &conn.backend {
+                let _ = block_on(raw.close());
+            }
             if let Some(pid) = conn.process_id {
                 common::log_info!("CDP: closing previous connection, terminating PID {}", pid);
                 crate::utils::terminate_process_tree(pid);
@@ -392,6 +510,9 @@ fn cdp_close(handle: &str) -> Result<()> {
 pub fn cleanup_connection(handle: &str) {
     let mut map = CDP_CONNECTIONS.lock().unwrap();
     if let Some(conn) = map.remove(handle) {
+        if let CdpBackend::NodeInspector(raw) = &conn.backend {
+            let _ = block_on(raw.close());
+        }
         if let Some(pid) = conn.process_id {
             common::log_info!("CDP: terminating process tree for PID {}", pid);
             crate::utils::terminate_process_tree(pid);
@@ -412,8 +533,12 @@ pub fn install_cdp_api(lua: &Lua, praxis: &Table) -> Result<()> {
     praxis
         .set(
             "cdp_spawn_and_connect",
-            lua.create_function(|_, config: Table| {
-                cdp_spawn_and_connect(&config).map_err(lua_err)
+            lua.create_function(|lua, config: Table| {
+                let (handle, desktop_id) = cdp_spawn_and_connect(&config).map_err(lua_err)?;
+                let tbl = lua.create_table().map_err(lua_err)?;
+                tbl.set("handle", handle).map_err(lua_err)?;
+                tbl.set("desktop", desktop_id).map_err(lua_err)?;
+                Ok(tbl)
             })
             .map_err(|e| anyhow!(e.to_string()))?,
         )

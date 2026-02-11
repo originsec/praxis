@@ -231,7 +231,8 @@ async fn get_downloads_info() -> Json<DownloadsInfoResponse> {
             let path = nodes_dir.join(filename);
             let (available, size) = if path.exists() {
                 let size = std::fs::metadata(&path).ok().map(|m| m.len());
-                (true, size)
+                let non_empty = size.map(|s| s > 0).unwrap_or(false);
+                (non_empty, size)
             } else {
                 (false, None)
             };

@@ -1514,7 +1514,7 @@ export function SettingsPage() {
                             <span className="font-medium capitalize">{node.platform}</span>
                             <p className="text-xs text-muted">
                               {node.filename}
-                              {node.size && (
+                              {node.available && node.size && (
                                 <span className="ml-1">
                                   ({(node.size / 1024 / 1024).toFixed(1)} MB)
                                 </span>

@@ -339,7 +339,7 @@ pub fn find_file_in_path(file_name: &str, search_path: &str) -> bool {
 
 #[cfg(windows)]
 pub struct HiddenDesktop {
-    handle: isize,
+    pub handle: isize,
     pub name: String,
 }
 
@@ -509,8 +509,8 @@ pub fn minimize_process_window(_pid: u32) -> bool {
 #[cfg(windows)]
 pub fn spawn_on_hidden_desktop(
     path: &str,
-    env_var: &str,
-    env_value: &str,
+    env_pair: Option<(&str, &str)>,
+    extra_args: &[&str],
     desktop_name: &str,
 ) -> anyhow::Result<u32> {
     use anyhow::anyhow;
@@ -526,15 +526,21 @@ pub fn spawn_on_hidden_desktop(
     // Set environment variable for the current process (inherited by child).
     //
 
-    // SAFETY: We're setting a single env var before spawning a child process,
-    // and removing it immediately after. No other threads access this var.
-    unsafe { std::env::set_var(env_var, env_value) };
+    if let Some((var, value)) = env_pair {
+        // SAFETY: We're setting a single env var before spawning a child process,
+        // and removing it immediately after. No other threads access this var.
+        unsafe { std::env::set_var(var, value) };
+    }
 
     //
     // Prepare command line.
     //
 
-    let cmd_line = format!("\"{}\"", path);
+    let mut cmd_line = format!("\"{}\"", path);
+    for arg in extra_args {
+        cmd_line.push(' ');
+        cmd_line.push_str(arg);
+    }
     let mut cmd_wide: Vec<u16> = OsStr::new(&cmd_line)
         .encode_wide()
         .chain(std::iter::once(0))
@@ -576,8 +582,10 @@ pub fn spawn_on_hidden_desktop(
     // Remove environment variable.
     //
 
-    // SAFETY: Removing the env var we just set; no other threads access it.
-    unsafe { std::env::remove_var(env_var) };
+    if let Some((var, _)) = env_pair {
+        // SAFETY: Removing the env var we just set; no other threads access it.
+        unsafe { std::env::remove_var(var) };
+    }
 
     match result {
         Ok(_) => {
@@ -588,5 +596,105 @@ pub fn spawn_on_hidden_desktop(
             Ok(pi.dwProcessId)
         }
         Err(e) => Err(anyhow!("CreateProcessW failed: {}", e)),
+    }
+}
+
+//
+// Result from spawn_process_detached. Callers decide what to do with the
+// hidden desktop (CDP stores it in the connection; standalone callers leak it).
+//
+
+pub struct SpawnResult {
+    pub pid: u32,
+    #[cfg(windows)]
+    pub hidden_desktop: Option<HiddenDesktop>,
+}
+
+//
+// Spawn a process detached (no wait). On Windows, tries hidden desktop first,
+// then falls back to normal spawn with minimize. Shared by CDP and standalone
+// process launching.
+//
+
+pub fn spawn_process_detached(
+    path: &str,
+    env_pair: Option<(&str, &str)>,
+    extra_args: &[&str],
+    use_hidden_desktop: bool,
+) -> anyhow::Result<SpawnResult> {
+    #[cfg(windows)]
+    {
+        let not_hidden = std::env::var("PRAXIS_NOT_HIDDEN")
+            .map(|v| v == "1")
+            .unwrap_or(cfg!(debug_assertions));
+        let want_hidden = use_hidden_desktop && !not_hidden;
+
+        if !want_hidden {
+            common::log_debug!(
+                "spawn_process_detached: hidden desktop disabled (use_hidden_desktop={}, not_hidden={})",
+                use_hidden_desktop, not_hidden
+            );
+        }
+
+        if want_hidden {
+            let desktop = HiddenDesktop::new();
+            if let Some(d) = desktop {
+                let pid = spawn_on_hidden_desktop(
+                    path,
+                    env_pair,
+                    extra_args,
+                    &d.name,
+                )?;
+                common::log_info!(
+                    "spawn_process_detached: spawned on hidden desktop '{}' with PID {}",
+                    d.name, pid
+                );
+                return Ok(SpawnResult {
+                    pid,
+
+                    hidden_desktop: Some(d),
+                });
+            }
+            common::log_warn!("spawn_process_detached: failed to create hidden desktop, spawning normally");
+        }
+
+        let mut cmd = std::process::Command::new(path);
+        if let Some((var, val)) = env_pair {
+            cmd.env(var, val);
+        }
+        for arg in extra_args {
+            cmd.arg(arg);
+        }
+        let process = cmd
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("failed to spawn {}: {}", path, e))?;
+        let pid = process.id();
+        common::log_info!(
+            "spawn_process_detached: spawned with PID {}",
+            pid
+        );
+        Ok(SpawnResult {
+            pid,
+
+            hidden_desktop: None,
+        })
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = use_hidden_desktop;
+        let mut cmd = std::process::Command::new(path);
+        if let Some((var, val)) = env_pair {
+            cmd.env(var, val);
+        }
+        for arg in extra_args {
+            cmd.arg(arg);
+        }
+        let process = cmd
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("failed to spawn {}: {}", path, e))?;
+        let pid = process.id();
+        common::log_info!("spawn_process_detached: spawned with PID {}", pid);
+        Ok(SpawnResult { pid })
     }
 }

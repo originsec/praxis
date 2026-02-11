@@ -1,6 +1,7 @@
 pub mod cdp;
 mod runtime;
 mod session;
+mod uia;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -116,7 +117,7 @@ impl Agent for LuaAgent {
                 details.available
             }
             Err(e) => {
-                common::log_warn!("Lua fingerprint failed for '{}': {}", self.short_name, e);
+                common::log_error!("Lua fingerprint failed for '{}': {}", self.short_name, e);
                 false
             }
         };
@@ -176,7 +177,7 @@ impl Agent for LuaAgent {
             match runtime::vm_read_session_content(&lua, session_file) {
                 Ok(content) => return content,
                 Err(e) => {
-                    common::log_warn!(
+                    common::log_error!(
                         "Lua read_session_content failed for '{}': {}",
                         self.short_name, e
                     );
@@ -222,7 +223,7 @@ impl AgentRecon for LuaAgent {
             match runtime::vm_recon(&lua, is_semantic, process_path.as_deref()) {
                 Ok(result) => result,
                 Err(e) => {
-                    common::log_warn!("Lua recon failed for '{}': {}", self.short_name, e);
+                    common::log_error!("Lua recon failed for '{}': {}", self.short_name, e);
                     return None;
                 }
             }
@@ -265,7 +266,7 @@ pub fn load_embedded_agents() -> Vec<(Arc<dyn Agent>, LuaRegisteredAgentInfo)> {
     for script in EMBEDDED_LUA_SCRIPTS {
         match create_agent_from_script(script, LuaSource::Embedded) {
             Ok(item) => agents.push(item),
-            Err(e) => tracing::warn!("Failed to load embedded Lua connector: {}", e),
+            Err(e) => common::log_error!("Failed to load embedded Lua connector: {}", e),
         }
     }
     agents

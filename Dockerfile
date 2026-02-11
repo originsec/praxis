@@ -39,19 +39,20 @@ RUN npm run build
 # Stage 4: Build Rust dependencies (cached layer)
 # ==============================================================================
 FROM chef AS builder
+ARG SKIP_NODE_BUILD=0
+ARG CARGO_PROFILE=release
 
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    mingw-w64 \
+RUN apt-get update && apt-get install -y pkg-config libssl-dev \
+    && if [ "$SKIP_NODE_BUILD" = "0" ]; then apt-get install -y mingw-w64; fi \
     && rm -rf /var/lib/apt/lists/*
 
-RUN rustup target add x86_64-pc-windows-gnu
-
-RUN mkdir -p /root/.cargo && echo '\
+RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
+    rustup target add x86_64-pc-windows-gnu && \
+    mkdir -p /root/.cargo && echo '\
 [target.x86_64-pc-windows-gnu]\n\
 linker = "x86_64-w64-mingw32-gcc"\n\
-' >> /root/.cargo/config.toml
+' >> /root/.cargo/config.toml; \
+    fi
 
 WORKDIR /build
 
@@ -60,9 +61,11 @@ WORKDIR /build
 #
 
 COPY --from=planner /build/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json -p praxis_node && \
-    cargo chef cook --release --recipe-path recipe.json -p praxis_node --target x86_64-pc-windows-gnu && \
-    cargo chef cook --release --recipe-path recipe.json -p praxis_service -p praxis_web
+RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
+        cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_node && \
+        cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_node --target x86_64-pc-windows-gnu; \
+    fi && \
+    cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_service -p praxis_web
 
 # ==============================================================================
 # Stage 5: Build application (only recompiles on source changes)
@@ -89,22 +92,28 @@ COPY --from=frontend /build/web/frontend/dist ./web/frontend/dist
 ENV PRAXIS_SKIP_FRONTEND=1
 
 #
-# Build praxis_node for Linux and Windows.
+# Build praxis_node for Linux and Windows (skipped if SKIP_NODE_BUILD=1).
 #
 
-RUN cargo build --release -p praxis_node && \
-    cargo build --release -p praxis_node --target x86_64-pc-windows-gnu
+RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
+        cargo build --profile "$CARGO_PROFILE" -p praxis_node && \
+        cargo build --profile "$CARGO_PROFILE" -p praxis_node --target x86_64-pc-windows-gnu; \
+    else \
+        mkdir -p "target/$CARGO_PROFILE" "target/x86_64-pc-windows-gnu/$CARGO_PROFILE" && \
+        touch "target/$CARGO_PROFILE/praxis_node" "target/x86_64-pc-windows-gnu/$CARGO_PROFILE/praxis_node.exe"; \
+    fi
 
 #
 # Build service and web binaries.
 #
 
-RUN cargo build --release -p praxis_service -p praxis_web
+RUN cargo build --profile "$CARGO_PROFILE" -p praxis_service -p praxis_web
 
 # ==============================================================================
 # Stage 6: Runtime image
 # ==============================================================================
 FROM debian:bookworm-slim
+ARG CARGO_PROFILE=release
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
@@ -119,16 +128,16 @@ WORKDIR /app
 # Copy main binaries.
 #
 
-COPY --from=builder /build/target/release/praxis_service /app/
-COPY --from=builder /build/target/release/praxis_web /app/
+COPY --from=builder /build/target/${CARGO_PROFILE}/praxis_service /app/
+COPY --from=builder /build/target/${CARGO_PROFILE}/praxis_web /app/
 
 #
 # Copy node binaries for download.
 #
 
 RUN mkdir -p /app/nodes
-COPY --from=builder /build/target/release/praxis_node /app/nodes/praxis_node_linux
-COPY --from=builder /build/target/x86_64-pc-windows-gnu/release/praxis_node.exe /app/nodes/praxis_node_windows.exe
+COPY --from=builder /build/target/${CARGO_PROFILE}/praxis_node /app/nodes/praxis_node_linux
+COPY --from=builder /build/target/x86_64-pc-windows-gnu/${CARGO_PROFILE}/praxis_node.exe /app/nodes/praxis_node_windows.exe
 
 #
 # Copy and setup entrypoint script.
