@@ -17,6 +17,9 @@
 #                         Default: amqp://praxis:praxis@localhost:5672
 #   PRAXIS_NOT_HIDDEN=1 - Disable hidden desktop for agent windows (Windows only)
 #                         Useful for debugging/testing DevTools-based agents
+#   SKIP_NODE_BUILD=1   - Skip building praxis_node binaries (faster builds)
+#   CARGO_PROFILE       - Cargo build profile (default: release)
+#                         Set to release-fast for faster builds with thin LTO
 #
 
 services:
@@ -57,7 +60,11 @@ services:
       - postgres
 
   praxis:
-    build: .
+    build:
+      context: .
+      args:
+        SKIP_NODE_BUILD: ${SKIP_NODE_BUILD:-0}
+        CARGO_PROFILE: ${CARGO_PROFILE:-release}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -72,7 +79,11 @@ services:
     restart: unless-stopped
 
   praxis-postgres:
-    build: .
+    build:
+      context: .
+      args:
+        SKIP_NODE_BUILD: ${SKIP_NODE_BUILD:-0}
+        CARGO_PROFILE: ${CARGO_PROFILE:-release}
     depends_on:
       rabbitmq:
         condition: service_healthy

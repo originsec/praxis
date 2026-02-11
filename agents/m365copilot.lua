@@ -62,7 +62,7 @@ local m365_adapter = {
     }
   end,
 
-  wait_for_submit_ready = function(handle)
+  wait_for_submit_ready = function(handle, _cancel_key)
     praxis.cdp_wait_for_element(handle, SEND_BUTTON_SELECTOR, 100, 100)
   end,
 }
@@ -73,6 +73,16 @@ local m365_adapter = {
 
 local function post_initialize(handle, working_dir)
   praxis.cdp_wait_for_element(handle, INPUT_SELECTOR, 30, 300)
+
+  praxis.log_info("m365copilot: post_initialize handle=" .. tostring(handle))
+  if handle then
+    local pid = praxis.cdp_process_id(handle)
+    praxis.log_info("m365copilot: minimize pid=" .. tostring(pid))
+    if pid then
+      praxis.sleep_ms(1000)
+      praxis.minimize_window(pid)
+    end
+  end
 
   local wd = WORKING_DIR_WORK
   if type(working_dir) == "string" and #working_dir > 0 then
@@ -109,19 +119,21 @@ local function run_create_session(ctx)
   praxis.kill_processes_by_name(PROCESS_NAME)
   praxis.sleep_ms(500)
 
-  local cdp_handle = devtools.connect({
+  local cdp_handle, desktop_handle = devtools.connect({
     process_path = ctx.process_path,
     debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
     debug_port_format = "--remote-debugging-port={}",
-    base_port = 9222,
-    port_range = 778,
+    base_port = 9250,
+    port_range = 100,
   })
   post_initialize(cdp_handle, ctx.working_dir)
+
   return {
     handle = cdp_handle,
     cdp_handle = cdp_handle,
     working_dir = ctx.working_dir,
     process_id = praxis.cdp_process_id(cdp_handle),
+    desktop_handle = desktop_handle,
   }
 end
 
@@ -133,6 +145,9 @@ end
 local function run_session_close(state)
   if state and state.cdp_handle then
     devtools.close(state.cdp_handle)
+  end
+  if state and state.desktop_handle then
+    praxis.release_desktop(state.desktop_handle)
   end
 end
 
@@ -163,13 +178,14 @@ local function do_recon(ctx)
   end
 
   local discovery_handle = nil
+  local discovery_desktop = nil
   local ok, err = pcall(function()
-    discovery_handle = devtools.connect({
+    discovery_handle, discovery_desktop = devtools.connect({
       process_path = process_path,
       debug_port_env_var = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
       debug_port_format = "--remote-debugging-port={}",
-      base_port = 9222,
-      port_range = 778,
+      base_port = 9250,
+      port_range = 100,
     })
 
     local profile = praxis.cdp_evaluate(discovery_handle, [[
@@ -204,6 +220,9 @@ local function do_recon(ctx)
 
   if discovery_handle then
     pcall(devtools.close, discovery_handle)
+  end
+  if discovery_desktop then
+    pcall(praxis.release_desktop, discovery_desktop)
   end
 
   if not ok then

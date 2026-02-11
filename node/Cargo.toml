@@ -61,9 +61,10 @@ nix = { version = "0.31.1", features = ["user"] }
 mlua = { version = "0.10", features = ["lua54", "vendored", "serialize", "send"] }
 base64 = "0.22"
 chromiumoxide = { version = "0.7", features = ["tokio-runtime"], default-features = false }
+tokio-tungstenite = "0.24"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62.2", features = ["Management_Deployment", "Foundation_Collections", "ApplicationModel", "Storage_Search", "Win32_Storage_Packaging_Appx", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_StationsAndDesktops", "Win32_Security", "Win32_System_Threading", "Win32_Graphics_Gdi"] }
+windows = { version = "0.62.2", features = ["Management_Deployment", "Foundation_Collections", "ApplicationModel", "Storage_Search", "Win32_Storage_Packaging_Appx", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_StationsAndDesktops", "Win32_Security", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse"] }
 windows-env = "0.2"
 uiautomation = { version = "0.24.2", features = ["all"] }
 winreg = "0.55"

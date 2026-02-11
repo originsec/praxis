@@ -3,7 +3,7 @@ resolver = "3"
 members = ["cli", "common", "node", "semantic_parser", "service", "web"]
 
 [workspace.package]
-version = "0.9.2"
+version = "0.9.3"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/originsec/praxis"
@@ -15,5 +15,10 @@ shared-version = true
 
 [profile.release]
 strip = true
+lto = "thin"
+codegen-units = 16
+
+[profile.release-optimized]
+inherits = "release"
 lto = true
 codegen-units = 1
