@@ -19,6 +19,7 @@ A connector handles four main capabilities:
 | Connector | Agent | Platform | Session Mode | Type |
 |-----------|-------|----------|--------------|------|
 | [`claudecode`](./claude-code.md) | Claude Code CLI | Linux, Windows | CLI (PTY) | Lua |
+| [`claudedesktop`](./claude-desktop.md) | Claude Desktop | Windows only | DevTools (Electron) | Lua |
 | [`codex`](./codex.md) | Codex CLI (OpenAI) | Linux, Windows | CLI | Lua |
 | [`cursor`](./cursor.md) | Cursor Agent CLI | Linux only | CLI | Lua |
 | [`gemini`](./gemini.md) | Gemini CLI | Linux, Windows | CLI | Lua |

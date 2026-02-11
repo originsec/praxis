@@ -59,6 +59,17 @@ impl AgentSession for LuaAgentSession {
             return;
         }
         let state = self.state.lock().unwrap().clone();
+
+        //
+        // Signal cancellation BEFORE acquiring the VM lock. If transact() is
+        // running, it holds the VM lock and we'd block forever without this.
+        // The cancel flag causes the Lua poll loop to exit, releasing the lock.
+        //
+
+        if let Some(handle) = state.get("cdp_handle").and_then(|v| v.as_str()) {
+            super::runtime::set_cancelled(handle);
+        }
+
         let lua = self.vm.lock().unwrap();
         if let Err(e) = super::runtime::vm_session_close(&lua, &self.context, &state) {
             common::log_warn!("Lua session close failed: {}", e);
@@ -93,8 +104,13 @@ impl AgentSession for LuaAgentSession {
         }
 
         //
-        // CDP/DevTools agents: terminate via process ID stored in session state.
+        // CDP/DevTools agents: signal cancellation via the cancel flag,
+        // then terminate the process tree.
         //
+
+        if let Some(handle) = state.get("cdp_handle").and_then(|v| v.as_str()) {
+            super::runtime::set_cancelled(handle);
+        }
 
         if let Some(pid) = state.get("process_id").and_then(|v| v.as_u64()) {
             crate::utils::terminate_process_tree(pid as u32);

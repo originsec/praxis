@@ -180,6 +180,9 @@ function M.for_each_user_home_coalesce(fn, opts)
   local homes = praxis.user_homes() or {}
   for _, home in ipairs(homes) do
     local ok, result = pcall(fn, home)
+    if not ok then
+      praxis.log_warn("for_each_user_home_coalesce: error for " .. tostring(home) .. ": " .. tostring(result))
+    end
     if ok and result ~= nil then
       if type(result) == "table" then
         local is_list = (#result > 0)
@@ -612,12 +615,7 @@ function M.collect_configs(base_path, templates, opts)
   local scope = opts.scope or "home"
   local include_contents = opts.include_contents
 
-  for _, tmpl in ipairs(templates) do
-    local file_path = praxis.path_join({ base_path, tmpl.path })
-    if not praxis.path_exists(file_path) then
-      goto continue
-    end
-
+  local function add_item(file_path, tmpl)
     local config_type = tmpl.type
     if scope == "project" then
       config_type = config_type .. ":" .. base_path
@@ -644,8 +642,21 @@ function M.collect_configs(base_path, templates, opts)
         })
       end
     end
+  end
 
-    ::continue::
+  for _, tmpl in ipairs(templates or {}) do
+    local file_path = praxis.path_join({ base_path, tmpl.path })
+
+    if file_path:find("[%*%?]") then
+      local matches = praxis.glob_files(file_path) or {}
+      for _, match in ipairs(matches) do
+        add_item(match, tmpl)
+      end
+    else
+      if praxis.path_exists(file_path) then
+        add_item(file_path, tmpl)
+      end
+    end
   end
 
   return result

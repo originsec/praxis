@@ -25,6 +25,9 @@ local function pick_path()
       default = { "${HOME}/.local/bin" },
       windows = { "${USERPROFILE}\\.local\\bin" },
     },
+    glob_paths = {
+      windows = { "${APPDATA}\\Claude\\claude-code\\*\\claude.exe" },
+    },
     verify = verify_binary,
   })
 end

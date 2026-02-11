@@ -24,6 +24,20 @@ For PostgreSQL instead of SQLite:
 docker compose --profile postgres up --build
 ```
 
+### Faster Builds
+
+Skip praxis_node binaries when you only need the service and web components:
+
+```bash
+SKIP_NODE_BUILD=1 docker compose up --build
+```
+
+Use the `release-optimized` profile for fully optimized production builds (full LTO, single codegen unit — significantly slower):
+
+```bash
+CARGO_PROFILE=release-optimized docker compose up --build
+```
+
 ## Building from Source
 
 ### Prerequisites

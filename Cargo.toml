@@ -15,5 +15,10 @@ shared-version = true
 
 [profile.release]
 strip = true
+lto = "thin"
+codegen-units = 16
+
+[profile.release-optimized]
+inherits = "release"
 lto = true
 codegen-units = 1

@@ -210,6 +210,9 @@ pub fn expand_path(template: &str) -> String {
     if let Ok(appdata) = std::env::var("APPDATA") {
         result = result.replace("${APPDATA}", &appdata);
     }
+    if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
+        result = result.replace("${LOCALAPPDATA}", &localappdata);
+    }
     result
 }
 

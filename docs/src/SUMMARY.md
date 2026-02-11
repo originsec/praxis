@@ -23,6 +23,7 @@
 - [Overview](./connectors/overview.md)
 - [Adding New Connectors](./connectors/adding-new.md)
 - [Claude Code](./connectors/claude-code.md)
+- [Claude Desktop](./connectors/claude-desktop.md)
 - [Codex CLI](./connectors/codex.md)
 - [Cursor Agent](./connectors/cursor.md)
 - [Gemini CLI](./connectors/gemini.md)

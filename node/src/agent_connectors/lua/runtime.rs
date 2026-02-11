@@ -6,13 +6,46 @@ use serde_json::{json, Value as JsonValue};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
 use common::{ReconResult, SessionContext};
 
 static COMMAND_HANDLES: Lazy<std::sync::Mutex<HashMap<String, Arc<AtomicU32>>>> =
     Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
+
+//
+// Cancellation registry for long-running Lua operations (e.g. transact poll
+// loops). Keyed by an arbitrary string (typically cdp_handle). Set from Rust
+// (abort_transaction/close), checked from Lua via praxis.is_cancelled(key).
+//
+
+static CANCEL_FLAGS: Lazy<std::sync::Mutex<HashMap<String, Arc<AtomicBool>>>> =
+    Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
+
+pub fn set_cancelled(key: &str) {
+    let map = CANCEL_FLAGS.lock().unwrap();
+    if let Some(flag) = map.get(key) {
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+fn is_cancelled(key: &str) -> bool {
+    let map = CANCEL_FLAGS.lock().unwrap();
+    map.get(key)
+        .map(|f| f.load(std::sync::atomic::Ordering::SeqCst))
+        .unwrap_or(false)
+}
+
+fn register_cancel_flag(key: &str) {
+    let mut map = CANCEL_FLAGS.lock().unwrap();
+    map.insert(key.to_string(), Arc::new(AtomicBool::new(false)));
+}
+
+fn remove_cancel_flag(key: &str) {
+    let mut map = CANCEL_FLAGS.lock().unwrap();
+    map.remove(key);
+}
 
 fn lua_error<E: std::fmt::Display>(e: E) -> anyhow::Error {
     anyhow!(e.to_string())
@@ -346,7 +379,7 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
             lua.create_function(|_, path: String| {
                 Ok(Path::new(&path)
                     .parent()
-                    .map(|p| p.to_string_lossy().to_string()))
+                    .map(|p| p.to_string_lossy().to_string().replace('\\', "/")))
             })
             .map_err(lua_error)?,
         )
@@ -378,7 +411,7 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
             lua.create_function(|_, ()| {
                 Ok(crate::agent_connectors::utils::enumerate_user_homes()
                     .into_iter()
-                    .map(|p| p.to_string_lossy().to_string())
+                    .map(|p| p.to_string_lossy().to_string().replace('\\', "/"))
                     .collect::<Vec<_>>())
             })
             .map_err(lua_error)?,
@@ -390,7 +423,7 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
             "extract_user_home",
             lua.create_function(|_, path: String| {
                 Ok(crate::agent_connectors::utils::extract_user_home_from_path(&path)
-                    .map(|p| p.to_string_lossy().to_string()))
+                    .map(|p| p.to_string_lossy().to_string().replace('\\', "/")))
             })
             .map_err(lua_error)?,
         )
@@ -416,6 +449,18 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
 
     praxis
         .set(
+            "write_file",
+            lua.create_function(|_, (path, content): (String, String)| {
+                std::fs::write(&path, &content)
+                    .map_err(|e| mlua::Error::RuntimeError(format!("write_file '{}': {}", path, e)))?;
+                Ok(())
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
             "read_dir",
             lua.create_function(|lua, path: String| {
                 let mut entries = Vec::<JsonValue>::new();
@@ -430,7 +475,7 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
                         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                         .map(|d| d.as_secs() as i64);
                     entries.push(json!({
-                        "path": p.to_string_lossy().to_string(),
+                        "path": p.to_string_lossy().to_string().replace('\\', "/"),
                         "name": p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string(),
                         "is_dir": p.is_dir(),
                         "is_file": p.is_file(),
@@ -462,7 +507,7 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
                     });
                 for entry in walker.flatten() {
                     if entry.file_type().is_file() {
-                        out.push(entry.path().to_string_lossy().to_string());
+                        out.push(entry.path().to_string_lossy().to_string().replace('\\', "/"));
                     }
                 }
                 lua.to_value(&out)
@@ -490,7 +535,7 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
                 let mut paths = Vec::<String>::new();
                 if let Ok(entries) = glob::glob(&pattern) {
                     for entry in entries.flatten() {
-                        paths.push(entry.to_string_lossy().to_string());
+                        paths.push(entry.to_string_lossy().to_string().replace('\\', "/"));
                     }
                 }
                 lua.to_value(&paths)
@@ -577,6 +622,17 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
     //
     // Logging helpers so Lua scripts can emit diagnostics.
     //
+
+    praxis
+        .set(
+            "log_debug",
+            lua.create_function(|_, msg: String| {
+                tracing::debug!("lua: {}", msg);
+                Ok(())
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
 
     praxis
         .set(
@@ -695,6 +751,79 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         )
         .map_err(lua_error)?;
 
+    //
+    // Spawn a process without waiting for it to exit. Returns { pid, desktop }
+    // where desktop is an opaque handle for the hidden desktop (nil if not used).
+    // On Windows, supports hidden desktop and minimize (same as CDP spawn).
+    //
+
+    praxis
+        .set(
+            "spawn_detached",
+            lua.create_function(|lua, (path, use_hidden): (String, Option<bool>)| {
+                let (pid, desktop_id) = spawn_detached_process(&path, use_hidden.unwrap_or(true))
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+                let tbl = lua.create_table()
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+                tbl.set("pid", pid)
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+                tbl.set("desktop", desktop_id)
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+                Ok(tbl)
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    //
+    // Minimize a process window by PID.
+    //
+
+    praxis
+        .set(
+            "minimize_window",
+            lua.create_function(|_, pid: u32| {
+                Ok(crate::utils::minimize_process_window(pid))
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    //
+    // Release a hidden desktop handle returned by spawn_detached.
+    //
+
+    praxis
+        .set(
+            "release_desktop",
+            lua.create_function(|_, id: Option<String>| {
+                if let Some(id) = id {
+                    release_desktop_handle(&id);
+                }
+                Ok(())
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    //
+    // Switch the current thread to a hidden desktop (for UIA interaction) or
+    // back to the original desktop (nil). UIA can only interact with windows
+    // on the current thread's desktop.
+    //
+
+    praxis
+        .set(
+            "switch_desktop",
+            lua.create_function(|_, id: Option<String>| {
+                switch_to_desktop(id.as_deref())
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+                Ok(())
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
     praxis
         .set(
             "sleep_ms",
@@ -706,7 +835,38 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         )
         .map_err(lua_error)?;
 
+    praxis
+        .set(
+            "is_cancelled",
+            lua.create_function(|_, key: String| Ok(is_cancelled(&key)))
+                .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "register_cancel",
+            lua.create_function(|_, key: String| {
+                register_cancel_flag(&key);
+                Ok(())
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "unregister_cancel",
+            lua.create_function(|_, key: String| {
+                remove_cancel_flag(&key);
+                Ok(())
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
     super::cdp::install_cdp_api(lua, &praxis)?;
+    super::uia::install_uia_api(lua, &praxis)?;
 
     lua.globals().set("praxis", praxis).map_err(lua_error)?;
     Ok(())
@@ -742,6 +902,20 @@ fn install_shared_libraries(lua: &Lua) -> Result<()> {
 
     preload
         .set("praxis.devtools", devtools_loader)
+        .map_err(lua_error)?;
+
+    let uiautomation_src = include_str!("lib/uiautomation.lua");
+    let uiautomation_loader = lua
+        .create_function(move |lua, ()| {
+            let value: Value = lua.load(uiautomation_src).eval().map_err(|e| {
+                mlua::Error::RuntimeError(format!("Failed to load praxis.uiautomation: {}", e))
+            })?;
+            Ok(value)
+        })
+        .map_err(lua_error)?;
+
+    preload
+        .set("praxis.uiautomation", uiautomation_loader)
         .map_err(lua_error)?;
 
     Ok(())
@@ -846,6 +1020,120 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
     };
 
     Ok(result)
+}
+
+//
+// Spawn a detached process without waiting for it to exit.
+// On Windows, uses hidden desktop if available, otherwise spawns normally
+// and minimizes after a short delay. Returns the PID.
+//
+
+#[cfg(windows)]
+static DESKTOP_HANDLES: once_cell::sync::Lazy<
+    std::sync::Mutex<std::collections::HashMap<String, crate::utils::HiddenDesktop>>,
+> = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+fn spawn_detached_process(path: &str, use_hidden_desktop: bool) -> Result<(u32, Option<String>)> {
+    let result = crate::utils::spawn_process_detached(path, None, &[], use_hidden_desktop)?;
+
+    //
+    // Don't minimize here — the caller may need UIA access to the window first.
+    // Use praxis.minimize_window(pid) from Lua when ready.
+    //
+
+    #[cfg(windows)]
+    {
+        let desktop_id = if let Some(desktop) = result.hidden_desktop {
+            let id = uuid::Uuid::new_v4().to_string();
+            DESKTOP_HANDLES.lock().unwrap().insert(id.clone(), desktop);
+            Some(id)
+        } else {
+            None
+        };
+        return Ok((result.pid, desktop_id));
+    }
+
+    #[cfg(not(windows))]
+    Ok((result.pid, None))
+}
+
+#[cfg(windows)]
+pub fn store_desktop_handle(id: &str, desktop: crate::utils::HiddenDesktop) {
+    DESKTOP_HANDLES.lock().unwrap().insert(id.to_string(), desktop);
+}
+
+//
+// Save/restore the original desktop for switch_to_desktop.
+//
+
+#[cfg(windows)]
+static ORIGINAL_DESKTOP: once_cell::sync::Lazy<std::sync::Mutex<Option<isize>>> =
+    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(None));
+
+fn switch_to_desktop(id: Option<&str>) -> Result<()> {
+    #[cfg(windows)]
+    {
+        use windows::Win32::System::StationsAndDesktops::{GetThreadDesktop, SetThreadDesktop, HDESK};
+
+        let current_thread = unsafe { windows::Win32::System::Threading::GetCurrentThreadId() };
+
+        match id {
+            Some(desktop_id) => {
+                let map = DESKTOP_HANDLES.lock().unwrap();
+                let desktop = map
+                    .get(desktop_id)
+                    .ok_or_else(|| anyhow!("desktop handle not found: {}", desktop_id))?;
+
+                //
+                // Save the original desktop before switching.
+                //
+
+                let mut orig = ORIGINAL_DESKTOP.lock().unwrap();
+                if orig.is_none() {
+                    let current = unsafe { GetThreadDesktop(current_thread) };
+                    if let Ok(h) = current {
+                        *orig = Some(h.0 as isize);
+                    }
+                }
+
+                let hdesk = unsafe { std::mem::transmute::<isize, HDESK>(desktop.handle) };
+                unsafe {
+                    SetThreadDesktop(hdesk)
+                        .map_err(|e| anyhow!("SetThreadDesktop failed: {}", e))?;
+                }
+                common::log_info!("Switched to hidden desktop '{}'", desktop.name);
+            }
+            None => {
+                let mut orig = ORIGINAL_DESKTOP.lock().unwrap();
+                if let Some(handle) = orig.take() {
+                    let hdesk = unsafe { std::mem::transmute::<isize, HDESK>(handle) };
+                    unsafe {
+                        SetThreadDesktop(hdesk)
+                            .map_err(|e| anyhow!("SetThreadDesktop (restore) failed: {}", e))?;
+                    }
+                    common::log_info!("Restored original desktop");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = id;
+        Ok(())
+    }
+}
+
+pub fn release_desktop_handle(id: &str) {
+    #[cfg(windows)]
+    {
+        DESKTOP_HANDLES.lock().unwrap().remove(id);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = id;
+    }
 }
 
 fn get_handle_pid_cell(handle: Option<String>) -> Arc<AtomicU32> {
