@@ -74,10 +74,36 @@ This starts:
 
 Open **http://localhost:8080** and you're in.
 
-To make macOS node binaries downloadable in the Web UI when running with Docker,
-place `praxis_node_macos_arm64` in `~/.praxis/bin/nodes/`. The compose file
-mounts that directory into the container by default and keeps the built-in Linux
-and Windows binaries available.
+To add a macOS node binary to Docker downloads, provide it explicitly (optional):
+
+```bash
+# Build macOS node binary on macOS
+cargo build --release -p praxis_node
+
+# Put it in a local directory
+mkdir -p ~/.praxis/bin/nodes
+cp target/release/praxis_node ~/.praxis/bin/nodes/praxis_node_macos_arm64
+```
+
+Then mount it and enable multi-directory lookup:
+
+```yaml
+# docker-compose.override.yml
+services:
+  praxis:
+    environment:
+      PRAXIS_NODES_DIRS: /app/nodes,/app/nodes-host
+    volumes:
+      - ~/.praxis/bin/nodes:/app/nodes-host:ro
+
+  praxis-postgres:
+    environment:
+      PRAXIS_NODES_DIRS: /app/nodes,/app/nodes-host
+    volumes:
+      - ~/.praxis/bin/nodes:/app/nodes-host:ro
+```
+
+This keeps Linux/Windows defaults unchanged while adding macOS as an opt-in download.
 
 The RabbitMQ management UI at **http://localhost:15672** uses credentials `praxis/praxis`.
 
