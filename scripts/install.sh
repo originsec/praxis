@@ -11,6 +11,9 @@ PRAXIS_HOME="${PRAXIS_HOME:-$HOME/.praxis}"
 PRAXIS_BIN="$PRAXIS_HOME/bin"
 PRAXIS_REPO="originsec/praxis"
 PRAXIS_VERSION="${PRAXIS_VERSION:-}"
+NODE_PLATFORM=""
+NODE_FILENAME=""
+NODE_SUBDIR=""
 
 # Colors
 RED='\033[0;31m'
@@ -38,6 +41,41 @@ warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
 has_cmd() { command -v "$1" &> /dev/null; }
+
+detect_node_platform() {
+    local os arch
+    os="$(uname -s)"
+    arch="$(uname -m)"
+
+    case "$os" in
+        Linux)
+            NODE_PLATFORM="linux"
+            NODE_FILENAME="praxis_node_linux"
+            NODE_SUBDIR="linux"
+            ;;
+        Darwin)
+            if [[ "$arch" == "arm64" || "$arch" == "aarch64" ]]; then
+                NODE_PLATFORM="macos-arm64"
+                NODE_FILENAME="praxis_node_macos_arm64"
+                NODE_SUBDIR="macos-arm64"
+            elif [[ "$arch" == "x86_64" ]]; then
+                NODE_PLATFORM="macos-x86_64"
+                NODE_FILENAME="praxis_node_macos_x86_64"
+                NODE_SUBDIR="macos-x86_64"
+            else
+                NODE_PLATFORM="macos"
+                NODE_FILENAME="praxis_node_macos"
+                NODE_SUBDIR="macos"
+            fi
+            ;;
+        *)
+            NODE_PLATFORM="linux"
+            NODE_FILENAME="praxis_node_linux"
+            NODE_SUBDIR="linux"
+            warn "Unknown OS '$os' - defaulting node platform to Linux."
+            ;;
+    esac
+}
 
 get_latest_version() {
     if [ -n "$PRAXIS_VERSION" ]; then
@@ -122,6 +160,10 @@ check_prerequisites() {
 install_praxis() {
     info "Creating directories..."
     mkdir -p "$PRAXIS_BIN"
+    mkdir -p "$PRAXIS_BIN/nodes"
+
+    detect_node_platform
+    mkdir -p "$PRAXIS_BIN/nodes/$NODE_SUBDIR"
     mkdir -p "$PRAXIS_BIN/nodes/linux"
     mkdir -p "$PRAXIS_BIN/nodes/windows"
 
@@ -131,10 +173,11 @@ install_praxis() {
     cargo install --git "$repo_url" --tag "$PRAXIS_VERSION" --root "$PRAXIS_HOME" praxis_service praxis_web praxis_cli
     success "Installed praxis_service, praxis_web, and praxis_cli"
 
-    info "Installing praxis_node (Linux)..."
+    info "Installing praxis_node ($NODE_PLATFORM)..."
     cargo install --git "$repo_url" --tag "$PRAXIS_VERSION" --root "$PRAXIS_HOME" praxis_node
-    mv "$PRAXIS_BIN/praxis_node" "$PRAXIS_BIN/nodes/linux/"
-    success "Installed praxis_node (Linux)"
+    mv "$PRAXIS_BIN/praxis_node" "$PRAXIS_BIN/nodes/$NODE_SUBDIR/praxis_node"
+    cp "$PRAXIS_BIN/nodes/$NODE_SUBDIR/praxis_node" "$PRAXIS_BIN/nodes/$NODE_FILENAME"
+    success "Installed praxis_node ($NODE_PLATFORM)"
 
     if [[ "$HAS_DOCKER" == true ]]; then
         info "Installing praxis_node (Windows) via cross..."
@@ -146,6 +189,7 @@ install_praxis() {
         cross build --release --target x86_64-pc-windows-gnu -p praxis_node
 
         cp target/x86_64-pc-windows-gnu/release/praxis_node.exe "$PRAXIS_BIN/nodes/windows/"
+        cp target/x86_64-pc-windows-gnu/release/praxis_node.exe "$PRAXIS_BIN/nodes/praxis_node_windows.exe"
         popd > /dev/null
 
         rm -rf "$TEMP_DIR"
@@ -230,9 +274,11 @@ print_summary() {
     echo "  $PRAXIS_BIN/praxis.sh"
     echo ""
     echo "Node agents:"
-    echo "  $PRAXIS_BIN/nodes/linux/praxis_node"
+    echo "  $PRAXIS_BIN/nodes/$NODE_SUBDIR/praxis_node"
+    echo "  $PRAXIS_BIN/nodes/$NODE_FILENAME"
     if [[ "$HAS_DOCKER" == true ]]; then
         echo "  $PRAXIS_BIN/nodes/windows/praxis_node.exe"
+        echo "  $PRAXIS_BIN/nodes/praxis_node_windows.exe"
     fi
     echo ""
     echo -e "${YELLOW}Add to your PATH:${NC}"
