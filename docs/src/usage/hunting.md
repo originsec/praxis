@@ -126,6 +126,18 @@ User identities and API keys extracted from agent configurations.
 | entry_type | "user_identity" or "api_key" |
 | value | The identity or key value |
 
+### EventLogs
+
+Centralized application log entries from service, web, and nodes. Requires `application_logs_enabled` to be set to `true` in settings.
+
+| Column | Description |
+|--------|-------------|
+| timestamp | When the log entry was recorded |
+| source | Origin: "service", "web", or a node ID |
+| level | Log level: error, warn, info, debug, trace |
+| target | Log target/module (may be null) |
+| message | Log message text |
+
 ## Supported KQL Operators
 
 | Operator | Description | Example |
@@ -188,6 +200,12 @@ TrafficLogs | join (TrafficMatchLogs) on traffic_id | project timestamp, url, ru
 
 // Find traffic with large responses
 TrafficLogs | where response_status == 200 | project timestamp, url, host | take 100
+
+// View recent error logs
+EventLogs | where level == "error" | take 50
+
+// Count log entries by source
+EventLogs | summarize count() by source
 ```
 
 ## KQL Parser

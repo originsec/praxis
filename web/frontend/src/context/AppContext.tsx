@@ -1337,22 +1337,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           break;
 
         //
-        // Application log messages.
-        //
-        case 'application_log_response':
-          //
-          // Dispatch as custom event for ApplicationLogTab to catch.
-          //
-          window.dispatchEvent(new CustomEvent('ws-message', { detail: message }));
-          break;
-        case 'application_log_cleared':
-          //
-          // Dispatch as custom event for ApplicationLogTab to catch.
-          //
-          window.dispatchEvent(new CustomEvent('ws-message', { detail: message }));
-          break;
-
-        //
         // Recon messages.
         //
         case 'recon_get_response':

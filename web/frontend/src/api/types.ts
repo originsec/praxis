@@ -545,15 +545,6 @@ export interface InterceptStatus {
 //
 // Agent Discovery Types.
 //
-// Node Event Log entry.
-//
-export interface ApplicationLogEntry {
-  source: string;
-  level: string;
-  message: string;
-  target: string | null;
-  timestamp: string;
-}
 
 export interface DiscoveredLlmEndpoint {
   id: string;
@@ -666,11 +657,6 @@ export type BrowserMessage =
   | { type: 'agent_discovery_disable'; node_id: string }
   | { type: 'discovered_endpoints_request'; node_id: string | null }
   //
-  // Node event log messages.
-  //
-  | { type: 'application_log_request'; node_id: string; level_filter: string[] | null; regex_filter: string | null; limit: number; offset: number }
-  | { type: 'application_log_clear'; node_id: string | null }
-  //
   // Recon messages.
   //
   | { type: 'recon_get'; node_id: string; agent_short_name: string }
@@ -757,11 +743,6 @@ export type ServerMessage =
   //
   | { type: 'discovered_endpoints_list'; endpoints: DiscoveredLlmEndpoint[] }
   | { type: 'agent_discovery_error'; message: string }
-  //
-  // Node event log messages.
-  //
-  | { type: 'application_log_response'; node_id: string; entries: ApplicationLogEntry[]; total_count: number }
-  | { type: 'application_log_cleared'; deleted_count: number }
   //
   // Recon messages.
   //
