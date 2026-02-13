@@ -139,7 +139,7 @@ When a node starts, it runs fingerprinting for all registered connectors. Any ag
 
 Fingerprint results are cached for 60 seconds when the agent is available. Agents that are not found are re-checked on every cycle so they are discovered as soon as they are installed.
 
-All connectors (Claude Code, Codex, Cursor, Gemini, M365 Copilot) are Lua-based and loaded from embedded scripts or the service database. Browser-based agents like M365 Copilot use the `praxis.cdp_*` native API and `praxis.devtools` Lua library for Chrome DevTools Protocol interaction.
+All connectors (Claude Code, Claude Desktop, Codex, Cursor, Gemini, M365 Copilot) are Lua-based and loaded from embedded scripts or the service database. GUI-based agents like Claude Desktop (Electron) and M365 Copilot (WebView) use the `praxis.cdp_*` native API and `praxis.devtools` Lua library for Chrome DevTools Protocol interaction.
 
 ## Development Builds
 
