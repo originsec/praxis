@@ -126,10 +126,10 @@ export type AgentCommand =
   | 'Recon'
   | 'ReconSemantic'
   | { Select: { short_name: string } }
-  | { WriteFile: { path: string; contents: string } }
+  | { WriteConfigContent: { path: string; contents: string } }
   | { ReadSessionContent: { session_file: string } }
-  | { ReadFile: { path: string; line_start?: number; line_end?: number } }
-  | { GrepFile: { path: string; pattern: string } };
+  | { ReadConfigContent: { path: string; line_start?: number; line_end?: number } }
+  | { GrepConfigContent: { path: string; pattern: string } };
 
 export type SessionCommand =
   | { Create: { context: SessionContext } }
@@ -202,10 +202,10 @@ export type AgentCommandResult =
   | { ReconComplete: { result: ReconResult } }
   | { Selected: { short_name: string } }
   | { YoloSet: { enabled: boolean } }
-  | { WriteFileResult: { success: boolean; error?: string } }
+  | { WriteConfigContentResult: { success: boolean; error?: string } }
   | { SessionContent: { session_file: string; content?: string; error?: string } }
-  | { ReadFileResult: { path: string; content?: string; line_start?: number; line_end?: number; error?: string } }
-  | { GrepFileResult: { path: string; pattern: string; matches: GrepMatch[]; error?: string } };
+  | { ReadConfigContentResult: { path: string; content?: string; line_start?: number; line_end?: number; error?: string } }
+  | { GrepConfigContentResult: { path: string; pattern: string; matches: GrepMatch[]; error?: string } };
 
 export interface GrepMatch {
   line_number: number;

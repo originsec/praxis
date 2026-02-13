@@ -267,7 +267,7 @@ pub async fn handle_agent_command(
                 },
             }
         }
-        AgentCommand::WriteFile { path, contents } => {
+        AgentCommand::WriteConfigContent { path, contents } => {
             //
             // Validate path is within a valid user home directory for security.
             //
@@ -281,7 +281,7 @@ pub async fn handle_agent_command(
                     match target_path.parent().and_then(|p| p.canonicalize().ok()) {
                         Some(parent) if is_path_in_valid_home(&parent) => target_path.to_path_buf(),
                         _ => {
-                            return NodeCommandResult::Agent(AgentCommandResult::WriteFileResult {
+                            return NodeCommandResult::Agent(AgentCommandResult::WriteConfigContentResult {
                                 success: false,
                                 error: Some("Invalid path or path outside home directory".to_string()),
                             });
@@ -291,7 +291,7 @@ pub async fn handle_agent_command(
             };
 
             if !is_path_in_valid_home(&canonical_path) {
-                return NodeCommandResult::Agent(AgentCommandResult::WriteFileResult {
+                return NodeCommandResult::Agent(AgentCommandResult::WriteConfigContentResult {
                     success: false,
                     error: Some("Path must be within a valid user home directory".to_string()),
                 });
@@ -303,14 +303,14 @@ pub async fn handle_agent_command(
             match std::fs::write(&path, &contents) {
                 Ok(_) => {
                     common::log_info!("Updated config file: {}", path);
-                    NodeCommandResult::Agent(AgentCommandResult::WriteFileResult {
+                    NodeCommandResult::Agent(AgentCommandResult::WriteConfigContentResult {
                         success: true,
                         error: None,
                     })
                 }
                 Err(e) => {
                     common::log_warn!("Failed to write config file {}: {}", path, e);
-                    NodeCommandResult::Agent(AgentCommandResult::WriteFileResult {
+                    NodeCommandResult::Agent(AgentCommandResult::WriteConfigContentResult {
                         success: false,
                         error: Some(format!("Failed to write file: {}", e)),
                     })
@@ -361,13 +361,13 @@ pub async fn handle_agent_command(
                 }
             }
         }
-        AgentCommand::ReadFile {
+        AgentCommand::ReadConfigContent {
             path,
             line_start,
             line_end,
         } => {
             if let Err(error) = validate_line_range(line_start, line_end) {
-                return NodeCommandResult::Agent(AgentCommandResult::ReadFileResult {
+                return NodeCommandResult::Agent(AgentCommandResult::ReadConfigContentResult {
                     path,
                     content: None,
                     line_start,
@@ -377,7 +377,7 @@ pub async fn handle_agent_command(
             }
 
             if let Err(error) = canonicalize_and_validate_path(&path) {
-                return NodeCommandResult::Agent(AgentCommandResult::ReadFileResult {
+                return NodeCommandResult::Agent(AgentCommandResult::ReadConfigContentResult {
                     path,
                     content: None,
                     line_start,
@@ -398,7 +398,7 @@ pub async fn handle_agent_command(
                         line_start,
                         line_end
                     );
-                    NodeCommandResult::Agent(AgentCommandResult::ReadFileResult {
+                    NodeCommandResult::Agent(AgentCommandResult::ReadConfigContentResult {
                         path,
                         content: Some(content),
                         line_start,
@@ -412,7 +412,7 @@ pub async fn handle_agent_command(
                 }
                 Err(e) => {
                     common::log_warn!("Failed to read file {}: {}", path, e);
-                    NodeCommandResult::Agent(AgentCommandResult::ReadFileResult {
+                    NodeCommandResult::Agent(AgentCommandResult::ReadConfigContentResult {
                         path,
                         content: None,
                         line_start,
@@ -422,9 +422,9 @@ pub async fn handle_agent_command(
                 }
             }
         }
-        AgentCommand::GrepFile { path, pattern } => {
+        AgentCommand::GrepConfigContent { path, pattern } => {
             if let Err(error) = canonicalize_and_validate_path(&path) {
-                return NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
+                return NodeCommandResult::Agent(AgentCommandResult::GrepConfigContentResult {
                     path,
                     pattern,
                     matches: Vec::new(),
@@ -435,7 +435,7 @@ pub async fn handle_agent_command(
             let re = match Regex::new(&pattern) {
                 Ok(re) => re,
                 Err(e) => {
-                    return NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
+                    return NodeCommandResult::Agent(AgentCommandResult::GrepConfigContentResult {
                         path,
                         pattern,
                         matches: Vec::new(),
@@ -447,7 +447,7 @@ pub async fn handle_agent_command(
             let file = match std::fs::File::open(&path) {
                 Ok(file) => file,
                 Err(e) => {
-                    return NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
+                    return NodeCommandResult::Agent(AgentCommandResult::GrepConfigContentResult {
                         path,
                         pattern,
                         matches: Vec::new(),
@@ -461,7 +461,7 @@ pub async fn handle_agent_command(
                 let line_content = match line {
                     Ok(line_content) => line_content,
                     Err(e) => {
-                        return NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
+                        return NodeCommandResult::Agent(AgentCommandResult::GrepConfigContentResult {
                             path,
                             pattern,
                             matches: Vec::new(),
@@ -483,7 +483,7 @@ pub async fn handle_agent_command(
                 pattern,
                 matches.len()
             );
-            NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
+            NodeCommandResult::Agent(AgentCommandResult::GrepConfigContentResult {
                 path,
                 pattern,
                 matches,

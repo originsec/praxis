@@ -262,7 +262,8 @@ pub struct ReconTools {
     /// Skills (slash commands like /commit, /review)
     #[serde(default)]
     pub skills: Vec<AgentTool>,
-    /// Internal tools (like Bash, Read, Write, Grep) - only via ReconSemantic
+    /// Internal tools (like ReadConfigContent, WriteConfigContent,
+    /// GrepConfigContent) - only via ReconSemantic
     #[serde(default)]
     pub internal_tools: Vec<AgentTool>,
 }
@@ -458,18 +459,18 @@ pub enum AgentCommand {
     /// Perform semantic reconnaissance on the selected agent
     /// Returns everything from Recon plus internal tools (via semantic analysis)
     ReconSemantic,
-    /// Write a file's contents
-    WriteFile { path: String, contents: String },
+    /// Write config content to a file
+    WriteConfigContent { path: String, contents: String },
     /// Read the content of a session file (for viewing session history)
     ReadSessionContent { session_file: String },
-    /// Read a file's contents, optionally within a line range (1-based inclusive)
-    ReadFile {
+    /// Read config content from a file, optionally within a line range (1-based inclusive)
+    ReadConfigContent {
         path: String,
         line_start: Option<usize>,
         line_end: Option<usize>,
     },
     /// Search a file using a regex pattern and return matching lines
-    GrepFile { path: String, pattern: String },
+    GrepConfigContent { path: String, pattern: String },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -632,8 +633,8 @@ pub enum AgentCommandResult {
     ReconComplete {
         result: ReconResult,
     },
-    /// File write result
-    WriteFileResult {
+    /// Config content write result
+    WriteConfigContentResult {
         success: bool,
         error: Option<String>,
     },
@@ -643,8 +644,8 @@ pub enum AgentCommandResult {
         content: Option<String>,
         error: Option<String>,
     },
-    /// File content response
-    ReadFileResult {
+    /// Config content response
+    ReadConfigContentResult {
         path: String,
         content: Option<String>,
         line_start: Option<usize>,
@@ -652,7 +653,7 @@ pub enum AgentCommandResult {
         error: Option<String>,
     },
     /// File grep response
-    GrepFileResult {
+    GrepConfigContentResult {
         path: String,
         pattern: String,
         matches: Vec<GrepMatch>,

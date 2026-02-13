@@ -754,6 +754,262 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         }
     }
 
+    #[tool(description = "Read config content from a file")]
+    async fn read_config_content(
+        &self,
+        Parameters(params): Parameters<ReadConfigContentParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.get_client()
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        let guard = self.client.lock().await;
+        let client = guard
+            .as_ref()
+            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
+
+        let state = client
+            .get_state()
+            .await
+            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
+        let node = state
+            .nodes
+            .iter()
+            .find(|n| {
+                n.node_id
+                    .to_lowercase()
+                    .starts_with(&params.node.to_lowercase())
+            })
+            .ok_or_else(|| {
+                rmcp::ErrorData::internal_error(
+                    format!("No node found matching '{}'", params.node),
+                    None,
+                )
+            })?;
+
+        let response = client
+            .send_command(
+                &node.node_id,
+                NodeCommand::Agent(crate::AgentCommand::ReadConfigContent {
+                    path: params.path.clone(),
+                    line_start: params.line_start,
+                    line_end: params.line_end,
+                }),
+            )
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+
+        match response.result {
+            NodeCommandResult::Agent(AgentCommandResult::ReadConfigContentResult {
+                path,
+                content,
+                line_start,
+                line_end,
+                error,
+            }) => Ok(CallToolResult::success(vec![Content::text(
+                serde_json::to_string_pretty(&json!({
+                    "path": path,
+                    "content": content,
+                    "line_start": line_start,
+                    "line_end": line_end,
+                    "error": error
+                }))
+                .unwrap(),
+            )])),
+            NodeCommandResult::Error { message } => {
+                Err(rmcp::ErrorData::internal_error(message, None))
+            }
+            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+        }
+    }
+
+    #[tool(description = "Write config content to a file")]
+    async fn write_config_content(
+        &self,
+        Parameters(params): Parameters<WriteConfigContentParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.get_client()
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        let guard = self.client.lock().await;
+        let client = guard
+            .as_ref()
+            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
+
+        let state = client
+            .get_state()
+            .await
+            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
+        let node = state
+            .nodes
+            .iter()
+            .find(|n| {
+                n.node_id
+                    .to_lowercase()
+                    .starts_with(&params.node.to_lowercase())
+            })
+            .ok_or_else(|| {
+                rmcp::ErrorData::internal_error(
+                    format!("No node found matching '{}'", params.node),
+                    None,
+                )
+            })?;
+
+        let response = client
+            .send_command(
+                &node.node_id,
+                NodeCommand::Agent(crate::AgentCommand::WriteConfigContent {
+                    path: params.path.clone(),
+                    contents: params.contents.clone(),
+                }),
+            )
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+
+        match response.result {
+            NodeCommandResult::Agent(AgentCommandResult::WriteConfigContentResult {
+                success,
+                error,
+            }) => Ok(CallToolResult::success(vec![Content::text(
+                serde_json::to_string_pretty(&json!({
+                    "success": success,
+                    "error": error
+                }))
+                .unwrap(),
+            )])),
+            NodeCommandResult::Error { message } => {
+                Err(rmcp::ErrorData::internal_error(message, None))
+            }
+            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+        }
+    }
+
+    #[tool(description = "Search config content in a file with regex")]
+    async fn grep_config_content(
+        &self,
+        Parameters(params): Parameters<GrepConfigContentParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.get_client()
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        let guard = self.client.lock().await;
+        let client = guard
+            .as_ref()
+            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
+
+        let state = client
+            .get_state()
+            .await
+            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
+        let node = state
+            .nodes
+            .iter()
+            .find(|n| {
+                n.node_id
+                    .to_lowercase()
+                    .starts_with(&params.node.to_lowercase())
+            })
+            .ok_or_else(|| {
+                rmcp::ErrorData::internal_error(
+                    format!("No node found matching '{}'", params.node),
+                    None,
+                )
+            })?;
+
+        let response = client
+            .send_command(
+                &node.node_id,
+                NodeCommand::Agent(crate::AgentCommand::GrepConfigContent {
+                    path: params.path.clone(),
+                    pattern: params.pattern.clone(),
+                }),
+            )
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+
+        match response.result {
+            NodeCommandResult::Agent(AgentCommandResult::GrepConfigContentResult {
+                path,
+                pattern,
+                matches,
+                error,
+            }) => Ok(CallToolResult::success(vec![Content::text(
+                serde_json::to_string_pretty(&json!({
+                    "path": path,
+                    "pattern": pattern,
+                    "matches": matches,
+                    "error": error
+                }))
+                .unwrap(),
+            )])),
+            NodeCommandResult::Error { message } => {
+                Err(rmcp::ErrorData::internal_error(message, None))
+            }
+            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+        }
+    }
+
+    #[tool(description = "Read session content")]
+    async fn read_session_content(
+        &self,
+        Parameters(params): Parameters<ReadSessionContentParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.get_client()
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        let guard = self.client.lock().await;
+        let client = guard
+            .as_ref()
+            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
+
+        let state = client
+            .get_state()
+            .await
+            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
+        let node = state
+            .nodes
+            .iter()
+            .find(|n| {
+                n.node_id
+                    .to_lowercase()
+                    .starts_with(&params.node.to_lowercase())
+            })
+            .ok_or_else(|| {
+                rmcp::ErrorData::internal_error(
+                    format!("No node found matching '{}'", params.node),
+                    None,
+                )
+            })?;
+
+        let response = client
+            .send_command(
+                &node.node_id,
+                NodeCommand::Agent(crate::AgentCommand::ReadSessionContent {
+                    session_file: params.session_file.clone(),
+                }),
+            )
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+
+        match response.result {
+            NodeCommandResult::Agent(AgentCommandResult::SessionContent {
+                session_file,
+                content,
+                error,
+            }) => Ok(CallToolResult::success(vec![Content::text(
+                serde_json::to_string_pretty(&json!({
+                    "session_file": session_file,
+                    "content": content,
+                    "error": error
+                }))
+                .unwrap(),
+            )])),
+            NodeCommandResult::Error { message } => {
+                Err(rmcp::ErrorData::internal_error(message, None))
+            }
+            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+        }
+    }
+
     #[tool(description = "Search intercepted network traffic")]
     async fn traffic_search(
         &self,

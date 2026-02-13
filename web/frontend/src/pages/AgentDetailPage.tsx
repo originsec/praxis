@@ -473,16 +473,16 @@ export function AgentDetailPage() {
     setConfigContent(null);
 
     sendCommand(nodeId, {
-      Agent: { ReadFile: { path: configItem.path } },
+      Agent: { ReadConfigContent: { path: configItem.path } },
     }).then(response => {
       if (isCancelled) return;
       if (
         'Agent' in response.result &&
         typeof response.result.Agent === 'object' &&
         response.result.Agent !== null &&
-        'ReadFileResult' in response.result.Agent
+        'ReadConfigContentResult' in response.result.Agent
       ) {
-        const result = response.result.Agent.ReadFileResult;
+        const result = response.result.Agent.ReadConfigContentResult;
         if (result.content) {
           setConfigContent(result.content);
           //
@@ -773,16 +773,16 @@ export function AgentDetailPage() {
 
     try {
       const response = await sendCommand(nodeId, {
-        Agent: { WriteFile: { path: item.path, contents: editingConfigContent } },
+        Agent: { WriteConfigContent: { path: item.path, contents: editingConfigContent } },
       });
 
       if (
         'Agent' in response.result &&
         typeof response.result.Agent === 'object' &&
         response.result.Agent !== null &&
-        'WriteFileResult' in response.result.Agent
+        'WriteConfigContentResult' in response.result.Agent
       ) {
-        const result = response.result.Agent.WriteFileResult;
+        const result = response.result.Agent.WriteConfigContentResult;
         if (result.success) {
           //
           // Update local state with new content.
