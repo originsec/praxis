@@ -282,6 +282,13 @@ pub enum BrowserMessage {
     },
 
     //
+    // Hunting messages.
+    //
+    HuntingQuery {
+        query: String,
+    },
+
+    //
     // AgentChat messages.
     //
     /// Start a new AgentChat session
@@ -595,6 +602,18 @@ pub enum ServerMessage {
     LuaAgentScriptDisabledToggled {
         script_id: String,
         disabled: bool,
+    },
+
+    //
+    // Hunting messages.
+    //
+    HuntingQueryResponse {
+        columns: Vec<String>,
+        rows: Vec<Vec<serde_json::Value>>,
+        total_count: usize,
+    },
+    HuntingQueryError {
+        message: String,
     },
 
     //

@@ -182,6 +182,41 @@ impl Database {
     }
 
     //
+    // List all recon results across all nodes and agents.
+    //
+
+    pub async fn list_all_recon_results(&self) -> Result<Vec<StoredReconResult>> {
+        let sql = "SELECT id, node_id, agent_short_name, is_semantic,
+                tools_json, config_json, sessions_json, project_paths_json, metadata_json,
+                performed_at, created_at
+             FROM recon_results
+             ORDER BY performed_at DESC";
+
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let rows = sqlx::query(sql)
+                    .fetch_all(pool)
+                    .await?;
+                let mut results = Vec::new();
+                for row in rows {
+                    results.push(parse_recon_row_sqlite(&row)?);
+                }
+                Ok(results)
+            }
+            DatabasePool::Postgres(pool) => {
+                let rows = sqlx::query(sql)
+                    .fetch_all(pool)
+                    .await?;
+                let mut results = Vec::new();
+                for row in rows {
+                    results.push(parse_recon_row_postgres(&row)?);
+                }
+                Ok(results)
+            }
+        }
+    }
+
+    //
     // Delete recon result for a node+agent.
     //
 

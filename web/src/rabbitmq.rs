@@ -536,6 +536,18 @@ impl RabbitMqClient {
     }
 
     //
+    // Hunting methods.
+    //
+
+    pub async fn hunting_query(&self, query: String) -> Result<()> {
+        let message = ClientSignalMessage::HuntingQuery {
+            client_id: self.state.client_id.clone(),
+            query,
+        };
+        self.publish_signal(message).await
+    }
+
+    //
     // AgentChat methods.
     //
 
@@ -1012,6 +1024,16 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::LuaAgentScriptDisabledToggled { script_id, disabled } => {
                 self.state.broadcast(ServerMessage::LuaAgentScriptDisabledToggled { script_id, disabled });
+            }
+
+            //
+            // Hunting responses.
+            //
+            ClientDirectMessage::HuntingQueryResponse { columns, rows, total_count } => {
+                self.state.broadcast(ServerMessage::HuntingQueryResponse { columns, rows, total_count });
+            }
+            ClientDirectMessage::HuntingQueryError { message } => {
+                self.state.broadcast(ServerMessage::HuntingQueryError { message });
             }
 
             //

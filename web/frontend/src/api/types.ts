@@ -548,15 +548,6 @@ export interface InterceptStatus {
 //
 // Agent Discovery Types.
 //
-// Node Event Log entry.
-//
-export interface ApplicationLogEntry {
-  source: string;
-  level: string;
-  message: string;
-  target: string | null;
-  timestamp: string;
-}
 
 export interface DiscoveredLlmEndpoint {
   id: string;
@@ -669,11 +660,6 @@ export type BrowserMessage =
   | { type: 'agent_discovery_disable'; node_id: string }
   | { type: 'discovered_endpoints_request'; node_id: string | null }
   //
-  // Node event log messages.
-  //
-  | { type: 'application_log_request'; node_id: string; level_filter: string[] | null; regex_filter: string | null; limit: number; offset: number }
-  | { type: 'application_log_clear'; node_id: string | null }
-  //
   // Recon messages.
   //
   | { type: 'recon_get'; node_id: string; agent_short_name: string }
@@ -686,6 +672,10 @@ export type BrowserMessage =
   | { type: 'lua_agent_script_reset_defaults' }
   | { type: 'lua_agent_script_list' }
   | { type: 'lua_agent_script_toggle_disabled'; script_id: string; disabled: boolean }
+  //
+  // Hunting messages.
+  //
+  | { type: 'hunting_query'; query: string }
   //
   // Agent Chat messages.
   //
@@ -758,11 +748,6 @@ export type ServerMessage =
   | { type: 'discovered_endpoints_list'; endpoints: DiscoveredLlmEndpoint[] }
   | { type: 'agent_discovery_error'; message: string }
   //
-  // Node event log messages.
-  //
-  | { type: 'application_log_response'; node_id: string; entries: ApplicationLogEntry[]; total_count: number }
-  | { type: 'application_log_cleared'; deleted_count: number }
-  //
   // Recon messages.
   //
   | { type: 'recon_get_response'; node_id: string; agent_short_name: string; recon_result: ReconResult | null; performed_at: string | null; is_semantic: boolean | null }
@@ -775,6 +760,11 @@ export type ServerMessage =
   | { type: 'lua_agent_script_defaults_reset'; count: number }
   | { type: 'lua_agent_script_list'; scripts: LuaAgentScriptInfo[] }
   | { type: 'lua_agent_script_disabled_toggled'; script_id: string; disabled: boolean }
+  //
+  // Hunting messages.
+  //
+  | { type: 'hunting_query_response'; columns: string[]; rows: unknown[][]; total_count: number }
+  | { type: 'hunting_query_error'; message: string }
   //
   // Agent Chat messages.
   //
