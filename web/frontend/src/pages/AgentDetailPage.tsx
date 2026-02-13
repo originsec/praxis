@@ -410,16 +410,16 @@ export function AgentDetailPage() {
     setSessionContent(null);
 
     sendCommand(nodeId, {
-      Agent: { GetSessionContent: { session_file: session.session_file } },
+      Agent: { ReadFile: { file_type: 'Session', path: session.session_file } },
     }).then(response => {
       if (isCancelled) return;
       if (
         'Agent' in response.result &&
         typeof response.result.Agent === 'object' &&
         response.result.Agent !== null &&
-        'SessionContent' in response.result.Agent
+        'ReadFileResult' in response.result.Agent
       ) {
-        const result = (response.result.Agent as { SessionContent: { session_file: string; content?: string; error?: string } }).SessionContent;
+        const result = response.result.Agent.ReadFileResult;
         if (result.content) {
           setSessionContent(result.content);
         } else if (result.error) {
@@ -473,16 +473,16 @@ export function AgentDetailPage() {
     setConfigContent(null);
 
     sendCommand(nodeId, {
-      Agent: { GetConfigContent: { config_path: configItem.path } },
+      Agent: { ReadFile: { file_type: 'Config', path: configItem.path } },
     }).then(response => {
       if (isCancelled) return;
       if (
         'Agent' in response.result &&
         typeof response.result.Agent === 'object' &&
         response.result.Agent !== null &&
-        'ConfigContent' in response.result.Agent
+        'ReadFileResult' in response.result.Agent
       ) {
-        const result = response.result.Agent.ConfigContent;
+        const result = response.result.Agent.ReadFileResult;
         if (result.content) {
           setConfigContent(result.content);
           //
@@ -773,16 +773,16 @@ export function AgentDetailPage() {
 
     try {
       const response = await sendCommand(nodeId, {
-        Agent: { UpdateConfigFile: { path: item.path, contents: editingConfigContent } },
+        Agent: { WriteFile: { file_type: 'Config', path: item.path, contents: editingConfigContent } },
       });
 
       if (
         'Agent' in response.result &&
         typeof response.result.Agent === 'object' &&
         response.result.Agent !== null &&
-        'ConfigFileUpdated' in response.result.Agent
+        'WriteFileResult' in response.result.Agent
       ) {
-        const result = response.result.Agent.ConfigFileUpdated;
+        const result = response.result.Agent.WriteFileResult;
         if (result.success) {
           //
           // Update local state with new content.

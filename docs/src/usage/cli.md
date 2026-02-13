@@ -106,6 +106,16 @@ praxis_cli agent update --node abc123
 # Perform reconnaissance
 praxis_cli agent recon --node abc123
 praxis_cli agent recon-semantic --node abc123
+
+# Read/write/grep config content
+praxis_cli agent config read --node abc123 /home/user/.codex/config.toml
+praxis_cli agent config read --node abc123 /home/user/.codex/config.toml --line-start 1 --line-end 50
+praxis_cli agent config write --node abc123 /home/user/.codex/config.toml "new content"
+praxis_cli agent config grep --node abc123 /home/user/.codex/config.toml "model|profile"
+
+# Read/grep session content
+praxis_cli agent session read --node abc123 /home/user/.codex/sessions/2026-02-13.jsonl
+praxis_cli agent session grep --node abc123 /home/user/.codex/sessions/2026-02-13.jsonl "error|warning"
 ```
 
 ### Sessions
@@ -249,6 +259,9 @@ The MCP server exposes the following tools:
 - `agent_update` - Request agent info refresh
 - `agent_recon` - Run agent reconnaissance
 - `agent_recon_semantic` - Run semantic reconnaissance
+- `read_file` - Read config/session file content (`file_type: Config|Session`, optional line range)
+- `write_file` - Write file content (`file_type: Config` only)
+- `grep_file` - Search config/session file content with regex (`file_type: Config|Session`)
 
 **Sessions:**
 - `session_create` - Create a new session

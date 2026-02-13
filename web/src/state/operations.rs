@@ -21,6 +21,7 @@ impl AppState {
     }
 
     /// Get all operations
+    #[allow(dead_code)]
     pub async fn get_operations(&self) -> Vec<common::SemanticOpUpdate> {
         let ops = self.operations.read().await;
         ops.values().cloned().collect()
@@ -44,6 +45,7 @@ impl AppState {
     }
 
     /// Get operation definitions
+    #[allow(dead_code)]
     pub async fn get_operation_definitions(&self) -> Vec<common::OperationDefinitionInfo> {
         let cached = self.operation_definitions.read().await;
         cached.clone()

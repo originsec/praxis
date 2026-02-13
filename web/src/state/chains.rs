@@ -14,6 +14,7 @@ impl AppState {
     }
 
     /// Get chain definitions
+    #[allow(dead_code)]
     pub async fn get_chain_definitions(&self) -> Vec<common::ChainDefinitionInfo> {
         let cached = self.chain_definitions.read().await;
         cached.clone()
@@ -30,6 +31,7 @@ impl AppState {
     }
 
     /// Get all chain executions
+    #[allow(dead_code)]
     pub async fn get_chain_executions(&self) -> Vec<common::ChainExecutionUpdate> {
         let execs = self.chain_executions.read().await;
         execs.values().cloned().collect()

@@ -6,12 +6,14 @@ impl AppState {
     //
 
     /// Add a pending command ID
+    #[allow(dead_code)]
     pub async fn add_pending_command(&self, command_id: String) {
         let mut pending = self.pending_commands.write().await;
         pending.insert(command_id);
     }
 
     /// Remove a pending command ID
+    #[allow(dead_code)]
     pub async fn remove_pending_command(&self, command_id: &str) {
         let mut pending = self.pending_commands.write().await;
         pending.remove(command_id);
@@ -40,6 +42,7 @@ impl AppState {
     }
 
     /// Take a command response (removes from storage only if response exists)
+    #[allow(dead_code)]
     pub async fn take_command_response(&self, command_id: &str) -> Option<common::NodeCommandResult> {
         let mut responses = self.command_responses.write().await;
         if let Some(result) = responses.remove(command_id) {
@@ -59,6 +62,7 @@ impl AppState {
     //
 
     /// Add a pending semantic op request ID
+    #[allow(dead_code)]
     pub async fn add_pending_semantic_op(&self, request_id: String) {
         let mut pending = self.pending_semantic_ops.write().await;
         pending.insert(request_id);
@@ -80,6 +84,7 @@ impl AppState {
     }
 
     /// Take a semantic op response (returns operation_id and removes from storage)
+    #[allow(dead_code)]
     pub async fn take_semantic_op_response(&self, request_id: &str) -> Option<String> {
         let mut responses = self.semantic_op_responses.write().await;
         if let Some(operation_id) = responses.remove(request_id) {

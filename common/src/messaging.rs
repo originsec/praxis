@@ -1,9 +1,11 @@
-use serde::{Serialize, Deserialize};
-use std::collections::HashMap;
-use std::sync::OnceLock;
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
-use lapin::{options::BasicPublishOptions, publisher_confirm::PublisherConfirm, BasicProperties, Channel};
+use lapin::{
+    BasicProperties, Channel, options::BasicPublishOptions, publisher_confirm::PublisherConfirm,
+};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
 /// Node signal queue - nodes send messages here
 pub const NODE_SIGNAL_QUEUE: &str = "NodeSignal";
@@ -38,8 +40,7 @@ static RABBITMQ_URL_CELL: OnceLock<String> = OnceLock::new();
 /// or the default value if the environment variable is not set.
 pub fn rabbitmq_url() -> &'static str {
     RABBITMQ_URL_CELL.get_or_init(|| {
-        std::env::var("PRAXIS_RABBITMQ_URL")
-            .unwrap_or_else(|_| DEFAULT_RABBITMQ_URL.to_string())
+        std::env::var("PRAXIS_RABBITMQ_URL").unwrap_or_else(|_| DEFAULT_RABBITMQ_URL.to_string())
     })
 }
 
@@ -261,7 +262,8 @@ pub struct ReconTools {
     /// Skills (slash commands like /commit, /review)
     #[serde(default)]
     pub skills: Vec<AgentTool>,
-    /// Internal tools (like Bash, Read, Write, Grep) - only via ReconSemantic
+    /// Internal tools (like ReadFile, WriteFile, GrepFile) - only via
+    /// ReconSemantic
     #[serde(default)]
     pub internal_tools: Vec<AgentTool>,
 }
@@ -457,12 +459,37 @@ pub enum AgentCommand {
     /// Perform semantic reconnaissance on the selected agent
     /// Returns everything from Recon plus internal tools (via semantic analysis)
     ReconSemantic,
-    /// Update a config file's contents
-    UpdateConfigFile { path: String, contents: String },
-    /// Get the content of a session file (for viewing session history)
-    GetSessionContent { session_file: String },
-    /// Get the content of a config file (for viewing config contents)
-    GetConfigContent { config_path: String },
+    /// Read file content, optionally within a line range (1-based inclusive)
+    ReadFile {
+        file_type: AgentFileType,
+        path: String,
+        line_start: Option<usize>,
+        line_end: Option<usize>,
+    },
+    /// Write file content
+    WriteFile {
+        file_type: AgentFileType,
+        path: String,
+        contents: String,
+    },
+    /// Search file content using a regex pattern and return matching lines
+    GrepFile {
+        file_type: AgentFileType,
+        path: String,
+        pattern: String,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum AgentFileType {
+    Config,
+    Session,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GrepMatch {
+    pub line_number: usize,
+    pub line_content: String,
 }
 
 /// Unique identifier for tracking session transactions
@@ -491,7 +518,10 @@ pub enum SessionCommand {
     Close,
     /// Send a prompt to the session and get a response
     /// transaction_id is used to match request with response
-    Prompt { text: String, transaction_id: TransactionId },
+    Prompt {
+        text: String,
+        transaction_id: TransactionId,
+    },
     /// Cancel a pending transaction
     /// force: If true, forcibly kills the underlying process (SIGKILL/TerminateProcess)
     CancelTransaction {
@@ -609,21 +639,35 @@ pub struct CommandRequest {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum AgentCommandResult {
     UpdateSent,
-    Selected { short_name: String },
+    Selected {
+        short_name: String,
+    },
     /// Reconnaissance completed with discovered tools and config
-    ReconComplete { result: ReconResult },
-    /// Config file update result
-    ConfigFileUpdated { success: bool, error: Option<String> },
-    /// Session content response
-    SessionContent {
-        session_file: String,
-        content: Option<String>,
+    ReconComplete {
+        result: ReconResult,
+    },
+    /// File content write result
+    WriteFileResult {
+        file_type: AgentFileType,
+        path: String,
+        success: bool,
         error: Option<String>,
     },
-    /// Config file content response
-    ConfigContent {
-        config_path: String,
+    /// File content response
+    ReadFileResult {
+        file_type: AgentFileType,
+        path: String,
         content: Option<String>,
+        line_start: Option<usize>,
+        line_end: Option<usize>,
+        error: Option<String>,
+    },
+    /// File grep response
+    GrepFileResult {
+        file_type: AgentFileType,
+        path: String,
+        pattern: String,
+        matches: Vec<GrepMatch>,
         error: Option<String>,
     },
 }
@@ -631,19 +675,28 @@ pub enum AgentCommandResult {
 /// Result of a session command
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum SessionCommandResult {
-    Created { session_id: String },
+    Created {
+        session_id: String,
+    },
     Closed,
     /// Response to a prompt, includes transaction_id for matching
-    PromptResponse { transaction_id: TransactionId, response: String },
+    PromptResponse {
+        transaction_id: TransactionId,
+        response: String,
+    },
     /// Transaction was cancelled
-    TransactionCancelled { transaction_id: TransactionId },
+    TransactionCancelled {
+        transaction_id: TransactionId,
+    },
 }
 
 /// Result of an intercept command
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum InterceptCommandResult {
     /// Interception enabled with specified method
-    Enabled { method: InterceptMethod },
+    Enabled {
+        method: InterceptMethod,
+    },
     Disabled,
 }
 
@@ -687,7 +740,9 @@ pub enum NodeCommandResult {
     AgentRegistry(AgentRegistryCommandResult),
     /// Agent discovery command result
     AgentDiscovery(AgentDiscoveryCommandResult),
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }
 
 /// Command response sent from node to server (and relayed to client)
@@ -1171,7 +1226,9 @@ pub struct AgentChatSessionState {
 pub enum ClientSignalMessage {
     Registration(ClientRegistration),
     Command(CommandRequest),
-    RemoveNode { node_id: String },
+    RemoveNode {
+        node_id: String,
+    },
 
     //
     // Semantic operations.
@@ -1214,7 +1271,6 @@ pub enum ClientSignalMessage {
     //
     // Operation definitions (stored in service database).
     //
-
     /// Add/update an operation definition from YAML or JSON content.
     /// Format is auto-detected: content starting with '{' is treated as JSON,
     /// otherwise as YAML.
@@ -1518,9 +1574,7 @@ pub enum ClientBroadcastMessage {
     /// Intercept status update for a node
     InterceptStatusUpdate(InterceptStatus),
     /// Enable/disable centralized event logging for clients
-    EventLoggingSet {
-        enabled: bool,
-    },
+    EventLoggingSet { enabled: bool },
 }
 
 /// Messages sent to a specific client queue
@@ -1706,12 +1760,28 @@ pub enum ClientDirectMessage {
     //
     // Lua agent script responses.
     //
-    LuaAgentScriptAdded { id: String, name: String },
-    LuaAgentScriptDeleted { script_id: String, success: bool },
-    LuaAgentScriptListResponse { scripts: Vec<LuaAgentScriptInfo> },
-    LuaAgentScriptUpdated { id: String, name: String },
-    LuaAgentScriptDefaultsReset { count: usize },
-    LuaAgentScriptDisabledToggled { script_id: String, disabled: bool },
+    LuaAgentScriptAdded {
+        id: String,
+        name: String,
+    },
+    LuaAgentScriptDeleted {
+        script_id: String,
+        success: bool,
+    },
+    LuaAgentScriptListResponse {
+        scripts: Vec<LuaAgentScriptInfo>,
+    },
+    LuaAgentScriptUpdated {
+        id: String,
+        name: String,
+    },
+    LuaAgentScriptDefaultsReset {
+        count: usize,
+    },
+    LuaAgentScriptDisabledToggled {
+        script_id: String,
+        disabled: bool,
+    },
 
     //
     // Hunting responses.
@@ -1875,7 +1945,10 @@ pub enum RuleScope {
     /// Apply to a specific node (all agents)
     Node { node_id: String },
     /// Apply to a specific agent on a specific node
-    Agent { node_id: String, agent_short_name: String },
+    Agent {
+        node_id: String,
+        agent_short_name: String,
+    },
 }
 
 /// Intercepted traffic entry sent from node to service

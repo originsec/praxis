@@ -6,6 +6,7 @@ impl AppState {
     //
 
     /// Add a pending traffic search request ID
+    #[allow(dead_code)]
     pub async fn add_pending_traffic_search(&self, request_id: String) {
         let mut pending = self.pending_traffic_searches.write().await;
         pending.insert(request_id);
@@ -38,6 +39,7 @@ impl AppState {
     }
 
     /// Take a traffic search response
+    #[allow(dead_code)]
     pub async fn take_traffic_search_response(
         &self,
         request_id: &str,

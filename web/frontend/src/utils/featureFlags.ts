@@ -11,7 +11,7 @@ export interface FeatureFlags {
 }
 
 const defaultFlags: FeatureFlags = {
-  orchestrator: false,
+  orchestrator: true,
   agentChat: false,
 };
 

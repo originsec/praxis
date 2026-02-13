@@ -1,7 +1,12 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use mlua::{Lua, Table};
+#[cfg(windows)]
+use anyhow::anyhow;
+#[cfg(windows)]
 use once_cell::sync::Lazy;
+#[cfg(windows)]
 use std::collections::HashMap;
+#[cfg(windows)]
 use std::sync::Mutex;
 
 #[cfg(windows)]
@@ -165,6 +170,7 @@ fn build_condition(
     Ok(combined)
 }
 
+#[cfg(windows)]
 fn lua_err(e: impl std::fmt::Display) -> mlua::Error {
     mlua::Error::RuntimeError(e.to_string())
 }

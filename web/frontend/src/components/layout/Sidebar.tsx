@@ -28,8 +28,8 @@ export function Sidebar({ onNavigate }: SidebarProps) {
     { to: '/intercept', icon: Shield, label: 'INTERCEPT', end: false },
     { to: '/hunting', icon: Crosshair, label: 'HUNTING', end: false },
     // { to: '/discovery', icon: Radar, label: 'DISCOVERY', end: false },  // Hidden - feature not ready
-    { to: '/agent-chat', icon: MessageSquare, label: 'AGENT CHAT', end: false },
     { to: '/orchestrator', icon: Bot, label: 'ORCHESTRATOR', end: false },
+    { to: '/agent-chat', icon: MessageSquare, label: 'AGENT CHAT', end: false },
     { to: '/toolkit', icon: Wrench, label: 'TOOLKIT', end: false },
     { to: '/settings', icon: Settings, label: 'SETTINGS', end: false },
   ];
