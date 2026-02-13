@@ -8,3 +8,11 @@ This project includes third-party components.
 - Copyright: WireGuard LLC
 - Component location: `node/assets/wintun_amd64.dll`
 - License text: `node/assets/LICENSE-WINTUN-PREBUILT`
+
+2) kqlparser (vendored, v0.0.4)
+--------------------------------
+- Author: Iwan Timmer
+- Source: https://github.com/irtimmer/rust-kql
+- License: Apache-2.0
+- Component location: `service/src/hunting/parser/`
+- Modifications: multiline join whitespace handling, $left/$right join key syntax

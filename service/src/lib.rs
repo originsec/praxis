@@ -6,6 +6,7 @@ mod conversions;
 mod database;
 mod dispatch;
 mod handlers;
+mod hunting;
 mod mcp;
 mod messaging;
 mod agent_chat;

@@ -264,6 +264,13 @@ pub async fn handle_browser_message(
         }
 
         //
+        // Hunting messages.
+        //
+        BrowserMessage::HuntingQuery { query } => {
+            state.rabbitmq.hunting_query(query).await?;
+        }
+
+        //
         // AgentChat messages.
         //
         BrowserMessage::AgentChatStart { goal, yolo_mode } => {
