@@ -317,11 +317,18 @@ pub enum AgentCommand {
     Select { short_name: String },             // Select an agent
     Recon,                                     // Static reconnaissance
     ReconSemantic,                             // Semantic reconnaissance
-    UpdateConfigFile { path, contents },       // Update config file
-    GetSessionContent { session_file },        // Get session history
-    GetConfigContent { config_path },          // Get config contents
+    WriteFile { path, contents },              // Write file contents
+    ReadSessionContent { session_file },       // Get session history
+    ReadFile { path, line_start, line_end },   // Read file (optional line range)
+    GrepFile { path, pattern },                // Search file with regex
 }
 ```
+
+`ReadFile` uses 1-based inclusive line bounds (`line_start` and `line_end`).
+If no bounds are provided, the entire file is returned.
+
+`GrepFile` returns matching lines with 1-based line numbers.
+If no lines match, it returns success with an empty `matches` list.
 
 ### SessionCommand
 

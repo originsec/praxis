@@ -209,9 +209,10 @@ pub enum NodeCommand {
 - `Select` - select an agent for operations
 - `Recon` - perform static reconnaissance
 - `ReconSemantic` - perform semantic reconnaissance
-- `UpdateConfigFile` - modify agent config
-- `GetSessionContent` - retrieve session history
-- `GetConfigContent` - retrieve config file contents
+- `WriteFile` - write file contents
+- `ReadSessionContent` - retrieve session history
+- `ReadFile` - retrieve file contents (optionally by line range)
+- `GrepFile` - search file contents with regex
 
 ### Session Commands
 
