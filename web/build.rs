@@ -3,8 +3,32 @@
 //! Builds the frontend if not already built, or if source files changed.
 
 use std::env;
+use std::fs;
 use std::path::Path;
 use std::process::Command;
+
+fn ensure_fallback_dist(dist_dir: &Path) -> anyhow::Result<()> {
+    if dist_dir.join("index.html").exists() {
+        return Ok(());
+    }
+
+    fs::create_dir_all(dist_dir)?;
+    let fallback = r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Praxis Web</title>
+  </head>
+  <body>
+    <h1>Praxis Web frontend is unavailable</h1>
+    <p>Build the frontend with npm to embed UI assets.</p>
+  </body>
+</html>
+"#;
+    fs::write(dist_dir.join("index.html"), fallback)?;
+    Ok(())
+}
 
 fn main() -> anyhow::Result<()> {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -24,7 +48,8 @@ fn main() -> anyhow::Result<()> {
     // Check if we should skip frontend build (for CI or quick iteration).
     //
     if env::var("PRAXIS_SKIP_FRONTEND").is_ok() {
-        println!("cargo:warning=Skipping frontend build (PRAXIS_SKIP_FRONTEND set)");
+        eprintln!("praxis_web build: skipping frontend build (PRAXIS_SKIP_FRONTEND set)");
+        ensure_fallback_dist(&dist_dir)?;
         return Ok(());
     }
 
@@ -37,7 +62,7 @@ fn main() -> anyhow::Result<()> {
         // In debug mode, skip if dist exists.
         //
         if env::var("PROFILE").unwrap_or_default() != "release" {
-            println!("cargo:warning=Frontend dist exists, skipping build (debug mode)");
+            eprintln!("praxis_web build: frontend dist exists, skipping build (debug mode)");
             return Ok(());
         }
     }
@@ -51,7 +76,7 @@ fn main() -> anyhow::Result<()> {
     // Check if node_modules exists, if not run npm install.
     //
     if !frontend_dir.join("node_modules").exists() {
-        println!("cargo:warning=Installing frontend dependencies...");
+        eprintln!("praxis_web build: installing frontend dependencies...");
         let status = Command::new(npm)
             .current_dir(&frontend_dir)
             .args(["install"])
@@ -60,15 +85,19 @@ fn main() -> anyhow::Result<()> {
         match status {
             Ok(s) if s.success() => {}
             Ok(s) => {
-                println!("cargo:warning=npm install failed with status: {}", s);
+                eprintln!("praxis_web build: npm install failed with status: {}", s);
                 //
                 // Don't fail the build, just warn.
                 //
+                ensure_fallback_dist(&dist_dir)?;
                 return Ok(());
             }
             Err(e) => {
-                println!("cargo:warning=npm not found or failed: {}", e);
-                println!("cargo:warning=Frontend will not be embedded. Install Node.js to build frontend.");
+                eprintln!("praxis_web build: npm not found or failed: {}", e);
+                eprintln!(
+                    "praxis_web build: frontend will not be embedded. Install Node.js to build frontend."
+                );
+                ensure_fallback_dist(&dist_dir)?;
                 return Ok(());
             }
         }
@@ -77,7 +106,7 @@ fn main() -> anyhow::Result<()> {
     //
     // Build frontend.
     //
-    println!("cargo:warning=Building frontend...");
+    eprintln!("praxis_web build: building frontend...");
     let status = Command::new(npm)
         .current_dir(&frontend_dir)
         .args(["run", "build"])
@@ -85,13 +114,15 @@ fn main() -> anyhow::Result<()> {
 
     match status {
         Ok(s) if s.success() => {
-            println!("cargo:warning=Frontend build complete");
+            eprintln!("praxis_web build: frontend build complete");
         }
         Ok(s) => {
-            println!("cargo:warning=Frontend build failed with status: {}", s);
+            eprintln!("praxis_web build: frontend build failed with status: {}", s);
+            ensure_fallback_dist(&dist_dir)?;
         }
         Err(e) => {
-            println!("cargo:warning=Failed to run npm build: {}", e);
+            eprintln!("praxis_web build: failed to run npm build: {}", e);
+            ensure_fallback_dist(&dist_dir)?;
         }
     }
 
