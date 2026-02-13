@@ -10,10 +10,10 @@ use crate::database::Database;
 use crate::state::NodeRegistry;
 
 use super::tables::{
-    VirtualTable, materialize_agent_logs, materialize_node_logs,
-    materialize_recon_logs, materialize_recon_metadata_logs,
-    materialize_recon_session_logs, materialize_recon_tool_logs,
-    resolve_table, table_columns,
+    VirtualTable, materialize_agent_logs, materialize_event_logs,
+    materialize_node_logs, materialize_recon_logs,
+    materialize_recon_metadata_logs, materialize_recon_session_logs,
+    materialize_recon_tool_logs, resolve_table, table_columns,
 };
 
 const MAX_RESULT_ROWS: usize = 10_000;
@@ -39,6 +39,8 @@ struct PushdownHints {
     host: Option<String>,
     url_pattern: Option<String>,
     rule_id: Option<i64>,
+    source: Option<String>,
+    level: Option<String>,
     take_limit: Option<usize>,
 }
 
@@ -77,7 +79,7 @@ pub async fn execute_hunting_query(
 
     let table = resolve_table(&table_name)
         .ok_or_else(|| anyhow!(
-            "Unknown table '{}'. Available tables: TrafficLogs, TrafficMatchLogs, NodeLogs, AgentLogs, ReconLogs, ReconToolLogs, ReconSessionLogs, ReconMetadataLogs",
+            "Unknown table '{}'. Available tables: TrafficLogs, TrafficMatchLogs, NodeLogs, AgentLogs, ReconLogs, ReconToolLogs, ReconSessionLogs, ReconMetadataLogs, EventLogs",
             table_name
         ))?;
 
@@ -343,6 +345,8 @@ fn collect_where_hints(expr: &Expr, columns: &[&str], hints: &mut PushdownHints)
                     "agent_short_name" => hints.agent_short_name = Some(val.clone()),
                     "direction" => hints.direction = Some(val.clone()),
                     "host" => hints.host = Some(val.clone()),
+                    "source" => hints.source = Some(val.clone()),
+                    "level" => hints.level = Some(val.clone()),
                     _ => {}
                 }
             }
@@ -401,6 +405,15 @@ async fn materialize_table(
         VirtualTable::ReconMetadataLogs => materialize_recon_metadata_logs(database).await,
         VirtualTable::TrafficLogs => materialize_traffic_logs(database, hints).await,
         VirtualTable::TrafficMatchLogs => materialize_traffic_match_logs(database, hints).await,
+        VirtualTable::EventLogs => {
+            let limit = hints.take_limit.unwrap_or(MAX_RESULT_ROWS).min(MAX_RESULT_ROWS);
+            materialize_event_logs(
+                database,
+                hints.source.as_deref(),
+                hints.level.as_deref(),
+                limit,
+            ).await
+        }
     }
 }
 

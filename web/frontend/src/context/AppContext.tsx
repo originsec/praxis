@@ -165,19 +165,6 @@ const initialAgentChatState: AgentChatState = {
 };
 
 //
-// Event log panel UI state.
-//
-interface EventLogPanelState {
-  isOpen: boolean;
-  height: number;
-}
-
-const initialEventLogPanelState: EventLogPanelState = {
-  isOpen: false,
-  height: 300,
-};
-
-//
 // State.
 //
 interface AppState {
@@ -197,7 +184,6 @@ interface AppState {
   chains: ChainState;
   discovery: DiscoveryState;
   agentChat: AgentChatState;
-  eventLogPanel: EventLogPanelState;
   luaAgentScripts: LuaAgentScriptInfo[];
   //
   // Agent session messages keyed by session_id.
@@ -231,7 +217,6 @@ function createInitialState(): AppState {
     chains: initialChainState,
     discovery: initialDiscoveryState,
     agentChat: initialAgentChatState,
-    eventLogPanel: initialEventLogPanelState,
     luaAgentScripts: [],
     agentSessionMessages: {},
     recentlyAccessedNodeIds: loadRecentNodes(MAX_RECENT_NODES),
@@ -312,10 +297,6 @@ type Action =
   | { type: 'SET_DISCOVERY_LOADING'; loading: boolean }
   | { type: 'SET_DISCOVERY_ERROR'; error: string | null }
   //
-  // Event log panel actions.
-  //
-  | { type: 'TOGGLE_EVENT_LOG_PANEL' }
-  | { type: 'SET_EVENT_LOG_PANEL_HEIGHT'; height: number }
   //
   // Agent Chat actions.
   //
@@ -817,29 +798,6 @@ function reduceDiscovery(state: AppState, action: Action): AppState | null {
   }
 }
 
-function reduceEventLogPanel(state: AppState, action: Action): AppState | null {
-  switch (action.type) {
-    case 'TOGGLE_EVENT_LOG_PANEL':
-      return {
-        ...state,
-        eventLogPanel: {
-          ...state.eventLogPanel,
-          isOpen: !state.eventLogPanel.isOpen,
-        },
-      };
-    case 'SET_EVENT_LOG_PANEL_HEIGHT':
-      return {
-        ...state,
-        eventLogPanel: {
-          ...state.eventLogPanel,
-          height: action.height,
-        },
-      };
-    default:
-      return null;
-  }
-}
-
 function reduceAgentChat(state: AppState, action: Action): AppState | null {
   switch (action.type) {
     case 'AGENT_CHAT_SESSION_STARTED': {
@@ -1040,7 +998,6 @@ function reducer(state: AppState, action: Action): AppState {
     ?? reduceChains(state, action)
     ?? reduceRecentNodes(state, action)
     ?? reduceDiscovery(state, action)
-    ?? reduceEventLogPanel(state, action)
     ?? reduceAgentChat(state, action)
     ?? state
   );
@@ -1140,11 +1097,6 @@ interface AppContextValue {
   disableAgentDiscovery: (nodeId: string) => void;
   requestDiscoveredEndpoints: (nodeId?: string) => void;
   clearDiscoveryError: () => void;
-  //
-  // Event log panel.
-  //
-  toggleEventLogPanel: () => void;
-  setEventLogPanelHeight: (height: number) => void;
   //
   // Agent Chat.
   //
@@ -1805,17 +1757,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   //
-  // Event log panel functions.
-  //
-  const toggleEventLogPanel = useCallback(() => {
-    dispatch({ type: 'TOGGLE_EVENT_LOG_PANEL' });
-  }, []);
-
-  const setEventLogPanelHeight = useCallback((height: number) => {
-    dispatch({ type: 'SET_EVENT_LOG_PANEL_HEIGHT', height });
-  }, []);
-
-  //
   // Agent Chat functions.
   //
   const agentChatStart = useCallback((goal: string | null, yoloMode: boolean) => {
@@ -1998,11 +1939,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     disableAgentDiscovery,
     requestDiscoveredEndpoints,
     clearDiscoveryError,
-    //
-    // Event log panel.
-    //
-    toggleEventLogPanel,
-    setEventLogPanelHeight,
     //
     // Agent Chat.
     //

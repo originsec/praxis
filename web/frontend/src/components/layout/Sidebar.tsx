@@ -10,24 +10,16 @@ import {
   // Radar,  // Hidden - Discovery feature not ready
   Settings,
   Wrench,
-  ScrollText,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { Tooltip } from '../common/Tooltip';
 
 interface SidebarProps {
   onNavigate?: () => void;
 }
 
 export function Sidebar({ onNavigate }: SidebarProps) {
-  const { state, toggleEventLogPanel } = useApp();
+  const { state } = useApp();
   const nodes = state.systemState?.nodes ?? [];
-  const eventLoggingEnabled = (() => {
-    const value = state.config.application_logs_enabled;
-    if (!value) return false;
-    const normalized = value.toLowerCase();
-    return !(normalized === 'false' || normalized === '0' || normalized === 'no');
-  })();
 
   const navItems = [
     { to: '/', icon: LayoutDashboard, label: 'DASHBOARD', end: true },
@@ -82,29 +74,6 @@ export function Sidebar({ onNavigate }: SidebarProps) {
           </NavLink>
         ))}
       </nav>
-
-      {/*
-      //
-      // Event Log Toggle Button.
-      //
-      */}
-      {eventLoggingEnabled && (
-        <div className="border-t border-subtle p-2">
-          <Tooltip content={state.eventLogPanel.isOpen ? 'Hide Event Log' : 'Show Event Log'} className="block w-full">
-            <button
-              onClick={toggleEventLogPanel}
-              className={`w-full flex items-center gap-3 px-3 py-2 text-xs tracking-wider transition-colors ${
-                state.eventLogPanel.isOpen
-                  ? 'text-title bg-[var(--accent-info)]/20 border-l-2 border-[var(--accent-info)]'
-                  : 'text-muted hover:text-title hover:bg-[var(--highlight)]'
-              }`}
-            >
-              <ScrollText size={14} />
-              EVENT LOG
-            </button>
-          </Tooltip>
-        </div>
-      )}
 
       {/*
       //

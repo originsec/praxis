@@ -54,6 +54,7 @@ const TABLE_SCHEMAS: TableSchema[] = [
   { name: 'ReconToolLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'tool_type', 'server_name', 'tool_name', 'tool_description', 'transport'] },
   { name: 'ReconSessionLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'session_id', 'context_path', 'last_modified', 'message_count'] },
   { name: 'ReconMetadataLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'entry_type', 'value'] },
+  { name: 'EventLogs', columns: ['timestamp', 'source', 'level', 'target', 'message'] },
 ];
 
 const KQL_OPERATORS = [

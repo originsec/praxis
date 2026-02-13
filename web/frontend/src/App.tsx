@@ -13,7 +13,6 @@ import { OrchestratorComingSoonPage } from './pages/OrchestratorComingSoonPage';
 import { AgentChatComingSoonPage } from './pages/AgentChatComingSoonPage';
 import { ToolkitPage } from './pages/ToolkitPage';
 import { OperationsPage } from './pages/OperationsPage';
-import { EventsPage } from './pages/EventsPage';
 import { InterceptPage } from './pages/InterceptPage';
 import { HuntingPage } from './pages/HuntingPage';
 // import { DiscoveryPage } from './pages/DiscoveryPage';  // Hidden - feature not ready
@@ -50,7 +49,6 @@ export default function App() {
               <Route path="/orchestrator" element={flags.orchestrator ? <OrchestratorPage /> : <OrchestratorComingSoonPage />} />
               <Route path="/toolkit" element={<ToolkitPage />} />
               <Route path="/operations" element={<OperationsPage />} />
-              <Route path="/events" element={<EventsPage />} />
               <Route path="/intercept" element={<InterceptPage />} />
               <Route path="/hunting" element={<HuntingPage />} />
               <Route path="/agent-chat" element={flags.agentChat ? <AgentChatPage /> : <AgentChatComingSoonPage />} />
