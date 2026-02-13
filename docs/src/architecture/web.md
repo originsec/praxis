@@ -167,6 +167,45 @@ WebSocket messages trigger state updates:
 
 This means multiple browser tabs see the same state-select an agent in one tab, see it selected in another.
 
+## Orchestrator
+
+The Orchestrator is an AI-powered agent that can autonomously interact with the Praxis network. It connects to the built-in MCP SSE server as a client to access all Praxis tools dynamically.
+
+### Architecture
+
+```diagram
+┌─────────────────────────────────────────────────────┐
+│                   Orchestrator                       │
+│                                                     │
+│   LLM (Claude/GPT/etc)                              │
+│      │                                              │
+│      ▼                                              │
+│   Tool Parser ──▶ Local Tools (wait, report_plan)   │
+│      │                                              │
+│      ▼                                              │
+│   MCP Client ──SSE──▶ MCP Server (Service)          │
+│                       └──▶ All Praxis tools         │
+└─────────────────────────────────────────────────────┘
+```
+
+### How It Works
+
+1. On session start, the Orchestrator connects to the MCP SSE server at `http://127.0.0.1:{port}/sse`
+2. It fetches all available tools via `list_tools` and converts them to the AI tool format
+3. Two local tools (`wait` and `report_plan`) are appended for sleep and plan tracking
+4. The combined tool definitions are included in the system prompt
+5. User prompts enter a tool-use loop: the LLM generates responses, tool calls are parsed and executed (local tools handled in-process, everything else delegated to the MCP server), and results fed back to the LLM
+6. The MCP client connection is dropped when the session ends
+
+### Prerequisites
+
+- **MCP server must be enabled** in Settings > MCP Server
+- **Orchestrator LLM must be configured** in Settings > LLM Providers > Feature Selection
+
+### Tool Execution
+
+Tools are stateless — each MCP tool call includes explicit parameters (e.g., `node` ID) rather than relying on selected-node context. The LLM manages passing the correct IDs based on previous tool results.
+
 ## Build Process
 
 ### Development

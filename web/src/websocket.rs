@@ -208,17 +208,14 @@ pub(super) async fn handle_orchestrator_start(
     }
 
     //
-    // Fetch operation definitions so they're available for Orchestrator tools.
-    //
-    let _ = state.rabbitmq.list_op_defs().await;
-
-    //
-    // Fetch LLM config from Service if not already cached.
+    // Fetch LLM and MCP config from Service if not already cached.
     //
     let _ = state.rabbitmq.get_config(vec![
         "llm_model_definitions".to_string(),
         "llm_feature_orchestrator".to_string(),
         "llm_orchestrator_max_tokens".to_string(),
+        "mcp_server_enabled".to_string(),
+        "mcp_server_port".to_string(),
     ]).await;
     //
     // Wait briefly for config response.
@@ -235,7 +232,6 @@ pub(super) async fn handle_orchestrator_start(
     //
     let session = match orchestrator::start_orchestrator_session(
         Arc::clone(&state.app_state),
-        Arc::clone(&state.rabbitmq),
         event_tx,
     ).await {
         Ok(s) => s,
