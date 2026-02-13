@@ -144,7 +144,7 @@ fn get_tool_definitions() -> Vec<Tool> {
         },
         Tool {
             name: "agent_recon_semantic".to_string(),
-            description: Some("Perform semantic reconnaissance on the selected agent. Returns everything from agent_recon PLUS internal tools (like ReadConfigContent, WriteConfigContent, GrepConfigContent) discovered via semantic analysis. May take longer as it creates a temporary session.".to_string()),
+            description: Some("Perform semantic reconnaissance on the selected agent. Returns everything from agent_recon PLUS internal tools (like ReadFile, WriteFile, GrepFile) discovered via semantic analysis. May take longer as it creates a temporary session.".to_string()),
             parameters: Some(json!({
                 "type": "object",
                 "properties": {},

@@ -126,10 +126,11 @@ export type AgentCommand =
   | 'Recon'
   | 'ReconSemantic'
   | { Select: { short_name: string } }
-  | { WriteConfigContent: { path: string; contents: string } }
-  | { ReadSessionContent: { session_file: string } }
-  | { ReadConfigContent: { path: string; line_start?: number; line_end?: number } }
-  | { GrepConfigContent: { path: string; pattern: string } };
+  | { ReadFile: { file_type: AgentFileType; path: string; line_start?: number; line_end?: number } }
+  | { WriteFile: { file_type: AgentFileType; path: string; contents: string } }
+  | { GrepFile: { file_type: AgentFileType; path: string; pattern: string } };
+
+export type AgentFileType = 'Config' | 'Session';
 
 export type SessionCommand =
   | { Create: { context: SessionContext } }
@@ -202,10 +203,9 @@ export type AgentCommandResult =
   | { ReconComplete: { result: ReconResult } }
   | { Selected: { short_name: string } }
   | { YoloSet: { enabled: boolean } }
-  | { WriteConfigContentResult: { success: boolean; error?: string } }
-  | { SessionContent: { session_file: string; content?: string; error?: string } }
-  | { ReadConfigContentResult: { path: string; content?: string; line_start?: number; line_end?: number; error?: string } }
-  | { GrepConfigContentResult: { path: string; pattern: string; matches: GrepMatch[]; error?: string } };
+  | { WriteFileResult: { file_type: AgentFileType; path: string; success: boolean; error?: string } }
+  | { ReadFileResult: { file_type: AgentFileType; path: string; content?: string; line_start?: number; line_end?: number; error?: string } }
+  | { GrepFileResult: { file_type: AgentFileType; path: string; pattern: string; matches: GrepMatch[]; error?: string } };
 
 export interface GrepMatch {
   line_number: number;

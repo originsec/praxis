@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 
 use super::client::McpClient;
 use super::params::*;
-use crate::{AgentCommandResult, NodeCommand, NodeCommandResult, SessionCommandResult};
+use crate::{AgentCommandResult, AgentFileType, NodeCommand, NodeCommandResult, SessionCommandResult};
 
 const SERVER_NAME: &str = "praxis";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -754,10 +754,10 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         }
     }
 
-    #[tool(description = "Read config content from a file")]
-    async fn read_config_content(
+    #[tool(description = "Read file content")]
+    async fn read_file(
         &self,
-        Parameters(params): Parameters<ReadConfigContentParams>,
+        Parameters(params): Parameters<ReadFileParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         self.get_client()
             .await
@@ -789,7 +789,11 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let response = client
             .send_command(
                 &node.node_id,
-                NodeCommand::Agent(crate::AgentCommand::ReadConfigContent {
+                NodeCommand::Agent(crate::AgentCommand::ReadFile {
+                    file_type: match params.file_type {
+                        McpFileType::Config => AgentFileType::Config,
+                        McpFileType::Session => AgentFileType::Session,
+                    },
                     path: params.path.clone(),
                     line_start: params.line_start,
                     line_end: params.line_end,
@@ -799,7 +803,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
 
         match response.result {
-            NodeCommandResult::Agent(AgentCommandResult::ReadConfigContentResult {
+            NodeCommandResult::Agent(AgentCommandResult::ReadFileResult {
+                file_type,
                 path,
                 content,
                 line_start,
@@ -807,6 +812,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
                 error,
             }) => Ok(CallToolResult::success(vec![Content::text(
                 serde_json::to_string_pretty(&json!({
+                    "file_type": format!("{:?}", file_type),
                     "path": path,
                     "content": content,
                     "line_start": line_start,
@@ -822,10 +828,10 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         }
     }
 
-    #[tool(description = "Write config content to a file")]
-    async fn write_config_content(
+    #[tool(description = "Write file content")]
+    async fn write_file(
         &self,
-        Parameters(params): Parameters<WriteConfigContentParams>,
+        Parameters(params): Parameters<WriteFileParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         self.get_client()
             .await
@@ -857,7 +863,11 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let response = client
             .send_command(
                 &node.node_id,
-                NodeCommand::Agent(crate::AgentCommand::WriteConfigContent {
+                NodeCommand::Agent(crate::AgentCommand::WriteFile {
+                    file_type: match params.file_type {
+                        McpFileType::Config => AgentFileType::Config,
+                        McpFileType::Session => AgentFileType::Session,
+                    },
                     path: params.path.clone(),
                     contents: params.contents.clone(),
                 }),
@@ -866,11 +876,15 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
 
         match response.result {
-            NodeCommandResult::Agent(AgentCommandResult::WriteConfigContentResult {
+            NodeCommandResult::Agent(AgentCommandResult::WriteFileResult {
+                file_type,
+                path,
                 success,
                 error,
             }) => Ok(CallToolResult::success(vec![Content::text(
                 serde_json::to_string_pretty(&json!({
+                    "file_type": format!("{:?}", file_type),
+                    "path": path,
                     "success": success,
                     "error": error
                 }))
@@ -883,10 +897,10 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         }
     }
 
-    #[tool(description = "Search config content in a file with regex")]
-    async fn grep_config_content(
+    #[tool(description = "Search file content with regex")]
+    async fn grep_file(
         &self,
-        Parameters(params): Parameters<GrepConfigContentParams>,
+        Parameters(params): Parameters<GrepFileParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         self.get_client()
             .await
@@ -918,7 +932,11 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let response = client
             .send_command(
                 &node.node_id,
-                NodeCommand::Agent(crate::AgentCommand::GrepConfigContent {
+                NodeCommand::Agent(crate::AgentCommand::GrepFile {
+                    file_type: match params.file_type {
+                        McpFileType::Config => AgentFileType::Config,
+                        McpFileType::Session => AgentFileType::Session,
+                    },
                     path: params.path.clone(),
                     pattern: params.pattern.clone(),
                 }),
@@ -927,78 +945,18 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
 
         match response.result {
-            NodeCommandResult::Agent(AgentCommandResult::GrepConfigContentResult {
+            NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
+                file_type,
                 path,
                 pattern,
                 matches,
                 error,
             }) => Ok(CallToolResult::success(vec![Content::text(
                 serde_json::to_string_pretty(&json!({
+                    "file_type": format!("{:?}", file_type),
                     "path": path,
                     "pattern": pattern,
                     "matches": matches,
-                    "error": error
-                }))
-                .unwrap(),
-            )])),
-            NodeCommandResult::Error { message } => {
-                Err(rmcp::ErrorData::internal_error(message, None))
-            }
-            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
-        }
-    }
-
-    #[tool(description = "Read session content")]
-    async fn read_session_content(
-        &self,
-        Parameters(params): Parameters<ReadSessionContentParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        let state = client
-            .get_state()
-            .await
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
-        let node = state
-            .nodes
-            .iter()
-            .find(|n| {
-                n.node_id
-                    .to_lowercase()
-                    .starts_with(&params.node.to_lowercase())
-            })
-            .ok_or_else(|| {
-                rmcp::ErrorData::internal_error(
-                    format!("No node found matching '{}'", params.node),
-                    None,
-                )
-            })?;
-
-        let response = client
-            .send_command(
-                &node.node_id,
-                NodeCommand::Agent(crate::AgentCommand::ReadSessionContent {
-                    session_file: params.session_file.clone(),
-                }),
-            )
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-
-        match response.result {
-            NodeCommandResult::Agent(AgentCommandResult::SessionContent {
-                session_file,
-                content,
-                error,
-            }) => Ok(CallToolResult::success(vec![Content::text(
-                serde_json::to_string_pretty(&json!({
-                    "session_file": session_file,
-                    "content": content,
                     "error": error
                 }))
                 .unwrap(),

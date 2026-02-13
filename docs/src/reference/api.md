@@ -317,18 +317,21 @@ pub enum AgentCommand {
     Select { short_name: String },             // Select an agent
     Recon,                                     // Static reconnaissance
     ReconSemantic,                             // Semantic reconnaissance
-    WriteConfigContent { path, contents },              // Write file contents
-    ReadSessionContent { session_file },       // Get session history
-    ReadConfigContent { path, line_start, line_end },   // Read file (optional line range)
-    GrepConfigContent { path, pattern },                // Search file with regex
+    ReadFile { file_type, path, line_start, line_end }, // Read file content
+    WriteFile { file_type, path, contents },            // Write file content
+    GrepFile { file_type, path, pattern },              // Search file with regex
 }
 ```
 
-`ReadConfigContent` uses 1-based inclusive line bounds (`line_start` and `line_end`).
+`file_type` is either `Config` or `Session`.
+
+`ReadFile` uses 1-based inclusive line bounds (`line_start` and `line_end`).
 If no bounds are provided, the entire file is returned.
 
-`GrepConfigContent` returns matching lines with 1-based line numbers.
+`GrepFile` returns matching lines with 1-based line numbers.
 If no lines match, it returns success with an empty `matches` list.
+
+`WriteFile` is only allowed for `file_type=Config`. Session writes are rejected.
 
 ### SessionCommand
 

@@ -262,8 +262,8 @@ pub struct ReconTools {
     /// Skills (slash commands like /commit, /review)
     #[serde(default)]
     pub skills: Vec<AgentTool>,
-    /// Internal tools (like ReadConfigContent, WriteConfigContent,
-    /// GrepConfigContent) - only via ReconSemantic
+    /// Internal tools (like ReadFile, WriteFile, GrepFile) - only via
+    /// ReconSemantic
     #[serde(default)]
     pub internal_tools: Vec<AgentTool>,
 }
@@ -459,18 +459,31 @@ pub enum AgentCommand {
     /// Perform semantic reconnaissance on the selected agent
     /// Returns everything from Recon plus internal tools (via semantic analysis)
     ReconSemantic,
-    /// Write config content to a file
-    WriteConfigContent { path: String, contents: String },
-    /// Read the content of a session file (for viewing session history)
-    ReadSessionContent { session_file: String },
-    /// Read config content from a file, optionally within a line range (1-based inclusive)
-    ReadConfigContent {
+    /// Read file content, optionally within a line range (1-based inclusive)
+    ReadFile {
+        file_type: AgentFileType,
         path: String,
         line_start: Option<usize>,
         line_end: Option<usize>,
     },
-    /// Search a file using a regex pattern and return matching lines
-    GrepConfigContent { path: String, pattern: String },
+    /// Write file content
+    WriteFile {
+        file_type: AgentFileType,
+        path: String,
+        contents: String,
+    },
+    /// Search file content using a regex pattern and return matching lines
+    GrepFile {
+        file_type: AgentFileType,
+        path: String,
+        pattern: String,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum AgentFileType {
+    Config,
+    Session,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -633,19 +646,16 @@ pub enum AgentCommandResult {
     ReconComplete {
         result: ReconResult,
     },
-    /// Config content write result
-    WriteConfigContentResult {
+    /// File content write result
+    WriteFileResult {
+        file_type: AgentFileType,
+        path: String,
         success: bool,
         error: Option<String>,
     },
-    /// Session content response
-    SessionContent {
-        session_file: String,
-        content: Option<String>,
-        error: Option<String>,
-    },
-    /// Config content response
-    ReadConfigContentResult {
+    /// File content response
+    ReadFileResult {
+        file_type: AgentFileType,
         path: String,
         content: Option<String>,
         line_start: Option<usize>,
@@ -653,7 +663,8 @@ pub enum AgentCommandResult {
         error: Option<String>,
     },
     /// File grep response
-    GrepConfigContentResult {
+    GrepFileResult {
+        file_type: AgentFileType,
         path: String,
         pattern: String,
         matches: Vec<GrepMatch>,

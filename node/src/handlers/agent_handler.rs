@@ -1,7 +1,6 @@
 use crate::agent_connectors::{Agent, AgentRegistry};
-use common::{AgentCommand, AgentCommandResult, GrepMatch, NodeCommandResult, ReconResult};
+use common::{AgentCommand, AgentCommandResult, AgentFileType, GrepMatch, NodeCommandResult, ReconResult};
 use regex::Regex;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
@@ -111,6 +110,40 @@ fn read_file_range(
     }
 
     Ok(selected.join("\n"))
+}
+
+fn select_line_range(content: &str, line_start: Option<usize>, line_end: Option<usize>) -> String {
+    if line_start.is_none() && line_end.is_none() {
+        return content.to_string();
+    }
+
+    let start = line_start.unwrap_or(1);
+    let end = line_end.unwrap_or(usize::MAX);
+    let mut selected = Vec::new();
+    for (idx, line) in content.lines().enumerate() {
+        let line_number = idx + 1;
+        if line_number < start {
+            continue;
+        }
+        if line_number > end {
+            break;
+        }
+        selected.push(line);
+    }
+    selected.join("\n")
+}
+
+fn grep_content(content: &str, re: &Regex) -> Vec<GrepMatch> {
+    let mut matches = Vec::new();
+    for (idx, line) in content.lines().enumerate() {
+        if re.is_match(line) {
+            matches.push(GrepMatch {
+                line_number: idx + 1,
+                line_content: line.to_string(),
+            });
+        }
+    }
+    matches
 }
 
 pub async fn handle_agent_command(
@@ -267,107 +300,15 @@ pub async fn handle_agent_command(
                 },
             }
         }
-        AgentCommand::WriteConfigContent { path, contents } => {
-            //
-            // Validate path is within a valid user home directory for security.
-            //
-            let target_path = Path::new(&path);
-            let canonical_path = match target_path.canonicalize() {
-                Ok(p) => p,
-                Err(_) => {
-                    //
-                    // File might not exist yet, check parent.
-                    //
-                    match target_path.parent().and_then(|p| p.canonicalize().ok()) {
-                        Some(parent) if is_path_in_valid_home(&parent) => target_path.to_path_buf(),
-                        _ => {
-                            return NodeCommandResult::Agent(AgentCommandResult::WriteConfigContentResult {
-                                success: false,
-                                error: Some("Invalid path or path outside home directory".to_string()),
-                            });
-                        }
-                    }
-                }
-            };
-
-            if !is_path_in_valid_home(&canonical_path) {
-                return NodeCommandResult::Agent(AgentCommandResult::WriteConfigContentResult {
-                    success: false,
-                    error: Some("Path must be within a valid user home directory".to_string()),
-                });
-            }
-
-            //
-            // Write the file.
-            //
-            match std::fs::write(&path, &contents) {
-                Ok(_) => {
-                    common::log_info!("Updated config file: {}", path);
-                    NodeCommandResult::Agent(AgentCommandResult::WriteConfigContentResult {
-                        success: true,
-                        error: None,
-                    })
-                }
-                Err(e) => {
-                    common::log_warn!("Failed to write config file {}: {}", path, e);
-                    NodeCommandResult::Agent(AgentCommandResult::WriteConfigContentResult {
-                        success: false,
-                        error: Some(format!("Failed to write file: {}", e)),
-                    })
-                }
-            }
-        }
-        AgentCommand::ReadSessionContent { session_file } => {
-            //
-            // Delegate to the selected agent's read_session_content, which
-            // handles virtual paths (e.g. SQLite-backed sessions) as well as
-            // plain files. Path validation is the agent's responsibility for
-            // virtual paths; for real files the default impl reads directly.
-            //
-
-            let locked = selected_agent.lock().unwrap();
-            let agent = locked.as_ref();
-
-            let content = agent.and_then(|a| a.read_session_content(&session_file));
-
-            match content {
-                Some(content) => {
-                    let (content, truncated) = truncate_content(content);
-                    if truncated {
-                        common::log_warn!(
-                            "Session file {} truncated to {} bytes",
-                            session_file,
-                            content.len()
-                        );
-                    }
-                    common::log_info!("Read session file: {}", session_file);
-                    NodeCommandResult::Agent(AgentCommandResult::SessionContent {
-                        session_file,
-                        content: Some(content),
-                        error: if truncated {
-                            Some("Content truncated due to size limit".to_string())
-                        } else {
-                            None
-                        },
-                    })
-                }
-                None => {
-                    common::log_warn!("Failed to read session file: {}", session_file);
-                    NodeCommandResult::Agent(AgentCommandResult::SessionContent {
-                        session_file,
-                        content: None,
-                        error: Some("Failed to read session content".to_string()),
-                    })
-                }
-            }
-        }
-        AgentCommand::ReadConfigContent {
+        AgentCommand::ReadFile {
+            file_type,
             path,
             line_start,
             line_end,
         } => {
             if let Err(error) = validate_line_range(line_start, line_end) {
-                return NodeCommandResult::Agent(AgentCommandResult::ReadConfigContentResult {
+                return NodeCommandResult::Agent(AgentCommandResult::ReadFileResult {
+                    file_type,
                     path,
                     content: None,
                     line_start,
@@ -376,17 +317,31 @@ pub async fn handle_agent_command(
                 });
             }
 
-            if let Err(error) = canonicalize_and_validate_path(&path) {
-                return NodeCommandResult::Agent(AgentCommandResult::ReadConfigContentResult {
-                    path,
-                    content: None,
-                    line_start,
-                    line_end,
-                    error: Some(error),
-                });
-            }
+            let content_result = match file_type {
+                AgentFileType::Config => {
+                    if let Err(error) = canonicalize_and_validate_path(&path) {
+                        return NodeCommandResult::Agent(AgentCommandResult::ReadFileResult {
+                            file_type,
+                            path,
+                            content: None,
+                            line_start,
+                            line_end,
+                            error: Some(error),
+                        });
+                    }
+                    read_file_range(&path, line_start, line_end).map_err(|e| e.to_string())
+                }
+                AgentFileType::Session => {
+                    let locked = selected_agent.lock().unwrap();
+                    let agent = locked.as_ref();
+                    match agent.and_then(|a| a.read_session_content(&path)) {
+                        Some(content) => Ok(select_line_range(&content, line_start, line_end)),
+                        None => Err("Failed to read session content".to_string()),
+                    }
+                }
+            };
 
-            match read_file_range(&path, line_start, line_end) {
+            match content_result {
                 Ok(content) => {
                     let (content, truncated) = truncate_content(content);
                     if truncated {
@@ -398,7 +353,8 @@ pub async fn handle_agent_command(
                         line_start,
                         line_end
                     );
-                    NodeCommandResult::Agent(AgentCommandResult::ReadConfigContentResult {
+                    NodeCommandResult::Agent(AgentCommandResult::ReadFileResult {
+                        file_type,
                         path,
                         content: Some(content),
                         line_start,
@@ -412,30 +368,87 @@ pub async fn handle_agent_command(
                 }
                 Err(e) => {
                     common::log_warn!("Failed to read file {}: {}", path, e);
-                    NodeCommandResult::Agent(AgentCommandResult::ReadConfigContentResult {
+                    NodeCommandResult::Agent(AgentCommandResult::ReadFileResult {
+                        file_type,
                         path,
                         content: None,
                         line_start,
                         line_end,
-                        error: Some(format!("Failed to read file: {}", e)),
+                        error: Some(e),
                     })
                 }
             }
         }
-        AgentCommand::GrepConfigContent { path, pattern } => {
-            if let Err(error) = canonicalize_and_validate_path(&path) {
-                return NodeCommandResult::Agent(AgentCommandResult::GrepConfigContentResult {
+        AgentCommand::WriteFile {
+            file_type,
+            path,
+            contents,
+        } => {
+            if matches!(file_type, AgentFileType::Session) {
+                return NodeCommandResult::Agent(AgentCommandResult::WriteFileResult {
+                    file_type,
                     path,
-                    pattern,
-                    matches: Vec::new(),
-                    error: Some(error),
+                    success: false,
+                    error: Some("Write is not allowed for session content".to_string()),
                 });
             }
 
+            let target_path = Path::new(&path);
+            let canonical_path = match target_path.canonicalize() {
+                Ok(p) => p,
+                Err(_) => match target_path.parent().and_then(|p| p.canonicalize().ok()) {
+                    Some(parent) if is_path_in_valid_home(&parent) => target_path.to_path_buf(),
+                    _ => {
+                        return NodeCommandResult::Agent(AgentCommandResult::WriteFileResult {
+                            file_type,
+                            path,
+                            success: false,
+                            error: Some("Invalid path or path outside home directory".to_string()),
+                        });
+                    }
+                },
+            };
+
+            if !is_path_in_valid_home(&canonical_path) {
+                return NodeCommandResult::Agent(AgentCommandResult::WriteFileResult {
+                    file_type,
+                    path,
+                    success: false,
+                    error: Some("Path must be within a valid user home directory".to_string()),
+                });
+            }
+
+            match std::fs::write(&path, &contents) {
+                Ok(_) => {
+                    common::log_info!("Updated config file: {}", path);
+                    NodeCommandResult::Agent(AgentCommandResult::WriteFileResult {
+                        file_type,
+                        path,
+                        success: true,
+                        error: None,
+                    })
+                }
+                Err(e) => {
+                    common::log_warn!("Failed to write config file {}: {}", path, e);
+                    NodeCommandResult::Agent(AgentCommandResult::WriteFileResult {
+                        file_type,
+                        path,
+                        success: false,
+                        error: Some(format!("Failed to write file: {}", e)),
+                    })
+                }
+            }
+        }
+        AgentCommand::GrepFile {
+            file_type,
+            path,
+            pattern,
+        } => {
             let re = match Regex::new(&pattern) {
                 Ok(re) => re,
                 Err(e) => {
-                    return NodeCommandResult::Agent(AgentCommandResult::GrepConfigContentResult {
+                    return NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
+                        file_type,
                         path,
                         pattern,
                         matches: Vec::new(),
@@ -444,38 +457,43 @@ pub async fn handle_agent_command(
                 }
             };
 
-            let file = match std::fs::File::open(&path) {
-                Ok(file) => file,
-                Err(e) => {
-                    return NodeCommandResult::Agent(AgentCommandResult::GrepConfigContentResult {
+            let content_result = match file_type {
+                AgentFileType::Config => {
+                    if let Err(error) = canonicalize_and_validate_path(&path) {
+                        return NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
+                            file_type,
+                            path,
+                            pattern,
+                            matches: Vec::new(),
+                            error: Some(error),
+                        });
+                    }
+                    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))
+                }
+                AgentFileType::Session => {
+                    let locked = selected_agent.lock().unwrap();
+                    let agent = locked.as_ref();
+                    match agent.and_then(|a| a.read_session_content(&path)) {
+                        Some(content) => Ok(content),
+                        None => Err("Failed to read session content".to_string()),
+                    }
+                }
+            };
+
+            let content = match content_result {
+                Ok(content) => content,
+                Err(error) => {
+                    return NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
+                        file_type,
                         path,
                         pattern,
                         matches: Vec::new(),
-                        error: Some(format!("Failed to read file: {}", e)),
+                        error: Some(error),
                     });
                 }
             };
 
-            let mut matches = Vec::new();
-            for (idx, line) in BufReader::new(file).lines().enumerate() {
-                let line_content = match line {
-                    Ok(line_content) => line_content,
-                    Err(e) => {
-                        return NodeCommandResult::Agent(AgentCommandResult::GrepConfigContentResult {
-                            path,
-                            pattern,
-                            matches: Vec::new(),
-                            error: Some(format!("Failed to read file: {}", e)),
-                        });
-                    }
-                };
-                if re.is_match(&line_content) {
-                    matches.push(GrepMatch {
-                        line_number: idx + 1,
-                        line_content,
-                    });
-                }
-            }
+            let matches = grep_content(&content, &re);
 
             common::log_info!(
                 "Grep file: {} pattern='{}' matches={}",
@@ -483,7 +501,8 @@ pub async fn handle_agent_command(
                 pattern,
                 matches.len()
             );
-            NodeCommandResult::Agent(AgentCommandResult::GrepConfigContentResult {
+            NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
+                file_type,
                 path,
                 pattern,
                 matches,

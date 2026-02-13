@@ -36,31 +36,34 @@ pub struct SessionPromptParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct ReadConfigContentParams {
+pub enum McpFileType {
+    Config,
+    Session,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ReadFileParams {
     pub node: String,
+    pub file_type: McpFileType,
     pub path: String,
     pub line_start: Option<usize>,
     pub line_end: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct WriteConfigContentParams {
+pub struct WriteFileParams {
     pub node: String,
+    pub file_type: McpFileType,
     pub path: String,
     pub contents: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct GrepConfigContentParams {
+pub struct GrepFileParams {
     pub node: String,
+    pub file_type: McpFileType,
     pub path: String,
     pub pattern: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct ReadSessionContentParams {
-    pub node: String,
-    pub session_file: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

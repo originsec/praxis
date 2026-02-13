@@ -66,8 +66,8 @@ pub fn build_servers_and_tools_prompt(text: &str) -> String {
 //
 
 /// JSON schema for internal/built-in tools discovery via semantic parser.
-/// This schema extracts agent internal tools (like ReadConfigContent,
-/// WriteConfigContent, GrepConfigContent, etc).
+/// This schema extracts agent internal tools (like ReadFile, WriteFile,
+/// GrepFile, etc).
 pub const INTERNAL_TOOLS_SCHEMA: &str = r#"{
     "type": "object",
     "properties": {

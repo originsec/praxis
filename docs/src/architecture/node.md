@@ -209,10 +209,9 @@ pub enum NodeCommand {
 - `Select` - select an agent for operations
 - `Recon` - perform static reconnaissance
 - `ReconSemantic` - perform semantic reconnaissance
-- `WriteConfigContent` - write file contents
-- `ReadSessionContent` - retrieve session history
-- `ReadConfigContent` - retrieve file contents (optionally by line range)
-- `GrepConfigContent` - search file contents with regex
+- `ReadFile` - read file contents for config or session (optional line range)
+- `WriteFile` - write config file contents (session writes are not allowed)
+- `GrepFile` - search config/session file contents with regex
 
 ### Session Commands
 
