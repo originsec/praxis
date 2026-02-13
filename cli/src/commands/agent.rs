@@ -45,6 +45,60 @@ pub enum AgentCommand {
         #[arg(short, long)]
         node: String,
     },
+
+    /// Read config content from a file
+    ReadConfigContent {
+        /// Node ID prefix
+        #[arg(short, long)]
+        node: String,
+
+        /// Path to config file
+        path: String,
+
+        /// Optional start line (1-based, inclusive)
+        #[arg(long)]
+        line_start: Option<usize>,
+
+        /// Optional end line (1-based, inclusive)
+        #[arg(long)]
+        line_end: Option<usize>,
+    },
+
+    /// Write config content to a file
+    WriteConfigContent {
+        /// Node ID prefix
+        #[arg(short, long)]
+        node: String,
+
+        /// Path to config file
+        path: String,
+
+        /// Content to write
+        contents: String,
+    },
+
+    /// Grep config content in a file with regex
+    GrepConfigContent {
+        /// Node ID prefix
+        #[arg(short, long)]
+        node: String,
+
+        /// Path to config file
+        path: String,
+
+        /// Regex pattern
+        pattern: String,
+    },
+
+    /// Read session content
+    ReadSessionContent {
+        /// Node ID prefix
+        #[arg(short, long)]
+        node: String,
+
+        /// Session file path/identifier
+        session_file: String,
+    },
 }
 
 pub async fn execute(client: &mut CliClient, command: AgentCommand, output: &OutputFormat) -> Result<()> {
@@ -54,6 +108,18 @@ pub async fn execute(client: &mut CliClient, command: AgentCommand, output: &Out
         AgentCommand::Update { node } => update_agent(client, &node, output).await,
         AgentCommand::Recon { node } => recon_agent(client, &node, false, output).await,
         AgentCommand::ReconSemantic { node } => recon_agent(client, &node, true, output).await,
+        AgentCommand::ReadConfigContent { node, path, line_start, line_end } => {
+            read_config_content(client, &node, &path, line_start, line_end, output).await
+        }
+        AgentCommand::WriteConfigContent { node, path, contents } => {
+            write_config_content(client, &node, &path, &contents, output).await
+        }
+        AgentCommand::GrepConfigContent { node, path, pattern } => {
+            grep_config_content(client, &node, &path, &pattern, output).await
+        }
+        AgentCommand::ReadSessionContent { node, session_file } => {
+            read_session_content(client, &node, &session_file, output).await
+        }
     }
 }
 
@@ -209,6 +275,247 @@ async fn recon_agent(client: &CliClient, node_prefix: &str, semantic: bool, outp
 
                     println!();
                     print_success(&format!("{} complete", recon_type));
+                }
+            }
+            Ok(())
+        }
+        NodeCommandResult::Error { message } => {
+            match output {
+                OutputFormat::Json => print_json(&json!({"status": "error", "message": message})),
+                OutputFormat::Text => print_error(&message),
+            }
+            Err(anyhow!("{}", message))
+        }
+        _ => Err(anyhow!("Unexpected response")),
+    }
+}
+
+async fn read_config_content(
+    client: &CliClient,
+    node_prefix: &str,
+    path: &str,
+    line_start: Option<usize>,
+    line_end: Option<usize>,
+    output: &OutputFormat,
+) -> Result<()> {
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let node_id = find_node_id(&state, node_prefix)
+        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+
+    let cmd = NodeCmd::Agent(NodeAgentCommand::ReadConfigContent {
+        path: path.to_string(),
+        line_start,
+        line_end,
+    });
+    let response = client.send_command(&node_id, cmd).await?;
+
+    match response.result {
+        NodeCommandResult::Agent(AgentCommandResult::ReadConfigContentResult {
+            path,
+            content,
+            line_start,
+            line_end,
+            error,
+        }) => {
+            match output {
+                OutputFormat::Json => {
+                    print_json(&json!({
+                        "path": path,
+                        "content": content,
+                        "line_start": line_start,
+                        "line_end": line_end,
+                        "error": error
+                    }));
+                }
+                OutputFormat::Text => {
+                    if let Some(error) = error {
+                        print_error(&error);
+                        return Err(anyhow!(error));
+                    }
+                    print_header("Config Content");
+                    println!();
+                    println!("  Path: {}", path);
+                    if line_start.is_some() || line_end.is_some() {
+                        println!("  Lines: {:?}..{:?}", line_start, line_end);
+                    }
+                    println!();
+                    if let Some(content) = content {
+                        println!("{}", content);
+                    }
+                    println!();
+                    print_success("Read complete");
+                }
+            }
+            Ok(())
+        }
+        NodeCommandResult::Error { message } => {
+            match output {
+                OutputFormat::Json => print_json(&json!({"status": "error", "message": message})),
+                OutputFormat::Text => print_error(&message),
+            }
+            Err(anyhow!("{}", message))
+        }
+        _ => Err(anyhow!("Unexpected response")),
+    }
+}
+
+async fn write_config_content(
+    client: &CliClient,
+    node_prefix: &str,
+    path: &str,
+    contents: &str,
+    output: &OutputFormat,
+) -> Result<()> {
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let node_id = find_node_id(&state, node_prefix)
+        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+
+    let cmd = NodeCmd::Agent(NodeAgentCommand::WriteConfigContent {
+        path: path.to_string(),
+        contents: contents.to_string(),
+    });
+    let response = client.send_command(&node_id, cmd).await?;
+
+    match response.result {
+        NodeCommandResult::Agent(AgentCommandResult::WriteConfigContentResult { success, error }) => {
+            match output {
+                OutputFormat::Json => {
+                    print_json(&json!({
+                        "success": success,
+                        "error": error
+                    }));
+                }
+                OutputFormat::Text => {
+                    if success {
+                        print_success("Write complete");
+                    } else {
+                        let msg = error.unwrap_or_else(|| "Write failed".to_string());
+                        print_error(&msg);
+                        return Err(anyhow!(msg));
+                    }
+                }
+            }
+            Ok(())
+        }
+        NodeCommandResult::Error { message } => {
+            match output {
+                OutputFormat::Json => print_json(&json!({"status": "error", "message": message})),
+                OutputFormat::Text => print_error(&message),
+            }
+            Err(anyhow!("{}", message))
+        }
+        _ => Err(anyhow!("Unexpected response")),
+    }
+}
+
+async fn grep_config_content(
+    client: &CliClient,
+    node_prefix: &str,
+    path: &str,
+    pattern: &str,
+    output: &OutputFormat,
+) -> Result<()> {
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let node_id = find_node_id(&state, node_prefix)
+        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+
+    let cmd = NodeCmd::Agent(NodeAgentCommand::GrepConfigContent {
+        path: path.to_string(),
+        pattern: pattern.to_string(),
+    });
+    let response = client.send_command(&node_id, cmd).await?;
+
+    match response.result {
+        NodeCommandResult::Agent(AgentCommandResult::GrepConfigContentResult {
+            path,
+            pattern,
+            matches,
+            error,
+        }) => {
+            match output {
+                OutputFormat::Json => {
+                    print_json(&json!({
+                        "path": path,
+                        "pattern": pattern,
+                        "matches": matches,
+                        "match_count": matches.len(),
+                        "error": error
+                    }));
+                }
+                OutputFormat::Text => {
+                    if let Some(error) = error {
+                        print_error(&error);
+                        return Err(anyhow!(error));
+                    }
+                    print_header("Config Grep Results");
+                    println!();
+                    println!("  Path: {}", path);
+                    println!("  Pattern: {}", pattern);
+                    println!("  Matches: {}", matches.len());
+                    println!();
+                    for m in matches {
+                        println!("  {:>6}: {}", m.line_number, m.line_content);
+                    }
+                    println!();
+                    print_success("Grep complete");
+                }
+            }
+            Ok(())
+        }
+        NodeCommandResult::Error { message } => {
+            match output {
+                OutputFormat::Json => print_json(&json!({"status": "error", "message": message})),
+                OutputFormat::Text => print_error(&message),
+            }
+            Err(anyhow!("{}", message))
+        }
+        _ => Err(anyhow!("Unexpected response")),
+    }
+}
+
+async fn read_session_content(
+    client: &CliClient,
+    node_prefix: &str,
+    session_file: &str,
+    output: &OutputFormat,
+) -> Result<()> {
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let node_id = find_node_id(&state, node_prefix)
+        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+
+    let cmd = NodeCmd::Agent(NodeAgentCommand::ReadSessionContent {
+        session_file: session_file.to_string(),
+    });
+    let response = client.send_command(&node_id, cmd).await?;
+
+    match response.result {
+        NodeCommandResult::Agent(AgentCommandResult::SessionContent {
+            session_file,
+            content,
+            error,
+        }) => {
+            match output {
+                OutputFormat::Json => {
+                    print_json(&json!({
+                        "session_file": session_file,
+                        "content": content,
+                        "error": error
+                    }));
+                }
+                OutputFormat::Text => {
+                    if let Some(error) = error {
+                        print_error(&error);
+                        return Err(anyhow!(error));
+                    }
+                    print_header("Session Content");
+                    println!();
+                    println!("  Session File: {}", session_file);
+                    println!();
+                    if let Some(content) = content {
+                        println!("{}", content);
+                    }
+                    println!();
+                    print_success("Read complete");
                 }
             }
             Ok(())
