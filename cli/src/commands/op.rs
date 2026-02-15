@@ -1,6 +1,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use clap::Subcommand;
+use colored::Colorize;
 use common::mcp::ops::{self, OpCancelResult, OpRunResult, OpInfoResult};
 use common::SemanticOpStatus;
 use serde_json::json;
@@ -225,12 +226,12 @@ async fn get_info(client: &CliClient, short_id: &str, output: &OutputFormat) -> 
     match result {
         Ok(OpInfoResult::Operation(op)) => show_op_info(&op, output),
         Ok(OpInfoResult::Chain(exec)) => show_chain_info(&exec, output),
-        Err(e) => {
-            match output {
-                OutputFormat::Json => print_json(&json!({"status": "error", "message": format!("Not found: {}", short_id)})),
-                OutputFormat::Text => print_error(&format!("No operation or chain found matching '{}'", short_id)),
+        Err(_) => {
+            let msg = format!("No operation or chain found matching '{}'", short_id);
+            if matches!(output, OutputFormat::Json) {
+                print_json(&json!({"status": "error", "message": msg}));
             }
-            Err(e)
+            Err(anyhow::anyhow!(msg))
         }
     }
 }
@@ -263,16 +264,18 @@ fn show_op_info(op: &common::SemanticOpUpdate, output: &OutputFormat) -> Result<
             print_header(&format!("Operation {} - {}", format_short_id(&op.operation_id), op.spec.name));
             println!();
             println!("  Status: {}", format_status(status_str));
-            println!("  Node: {}", format_short_id(&op.node_id));
+            println!("  Node:   {}", format_short_id(&op.node_id));
             if let Some(pos) = op.queue_position {
-                println!("  Queue Position: {}", pos);
+                println!("  Queue:  {}", pos);
             }
             if let Some(ref result) = op.result {
-                println!("  Result: {}", result);
+                println!();
+                println!("  {}", "Result:".bold());
+                print_markdown(result);
             }
             if let Some(ref out) = op.output {
                 println!();
-                println!("  Output:");
+                println!("  {}", "Output:".bold());
                 print_markdown(out);
             }
         }
@@ -310,19 +313,20 @@ fn show_chain_info(exec: &common::ChainExecutionUpdate, output: &OutputFormat) -
         OutputFormat::Text => {
             print_header(&format!("Chain Execution {} - {}", format_short_id(&exec.execution_id), exec.chain_name));
             println!();
-            println!("  Status: {}", format_status(&status_str));
-            println!("  Node: {}", format_short_id(&exec.node_id));
-            println!("  Agent: {}", exec.agent_short_name);
+            println!("  Status:   {}", format_status(&status_str));
+            println!("  Node:     {}", format_short_id(&exec.node_id));
+            println!("  Agent:    {}", exec.agent_short_name);
             println!("  Elements: {}", exec.elements.len());
-            println!("  Started: {}", exec.started_at.format("%Y-%m-%d %H:%M:%S"));
+            println!("  Started:  {}", exec.started_at.format("%Y-%m-%d %H:%M:%S"));
             if let Some(ended) = exec.ended_at {
                 let ended: DateTime<Utc> = ended;
-                println!("  Ended: {}", ended.format("%Y-%m-%d %H:%M:%S"));
+                let duration = ended - exec.started_at;
+                println!("  Ended:    {} ({}s)", ended.format("%Y-%m-%d %H:%M:%S"), duration.num_seconds());
             }
 
             if !exec.elements.is_empty() {
                 println!();
-                println!("  Element Status:");
+                println!("  {}:", "Elements".bold());
                 for (id, elem) in &exec.elements {
                     let elem_status = match &elem.status {
                         common::ElementExecutionStatus::Pending => "Pending".to_string(),
@@ -358,12 +362,12 @@ async fn cancel(client: &CliClient, short_id: &str, output: &OutputFormat) -> Re
             }
             Ok(())
         }
-        Err(e) => {
-            match output {
-                OutputFormat::Json => print_json(&json!({"status": "error", "message": format!("Not found: {}", short_id)})),
-                OutputFormat::Text => print_error(&format!("No operation or chain found matching '{}'", short_id)),
+        Err(_) => {
+            let msg = format!("No operation or chain found matching '{}'", short_id);
+            if matches!(output, OutputFormat::Json) {
+                print_json(&json!({"status": "error", "message": msg}));
             }
-            Err(e)
+            Err(anyhow::anyhow!(msg))
         }
     }
 }

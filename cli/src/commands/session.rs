@@ -4,7 +4,7 @@ use common::{NodeCommand as NodeCmd, NodeCommandResult, SessionCommand as NodeSe
 use serde_json::json;
 
 use crate::client::CliClient;
-use crate::output::{format_short_id, print_error, print_json, print_success, OutputFormat};
+use crate::output::{format_short_id, print_json, print_success, OutputFormat};
 
 #[derive(Subcommand)]
 pub enum SessionCommand {
@@ -91,9 +91,8 @@ async fn create_session(client: &CliClient, node_prefix: &str, yolo: bool, proje
             Ok(())
         }
         NodeCommandResult::Error { message } => {
-            match output {
-                OutputFormat::Json => print_json(&json!({"status": "error", "message": message})),
-                OutputFormat::Text => print_error(&message),
+            if matches!(output, OutputFormat::Json) {
+                print_json(&json!({"status": "error", "message": message}));
             }
             Err(anyhow!("{}", message))
         }
@@ -111,7 +110,25 @@ async fn send_prompt(client: &CliClient, node_prefix: &str, text: &str, output: 
         transaction_id: transaction_id.clone(),
     });
 
-    let response = client.send_command(&node_id, cmd).await?;
+    //
+    // Race send_command against Ctrl+C. On interrupt, send CancelTransaction
+    // to abort the running prompt on the node.
+    //
+
+    let response = tokio::select! {
+        result = client.send_command(&node_id, cmd) => result?,
+        _ = tokio::signal::ctrl_c() => {
+            let cancel_cmd = NodeCmd::Session(NodeSessionCommand::CancelTransaction {
+                transaction_id: transaction_id.clone(),
+                force: true,
+            });
+            let _ = client.send_command(&node_id, cancel_cmd).await;
+            if matches!(output, OutputFormat::Json) {
+                print_json(&json!({"status": "cancelled", "message": "Prompt cancelled"}));
+            }
+            return Err(anyhow!("Prompt cancelled"));
+        }
+    };
 
     match response.result {
         NodeCommandResult::Session(SessionCommandResult::PromptResponse { response, .. }) => {
@@ -129,10 +146,15 @@ async fn send_prompt(client: &CliClient, node_prefix: &str, text: &str, output: 
             }
             Ok(())
         }
+        NodeCommandResult::Session(SessionCommandResult::TransactionCancelled { .. }) => {
+            if matches!(output, OutputFormat::Json) {
+                print_json(&json!({"status": "cancelled", "message": "Prompt cancelled"}));
+            }
+            Err(anyhow!("Prompt cancelled"))
+        }
         NodeCommandResult::Error { message } => {
-            match output {
-                OutputFormat::Json => print_json(&json!({"status": "error", "message": message})),
-                OutputFormat::Text => print_error(&message),
+            if matches!(output, OutputFormat::Json) {
+                print_json(&json!({"status": "error", "message": message}));
             }
             Err(anyhow!("{}", message))
         }
@@ -156,9 +178,8 @@ async fn close_session(client: &CliClient, node_prefix: &str, output: &OutputFor
             Ok(())
         }
         NodeCommandResult::Error { message } => {
-            match output {
-                OutputFormat::Json => print_json(&json!({"status": "error", "message": message})),
-                OutputFormat::Text => print_error(&message),
+            if matches!(output, OutputFormat::Json) {
+                print_json(&json!({"status": "error", "message": message}));
             }
             Err(anyhow!("{}", message))
         }
