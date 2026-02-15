@@ -4,7 +4,7 @@ use common::{
     client_queue_name, mcp::McpClient, publish_json, CLIENT_BROADCAST_EXCHANGE,
     CLIENT_SIGNAL_QUEUE, ClientBroadcastMessage, ClientDirectMessage, ClientRegistration,
     ClientSignalMessage, CommandRequest, CommandResponse, NodeCommand, NodeCommandResult,
-    SemanticOpUpdate, SystemState, InterceptedTrafficEntry, TrafficSearchFilters,
+    ReconResult, SemanticOpUpdate, SystemState, InterceptedTrafficEntry, TrafficSearchFilters,
     ChainExecutionUpdate, ChainDefinitionInfo, OperationDefinitionInfo,
 };
 use futures_util::StreamExt;
@@ -34,10 +34,19 @@ struct ClientState {
     pending_commands: std::collections::HashMap<String, Option<NodeCommandResult>>,
     pending_semantic_ops: std::collections::HashMap<String, Option<String>>,
     pending_traffic_search: Option<(Vec<InterceptedTrafficEntry>, usize)>,
+    pending_recon_get: Option<ReconGetResult>,
     operations: Vec<SemanticOpUpdate>,
     operation_definitions: Vec<OperationDefinitionInfo>,
     chain_definitions: Vec<ChainDefinitionInfo>,
     chain_executions: Vec<ChainExecutionUpdate>,
+}
+
+struct ReconGetResult {
+    recon_result: Option<ReconResult>,
+    #[allow(dead_code)]
+    performed_at: Option<String>,
+    #[allow(dead_code)]
+    is_semantic: Option<bool>,
 }
 
 impl CliClient {
@@ -245,6 +254,13 @@ impl CliClient {
             }
             ClientDirectMessage::ChainExecutionListResponse { executions } => {
                 state.chain_executions = executions;
+            }
+            ClientDirectMessage::ReconGetResponse { recon_result, performed_at, is_semantic, .. } => {
+                state.pending_recon_get = Some(ReconGetResult {
+                    recon_result,
+                    performed_at,
+                    is_semantic,
+                });
             }
             _ => {}
         }
@@ -513,6 +529,37 @@ impl CliClient {
 
     pub async fn get_chain_executions(&self) -> Vec<ChainExecutionUpdate> {
         self.state.lock().await.chain_executions.clone()
+    }
+
+    pub async fn get_recon_result(
+        &self,
+        node_id: &str,
+        agent_short_name: &str,
+    ) -> Result<Option<ReconResult>> {
+        {
+            let mut state = self.state.lock().await;
+            state.pending_recon_get = None;
+        }
+
+        let message = ClientSignalMessage::ReconGet {
+            client_id: self.client_id.clone(),
+            node_id: node_id.to_string(),
+            agent_short_name: agent_short_name.to_string(),
+        };
+        self.publish_signal(message).await?;
+
+        let poll_interval = Duration::from_millis(100);
+        let max_polls = 50;
+
+        for _ in 0..max_polls {
+            tokio::time::sleep(poll_interval).await;
+            let mut state = self.state.lock().await;
+            if let Some(result) = state.pending_recon_get.take() {
+                return Ok(result.recon_result);
+            }
+        }
+
+        Err(anyhow!("Timeout waiting for recon result"))
     }
 }
 

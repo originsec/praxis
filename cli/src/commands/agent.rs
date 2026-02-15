@@ -271,21 +271,46 @@ async fn recon_agent(client: &CliClient, node_prefix: &str, semantic: bool, outp
                 OutputFormat::Text => {
                     let recon_type = if semantic { "Semantic recon" } else { "Recon" };
                     print_header(&format!("{} Results", recon_type));
+
                     println!();
                     println!("  MCP Servers: {} ({} tools)", result.tools.mcp_servers.len(), mcp_tools_count);
+                    for server in &result.tools.mcp_servers {
+                        println!("    {} ({})", server.name, server.transport);
+                        if !server.tools.is_empty() {
+                            let names: Vec<&str> = server.tools.iter().map(|t| t.name.as_str()).collect();
+                            println!("      {}", names.join(", "));
+                        }
+                    }
+
                     println!("  Skills: {}", result.tools.skills.len());
+                    if !result.tools.skills.is_empty() {
+                        let names: Vec<String> = result.tools.skills.iter()
+                            .map(|s| format!("/{}", s.name))
+                            .collect();
+                        println!("    {}", names.join(", "));
+                    }
+
                     if semantic {
                         println!("  Internal Tools: {}", result.tools.internal_tools.len());
+                        if !result.tools.internal_tools.is_empty() {
+                            let names: Vec<&str> = result.tools.internal_tools.iter()
+                                .map(|t| t.name.as_str())
+                                .collect();
+                            println!("    {}", names.join(", "));
+                        }
                     }
+
                     println!("  Config Items: {}", result.config.len());
+                    for item in &result.config {
+                        println!("    {} ({})", item.path, item.config_type);
+                    }
+
                     println!("  Sessions: {}", result.sessions.len());
                     println!("  Project Paths: {}", result.project_paths.len());
 
                     if !result.project_paths.is_empty() {
-                        println!();
-                        println!("  Projects:");
                         for path in &result.project_paths {
-                            println!("    - {}", path);
+                            println!("    {}", path);
                         }
                     }
 

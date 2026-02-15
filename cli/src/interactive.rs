@@ -6,6 +6,7 @@ use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
 use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
+use rustyline::history::DefaultHistory;
 use rustyline::{CompletionType, Config, Editor, Helper};
 use std::sync::{Arc, Mutex};
 
@@ -116,11 +117,18 @@ struct CompletionCache {
     op_short_ids: Vec<String>,
     chain_names: Vec<String>,
     chain_exec_ids: Vec<String>,
+    project_paths: Vec<String>,
 }
 
-async fn refresh_completion_cache(client: &CliClient, cache: &Arc<Mutex<CompletionCache>>, selected_node: Option<&str>) {
+async fn refresh_completion_cache(
+    client: &CliClient,
+    cache: &Arc<Mutex<CompletionCache>>,
+    selected_node: Option<&str>,
+    selected_agent: Option<&str>,
+) {
     let mut node_ids = Vec::new();
     let mut agent_names = Vec::new();
+    let mut full_node_id = None;
 
     if let Some(state) = client.get_state().await {
         for node in &state.nodes {
@@ -137,12 +145,27 @@ async fn refresh_completion_cache(client: &CliClient, cache: &Arc<Mutex<Completi
                 .unwrap_or(true);
 
             if show_agents {
+                if selected_node.is_some() {
+                    full_node_id = Some(node.node_id.clone());
+                }
                 for agent in &node.discovered_agents {
                     if !agent_names.contains(&agent.short_name) {
                         agent_names.push(agent.short_name.clone());
                     }
                 }
             }
+        }
+    }
+
+    //
+    // Fetch project paths from the latest recon result for the selected
+    // node+agent, used for session create completion.
+    //
+
+    let mut project_paths = Vec::new();
+    if let (Some(ref nid), Some(agent)) = (full_node_id, selected_agent) {
+        if let Ok(Some(recon)) = client.get_recon_result(nid, agent).await {
+            project_paths = recon.project_paths;
         }
     }
 
@@ -175,6 +198,7 @@ async fn refresh_completion_cache(client: &CliClient, cache: &Arc<Mutex<Completi
         c.op_short_ids = op_short_ids;
         c.chain_names = chain_names;
         c.chain_exec_ids = chain_exec_ids;
+        c.project_paths = project_paths;
     }
 }
 
@@ -189,6 +213,7 @@ enum CompletionContext {
     AgentName,
     OpName,
     ShortId,
+    ProjectPath,
 }
 
 fn detect_context(tokens: &[&str], trailing_space: bool) -> CompletionContext {
@@ -206,6 +231,9 @@ fn detect_context(tokens: &[&str], trailing_space: bool) -> CompletionContext {
         if prev == "-a" || prev == "--agent" {
             return CompletionContext::AgentName;
         }
+        if prev == "-p" || prev == "--project" {
+            return CompletionContext::ProjectPath;
+        }
     }
 
     //
@@ -219,6 +247,7 @@ fn detect_context(tokens: &[&str], trailing_space: bool) -> CompletionContext {
             ("agent", "select") if completing_idx >= 2 => return CompletionContext::AgentName,
             ("op", "run") if completing_idx == 2 => return CompletionContext::OpName,
             ("op", "info") | ("op", "cancel") if completing_idx == 2 => return CompletionContext::ShortId,
+            ("session", "create") if completing_idx == 2 => return CompletionContext::ProjectPath,
             _ => {}
         }
     }
@@ -283,6 +312,7 @@ impl PraxisCompleter {
                 ids.extend(cache.chain_exec_ids.clone());
                 ids
             }
+            CompletionContext::ProjectPath => cache.project_paths.clone(),
             CompletionContext::Command => Vec::new(),
         }
     }
@@ -541,6 +571,95 @@ fn sync_repl_state(state: &mut ReplState, sys_state: Option<&common::SystemState
     }
 }
 
+fn is_session_create(tokens: &[String]) -> bool {
+    tokens.first().map(|s| s.as_str()) == Some("session")
+        && tokens.get(1).map(|s| s.as_str()) == Some("create")
+}
+
+fn has_project_flag(tokens: &[String]) -> bool {
+    tokens.iter().any(|t| t == "-p" || t == "--project")
+}
+
+//
+// Handle interactive project selection for "session create":
+// - Bare positional path: "session create /foo" → inject -p flag
+// - No project: show picker from recon data
+//
+
+async fn handle_session_create_project(
+    tokens: &mut Vec<String>,
+    repl_state: &ReplState,
+    client: &crate::client::CliClient,
+    rl: &mut Editor<PraxisCompleter, DefaultHistory>,
+) {
+    if has_project_flag(tokens) {
+        return;
+    }
+
+    //
+    // Check for bare positional: "session create /some/path" or
+    // "session create ~/project". Anything after "create" that isn't
+    // a flag is treated as a project path.
+    //
+
+    let extra_args: Vec<String> = tokens.iter()
+        .skip(2)
+        .filter(|t| !t.starts_with('-'))
+        .cloned()
+        .collect();
+
+    if let Some(path) = extra_args.first() {
+        let path = path.clone();
+        tokens.retain(|t| t != &path || t.starts_with('-'));
+        tokens.push("-p".to_string());
+        tokens.push(path);
+        return;
+    }
+
+    //
+    // No project specified — try to show an interactive picker from the
+    // latest recon result.
+    //
+
+    let (Some(node_id), Some(agent)) = (&repl_state.selected_node, &repl_state.selected_agent) else {
+        return;
+    };
+
+    let recon = match client.get_recon_result(node_id, agent).await {
+        Ok(Some(r)) => r,
+        _ => return,
+    };
+
+    if recon.project_paths.is_empty() {
+        return;
+    }
+
+    println!();
+    println!("  {}", "Select a project:".bold());
+    for (i, path) in recon.project_paths.iter().enumerate() {
+        println!("  {}  {}", format!("[{}]", i + 1).cyan(), path);
+    }
+    println!("  {}  {}", "[0]".cyan(), "(no project)");
+    println!();
+
+    let selection: String = match rl.readline("  Choice: ") {
+        Ok(line) => line.trim().to_string(),
+        Err(_) => return,
+    };
+
+    if selection.is_empty() || selection == "0" {
+        return;
+    }
+
+    if let Ok(idx) = selection.parse::<usize>() {
+        if idx >= 1 && idx <= recon.project_paths.len() {
+            let path = recon.project_paths[idx - 1].clone();
+            tokens.push("-p".to_string());
+            tokens.push(path);
+        }
+    }
+}
+
 pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) -> Result<()> {
     //
     // Install the SIGINT handler early so Ctrl+C during command execution
@@ -565,7 +684,7 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
     let cache = Arc::new(Mutex::new(CompletionCache::default()));
     let mut repl_state = ReplState::default();
 
-    refresh_completion_cache(&client, &cache, repl_state.selected_node.as_deref()).await;
+    refresh_completion_cache(&client, &cache, repl_state.selected_node.as_deref(), repl_state.selected_agent.as_deref()).await;
 
     let config = Config::builder()
         .completion_type(CompletionType::List)
@@ -631,6 +750,20 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
                 let mut tokens = shell_split(trimmed);
                 inject_defaults(&mut tokens, &repl_state);
 
+                //
+                // Intercept "session create" for interactive project selection
+                // and bare positional path support.
+                //
+
+                if is_session_create(&tokens) {
+                    handle_session_create_project(
+                        &mut tokens,
+                        &repl_state,
+                        &client,
+                        &mut rl,
+                    ).await;
+                }
+
                 match ReplCli::try_parse_from(&tokens) {
                     Ok(parsed) => {
                         println!();
@@ -679,7 +812,7 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
                     }
                 }
 
-                refresh_completion_cache(&client, &cache, repl_state.selected_node.as_deref()).await;
+                refresh_completion_cache(&client, &cache, repl_state.selected_node.as_deref(), repl_state.selected_agent.as_deref()).await;
             }
             Err(ReadlineError::Interrupted) => continue,
             Err(ReadlineError::Eof) => {
