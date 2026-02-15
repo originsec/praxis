@@ -124,7 +124,7 @@ async fn send_prompt(client: &CliClient, node_prefix: &str, text: &str, output: 
                     }));
                 }
                 OutputFormat::Text => {
-                    println!("{}", response);
+                    crate::output::print_markdown(&response);
                 }
             }
             Ok(())

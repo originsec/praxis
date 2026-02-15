@@ -42,6 +42,10 @@ pub fn format_short_id(id: &str) -> String {
     id[..8.min(id.len())].to_string()
 }
 
+pub fn print_markdown(text: &str) {
+    termimad::print_text(text);
+}
+
 pub fn format_status(status: &str) -> String {
     match status.to_lowercase().as_str() {
         "running" | "active" => status.yellow().to_string(),

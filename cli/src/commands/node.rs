@@ -13,14 +13,14 @@ pub enum NodeCommand {
     /// Select a node by ID prefix
     Select {
         /// Node ID prefix
-        prefix: String,
+        node: String,
     },
 }
 
 pub async fn execute(client: &mut CliClient, command: NodeCommand, output: &OutputFormat) -> Result<()> {
     match command {
         NodeCommand::List => list_nodes(client, output).await,
-        NodeCommand::Select { prefix } => select_node(client, &prefix, output).await,
+        NodeCommand::Select { node } => select_node(client, &node, output).await,
     }
 }
 

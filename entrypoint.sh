@@ -43,6 +43,14 @@ if echo "$PRAXIS_DATABASE_URL" | grep -qE '^postgres(ql)?://'; then
     done
 fi
 
+#
+# Copy CLI binary to data volume so it's accessible from the host.
+#
+
+if [ -f /app/praxis_cli ]; then
+    cp /app/praxis_cli /app/data/praxis_cli
+fi
+
 /app/praxis_service &
 SERVICE_PID=$!
 sleep 2
@@ -52,10 +60,15 @@ if ! kill -0 $SERVICE_PID 2>/dev/null; then
     exit 1
 fi
 
-/app/praxis_web &
-WEB_PID=$!
+if [ "${PRAXIS_HEADLESS:-0}" = "1" ]; then
+    echo "Praxis running (headless — web UI disabled)."
+    wait $SERVICE_PID
+else
+    /app/praxis_web &
+    WEB_PID=$!
 
-echo "Praxis running."
-echo "  Web UI: http://localhost:8080"
+    echo "Praxis running."
+    echo "  Web UI: http://localhost:8080"
 
-wait $SERVICE_PID $WEB_PID
+    wait $SERVICE_PID $WEB_PID
+fi

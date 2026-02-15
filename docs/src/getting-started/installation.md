@@ -74,6 +74,22 @@ This starts:
 
 Open **http://localhost:8080** and you're in.
 
+To run without the web UI (headless mode for CLI-only usage):
+
+```bash
+PRAXIS_HEADLESS=1 docker compose up --build
+```
+
+### Getting the CLI from Docker
+
+The CLI binary is built into the Docker image and copied to the data volume on startup. Extract it with:
+
+```bash
+docker cp praxis-praxis-1:/app/praxis_cli ./praxis_cli
+chmod +x ./praxis_cli
+./praxis_cli
+```
+
 To add a macOS node binary to Docker downloads, provide it explicitly (optional):
 
 ```bash

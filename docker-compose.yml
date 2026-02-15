@@ -18,6 +18,7 @@
 #   PRAXIS_NOT_HIDDEN=1 - Disable hidden desktop for agent windows (Windows only)
 #                         Useful for debugging/testing DevTools-based agents
 #   SKIP_NODE_BUILD=1   - Skip building praxis_node binaries (faster builds)
+#   PRAXIS_HEADLESS=1   - Run without web UI (service + RabbitMQ only)
 #   CARGO_PROFILE       - Cargo build profile (default: release)
 #                         Set to release-fast for faster builds with thin LTO
 #
@@ -64,6 +65,7 @@ services:
       context: .
       args:
         SKIP_NODE_BUILD: ${SKIP_NODE_BUILD:-0}
+        SKIP_WEB_BUILD: ${PRAXIS_HEADLESS:-0}
         CARGO_PROFILE: ${CARGO_PROFILE:-release}
     depends_on:
       rabbitmq:
@@ -71,6 +73,7 @@ services:
     environment:
       PRAXIS_RABBITMQ_URL: amqp://praxis:praxis@rabbitmq:5672
       PRAXIS_DATABASE_URL: /app/data/praxis_operations.db
+      PRAXIS_HEADLESS: ${PRAXIS_HEADLESS:-0}
       RUST_LOG: info
     ports:
       - "8080:8080"
@@ -83,6 +86,7 @@ services:
       context: .
       args:
         SKIP_NODE_BUILD: ${SKIP_NODE_BUILD:-0}
+        SKIP_WEB_BUILD: ${PRAXIS_HEADLESS:-0}
         CARGO_PROFILE: ${CARGO_PROFILE:-release}
     depends_on:
       rabbitmq:
@@ -92,6 +96,7 @@ services:
     environment:
       PRAXIS_RABBITMQ_URL: amqp://praxis:praxis@rabbitmq:5672
       PRAXIS_DATABASE_URL: postgresql://praxis:praxis_db_2024@postgres:5432/praxis
+      PRAXIS_HEADLESS: ${PRAXIS_HEADLESS:-0}
       RUST_LOG: info
     ports:
       - "8080:8080"

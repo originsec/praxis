@@ -48,20 +48,44 @@ We're releasing early to get feedback and contributions from the community.
 
 ## Quick Start
 
-The fastest way to get Praxis running is with Docker:
+### One-Liner (Docker)
 
 ```bash
-# Clone the repository
+curl -fsSL https://praxis.originhq.com/docker.sh | bash
+```
+
+This clones the latest release, builds with Docker Compose, and starts the service, web UI, and RabbitMQ. Open **http://localhost:8080** in your browser.
+
+The CLI binary is built into the Docker image. Extract it with:
+
+```bash
+docker cp praxis-praxis-1:/app/praxis_cli ./praxis_cli
+```
+
+### Manual Docker
+
+```bash
 git clone https://github.com/originsec/praxis.git
 cd praxis
-
-# Start everything (service + web + RabbitMQ)
 docker compose up --build
 ```
 
-Open **http://localhost:8080** in your browser.
+To run without the web UI (headless — service + RabbitMQ only):
 
-> For detailed installation instructions (native builds, cross-compilation, and deployment patterns), see the [full documentation](https://originsec.github.io/praxis/).
+```bash
+PRAXIS_HEADLESS=1 docker compose up --build
+```
+
+### Native Install
+
+```bash
+# Linux/macOS
+curl -fsSL https://praxis.originhq.com/install.sh | bash
+```
+
+This installs Rust if needed, builds from source, and sets up binaries in `~/.praxis/bin/` including `praxis_cli`.
+
+> For detailed installation instructions (cross-compilation, Windows, deployment patterns), see the [full documentation](https://originsec.github.io/praxis/).
 
 ### Deploy Nodes
 
@@ -93,6 +117,22 @@ After starting Praxis, configure at least one LLM provider in **Settings** → *
 
 We recommend low-latency providers (for example **Groq** or **Cerebras**) for parser-heavy workflows.
 
+## CLI
+
+The Praxis CLI (`praxis_cli`) provides an interactive REPL for controlling the Praxis network from the command line.
+
+```
+praxis [b3bf7460:claudecode *] ❯ session prompt "list all files"
+```
+
+Features:
+- **Interactive REPL** with selection state — select a node and agent once, then run commands without repeating `-n`/`-a` flags
+- **Tab completion** for node IDs, agent names, operation names, and short IDs
+- **One-shot mode** via `-C "command"` for scripting
+- **MCP server mode** via `--mcp` for integration with Claude Code, Cursor, and other AI assistants
+
+See [CLI documentation](https://originsec.github.io/praxis/usage/cli.html) for the full reference.
+
 ## Architecture At A Glance
 
 Praxis has three core components:
@@ -113,6 +153,7 @@ Full documentation is available at **[originsec.github.io/praxis](https://origin
 - [Reconnaissance](https://originsec.github.io/praxis/usage/recon.html) - Tool and configuration discovery
 - [Sessions](https://originsec.github.io/praxis/usage/sessions.html) - Interactive agent sessions
 - [Agent Connectors](https://originsec.github.io/praxis/connectors/overview.html) - Supported agents and adding new ones
+- [CLI](https://originsec.github.io/praxis/usage/cli.html) - Interactive REPL, one-shot mode, MCP integration
 - [Interception](https://originsec.github.io/praxis/usage/interception.html) - Traffic capture setup and options
 - [Architecture](https://originsec.github.io/praxis/architecture/overview.html) - How it all fits together
 
