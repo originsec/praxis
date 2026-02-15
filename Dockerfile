@@ -67,9 +67,9 @@ RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
         cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_node --target x86_64-pc-windows-gnu; \
     fi && \
     if [ "$SKIP_WEB_BUILD" = "1" ]; then \
-        cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_service; \
+        cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_service -p praxis_cli; \
     else \
-        cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_service -p praxis_web; \
+        cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_service -p praxis_web -p praxis_cli; \
     fi
 
 # ==============================================================================
@@ -109,14 +109,14 @@ RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
     fi
 
 #
-# Build service (and web unless headless).
+# Build service, CLI (and web unless headless).
 #
 
 RUN if [ "$SKIP_WEB_BUILD" = "1" ]; then \
-        cargo build --profile "$CARGO_PROFILE" -p praxis_service && \
+        cargo build --profile "$CARGO_PROFILE" -p praxis_service -p praxis_cli && \
         touch "target/$CARGO_PROFILE/praxis_web"; \
     else \
-        cargo build --profile "$CARGO_PROFILE" -p praxis_service -p praxis_web; \
+        cargo build --profile "$CARGO_PROFILE" -p praxis_service -p praxis_web -p praxis_cli; \
     fi
 
 # ==============================================================================
@@ -140,6 +140,7 @@ WORKDIR /app
 
 COPY --from=builder /build/target/${CARGO_PROFILE}/praxis_service /app/
 COPY --from=builder /build/target/${CARGO_PROFILE}/praxis_web /app/
+COPY --from=builder /build/target/${CARGO_PROFILE}/praxis_cli /app/
 
 #
 # Copy node binaries for download.

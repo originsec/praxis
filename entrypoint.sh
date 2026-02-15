@@ -43,6 +43,14 @@ if echo "$PRAXIS_DATABASE_URL" | grep -qE '^postgres(ql)?://'; then
     done
 fi
 
+#
+# Copy CLI binary to data volume so it's accessible from the host.
+#
+
+if [ -f /app/praxis_cli ]; then
+    cp /app/praxis_cli /app/data/praxis_cli
+fi
+
 /app/praxis_service &
 SERVICE_PID=$!
 sleep 2
