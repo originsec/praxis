@@ -10,7 +10,6 @@ use clap::{CommandFactory, Parser, Subcommand};
 
 use commands::{
     agent::AgentCommand,
-    chain::ChainCommand,
     node::NodeCommand,
     op::OpCommand,
     session::SessionCommand,
@@ -86,16 +85,10 @@ pub(crate) enum Commands {
         command: TrafficCommand,
     },
 
-    /// Semantic operation commands
+    /// Operation and chain workflow commands
     Op {
         #[command(subcommand)]
         command: OpCommand,
-    },
-
-    /// Chain workflow commands
-    Chain {
-        #[command(subcommand)]
-        command: ChainCommand,
     },
 }
 
@@ -115,7 +108,6 @@ impl Commands {
                 commands::traffic::execute(client, command, output).await
             }
             Commands::Op { command } => commands::op::execute(client, command, output).await,
-            Commands::Chain { command } => commands::chain::execute(client, command, output).await,
         }
     }
 }
@@ -140,7 +132,7 @@ fn print_fullhelp() {
     //
     // Print help for each subcommand.
     //
-    let subcommands = ["node", "agent", "session", "traffic", "op", "chain"];
+    let subcommands = ["node", "agent", "session", "traffic", "op"];
 
     for sub_name in subcommands {
         println!("================================================================================");
