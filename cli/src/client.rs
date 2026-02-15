@@ -35,6 +35,7 @@ struct ClientState {
     pending_semantic_ops: std::collections::HashMap<String, Option<String>>,
     pending_traffic_search: Option<(Vec<InterceptedTrafficEntry>, usize)>,
     pending_recon_get: Option<ReconGetResult>,
+    cached_project_paths: Vec<String>,
     operations: Vec<SemanticOpUpdate>,
     operation_definitions: Vec<OperationDefinitionInfo>,
     chain_definitions: Vec<ChainDefinitionInfo>,
@@ -256,6 +257,9 @@ impl CliClient {
                 state.chain_executions = executions;
             }
             ClientDirectMessage::ReconGetResponse { recon_result, performed_at, is_semantic, .. } => {
+                if let Some(ref recon) = recon_result {
+                    state.cached_project_paths = recon.project_paths.clone();
+                }
                 state.pending_recon_get = Some(ReconGetResult {
                     recon_result,
                     performed_at,
@@ -531,6 +535,11 @@ impl CliClient {
         self.state.lock().await.chain_executions.clone()
     }
 
+    //
+    // Blocking fetch of recon result — used by the interactive project picker
+    // where the user is explicitly waiting.
+    //
+
     pub async fn get_recon_result(
         &self,
         node_id: &str,
@@ -560,6 +569,25 @@ impl CliClient {
         }
 
         Err(anyhow!("Timeout waiting for recon result"))
+    }
+
+    //
+    // Fire-and-forget recon request — the response will be picked up by the
+    // background consumer and cached in `cached_project_paths`. Use
+    // `get_cached_project_paths()` to read the result.
+    //
+
+    pub async fn request_recon_result(&self, node_id: &str, agent_short_name: &str) {
+        let message = ClientSignalMessage::ReconGet {
+            client_id: self.client_id.clone(),
+            node_id: node_id.to_string(),
+            agent_short_name: agent_short_name.to_string(),
+        };
+        let _ = self.publish_signal(message).await;
+    }
+
+    pub async fn get_cached_project_paths(&self) -> Vec<String> {
+        self.state.lock().await.cached_project_paths.clone()
     }
 }
 

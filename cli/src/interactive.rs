@@ -158,16 +158,14 @@ async fn refresh_completion_cache(
     }
 
     //
-    // Fetch project paths from the latest recon result for the selected
-    // node+agent, used for session create completion.
+    // Fire a non-blocking recon request so project paths are available
+    // for the next completion cycle. Read whatever is already cached.
     //
 
-    let mut project_paths = Vec::new();
     if let (Some(ref nid), Some(agent)) = (full_node_id, selected_agent) {
-        if let Ok(Some(recon)) = client.get_recon_result(nid, agent).await {
-            project_paths = recon.project_paths;
-        }
+        client.request_recon_result(nid, agent).await;
     }
+    let project_paths = client.get_cached_project_paths().await;
 
     let op_defs = client.get_operation_definitions().await;
     let op_names: Vec<String> = op_defs.iter()
