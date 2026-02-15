@@ -84,7 +84,7 @@ mod tests {
         assert!(prompt.contains("## Available Tools"));
         assert!(prompt.contains("## Tool Calling Format"));
         assert!(prompt.contains("## Task Completion"));
-        assert!(prompt.contains("signal completion"));
+        assert!(prompt.contains("Signal completion"));
     }
 
     #[test]

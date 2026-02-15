@@ -1,10 +1,11 @@
 use anyhow::{anyhow, Result};
+use async_trait::async_trait;
 use common::{
-    client_queue_name, publish_json, CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE,
-    ClientBroadcastMessage, ClientDirectMessage, ClientRegistration, ClientSignalMessage,
-    CommandRequest, CommandResponse, NodeCommand, NodeCommandResult, SemanticOpUpdate,
-    SystemState, InterceptedTrafficEntry, TrafficSearchFilters, ChainExecutionUpdate, ChainDefinitionInfo,
-    OperationDefinitionInfo,
+    client_queue_name, mcp::McpClient, publish_json, CLIENT_BROADCAST_EXCHANGE,
+    CLIENT_SIGNAL_QUEUE, ClientBroadcastMessage, ClientDirectMessage, ClientRegistration,
+    ClientSignalMessage, CommandRequest, CommandResponse, NodeCommand, NodeCommandResult,
+    SemanticOpUpdate, SystemState, InterceptedTrafficEntry, TrafficSearchFilters,
+    ChainExecutionUpdate, ChainDefinitionInfo, OperationDefinitionInfo,
 };
 use futures_util::StreamExt;
 use lapin::{
@@ -512,5 +513,90 @@ impl CliClient {
 
     pub async fn get_chain_executions(&self) -> Vec<ChainExecutionUpdate> {
         self.state.lock().await.chain_executions.clone()
+    }
+}
+
+//
+// McpClient implementation for CliClient. Delegates to the inherent methods
+// above, enabling the shared ops layer in common::mcp::ops to work directly
+// with CliClient.
+//
+
+#[async_trait]
+impl McpClient for CliClient {
+    async fn get_state(&self) -> Option<SystemState> {
+        CliClient::get_state(self).await
+    }
+
+    async fn send_command(&self, node_id: &str, command: NodeCommand) -> Result<CommandResponse> {
+        CliClient::send_command(self, node_id, command).await
+    }
+
+    async fn search_traffic(
+        &self,
+        filters: TrafficSearchFilters,
+    ) -> Result<(Vec<InterceptedTrafficEntry>, usize)> {
+        CliClient::search_traffic(self, filters).await
+    }
+
+    async fn run_semantic_op(
+        &self,
+        node_id: String,
+        agent_short_name: String,
+        operation_name: String,
+        working_dir: Option<String>,
+    ) -> Result<String> {
+        CliClient::run_semantic_op(self, node_id, agent_short_name, operation_name, working_dir)
+            .await
+    }
+
+    async fn cancel_semantic_op(&self, operation_id: String) -> Result<()> {
+        CliClient::cancel_semantic_op(self, operation_id).await
+    }
+
+    async fn request_semantic_op_list(&self) -> Result<()> {
+        CliClient::request_semantic_op_list(self).await
+    }
+
+    async fn get_operations(&self) -> Vec<SemanticOpUpdate> {
+        CliClient::get_operations(self).await
+    }
+
+    async fn request_op_def_list(&self) -> Result<()> {
+        CliClient::request_op_def_list(self).await
+    }
+
+    async fn get_operation_definitions(&self) -> Vec<OperationDefinitionInfo> {
+        CliClient::get_operation_definitions(self).await
+    }
+
+    async fn request_chain_list(&self) -> Result<()> {
+        CliClient::request_chain_list(self).await
+    }
+
+    async fn get_chain_definitions(&self) -> Vec<ChainDefinitionInfo> {
+        CliClient::get_chain_definitions(self).await
+    }
+
+    async fn run_chain(
+        &self,
+        chain_id: String,
+        node_id: String,
+        agent_short_name: String,
+        working_dir: Option<String>,
+    ) -> Result<()> {
+        CliClient::run_chain(self, chain_id, node_id, agent_short_name, working_dir).await
+    }
+
+    async fn cancel_chain(&self, execution_id: String) -> Result<()> {
+        CliClient::cancel_chain(self, execution_id).await
+    }
+
+    async fn request_chain_execution_list(&self) -> Result<()> {
+        CliClient::request_chain_execution_list(self).await
+    }
+
+    async fn get_chain_executions(&self) -> Vec<ChainExecutionUpdate> {
+        CliClient::get_chain_executions(self).await
     }
 }

@@ -81,21 +81,26 @@ fn default_limit() -> usize {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct OpRunParams {
-    pub operation: String,
+    /// Operation name (e.g. recon::system_info) or chain name/ID
+    #[schemars(description = "Operation name (e.g. recon::system_info) or chain name/ID")]
+    pub name: String,
+
+    /// Node ID prefix
+    #[schemars(description = "Node ID prefix")]
     pub node: String,
+
+    /// Agent short name
+    #[schemars(description = "Agent short name")]
     pub agent: String,
+
+    /// Working directory for the operation
+    #[schemars(description = "Working directory for the operation")]
     pub working_dir: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ShortIdParams {
+    /// Short ID to look up
+    #[schemars(description = "Short ID to look up")]
     pub short_id: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct ChainRunParams {
-    pub chain_id: String,
-    pub node: String,
-    pub agent: String,
-    pub working_dir: Option<String>,
 }
