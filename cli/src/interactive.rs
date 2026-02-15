@@ -223,6 +223,11 @@ impl PraxisCompleter {
         let cmd = ReplCli::command();
         let mut paths = Vec::new();
         Self::collect_paths(&cmd, &mut Vec::new(), &mut paths);
+
+        for builtin in ["help", "exit", "quit", "clear"] {
+            paths.push(vec![builtin.to_string()]);
+        }
+
         Self { commands: paths, cache }
     }
 
