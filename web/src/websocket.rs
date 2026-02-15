@@ -208,8 +208,9 @@ pub(super) async fn handle_orchestrator_start(
     }
 
     //
-    // Fetch LLM and MCP config from Service if not already cached.
+    // Fetch LLM and MCP config from Service, waiting for the response.
     //
+    let config_notify = state.app_state.config_notify.notified();
     let _ = state.rabbitmq.get_config(vec![
         "llm_model_definitions".to_string(),
         "llm_feature_orchestrator".to_string(),
@@ -217,10 +218,12 @@ pub(super) async fn handle_orchestrator_start(
         "mcp_server_enabled".to_string(),
         "mcp_server_port".to_string(),
     ]).await;
-    //
-    // Wait briefly for config response.
-    //
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    if tokio::time::timeout(std::time::Duration::from_secs(5), config_notify).await.is_err() {
+        state.app_state.broadcast(ServerMessage::OrchestratorError {
+            message: "Timed out waiting for configuration from service".to_string(),
+        });
+        return Ok(());
+    }
 
     //
     // Create event channel for this session.

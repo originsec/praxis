@@ -279,7 +279,7 @@ pub async fn start_orchestrator_session(
 
     let mcp_port: u16 = config.get("mcp_server_port")
         .and_then(|s| s.parse().ok())
-        .unwrap_or(9090);
+        .unwrap_or(8585);
 
     //
     // Parse model definitions and find the selected Orchestrator model.

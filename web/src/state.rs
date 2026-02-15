@@ -51,6 +51,8 @@ pub struct AppState {
     pub chain_executions: RwLock<HashMap<String, ChainExecutionUpdate>>,
     /// Notify for signaling shutdown/restart (RabbitMQ connection lost)
     pub shutdown_notify: Arc<Notify>,
+    /// Notify for signaling config response arrival
+    pub config_notify: Notify,
 }
 
 /// Information about a WebSocket connection
@@ -80,6 +82,7 @@ impl AppState {
             chain_definitions: RwLock::new(Vec::new()),
             chain_executions: RwLock::new(HashMap::new()),
             shutdown_notify: Arc::new(Notify::new()),
+            config_notify: Notify::new(),
         })
     }
 

@@ -13,6 +13,8 @@ impl AppState {
         for (k, v) in values {
             cache.insert(k, v);
         }
+        drop(cache);
+        self.config_notify.notify_waiters();
     }
 
     /// Get cached config values
