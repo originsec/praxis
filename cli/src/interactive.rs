@@ -486,12 +486,13 @@ fn print_help() {
         ("recon run-semantic", "Run semantic recon on selected node"),
         ("recon list", "List all stored recon data"),
         ("recon list <section>", "List sessions/tools/projects/configs"),
-        ("recon config-read <path>", "Read config file content"),
-        ("recon session-read <path>", "Read session file content"),
-        ("recon config-grep <path> <pattern>", "Grep config file"),
-        ("recon session-grep <path> <pattern>", "Grep session file"),
+        ("recon config-read [path]", "Read config file (omit for all)"),
+        ("recon session-read [path]", "Read session file (omit for all)"),
+        ("recon config-grep <pattern> [path]", "Grep config file (omit for all)"),
+        ("recon session-grep <pattern> [path]", "Grep session file (omit for all)"),
         ("session create", "Create a session"),
         ("session prompt <text>", "Send a prompt"),
+        ("session prompt", "Interactive prompt mode"),
         ("session close", "Close a session"),
         ("traffic search <pattern>", "Search intercepted traffic"),
         ("op available", "List available operations and chains"),
@@ -776,20 +777,45 @@ fn is_recon_needs_path(tokens: &[String]) -> Option<&'static str> {
     }
 }
 
-fn has_positional_path(tokens: &[String]) -> bool {
+fn count_positionals(tokens: &[String]) -> usize {
+    let mut count = 0;
     let mut i = 2;
     while i < tokens.len() {
         let t = &tokens[i];
         if t.starts_with('-') {
-            if t == "-n" || t == "--node" || t == "-a" || t == "--agent" {
+            if t == "-n" || t == "--node"
+                || t == "-a" || t == "--agent"
+                || t == "--line-start" || t == "--line-end"
+            {
                 i += 1; // skip flag value
             }
         } else {
-            return true;
+            count += 1;
         }
         i += 1;
     }
-    false
+    count
+}
+
+fn is_grep_command(tokens: &[String]) -> bool {
+    matches!(tokens.get(1).map(|s| s.as_str()), Some("config-grep") | Some("session-grep"))
+}
+
+//
+// For read commands: path is the first positional, so missing when count == 0.
+// For grep commands: pattern is first, path is second, so missing when count < 2.
+//
+
+fn needs_path_picker(tokens: &[String]) -> bool {
+    if is_recon_needs_path(tokens).is_none() {
+        return false;
+    }
+    let n = count_positionals(tokens);
+    if is_grep_command(tokens) {
+        n == 1 // has pattern, needs path
+    } else {
+        n == 0 // needs path
+    }
 }
 
 async fn handle_recon_path_picker(
@@ -799,7 +825,7 @@ async fn handle_recon_path_picker(
     rl: &mut Editor<PraxisCompleter, DefaultHistory>,
 ) {
     let Some(path_type) = is_recon_needs_path(tokens) else { return };
-    if has_positional_path(tokens) { return; }
+    if !needs_path_picker(tokens) { return; }
 
     let (Some(node_id), Some(agent)) = (&repl_state.selected_node, &repl_state.selected_agent) else {
         return;
@@ -810,15 +836,25 @@ async fn handle_recon_path_picker(
         _ => return,
     };
 
-    let items: Vec<String> = match path_type {
+    let file_paths: Vec<String> = match path_type {
         "config" => recon.config.iter().map(|c| c.path.clone()).collect(),
         "session" => recon.sessions.iter().map(|s| s.session_file.clone()).collect(),
         _ => return,
     };
 
+    //
+    // Build picker items with * (all) at the top.
+    //
+
+    let mut items = vec!["* (all)".to_string()];
+    items.extend(file_paths);
+
     let label = if path_type == "config" { "Select a config file:" } else { "Select a session file:" };
-    if let Some(path) = interactive_pick(&items, label, rl) {
-        tokens.push(path);
+    if let Some(picked) = interactive_pick(&items, label, rl) {
+        if !picked.starts_with("* ") {
+            tokens.push(picked);
+        }
+        // picking * leaves path absent → handler reads/greps all files
     }
 }
 
@@ -832,7 +868,7 @@ fn handle_recon_list_picker(
 ) {
     if tokens.first().map(|s| s.as_str()) != Some("recon") { return; }
     if tokens.get(1).map(|s| s.as_str()) != Some("list") { return; }
-    if has_positional_path(tokens) { return; }
+    if count_positionals(tokens) > 0 { return; }
 
     let sections = vec![
         "all".to_string(),
@@ -864,7 +900,7 @@ async fn handle_agent_select_picker(
     // Check if there's already a positional agent name.
     //
 
-    if has_positional_path(tokens) { return; }
+    if count_positionals(tokens) > 0 { return; }
 
     let Some(ref node_id) = repl_state.selected_node else { return };
 
@@ -1062,11 +1098,10 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
 
                         if result.is_ok() {
                             println!();
-                            let toks = shell_split(trimmed);
-                            if toks.first().map(|s| s.as_str()) == Some("node")
-                                && toks.get(1).map(|s| s.as_str()) == Some("select")
+                            if tokens.first().map(|s| s.as_str()) == Some("node")
+                                && tokens.get(1).map(|s| s.as_str()) == Some("select")
                             {
-                                handle_node_select(&toks, &mut repl_state, sys_state.as_ref());
+                                handle_node_select(&tokens, &mut repl_state, sys_state.as_ref());
                             }
                         }
 

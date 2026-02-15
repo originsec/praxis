@@ -203,10 +203,14 @@ recon list configs                  # config items
 recon config-read /home/user/.codex/config.toml
 recon config-read /home/user/.codex/config.toml --line-start 1 --line-end 50
 recon session-read /home/user/.codex/sessions/2026-02-13.jsonl
+recon config-read                               # omit path to read all (interactive picker)
+recon session-read                              # omit path to read all
 
-# Grep config/session content with regex
-recon config-grep /home/user/.codex/config.toml "model|profile"
-recon session-grep /home/user/.codex/sessions/2026-02-13.jsonl "error|warning"
+# Grep config/session content with regex (pattern first, then optional path)
+recon config-grep "model|profile" /home/user/.codex/config.toml
+recon session-grep "error|warning" /home/user/.codex/sessions/2026-02-13.jsonl
+recon config-grep "model|profile"               # omit path to grep all (interactive picker)
+recon session-grep "error|warning"              # omit path to grep all
 ```
 
 ### Sessions
@@ -217,6 +221,9 @@ session create --yolo --project /path/to/project
 
 # Send a prompt
 session prompt "list files in current directory"
+
+# Interactive prompt mode (prompt→response loop, ctrl+c to exit)
+session prompt
 
 # Close session
 session close

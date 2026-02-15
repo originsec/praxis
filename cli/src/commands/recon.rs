@@ -46,8 +46,8 @@ pub enum ReconCommand {
         #[arg(short, long)]
         node: String,
 
-        /// Path to the config file
-        path: String,
+        /// Path to the config file (omit to read all)
+        path: Option<String>,
 
         #[arg(long)]
         line_start: Option<usize>,
@@ -62,8 +62,8 @@ pub enum ReconCommand {
         #[arg(short, long)]
         node: String,
 
-        /// Path to the session file
-        path: String,
+        /// Path to the session file (omit to read all)
+        path: Option<String>,
 
         #[arg(long)]
         line_start: Option<usize>,
@@ -78,11 +78,11 @@ pub enum ReconCommand {
         #[arg(short, long)]
         node: String,
 
-        /// Path to the config file
-        path: String,
-
         /// Regex pattern to search for
         pattern: String,
+
+        /// Path to the config file (omit to grep all)
+        path: Option<String>,
     },
 
     /// Grep session content with regex
@@ -91,11 +91,11 @@ pub enum ReconCommand {
         #[arg(short, long)]
         node: String,
 
-        /// Path to the session file
-        path: String,
-
         /// Regex pattern to search for
         pattern: String,
+
+        /// Path to the session file (omit to grep all)
+        path: Option<String>,
     },
 }
 
@@ -116,16 +116,28 @@ pub async fn execute(client: &mut CliClient, command: ReconCommand, output: &Out
             recon_list(client, &node, agent.as_deref(), section.as_ref(), output).await
         }
         ReconCommand::ConfigRead { node, path, line_start, line_end } => {
-            read_file(client, &node, NodeFileType::Config, &path, line_start, line_end, output).await
+            match path {
+                Some(p) => read_file(client, &node, NodeFileType::Config, &p, line_start, line_end, output).await,
+                None => read_all(client, &node, NodeFileType::Config, line_start, line_end, output).await,
+            }
         }
         ReconCommand::SessionRead { node, path, line_start, line_end } => {
-            read_file(client, &node, NodeFileType::Session, &path, line_start, line_end, output).await
+            match path {
+                Some(p) => read_file(client, &node, NodeFileType::Session, &p, line_start, line_end, output).await,
+                None => read_all(client, &node, NodeFileType::Session, line_start, line_end, output).await,
+            }
         }
-        ReconCommand::ConfigGrep { node, path, pattern } => {
-            grep_file(client, &node, NodeFileType::Config, &path, &pattern, output).await
+        ReconCommand::ConfigGrep { node, pattern, path } => {
+            match path {
+                Some(p) => grep_file(client, &node, NodeFileType::Config, &p, &pattern, output).await,
+                None => grep_all(client, &node, NodeFileType::Config, &pattern, output).await,
+            }
         }
-        ReconCommand::SessionGrep { node, path, pattern } => {
-            grep_file(client, &node, NodeFileType::Session, &path, &pattern, output).await
+        ReconCommand::SessionGrep { node, pattern, path } => {
+            match path {
+                Some(p) => grep_file(client, &node, NodeFileType::Session, &p, &pattern, output).await,
+                None => grep_all(client, &node, NodeFileType::Session, &pattern, output).await,
+            }
         }
     }
 }
@@ -500,4 +512,66 @@ async fn grep_file(
         }
         _ => Err(anyhow!("Unexpected response")),
     }
+}
+
+//
+// Resolve all paths for a file type from stored recon data.
+//
+
+async fn resolve_all_paths(
+    client: &CliClient,
+    node_prefix: &str,
+    file_type: NodeFileType,
+) -> Result<Vec<String>> {
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let node_id = find_node_id(&state, node_prefix)
+        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+    let agent_name = resolve_agent_short_name(&state, &node_id, None)
+        .ok_or_else(|| anyhow!("No agent selected"))?;
+
+    let recon = client
+        .get_recon_result(&node_id, &agent_name)
+        .await?
+        .ok_or_else(|| anyhow!("No stored recon data — run recon first"))?;
+
+    let paths = match file_type {
+        NodeFileType::Config => recon.config.iter().map(|c| c.path.clone()).collect(),
+        NodeFileType::Session => recon.sessions.iter().map(|s| s.session_file.clone()).collect(),
+    };
+    Ok(paths)
+}
+
+async fn read_all(
+    client: &CliClient,
+    node_prefix: &str,
+    file_type: NodeFileType,
+    line_start: Option<usize>,
+    line_end: Option<usize>,
+    output: &OutputFormat,
+) -> Result<()> {
+    let paths = resolve_all_paths(client, node_prefix, file_type).await?;
+    if paths.is_empty() {
+        return Err(anyhow!("No files found in recon data"));
+    }
+    for path in &paths {
+        read_file(client, node_prefix, file_type, path, line_start, line_end, output).await?;
+    }
+    Ok(())
+}
+
+async fn grep_all(
+    client: &CliClient,
+    node_prefix: &str,
+    file_type: NodeFileType,
+    pattern: &str,
+    output: &OutputFormat,
+) -> Result<()> {
+    let paths = resolve_all_paths(client, node_prefix, file_type).await?;
+    if paths.is_empty() {
+        return Err(anyhow!("No files found in recon data"));
+    }
+    for path in &paths {
+        grep_file(client, node_prefix, file_type, path, pattern, output).await?;
+    }
+    Ok(())
 }

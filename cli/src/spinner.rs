@@ -8,12 +8,21 @@ pub struct Spinner {
 
 impl Spinner {
     pub fn start(message: &str) -> Self {
+        Self::spawn(message, false)
+    }
+
+    pub fn start_with_elapsed(message: &str) -> Self {
+        Self::spawn(message, true)
+    }
+
+    fn spawn(message: &str, show_elapsed: bool) -> Self {
         let (tx, mut rx) = tokio::sync::watch::channel(false);
         let msg = message.to_string();
 
         let handle = tokio::spawn(async move {
             const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
             let mut i = 0;
+            let start = std::time::Instant::now();
 
             loop {
                 if *rx.borrow() {
@@ -21,7 +30,13 @@ impl Spinner {
                 }
 
                 let frame = FRAMES[i % FRAMES.len()].dimmed();
-                print!("\r  {} {}", frame, msg.dimmed());
+                if show_elapsed {
+                    let secs = start.elapsed().as_secs();
+                    let elapsed = format!("[{}s]", secs).dimmed();
+                    print!("\r  {} {} {}", frame, msg.dimmed(), elapsed);
+                } else {
+                    print!("\r  {} {}", frame, msg.dimmed());
+                }
                 let _ = std::io::stdout().flush();
                 i += 1;
 
