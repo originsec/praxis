@@ -682,7 +682,10 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
                 refresh_completion_cache(&client, &cache, repl_state.selected_node.as_deref()).await;
             }
             Err(ReadlineError::Interrupted) => continue,
-            Err(ReadlineError::Eof) => break,
+            Err(ReadlineError::Eof) => {
+                println!();
+                break;
+            }
             Err(e) => {
                 crate::output::print_error(&format!("Input error: {}", e));
                 break;
