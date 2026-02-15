@@ -8,11 +8,13 @@ const STORAGE_KEY = 'praxis_feature_flags';
 export interface FeatureFlags {
   orchestrator: boolean;
   agentChat: boolean;
+  orchestratorExecutionTopology: boolean;
 }
 
 const defaultFlags: FeatureFlags = {
   orchestrator: true,
   agentChat: false,
+  orchestratorExecutionTopology: false,
 };
 
 //
@@ -79,6 +81,8 @@ interface PraxisDevtools {
   disableOrchestrator: () => void;
   enableAgentChat: () => void;
   disableAgentChat: () => void;
+  enableOrchestratorExecutionTopology: () => void;
+  disableOrchestratorExecutionTopology: () => void;
   getFlags: () => FeatureFlags;
 }
 
@@ -106,6 +110,18 @@ const devtools: PraxisDevtools = {
     saveFlags(currentFlags);
     notifyListeners();
     console.log('%c[Praxis] Agent Chat disabled. Refresh the page to see changes.', 'color: #ef4444');
+  },
+  enableOrchestratorExecutionTopology: () => {
+    currentFlags = { ...currentFlags, orchestratorExecutionTopology: true };
+    saveFlags(currentFlags);
+    notifyListeners();
+    console.log('%c[Praxis] Orchestrator execution topology enabled. Refresh the page to see changes.', 'color: #22c55e');
+  },
+  disableOrchestratorExecutionTopology: () => {
+    currentFlags = { ...currentFlags, orchestratorExecutionTopology: false };
+    saveFlags(currentFlags);
+    notifyListeners();
+    console.log('%c[Praxis] Orchestrator execution topology disabled. Refresh the page to see changes.', 'color: #ef4444');
   },
   getFlags: () => getFeatureFlags(),
 };
