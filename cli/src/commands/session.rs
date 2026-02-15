@@ -183,7 +183,9 @@ async fn send_prompt(client: &CliClient, node_prefix: &str, text: &str, output: 
 
 async fn interactive_prompt(client: &CliClient, node_prefix: &str, output: &OutputFormat) -> Result<()> {
     use colored::Colorize;
-    use std::io::Write;
+    use rustyline::error::ReadlineError;
+    use rustyline::history::DefaultHistory;
+    use rustyline::{Config, Editor};
 
     let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
     let node_id = find_node_id(&state, node_prefix)
@@ -203,104 +205,95 @@ async fn interactive_prompt(client: &CliClient, node_prefix: &str, output: &Outp
         return Err(anyhow!("No active session — create one first with 'session create'"));
     }
 
+    let config = Config::builder().build();
+    let mut rl: Editor<(), DefaultHistory> = Editor::with_config(config)?;
+
     println!();
-    println!("  {} {}", "Interactive session prompt".bold(), "(ctrl+c to exit)".dimmed());
+    println!("  {} {}", "Interactive session".bold(), "(ctrl+c to exit)".dimmed());
     println!();
+
+    let prompt = format!("  {} ", "▸".cyan());
 
     loop {
-        print!("  {} ", "▸".cyan());
-        let _ = std::io::stdout().flush();
-
-        //
-        // Read a line, treating ctrl+c as exit signal.
-        //
-
-        let line = tokio::select! {
-            line = tokio::task::spawn_blocking(|| {
-                let mut buf = String::new();
-                match std::io::stdin().read_line(&mut buf) {
-                    Ok(0) => None,
-                    Ok(_) => Some(buf),
-                    Err(_) => None,
+        match rl.readline(&prompt) {
+            Ok(line) => {
+                let text = line.trim();
+                if text.is_empty() {
+                    continue;
                 }
-            }) => {
-                match line {
-                    Ok(Some(l)) => l,
-                    _ => break,
+                let _ = rl.add_history_entry(text);
+
+                let transaction_id = uuid::Uuid::new_v4().to_string();
+                let cmd = NodeCmd::Session(NodeSessionCommand::Prompt {
+                    text: text.to_string(),
+                    transaction_id: transaction_id.clone(),
+                });
+
+                let spinner = if matches!(output, OutputFormat::Text) {
+                    Some(Spinner::start_with_elapsed("Thinking..."))
+                } else {
+                    None
+                };
+
+                let response = tokio::select! {
+                    result = client.send_command(&node_id, cmd) => {
+                        if let Some(s) = spinner { s.finish().await; }
+                        match result {
+                            Ok(r) => r,
+                            Err(e) => {
+                                crate::output::print_error(&e.to_string());
+                                continue;
+                            }
+                        }
+                    }
+                    _ = tokio::signal::ctrl_c() => {
+                        if let Some(s) = spinner { s.finish().await; }
+                        let cancel_cmd = NodeCmd::Session(NodeSessionCommand::CancelTransaction {
+                            transaction_id: transaction_id.clone(),
+                            force: true,
+                        });
+                        let _ = client.send_command(&node_id, cancel_cmd).await;
+                        println!();
+                        println!("  {}", "Cancelled".dimmed());
+                        continue;
+                    }
+                };
+
+                match response.result {
+                    NodeCommandResult::Session(SessionCommandResult::PromptResponse { response, .. }) => {
+                        match output {
+                            OutputFormat::Json => {
+                                print_json(&json!({
+                                    "status": "success",
+                                    "prompt": text,
+                                    "response": response
+                                }));
+                            }
+                            OutputFormat::Text => {
+                                println!();
+                                crate::output::print_markdown(&response);
+                                println!();
+                            }
+                        }
+                    }
+                    NodeCommandResult::Session(SessionCommandResult::TransactionCancelled { .. }) => {
+                        println!("  {}", "Cancelled".dimmed());
+                    }
+                    NodeCommandResult::Error { message } => {
+                        crate::output::print_error(&message);
+                    }
+                    _ => {
+                        crate::output::print_error("Unexpected response");
+                    }
                 }
             }
-            _ = tokio::signal::ctrl_c() => {
+            Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
                 println!();
                 break;
             }
-        };
-
-        let text = line.trim();
-        if text.is_empty() {
-            continue;
-        }
-
-        let transaction_id = uuid::Uuid::new_v4().to_string();
-        let cmd = NodeCmd::Session(NodeSessionCommand::Prompt {
-            text: text.to_string(),
-            transaction_id: transaction_id.clone(),
-        });
-
-        let spinner = if matches!(output, OutputFormat::Text) {
-            Some(Spinner::start_with_elapsed("Thinking..."))
-        } else {
-            None
-        };
-
-        let response = tokio::select! {
-            result = client.send_command(&node_id, cmd) => {
-                if let Some(s) = spinner { s.finish().await; }
-                match result {
-                    Ok(r) => r,
-                    Err(e) => {
-                        crate::output::print_error(&e.to_string());
-                        continue;
-                    }
-                }
-            }
-            _ = tokio::signal::ctrl_c() => {
-                if let Some(s) = spinner { s.finish().await; }
-                let cancel_cmd = NodeCmd::Session(NodeSessionCommand::CancelTransaction {
-                    transaction_id: transaction_id.clone(),
-                    force: true,
-                });
-                let _ = client.send_command(&node_id, cancel_cmd).await;
-                println!();
-                println!("  {}", "Cancelled".dimmed());
-                continue;
-            }
-        };
-
-        match response.result {
-            NodeCommandResult::Session(SessionCommandResult::PromptResponse { response, .. }) => {
-                match output {
-                    OutputFormat::Json => {
-                        print_json(&json!({
-                            "status": "success",
-                            "prompt": text,
-                            "response": response
-                        }));
-                    }
-                    OutputFormat::Text => {
-                        println!();
-                        crate::output::print_markdown(&response);
-                        println!();
-                    }
-                }
-            }
-            NodeCommandResult::Session(SessionCommandResult::TransactionCancelled { .. }) => {
-                println!("  {}", "Cancelled".dimmed());
-            }
-            NodeCommandResult::Error { message } => {
-                crate::output::print_error(&message);
-            }
-            _ => {
-                crate::output::print_error("Unexpected response");
+            Err(e) => {
+                crate::output::print_error(&format!("Input error: {}", e));
+                break;
             }
         }
     }
