@@ -1,9 +1,9 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use clap::Subcommand;
-use common::{ChainExecutionUpdate, SemanticOpStatus};
+use common::mcp::ops::{self, OpCancelResult, OpRunResult, OpInfoResult};
+use common::SemanticOpStatus;
 use serde_json::json;
-use std::time::Duration;
 
 use crate::client::CliClient;
 use crate::output::{format_short_id, format_status, print_error, print_header, print_json, print_markdown, print_success, OutputFormat};
@@ -31,8 +31,8 @@ pub enum OpCommand {
         working_dir: Option<String>,
     },
 
-    /// Check operation or chain status
-    Status {
+    /// Show operation or chain info
+    Info {
         /// Short ID
         short_id: String,
     },
@@ -53,29 +53,16 @@ pub async fn execute(client: &mut CliClient, command: OpCommand, output: &Output
         OpCommand::Run { name, node, agent, working_dir } => {
             run(client, &name, &node, &agent, working_dir, output).await
         }
-        OpCommand::Status { short_id } => get_status(client, &short_id, output).await,
+        OpCommand::Info { short_id } => get_info(client, &short_id, output).await,
         OpCommand::Cancel { short_id } => cancel(client, &short_id, output).await,
-        OpCommand::List => list_running(client, output).await,
+        OpCommand::List => list_tracked(client, output).await,
     }
 }
 
 async fn list_available(client: &CliClient, output: &OutputFormat) -> Result<()> {
+    let result = ops::list_available(client).await?;
 
-    //
-    // Fetch both operation and chain definitions concurrently.
-    //
-
-    client.request_op_def_list().await?;
-    client.request_chain_list().await?;
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    let op_defs = client.get_operation_definitions().await;
-    let chain_defs = client.get_chain_definitions().await;
-
-    let enabled_ops: Vec<_> = op_defs.iter().filter(|op| !op.disabled).collect();
-    let enabled_chains: Vec<_> = chain_defs.iter().filter(|c| !c.disabled).collect();
-
-    if enabled_ops.is_empty() && enabled_chains.is_empty() {
+    if result.operations.is_empty() && result.chains.is_empty() {
         match output {
             OutputFormat::Json => print_json(&json!({"operations": [], "chains": [], "count": 0})),
             OutputFormat::Text => print_error("No operations or chains available"),
@@ -85,7 +72,7 @@ async fn list_available(client: &CliClient, output: &OutputFormat) -> Result<()>
 
     match output {
         OutputFormat::Json => {
-            let ops_json: Vec<_> = enabled_ops.iter().map(|op| {
+            let ops_json: Vec<_> = result.operations.iter().map(|op| {
                 json!({
                     "type": "operation",
                     "category": op.category,
@@ -96,7 +83,7 @@ async fn list_available(client: &CliClient, output: &OutputFormat) -> Result<()>
                     "timeout": op.timeout
                 })
             }).collect();
-            let chains_json: Vec<_> = enabled_chains.iter().map(|c| {
+            let chains_json: Vec<_> = result.chains.iter().map(|c| {
                 json!({
                     "type": "chain",
                     "id": c.id,
@@ -117,12 +104,12 @@ async fn list_available(client: &CliClient, output: &OutputFormat) -> Result<()>
             }));
         }
         OutputFormat::Text => {
-            if !enabled_ops.is_empty() {
+            if !result.operations.is_empty() {
                 print_header("Available Operations");
                 println!();
 
                 let mut categories: std::collections::HashMap<&str, Vec<_>> = std::collections::HashMap::new();
-                for op in &enabled_ops {
+                for op in &result.operations {
                     categories.entry(&op.category).or_default().push(op);
                 }
 
@@ -137,15 +124,15 @@ async fn list_available(client: &CliClient, output: &OutputFormat) -> Result<()>
                     println!();
                 }
 
-                print_success(&format!("{} operation(s) available", enabled_ops.len()));
+                print_success(&format!("{} operation(s) available", result.operations.len()));
             }
 
-            if !enabled_chains.is_empty() {
+            if !result.chains.is_empty() {
                 print_header("Available Chains");
                 println!();
 
                 let mut categories: std::collections::HashMap<&str, Vec<_>> = std::collections::HashMap::new();
-                for chain in &enabled_chains {
+                for chain in &result.chains {
                     categories.entry(&chain.category).or_default().push(chain);
                 }
 
@@ -167,7 +154,7 @@ async fn list_available(client: &CliClient, output: &OutputFormat) -> Result<()>
                     println!();
                 }
 
-                print_success(&format!("{} chain(s) available", enabled_chains.len()));
+                print_success(&format!("{} chain(s) available", result.chains.len()));
             }
         }
     }
@@ -183,125 +170,48 @@ async fn run(
     working_dir: Option<String>,
     output: &OutputFormat,
 ) -> Result<()> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let result = ops::run(client, name, node_prefix, agent, working_dir).await?;
 
-    let node_id = state.nodes.iter()
-        .find(|n| n.node_id.to_lowercase().starts_with(&node_prefix.to_lowercase()))
-        .map(|n| n.node_id.clone())
-        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
-
-    //
-    // Try operation definitions first.
-    //
-
-    client.request_op_def_list().await?;
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    let op_defs = client.get_operation_definitions().await;
-    let operation = op_defs.iter().find(|op| {
-        op.full_name.to_lowercase() == name.to_lowercase() ||
-        op.short_name.to_lowercase() == name.to_lowercase() ||
-        format!("{}::{}", op.category, op.short_name).to_lowercase() == name.to_lowercase()
-    });
-
-    if let Some(operation) = operation {
-        let operation_id = client.run_semantic_op(
-            node_id,
-            agent.to_string(),
-            operation.full_name.clone(),
-            working_dir,
-        ).await?;
-
-        let short_id = format_short_id(&operation_id);
-
-        match output {
-            OutputFormat::Json => {
-                print_json(&json!({
-                    "status": "success",
-                    "operation_id": short_id,
-                    "operation_name": operation.name
-                }));
-            }
-            OutputFormat::Text => {
-                print_success(&format!("Operation queued: {} ({})", operation.name, short_id));
+    match result {
+        OpRunResult::Operation { id, name } => {
+            let short_id = format_short_id(&id);
+            match output {
+                OutputFormat::Json => {
+                    print_json(&json!({
+                        "status": "success",
+                        "operation_id": short_id,
+                        "operation_name": name
+                    }));
+                }
+                OutputFormat::Text => {
+                    print_success(&format!("Operation queued: {} ({})", name, short_id));
+                }
             }
         }
-
-        return Ok(());
-    }
-
-    //
-    // Not an operation — try chain definitions.
-    //
-
-    client.request_chain_list().await?;
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    let chain_defs = client.get_chain_definitions().await;
-    let chain = chain_defs.iter().find(|c| {
-        c.id.to_lowercase().starts_with(&name.to_lowercase()) ||
-        c.name.to_lowercase() == name.to_lowercase()
-    });
-
-    match chain {
-        Some(chain) => {
-            run_chain(client, chain, &node_id, agent, working_dir, output).await
-        }
-        None => {
-            Err(anyhow!("No operation or chain found matching '{}'", name))
-        }
-    }
-}
-
-async fn run_chain(
-    client: &CliClient,
-    chain: &common::ChainDefinitionInfo,
-    node_id: &str,
-    agent: &str,
-    working_dir: Option<String>,
-    output: &OutputFormat,
-) -> Result<()> {
-    client.run_chain(
-        chain.id.clone(),
-        node_id.to_string(),
-        agent.to_string(),
-        working_dir,
-    ).await?;
-
-    //
-    // Wait briefly and check for execution.
-    //
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    client.request_chain_execution_list().await?;
-    tokio::time::sleep(Duration::from_millis(300)).await;
-
-    let execs: Vec<ChainExecutionUpdate> = client.get_chain_executions().await;
-    let matching_exec = execs.iter()
-        .filter(|e| e.chain_id == chain.id && e.node_id == node_id)
-        .max_by_key(|e| e.started_at);
-
-    match output {
-        OutputFormat::Json => {
-            if let Some(exec) = matching_exec {
-                print_json(&json!({
-                    "status": "success",
-                    "execution_id": format_short_id(&exec.execution_id),
-                    "chain_name": chain.name
-                }));
-            } else {
-                print_json(&json!({
-                    "status": "success",
-                    "message": "Chain queued",
-                    "chain_name": chain.name
-                }));
-            }
-        }
-        OutputFormat::Text => {
-            if let Some(exec) = matching_exec {
-                print_success(&format!("Chain '{}' started ({})", chain.name, format_short_id(&exec.execution_id)));
-            } else {
-                print_success(&format!("Chain '{}' queued", chain.name));
+        OpRunResult::Chain { name, execution_id } => {
+            match output {
+                OutputFormat::Json => {
+                    if let Some(ref exec_id) = execution_id {
+                        print_json(&json!({
+                            "status": "success",
+                            "execution_id": format_short_id(exec_id),
+                            "chain_name": name
+                        }));
+                    } else {
+                        print_json(&json!({
+                            "status": "success",
+                            "message": "Chain queued",
+                            "chain_name": name
+                        }));
+                    }
+                }
+                OutputFormat::Text => {
+                    if let Some(ref exec_id) = execution_id {
+                        print_success(&format!("Chain '{}' started ({})", name, format_short_id(exec_id)));
+                    } else {
+                        print_success(&format!("Chain '{}' queued", name));
+                    }
+                }
             }
         }
     }
@@ -309,44 +219,23 @@ async fn run_chain(
     Ok(())
 }
 
-async fn get_status(client: &CliClient, short_id: &str, output: &OutputFormat) -> Result<()> {
+async fn get_info(client: &CliClient, short_id: &str, output: &OutputFormat) -> Result<()> {
+    let result = ops::get_info(client, short_id).await;
 
-    //
-    // Try semantic operations first.
-    //
-
-    client.request_semantic_op_list().await?;
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    let ops = client.get_operations().await;
-    let found_op = ops.iter().find(|op| op.operation_id.starts_with(short_id));
-
-    if let Some(op) = found_op {
-        return show_op_status(op, output);
+    match result {
+        Ok(OpInfoResult::Operation(op)) => show_op_info(&op, output),
+        Ok(OpInfoResult::Chain(exec)) => show_chain_info(&exec, output),
+        Err(e) => {
+            match output {
+                OutputFormat::Json => print_json(&json!({"status": "error", "message": format!("Not found: {}", short_id)})),
+                OutputFormat::Text => print_error(&format!("No operation or chain found matching '{}'", short_id)),
+            }
+            Err(e)
+        }
     }
-
-    //
-    // Not an operation — try chain executions.
-    //
-
-    client.request_chain_execution_list().await?;
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    let execs: Vec<ChainExecutionUpdate> = client.get_chain_executions().await;
-    let found_exec = execs.iter().find(|e| e.execution_id.starts_with(short_id));
-
-    if let Some(exec) = found_exec {
-        return show_chain_status(exec, output);
-    }
-
-    match output {
-        OutputFormat::Json => print_json(&json!({"status": "error", "message": format!("Not found: {}", short_id)})),
-        OutputFormat::Text => print_error(&format!("No operation or chain found matching '{}'", short_id)),
-    }
-    Err(anyhow!("Not found: {}", short_id))
 }
 
-fn show_op_status(op: &common::SemanticOpUpdate, output: &OutputFormat) -> Result<()> {
+fn show_op_info(op: &common::SemanticOpUpdate, output: &OutputFormat) -> Result<()> {
     let status_str = match op.status {
         SemanticOpStatus::Running => "Running",
         SemanticOpStatus::Queued => "Queued",
@@ -391,7 +280,7 @@ fn show_op_status(op: &common::SemanticOpUpdate, output: &OutputFormat) -> Resul
     Ok(())
 }
 
-fn show_chain_status(exec: &ChainExecutionUpdate, output: &OutputFormat) -> Result<()> {
+fn show_chain_info(exec: &common::ChainExecutionUpdate, output: &OutputFormat) -> Result<()> {
     let status_str = exec.status.to_string();
 
     match output {
@@ -452,62 +341,37 @@ fn show_chain_status(exec: &ChainExecutionUpdate, output: &OutputFormat) -> Resu
 }
 
 async fn cancel(client: &CliClient, short_id: &str, output: &OutputFormat) -> Result<()> {
+    let result = ops::cancel(client, short_id).await;
 
-    //
-    // Try semantic operations first.
-    //
-
-    let ops = client.get_operations().await;
-    let found_op = ops.iter().find(|op| op.operation_id.starts_with(short_id));
-
-    if let Some(op) = found_op {
-        client.cancel_semantic_op(op.operation_id.clone()).await?;
-
-        match output {
-            OutputFormat::Json => print_json(&json!({"status": "success", "message": format!("Cancel request sent for operation {}", short_id)})),
-            OutputFormat::Text => print_success(&format!("Cancel request sent for operation {}", short_id)),
+    match result {
+        Ok(OpCancelResult::Operation { id }) => {
+            match output {
+                OutputFormat::Json => print_json(&json!({"status": "success", "message": format!("Cancel request sent for operation {}", id)})),
+                OutputFormat::Text => print_success(&format!("Cancel request sent for operation {}", id)),
+            }
+            Ok(())
         }
-        return Ok(());
-    }
-
-    //
-    // Not an operation — try chain executions.
-    //
-
-    let execs: Vec<ChainExecutionUpdate> = client.get_chain_executions().await;
-    let found_exec = execs.iter().find(|e| e.execution_id.starts_with(short_id));
-
-    if let Some(exec) = found_exec {
-        client.cancel_chain(exec.execution_id.clone()).await?;
-
-        match output {
-            OutputFormat::Json => print_json(&json!({"status": "success", "message": format!("Cancel request sent for chain {}", short_id)})),
-            OutputFormat::Text => print_success(&format!("Cancel request sent for chain {}", short_id)),
+        Ok(OpCancelResult::Chain { id }) => {
+            match output {
+                OutputFormat::Json => print_json(&json!({"status": "success", "message": format!("Cancel request sent for chain {}", id)})),
+                OutputFormat::Text => print_success(&format!("Cancel request sent for chain {}", id)),
+            }
+            Ok(())
         }
-        return Ok(());
+        Err(e) => {
+            match output {
+                OutputFormat::Json => print_json(&json!({"status": "error", "message": format!("Not found: {}", short_id)})),
+                OutputFormat::Text => print_error(&format!("No operation or chain found matching '{}'", short_id)),
+            }
+            Err(e)
+        }
     }
-
-    match output {
-        OutputFormat::Json => print_json(&json!({"status": "error", "message": format!("Not found: {}", short_id)})),
-        OutputFormat::Text => print_error(&format!("No operation or chain found matching '{}'", short_id)),
-    }
-    Err(anyhow!("Not found: {}", short_id))
 }
 
-async fn list_running(client: &CliClient, output: &OutputFormat) -> Result<()> {
+async fn list_tracked(client: &CliClient, output: &OutputFormat) -> Result<()> {
+    let result = ops::list_tracked(client).await?;
 
-    //
-    // Fetch both operations and chain executions.
-    //
-
-    client.request_semantic_op_list().await?;
-    client.request_chain_execution_list().await?;
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    let ops = client.get_operations().await;
-    let execs: Vec<ChainExecutionUpdate> = client.get_chain_executions().await;
-
-    if ops.is_empty() && execs.is_empty() {
+    if result.operations.is_empty() && result.chains.is_empty() {
         match output {
             OutputFormat::Json => print_json(&json!({"operations": [], "chains": [], "count": 0})),
             OutputFormat::Text => print_error("No tracked operations or chains"),
@@ -517,7 +381,7 @@ async fn list_running(client: &CliClient, output: &OutputFormat) -> Result<()> {
 
     match output {
         OutputFormat::Json => {
-            let ops_json: Vec<_> = ops.iter().map(|op| {
+            let ops_json: Vec<_> = result.operations.iter().map(|op| {
                 let status_str = match op.status {
                     SemanticOpStatus::Running => "Running",
                     SemanticOpStatus::Queued => "Queued",
@@ -534,7 +398,7 @@ async fn list_running(client: &CliClient, output: &OutputFormat) -> Result<()> {
                     "queue_position": op.queue_position
                 })
             }).collect();
-            let execs_json: Vec<_> = execs.iter().map(|exec| {
+            let execs_json: Vec<_> = result.chains.iter().map(|exec| {
                 json!({
                     "type": "chain",
                     "id": format_short_id(&exec.execution_id),
@@ -553,11 +417,11 @@ async fn list_running(client: &CliClient, output: &OutputFormat) -> Result<()> {
             }));
         }
         OutputFormat::Text => {
-            if !ops.is_empty() {
+            if !result.operations.is_empty() {
                 print_header("Tracked Operations");
                 println!();
 
-                for op in &ops {
+                for op in &result.operations {
                     let status_str = match op.status {
                         SemanticOpStatus::Running => "Running",
                         SemanticOpStatus::Queued => "Queued",
@@ -576,14 +440,14 @@ async fn list_running(client: &CliClient, output: &OutputFormat) -> Result<()> {
                 }
 
                 println!();
-                print_success(&format!("{} operation(s) tracked", ops.len()));
+                print_success(&format!("{} operation(s) tracked", result.operations.len()));
             }
 
-            if !execs.is_empty() {
+            if !result.chains.is_empty() {
                 print_header("Tracked Chain Executions");
                 println!();
 
-                for exec in &execs {
+                for exec in &result.chains {
                     println!(
                         "  {} {} on {} [{}]",
                         format_short_id(&exec.execution_id),
@@ -594,7 +458,7 @@ async fn list_running(client: &CliClient, output: &OutputFormat) -> Result<()> {
                 }
 
                 println!();
-                print_success(&format!("{} chain execution(s) tracked", execs.len()));
+                print_success(&format!("{} chain execution(s) tracked", result.chains.len()));
             }
         }
     }

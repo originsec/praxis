@@ -205,7 +205,7 @@ fn detect_context(tokens: &[&str], trailing_space: bool) -> CompletionContext {
             ("node", "select") if completing_idx == 2 => return CompletionContext::NodeId,
             ("agent", "select") if completing_idx >= 2 => return CompletionContext::AgentName,
             ("op", "run") if completing_idx == 2 => return CompletionContext::OpName,
-            ("op", "status") | ("op", "cancel") if completing_idx == 2 => return CompletionContext::ShortId,
+            ("op", "info") | ("op", "cancel") if completing_idx == 2 => return CompletionContext::ShortId,
             _ => {}
         }
     }
@@ -412,7 +412,7 @@ fn print_help() {
         ("op available", "List available operations and chains"),
         ("op run <name>", "Run an operation or chain"),
         ("op list", "List tracked operations/chains"),
-        ("op status <id>", "Check operation/chain status"),
+        ("op info <id>", "Show operation/chain info"),
         ("op cancel <id>", "Cancel an operation/chain"),
         ("", ""),
         ("help", "Show this help"),

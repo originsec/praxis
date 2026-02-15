@@ -1037,8 +1037,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         )]))
     }
 
-    #[tool(description = "List available semantic operations")]
-    async fn op_list(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+    #[tool(description = "List available operations and chains")]
+    async fn op_available(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         self.get_client()
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
@@ -1047,31 +1047,53 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             .as_ref()
             .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
 
-        client
-            .request_op_def_list()
+        let result = super::ops::list_available(client)
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let defs = client.get_operation_definitions().await;
 
-        let ops: Vec<_> = defs
+        let ops: Vec<_> = result
+            .operations
             .iter()
             .map(|d| {
                 json!({
-                    "name": d.name,
+                    "type": "operation",
                     "category": d.category,
+                    "short_name": d.short_name,
+                    "full_name": d.full_name,
+                    "name": d.name,
                     "description": d.description
                 })
             })
             .collect();
 
+        let chains: Vec<_> = result
+            .chains
+            .iter()
+            .map(|c| {
+                json!({
+                    "type": "chain",
+                    "id": &c.id[..8.min(c.id.len())],
+                    "name": c.name,
+                    "description": c.description,
+                    "category": c.category,
+                    "element_count": c.element_count,
+                    "operation_count": c.operation_count
+                })
+            })
+            .collect();
+
         Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({ "operations": ops, "count": ops.len() }))
-                .unwrap(),
+            serde_json::to_string_pretty(&json!({
+                "operations": ops,
+                "chains": chains,
+                "operation_count": ops.len(),
+                "chain_count": chains.len()
+            }))
+            .unwrap(),
         )]))
     }
 
-    #[tool(description = "Run a semantic operation")]
+    #[tool(description = "Run a semantic operation or chain")]
     async fn op_run(
         &self,
         Parameters(params): Parameters<OpRunParams>,
@@ -1084,46 +1106,36 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             .as_ref()
             .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
 
-        let state = client
-            .get_state()
-            .await
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
-        let node = state
-            .nodes
-            .iter()
-            .find(|n| {
-                n.node_id
-                    .to_lowercase()
-                    .starts_with(&params.node.to_lowercase())
-            })
-            .ok_or_else(|| {
-                rmcp::ErrorData::internal_error(
-                    format!("No node found matching '{}'", params.node),
-                    None,
-                )
-            })?;
-
-        let op_id = client
-            .run_semantic_op(
-                node.node_id.clone(),
-                params.agent,
-                params.operation,
-                params.working_dir,
-            )
+        let result = super::ops::run(client, &params.name, &params.node, &params.agent, params.working_dir)
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
 
+        let response = match result {
+            super::ops::OpRunResult::Operation { id, name } => {
+                json!({
+                    "status": "success",
+                    "type": "operation",
+                    "id": &id[..8.min(id.len())],
+                    "name": name
+                })
+            }
+            super::ops::OpRunResult::Chain { name, execution_id } => {
+                json!({
+                    "status": "success",
+                    "type": "chain",
+                    "name": name,
+                    "execution_id": execution_id.as_deref().map(|id| &id[..8.min(id.len())])
+                })
+            }
+        };
+
         Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({
-                "status": "success",
-                "operation_id": &op_id[..8.min(op_id.len())]
-            }))
-            .unwrap(),
+            serde_json::to_string_pretty(&response).unwrap(),
         )]))
     }
 
-    #[tool(description = "Check status of a semantic operation")]
-    async fn op_status(
+    #[tool(description = "Show info for an operation or chain execution")]
+    async fn op_info(
         &self,
         Parameters(params): Parameters<ShortIdParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
@@ -1135,35 +1147,40 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             .as_ref()
             .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
 
-        client
-            .request_semantic_op_list()
+        let result = super::ops::get_info(client, &params.short_id)
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let ops = client.get_operations().await;
-        let found = ops
-            .iter()
-            .find(|o| o.operation_id.starts_with(&params.short_id));
 
-        match found {
-            Some(op) => Ok(CallToolResult::success(vec![Content::text(
-                serde_json::to_string_pretty(&json!({
-                    "operation_id": &op.operation_id[..8.min(op.operation_id.len())],
-                    "operation_name": op.spec.name,
+        let response = match result {
+            super::ops::OpInfoResult::Operation(op) => {
+                json!({
+                    "type": "operation",
+                    "id": &op.operation_id[..8.min(op.operation_id.len())],
+                    "name": op.spec.name,
                     "status": format!("{:?}", op.status),
                     "node_id": &op.node_id[..8.min(op.node_id.len())],
                     "agent": op.agent_short_name
-                }))
-                .unwrap(),
-            )])),
-            None => Err(rmcp::ErrorData::internal_error(
-                format!("Operation not found: {}", params.short_id),
-                None,
-            )),
-        }
+                })
+            }
+            super::ops::OpInfoResult::Chain(exec) => {
+                json!({
+                    "type": "chain",
+                    "id": &exec.execution_id[..8.min(exec.execution_id.len())],
+                    "chain_name": exec.chain_name,
+                    "status": exec.status.to_string(),
+                    "node_id": &exec.node_id[..8.min(exec.node_id.len())],
+                    "agent": exec.agent_short_name,
+                    "element_count": exec.elements.len()
+                })
+            }
+        };
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&response).unwrap(),
+        )]))
     }
 
-    #[tool(description = "Cancel a running semantic operation")]
+    #[tool(description = "Cancel a running operation or chain execution")]
     async fn op_cancel(
         &self,
         Parameters(params): Parameters<ShortIdParams>,
@@ -1176,34 +1193,30 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             .as_ref()
             .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
 
-        let ops = client.get_operations().await;
-        let found = ops
-            .iter()
-            .find(|o| o.operation_id.starts_with(&params.short_id));
+        let result = super::ops::cancel(client, &params.short_id)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
 
-        match found {
-            Some(op) => {
-                client
-                    .cancel_semantic_op(op.operation_id.clone())
-                    .await
-                    .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-                Ok(CallToolResult::success(vec![Content::text(
-                    serde_json::to_string_pretty(&json!({
-                        "status": "success",
-                        "message": format!("Cancel request sent for {}", params.short_id)
-                    }))
-                    .unwrap(),
-                )]))
+        let message = match result {
+            super::ops::OpCancelResult::Operation { id } => {
+                format!("Cancel request sent for operation {}", id)
             }
-            None => Err(rmcp::ErrorData::internal_error(
-                format!("Operation not found: {}", params.short_id),
-                None,
-            )),
-        }
+            super::ops::OpCancelResult::Chain { id } => {
+                format!("Cancel request sent for chain {}", id)
+            }
+        };
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&json!({
+                "status": "success",
+                "message": message
+            }))
+            .unwrap(),
+        )]))
     }
 
-    #[tool(description = "List running semantic operations")]
-    async fn op_running(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+    #[tool(description = "List running/tracked operations and chain executions")]
+    async fn op_list(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         self.get_client()
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
@@ -1212,19 +1225,18 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             .as_ref()
             .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
 
-        client
-            .request_semantic_op_list()
+        let result = super::ops::list_tracked(client)
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let ops = client.get_operations().await;
 
-        let running: Vec<_> = ops
+        let ops: Vec<_> = result
+            .operations
             .iter()
             .map(|o| {
                 json!({
-                    "operation_id": &o.operation_id[..8.min(o.operation_id.len())],
-                    "operation_name": o.spec.name,
+                    "type": "operation",
+                    "id": &o.operation_id[..8.min(o.operation_id.len())],
+                    "name": o.spec.name,
                     "status": format!("{:?}", o.status),
                     "node_id": &o.node_id[..8.min(o.node_id.len())],
                     "agent": o.agent_short_name
@@ -1232,230 +1244,30 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             })
             .collect();
 
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({ "operations": running, "count": running.len() }))
-                .unwrap(),
-        )]))
-    }
-
-    #[tool(description = "List available chains")]
-    async fn chain_list(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        client
-            .request_chain_list()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let chains = client.get_chain_definitions().await;
-
-        let enabled: Vec<_> = chains
-            .iter()
-            .filter(|c| !c.disabled)
-            .map(|c| {
-                json!({
-                    "id": &c.id[..8.min(c.id.len())],
-                    "name": c.name,
-                    "description": c.description,
-                    "category": c.category
-                })
-            })
-            .collect();
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({ "chains": enabled, "count": enabled.len() }))
-                .unwrap(),
-        )]))
-    }
-
-    #[tool(description = "Run a chain workflow")]
-    async fn chain_run(
-        &self,
-        Parameters(params): Parameters<ChainRunParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        let state = client
-            .get_state()
-            .await
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
-        let node = state
-            .nodes
-            .iter()
-            .find(|n| {
-                n.node_id
-                    .to_lowercase()
-                    .starts_with(&params.node.to_lowercase())
-            })
-            .ok_or_else(|| {
-                rmcp::ErrorData::internal_error(
-                    format!("No node found matching '{}'", params.node),
-                    None,
-                )
-            })?;
-
-        client
-            .request_chain_list()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let chains = client.get_chain_definitions().await;
-        let chain = chains
-            .iter()
-            .find(|c| {
-                c.id.to_lowercase()
-                    .starts_with(&params.chain_id.to_lowercase())
-                    || c.name.to_lowercase() == params.chain_id.to_lowercase()
-            })
-            .ok_or_else(|| {
-                rmcp::ErrorData::internal_error(
-                    format!("Chain not found: {}", params.chain_id),
-                    None,
-                )
-            })?;
-
-        client
-            .run_chain(
-                chain.id.clone(),
-                node.node_id.clone(),
-                params.agent,
-                params.working_dir,
-            )
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({ "status": "success", "chain_name": chain.name }))
-                .unwrap(),
-        )]))
-    }
-
-    #[tool(description = "Check status of a chain execution")]
-    async fn chain_status(
-        &self,
-        Parameters(params): Parameters<ShortIdParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        client
-            .request_chain_execution_list()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let execs = client.get_chain_executions().await;
-        let found = execs
-            .iter()
-            .find(|e| e.execution_id.starts_with(&params.short_id));
-
-        match found {
-            Some(exec) => Ok(CallToolResult::success(vec![Content::text(
-                serde_json::to_string_pretty(&json!({
-                    "execution_id": &exec.execution_id[..8.min(exec.execution_id.len())],
-                    "chain_name": exec.chain_name,
-                    "status": exec.status.to_string(),
-                    "node_id": &exec.node_id[..8.min(exec.node_id.len())],
-                    "agent": exec.agent_short_name,
-                    "element_count": exec.elements.len()
-                }))
-                .unwrap(),
-            )])),
-            None => Err(rmcp::ErrorData::internal_error(
-                format!("Chain execution not found: {}", params.short_id),
-                None,
-            )),
-        }
-    }
-
-    #[tool(description = "Cancel a running chain execution")]
-    async fn chain_cancel(
-        &self,
-        Parameters(params): Parameters<ShortIdParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        let execs = client.get_chain_executions().await;
-        let found = execs
-            .iter()
-            .find(|e| e.execution_id.starts_with(&params.short_id));
-
-        match found {
-            Some(exec) => {
-                client
-                    .cancel_chain(exec.execution_id.clone())
-                    .await
-                    .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-                Ok(CallToolResult::success(vec![Content::text(
-                    serde_json::to_string_pretty(&json!({
-                        "status": "success",
-                        "message": format!("Cancel request sent for {}", params.short_id)
-                    }))
-                    .unwrap(),
-                )]))
-            }
-            None => Err(rmcp::ErrorData::internal_error(
-                format!("Chain execution not found: {}", params.short_id),
-                None,
-            )),
-        }
-    }
-
-    #[tool(description = "List running chain executions")]
-    async fn chain_running(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        client
-            .request_chain_execution_list()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        let execs = client.get_chain_executions().await;
-
-        let running: Vec<_> = execs
+        let chains: Vec<_> = result
+            .chains
             .iter()
             .map(|e| {
                 json!({
-                    "execution_id": &e.execution_id[..8.min(e.execution_id.len())],
+                    "type": "chain",
+                    "id": &e.execution_id[..8.min(e.execution_id.len())],
                     "chain_name": e.chain_name,
                     "status": e.status.to_string(),
                     "node_id": &e.node_id[..8.min(e.node_id.len())],
-                    "agent": e.agent_short_name
+                    "agent": e.agent_short_name,
+                    "element_count": e.elements.len()
                 })
             })
             .collect();
 
         Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({ "executions": running, "count": running.len() }))
-                .unwrap(),
+            serde_json::to_string_pretty(&json!({
+                "operations": ops,
+                "chains": chains,
+                "operation_count": ops.len(),
+                "chain_count": chains.len()
+            }))
+            .unwrap(),
         )]))
     }
 }

@@ -325,19 +325,12 @@ The MCP server exposes the following tools:
 - `session_prompt` - Send a prompt to the active session
 - `session_close` - Close the active session
 
-**Operations:**
-- `op_list` - List available semantic operations
-- `op_run` - Run a semantic operation
-- `op_status` - Check operation status
-- `op_cancel` - Cancel a running operation
-- `op_running` - List all running operations
-
-**Chains:**
-- `chain_list` - List available chains
-- `chain_run` - Run a chain workflow
-- `chain_status` - Check chain execution status
-- `chain_cancel` - Cancel a running chain
-- `chain_running` - List all running chain executions
+**Operations & Chains:**
+- `op_available` - List available operations and chains
+- `op_run` - Run an operation or chain
+- `op_info` - Show info for an operation or chain execution
+- `op_cancel` - Cancel a running operation or chain execution
+- `op_list` - List tracked operations and chain executions
 
 **Traffic:**
 - `traffic_search` - Search intercepted traffic
