@@ -7,38 +7,123 @@ The Praxis CLI (`praxis_cli`) provides a command-line interface for interacting 
 The CLI is designed for **external agent orchestration** and **programmatic exploration** of the Praxis network. It is not intended to replace the web interface at this stage - not all features are available in the CLI.
 
 Primary use cases:
+- Interactive REPL for hands-on exploration and control
 - Scripting and automation
 - Integration with external AI agents (via MCP server mode)
 - Headless environments without GUI access
-- Quick operations from the command line
 
 ## Installation
 
-The CLI is installed automatically with the standard Praxis installation scripts:
+The CLI is installed automatically with the native installation scripts:
 
 ```bash
 # Linux/macOS
 curl -fsSL https://praxis.originhq.com/install.sh | bash
-
-# Windows (PowerShell)
-irm https://praxis.originhq.com/install.ps1 | iex
 ```
 
 The binary is installed to `~/.praxis/bin/praxis_cli`.
 
-## Getting Help
+When using Docker, the CLI binary is built into the container image and copied to the data volume on startup. You can extract it with:
 
-View basic help:
 ```bash
-praxis_cli --help
+docker cp praxis-praxis-1:/app/praxis_cli ./praxis_cli
 ```
 
-View comprehensive help for all commands:
-```bash
-praxis_cli --fullhelp
+## Interactive REPL (Default Mode)
+
+Running `praxis_cli` with no arguments launches an interactive REPL:
+
+```
+$ praxis_cli
+
+    ____                  _
+   / __ \_________ __  __(_)____
+  / /_/ / ___/ __ `/ |/_/ / ___/
+ / ____/ /  / /_/ />  </ (__  )
+/_/   /_/   \__,_/_/|_/_/____/
+
+  praxis 0.9.3 | client 953da792 | 1 node(s)
+  amqp://praxis:praxis@localhost:5672
+  Type help for commands, exit (or ctrl+d) to quit
+
+praxis [b3bf7460:claudecode *] ❯
 ```
 
-The `--fullhelp` option outputs documentation for every command and subcommand, including all available options and arguments.
+### Selection State
+
+The REPL tracks your selected node, agent, and active session. The prompt updates to reflect the current state:
+
+```
+praxis ❯                                 # nothing selected
+praxis [b3bf7460] ❯                      # node selected
+praxis [b3bf7460:claudecode] ❯           # node + agent
+praxis [b3bf7460:claudecode *] ❯         # node + agent + active session
+```
+
+Select a node and agent:
+
+```
+praxis ❯ node select b3bf7460
+✓ Selected node: b3bf7460 (kaplan-ws-linux)
+
+praxis [b3bf7460] ❯ agent select claudecode
+✓ Selected agent: claudecode
+
+praxis [b3bf7460:claudecode] ❯
+```
+
+On startup, if there is exactly one active node, it is auto-selected along with any existing agent selection and session state.
+
+### Implicit Flag Injection
+
+Once a node and agent are selected, the `-n` and `-a` flags are injected automatically. You don't need to pass them for every command:
+
+```
+praxis [b3bf7460:claudecode] ❯ session create
+✓ Session created: a1b2c3d4
+
+praxis [b3bf7460:claudecode *] ❯ session prompt "list files"
+```
+
+This is equivalent to typing `session create -n b3bf7460` and `session prompt -n b3bf7460 "list files"`. You can always override by passing the flag explicitly.
+
+### Tab Completion
+
+The REPL provides context-aware tab completion:
+
+- **Command names**: `op<TAB>` → `op`, `node<TAB>` → `node`
+- **Node IDs**: `node select <TAB>` shows connected node IDs
+- **Agent names**: `agent select <TAB>` shows discovered agent names
+- **Operation names**: `op run <TAB>` shows available operations and chains
+- **Short IDs**: `op status <TAB>` shows tracked operation/chain IDs
+- **Flag values**: `-n <TAB>` shows node IDs, `-a <TAB>` shows agent names
+
+The completion cache refreshes after every command.
+
+### Error Messages
+
+The REPL provides contextual error messages instead of raw usage text:
+
+```
+praxis ❯ session prompt "hi"
+✗ No node selected. Use 'node select <id>' first, or pass -n <id>.
+```
+
+## One-Shot Mode
+
+Use `-C` to run a single command and exit:
+
+```bash
+praxis_cli -C "node list"
+praxis_cli -C "op run recon::system_info -n abc123 -a claudecode"
+```
+
+For backwards compatibility, subcommands can also be passed directly:
+
+```bash
+praxis_cli node list
+praxis_cli op run recon::system_info --node abc123 --agent claudecode
+```
 
 ## Global Options
 
@@ -47,6 +132,7 @@ The `--fullhelp` option outputs documentation for every command and subcommand, 
 | `-r, --rabbitmq` | RabbitMQ URL | `amqp://praxis:praxis@localhost:5672` |
 | `-o, --output` | Output format (`text` or `json`) | `text` |
 | `-t, --timeout` | Command timeout in seconds | `300` |
+| `-C, --command` | Run a single command and exit | - |
 | `--fullhelp` | Show comprehensive help | - |
 | `--clear` | Clear local state and exit | - |
 | `--status` | Check service connection status | - |
@@ -54,139 +140,97 @@ The `--fullhelp` option outputs documentation for every command and subcommand, 
 
 The RabbitMQ URL can also be set via the `PRAXIS_RABBITMQ_URL` environment variable.
 
-## Local State
-
-The CLI stores persistent state in `~/.praxis/cli.json`. This file contains:
-
-- **client_id**: A unique identifier for this CLI instance, used for RabbitMQ queue routing
-
-The client ID is generated on first run and reused for subsequent executions. This allows the Praxis service to maintain consistent communication with the CLI across sessions.
-
-To reset local state:
-```bash
-praxis_cli --clear
-```
-
-This removes `~/.praxis/cli.json`, causing a new client ID to be generated on the next run.
-
-## Checking Connection Status
-
-Verify the CLI can connect to the Praxis service:
-
-```bash
-praxis_cli --status
-```
-
-This connects to RabbitMQ, registers with the service, and displays connection information including the number of connected nodes.
-
 ## Commands
 
 ### Node Management
 
 ```bash
 # List all connected nodes
-praxis_cli node list
+node list
 
 # Select a node by ID prefix
-praxis_cli node select abc123
+node select abc123
 ```
 
 ### Agent Management
 
 ```bash
 # List agents on a node
-praxis_cli agent list --node abc123
+agent list
 
 # Select an agent
-praxis_cli agent select --node abc123 claudecode
+agent select claudecode
 
 # Request agent info update
-praxis_cli agent update --node abc123
+agent update
 
 # Perform reconnaissance
-praxis_cli agent recon --node abc123
-praxis_cli agent recon-semantic --node abc123
+agent recon
+agent recon-semantic
 
 # Read/write/grep config content
-praxis_cli agent config read --node abc123 /home/user/.codex/config.toml
-praxis_cli agent config read --node abc123 /home/user/.codex/config.toml --line-start 1 --line-end 50
-praxis_cli agent config write --node abc123 /home/user/.codex/config.toml "new content"
-praxis_cli agent config grep --node abc123 /home/user/.codex/config.toml "model|profile"
+agent config read /home/user/.codex/config.toml
+agent config read /home/user/.codex/config.toml --line-start 1 --line-end 50
+agent config write /home/user/.codex/config.toml "new content"
+agent config grep /home/user/.codex/config.toml "model|profile"
 
 # Read/grep session content
-praxis_cli agent session read --node abc123 /home/user/.codex/sessions/2026-02-13.jsonl
-praxis_cli agent session grep --node abc123 /home/user/.codex/sessions/2026-02-13.jsonl "error|warning"
+agent session read /home/user/.codex/sessions/2026-02-13.jsonl
+agent session grep /home/user/.codex/sessions/2026-02-13.jsonl "error|warning"
 ```
 
 ### Sessions
 
 ```bash
 # Create a session with YOLO mode and working directory
-praxis_cli session create --node abc123 --yolo --project /path/to/project
+session create --yolo --project /path/to/project
 
 # Send a prompt
-praxis_cli session prompt --node abc123 "list files in current directory"
+session prompt "list files in current directory"
 
 # Close session
-praxis_cli session close --node abc123
+session close
 ```
 
 Session options:
 - `--yolo`: Enable YOLO mode (auto-approve actions)
 - `--project <PATH>`: Set the working directory for the session
 
-### Semantic Operations
+### Operations and Chains
+
+Operations and chains are managed under the `op` command. When running or checking status, the CLI searches both operations and chains automatically.
 
 ```bash
-# List available operations
-praxis_cli op list
+# List available operations and chains
+op available
 
 # Run an operation
-praxis_cli op run recon::system_info --node abc123 --agent claudecode
+op run recon::system_info
+
+# Run a chain (same command — chains are matched by name or ID)
+op run full_recon_chain
 
 # Run with working directory
-praxis_cli op run recon::system_info --node abc123 --agent claudecode --working-dir /path/to/project
+op run recon::system_info --working-dir /path/to/project
 
-# Check status
-praxis_cli op status abc123
+# List tracked (running/completed) operations and chains
+op list
 
-# List running operations
-praxis_cli op running
+# Check status of an operation or chain execution
+op status abc123
 
-# Cancel an operation
-praxis_cli op cancel abc123
-```
-
-### Chains
-
-```bash
-# List available chains
-praxis_cli chain list
-
-# Run a chain
-praxis_cli chain run mychain --node abc123 --agent claudecode
-
-# Run with working directory
-praxis_cli chain run mychain --node abc123 --agent claudecode --working-dir /path/to/project
-
-# Check status
-praxis_cli chain status abc123
-
-# List running executions
-praxis_cli chain running
-
-# Cancel an execution
-praxis_cli chain cancel abc123
+# Cancel a running operation or chain
+op cancel abc123
 ```
 
 ### Traffic Search
 
 ```bash
 # Search intercepted traffic
-praxis_cli traffic search "api\.openai\.com" --limit 20
+traffic search "api\.openai\.com" --limit 20
 
 # Filter by node and agent
-praxis_cli traffic search "Bearer" --node abc123 --agent claudecode
+traffic search "Bearer" --node abc123 --agent claudecode
 ```
 
 ## JSON Output
@@ -194,7 +238,20 @@ praxis_cli traffic search "Bearer" --node abc123 --agent claudecode
 Use `--output json` for machine-readable output:
 
 ```bash
-praxis_cli --output json node list | jq '.nodes[].node_id'
+praxis_cli -o json -C "node list" | jq '.nodes[].node_id'
+```
+
+## Local State
+
+The CLI stores persistent state in `~/.praxis/cli.json`. This file contains:
+
+- **client_id**: A unique identifier for this CLI instance, used for RabbitMQ queue routing
+
+The client ID is generated on first run and reused for subsequent executions.
+
+To reset local state:
+```bash
+praxis_cli --clear
 ```
 
 ## MCP Server Mode
