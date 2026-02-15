@@ -229,6 +229,7 @@ enum CompletionContext {
     ProjectPath,
     ConfigPath,
     SessionPath,
+    ReconSection,
 }
 
 fn detect_context(tokens: &[&str], trailing_space: bool) -> CompletionContext {
@@ -268,6 +269,9 @@ fn detect_context(tokens: &[&str], trailing_space: bool) -> CompletionContext {
             }
             ("recon", "session-read") | ("recon", "session-grep") if completing_idx == 2 => {
                 return CompletionContext::SessionPath;
+            }
+            ("recon", "list") if completing_idx == 2 => {
+                return CompletionContext::ReconSection;
             }
             _ => {}
         }
@@ -336,6 +340,10 @@ impl PraxisCompleter {
             CompletionContext::ProjectPath => cache.project_paths.clone(),
             CompletionContext::ConfigPath => cache.config_paths.clone(),
             CompletionContext::SessionPath => cache.session_paths.clone(),
+            CompletionContext::ReconSection => {
+                vec!["all", "sessions", "tools", "projects", "configs"]
+                    .into_iter().map(|s| s.to_string()).collect()
+            }
             CompletionContext::Command => Vec::new(),
         }
     }
@@ -806,6 +814,31 @@ async fn handle_recon_path_picker(
 }
 
 //
+// Intercept "recon list" with no section — show a picker.
+//
+
+fn handle_recon_list_picker(
+    tokens: &mut Vec<String>,
+    rl: &mut Editor<PraxisCompleter, DefaultHistory>,
+) {
+    if tokens.first().map(|s| s.as_str()) != Some("recon") { return; }
+    if tokens.get(1).map(|s| s.as_str()) != Some("list") { return; }
+    if has_positional_path(tokens) { return; }
+
+    let sections = vec![
+        "all".to_string(),
+        "sessions".to_string(),
+        "tools".to_string(),
+        "projects".to_string(),
+        "configs".to_string(),
+    ];
+
+    if let Some(section) = interactive_pick(&sections, "Select a section:", rl) {
+        tokens.push(section);
+    }
+}
+
+//
 // Intercept "agent select" with no short_name — show a picker.
 //
 
@@ -1006,6 +1039,7 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
                 }
 
                 handle_recon_path_picker(&mut tokens, &repl_state, &client, &mut rl).await;
+                handle_recon_list_picker(&mut tokens, &mut rl);
                 handle_agent_select_picker(&mut tokens, &repl_state, &client, &mut rl).await;
                 handle_node_select_picker(&mut tokens, &client, &mut rl).await;
 

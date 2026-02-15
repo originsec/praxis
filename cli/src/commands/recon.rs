@@ -101,6 +101,7 @@ pub enum ReconCommand {
 
 #[derive(Clone, ValueEnum)]
 pub enum ReconListSection {
+    All,
     Sessions,
     Tools,
     Projects,
@@ -235,7 +236,7 @@ async fn recon_list(
         .await?
         .ok_or_else(|| anyhow!("No stored recon for {}:{}", node_prefix, agent_name))?;
 
-    let show_all = section.is_none();
+    let show_all = section.is_none() || matches!(section, Some(ReconListSection::All));
 
     match output {
         OutputFormat::Json => {
