@@ -1936,6 +1936,49 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
         }
 
         //
+        // Orchestrator messages.
+        //
+        ClientSignalMessage::OrchestratorStart { client_id } => {
+            info!(
+                "Received OrchestratorStart from client {}",
+                &client_id[..8.min(client_id.len())]
+            );
+            ctx.orchestrator_manager
+                .start_session(&client_id, &ctx.service_config, &ctx.client_publish_channel)
+                .await;
+        }
+
+        ClientSignalMessage::OrchestratorPrompt { client_id, message } => {
+            info!(
+                "Received OrchestratorPrompt from client {}",
+                &client_id[..8.min(client_id.len())]
+            );
+            ctx.orchestrator_manager
+                .send_prompt(&client_id, message, &ctx.client_publish_channel)
+                .await;
+        }
+
+        ClientSignalMessage::OrchestratorStop { client_id } => {
+            info!(
+                "Received OrchestratorStop from client {}",
+                &client_id[..8.min(client_id.len())]
+            );
+            ctx.orchestrator_manager
+                .stop_session(&client_id, &ctx.client_publish_channel)
+                .await;
+        }
+
+        ClientSignalMessage::OrchestratorCancel { client_id } => {
+            info!(
+                "Received OrchestratorCancel from client {}",
+                &client_id[..8.min(client_id.len())]
+            );
+            ctx.orchestrator_manager
+                .cancel_inference(&client_id, &ctx.client_publish_channel)
+                .await;
+        }
+
+        //
         // AgentChat messages.
         //
         ClientSignalMessage::AgentChatStart {

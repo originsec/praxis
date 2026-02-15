@@ -10,6 +10,7 @@ mod hunting;
 mod mcp;
 mod messaging;
 mod agent_chat;
+mod orchestrator;
 mod semantic_helpers;
 mod semantic_ops;
 mod state;
@@ -46,6 +47,7 @@ use database::{Database, DatabaseConfig};
 use dispatch::ServiceContext;
 use handlers::{ClientMessageHandler, NodeMessageHandler};
 use agent_chat::AgentChatManager;
+use orchestrator::OrchestratorManager;
 use config::service_config::APPLICATION_LOGS_ENABLED;
 use semantic_ops::{SemanticOpsManager, ResponseTracker, ChainExecutor};
 use state::{NodeRegistry, ClientRegistry, PendingCommands};
@@ -303,6 +305,12 @@ async fn run_main_loop() -> Result<()> {
         pending_commands.clone(),
     ));
     info!("Initialized AgentChat manager");
+
+    //
+    // Initialize Orchestrator manager.
+    //
+    let orchestrator_manager = Arc::new(OrchestratorManager::new());
+    info!("Initialized Orchestrator manager");
 
     //
     // Initialize event logging system.
@@ -566,6 +574,7 @@ async fn run_main_loop() -> Result<()> {
         semantic_ops_manager,
         chain_executor,
         agent_chat_manager,
+        orchestrator_manager,
         mcp_manager,
         publish_channel,
         client_publish_channel,

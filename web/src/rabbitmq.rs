@@ -548,6 +548,39 @@ impl RabbitMqClient {
     }
 
     //
+    // Orchestrator methods.
+    //
+
+    pub async fn start_orchestrator(&self) -> Result<()> {
+        let message = ClientSignalMessage::OrchestratorStart {
+            client_id: self.state.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn send_orchestrator_prompt(&self, prompt: String) -> Result<()> {
+        let message = ClientSignalMessage::OrchestratorPrompt {
+            client_id: self.state.client_id.clone(),
+            message: prompt,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn stop_orchestrator(&self) -> Result<()> {
+        let message = ClientSignalMessage::OrchestratorStop {
+            client_id: self.state.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn cancel_orchestrator(&self) -> Result<()> {
+        let message = ClientSignalMessage::OrchestratorCancel {
+            client_id: self.state.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    //
     // AgentChat methods.
     //
 
@@ -1034,6 +1067,37 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::HuntingQueryError { message } => {
                 self.state.broadcast(ServerMessage::HuntingQueryError { message });
+            }
+
+            //
+            // Orchestrator responses.
+            //
+            ClientDirectMessage::OrchestratorStarted => {
+                self.state.broadcast(ServerMessage::OrchestratorStarted);
+            }
+            ClientDirectMessage::OrchestratorContent { content } => {
+                self.state.broadcast(ServerMessage::OrchestratorContent { content });
+            }
+            ClientDirectMessage::OrchestratorToolExecuting { name, input } => {
+                self.state.broadcast(ServerMessage::OrchestratorToolExecuting { name, input });
+            }
+            ClientDirectMessage::OrchestratorToolExecuted { name, display, success, result } => {
+                self.state.broadcast(ServerMessage::OrchestratorToolExecuted { name, display, success, result });
+            }
+            ClientDirectMessage::OrchestratorPlanUpdated { plan } => {
+                self.state.broadcast(ServerMessage::OrchestratorPlanUpdated { plan });
+            }
+            ClientDirectMessage::OrchestratorDone => {
+                self.state.broadcast(ServerMessage::OrchestratorDone);
+            }
+            ClientDirectMessage::OrchestratorStopped => {
+                self.state.broadcast(ServerMessage::OrchestratorStopped);
+            }
+            ClientDirectMessage::OrchestratorError { message } => {
+                self.state.broadcast(ServerMessage::OrchestratorError { message });
+            }
+            ClientDirectMessage::OrchestratorTokenUsage { prompt_tokens, completion_tokens, total_tokens } => {
+                self.state.broadcast(ServerMessage::OrchestratorTokenUsage { prompt_tokens, completion_tokens, total_tokens });
             }
 
             //

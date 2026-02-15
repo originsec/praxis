@@ -42,6 +42,7 @@ struct ClientState {
     operation_definitions: Vec<OperationDefinitionInfo>,
     chain_definitions: Vec<ChainDefinitionInfo>,
     chain_executions: Vec<ChainExecutionUpdate>,
+    orchestrator_event_tx: Option<tokio::sync::mpsc::UnboundedSender<ClientDirectMessage>>,
 }
 
 struct ReconGetResult {
@@ -270,6 +271,24 @@ impl CliClient {
                     is_semantic,
                 });
             }
+
+            //
+            // Forward orchestrator events to subscriber if present.
+            //
+            msg @ (ClientDirectMessage::OrchestratorStarted
+                | ClientDirectMessage::OrchestratorContent { .. }
+                | ClientDirectMessage::OrchestratorToolExecuting { .. }
+                | ClientDirectMessage::OrchestratorToolExecuted { .. }
+                | ClientDirectMessage::OrchestratorPlanUpdated { .. }
+                | ClientDirectMessage::OrchestratorDone
+                | ClientDirectMessage::OrchestratorStopped
+                | ClientDirectMessage::OrchestratorError { .. }
+                | ClientDirectMessage::OrchestratorTokenUsage { .. }) => {
+                if let Some(ref tx) = state.orchestrator_event_tx {
+                    let _ = tx.send(msg);
+                }
+            }
+
             _ => {}
         }
     }
@@ -600,6 +619,61 @@ impl CliClient {
 
     pub async fn get_cached_session_paths(&self) -> Vec<String> {
         self.state.lock().await.cached_session_paths.clone()
+    }
+
+    //
+    // Orchestrator methods.
+    //
+
+    pub fn subscribe_orchestrator_events(&self) -> tokio::sync::mpsc::UnboundedReceiver<ClientDirectMessage> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        //
+        // Store the sender synchronously via a blocking lock. The consumer
+        // task holds the async lock only briefly, so this won't deadlock.
+        //
+        let state = self.state.clone();
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let mut state = state.lock().await;
+                state.orchestrator_event_tx = Some(tx);
+            });
+        });
+        rx
+    }
+
+    pub async fn unsubscribe_orchestrator_events(&self) {
+        let mut state = self.state.lock().await;
+        state.orchestrator_event_tx = None;
+    }
+
+    pub async fn start_orchestrator(&self) -> Result<()> {
+        let message = ClientSignalMessage::OrchestratorStart {
+            client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn send_orchestrator_prompt(&self, prompt: String) -> Result<()> {
+        let message = ClientSignalMessage::OrchestratorPrompt {
+            client_id: self.client_id.clone(),
+            message: prompt,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn stop_orchestrator(&self) -> Result<()> {
+        let message = ClientSignalMessage::OrchestratorStop {
+            client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn cancel_orchestrator(&self) -> Result<()> {
+        let message = ClientSignalMessage::OrchestratorCancel {
+            client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
     }
 }
 

@@ -262,6 +262,31 @@ op status abc123
 op cancel abc123
 ```
 
+### Orchestrator
+
+The `orchestrate` command starts an interactive LLM orchestrator session. The orchestrator is an AI tool-calling loop that coordinates operations across your nodes using the service's MCP tools.
+
+```bash
+# Start interactive orchestrator session
+orchestrate
+```
+
+Once started, you enter a prompt loop:
+- Type a prompt and press Enter to send it to the orchestrator
+- The orchestrator will execute tools, show plans, and stream responses
+- **Ctrl+C** during inference cancels the current request (session stays active)
+- **Ctrl+C** or **Ctrl+D** at the prompt exits the session
+
+The orchestrator displays:
+- Tool executions with success/failure indicators
+- Execution plans with step progress (not started / in progress / done)
+- Token usage statistics
+- Final responses rendered as markdown
+
+Prerequisites:
+- MCP server must be enabled in Settings
+- An LLM model must be configured for the Orchestrator feature in Settings > LLM Providers > Feature Selection
+
 ### Traffic Search
 
 ```bash
@@ -424,6 +449,7 @@ The CLI currently supports a subset of Praxis features focused on orchestration:
 - Node and agent management
 - Sessions and prompts
 - Semantic operations and chains
+- Interactive LLM orchestrator
 - Traffic search
 - MCP server mode for AI assistant integration
 

@@ -10,7 +10,7 @@ use super::WsState;
 pub async fn handle_browser_message(
     text: &str,
     state: &Arc<WsState>,
-    connection_id: &str,
+    _connection_id: &str,
 ) -> anyhow::Result<()> {
     let message: BrowserMessage = match serde_json::from_str(text) {
         Ok(m) => m,
@@ -90,16 +90,16 @@ pub async fn handle_browser_message(
             state.rabbitmq.get_op_def(full_name).await?;
         }
         BrowserMessage::OrchestratorStart => {
-            super::handle_orchestrator_start(state, connection_id).await?;
+            state.rabbitmq.start_orchestrator().await?;
         }
         BrowserMessage::OrchestratorPrompt { message } => {
-            super::handle_orchestrator_prompt(state, connection_id, &message).await?;
+            state.rabbitmq.send_orchestrator_prompt(message).await?;
         }
         BrowserMessage::OrchestratorStop => {
-            super::handle_orchestrator_stop(state, connection_id).await?;
+            state.rabbitmq.stop_orchestrator().await?;
         }
         BrowserMessage::OrchestratorCancel => {
-            super::handle_orchestrator_cancel(state, connection_id).await?;
+            state.rabbitmq.cancel_orchestrator().await?;
         }
 
         //

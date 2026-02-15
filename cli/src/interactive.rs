@@ -500,6 +500,7 @@ fn print_help() {
         ("op list", "List tracked operations/chains"),
         ("op info <id>", "Show operation/chain info"),
         ("op cancel <id>", "Cancel an operation/chain"),
+        ("orchestrate", "Interactive LLM orchestrator session"),
         ("", ""),
         ("help", "Show this help"),
         ("clear", "Clear the screen"),

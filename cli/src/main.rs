@@ -98,6 +98,9 @@ pub(crate) enum Commands {
         #[command(subcommand)]
         command: OpCommand,
     },
+
+    /// Interactive LLM orchestrator session
+    Orchestrate,
 }
 
 impl Commands {
@@ -117,6 +120,7 @@ impl Commands {
                 commands::traffic::execute(client, command, output).await
             }
             Commands::Op { command } => commands::op::execute(client, command, output).await,
+            Commands::Orchestrate => commands::orchestrate::execute(client).await,
         }
     }
 }
@@ -141,7 +145,7 @@ fn print_fullhelp() {
     //
     // Print help for each subcommand.
     //
-    let subcommands = ["node", "agent", "recon", "session", "traffic", "op"];
+    let subcommands = ["node", "agent", "recon", "session", "traffic", "op", "orchestrate"];
 
     for sub_name in subcommands {
         println!("================================================================================");
