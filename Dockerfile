@@ -40,6 +40,7 @@ RUN npm run build
 # ==============================================================================
 FROM chef AS builder
 ARG SKIP_NODE_BUILD=0
+ARG SKIP_WEB_BUILD=0
 ARG CARGO_PROFILE=release
 
 RUN apt-get update && apt-get install -y pkg-config libssl-dev \
@@ -65,7 +66,11 @@ RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
         cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_node && \
         cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_node --target x86_64-pc-windows-gnu; \
     fi && \
-    cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_service -p praxis_web
+    if [ "$SKIP_WEB_BUILD" = "1" ]; then \
+        cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_service; \
+    else \
+        cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_service -p praxis_web; \
+    fi
 
 # ==============================================================================
 # Stage 5: Build application (only recompiles on source changes)
@@ -104,10 +109,15 @@ RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
     fi
 
 #
-# Build service and web binaries.
+# Build service (and web unless headless).
 #
 
-RUN cargo build --profile "$CARGO_PROFILE" -p praxis_service -p praxis_web
+RUN if [ "$SKIP_WEB_BUILD" = "1" ]; then \
+        cargo build --profile "$CARGO_PROFILE" -p praxis_service && \
+        touch "target/$CARGO_PROFILE/praxis_web"; \
+    else \
+        cargo build --profile "$CARGO_PROFILE" -p praxis_service -p praxis_web; \
+    fi
 
 # ==============================================================================
 # Stage 6: Runtime image
