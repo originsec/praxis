@@ -946,6 +946,7 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
     // to stay in the handler chain.
     //
 
+    #[cfg(unix)]
     let _sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
 
     let mut cli_state = crate::state::CliState::load()?;

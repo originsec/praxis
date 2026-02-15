@@ -103,6 +103,7 @@ pub enum Type {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum Literal {
     Bool(Option<bool>),
     DateTime(Option<DateTime>),
