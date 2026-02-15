@@ -3,6 +3,7 @@ use colored::Colorize;
 use rustyline::error::ReadlineError;
 use rustyline::history::DefaultHistory;
 use rustyline::{Config, Editor};
+use std::io::Write;
 use tokio::sync::mpsc;
 
 use common::{ClientDirectMessage, OrchestratorPlan, PlanStepStatus};
@@ -106,6 +107,9 @@ async fn process_events_until_done(
 ) {
     let mut spinner: Option<Spinner> = None;
     let mut accumulated_content = String::new();
+    let mut total_prompt_tokens: u32 = 0;
+    let mut total_completion_tokens: u32 = 0;
+    let mut total_tokens: u32 = 0;
 
     //
     // Install Ctrl+C handler for cancelling inference.
@@ -138,6 +142,11 @@ async fn process_events_until_done(
                         if let Some(s) = spinner.take() {
                             s.finish().await;
                         }
+                        //
+                        // Clear in-place token line before spinner takes over.
+                        //
+                        print!("\r\x1B[2K");
+                        let _ = std::io::stdout().flush();
                         spinner = Some(Spinner::start_with_elapsed(&format!("◆ {}", name)));
                     }
                     ClientDirectMessage::OrchestratorToolExecuted { name, display, success, .. } => {
@@ -151,11 +160,21 @@ async fn process_events_until_done(
                         if let Some(s) = spinner.take() {
                             s.finish().await;
                         }
+                        print!("\r\x1B[2K");
+                        let _ = std::io::stdout().flush();
                         render_plan(&plan);
                     }
-                    ClientDirectMessage::OrchestratorTokenUsage { prompt_tokens, completion_tokens, total_tokens } => {
-                        let usage = format!("tokens: {} prompt + {} completion = {}", prompt_tokens, completion_tokens, total_tokens);
-                        println!("  {}", usage.dimmed());
+                    ClientDirectMessage::OrchestratorTokenUsage { prompt_tokens, completion_tokens, total_tokens: batch_total } => {
+                        total_prompt_tokens += prompt_tokens;
+                        total_completion_tokens += completion_tokens;
+                        total_tokens += batch_total;
+
+                        //
+                        // Update token counter in-place below the prompt line.
+                        //
+                        let usage = format!("  tokens: {} prompt + {} completion = {}", total_prompt_tokens, total_completion_tokens, total_tokens);
+                        print!("\r\x1B[2K{}", usage.dimmed());
+                        let _ = std::io::stdout().flush();
                     }
                     ClientDirectMessage::OrchestratorError { message } => {
                         if let Some(s) = spinner.take() {
@@ -166,6 +185,13 @@ async fn process_events_until_done(
                     ClientDirectMessage::OrchestratorDone => {
                         if let Some(s) = spinner.take() {
                             s.finish().await;
+                        }
+
+                        //
+                        // Finalize the in-place token counter line.
+                        //
+                        if total_tokens > 0 {
+                            println!();
                         }
 
                         //
