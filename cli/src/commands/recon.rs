@@ -231,9 +231,16 @@ async fn recon_list(
     let agent_name = resolve_agent_short_name(&state, &node_id, agent)
         .ok_or_else(|| anyhow!("No agent selected and --agent not provided"))?;
 
+    let spinner = if matches!(output, OutputFormat::Text) {
+        Some(Spinner::start("Fetching recon data..."))
+    } else {
+        None
+    };
     let recon = client
         .get_recon_result(&node_id, &agent_name)
-        .await?
+        .await;
+    if let Some(s) = spinner { s.finish().await; }
+    let recon = recon?
         .ok_or_else(|| anyhow!("No stored recon for {}:{}", node_prefix, agent_name))?;
 
     let show_all = section.is_none() || matches!(section, Some(ReconListSection::All));
@@ -354,7 +361,14 @@ async fn read_file(
         line_start,
         line_end,
     });
-    let response = client.send_command(&node_id, cmd).await?;
+    let spinner = if matches!(output, OutputFormat::Text) {
+        Some(Spinner::start("Reading file..."))
+    } else {
+        None
+    };
+    let response = client.send_command(&node_id, cmd).await;
+    if let Some(s) = spinner { s.finish().await; }
+    let response = response?;
 
     match response.result {
         NodeCommandResult::Agent(AgentCommandResult::ReadFileResult {
@@ -427,7 +441,14 @@ async fn grep_file(
         path: path.to_string(),
         pattern: pattern.to_string(),
     });
-    let response = client.send_command(&node_id, cmd).await?;
+    let spinner = if matches!(output, OutputFormat::Text) {
+        Some(Spinner::start("Searching..."))
+    } else {
+        None
+    };
+    let response = client.send_command(&node_id, cmd).await;
+    if let Some(s) = spinner { s.finish().await; }
+    let response = response?;
 
     match response.result {
         NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
