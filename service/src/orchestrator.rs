@@ -502,7 +502,7 @@ fn get_local_tool_definitions() -> Vec<Tool> {
                 "properties": {
                     "seconds": {
                         "type": "integer",
-                        "description": "Number of seconds to wait (1-60)"
+                        "description": "Number of seconds to wait (1-15)"
                     }
                 },
                 "required": ["seconds"]
@@ -558,8 +558,8 @@ async fn execute_local_tool(tool_name: &str, tool_input: &Value) -> Option<Strin
             if seconds < 1 {
                 return Some(json!({"status": "error", "message": "seconds must be at least 1", "display": "Error: seconds >= 1"}).to_string());
             }
-            if seconds > 60 {
-                return Some(json!({"status": "error", "message": "seconds cannot exceed 60", "display": "Error: seconds <= 60"}).to_string());
+            if seconds > 15 {
+                return Some(json!({"status": "error", "message": "seconds cannot exceed 15", "display": "Error: seconds <= 15"}).to_string());
             }
 
             tokio::time::sleep(std::time::Duration::from_secs(seconds as u64)).await;

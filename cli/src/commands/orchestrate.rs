@@ -114,6 +114,7 @@ async fn process_events_until_done(
 ) {
     let mut spinner: Option<Spinner> = None;
     let mut accumulated_content = String::new();
+    let mut tool_calls: Vec<(String, bool)> = Vec::new();
     let mut total_prompt_tokens: u32 = 0;
     let mut total_completion_tokens: u32 = 0;
     let mut total_tokens: u32 = 0;
@@ -159,13 +160,12 @@ async fn process_events_until_done(
                             spinner = Some(Spinner::start_with_elapsed(&format!("◆ {}", name)));
                         }
                     }
-                    ClientDirectMessage::OrchestratorToolExecuted { name, display, success, .. } => {
+                    ClientDirectMessage::OrchestratorToolExecuted { name, success, .. } => {
                         if name != "report_plan" {
                             if let Some(s) = spinner.take() {
                                 s.finish().await;
                             }
-                            let icon = if success { "✓".green() } else { "✗".red() };
-                            println!("  {} {} {}", icon, name.dimmed(), display);
+                            tool_calls.push((name, success));
                         }
                     }
                     ClientDirectMessage::OrchestratorPlanUpdated { plan } => {
@@ -204,6 +204,11 @@ async fn process_events_until_done(
                         //
                         if total_tokens > 0 {
                             println!();
+                        }
+
+                        if !tool_calls.is_empty() {
+                            render_tool_summary(&tool_calls);
+                            tool_calls.clear();
                         }
 
                         //
@@ -260,6 +265,44 @@ async fn process_events_until_done(
     }
 
     ctrlc_handle.abort();
+}
+
+fn render_tool_summary(tool_calls: &[(String, bool)]) {
+    let total = tool_calls.len();
+    let failures = tool_calls.iter().filter(|(_, ok)| !ok).count();
+
+    //
+    // Count occurrences in first-seen order.
+    //
+
+    let mut counts: Vec<(&str, usize)> = Vec::new();
+    for (name, _) in tool_calls {
+        if let Some(entry) = counts.iter_mut().find(|(n, _)| *n == name) {
+            entry.1 += 1;
+        } else {
+            counts.push((name, 1));
+        }
+    }
+
+    let parts: Vec<String> = counts.iter().map(|(name, count)| {
+        if *count > 1 {
+            format!("{} \u{00d7}{}", name, count)
+        } else {
+            name.to_string()
+        }
+    }).collect();
+
+    let icon = if failures == 0 { "\u{2713}".green() } else { "\u{2717}".red() };
+    let label = if total == 1 { "tool call" } else { "tool calls" };
+
+    if failures > 0 {
+        println!(
+            "  {} {} {} ({}) \u{00b7} {} failed",
+            icon, total, label, parts.join(", "), failures
+        );
+    } else {
+        println!("  {} {} {} ({})", icon, total, label, parts.join(", "));
+    }
 }
 
 fn render_plan(plan: &OrchestratorPlan) {
