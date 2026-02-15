@@ -123,7 +123,7 @@ function PlanDisplay({ plan }: { plan: OrchestratorPlan }) {
 //
 function ToolExecutionItem({ exec }: { exec: OrchestratorToolExecution }) {
   const [expanded, setExpanded] = useState(false);
-  const canExpand = !exec.executing && exec.result;
+  const canExpand = exec.input || exec.result;
 
   return (
     <div
@@ -148,20 +148,31 @@ function ToolExecutionItem({ exec }: { exec: OrchestratorToolExecution }) {
         <span className="font-mono">{exec.name}</span>
         {!exec.executing && <span className="text-[var(--text-highlight)]/60">- {exec.display}</span>}
       </div>
-      {exec.input && (
-        <div className="mt-1 ml-5 pl-2 border-l border-current/30 text-[var(--text-highlight)]/60 italic">
-          {exec.input}
-        </div>
-      )}
-      {expanded && exec.result && (
-        <div className="mt-2 ml-5 p-2 bg-[var(--bg-primary)] rounded border border-subtle text-[var(--text-muted)] font-mono text-[10px] overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
-          {(() => {
-            try {
-              return JSON.stringify(JSON.parse(exec.result), null, 2);
-            } catch {
-              return exec.result;
-            }
-          })()}
+      {expanded && (
+        <div className="mt-2 ml-5 space-y-2">
+          {exec.input && (
+            <div className="p-2 bg-[var(--bg-primary)] rounded border border-subtle text-[var(--text-muted)] font-mono text-[10px] overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
+              <span className="text-[var(--text-highlight)]/40 select-none">input: </span>
+              {(() => {
+                try {
+                  return JSON.stringify(JSON.parse(exec.input), null, 2);
+                } catch {
+                  return exec.input;
+                }
+              })()}
+            </div>
+          )}
+          {exec.result && (
+            <div className="p-2 bg-[var(--bg-primary)] rounded border border-subtle text-[var(--text-muted)] font-mono text-[10px] overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
+              {(() => {
+                try {
+                  return JSON.stringify(JSON.parse(exec.result), null, 2);
+                } catch {
+                  return exec.result;
+                }
+              })()}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -340,8 +351,9 @@ export function OrchestratorPage() {
   // Fetch config on mount to check if Orchestrator is configured.
   //
   useEffect(() => {
+    if (!state.connected) return;
     getConfig(['llm_feature_orchestrator', 'llm_model_definitions']);
-  }, [getConfig]);
+  }, [state.connected, getConfig]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });

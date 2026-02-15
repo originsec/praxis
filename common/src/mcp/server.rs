@@ -100,7 +100,7 @@ macro_rules! resolve_node {
             })
             .ok_or_else(|| {
                 rmcp::ErrorData::internal_error(
-                    format!("No node found matching '{}'", $node_prefix),
+                    format!("No node found matching '{}'. Use node_list to see connected nodes.", $node_prefix),
                     None,
                 )
             })?;
@@ -129,7 +129,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let state = client.get_state().await
-            .ok_or_else(|| mcp_err("No state available"))?;
+            .ok_or_else(|| mcp_err("No state available. The service may still be starting — try again in a moment."))?;
         let nodes: Vec<_> = state.nodes.iter().map(|n| {
             json!({
                 "node_id": n.node_id,
@@ -152,10 +152,10 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let state = client.get_state().await
-            .ok_or_else(|| mcp_err("No state available"))?;
+            .ok_or_else(|| mcp_err("No state available. The service may still be starting — try again in a moment."))?;
         let node = state.nodes.iter()
             .find(|n| n.node_id.to_lowercase().starts_with(&params.prefix.to_lowercase()))
-            .ok_or_else(|| mcp_err(format!("No node found matching '{}'", params.prefix)))?;
+            .ok_or_else(|| mcp_err(format!("No node found matching '{}'. Use node_list to see connected nodes.", params.prefix)))?;
 
         json_result(json!({
             "node_id": node.node_id,
@@ -175,10 +175,10 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let state = client.get_state().await
-            .ok_or_else(|| mcp_err("No state available"))?;
+            .ok_or_else(|| mcp_err("No state available. The service may still be starting — try again in a moment."))?;
         let node = state.nodes.iter()
             .find(|n| n.node_id.to_lowercase().starts_with(&params.node.to_lowercase()))
-            .ok_or_else(|| mcp_err(format!("No node found matching '{}'", params.node)))?;
+            .ok_or_else(|| mcp_err(format!("No node found matching '{}'. Use node_list to see connected nodes.", params.node)))?;
 
         let agents: Vec<_> = node.discovered_agents.iter().map(|a| {
             json!({

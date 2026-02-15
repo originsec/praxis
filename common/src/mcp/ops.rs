@@ -52,7 +52,7 @@ pub fn resolve_node_id(state: &SystemState, prefix: &str) -> Result<String> {
                 .starts_with(&prefix.to_lowercase())
         })
         .map(|n| n.node_id.clone())
-        .ok_or_else(|| anyhow!("No node found matching '{}'", prefix))
+        .ok_or_else(|| anyhow!("No node found matching '{}'. Use node_list to see connected nodes.", prefix))
 }
 
 //
@@ -66,7 +66,7 @@ fn resolve_selected_agent(state: &SystemState, node_id: &str) -> Result<String> 
         .find(|n| n.node_id == node_id)
         .and_then(|n| n.selected_agent.as_ref())
         .map(|a| a.short_name.clone())
-        .ok_or_else(|| anyhow!("No agent selected on node"))
+        .ok_or_else(|| anyhow!("No agent selected on node. Use agent_select to select one first."))
 }
 
 //
@@ -110,7 +110,7 @@ pub async fn run(
     let state = client
         .get_state()
         .await
-        .ok_or_else(|| anyhow!("No state available"))?;
+        .ok_or_else(|| anyhow!("No state available. The service may still be starting — try again in a moment."))?;
     let node_id = resolve_node_id(&state, node_prefix)?;
 
     //
@@ -187,7 +187,7 @@ pub async fn run(
                 execution_id,
             })
         }
-        None => Err(anyhow!("No operation or chain found matching '{}'", name)),
+        None => Err(anyhow!("No operation or chain found matching '{}'. Use op_available to list what's available.", name)),
     }
 }
 
@@ -226,7 +226,7 @@ pub async fn get_info(
     }
 
     Err(anyhow!(
-        "No operation or chain execution found matching '{}'",
+        "No operation or chain execution found matching '{}'. Use op_list to see tracked executions.",
         short_id
     ))
 }
@@ -257,7 +257,7 @@ pub async fn cancel(
     }
 
     Err(anyhow!(
-        "No operation or chain execution found matching '{}'",
+        "No operation or chain execution found matching '{}'. Use op_list to see tracked executions.",
         short_id
     ))
 }
@@ -296,12 +296,12 @@ pub async fn recon_list(
     agent: &str,
     section: Option<&str>,
 ) -> Result<ReconListResult> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available. The service may still be starting — try again in a moment."))?;
     let node_id = resolve_node_id(&state, node_prefix)?;
     let recon = client
         .get_stored_recon(&node_id, agent)
         .await?
-        .ok_or_else(|| anyhow!("No stored recon for {}:{}", node_prefix, agent))?;
+        .ok_or_else(|| anyhow!("No stored recon for {}:{}. Run recon_run first to discover files and tools.", node_prefix, agent))?;
 
     let show_all = section.is_none() || section == Some("all");
 
@@ -386,13 +386,13 @@ pub async fn recon_read_all(
     line_start: Option<usize>,
     line_end: Option<usize>,
 ) -> Result<Vec<ReadFileResult>> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available. The service may still be starting — try again in a moment."))?;
     let node_id = resolve_node_id(&state, node_prefix)?;
     let agent = resolve_selected_agent(&state, &node_id)?;
     let recon = client
         .get_stored_recon(&node_id, &agent)
         .await?
-        .ok_or_else(|| anyhow!("No stored recon data — run recon first"))?;
+        .ok_or_else(|| anyhow!("No stored recon data. Run recon_run first, then select an agent with agent_select."))?;
 
     let paths: Vec<String> = match file_type {
         AgentFileType::Config => recon.config.iter().map(|c| c.path.clone()).collect(),
@@ -400,7 +400,7 @@ pub async fn recon_read_all(
     };
 
     if paths.is_empty() {
-        return Err(anyhow!("No files found in recon data"));
+        return Err(anyhow!("No files found in recon data. Run recon_run to discover files."));
     }
 
     let mut results = Vec::new();
@@ -463,13 +463,13 @@ pub async fn recon_grep_all(
     file_type: AgentFileType,
     pattern: &str,
 ) -> Result<Vec<GrepFileResult>> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available. The service may still be starting — try again in a moment."))?;
     let node_id = resolve_node_id(&state, node_prefix)?;
     let agent = resolve_selected_agent(&state, &node_id)?;
     let recon = client
         .get_stored_recon(&node_id, &agent)
         .await?
-        .ok_or_else(|| anyhow!("No stored recon data — run recon first"))?;
+        .ok_or_else(|| anyhow!("No stored recon data. Run recon_run first, then select an agent with agent_select."))?;
 
     let paths: Vec<String> = match file_type {
         AgentFileType::Config => recon.config.iter().map(|c| c.path.clone()).collect(),
@@ -477,7 +477,7 @@ pub async fn recon_grep_all(
     };
 
     if paths.is_empty() {
-        return Err(anyhow!("No files found in recon data"));
+        return Err(anyhow!("No files found in recon data. Run recon_run to discover files."));
     }
 
     let mut results = Vec::new();
