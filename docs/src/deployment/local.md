@@ -13,8 +13,15 @@ docker compose up --build
 This starts:
 - RabbitMQ on port 5672 (management UI on 15672)
 - Praxis service and web on port 8080
+- MCP server on port 8585 (when enabled in Settings > MCP Server)
 
 Open http://localhost:8080 to access the UI.
+
+To use a different MCP server port:
+
+```bash
+PRAXIS_MCP_PORT=9090 docker compose up --build
+```
 
 ### With PostgreSQL
 

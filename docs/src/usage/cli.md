@@ -42,7 +42,7 @@ $ praxis_cli
  / ____/ /  / /_/ />  </ (__  )
 /_/   /_/   \__,_/_/|_/_/____/
 
-  praxis 0.9.3 | client 953da792 | 1 node(s)
+  praxis 0.9.4 | client 953da792 | 1 node(s)
   amqp://praxis:praxis@localhost:5672
   Type help for commands, exit (or ctrl+d) to quit
 
