@@ -205,9 +205,8 @@ async fn select_agent(client: &CliClient, node_prefix: &str, short_name: &str, o
             Ok(())
         }
         NodeCommandResult::Error { message } => {
-            match output {
-                OutputFormat::Json => print_json(&json!({"status": "error", "message": message})),
-                OutputFormat::Text => print_error(&message),
+            if matches!(output, OutputFormat::Json) {
+                print_json(&json!({"status": "error", "message": message}));
             }
             Err(anyhow!("{}", message))
         }
@@ -231,9 +230,8 @@ async fn update_agent(client: &CliClient, node_prefix: &str, output: &OutputForm
             Ok(())
         }
         NodeCommandResult::Error { message } => {
-            match output {
-                OutputFormat::Json => print_json(&json!({"status": "error", "message": message})),
-                OutputFormat::Text => print_error(&message),
+            if matches!(output, OutputFormat::Json) {
+                print_json(&json!({"status": "error", "message": message}));
             }
             Err(anyhow!("{}", message))
         }
@@ -298,9 +296,8 @@ async fn recon_agent(client: &CliClient, node_prefix: &str, semantic: bool, outp
             Ok(())
         }
         NodeCommandResult::Error { message } => {
-            match output {
-                OutputFormat::Json => print_json(&json!({"status": "error", "message": message})),
-                OutputFormat::Text => print_error(&message),
+            if matches!(output, OutputFormat::Json) {
+                print_json(&json!({"status": "error", "message": message}));
             }
             Err(anyhow!("{}", message))
         }
@@ -351,7 +348,6 @@ async fn read_file(
                 }
                 OutputFormat::Text => {
                     if let Some(error) = error {
-                        print_error(&error);
                         return Err(anyhow!(error));
                     }
                     let title = match result_file_type {
@@ -375,9 +371,8 @@ async fn read_file(
             Ok(())
         }
         NodeCommandResult::Error { message } => {
-            match output {
-                OutputFormat::Json => print_json(&json!({"status": "error", "message": message})),
-                OutputFormat::Text => print_error(&message),
+            if matches!(output, OutputFormat::Json) {
+                print_json(&json!({"status": "error", "message": message}));
             }
             Err(anyhow!("{}", message))
         }
@@ -425,7 +420,6 @@ async fn write_file(
                         print_success("Write complete");
                     } else {
                         let msg = error.unwrap_or_else(|| "Write failed".to_string());
-                        print_error(&msg);
                         return Err(anyhow!(msg));
                     }
                 }
@@ -433,9 +427,8 @@ async fn write_file(
             Ok(())
         }
         NodeCommandResult::Error { message } => {
-            match output {
-                OutputFormat::Json => print_json(&json!({"status": "error", "message": message})),
-                OutputFormat::Text => print_error(&message),
+            if matches!(output, OutputFormat::Json) {
+                print_json(&json!({"status": "error", "message": message}));
             }
             Err(anyhow!("{}", message))
         }
@@ -483,7 +476,6 @@ async fn grep_file(
                 }
                 OutputFormat::Text => {
                     if let Some(error) = error {
-                        print_error(&error);
                         return Err(anyhow!(error));
                     }
                     let title = match result_file_type {
@@ -506,9 +498,8 @@ async fn grep_file(
             Ok(())
         }
         NodeCommandResult::Error { message } => {
-            match output {
-                OutputFormat::Json => print_json(&json!({"status": "error", "message": message})),
-                OutputFormat::Text => print_error(&message),
+            if matches!(output, OutputFormat::Json) {
+                print_json(&json!({"status": "error", "message": message}));
             }
             Err(anyhow!("{}", message))
         }

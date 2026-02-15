@@ -112,15 +112,10 @@ async fn select_node(client: &CliClient, prefix: &str, output: &OutputFormat) ->
             Ok(())
         }
         None => {
-            match output {
-                OutputFormat::Json => {
-                    print_json(&json!({"status": "error", "message": format!("No node found matching '{}'", prefix)}));
-                }
-                OutputFormat::Text => {
-                    print_error(&format!("No node found matching '{}'", prefix));
-                }
+            if matches!(output, OutputFormat::Json) {
+                print_json(&json!({"status": "error", "message": format!("No node found matching '{}'", prefix)}));
             }
-            Err(anyhow!("Node not found"))
+            Err(anyhow!("No node found matching '{}'", prefix))
         }
     }
 }

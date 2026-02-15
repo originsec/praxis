@@ -118,16 +118,29 @@ struct CompletionCache {
     chain_exec_ids: Vec<String>,
 }
 
-async fn refresh_completion_cache(client: &CliClient, cache: &Arc<Mutex<CompletionCache>>) {
+async fn refresh_completion_cache(client: &CliClient, cache: &Arc<Mutex<CompletionCache>>, selected_node: Option<&str>) {
     let mut node_ids = Vec::new();
     let mut agent_names = Vec::new();
 
     if let Some(state) = client.get_state().await {
         for node in &state.nodes {
-            node_ids.push(format_short_id(&node.node_id));
-            for agent in &node.discovered_agents {
-                if !agent_names.contains(&agent.short_name) {
-                    agent_names.push(agent.short_name.clone());
+            let short = format_short_id(&node.node_id);
+            node_ids.push(short.clone());
+
+            //
+            // Only show agents from the selected node. If no node is selected,
+            // show agents from all nodes.
+            //
+
+            let show_agents = selected_node
+                .map(|sel| node.node_id.starts_with(sel) || short == sel)
+                .unwrap_or(true);
+
+            if show_agents {
+                for agent in &node.discovered_agents {
+                    if !agent_names.contains(&agent.short_name) {
+                        agent_names.push(agent.short_name.clone());
+                    }
                 }
             }
         }
@@ -428,11 +441,6 @@ fn print_help() {
         }
     }
     println!();
-    println!(
-        "  {} Flags {}/{} are injected automatically from selection state.",
-        "Tip:".bold(), "-n".green(), "-a".green()
-    );
-    println!();
 }
 
 //
@@ -482,59 +490,67 @@ fn inject_defaults(tokens: &mut Vec<String>, state: &ReplState) {
 // After a successful command, update ReplState based on what was run.
 //
 
-fn update_state_after_command(
+//
+// Handle node select from tokens (client-side state only).
+//
+
+fn handle_node_select(
     tokens: &[String],
     state: &mut ReplState,
-    client_state: Option<&common::SystemState>,
+    sys_state: Option<&common::SystemState>,
 ) {
-    let cmd = tokens.first().map(|s| s.as_str()).unwrap_or("");
-    let sub = tokens.get(1).map(|s| s.as_str()).unwrap_or("");
+    if let Some(prefix) = tokens.get(2) {
+        if let Some(sys_state) = sys_state {
+            let search = prefix.to_lowercase();
+            if let Some(node) = sys_state.nodes.iter()
+                .find(|n| n.node_id.to_lowercase().starts_with(&search))
+            {
+                state.selected_node = Some(node.node_id.clone());
+            }
+        }
+    }
+}
 
-    match (cmd, sub) {
-        ("node", "select") => {
-            //
-            // Resolve the prefix from SystemState to get the full node_id.
-            //
-            if let Some(prefix) = tokens.get(2) {
-                if let Some(sys_state) = client_state {
-                    let search = prefix.to_lowercase();
-                    if let Some(node) = sys_state.nodes.iter()
-                        .find(|n| n.node_id.to_lowercase().starts_with(&search))
-                    {
-                        state.selected_node = Some(node.node_id.clone());
-                        state.selected_agent = None;
-                        state.has_session = false;
-                    }
-                }
-            }
-        }
-        ("agent", "select") => {
-            //
-            // Find the agent short_name from tokens. It's the positional
-            // arg (not preceded by a flag).
-            //
-            let mut i = 2;
-            while i < tokens.len() {
-                if tokens[i] == "-n" || tokens[i] == "--node" {
-                    i += 2; // skip flag + value
-                } else {
-                    state.selected_agent = Some(tokens[i].clone());
-                    break;
-                }
-                i += 1;
-            }
-        }
-        ("session", "create") => {
-            state.has_session = true;
-        }
-        ("session", "close") => {
-            state.has_session = false;
-        }
-        _ => {}
+//
+// Sync REPL state (agent, session) from the server's SystemState.
+// This ensures the prompt always reflects reality regardless of
+// whether commands succeeded or failed.
+//
+
+fn sync_repl_state(state: &mut ReplState, sys_state: Option<&common::SystemState>) {
+    let Some(sys_state) = sys_state else { return };
+    let Some(ref node_id) = state.selected_node else {
+        state.selected_agent = None;
+        state.has_session = false;
+        return;
+    };
+
+    let Some(node) = sys_state.nodes.iter().find(|n| n.node_id == *node_id) else {
+        state.selected_node = None;
+        state.selected_agent = None;
+        state.has_session = false;
+        return;
+    };
+
+    if let Some(ref agent) = node.selected_agent {
+        state.selected_agent = Some(agent.short_name.clone());
+        state.has_session = agent.session_id.is_some();
+    } else {
+        state.selected_agent = None;
+        state.has_session = false;
     }
 }
 
 pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) -> Result<()> {
+    //
+    // Install the SIGINT handler early so Ctrl+C during command execution
+    // doesn't terminate the process. Rustyline saves/restores signal handlers
+    // around readline(), so this must be installed before rustyline starts
+    // to stay in the handler chain.
+    //
+
+    let _sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+
     let mut cli_state = crate::state::CliState::load()?;
     let client_id = cli_state.get_or_create_client_id()?;
     let short_id = client_id[..8.min(client_id.len())].to_string();
@@ -547,7 +563,9 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
     print_banner(&short_id, node_count, rabbitmq_url);
 
     let cache = Arc::new(Mutex::new(CompletionCache::default()));
-    refresh_completion_cache(&client, &cache).await;
+    let mut repl_state = ReplState::default();
+
+    refresh_completion_cache(&client, &cache, repl_state.selected_node.as_deref()).await;
 
     let config = Config::builder()
         .completion_type(CompletionType::List)
@@ -559,8 +577,6 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
     if let Some(path) = history_path() {
         let _ = rl.load_history(&path);
     }
-
-    let mut repl_state = ReplState::default();
 
     //
     // Auto-select if there's exactly one active node (seen within 60s).
@@ -619,19 +635,29 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
                     Ok(parsed) => {
                         println!();
                         let result = parsed.command.execute(&mut client, &output).await;
-                        println!();
+
+                        let sys_state = client.get_state().await;
 
                         if result.is_ok() {
-                            let sys_state = client.get_state().await;
-                            update_state_after_command(
-                                &shell_split(trimmed),
-                                &mut repl_state,
-                                sys_state.as_ref(),
-                            );
+                            println!();
+                            let toks = shell_split(trimmed);
+                            if toks.first().map(|s| s.as_str()) == Some("node")
+                                && toks.get(1).map(|s| s.as_str()) == Some("select")
+                            {
+                                handle_node_select(&toks, &mut repl_state, sys_state.as_ref());
+                            }
                         }
+
+                        //
+                        // Always sync agent/session state from the server so
+                        // the prompt reflects reality after every command.
+                        //
+
+                        sync_repl_state(&mut repl_state, sys_state.as_ref());
 
                         if let Err(e) = result {
                             crate::output::print_error(&e.to_string());
+                            println!();
                         }
                     }
                     Err(e) => {
@@ -653,10 +679,13 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
                     }
                 }
 
-                refresh_completion_cache(&client, &cache).await;
+                refresh_completion_cache(&client, &cache, repl_state.selected_node.as_deref()).await;
             }
             Err(ReadlineError::Interrupted) => continue,
-            Err(ReadlineError::Eof) => break,
+            Err(ReadlineError::Eof) => {
+                println!();
+                break;
+            }
             Err(e) => {
                 crate::output::print_error(&format!("Input error: {}", e));
                 break;
