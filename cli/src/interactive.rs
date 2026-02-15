@@ -15,7 +15,12 @@ use crate::output::{format_short_id, OutputFormat};
 use crate::Commands;
 
 #[derive(Parser)]
-#[command(name = "praxis", no_binary_name = true)]
+#[command(
+    name = "praxis",
+    no_binary_name = true,
+    disable_help_flag = true,
+    disable_help_subcommand = true,
+)]
 pub(crate) struct ReplCli {
     #[command(subcommand)]
     pub command: Commands,
@@ -1082,12 +1087,21 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
                             println!("Unknown command. Type 'help' for available commands.");
                         } else {
                             //
-                            // Print clap's error which includes usage/help for
-                            // the specific subcommand. This covers
-                            // MissingSubcommand (e.g. "session" alone),
-                            // missing required args, and other parse errors.
+                            // Print clap's usage/help, filtering out lines
+                            // that reference --help (not relevant in the REPL).
                             //
-                            print!("{}", e);
+                            let msg = e.to_string();
+                            for line in msg.lines() {
+                                let trimmed = line.trim();
+                                if trimmed.starts_with("-h,")
+                                    || trimmed == "Options:"
+                                    || trimmed.contains("try '--help'")
+                                    || trimmed.contains("try 'help'")
+                                {
+                                    continue;
+                                }
+                                println!("{}", line);
+                            }
                         }
                     }
                 }
