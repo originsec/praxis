@@ -265,8 +265,18 @@ async fn process_events_until_done(
 fn render_plan(plan: &OrchestratorPlan) {
     println!();
 
-    if let Some(ref desc) = plan.current_step_description {
-        println!("  {} {}", "▸".bold(), desc.as_str().bold());
+    //
+    // Show plan title — use current_step_description if provided, otherwise
+    // derive from the first in-progress step.
+    //
+    let title = plan.current_step_description.as_deref().or_else(|| {
+        plan.steps.iter()
+            .find(|s| s.status == PlanStepStatus::InProgress)
+            .map(|s| s.description.as_str())
+    });
+
+    if let Some(title) = title {
+        println!("  {} {}", "▸".bold(), title.bold());
     }
 
     for step in &plan.steps {
