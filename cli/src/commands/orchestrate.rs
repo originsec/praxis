@@ -157,7 +157,13 @@ async fn process_events_until_done(
                             }
                             print!("\r\x1B[2K");
                             let _ = std::io::stdout().flush();
-                            spinner = Some(Spinner::start_with_elapsed(&format!("◆ {}", name)));
+                            let count = tool_calls.len();
+                            let label = if count == 0 {
+                                format!("◆ {}", name)
+                            } else {
+                                format!("◆ {} ({})", name, count)
+                            };
+                            spinner = Some(Spinner::start_with_elapsed(&label));
                         }
                     }
                     ClientDirectMessage::OrchestratorToolExecuted { name, success, .. } => {
