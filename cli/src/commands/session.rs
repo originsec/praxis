@@ -69,12 +69,12 @@ async fn create_session(client: &CliClient, node_prefix: &str, yolo: bool, proje
 
     let cmd = NodeCmd::Session(NodeSessionCommand::Create { context });
     let spinner = if matches!(output, OutputFormat::Text) {
-        Some(start_spinner("Creating session..."))
+        Some(Spinner::start("Creating session..."))
     } else {
         None
     };
     let response = client.send_command(&node_id, cmd).await;
-    if let Some(tx) = spinner { let _ = tx.send(true); }
+    if let Some(s) = spinner { s.finish().await; }
     let response = response?;
 
     match response.result {
@@ -109,35 +109,47 @@ async fn create_session(client: &CliClient, node_prefix: &str, yolo: bool, proje
     }
 }
 
-fn start_spinner(message: &str) -> tokio::sync::watch::Sender<bool> {
-    let (tx, mut rx) = tokio::sync::watch::channel(false);
-    let msg = message.to_string();
+struct Spinner {
+    stop: tokio::sync::watch::Sender<bool>,
+    handle: tokio::task::JoinHandle<()>,
+}
 
-    tokio::spawn(async move {
-        const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-        let mut i = 0;
+impl Spinner {
+    fn start(message: &str) -> Self {
+        let (tx, mut rx) = tokio::sync::watch::channel(false);
+        let msg = message.to_string();
 
-        loop {
-            if *rx.borrow() {
-                break;
+        let handle = tokio::spawn(async move {
+            const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let mut i = 0;
+
+            loop {
+                if *rx.borrow() {
+                    break;
+                }
+
+                let frame = FRAMES[i % FRAMES.len()].dimmed();
+                print!("\r  {} {}", frame, msg.dimmed());
+                let _ = std::io::stdout().flush();
+                i += 1;
+
+                tokio::select! {
+                    _ = rx.changed() => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(80)) => {}
+                }
             }
 
-            let frame = FRAMES[i % FRAMES.len()].dimmed();
-            print!("\r  {} {}", frame, msg.dimmed());
-            let _ = std::io::stderr().flush();
-            i += 1;
+            print!("\r\x1B[2K");
+            let _ = std::io::stdout().flush();
+        });
 
-            tokio::select! {
-                _ = rx.changed() => break,
-                _ = tokio::time::sleep(std::time::Duration::from_millis(80)) => {}
-            }
-        }
+        Self { stop: tx, handle }
+    }
 
-        print!("\r\x1B[2K");
-        let _ = std::io::stderr().flush();
-    });
-
-    tx
+    async fn finish(self) {
+        let _ = self.stop.send(true);
+        let _ = self.handle.await;
+    }
 }
 
 async fn send_prompt(client: &CliClient, node_prefix: &str, text: &str, output: &OutputFormat) -> Result<()> {
@@ -150,8 +162,11 @@ async fn send_prompt(client: &CliClient, node_prefix: &str, text: &str, output: 
         transaction_id: transaction_id.clone(),
     });
 
-    let show_spinner = matches!(output, OutputFormat::Text);
-    let spinner = if show_spinner { Some(start_spinner("Thinking...")) } else { None };
+    let spinner = if matches!(output, OutputFormat::Text) {
+        Some(Spinner::start("Thinking..."))
+    } else {
+        None
+    };
 
     //
     // Race send_command against Ctrl+C. On interrupt, send CancelTransaction
@@ -160,11 +175,11 @@ async fn send_prompt(client: &CliClient, node_prefix: &str, text: &str, output: 
 
     let response = tokio::select! {
         result = client.send_command(&node_id, cmd) => {
-            if let Some(tx) = spinner { let _ = tx.send(true); }
+            if let Some(s) = spinner { s.finish().await; }
             result?
         }
         _ = tokio::signal::ctrl_c() => {
-            if let Some(tx) = spinner { let _ = tx.send(true); }
+            if let Some(s) = spinner { s.finish().await; }
             let cancel_cmd = NodeCmd::Session(NodeSessionCommand::CancelTransaction {
                 transaction_id: transaction_id.clone(),
                 force: true,
