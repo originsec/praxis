@@ -516,8 +516,11 @@ fn print_help() {
 //
 
 fn needs_node_flag(tokens: &[String]) -> bool {
-    let cmd = tokens.first().map(|s| s.as_str()).unwrap_or("");
-    let sub = tokens.get(1).map(|s| s.as_str()).unwrap_or("");
+    if tokens.len() < 2 {
+        return false; // no subcommand yet, don't inject flags
+    }
+    let cmd = tokens[0].as_str();
+    let sub = tokens[1].as_str();
     match cmd {
         "agent" | "session" | "recon" => true,
         "op" => sub == "run",
@@ -530,9 +533,10 @@ fn needs_node_flag(tokens: &[String]) -> bool {
 //
 
 fn needs_agent_flag(tokens: &[String]) -> bool {
-    let cmd = tokens.first().map(|s| s.as_str()).unwrap_or("");
-    let sub = tokens.get(1).map(|s| s.as_str()).unwrap_or("");
-    cmd == "op" && sub == "run"
+    if tokens.len() < 2 {
+        return false;
+    }
+    tokens[0] == "op" && tokens[1] == "run"
 }
 
 fn inject_defaults(tokens: &mut Vec<String>, state: &ReplState) {
