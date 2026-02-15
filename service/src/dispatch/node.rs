@@ -7,7 +7,6 @@ use common::{
     ClientDirectMessage, NodeBroadcastMessage, NodeSignalMessage, CLIENT_BROADCAST_EXCHANGE,
     NODE_BROADCAST_EXCHANGE,
 };
-use tracing::{error, info, warn};
 
 use crate::config::service_config::APPLICATION_LOGS_ENABLED;
 use crate::messaging::{broadcast_state_to_clients, send_to_client};
@@ -33,7 +32,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                     .map(|s| STANDARD.encode(s.as_bytes()))
                     .collect(),
                 Err(e) => {
-                    error!("Failed to load Lua scripts for registration ack: {}", e);
+                    common::log_error!("Failed to load Lua scripts for registration ack: {}", e);
                     Vec::new()
                 }
             };
@@ -43,7 +42,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                 .handle_node_registration(registration, lua_scripts)
                 .await
             {
-                error!("Failed to handle NodeRegistration: {}", e);
+                common::log_error!("Failed to handle NodeRegistration: {}", e);
             }
 
             //
@@ -62,7 +61,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
 
         NodeSignalMessage::InformationUpdate(update) => {
             if !ctx.node_handler.is_node_registered(&update.node_id).await {
-                warn!(
+                common::log_warn!(
                     "Rejecting message from unregistered node: {}",
                     update.node_id
                 );
@@ -74,7 +73,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                     .handle_node_information_update(update)
                     .await
                 {
-                    error!("Failed to handle NodeInformationUpdate: {}", e);
+                    common::log_error!("Failed to handle NodeInformationUpdate: {}", e);
                 }
             }
         }
@@ -161,12 +160,12 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                 )
                 .await
                 {
-                    error!(
+                    common::log_error!(
                         "Failed to send command response to client {}: {}",
                         pending.client_id, e
                     );
                 }
-                info!(
+                common::log_info!(
                     "Forwarded command response {} to client {}",
                     response.command_id, pending.client_id
                 );
@@ -184,7 +183,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                     )
                     .await
                 {
-                    warn!("AgentChat command response handling failed: {}", e);
+                    common::log_warn!("AgentChat command response handling failed: {}", e);
                 }
 
                 if should_broadcast_state {
@@ -194,7 +193,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                     )
                     .await
                     {
-                        error!("Failed to broadcast state after session change: {}", e);
+                        common::log_error!("Failed to broadcast state after session change: {}", e);
                     }
                 }
             } else {
@@ -202,7 +201,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                 // Command might be from semantic operations (not tracked in
                 // pending_commands).
                 //
-                info!(
+                common::log_info!(
                     "Received command response {} (possibly from semantic operation)",
                     response.command_id
                 );
@@ -213,7 +212,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             //
             // Forward terminal output directly to the target client.
             //
-            info!(
+            common::log_info!(
                 "Forwarding {} bytes terminal output to client {}",
                 output.data.len(),
                 output.client_id.get(..8).unwrap_or(&output.client_id)
@@ -222,7 +221,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             if let Err(e) =
                 send_to_client(&ctx.client_publish_channel, &output.client_id, client_message).await
             {
-                error!(
+                common::log_error!(
                     "Failed to send terminal output to client {}: {}",
                     output.client_id, e
                 );
@@ -230,7 +229,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
         }
 
         NodeSignalMessage::SemanticParserRequest { node_id, request } => {
-            info!(
+            common::log_info!(
                 "Received semantic parser request {} from node {}",
                 &request.request_id[..8.min(request.request_id.len())],
                 &node_id[..8.min(node_id.len())]
@@ -252,7 +251,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                 let semantic_queue = node_semantic_queue_name(&node_id_clone);
                 if let Err(e) = publish_json(&publish_channel_clone, &semantic_queue, &response).await
                 {
-                    error!(
+                    common::log_error!(
                         "Failed to send semantic parser response to node {}: {}",
                         node_id_clone, e
                     );
@@ -261,7 +260,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
         }
 
         NodeSignalMessage::InterceptedTraffic(entry) => {
-            info!(
+            common::log_info!(
                 "Received intercepted traffic: node={} agent={} {} {} {} (status={})",
                 &entry.node_id[..8.min(entry.node_id.len())],
                 entry.agent_short_name,
@@ -279,7 +278,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             //
             match ctx.database.insert_traffic(&entry).await {
                 Ok(traffic_id) => {
-                    info!("Stored traffic entry id={} for {}", traffic_id, entry.url);
+                    common::log_info!("Stored traffic entry id={} for {}", traffic_id, entry.url);
 
                     //
                     // Check against rules and insert matches.
@@ -316,14 +315,14 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                                                 if let Err(e) =
                                                     db.update_match_summary(match_id, &summary).await
                                                 {
-                                                    error!(
+                                                    common::log_error!(
                                                         "Failed to update match summary: {}",
                                                         e
                                                     );
                                                 }
                                             }
                                         } else if let Some(err) = result.error {
-                                            warn!(
+                                            common::log_warn!(
                                                 "Summarization failed for match {}: {}",
                                                 match_id, err
                                             );
@@ -333,7 +332,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                             }
                         }
                         Err(e) => {
-                            error!("Failed to check traffic matches: {}", e);
+                            common::log_error!("Failed to check traffic matches: {}", e);
                         }
                     }
 
@@ -343,13 +342,13 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                     let _ = ctx.database.prune_old_traffic().await;
                 }
                 Err(e) => {
-                    error!("Failed to store intercepted traffic: {}", e);
+                    common::log_error!("Failed to store intercepted traffic: {}", e);
                 }
             }
         }
 
         NodeSignalMessage::InterceptStatusUpdate(status) => {
-            info!(
+            common::log_info!(
                 "Received intercept status update from node {}: enabled={}",
                 &status.node_id[..8.min(status.node_id.len())],
                 status.enabled
@@ -366,7 +365,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
         }
 
         NodeSignalMessage::DiscoveredLlmEndpoint(endpoint) => {
-            info!(
+            common::log_info!(
                 "Received discovered LLM endpoint from node {}: {} at {}:{}",
                 &endpoint.node_id[..8.min(endpoint.node_id.len())],
                 endpoint.domain.as_deref().unwrap_or(&endpoint.ip_address),
@@ -378,7 +377,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             // Store in database.
             //
             if let Err(e) = ctx.database.upsert_discovered_endpoint(&endpoint).await {
-                error!("Failed to store discovered endpoint: {}", e);
+                common::log_error!("Failed to store discovered endpoint: {}", e);
             }
         }
 
@@ -388,7 +387,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             recon_result,
             is_semantic,
         } => {
-            info!(
+            common::log_info!(
                 "Received recon result from node {} agent {}: {} tools, {} configs, {} sessions",
                 &node_id[..8.min(node_id.len())],
                 agent_short_name,
@@ -407,7 +406,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                 .upsert_recon_result(&node_id, &agent_short_name, &recon_result, is_semantic)
                 .await
             {
-                error!("Failed to store recon result: {}", e);
+                common::log_error!("Failed to store recon result: {}", e);
             }
         }
     }

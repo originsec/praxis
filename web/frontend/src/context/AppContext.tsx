@@ -1,4 +1,5 @@
-import { createContext, useContext, useReducer, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import { create } from 'zustand';
 import { wsClient } from '../api/websocket';
 import { generateUUID } from '../utils/uuid';
 import type { OrchestratorState } from './orchestratorTypes';
@@ -1003,6 +1004,19 @@ function reducer(state: AppState, action: Action): AppState {
   );
 }
 
+type AppStore = {
+  state: AppState;
+  dispatch: (action: Action) => void;
+};
+
+const useAppStore = create<AppStore>((set) => ({
+  state: createInitialState(),
+  dispatch: (action: Action) =>
+    set((store) => ({
+      state: reducer(store.state, action),
+    })),
+}));
+
 //
 // Context.
 //
@@ -1130,7 +1144,8 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, null, createInitialState);
+  const state = useAppStore((store) => store.state);
+  const dispatch = useAppStore((store) => store.dispatch);
 
   //
   // Use refs for callback maps to avoid stale closure issues.
