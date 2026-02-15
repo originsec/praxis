@@ -23,9 +23,14 @@ pub struct AgentSelectParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SessionCreateParams {
+    #[schemars(description = "Node ID prefix")]
     pub node: String,
+
+    #[schemars(description = "Enable YOLO mode (agent auto-approves actions)")]
     #[serde(default)]
     pub yolo: bool,
+
+    #[schemars(description = "Working directory / project path for the session")]
     pub project: Option<String>,
 }
 

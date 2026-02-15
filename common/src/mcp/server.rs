@@ -496,7 +496,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
 
     // ── Sessions ─────────────────────────────────────────────────────────
 
-    #[tool(description = "Create a session with an agent")]
+    #[tool(description = "Create a session with the selected agent. Optionally enable yolo mode and set a working directory.")]
     async fn session_create(
         &self,
         Parameters(params): Parameters<SessionCreateParams>,
