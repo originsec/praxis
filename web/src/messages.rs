@@ -375,7 +375,10 @@ pub enum ServerMessage {
         message: String,
     },
     /// Orchestrator session started
-    OrchestratorStarted,
+    OrchestratorStarted {
+        provider: String,
+        model: String,
+    },
     /// Orchestrator streaming text content
     OrchestratorContent {
         content: String,

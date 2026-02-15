@@ -1072,8 +1072,8 @@ impl RabbitMqClient {
             //
             // Orchestrator responses.
             //
-            ClientDirectMessage::OrchestratorStarted => {
-                self.state.broadcast(ServerMessage::OrchestratorStarted);
+            ClientDirectMessage::OrchestratorStarted { provider, model } => {
+                self.state.broadcast(ServerMessage::OrchestratorStarted { provider, model });
             }
             ClientDirectMessage::OrchestratorContent { content } => {
                 self.state.broadcast(ServerMessage::OrchestratorContent { content });

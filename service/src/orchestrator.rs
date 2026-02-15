@@ -147,10 +147,16 @@ impl OrchestratorManager {
         // immediately — the slow MCP connection happens in the background task.
         // Prompts sent before MCP is ready queue in the channel.
         //
+        let provider_name = model_def.provider.clone();
+        let model = model_def.model.clone();
+
         let _ = send_to_client(
             publish_channel,
             client_id,
-            ClientDirectMessage::OrchestratorStarted,
+            ClientDirectMessage::OrchestratorStarted {
+                provider: provider_name.clone(),
+                model: model.clone(),
+            },
         ).await;
 
         let (prompt_tx, mut prompt_rx) = mpsc::channel::<String>(32);
@@ -161,7 +167,6 @@ impl OrchestratorManager {
 
         let client_id_owned = client_id.to_string();
         let publish_channel_clone = publish_channel.clone();
-        let model = model_def.model.clone();
 
         //
         // Store the session immediately so prompts can be sent while MCP

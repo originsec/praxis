@@ -275,7 +275,7 @@ impl CliClient {
             //
             // Forward orchestrator events to subscriber if present.
             //
-            msg @ (ClientDirectMessage::OrchestratorStarted
+            msg @ (ClientDirectMessage::OrchestratorStarted { .. }
                 | ClientDirectMessage::OrchestratorContent { .. }
                 | ClientDirectMessage::OrchestratorToolExecuting { .. }
                 | ClientDirectMessage::OrchestratorToolExecuted { .. }

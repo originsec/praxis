@@ -716,7 +716,7 @@ export type ServerMessage =
   | { type: 'op_def_added'; full_name: string }
   | { type: 'op_def_deleted'; full_name: string; success: boolean }
   | { type: 'op_def_error'; message: string }
-  | { type: 'orchestrator_started' }
+  | { type: 'orchestrator_started'; provider: string; model: string }
   | { type: 'orchestrator_content'; content: string }
   | { type: 'orchestrator_tool_executing'; name: string; input?: string }
   | { type: 'orchestrator_tool_executed'; name: string; display: string; success: boolean; result: string }

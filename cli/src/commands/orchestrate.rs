@@ -28,7 +28,6 @@ pub async fn execute(client: &mut CliClient) -> Result<()> {
         return Ok(());
     }
 
-    println!("  {} {}", "●".green(), "Orchestrator session started".bold());
     println!("  {}", "Type your prompt, Ctrl+C to cancel inference, Ctrl+D to exit".dimmed());
     println!();
 
@@ -84,7 +83,15 @@ pub async fn execute(client: &mut CliClient) -> Result<()> {
 async fn wait_for_started(event_rx: &mut mpsc::UnboundedReceiver<ClientDirectMessage>) -> bool {
     let timeout = tokio::time::Duration::from_secs(30);
     match tokio::time::timeout(timeout, event_rx.recv()).await {
-        Ok(Some(ClientDirectMessage::OrchestratorStarted)) => true,
+        Ok(Some(ClientDirectMessage::OrchestratorStarted { provider, model })) => {
+            println!(
+                "  {} {} {}",
+                "●".green(),
+                "Orchestrator session started".bold(),
+                format!("({}::{})", provider, model).dimmed()
+            );
+            true
+        }
         Ok(Some(ClientDirectMessage::OrchestratorError { message })) => {
             eprintln!("  {} {}", "✗".red(), message);
             false
