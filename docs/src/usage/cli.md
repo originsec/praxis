@@ -101,9 +101,25 @@ The REPL provides context-aware tab completion:
 
 The completion cache refreshes after every command.
 
+### Usage Help
+
+All commands show usage instructions when invoked with missing or incorrect arguments. Typing a command group without a subcommand shows available subcommands:
+
+```
+praxis [myhost:claudecode] ❯ session
+error: 'praxis session' requires a subcommand but one was not provided
+  [subcommands: create, prompt, close]
+
+Usage: session <COMMAND>
+
+For more information, try '--help'
+```
+
+The same usage help is available both in the REPL and in non-interactive mode (`-C` or direct subcommand).
+
 ### Error Messages
 
-The REPL provides contextual error messages instead of raw usage text:
+The REPL provides contextual error messages for runtime errors:
 
 ```
 praxis ❯ session prompt "hi"

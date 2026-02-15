@@ -1073,20 +1073,17 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
                         }
                     }
                     Err(e) => {
-                        //
-                        // Show a friendly message for unknown commands instead
-                        // of the raw clap "Usage: praxis <COMMAND>" output.
-                        //
                         let kind = e.kind();
-                        if matches!(
-                            kind,
-                            clap::error::ErrorKind::InvalidSubcommand
-                                | clap::error::ErrorKind::UnknownArgument
-                                | clap::error::ErrorKind::MissingSubcommand
-                        ) {
+                        if matches!(kind, clap::error::ErrorKind::InvalidSubcommand) {
                             println!("Unknown command. Type 'help' for available commands.");
                         } else {
-                            println!("{}", e);
+                            //
+                            // Print clap's error which includes usage/help for
+                            // the specific subcommand. This covers
+                            // MissingSubcommand (e.g. "session" alone),
+                            // missing required args, and other parse errors.
+                            //
+                            print!("{}", e);
                         }
                     }
                 }
