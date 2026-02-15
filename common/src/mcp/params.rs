@@ -42,15 +42,6 @@ pub enum McpFileType {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct ReadFileParams {
-    pub node: String,
-    pub file_type: McpFileType,
-    pub path: String,
-    pub line_start: Option<usize>,
-    pub line_end: Option<usize>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
 pub struct WriteFileParams {
     pub node: String,
     pub file_type: McpFileType,
@@ -59,11 +50,39 @@ pub struct WriteFileParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct GrepFileParams {
+pub struct ReconListParams {
+    #[schemars(description = "Node ID prefix")]
     pub node: String,
-    pub file_type: McpFileType,
-    pub path: String,
+
+    #[schemars(description = "Agent short name")]
+    pub agent: String,
+
+    #[schemars(description = "Section to list: all, sessions, tools, projects, configs (default: all)")]
+    pub section: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ReconReadParams {
+    #[schemars(description = "Node ID prefix")]
+    pub node: String,
+
+    #[schemars(description = "Path to the file (omit to read all from recon)")]
+    pub path: Option<String>,
+
+    pub line_start: Option<usize>,
+    pub line_end: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ReconGrepParams {
+    #[schemars(description = "Node ID prefix")]
+    pub node: String,
+
+    #[schemars(description = "Regex pattern to search for")]
     pub pattern: String,
+
+    #[schemars(description = "Path to the file (omit to grep all from recon)")]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -81,37 +100,21 @@ fn default_limit() -> usize {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct OpRunParams {
-    /// Operation name (e.g. recon::system_info) or chain name/ID
     #[schemars(description = "Operation name (e.g. recon::system_info) or chain name/ID")]
     pub name: String,
 
-    /// Node ID prefix
     #[schemars(description = "Node ID prefix")]
     pub node: String,
 
-    /// Agent short name
     #[schemars(description = "Agent short name")]
     pub agent: String,
 
-    /// Working directory for the operation
     #[schemars(description = "Working directory for the operation")]
     pub working_dir: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ShortIdParams {
-    /// Short ID to look up
     #[schemars(description = "Short ID to look up")]
     pub short_id: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub struct AgentQueryParams {
-    /// Node ID prefix
-    #[schemars(description = "Node ID prefix")]
-    pub node: String,
-
-    /// Agent short name
-    #[schemars(description = "Agent short name (e.g. claudecode, cursor, codex)")]
-    pub agent: String,
 }

@@ -351,17 +351,18 @@ The MCP server exposes the following tools:
 
 **Agent Management:**
 - `agent_list` - List agents on a node
-- `agent_select` - Get details for a specific agent
+- `agent_select` - Select an agent on a node
 - `agent_update` - Request agent info refresh
-- `agent_recon` - Run agent reconnaissance
-- `agent_recon_semantic` - Run semantic reconnaissance
-- `recon_sessions` - List sessions from stored recon (node + agent)
-- `recon_projects` - List project paths from stored recon (node + agent)
-- `recon_tools` - List MCP servers, skills, and internal tools from stored recon (node + agent)
-- `recon_configs` - List config items from stored recon (node + agent)
-- `read_file` - Read config/session file content (`file_type: Config|Session`, optional line range)
-- `write_file` - Write file content (`file_type: Config` only)
-- `grep_file` - Search config/session file content with regex (`file_type: Config|Session`)
+
+**Reconnaissance:**
+- `recon_run` - Run static reconnaissance
+- `recon_run_semantic` - Run semantic reconnaissance (includes internal tools)
+- `recon_list` - List stored recon data (section: all/sessions/tools/projects/configs)
+- `recon_config_read` - Read config file content (omit path to read all)
+- `recon_session_read` - Read session file content (omit path to read all)
+- `recon_config_grep` - Grep config files with regex (omit path to grep all)
+- `recon_session_grep` - Grep session files with regex (omit path to grep all)
+- `write_file` - Write file content
 
 **Sessions:**
 - `session_create` - Create a new session
@@ -371,7 +372,7 @@ The MCP server exposes the following tools:
 **Operations & Chains:**
 - `op_available` - List available operations and chains
 - `op_run` - Run an operation or chain
-- `op_info` - Show info for an operation or chain execution
+- `op_info` - Show full info for an operation or chain execution (includes result/output)
 - `op_cancel` - Cancel a running operation or chain execution
 - `op_list` - List tracked operations and chain executions
 

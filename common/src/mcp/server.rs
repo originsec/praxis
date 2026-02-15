@@ -70,39 +70,77 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
     }
 }
 
-#[tool_router]
-impl<C: McpClient + Clone + 'static> PraxisServer<C> {
-    #[tool(description = "List all connected nodes in the Praxis network")]
-    async fn node_list(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
+//
+// Helper macros to reduce boilerplate in tool implementations.
+//
+
+macro_rules! acquire_client {
+    ($self:expr) => {{
+        $self.get_client()
             .await
             .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
+        let guard = $self.client.lock().await;
+        guard
+    }};
+}
 
-        let state = client
+macro_rules! resolve_node {
+    ($client:expr, $node_prefix:expr) => {{
+        let state = $client
             .get_state()
             .await
             .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
-        let nodes: Vec<_> = state
+        let node = state
             .nodes
             .iter()
-            .map(|n| {
-                json!({
-                    "node_id": n.node_id,
-                    "node_id_short": &n.node_id[..8.min(n.node_id.len())],
-                    "hostname": n.machine_name,
-                    "os": n.os_details,
-                    "agent_count": n.discovered_agents.len()
-                })
+            .find(|n| {
+                n.node_id
+                    .to_lowercase()
+                    .starts_with(&$node_prefix.to_lowercase())
             })
-            .collect();
+            .ok_or_else(|| {
+                rmcp::ErrorData::internal_error(
+                    format!("No node found matching '{}'", $node_prefix),
+                    None,
+                )
+            })?;
+        node.node_id.clone()
+    }};
+}
 
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({ "nodes": nodes, "count": nodes.len() })).unwrap(),
-        )]))
+fn mcp_err(e: impl std::fmt::Display) -> rmcp::ErrorData {
+    rmcp::ErrorData::internal_error(e.to_string(), None)
+}
+
+fn json_result(value: serde_json::Value) -> Result<CallToolResult, rmcp::ErrorData> {
+    Ok(CallToolResult::success(vec![Content::text(
+        serde_json::to_string_pretty(&value).unwrap(),
+    )]))
+}
+
+#[tool_router]
+impl<C: McpClient + Clone + 'static> PraxisServer<C> {
+
+    // ── Node Management ──────────────────────────────────────────────────
+
+    #[tool(description = "List all connected nodes in the Praxis network")]
+    async fn node_list(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+
+        let state = client.get_state().await
+            .ok_or_else(|| mcp_err("No state available"))?;
+        let nodes: Vec<_> = state.nodes.iter().map(|n| {
+            json!({
+                "node_id": n.node_id,
+                "node_id_short": &n.node_id[..8.min(n.node_id.len())],
+                "hostname": n.machine_name,
+                "os": n.os_details,
+                "agent_count": n.discovered_agents.len()
+            })
+        }).collect();
+
+        json_result(json!({ "nodes": nodes, "count": nodes.len() }))
     }
 
     #[tool(description = "Select a node by ID prefix")]
@@ -110,92 +148,48 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<NodePrefixParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
-        let state = client
-            .get_state()
-            .await
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
-        let node = state
-            .nodes
-            .iter()
-            .find(|n| {
-                n.node_id
-                    .to_lowercase()
-                    .starts_with(&params.prefix.to_lowercase())
-            })
-            .ok_or_else(|| {
-                rmcp::ErrorData::internal_error(
-                    format!("No node found matching '{}'", params.prefix),
-                    None,
-                )
-            })?;
+        let state = client.get_state().await
+            .ok_or_else(|| mcp_err("No state available"))?;
+        let node = state.nodes.iter()
+            .find(|n| n.node_id.to_lowercase().starts_with(&params.prefix.to_lowercase()))
+            .ok_or_else(|| mcp_err(format!("No node found matching '{}'", params.prefix)))?;
 
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({
-                "node_id": node.node_id,
-                "hostname": node.machine_name,
-                "os": node.os_details
-            }))
-            .unwrap(),
-        )]))
+        json_result(json!({
+            "node_id": node.node_id,
+            "hostname": node.machine_name,
+            "os": node.os_details
+        }))
     }
+
+    // ── Agent Management ─────────────────────────────────────────────────
 
     #[tool(description = "List agents on a node")]
     async fn agent_list(
         &self,
         Parameters(params): Parameters<NodeParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
-        let state = client
-            .get_state()
-            .await
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
-        let node = state
-            .nodes
-            .iter()
-            .find(|n| {
-                n.node_id
-                    .to_lowercase()
-                    .starts_with(&params.node.to_lowercase())
+        let state = client.get_state().await
+            .ok_or_else(|| mcp_err("No state available"))?;
+        let node = state.nodes.iter()
+            .find(|n| n.node_id.to_lowercase().starts_with(&params.node.to_lowercase()))
+            .ok_or_else(|| mcp_err(format!("No node found matching '{}'", params.node)))?;
+
+        let agents: Vec<_> = node.discovered_agents.iter().map(|a| {
+            json!({
+                "short_name": a.short_name,
+                "name": a.name,
+                "available": a.available,
+                "version": a.version
             })
-            .ok_or_else(|| {
-                rmcp::ErrorData::internal_error(
-                    format!("No node found matching '{}'", params.node),
-                    None,
-                )
-            })?;
+        }).collect();
 
-        let agents: Vec<_> = node
-            .discovered_agents
-            .iter()
-            .map(|a| {
-                json!({
-                    "short_name": a.short_name,
-                    "name": a.name,
-                    "available": a.available,
-                    "version": a.version
-                })
-            })
-            .collect();
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({ "agents": agents, "count": agents.len() }))
-                .unwrap(),
-        )]))
+        json_result(json!({ "agents": agents, "count": agents.len() }))
     }
 
     #[tool(description = "Select an agent on a node")]
@@ -203,57 +197,22 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<AgentSelectParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        let state = client
-            .get_state()
-            .await
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
-        let node = state
-            .nodes
-            .iter()
-            .find(|n| {
-                n.node_id
-                    .to_lowercase()
-                    .starts_with(&params.node.to_lowercase())
-            })
-            .ok_or_else(|| {
-                rmcp::ErrorData::internal_error(
-                    format!("No node found matching '{}'", params.node),
-                    None,
-                )
-            })?;
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let node_id = resolve_node!(client, params.node);
 
         let response = client
-            .send_command(
-                &node.node_id,
-                NodeCommand::Agent(crate::AgentCommand::Select {
-                    short_name: params.agent.clone(),
-                }),
-            )
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+            .send_command(&node_id, NodeCommand::Agent(crate::AgentCommand::Select {
+                short_name: params.agent.clone(),
+            }))
+            .await.map_err(mcp_err)?;
 
         match response.result {
             NodeCommandResult::Agent(AgentCommandResult::Selected { short_name }) => {
-                Ok(CallToolResult::success(vec![Content::text(
-                    serde_json::to_string_pretty(&json!({
-                        "status": "success",
-                        "short_name": short_name
-                    }))
-                    .unwrap(),
-                )]))
+                json_result(json!({ "status": "success", "short_name": short_name }))
             }
-            NodeCommandResult::Error { message } => {
-                Err(rmcp::ErrorData::internal_error(message, None))
-            }
-            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+            NodeCommandResult::Error { message } => Err(mcp_err(message)),
+            _ => Err(mcp_err("Unexpected response")),
         }
     }
 
@@ -262,378 +221,312 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<NodeParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        let state = client
-            .get_state()
-            .await
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
-        let node = state
-            .nodes
-            .iter()
-            .find(|n| {
-                n.node_id
-                    .to_lowercase()
-                    .starts_with(&params.node.to_lowercase())
-            })
-            .ok_or_else(|| {
-                rmcp::ErrorData::internal_error(
-                    format!("No node found matching '{}'", params.node),
-                    None,
-                )
-            })?;
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let node_id = resolve_node!(client, params.node);
 
         let response = client
-            .send_command(&node.node_id, NodeCommand::Agent(crate::AgentCommand::Update))
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+            .send_command(&node_id, NodeCommand::Agent(crate::AgentCommand::Update))
+            .await.map_err(mcp_err)?;
 
         match response.result {
             NodeCommandResult::Agent(AgentCommandResult::UpdateSent) => {
-                Ok(CallToolResult::success(vec![Content::text(
-                    serde_json::to_string_pretty(&json!({
-                        "status": "success",
-                        "message": "Update request sent"
-                    }))
-                    .unwrap(),
-                )]))
+                json_result(json!({ "status": "success", "message": "Update request sent" }))
             }
-            NodeCommandResult::Error { message } => {
-                Err(rmcp::ErrorData::internal_error(message, None))
-            }
-            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+            NodeCommandResult::Error { message } => Err(mcp_err(message)),
+            _ => Err(mcp_err("Unexpected response")),
         }
     }
 
-    #[tool(description = "Perform reconnaissance on a node")]
-    async fn agent_recon(
+    // ── Reconnaissance ───────────────────────────────────────────────────
+
+    #[tool(description = "Run static reconnaissance on a node")]
+    async fn recon_run(
         &self,
         Parameters(params): Parameters<NodeParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        let state = client
-            .get_state()
-            .await
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
-        let node = state
-            .nodes
-            .iter()
-            .find(|n| {
-                n.node_id
-                    .to_lowercase()
-                    .starts_with(&params.node.to_lowercase())
-            })
-            .ok_or_else(|| {
-                rmcp::ErrorData::internal_error(
-                    format!("No node found matching '{}'", params.node),
-                    None,
-                )
-            })?;
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let node_id = resolve_node!(client, params.node);
 
         let response = client
-            .send_command(&node.node_id, NodeCommand::Agent(crate::AgentCommand::Recon))
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+            .send_command(&node_id, NodeCommand::Agent(crate::AgentCommand::Recon))
+            .await.map_err(mcp_err)?;
 
         match response.result {
             NodeCommandResult::Agent(AgentCommandResult::ReconComplete { result }) => {
-                let mcp_servers: Vec<_> = result
-                    .tools
-                    .mcp_servers
-                    .iter()
-                    .map(|s| {
-                        json!({
-                            "name": s.name,
-                            "transport": format!("{:?}", s.transport),
-                            "command": s.command,
-                            "address": s.address,
-                            "context_path": s.context_path,
-                            "tools": s.tools.iter().map(|t| json!({
-                                "name": t.name,
-                                "description": t.description
-                            })).collect::<Vec<_>>()
-                        })
-                    })
-                    .collect();
-
-                let skills: Vec<_> = result
-                    .tools
-                    .skills
-                    .iter()
-                    .map(|s| {
-                        json!({
-                            "name": s.name,
-                            "description": s.description
-                        })
-                    })
-                    .collect();
-
-                let config_items: Vec<_> = result
-                    .config
-                    .iter()
-                    .map(|c| {
-                        json!({
-                            "path": c.path,
-                            "config_type": format!("{:?}", c.config_type)
-                        })
-                    })
-                    .collect();
-
-                let sessions: Vec<_> = result
-                    .sessions
-                    .iter()
-                    .map(|s| {
-                        json!({
-                            "session_id": s.session_id,
-                            "session_file": s.session_file,
-                            "context_path": s.context_path,
-                            "last_modified": s.last_modified,
-                            "message_count": s.message_count
-                        })
-                    })
-                    .collect();
-
-                let metadata = result.metadata.as_ref().map(|m| {
-                    json!({
-                        "user_identities": m.user_identities,
-                        "api_keys": m.api_keys
-                    })
-                });
-
-                Ok(CallToolResult::success(vec![Content::text(
-                    serde_json::to_string_pretty(&json!({
-                        "status": "success",
-                        "mcp_servers": mcp_servers,
-                        "skills": skills,
-                        "config_items": config_items,
-                        "sessions": sessions,
-                        "project_paths": result.project_paths,
-                        "metadata": metadata
-                    }))
-                    .unwrap(),
-                )]))
+                let mcp_tools_count: usize = result.tools.mcp_servers.iter().map(|s| s.tools.len()).sum();
+                json_result(json!({
+                    "status": "success",
+                    "mcp_servers": result.tools.mcp_servers.len(),
+                    "mcp_tools": mcp_tools_count,
+                    "skills": result.tools.skills.len(),
+                    "config_items": result.config.len(),
+                    "sessions": result.sessions.len(),
+                    "project_paths": result.project_paths.len()
+                }))
             }
-            NodeCommandResult::Error { message } => {
-                Err(rmcp::ErrorData::internal_error(message, None))
-            }
-            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+            NodeCommandResult::Error { message } => Err(mcp_err(message)),
+            _ => Err(mcp_err("Unexpected response")),
         }
     }
 
-    #[tool(description = "Perform semantic reconnaissance on a node")]
-    async fn agent_recon_semantic(
+    #[tool(description = "Run semantic reconnaissance on a node (includes internal tools)")]
+    async fn recon_run_semantic(
         &self,
         Parameters(params): Parameters<NodeParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        let state = client
-            .get_state()
-            .await
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
-        let node = state
-            .nodes
-            .iter()
-            .find(|n| {
-                n.node_id
-                    .to_lowercase()
-                    .starts_with(&params.node.to_lowercase())
-            })
-            .ok_or_else(|| {
-                rmcp::ErrorData::internal_error(
-                    format!("No node found matching '{}'", params.node),
-                    None,
-                )
-            })?;
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let node_id = resolve_node!(client, params.node);
 
         let response = client
-            .send_command(
-                &node.node_id,
-                NodeCommand::Agent(crate::AgentCommand::ReconSemantic),
-            )
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+            .send_command(&node_id, NodeCommand::Agent(crate::AgentCommand::ReconSemantic))
+            .await.map_err(mcp_err)?;
 
         match response.result {
             NodeCommandResult::Agent(AgentCommandResult::ReconComplete { result }) => {
-                let mcp_servers: Vec<_> = result
-                    .tools
-                    .mcp_servers
-                    .iter()
-                    .map(|s| {
-                        json!({
-                            "name": s.name,
-                            "transport": format!("{:?}", s.transport),
-                            "command": s.command,
-                            "address": s.address,
-                            "context_path": s.context_path,
-                            "tools": s.tools.iter().map(|t| json!({
-                                "name": t.name,
-                                "description": t.description
-                            })).collect::<Vec<_>>()
-                        })
-                    })
-                    .collect();
-
-                let skills: Vec<_> = result
-                    .tools
-                    .skills
-                    .iter()
-                    .map(|s| {
-                        json!({
-                            "name": s.name,
-                            "description": s.description
-                        })
-                    })
-                    .collect();
-
-                let internal_tools: Vec<_> = result
-                    .tools
-                    .internal_tools
-                    .iter()
-                    .map(|t| {
-                        json!({
-                            "name": t.name,
-                            "description": t.description
-                        })
-                    })
-                    .collect();
-
-                let config_items: Vec<_> = result
-                    .config
-                    .iter()
-                    .map(|c| {
-                        json!({
-                            "path": c.path,
-                            "config_type": format!("{:?}", c.config_type)
-                        })
-                    })
-                    .collect();
-
-                let sessions: Vec<_> = result
-                    .sessions
-                    .iter()
-                    .map(|s| {
-                        json!({
-                            "session_id": s.session_id,
-                            "session_file": s.session_file,
-                            "context_path": s.context_path,
-                            "last_modified": s.last_modified,
-                            "message_count": s.message_count
-                        })
-                    })
-                    .collect();
-
-                let metadata = result.metadata.as_ref().map(|m| {
-                    json!({
-                        "user_identities": m.user_identities,
-                        "api_keys": m.api_keys
-                    })
-                });
-
-                Ok(CallToolResult::success(vec![Content::text(
-                    serde_json::to_string_pretty(&json!({
-                        "status": "success",
-                        "mcp_servers": mcp_servers,
-                        "skills": skills,
-                        "internal_tools": internal_tools,
-                        "config_items": config_items,
-                        "sessions": sessions,
-                        "project_paths": result.project_paths,
-                        "metadata": metadata
-                    }))
-                    .unwrap(),
-                )]))
+                let mcp_tools_count: usize = result.tools.mcp_servers.iter().map(|s| s.tools.len()).sum();
+                json_result(json!({
+                    "status": "success",
+                    "mcp_servers": result.tools.mcp_servers.len(),
+                    "mcp_tools": mcp_tools_count,
+                    "skills": result.tools.skills.len(),
+                    "internal_tools": result.tools.internal_tools.len(),
+                    "config_items": result.config.len(),
+                    "sessions": result.sessions.len(),
+                    "project_paths": result.project_paths.len()
+                }))
             }
-            NodeCommandResult::Error { message } => {
-                Err(rmcp::ErrorData::internal_error(message, None))
-            }
-            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+            NodeCommandResult::Error { message } => Err(mcp_err(message)),
+            _ => Err(mcp_err("Unexpected response")),
         }
     }
+
+    #[tool(description = "List stored recon data. Section: all, sessions, tools, projects, configs (default: all)")]
+    async fn recon_list(
+        &self,
+        Parameters(params): Parameters<ReconListParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+
+        let result = super::ops::recon_list(
+            client,
+            &params.node,
+            &params.agent,
+            params.section.as_deref(),
+        ).await.map_err(mcp_err)?;
+
+        let mut response = json!({});
+
+        if let Some(sessions) = &result.sessions {
+            let items: Vec<_> = sessions.iter().map(|s| json!({
+                "session_id": s.session_id,
+                "session_file": s.session_file,
+                "context_path": s.context_path,
+                "last_modified": s.last_modified,
+                "message_count": s.message_count
+            })).collect();
+            response["sessions"] = json!(items);
+        }
+
+        if let Some(mcp_servers) = &result.mcp_servers {
+            let items: Vec<_> = mcp_servers.iter().map(|s| json!({
+                "name": s.name,
+                "transport": format!("{:?}", s.transport),
+                "tools": s.tools.iter().map(|t| json!({"name": t.name, "description": t.description})).collect::<Vec<_>>()
+            })).collect();
+            response["mcp_servers"] = json!(items);
+        }
+
+        if let Some(skills) = &result.skills {
+            let items: Vec<_> = skills.iter().map(|s| json!({"name": s.name, "description": s.description})).collect();
+            response["skills"] = json!(items);
+        }
+
+        if let Some(internal_tools) = &result.internal_tools {
+            let items: Vec<_> = internal_tools.iter().map(|t| json!({"name": t.name, "description": t.description})).collect();
+            response["internal_tools"] = json!(items);
+        }
+
+        if let Some(configs) = &result.configs {
+            let items: Vec<_> = configs.iter().map(|c| json!({"path": c.path, "config_type": c.config_type})).collect();
+            response["configs"] = json!(items);
+        }
+
+        if let Some(projects) = &result.projects {
+            response["projects"] = json!(projects);
+        }
+
+        json_result(response)
+    }
+
+    #[tool(description = "Read config file content discovered by recon. Omit path to read all config files.")]
+    async fn recon_config_read(
+        &self,
+        Parameters(params): Parameters<ReconReadParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+
+        match params.path {
+            Some(path) => {
+                let node_id = resolve_node!(client, params.node);
+                let r = super::ops::recon_read_file(
+                    client, &node_id, AgentFileType::Config, &path, params.line_start, params.line_end,
+                ).await.map_err(mcp_err)?;
+                json_result(json!({
+                    "path": r.path, "content": r.content,
+                    "line_start": r.line_start, "line_end": r.line_end, "error": r.error
+                }))
+            }
+            None => {
+                let results = super::ops::recon_read_all(
+                    client, &params.node, AgentFileType::Config, params.line_start, params.line_end,
+                ).await.map_err(mcp_err)?;
+                let files: Vec<_> = results.iter().map(|r| json!({
+                    "path": r.path, "content": r.content, "error": r.error
+                })).collect();
+                json_result(json!({ "files": files, "count": files.len() }))
+            }
+        }
+    }
+
+    #[tool(description = "Read session file content discovered by recon. Omit path to read all session files.")]
+    async fn recon_session_read(
+        &self,
+        Parameters(params): Parameters<ReconReadParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+
+        match params.path {
+            Some(path) => {
+                let node_id = resolve_node!(client, params.node);
+                let r = super::ops::recon_read_file(
+                    client, &node_id, AgentFileType::Session, &path, params.line_start, params.line_end,
+                ).await.map_err(mcp_err)?;
+                json_result(json!({
+                    "path": r.path, "content": r.content,
+                    "line_start": r.line_start, "line_end": r.line_end, "error": r.error
+                }))
+            }
+            None => {
+                let results = super::ops::recon_read_all(
+                    client, &params.node, AgentFileType::Session, params.line_start, params.line_end,
+                ).await.map_err(mcp_err)?;
+                let files: Vec<_> = results.iter().map(|r| json!({
+                    "path": r.path, "content": r.content, "error": r.error
+                })).collect();
+                json_result(json!({ "files": files, "count": files.len() }))
+            }
+        }
+    }
+
+    #[tool(description = "Grep config file content with regex. Omit path to grep all config files (returns only files with matches).")]
+    async fn recon_config_grep(
+        &self,
+        Parameters(params): Parameters<ReconGrepParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+
+        match params.path {
+            Some(path) => {
+                let node_id = resolve_node!(client, params.node);
+                let r = super::ops::recon_grep_file(
+                    client, &node_id, AgentFileType::Config, &path, &params.pattern,
+                ).await.map_err(mcp_err)?;
+                json_result(json!({
+                    "path": r.path, "pattern": r.pattern,
+                    "matches": r.matches, "match_count": r.matches.len(), "error": r.error
+                }))
+            }
+            None => {
+                let results = super::ops::recon_grep_all(
+                    client, &params.node, AgentFileType::Config, &params.pattern,
+                ).await.map_err(mcp_err)?;
+                let files: Vec<_> = results.iter().map(|r| json!({
+                    "path": r.path, "matches": r.matches, "match_count": r.matches.len()
+                })).collect();
+                json_result(json!({
+                    "pattern": params.pattern,
+                    "files_with_matches": files.len(),
+                    "results": files
+                }))
+            }
+        }
+    }
+
+    #[tool(description = "Grep session file content with regex. Omit path to grep all session files (returns only files with matches).")]
+    async fn recon_session_grep(
+        &self,
+        Parameters(params): Parameters<ReconGrepParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+
+        match params.path {
+            Some(path) => {
+                let node_id = resolve_node!(client, params.node);
+                let r = super::ops::recon_grep_file(
+                    client, &node_id, AgentFileType::Session, &path, &params.pattern,
+                ).await.map_err(mcp_err)?;
+                json_result(json!({
+                    "path": r.path, "pattern": r.pattern,
+                    "matches": r.matches, "match_count": r.matches.len(), "error": r.error
+                }))
+            }
+            None => {
+                let results = super::ops::recon_grep_all(
+                    client, &params.node, AgentFileType::Session, &params.pattern,
+                ).await.map_err(mcp_err)?;
+                let files: Vec<_> = results.iter().map(|r| json!({
+                    "path": r.path, "matches": r.matches, "match_count": r.matches.len()
+                })).collect();
+                json_result(json!({
+                    "pattern": params.pattern,
+                    "files_with_matches": files.len(),
+                    "results": files
+                }))
+            }
+        }
+    }
+
+    // ── Sessions ─────────────────────────────────────────────────────────
 
     #[tool(description = "Create a session with an agent")]
     async fn session_create(
         &self,
         Parameters(params): Parameters<SessionCreateParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        let state = client
-            .get_state()
-            .await
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
-        let node = state
-            .nodes
-            .iter()
-            .find(|n| {
-                n.node_id
-                    .to_lowercase()
-                    .starts_with(&params.node.to_lowercase())
-            })
-            .ok_or_else(|| {
-                rmcp::ErrorData::internal_error(
-                    format!("No node found matching '{}'", params.node),
-                    None,
-                )
-            })?;
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let node_id = resolve_node!(client, params.node);
 
         use crate::{SessionCommand, SessionContext};
         let response = client
-            .send_command(
-                &node.node_id,
-                NodeCommand::Session(SessionCommand::Create {
-                    context: SessionContext {
-                        working_dir: params.project.clone(),
-                        yolo_mode: params.yolo,
-                    },
-                }),
-            )
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+            .send_command(&node_id, NodeCommand::Session(SessionCommand::Create {
+                context: SessionContext {
+                    working_dir: params.project.clone(),
+                    yolo_mode: params.yolo,
+                },
+            }))
+            .await.map_err(mcp_err)?;
 
         match response.result {
             NodeCommandResult::Session(SessionCommandResult::Created { session_id }) => {
-                Ok(CallToolResult::success(vec![Content::text(
-                    serde_json::to_string_pretty(&json!({
-                        "status": "success",
-                        "session_id": session_id,
-                        "session_id_short": &session_id[..8.min(session_id.len())],
-                        "yolo_mode": params.yolo,
-                        "project": params.project
-                    }))
-                    .unwrap(),
-                )]))
+                json_result(json!({
+                    "status": "success",
+                    "session_id": session_id,
+                    "session_id_short": &session_id[..8.min(session_id.len())],
+                    "yolo_mode": params.yolo,
+                    "project": params.project
+                }))
             }
-            NodeCommandResult::Error { message } => {
-                Err(rmcp::ErrorData::internal_error(message, None))
-            }
-            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+            NodeCommandResult::Error { message } => Err(mcp_err(message)),
+            _ => Err(mcp_err("Unexpected response")),
         }
     }
 
@@ -642,61 +535,29 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<SessionPromptParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        let state = client
-            .get_state()
-            .await
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
-        let node = state
-            .nodes
-            .iter()
-            .find(|n| {
-                n.node_id
-                    .to_lowercase()
-                    .starts_with(&params.node.to_lowercase())
-            })
-            .ok_or_else(|| {
-                rmcp::ErrorData::internal_error(
-                    format!("No node found matching '{}'", params.node),
-                    None,
-                )
-            })?;
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let node_id = resolve_node!(client, params.node);
 
         use crate::SessionCommand;
         let transaction_id = uuid::Uuid::new_v4().to_string();
         let response = client
-            .send_command(
-                &node.node_id,
-                NodeCommand::Session(SessionCommand::Prompt {
-                    text: params.prompt.clone(),
-                    transaction_id: transaction_id.clone(),
-                }),
-            )
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+            .send_command(&node_id, NodeCommand::Session(SessionCommand::Prompt {
+                text: params.prompt.clone(),
+                transaction_id,
+            }))
+            .await.map_err(mcp_err)?;
 
         match response.result {
             NodeCommandResult::Session(SessionCommandResult::PromptResponse { response, .. }) => {
-                Ok(CallToolResult::success(vec![Content::text(
-                    serde_json::to_string_pretty(&json!({
-                        "status": "success",
-                        "prompt": params.prompt,
-                        "response": response
-                    }))
-                    .unwrap(),
-                )]))
+                json_result(json!({
+                    "status": "success",
+                    "prompt": params.prompt,
+                    "response": response
+                }))
             }
-            NodeCommandResult::Error { message } => {
-                Err(rmcp::ErrorData::internal_error(message, None))
-            }
-            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+            NodeCommandResult::Error { message } => Err(mcp_err(message)),
+            _ => Err(mcp_err("Unexpected response")),
         }
     }
 
@@ -705,293 +566,73 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<NodeParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        let state = client
-            .get_state()
-            .await
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
-        let node = state
-            .nodes
-            .iter()
-            .find(|n| {
-                n.node_id
-                    .to_lowercase()
-                    .starts_with(&params.node.to_lowercase())
-            })
-            .ok_or_else(|| {
-                rmcp::ErrorData::internal_error(
-                    format!("No node found matching '{}'", params.node),
-                    None,
-                )
-            })?;
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let node_id = resolve_node!(client, params.node);
 
         use crate::SessionCommand;
         let response = client
-            .send_command(&node.node_id, NodeCommand::Session(SessionCommand::Close))
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+            .send_command(&node_id, NodeCommand::Session(SessionCommand::Close))
+            .await.map_err(mcp_err)?;
 
         match response.result {
             NodeCommandResult::Session(SessionCommandResult::Closed) => {
-                Ok(CallToolResult::success(vec![Content::text(
-                    serde_json::to_string_pretty(&json!({
-                        "status": "success",
-                        "message": "Session closed"
-                    }))
-                    .unwrap(),
-                )]))
+                json_result(json!({ "status": "success", "message": "Session closed" }))
             }
-            NodeCommandResult::Error { message } => {
-                Err(rmcp::ErrorData::internal_error(message, None))
-            }
-            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+            NodeCommandResult::Error { message } => Err(mcp_err(message)),
+            _ => Err(mcp_err("Unexpected response")),
         }
     }
 
-    #[tool(description = "Read file content")]
-    async fn read_file(
-        &self,
-        Parameters(params): Parameters<ReadFileParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        let state = client
-            .get_state()
-            .await
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
-        let node = state
-            .nodes
-            .iter()
-            .find(|n| {
-                n.node_id
-                    .to_lowercase()
-                    .starts_with(&params.node.to_lowercase())
-            })
-            .ok_or_else(|| {
-                rmcp::ErrorData::internal_error(
-                    format!("No node found matching '{}'", params.node),
-                    None,
-                )
-            })?;
-
-        let response = client
-            .send_command(
-                &node.node_id,
-                NodeCommand::Agent(crate::AgentCommand::ReadFile {
-                    file_type: match params.file_type {
-                        McpFileType::Config => AgentFileType::Config,
-                        McpFileType::Session => AgentFileType::Session,
-                    },
-                    path: params.path.clone(),
-                    line_start: params.line_start,
-                    line_end: params.line_end,
-                }),
-            )
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-
-        match response.result {
-            NodeCommandResult::Agent(AgentCommandResult::ReadFileResult {
-                file_type,
-                path,
-                content,
-                line_start,
-                line_end,
-                error,
-            }) => Ok(CallToolResult::success(vec![Content::text(
-                serde_json::to_string_pretty(&json!({
-                    "file_type": format!("{:?}", file_type),
-                    "path": path,
-                    "content": content,
-                    "line_start": line_start,
-                    "line_end": line_end,
-                    "error": error
-                }))
-                .unwrap(),
-            )])),
-            NodeCommandResult::Error { message } => {
-                Err(rmcp::ErrorData::internal_error(message, None))
-            }
-            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
-        }
-    }
+    // ── File Write ───────────────────────────────────────────────────────
 
     #[tool(description = "Write file content")]
     async fn write_file(
         &self,
         Parameters(params): Parameters<WriteFileParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        let state = client
-            .get_state()
-            .await
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
-        let node = state
-            .nodes
-            .iter()
-            .find(|n| {
-                n.node_id
-                    .to_lowercase()
-                    .starts_with(&params.node.to_lowercase())
-            })
-            .ok_or_else(|| {
-                rmcp::ErrorData::internal_error(
-                    format!("No node found matching '{}'", params.node),
-                    None,
-                )
-            })?;
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+        let node_id = resolve_node!(client, params.node);
 
         let response = client
-            .send_command(
-                &node.node_id,
-                NodeCommand::Agent(crate::AgentCommand::WriteFile {
-                    file_type: match params.file_type {
-                        McpFileType::Config => AgentFileType::Config,
-                        McpFileType::Session => AgentFileType::Session,
-                    },
-                    path: params.path.clone(),
-                    contents: params.contents.clone(),
-                }),
-            )
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+            .send_command(&node_id, NodeCommand::Agent(crate::AgentCommand::WriteFile {
+                file_type: match params.file_type {
+                    McpFileType::Config => AgentFileType::Config,
+                    McpFileType::Session => AgentFileType::Session,
+                },
+                path: params.path.clone(),
+                contents: params.contents.clone(),
+            }))
+            .await.map_err(mcp_err)?;
 
         match response.result {
             NodeCommandResult::Agent(AgentCommandResult::WriteFileResult {
-                file_type,
-                path,
-                success,
-                error,
-            }) => Ok(CallToolResult::success(vec![Content::text(
-                serde_json::to_string_pretty(&json!({
-                    "file_type": format!("{:?}", file_type),
-                    "path": path,
-                    "success": success,
-                    "error": error
-                }))
-                .unwrap(),
-            )])),
-            NodeCommandResult::Error { message } => {
-                Err(rmcp::ErrorData::internal_error(message, None))
-            }
-            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
+                file_type, path, success, error,
+            }) => json_result(json!({
+                "file_type": format!("{:?}", file_type),
+                "path": path, "success": success, "error": error
+            })),
+            NodeCommandResult::Error { message } => Err(mcp_err(message)),
+            _ => Err(mcp_err("Unexpected response")),
         }
     }
 
-    #[tool(description = "Search file content with regex")]
-    async fn grep_file(
-        &self,
-        Parameters(params): Parameters<GrepFileParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        let state = client
-            .get_state()
-            .await
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No state available", None))?;
-        let node = state
-            .nodes
-            .iter()
-            .find(|n| {
-                n.node_id
-                    .to_lowercase()
-                    .starts_with(&params.node.to_lowercase())
-            })
-            .ok_or_else(|| {
-                rmcp::ErrorData::internal_error(
-                    format!("No node found matching '{}'", params.node),
-                    None,
-                )
-            })?;
-
-        let response = client
-            .send_command(
-                &node.node_id,
-                NodeCommand::Agent(crate::AgentCommand::GrepFile {
-                    file_type: match params.file_type {
-                        McpFileType::Config => AgentFileType::Config,
-                        McpFileType::Session => AgentFileType::Session,
-                    },
-                    path: params.path.clone(),
-                    pattern: params.pattern.clone(),
-                }),
-            )
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-
-        match response.result {
-            NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
-                file_type,
-                path,
-                pattern,
-                matches,
-                error,
-            }) => Ok(CallToolResult::success(vec![Content::text(
-                serde_json::to_string_pretty(&json!({
-                    "file_type": format!("{:?}", file_type),
-                    "path": path,
-                    "pattern": pattern,
-                    "matches": matches,
-                    "error": error
-                }))
-                .unwrap(),
-            )])),
-            NodeCommandResult::Error { message } => {
-                Err(rmcp::ErrorData::internal_error(message, None))
-            }
-            _ => Err(rmcp::ErrorData::internal_error("Unexpected response", None)),
-        }
-    }
+    // ── Traffic ──────────────────────────────────────────────────────────
 
     #[tool(description = "Search intercepted network traffic")]
     async fn traffic_search(
         &self,
         Parameters(params): Parameters<TrafficSearchParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let state = client.get_state().await;
         let resolved_node_id = if let Some(prefix) = &params.node {
             state.as_ref().and_then(|s| {
-                s.nodes
-                    .iter()
-                    .find(|n| {
-                        n.node_id
-                            .to_lowercase()
-                            .starts_with(&prefix.to_lowercase())
-                    })
+                s.nodes.iter()
+                    .find(|n| n.node_id.to_lowercase().starts_with(&prefix.to_lowercase()))
                     .map(|n| n.node_id.clone())
             })
         } else {
@@ -1007,90 +648,59 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             offset: 0,
         };
 
-        let (entries, total_count) = client
-            .search_traffic(filters)
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-        let entries_json: Vec<_> = entries
-            .iter()
-            .map(|e| {
-                json!({
-                    "id": e.id,
-                    "timestamp": e.timestamp.to_rfc3339(),
-                    "node_id": e.node_id,
-                    "agent": e.agent_short_name,
-                    "method": e.method,
-                    "url": e.url,
-                    "host": e.host,
-                    "response_status": e.response_status
-                })
-            })
-            .collect();
+        let (entries, total_count) = client.search_traffic(filters).await.map_err(mcp_err)?;
+        let entries_json: Vec<_> = entries.iter().map(|e| json!({
+            "id": e.id,
+            "timestamp": e.timestamp.to_rfc3339(),
+            "node_id": e.node_id,
+            "agent": e.agent_short_name,
+            "method": e.method,
+            "url": e.url,
+            "host": e.host,
+            "response_status": e.response_status
+        })).collect();
 
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({
-                "entries": entries_json,
-                "returned_count": entries.len(),
-                "total_count": total_count
-            }))
-            .unwrap(),
-        )]))
+        json_result(json!({
+            "entries": entries_json,
+            "returned_count": entries.len(),
+            "total_count": total_count
+        }))
     }
+
+    // ── Operations & Chains ──────────────────────────────────────────────
 
     #[tool(description = "List available operations and chains")]
     async fn op_available(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
-        let result = super::ops::list_available(client)
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+        let result = super::ops::list_available(client).await.map_err(mcp_err)?;
 
-        let ops: Vec<_> = result
-            .operations
-            .iter()
-            .map(|d| {
-                json!({
-                    "type": "operation",
-                    "category": d.category,
-                    "short_name": d.short_name,
-                    "full_name": d.full_name,
-                    "name": d.name,
-                    "description": d.description
-                })
-            })
-            .collect();
+        let ops: Vec<_> = result.operations.iter().map(|d| json!({
+            "type": "operation",
+            "category": d.category,
+            "short_name": d.short_name,
+            "full_name": d.full_name,
+            "name": d.name,
+            "description": d.description,
+            "timeout": d.timeout
+        })).collect();
 
-        let chains: Vec<_> = result
-            .chains
-            .iter()
-            .map(|c| {
-                json!({
-                    "type": "chain",
-                    "id": &c.id[..8.min(c.id.len())],
-                    "name": c.name,
-                    "description": c.description,
-                    "category": c.category,
-                    "element_count": c.element_count,
-                    "operation_count": c.operation_count
-                })
-            })
-            .collect();
+        let chains: Vec<_> = result.chains.iter().map(|c| json!({
+            "type": "chain",
+            "id": &c.id[..8.min(c.id.len())],
+            "name": c.name,
+            "description": c.description,
+            "category": c.category,
+            "element_count": c.element_count,
+            "operation_count": c.operation_count,
+            "timeout": c.timeout
+        })).collect();
 
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({
-                "operations": ops,
-                "chains": chains,
-                "operation_count": ops.len(),
-                "chain_count": chains.len()
-            }))
-            .unwrap(),
-        )]))
+        json_result(json!({
+            "operations": ops, "chains": chains,
+            "operation_count": ops.len(), "chain_count": chains.len()
+        }))
     }
 
     #[tool(description = "Run a semantic operation or chain")]
@@ -1098,40 +708,24 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<OpRunParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
         let result = super::ops::run(client, &params.name, &params.node, &params.agent, params.working_dir)
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+            .await.map_err(mcp_err)?;
 
         let response = match result {
-            super::ops::OpRunResult::Operation { id, name } => {
-                json!({
-                    "status": "success",
-                    "type": "operation",
-                    "id": &id[..8.min(id.len())],
-                    "name": name
-                })
-            }
-            super::ops::OpRunResult::Chain { name, execution_id } => {
-                json!({
-                    "status": "success",
-                    "type": "chain",
-                    "name": name,
-                    "execution_id": execution_id.as_deref().map(|id| &id[..8.min(id.len())])
-                })
-            }
+            super::ops::OpRunResult::Operation { id, name } => json!({
+                "status": "success", "type": "operation",
+                "id": &id[..8.min(id.len())], "name": name
+            }),
+            super::ops::OpRunResult::Chain { name, execution_id } => json!({
+                "status": "success", "type": "chain", "name": name,
+                "execution_id": execution_id.as_deref().map(|id| &id[..8.min(id.len())])
+            }),
         };
 
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&response).unwrap(),
-        )]))
+        json_result(response)
     }
 
     #[tool(description = "Show info for an operation or chain execution")]
@@ -1139,30 +733,28 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<ShortIdParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
-        let result = super::ops::get_info(client, &params.short_id)
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+        let result = super::ops::get_info(client, &params.short_id).await.map_err(mcp_err)?;
 
         let response = match result {
-            super::ops::OpInfoResult::Operation(op) => {
-                json!({
-                    "type": "operation",
-                    "id": &op.operation_id[..8.min(op.operation_id.len())],
-                    "name": op.spec.name,
-                    "status": format!("{:?}", op.status),
-                    "node_id": &op.node_id[..8.min(op.node_id.len())],
-                    "agent": op.agent_short_name
-                })
-            }
+            super::ops::OpInfoResult::Operation(op) => json!({
+                "type": "operation",
+                "id": &op.operation_id[..8.min(op.operation_id.len())],
+                "name": op.spec.name,
+                "status": format!("{:?}", op.status),
+                "node_id": &op.node_id[..8.min(op.node_id.len())],
+                "agent": op.agent_short_name,
+                "result": op.result,
+                "output": op.output,
+                "queue_position": op.queue_position
+            }),
             super::ops::OpInfoResult::Chain(exec) => {
+                let elements: Vec<_> = exec.elements.iter().map(|(id, elem)| json!({
+                    "element_id": id,
+                    "status": format!("{:?}", elem.status)
+                })).collect();
                 json!({
                     "type": "chain",
                     "id": &exec.execution_id[..8.min(exec.execution_id.len())],
@@ -1170,14 +762,15 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
                     "status": exec.status.to_string(),
                     "node_id": &exec.node_id[..8.min(exec.node_id.len())],
                     "agent": exec.agent_short_name,
-                    "element_count": exec.elements.len()
+                    "element_count": exec.elements.len(),
+                    "elements": elements,
+                    "started_at": exec.started_at.to_rfc3339(),
+                    "ended_at": exec.ended_at.map(|t| t.to_rfc3339())
                 })
             }
         };
 
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&response).unwrap(),
-        )]))
+        json_result(response)
     }
 
     #[tool(description = "Cancel a running operation or chain execution")]
@@ -1185,242 +778,50 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         &self,
         Parameters(params): Parameters<ShortIdParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
-        let result = super::ops::cancel(client, &params.short_id)
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+        let result = super::ops::cancel(client, &params.short_id).await.map_err(mcp_err)?;
 
         let message = match result {
-            super::ops::OpCancelResult::Operation { id } => {
-                format!("Cancel request sent for operation {}", id)
-            }
-            super::ops::OpCancelResult::Chain { id } => {
-                format!("Cancel request sent for chain {}", id)
-            }
+            super::ops::OpCancelResult::Operation { id } => format!("Cancel request sent for operation {}", id),
+            super::ops::OpCancelResult::Chain { id } => format!("Cancel request sent for chain {}", id),
         };
 
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({
-                "status": "success",
-                "message": message
-            }))
-            .unwrap(),
-        )]))
+        json_result(json!({ "status": "success", "message": message }))
     }
 
     #[tool(description = "List running/tracked operations and chain executions")]
     async fn op_list(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
-        let result = super::ops::list_tracked(client)
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+        let result = super::ops::list_tracked(client).await.map_err(mcp_err)?;
 
-        let ops: Vec<_> = result
-            .operations
-            .iter()
-            .map(|o| {
-                json!({
-                    "type": "operation",
-                    "id": &o.operation_id[..8.min(o.operation_id.len())],
-                    "name": o.spec.name,
-                    "status": format!("{:?}", o.status),
-                    "node_id": &o.node_id[..8.min(o.node_id.len())],
-                    "agent": o.agent_short_name
-                })
-            })
-            .collect();
+        let ops: Vec<_> = result.operations.iter().map(|o| json!({
+            "type": "operation",
+            "id": &o.operation_id[..8.min(o.operation_id.len())],
+            "name": o.spec.name,
+            "status": format!("{:?}", o.status),
+            "node_id": &o.node_id[..8.min(o.node_id.len())],
+            "agent": o.agent_short_name,
+            "queue_position": o.queue_position
+        })).collect();
 
-        let chains: Vec<_> = result
-            .chains
-            .iter()
-            .map(|e| {
-                json!({
-                    "type": "chain",
-                    "id": &e.execution_id[..8.min(e.execution_id.len())],
-                    "chain_name": e.chain_name,
-                    "status": e.status.to_string(),
-                    "node_id": &e.node_id[..8.min(e.node_id.len())],
-                    "agent": e.agent_short_name,
-                    "element_count": e.elements.len()
-                })
-            })
-            .collect();
+        let chains: Vec<_> = result.chains.iter().map(|e| json!({
+            "type": "chain",
+            "id": &e.execution_id[..8.min(e.execution_id.len())],
+            "chain_name": e.chain_name,
+            "status": e.status.to_string(),
+            "node_id": &e.node_id[..8.min(e.node_id.len())],
+            "agent": e.agent_short_name,
+            "element_count": e.elements.len()
+        })).collect();
 
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({
-                "operations": ops,
-                "chains": chains,
-                "operation_count": ops.len(),
-                "chain_count": chains.len()
-            }))
-            .unwrap(),
-        )]))
-    }
-
-    #[tool(description = "List sessions from stored recon results (without re-running recon)")]
-    async fn recon_sessions(
-        &self,
-        Parameters(params): Parameters<AgentQueryParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        let result = super::ops::recon_sessions(client, &params.node, &params.agent)
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-
-        let sessions: Vec<_> = result
-            .sessions
-            .iter()
-            .map(|s| {
-                json!({
-                    "session_id": s.session_id,
-                    "session_file": s.session_file,
-                    "context_path": s.context_path,
-                    "last_modified": s.last_modified,
-                    "message_count": s.message_count
-                })
-            })
-            .collect();
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({
-                "sessions": sessions,
-                "count": sessions.len()
-            }))
-            .unwrap(),
-        )]))
-    }
-
-    #[tool(description = "List project paths from stored recon results (without re-running recon)")]
-    async fn recon_projects(
-        &self,
-        Parameters(params): Parameters<AgentQueryParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        let result = super::ops::recon_projects(client, &params.node, &params.agent)
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({
-                "projects": result.projects,
-                "count": result.projects.len()
-            }))
-            .unwrap(),
-        )]))
-    }
-
-    #[tool(description = "List tools from stored recon results: MCP servers, skills, internal tools (without re-running recon)")]
-    async fn recon_tools(
-        &self,
-        Parameters(params): Parameters<AgentQueryParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        let result = super::ops::recon_tools(client, &params.node, &params.agent)
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-
-        let mcp_servers: Vec<_> = result
-            .mcp_servers
-            .iter()
-            .map(|s| {
-                json!({
-                    "name": s.name,
-                    "transport": format!("{:?}", s.transport),
-                    "tools": s.tools.iter().map(|t| json!({
-                        "name": t.name,
-                        "description": t.description
-                    })).collect::<Vec<_>>()
-                })
-            })
-            .collect();
-
-        let skills: Vec<_> = result
-            .skills
-            .iter()
-            .map(|s| json!({ "name": s.name, "description": s.description }))
-            .collect();
-
-        let internal_tools: Vec<_> = result
-            .internal_tools
-            .iter()
-            .map(|t| json!({ "name": t.name, "description": t.description }))
-            .collect();
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({
-                "mcp_servers": mcp_servers,
-                "skills": skills,
-                "internal_tools": internal_tools
-            }))
-            .unwrap(),
-        )]))
-    }
-
-    #[tool(description = "List config items from stored recon results (without re-running recon)")]
-    async fn recon_configs(
-        &self,
-        Parameters(params): Parameters<AgentQueryParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        self.get_client()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-        let guard = self.client.lock().await;
-        let client = guard
-            .as_ref()
-            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
-
-        let result = super::ops::recon_configs(client, &params.node, &params.agent)
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
-
-        let configs: Vec<_> = result
-            .configs
-            .iter()
-            .map(|c| json!({"path": c.path, "config_type": c.config_type}))
-            .collect();
-
-        Ok(CallToolResult::success(vec![Content::text(
-            serde_json::to_string_pretty(&json!({
-                "configs": configs,
-                "count": configs.len()
-            }))
-            .unwrap(),
-        )]))
+        json_result(json!({
+            "operations": ops, "chains": chains,
+            "operation_count": ops.len(), "chain_count": chains.len()
+        }))
     }
 }
 
@@ -1437,9 +838,10 @@ impl<C: McpClient + Clone + 'static> ServerHandler for PraxisServer<C> {
             },
             instructions: Some(
                 "Praxis C2 framework for orchestrating AI coding agents. \
-                Use node_list to see connected nodes, then agent_list to see agents on a node. \
-                IMPORTANT: Always call session_close when you are done with a session to free \
-                resources and allow other clients to use the agent."
+                Use node_list to see connected nodes, agent_list to see agents. \
+                Use recon_run to discover tools/configs/sessions, recon_list to query stored results. \
+                Use recon_config_read/recon_session_read to read files, recon_config_grep/recon_session_grep to search. \
+                IMPORTANT: Always call session_close when done with a session."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
