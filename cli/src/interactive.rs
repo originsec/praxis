@@ -127,6 +127,8 @@ struct CompletionCache {
     chain_names: Vec<String>,
     chain_exec_ids: Vec<String>,
     project_paths: Vec<String>,
+    config_paths: Vec<String>,
+    session_paths: Vec<String>,
 }
 
 async fn refresh_completion_cache(
@@ -175,6 +177,8 @@ async fn refresh_completion_cache(
         client.request_recon_result(nid, agent).await;
     }
     let project_paths = client.get_cached_project_paths().await;
+    let config_paths = client.get_cached_config_paths().await;
+    let session_paths = client.get_cached_session_paths().await;
 
     let op_defs = client.get_operation_definitions().await;
     let op_names: Vec<String> = op_defs.iter()
@@ -206,6 +210,8 @@ async fn refresh_completion_cache(
         c.chain_names = chain_names;
         c.chain_exec_ids = chain_exec_ids;
         c.project_paths = project_paths;
+        c.config_paths = config_paths;
+        c.session_paths = session_paths;
     }
 }
 
@@ -221,6 +227,8 @@ enum CompletionContext {
     OpName,
     ShortId,
     ProjectPath,
+    ConfigPath,
+    SessionPath,
 }
 
 fn detect_context(tokens: &[&str], trailing_space: bool) -> CompletionContext {
@@ -255,6 +263,12 @@ fn detect_context(tokens: &[&str], trailing_space: bool) -> CompletionContext {
             ("op", "run") if completing_idx == 2 => return CompletionContext::OpName,
             ("op", "info") | ("op", "cancel") if completing_idx == 2 => return CompletionContext::ShortId,
             ("session", "create") if completing_idx == 2 => return CompletionContext::ProjectPath,
+            ("recon", "config-read") | ("recon", "config-grep") if completing_idx == 2 => {
+                return CompletionContext::ConfigPath;
+            }
+            ("recon", "session-read") | ("recon", "session-grep") if completing_idx == 2 => {
+                return CompletionContext::SessionPath;
+            }
             _ => {}
         }
     }
@@ -320,6 +334,8 @@ impl PraxisCompleter {
                 ids
             }
             CompletionContext::ProjectPath => cache.project_paths.clone(),
+            CompletionContext::ConfigPath => cache.config_paths.clone(),
+            CompletionContext::SessionPath => cache.session_paths.clone(),
             CompletionContext::Command => Vec::new(),
         }
     }
@@ -495,7 +511,7 @@ fn needs_node_flag(tokens: &[String]) -> bool {
     let cmd = tokens.first().map(|s| s.as_str()).unwrap_or("");
     let sub = tokens.get(1).map(|s| s.as_str()).unwrap_or("");
     match cmd {
-        "agent" | "session" => true,
+        "agent" | "session" | "recon" => true,
         "op" => sub == "run",
         _ => false,
     }
@@ -688,6 +704,198 @@ async fn handle_session_create_project(
     }
 }
 
+//
+// Generic interactive picker — shows a numbered list and returns the chosen
+// value, or None if the user cancels.
+//
+
+fn interactive_pick(
+    items: &[String],
+    prompt_msg: &str,
+    rl: &mut Editor<PraxisCompleter, DefaultHistory>,
+) -> Option<String> {
+    if items.is_empty() {
+        return None;
+    }
+
+    println!();
+    println!("  {}", prompt_msg.bold());
+    for (i, item) in items.iter().enumerate() {
+        println!("  {}  {}", format!("[{}]", i + 1).cyan(), item);
+    }
+    println!("  {}  {}", "[0]".cyan(), "(cancel)");
+    println!();
+
+    let selection: String = match rl.readline("  Choice: ") {
+        Ok(line) => line.trim().to_string(),
+        Err(_) => return None,
+    };
+
+    if selection.is_empty() || selection == "0" {
+        return None;
+    }
+
+    if let Ok(idx) = selection.parse::<usize>() {
+        if idx >= 1 && idx <= items.len() {
+            return Some(items[idx - 1].clone());
+        }
+    }
+    None
+}
+
+//
+// Intercept recon config-read/session-read/config-grep/session-grep — if the
+// positional path arg is missing, show an interactive picker from cached paths.
+//
+
+fn is_recon_needs_path(tokens: &[String]) -> Option<&'static str> {
+    if tokens.first().map(|s| s.as_str()) != Some("recon") {
+        return None;
+    }
+    match tokens.get(1).map(|s| s.as_str()) {
+        Some("config-read") | Some("config-grep") => Some("config"),
+        Some("session-read") | Some("session-grep") => Some("session"),
+        _ => None,
+    }
+}
+
+fn has_positional_path(tokens: &[String]) -> bool {
+    let mut i = 2;
+    while i < tokens.len() {
+        let t = &tokens[i];
+        if t.starts_with('-') {
+            if t == "-n" || t == "--node" || t == "-a" || t == "--agent" {
+                i += 1; // skip flag value
+            }
+        } else {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+async fn handle_recon_path_picker(
+    tokens: &mut Vec<String>,
+    repl_state: &ReplState,
+    client: &CliClient,
+    rl: &mut Editor<PraxisCompleter, DefaultHistory>,
+) {
+    let Some(path_type) = is_recon_needs_path(tokens) else { return };
+    if has_positional_path(tokens) { return; }
+
+    let (Some(node_id), Some(agent)) = (&repl_state.selected_node, &repl_state.selected_agent) else {
+        return;
+    };
+
+    let recon = match client.get_recon_result(node_id, agent).await {
+        Ok(Some(r)) => r,
+        _ => return,
+    };
+
+    let items: Vec<String> = match path_type {
+        "config" => recon.config.iter().map(|c| c.path.clone()).collect(),
+        "session" => recon.sessions.iter().map(|s| s.session_file.clone()).collect(),
+        _ => return,
+    };
+
+    let label = if path_type == "config" { "Select a config file:" } else { "Select a session file:" };
+    if let Some(path) = interactive_pick(&items, label, rl) {
+        tokens.push(path);
+    }
+}
+
+//
+// Intercept "agent select" with no short_name — show a picker.
+//
+
+async fn handle_agent_select_picker(
+    tokens: &mut Vec<String>,
+    repl_state: &ReplState,
+    client: &CliClient,
+    rl: &mut Editor<PraxisCompleter, DefaultHistory>,
+) {
+    if tokens.first().map(|s| s.as_str()) != Some("agent") { return; }
+    if tokens.get(1).map(|s| s.as_str()) != Some("select") { return; }
+
+    //
+    // Check if there's already a positional agent name.
+    //
+
+    if has_positional_path(tokens) { return; }
+
+    let Some(ref node_id) = repl_state.selected_node else { return };
+
+    let state = match client.get_state().await {
+        Some(s) => s,
+        None => return,
+    };
+
+    let Some(node) = state.nodes.iter().find(|n| n.node_id == *node_id) else { return };
+
+    let agents: Vec<String> = node.discovered_agents.iter()
+        .filter(|a| a.available)
+        .map(|a| a.short_name.clone())
+        .collect();
+
+    if let Some(name) = interactive_pick(&agents, "Select an agent:", rl) {
+        tokens.push(name);
+    }
+}
+
+//
+// Intercept "node select" with no prefix — show a picker.
+//
+
+async fn handle_node_select_picker(
+    tokens: &mut Vec<String>,
+    client: &CliClient,
+    rl: &mut Editor<PraxisCompleter, DefaultHistory>,
+) {
+    if tokens.first().map(|s| s.as_str()) != Some("node") { return; }
+    if tokens.get(1).map(|s| s.as_str()) != Some("select") { return; }
+    if tokens.len() > 2 { return; }
+
+    let state = match client.get_state().await {
+        Some(s) => s,
+        None => return,
+    };
+
+    let nodes: Vec<String> = state.nodes.iter()
+        .map(|n| {
+            let short = &n.node_id[..8.min(n.node_id.len())];
+            format!("{} ({})", short, n.machine_name)
+        })
+        .collect();
+
+    let node_ids: Vec<String> = state.nodes.iter()
+        .map(|n| format_short_id(&n.node_id))
+        .collect();
+
+    if nodes.is_empty() { return; }
+
+    println!();
+    println!("  {}", "Select a node:".bold());
+    for (i, label) in nodes.iter().enumerate() {
+        println!("  {}  {}", format!("[{}]", i + 1).cyan(), label);
+    }
+    println!("  {}  {}", "[0]".cyan(), "(cancel)");
+    println!();
+
+    let selection: String = match rl.readline("  Choice: ") {
+        Ok(line) => line.trim().to_string(),
+        Err(_) => return,
+    };
+
+    if selection.is_empty() || selection == "0" { return; }
+
+    if let Ok(idx) = selection.parse::<usize>() {
+        if idx >= 1 && idx <= node_ids.len() {
+            tokens.push(node_ids[idx - 1].clone());
+        }
+    }
+}
+
 pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) -> Result<()> {
     //
     // Install the SIGINT handler early so Ctrl+C during command execution
@@ -742,6 +950,7 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
         if active_nodes.len() == 1 {
             let node = active_nodes[0];
             repl_state.selected_node = Some(node.node_id.clone());
+            repl_state.selected_machine_name = Some(node.machine_name.clone());
 
             if let Some(ref agent) = node.selected_agent {
                 repl_state.selected_agent = Some(agent.short_name.clone());
@@ -783,6 +992,10 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
                 // and bare positional path support.
                 //
 
+                //
+                // Interactive pickers for commands missing positional args.
+                //
+
                 if is_session_create(&tokens) {
                     handle_session_create_project(
                         &mut tokens,
@@ -791,6 +1004,10 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
                         &mut rl,
                     ).await;
                 }
+
+                handle_recon_path_picker(&mut tokens, &repl_state, &client, &mut rl).await;
+                handle_agent_select_picker(&mut tokens, &repl_state, &client, &mut rl).await;
+                handle_node_select_picker(&mut tokens, &client, &mut rl).await;
 
                 match ReplCli::try_parse_from(&tokens) {
                     Ok(parsed) => {

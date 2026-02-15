@@ -36,6 +36,8 @@ struct ClientState {
     pending_traffic_search: Option<(Vec<InterceptedTrafficEntry>, usize)>,
     pending_recon_get: Option<ReconGetResult>,
     cached_project_paths: Vec<String>,
+    cached_config_paths: Vec<String>,
+    cached_session_paths: Vec<String>,
     operations: Vec<SemanticOpUpdate>,
     operation_definitions: Vec<OperationDefinitionInfo>,
     chain_definitions: Vec<ChainDefinitionInfo>,
@@ -259,6 +261,8 @@ impl CliClient {
             ClientDirectMessage::ReconGetResponse { recon_result, performed_at, is_semantic, .. } => {
                 if let Some(ref recon) = recon_result {
                     state.cached_project_paths = recon.project_paths.clone();
+                    state.cached_config_paths = recon.config.iter().map(|c| c.path.clone()).collect();
+                    state.cached_session_paths = recon.sessions.iter().map(|s| s.session_file.clone()).collect();
                 }
                 state.pending_recon_get = Some(ReconGetResult {
                     recon_result,
@@ -588,6 +592,14 @@ impl CliClient {
 
     pub async fn get_cached_project_paths(&self) -> Vec<String> {
         self.state.lock().await.cached_project_paths.clone()
+    }
+
+    pub async fn get_cached_config_paths(&self) -> Vec<String> {
+        self.state.lock().await.cached_config_paths.clone()
+    }
+
+    pub async fn get_cached_session_paths(&self) -> Vec<String> {
+        self.state.lock().await.cached_session_paths.clone()
     }
 }
 
