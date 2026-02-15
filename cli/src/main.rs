@@ -3,6 +3,7 @@ mod commands;
 mod interactive;
 mod mcp;
 mod output;
+mod spinner;
 mod state;
 
 use anyhow::Result;
@@ -12,6 +13,7 @@ use commands::{
     agent::AgentCommand,
     node::NodeCommand,
     op::OpCommand,
+    recon::ReconCommand,
     session::SessionCommand,
     traffic::TrafficCommand,
 };
@@ -73,6 +75,12 @@ pub(crate) enum Commands {
         command: AgentCommand,
     },
 
+    /// Reconnaissance operations
+    Recon {
+        #[command(subcommand)]
+        command: ReconCommand,
+    },
+
     /// Session management commands
     Session {
         #[command(subcommand)]
@@ -101,6 +109,7 @@ impl Commands {
         match self {
             Commands::Node { command } => commands::node::execute(client, command, output).await,
             Commands::Agent { command } => commands::agent::execute(client, command, output).await,
+            Commands::Recon { command } => commands::recon::execute(client, command, output).await,
             Commands::Session { command } => {
                 commands::session::execute(client, command, output).await
             }
@@ -132,7 +141,7 @@ fn print_fullhelp() {
     //
     // Print help for each subcommand.
     //
-    let subcommands = ["node", "agent", "session", "traffic", "op"];
+    let subcommands = ["node", "agent", "recon", "session", "traffic", "op"];
 
     for sub_name in subcommands {
         println!("================================================================================");

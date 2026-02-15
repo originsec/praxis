@@ -41,11 +41,19 @@
 - For PostgreSQL, use `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`.
 - The `service_config` table can store version tracking keys (e.g., `builtin_scripts_version`) to coordinate data migrations across service upgrades.
 
+## CLI / MCP Parity
+
+- Capabilities of the CLI REPL and non-interactive CLI must always match. Any command available in the REPL must also work in one-shot mode (`-C`) and as a direct subcommand.
+- Help text must be updated to match for both in-REPL help and non-interactive `--fullhelp`.
+- The MCP server must always have at least the capabilities available in the CLI (MCP can have more). Common code in `common/src/mcp/ops.rs` is used by both CLI and MCP.
+
 ## Documentation
 
 - Documentation lives in `docs/` and is built with mdBook.
-- When making code changes, update the corresponding documentation in `docs/src/`.
+- Documentation must always be kept up to date to reflect any code changes. When adding, removing, or modifying features, update the corresponding documentation in `docs/src/`.
 - Key documentation files:
+  - `docs/src/usage/cli.md` - CLI commands, REPL, MCP server tools
+  - `docs/src/usage/recon.md` - Reconnaissance features
   - `docs/src/architecture/` - Node architecture
   - `docs/src/connectors/` - Agent connector documentation
 - But look through entire docs/src to locate any areas that may need updates

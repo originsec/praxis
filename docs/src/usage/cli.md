@@ -55,9 +55,9 @@ The REPL tracks your selected node, agent, and active session. The prompt update
 
 ```
 praxis ❯                                 # nothing selected
-praxis [b3bf7460] ❯                      # node selected
-praxis [b3bf7460:claudecode] ❯           # node + agent
-praxis [b3bf7460:claudecode *] ❯         # node + agent + active session
+praxis [myhost] ❯                        # node selected (shows machine name)
+praxis [myhost:claudecode] ❯             # node + agent
+praxis [myhost:claudecode *] ❯           # node + agent + active session
 ```
 
 Select a node and agent:
@@ -69,7 +69,7 @@ praxis ❯ node select b3bf7460
 praxis [b3bf7460] ❯ agent select claudecode
 ✓ Selected agent: claudecode
 
-praxis [b3bf7460:claudecode] ❯
+praxis [myhost:claudecode] ❯
 ```
 
 On startup, if there is exactly one active node, it is auto-selected along with any existing agent selection and session state.
@@ -79,10 +79,10 @@ On startup, if there is exactly one active node, it is auto-selected along with 
 Once a node and agent are selected, the `-n` and `-a` flags are injected automatically. You don't need to pass them for every command:
 
 ```
-praxis [b3bf7460:claudecode] ❯ session create
+praxis [myhost:claudecode] ❯ session create
 ✓ Session created: a1b2c3d4
 
-praxis [b3bf7460:claudecode *] ❯ session prompt "list files"
+praxis [myhost:claudecode *] ❯ session prompt "list files"
 ```
 
 This is equivalent to typing `session create -n b3bf7460` and `session prompt -n b3bf7460 "list files"`. You can always override by passing the flag explicitly.
@@ -96,6 +96,7 @@ The REPL provides context-aware tab completion:
 - **Agent names**: `agent select <TAB>` shows discovered agent names
 - **Operation names**: `op run <TAB>` shows available operations and chains
 - **Short IDs**: `op status <TAB>` shows tracked operation/chain IDs
+- **Project paths**: `session create <TAB>` or `-p <TAB>` shows project paths from recon
 - **Flag values**: `-n <TAB>` shows node IDs, `-a <TAB>` shows agent names
 
 The completion cache refreshes after every command.
@@ -164,19 +165,32 @@ agent select claudecode
 # Request agent info update
 agent update
 
-# Perform reconnaissance
-agent recon
-agent recon-semantic
+# Request agent info update
+agent update
+```
 
-# Read/write/grep config content
-agent config read /home/user/.codex/config.toml
-agent config read /home/user/.codex/config.toml --line-start 1 --line-end 50
-agent config write /home/user/.codex/config.toml "new content"
-agent config grep /home/user/.codex/config.toml "model|profile"
+### Reconnaissance
 
-# Read/grep session content
-agent session read /home/user/.codex/sessions/2026-02-13.jsonl
-agent session grep /home/user/.codex/sessions/2026-02-13.jsonl "error|warning"
+```bash
+# Run reconnaissance
+recon run                           # static recon (shows summary)
+recon run-semantic                  # semantic recon (shows summary)
+
+# List stored recon data (without re-running)
+recon list                          # all details
+recon list sessions                 # just sessions
+recon list tools                    # MCP servers, skills, internal tools
+recon list projects                 # project paths
+recon list configs                  # config items
+
+# Read config/session content discovered by recon
+recon config-read /home/user/.codex/config.toml
+recon config-read /home/user/.codex/config.toml --line-start 1 --line-end 50
+recon session-read /home/user/.codex/sessions/2026-02-13.jsonl
+
+# Grep config/session content with regex
+recon config-grep /home/user/.codex/config.toml "model|profile"
+recon session-grep /home/user/.codex/sessions/2026-02-13.jsonl "error|warning"
 ```
 
 ### Sessions
@@ -195,6 +209,8 @@ session close
 Session options:
 - `--yolo`: Enable YOLO mode (auto-approve actions)
 - `--project <PATH>`: Set the working directory for the session
+
+In the REPL, running `session create` without `--project` will show an interactive project picker if recon has been run and project paths were discovered. You can also pass a project path as a positional argument: `session create /path/to/project`.
 
 ### Operations and Chains
 
@@ -316,6 +332,10 @@ The MCP server exposes the following tools:
 - `agent_update` - Request agent info refresh
 - `agent_recon` - Run agent reconnaissance
 - `agent_recon_semantic` - Run semantic reconnaissance
+- `recon_sessions` - List sessions from stored recon (node + agent)
+- `recon_projects` - List project paths from stored recon (node + agent)
+- `recon_tools` - List MCP servers, skills, and internal tools from stored recon (node + agent)
+- `recon_configs` - List config items from stored recon (node + agent)
 - `read_file` - Read config/session file content (`file_type: Config|Session`, optional line range)
 - `write_file` - Write file content (`file_type: Config` only)
 - `grep_file` - Search config/session file content with regex (`file_type: Config|Session`)

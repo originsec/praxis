@@ -1,12 +1,11 @@
 use anyhow::{anyhow, Result};
 use clap::Subcommand;
-use colored::Colorize;
 use common::{NodeCommand as NodeCmd, NodeCommandResult, SessionCommand as NodeSessionCommand, SessionCommandResult, SessionContext};
 use serde_json::json;
-use std::io::Write;
 
 use crate::client::CliClient;
 use crate::output::{format_short_id, print_json, print_success, OutputFormat};
+use crate::spinner::Spinner;
 
 #[derive(Subcommand)]
 pub enum SessionCommand {
@@ -106,49 +105,6 @@ async fn create_session(client: &CliClient, node_prefix: &str, yolo: bool, proje
             Err(anyhow!("{}", message))
         }
         _ => Err(anyhow!("Unexpected response")),
-    }
-}
-
-struct Spinner {
-    stop: tokio::sync::watch::Sender<bool>,
-    handle: tokio::task::JoinHandle<()>,
-}
-
-impl Spinner {
-    fn start(message: &str) -> Self {
-        let (tx, mut rx) = tokio::sync::watch::channel(false);
-        let msg = message.to_string();
-
-        let handle = tokio::spawn(async move {
-            const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-            let mut i = 0;
-
-            loop {
-                if *rx.borrow() {
-                    break;
-                }
-
-                let frame = FRAMES[i % FRAMES.len()].dimmed();
-                print!("\r  {} {}", frame, msg.dimmed());
-                let _ = std::io::stdout().flush();
-                i += 1;
-
-                tokio::select! {
-                    _ = rx.changed() => break,
-                    _ = tokio::time::sleep(std::time::Duration::from_millis(80)) => {}
-                }
-            }
-
-            print!("\r\x1B[2K");
-            let _ = std::io::stdout().flush();
-        });
-
-        Self { stop: tx, handle }
-    }
-
-    async fn finish(self) {
-        let _ = self.stop.send(true);
-        let _ = self.handle.await;
     }
 }
 

@@ -2,7 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use common::{
     mcp::McpClient, ChainDefinitionInfo, ChainExecutionUpdate, CommandResponse,
-    InterceptedTrafficEntry, NodeCommand, OperationDefinitionInfo, PraxisServer,
+    InterceptedTrafficEntry, NodeCommand, OperationDefinitionInfo, PraxisServer, ReconResult,
     SemanticOpUpdate, SystemState, TrafficSearchFilters, run_stdio_server,
 };
 
@@ -117,6 +117,14 @@ impl McpClient for CliMcpClient {
 
     async fn get_chain_executions(&self) -> Vec<ChainExecutionUpdate> {
         self.inner.lock().await.get_chain_executions().await
+    }
+
+    async fn get_stored_recon(
+        &self,
+        node_id: &str,
+        agent_short_name: &str,
+    ) -> Result<Option<ReconResult>> {
+        self.inner.lock().await.get_stored_recon(node_id, agent_short_name).await
     }
 }
 

@@ -24,7 +24,7 @@ If the MCP server is not enabled when you start a session, you'll see an error m
 The Orchestrator has access to all Praxis MCP tools:
 
 - **Node management** — List nodes, select nodes, request info updates
-- **Agent control** — List agents, select agents, run recon (static and semantic)
+- **Agent control** — List agents, select agents, run recon (static and semantic), query stored recon data (sessions, projects, tools)
 - **Sessions** — Create sessions, send prompts, close sessions
 - **Operations** — List, run, monitor, and cancel semantic operations
 - **Chains** — List, run, monitor, and cancel chain workflows

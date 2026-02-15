@@ -104,3 +104,14 @@ pub struct ShortIdParams {
     #[schemars(description = "Short ID to look up")]
     pub short_id: String,
 }
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AgentQueryParams {
+    /// Node ID prefix
+    #[schemars(description = "Node ID prefix")]
+    pub node: String,
+
+    /// Agent short name
+    #[schemars(description = "Agent short name (e.g. claudecode, cursor, codex)")]
+    pub agent: String,
+}

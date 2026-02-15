@@ -3,7 +3,8 @@ use async_trait::async_trait;
 
 use crate::{
     ChainDefinitionInfo, ChainExecutionUpdate, CommandResponse, InterceptedTrafficEntry,
-    NodeCommand, OperationDefinitionInfo, SemanticOpUpdate, SystemState, TrafficSearchFilters,
+    NodeCommand, OperationDefinitionInfo, ReconResult, SemanticOpUpdate, SystemState,
+    TrafficSearchFilters,
 };
 
 //
@@ -72,4 +73,11 @@ pub trait McpClient: Send + Sync {
 
     /// Get cached chain executions.
     async fn get_chain_executions(&self) -> Vec<ChainExecutionUpdate>;
+
+    /// Get stored recon result for a node+agent from the service database.
+    async fn get_stored_recon(
+        &self,
+        node_id: &str,
+        agent_short_name: &str,
+    ) -> Result<Option<ReconResult>>;
 }

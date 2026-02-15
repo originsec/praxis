@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use crate::mcp::McpClient;
 use crate::{
-    ChainDefinitionInfo, ChainExecutionUpdate, OperationDefinitionInfo, SemanticOpUpdate,
-    SystemState,
+    AgentTool, ChainDefinitionInfo, ChainExecutionUpdate, ConfigItem, McpServer,
+    OperationDefinitionInfo, SemanticOpUpdate, SessionItem, SystemState,
 };
 
 //
@@ -260,4 +260,103 @@ pub async fn list_tracked(client: &(impl McpClient + Sync)) -> Result<OpListResu
     let chains = client.get_chain_executions().await;
 
     Ok(OpListResult { operations, chains })
+}
+
+//
+// Recon listing result types. These query stored recon results without
+// re-running reconnaissance.
+//
+
+pub struct ReconSessionsResult {
+    pub sessions: Vec<SessionItem>,
+}
+
+pub struct ReconProjectsResult {
+    pub projects: Vec<String>,
+}
+
+pub struct ReconToolsResult {
+    pub mcp_servers: Vec<McpServer>,
+    pub skills: Vec<AgentTool>,
+    pub internal_tools: Vec<AgentTool>,
+}
+
+pub struct ReconConfigsResult {
+    pub configs: Vec<ConfigItem>,
+}
+
+//
+// Query stored recon for sessions.
+//
+
+pub async fn recon_sessions(
+    client: &(impl McpClient + Sync),
+    node_prefix: &str,
+    agent: &str,
+) -> Result<ReconSessionsResult> {
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let node_id = resolve_node_id(&state, node_prefix)?;
+    let recon = client
+        .get_stored_recon(&node_id, agent)
+        .await?
+        .ok_or_else(|| anyhow!("No stored recon for {}:{}", node_prefix, agent))?;
+    Ok(ReconSessionsResult { sessions: recon.sessions })
+}
+
+//
+// Query stored recon for project paths.
+//
+
+pub async fn recon_projects(
+    client: &(impl McpClient + Sync),
+    node_prefix: &str,
+    agent: &str,
+) -> Result<ReconProjectsResult> {
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let node_id = resolve_node_id(&state, node_prefix)?;
+    let recon = client
+        .get_stored_recon(&node_id, agent)
+        .await?
+        .ok_or_else(|| anyhow!("No stored recon for {}:{}", node_prefix, agent))?;
+    Ok(ReconProjectsResult { projects: recon.project_paths })
+}
+
+//
+// Query stored recon for tools (MCP servers, skills, internal tools).
+//
+
+pub async fn recon_tools(
+    client: &(impl McpClient + Sync),
+    node_prefix: &str,
+    agent: &str,
+) -> Result<ReconToolsResult> {
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let node_id = resolve_node_id(&state, node_prefix)?;
+    let recon = client
+        .get_stored_recon(&node_id, agent)
+        .await?
+        .ok_or_else(|| anyhow!("No stored recon for {}:{}", node_prefix, agent))?;
+    Ok(ReconToolsResult {
+        mcp_servers: recon.tools.mcp_servers,
+        skills: recon.tools.skills,
+        internal_tools: recon.tools.internal_tools,
+    })
+}
+
+//
+// Query stored recon for config items.
+//
+
+pub async fn recon_configs(
+    client: &(impl McpClient + Sync),
+    node_prefix: &str,
+    agent: &str,
+) -> Result<ReconConfigsResult> {
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let node_id = resolve_node_id(&state, node_prefix)?;
+    let recon = client
+        .get_stored_recon(&node_id, agent)
+        .await?
+        .ok_or_else(|| anyhow!("No stored recon for {}:{}", node_prefix, agent))?;
+    Ok(ReconConfigsResult { configs: recon.config })
 }

@@ -1270,6 +1270,158 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
             .unwrap(),
         )]))
     }
+
+    #[tool(description = "List sessions from stored recon results (without re-running recon)")]
+    async fn recon_sessions(
+        &self,
+        Parameters(params): Parameters<AgentQueryParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.get_client()
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        let guard = self.client.lock().await;
+        let client = guard
+            .as_ref()
+            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
+
+        let result = super::ops::recon_sessions(client, &params.node, &params.agent)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+
+        let sessions: Vec<_> = result
+            .sessions
+            .iter()
+            .map(|s| {
+                json!({
+                    "session_id": s.session_id,
+                    "session_file": s.session_file,
+                    "context_path": s.context_path,
+                    "last_modified": s.last_modified,
+                    "message_count": s.message_count
+                })
+            })
+            .collect();
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&json!({
+                "sessions": sessions,
+                "count": sessions.len()
+            }))
+            .unwrap(),
+        )]))
+    }
+
+    #[tool(description = "List project paths from stored recon results (without re-running recon)")]
+    async fn recon_projects(
+        &self,
+        Parameters(params): Parameters<AgentQueryParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.get_client()
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        let guard = self.client.lock().await;
+        let client = guard
+            .as_ref()
+            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
+
+        let result = super::ops::recon_projects(client, &params.node, &params.agent)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&json!({
+                "projects": result.projects,
+                "count": result.projects.len()
+            }))
+            .unwrap(),
+        )]))
+    }
+
+    #[tool(description = "List tools from stored recon results: MCP servers, skills, internal tools (without re-running recon)")]
+    async fn recon_tools(
+        &self,
+        Parameters(params): Parameters<AgentQueryParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.get_client()
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        let guard = self.client.lock().await;
+        let client = guard
+            .as_ref()
+            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
+
+        let result = super::ops::recon_tools(client, &params.node, &params.agent)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+
+        let mcp_servers: Vec<_> = result
+            .mcp_servers
+            .iter()
+            .map(|s| {
+                json!({
+                    "name": s.name,
+                    "transport": format!("{:?}", s.transport),
+                    "tools": s.tools.iter().map(|t| json!({
+                        "name": t.name,
+                        "description": t.description
+                    })).collect::<Vec<_>>()
+                })
+            })
+            .collect();
+
+        let skills: Vec<_> = result
+            .skills
+            .iter()
+            .map(|s| json!({ "name": s.name, "description": s.description }))
+            .collect();
+
+        let internal_tools: Vec<_> = result
+            .internal_tools
+            .iter()
+            .map(|t| json!({ "name": t.name, "description": t.description }))
+            .collect();
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&json!({
+                "mcp_servers": mcp_servers,
+                "skills": skills,
+                "internal_tools": internal_tools
+            }))
+            .unwrap(),
+        )]))
+    }
+
+    #[tool(description = "List config items from stored recon results (without re-running recon)")]
+    async fn recon_configs(
+        &self,
+        Parameters(params): Parameters<AgentQueryParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.get_client()
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        let guard = self.client.lock().await;
+        let client = guard
+            .as_ref()
+            .ok_or_else(|| rmcp::ErrorData::internal_error("No client", None))?;
+
+        let result = super::ops::recon_configs(client, &params.node, &params.agent)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+
+        let configs: Vec<_> = result
+            .configs
+            .iter()
+            .map(|c| json!({"path": c.path, "config_type": c.config_type}))
+            .collect();
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&json!({
+                "configs": configs,
+                "count": configs.len()
+            }))
+            .unwrap(),
+        )]))
+    }
 }
 
 #[tool_handler]

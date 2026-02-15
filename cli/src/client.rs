@@ -674,4 +674,12 @@ impl McpClient for CliClient {
     async fn get_chain_executions(&self) -> Vec<ChainExecutionUpdate> {
         CliClient::get_chain_executions(self).await
     }
+
+    async fn get_stored_recon(
+        &self,
+        node_id: &str,
+        agent_short_name: &str,
+    ) -> Result<Option<ReconResult>> {
+        CliClient::get_recon_result(self, node_id, agent_short_name).await
+    }
 }

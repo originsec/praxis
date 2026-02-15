@@ -78,6 +78,7 @@ pub(crate) fn shell_split(input: &str) -> Vec<String> {
 #[derive(Default)]
 struct ReplState {
     selected_node: Option<String>,
+    selected_machine_name: Option<String>,
     selected_agent: Option<String>,
     has_session: bool,
 }
@@ -88,16 +89,24 @@ impl ReplState {
             return format!("{} {} ", "praxis".bold(), "❯".bold());
         }
 
-        let node_short = format_short_id(self.selected_node.as_ref().unwrap());
+        let node_display = self
+            .selected_machine_name
+            .as_deref()
+            .unwrap_or_else(|| {
+                self.selected_node
+                    .as_deref()
+                    .map(|id| &id[..8.min(id.len())])
+                    .unwrap_or("?")
+            });
 
         let inner = if let Some(ref agent) = self.selected_agent {
             if self.has_session {
-                format!("{}:{} {}", node_short.cyan(), agent.green(), "*".yellow())
+                format!("{}:{} {}", node_display.cyan(), agent.green(), "*".yellow())
             } else {
-                format!("{}:{}", node_short.cyan(), agent.green())
+                format!("{}:{}", node_display.cyan(), agent.green())
             }
         } else {
-            format!("{}", node_short.cyan())
+            format!("{}", node_display.cyan())
         };
 
         format!("{} [{}] {} ", "praxis".bold(), inner, "❯".bold())
@@ -443,9 +452,15 @@ fn print_help() {
         ("node select <node>", "Select a node"),
         ("agent list", "List agents on selected node"),
         ("agent select <agent>", "Select an agent"),
-        ("agent recon", "Reconnaisance on selected node"),
-        ("agent recon-semantic", "Semantic recon on selected node"),
         ("agent update", "Request agent info update"),
+        ("recon run", "Run recon on selected node"),
+        ("recon run-semantic", "Run semantic recon on selected node"),
+        ("recon list", "List all stored recon data"),
+        ("recon list <section>", "List sessions/tools/projects/configs"),
+        ("recon config-read <path>", "Read config file content"),
+        ("recon session-read <path>", "Read session file content"),
+        ("recon config-grep <path> <pattern>", "Grep config file"),
+        ("recon session-grep <path> <pattern>", "Grep session file"),
         ("session create", "Create a session"),
         ("session prompt <text>", "Send a prompt"),
         ("session close", "Close a session"),
@@ -534,6 +549,7 @@ fn handle_node_select(
                 .find(|n| n.node_id.to_lowercase().starts_with(&search))
             {
                 state.selected_node = Some(node.node_id.clone());
+                state.selected_machine_name = Some(node.machine_name.clone());
             }
         }
     }
@@ -548,6 +564,7 @@ fn handle_node_select(
 fn sync_repl_state(state: &mut ReplState, sys_state: Option<&common::SystemState>) {
     let Some(sys_state) = sys_state else { return };
     let Some(ref node_id) = state.selected_node else {
+        state.selected_machine_name = None;
         state.selected_agent = None;
         state.has_session = false;
         return;
@@ -555,10 +572,13 @@ fn sync_repl_state(state: &mut ReplState, sys_state: Option<&common::SystemState
 
     let Some(node) = sys_state.nodes.iter().find(|n| n.node_id == *node_id) else {
         state.selected_node = None;
+        state.selected_machine_name = None;
         state.selected_agent = None;
         state.has_session = false;
         return;
     };
+
+    state.selected_machine_name = Some(node.machine_name.clone());
 
     if let Some(ref agent) = node.selected_agent {
         state.selected_agent = Some(agent.short_name.clone());
