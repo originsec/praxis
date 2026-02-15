@@ -570,8 +570,73 @@ async fn grep_all(
     if paths.is_empty() {
         return Err(anyhow!("No files found in recon data"));
     }
+
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let node_id = find_node_id(&state, node_prefix)
+        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+
+    let spinner = if matches!(output, OutputFormat::Text) {
+        Some(Spinner::start("Searching all files..."))
+    } else {
+        None
+    };
+
+    //
+    // Collect results, keeping only files with matches.
+    //
+
+    let mut results = Vec::new();
     for path in &paths {
-        grep_file(client, node_prefix, file_type, path, pattern, output).await?;
+        let cmd = NodeCmd::Agent(NodeAgentCommand::GrepFile {
+            file_type,
+            path: path.to_string(),
+            pattern: pattern.to_string(),
+        });
+        let response = client.send_command(&node_id, cmd).await?;
+        if let NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
+            path, matches, error, ..
+        }) = response.result {
+            if error.is_none() && !matches.is_empty() {
+                results.push((path, matches));
+            }
+        }
+    }
+
+    if let Some(s) = spinner { s.finish().await; }
+
+    let title = match file_type {
+        NodeFileType::Config => "Config Grep Results",
+        NodeFileType::Session => "Session Grep Results",
+    };
+
+    match output {
+        OutputFormat::Json => {
+            let entries: Vec<_> = results.iter().map(|(path, matches)| {
+                json!({ "path": path, "matches": matches, "match_count": matches.len() })
+            }).collect();
+            print_json(&json!({
+                "pattern": pattern,
+                "files_with_matches": entries.len(),
+                "results": entries,
+            }));
+        }
+        OutputFormat::Text => {
+            print_header(title);
+            println!();
+            println!("  Pattern: {}", pattern);
+            println!("  Files with matches: {} / {}", results.len(), paths.len());
+
+            for (path, matches) in &results {
+                println!();
+                println!("  {} ({} matches)", path, matches.len());
+                for m in matches {
+                    println!("  {:>6}: {}", m.line_number, m.line_content);
+                }
+            }
+
+            println!();
+            print_success("Grep complete");
+        }
     }
     Ok(())
 }
