@@ -163,6 +163,31 @@ pub async fn create_session(
     }
 }
 
+/// Cancel a running transaction on the node (fire and forget)
+pub async fn cancel_transaction(
+    node_id: &str,
+    transaction_id: &str,
+    rabbitmq_channel: &Channel,
+) -> Result<()> {
+    let service_id = "service";
+    let cmd_id = Uuid::new_v4().to_string();
+
+    let request = CommandRequest {
+        command_id: cmd_id,
+        client_id: service_id.to_string(),
+        node_id: node_id.to_string(),
+        command: NodeCommand::Session(SessionCommand::CancelTransaction {
+            transaction_id: transaction_id.to_string(),
+            force: true,
+        }),
+    };
+
+    let message = NodeDirectMessage::Command(request);
+    publish_json(rabbitmq_channel, &node_queue_name(node_id), &message).await?;
+
+    Ok(())
+}
+
 /// Close the current session (fire and forget)
 pub async fn close_session(node_id: &str, rabbitmq_channel: &Channel) -> Result<()> {
     let service_id = "service";
@@ -285,12 +310,14 @@ pub async fn execute_one_shot(
                 Err(_) => {
                     let _ = database.append_output(operation_id, &fmt_error(&format!("Operation timed out after {} seconds", spec.timeout))).await;
                     common::log_error!("SemanticResponseError: op={} error=timeout", &operation_id[..8]);
+
                     //
-                    // Close session if we created it.
+                    // Cancel the in-flight prompt on the node, then close session.
                     //
-                    if !use_existing_session {
-                        let _ = close_session(node_id, rabbitmq_channel).await;
-                    }
+
+                    let _ = cancel_transaction(node_id, &transaction_id, rabbitmq_channel).await;
+                    let _ = close_session(node_id, rabbitmq_channel).await;
+
                     Err(anyhow::anyhow!("Operation timed out after {} seconds", spec.timeout))
                 }
             }
@@ -298,12 +325,14 @@ pub async fn execute_one_shot(
         _ = &mut cancel_rx => {
             let _ = database.append_output(operation_id, &fmt_error("Operation cancelled")).await;
             common::log_error!("SemanticResponseError: op={} error=cancelled", &operation_id[..8]);
+
             //
-            // Close session if we created it.
+            // Cancel the in-flight prompt on the node, then close session.
             //
-            if !use_existing_session {
-                let _ = close_session(node_id, rabbitmq_channel).await;
-            }
+
+            let _ = cancel_transaction(node_id, &transaction_id, rabbitmq_channel).await;
+            let _ = close_session(node_id, rabbitmq_channel).await;
+
             Err(anyhow::anyhow!("Operation cancelled"))
         }
     }?;
@@ -444,12 +473,7 @@ pub async fn execute_agent_mode(
         // Check timeout.
         //
         if start_time.elapsed() > timeout_duration {
-            //
-            // Close session if we created it.
-            //
-            if !use_existing_session {
-                let _ = close_session(node_id, rabbitmq_channel).await;
-            }
+            let _ = close_session(node_id, rabbitmq_channel).await;
             return Err(anyhow::anyhow!(
                 "Operation timed out after {} seconds",
                 spec.timeout
@@ -461,12 +485,7 @@ pub async fn execute_agent_mode(
         //
         if cancel_rx.try_recv().is_ok() {
             let _ = database.append_output(operation_id, &fmt_error("Operation cancelled")).await;
-            //
-            // Close session if we created it.
-            //
-            if !use_existing_session {
-                let _ = close_session(node_id, rabbitmq_channel).await;
-            }
+            let _ = close_session(node_id, rabbitmq_channel).await;
             return Err(anyhow::anyhow!("Operation cancelled"));
         }
 
@@ -490,9 +509,7 @@ pub async fn execute_agent_mode(
             }
             _ = &mut cancel_rx => {
                 let _ = database.append_output(operation_id, &fmt_error("Operation cancelled")).await;
-                if !use_existing_session {
-                    let _ = close_session(node_id, rabbitmq_channel).await;
-                }
+                let _ = close_session(node_id, rabbitmq_channel).await;
                 return Err(anyhow::anyhow!("Operation cancelled"));
             }
         };
@@ -564,9 +581,7 @@ pub async fn execute_agent_mode(
                     }
                     _ = &mut cancel_rx => {
                         let _ = database.append_output(operation_id, &fmt_error("Operation cancelled")).await;
-                        if !use_existing_session {
-                            let _ = close_session(node_id, rabbitmq_channel).await;
-                        }
+                        let _ = close_session(node_id, rabbitmq_channel).await;
                         return Err(anyhow::anyhow!("Operation cancelled"));
                     }
                 }
