@@ -598,19 +598,29 @@ async fn handle_session_create_project(
 
     //
     // Check for bare positional: "session create /some/path" or
-    // "session create ~/project". Anything after "create" that isn't
-    // a flag is treated as a project path.
+    // "session create ~/project". Walk tokens after "create", skipping
+    // flags and their values, to find a bare positional argument.
     //
 
-    let extra_args: Vec<String> = tokens.iter()
-        .skip(2)
-        .filter(|t| !t.starts_with('-'))
-        .cloned()
-        .collect();
+    let known_flags = ["-n", "--node", "-y", "--yolo", "-p", "--project"];
+    let mut positional: Option<(usize, String)> = None;
+    let mut i = 2;
+    while i < tokens.len() {
+        let t = &tokens[i];
+        if t.starts_with('-') {
+            let takes_value = known_flags.contains(&t.as_str()) && *t != "-y" && *t != "--yolo";
+            if takes_value {
+                i += 1; // skip the flag's value
+            }
+        } else {
+            positional = Some((i, t.clone()));
+            break;
+        }
+        i += 1;
+    }
 
-    if let Some(path) = extra_args.first() {
-        let path = path.clone();
-        tokens.retain(|t| t != &path || t.starts_with('-'));
+    if let Some((idx, path)) = positional {
+        tokens.remove(idx);
         tokens.push("-p".to_string());
         tokens.push(path);
         return;
