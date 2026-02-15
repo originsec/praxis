@@ -541,11 +541,8 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
 
     let mut client = CliClient::connect(rabbitmq_url, timeout, client_id).await?;
 
-    let node_count = client
-        .get_state()
-        .await
-        .map(|s| s.nodes.len())
-        .unwrap_or(0);
+    let system_state = client.get_state().await;
+    let node_count = system_state.as_ref().map(|s| s.nodes.len()).unwrap_or(0);
 
     print_banner(&short_id, node_count, rabbitmq_url);
 
@@ -564,6 +561,31 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
     }
 
     let mut repl_state = ReplState::default();
+
+    //
+    // Auto-select if there's exactly one active node (seen within 60s).
+    // Populate agent and session state from it if available.
+    //
+
+    if let Some(ref state) = system_state {
+        let now = chrono::Utc::now();
+        let active_nodes: Vec<_> = state.nodes.iter()
+            .filter(|n| {
+                let age = now.signed_duration_since(n.last_update);
+                age.num_seconds() < 60
+            })
+            .collect();
+
+        if active_nodes.len() == 1 {
+            let node = active_nodes[0];
+            repl_state.selected_node = Some(node.node_id.clone());
+
+            if let Some(ref agent) = node.selected_agent {
+                repl_state.selected_agent = Some(agent.short_name.clone());
+                repl_state.has_session = agent.session_id.is_some();
+            }
+        }
+    }
 
     loop {
         let prompt = repl_state.build_prompt();
