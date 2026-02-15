@@ -1,7 +1,9 @@
 use anyhow::{anyhow, Result};
 use clap::Subcommand;
+use colored::Colorize;
 use common::{NodeCommand as NodeCmd, NodeCommandResult, SessionCommand as NodeSessionCommand, SessionCommandResult, SessionContext};
 use serde_json::json;
+use std::io::Write;
 
 use crate::client::CliClient;
 use crate::output::{format_short_id, print_json, print_success, OutputFormat};
@@ -66,7 +68,14 @@ async fn create_session(client: &CliClient, node_prefix: &str, yolo: bool, proje
     };
 
     let cmd = NodeCmd::Session(NodeSessionCommand::Create { context });
-    let response = client.send_command(&node_id, cmd).await?;
+    let spinner = if matches!(output, OutputFormat::Text) {
+        Some(start_spinner("Creating session..."))
+    } else {
+        None
+    };
+    let response = client.send_command(&node_id, cmd).await;
+    if let Some(tx) = spinner { let _ = tx.send(true); }
+    let response = response?;
 
     match response.result {
         NodeCommandResult::Session(SessionCommandResult::Created { session_id }) => {
@@ -100,6 +109,37 @@ async fn create_session(client: &CliClient, node_prefix: &str, yolo: bool, proje
     }
 }
 
+fn start_spinner(message: &str) -> tokio::sync::watch::Sender<bool> {
+    let (tx, mut rx) = tokio::sync::watch::channel(false);
+    let msg = message.to_string();
+
+    tokio::spawn(async move {
+        const FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let mut i = 0;
+
+        loop {
+            if *rx.borrow() {
+                break;
+            }
+
+            let frame = FRAMES[i % FRAMES.len()].dimmed();
+            print!("\r  {} {}", frame, msg.dimmed());
+            let _ = std::io::stderr().flush();
+            i += 1;
+
+            tokio::select! {
+                _ = rx.changed() => break,
+                _ = tokio::time::sleep(std::time::Duration::from_millis(80)) => {}
+            }
+        }
+
+        print!("\r\x1B[2K");
+        let _ = std::io::stderr().flush();
+    });
+
+    tx
+}
+
 async fn send_prompt(client: &CliClient, node_prefix: &str, text: &str, output: &OutputFormat) -> Result<()> {
     let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
     let node_id = find_node_id(&state, node_prefix).ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
@@ -110,14 +150,21 @@ async fn send_prompt(client: &CliClient, node_prefix: &str, text: &str, output: 
         transaction_id: transaction_id.clone(),
     });
 
+    let show_spinner = matches!(output, OutputFormat::Text);
+    let spinner = if show_spinner { Some(start_spinner("Thinking...")) } else { None };
+
     //
     // Race send_command against Ctrl+C. On interrupt, send CancelTransaction
     // to abort the running prompt on the node.
     //
 
     let response = tokio::select! {
-        result = client.send_command(&node_id, cmd) => result?,
+        result = client.send_command(&node_id, cmd) => {
+            if let Some(tx) = spinner { let _ = tx.send(true); }
+            result?
+        }
         _ = tokio::signal::ctrl_c() => {
+            if let Some(tx) = spinner { let _ = tx.send(true); }
             let cancel_cmd = NodeCmd::Session(NodeSessionCommand::CancelTransaction {
                 transaction_id: transaction_id.clone(),
                 force: true,
