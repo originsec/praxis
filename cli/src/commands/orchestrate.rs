@@ -139,22 +139,27 @@ async fn process_events_until_done(
                         accumulated_content.push_str(&content);
                     }
                     ClientDirectMessage::OrchestratorToolExecuting { name, input: _ } => {
-                        if let Some(s) = spinner.take() {
-                            s.finish().await;
+                        //
+                        // Hide report_plan — the plan is shown via
+                        // OrchestratorPlanUpdated.
+                        //
+                        if name != "report_plan" {
+                            if let Some(s) = spinner.take() {
+                                s.finish().await;
+                            }
+                            print!("\r\x1B[2K");
+                            let _ = std::io::stdout().flush();
+                            spinner = Some(Spinner::start_with_elapsed(&format!("◆ {}", name)));
                         }
-                        //
-                        // Clear in-place token line before spinner takes over.
-                        //
-                        print!("\r\x1B[2K");
-                        let _ = std::io::stdout().flush();
-                        spinner = Some(Spinner::start_with_elapsed(&format!("◆ {}", name)));
                     }
                     ClientDirectMessage::OrchestratorToolExecuted { name, display, success, .. } => {
-                        if let Some(s) = spinner.take() {
-                            s.finish().await;
+                        if name != "report_plan" {
+                            if let Some(s) = spinner.take() {
+                                s.finish().await;
+                            }
+                            let icon = if success { "✓".green() } else { "✗".red() };
+                            println!("  {} {} {}", icon, name.dimmed(), display);
                         }
-                        let icon = if success { "✓".green() } else { "✗".red() };
-                        println!("  {} {} {}", icon, name.dimmed(), display);
                     }
                     ClientDirectMessage::OrchestratorPlanUpdated { plan } => {
                         if let Some(s) = spinner.take() {

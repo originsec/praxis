@@ -1227,10 +1227,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'ORCHESTRATOR_ADD_CONTENT', content: message.content });
           break;
         case 'orchestrator_tool_executing':
-          dispatch({ type: 'ORCHESTRATOR_TOOL_EXECUTING', name: message.name, input: message.input });
+          if (message.name !== 'report_plan') {
+            dispatch({ type: 'ORCHESTRATOR_TOOL_EXECUTING', name: message.name, input: message.input });
+          }
           break;
         case 'orchestrator_tool_executed':
-          dispatch({ type: 'ORCHESTRATOR_TOOL_EXECUTED', name: message.name, display: message.display, success: message.success, result: message.result });
+          if (message.name !== 'report_plan') {
+            dispatch({ type: 'ORCHESTRATOR_TOOL_EXECUTED', name: message.name, display: message.display, success: message.success, result: message.result });
+          }
           break;
         case 'orchestrator_plan_updated':
           dispatch({ type: 'ORCHESTRATOR_PLAN_UPDATED', plan: message.plan });
