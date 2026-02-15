@@ -186,7 +186,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
                 json!({
                     "short_name": a.short_name,
                     "name": a.name,
-                    "available": a.available
+                    "available": a.available,
+                    "version": a.version
                 })
             })
             .collect();

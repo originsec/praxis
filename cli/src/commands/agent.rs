@@ -168,7 +168,8 @@ async fn list_agents(client: &CliClient, node_prefix: &str, output: &OutputForma
                 json!({
                     "short_name": a.short_name,
                     "name": a.name,
-                    "available": a.available
+                    "available": a.available,
+                    "version": a.version
                 })
             }).collect();
             print_json(&json!({"agents": agents, "count": agents.len()}));
@@ -177,8 +178,8 @@ async fn list_agents(client: &CliClient, node_prefix: &str, output: &OutputForma
             print_header(&format!("Agents on {} ({})", format_short_id(&node.node_id), node.machine_name));
             println!();
             for agent in &node.discovered_agents {
-                let status = if agent.available { "available" } else { "unavailable" };
-                println!("  {} - {} [{}]", agent.short_name, agent.name, status);
+                let version_suffix = agent.version.as_deref().map(|v| format!(" {}", v)).unwrap_or_default();
+                println!("  {} - {}{}", agent.short_name, agent.name, version_suffix);
             }
             println!();
             print_success(&format!("{} agent(s) discovered", node.discovered_agents.len()));
