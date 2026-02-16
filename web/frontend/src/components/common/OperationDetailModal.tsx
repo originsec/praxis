@@ -101,33 +101,6 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
 
           {/*
           //
-          // Summary (collapsible) with Result tag.
-          //
-          */}
-          {(operation.summary || operation.result) && (
-            <div>
-              <button
-                onClick={() => setSummaryCollapsed(!summaryCollapsed)}
-                className="flex items-center gap-2 text-xs text-muted mb-1 hover:text-[var(--text-primary)] transition-colors"
-              >
-                {summaryCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                Summary
-                {operation.result && (
-                  <span className="px-1.5 py-0.5 text-[10px] font-mono bg-[var(--bg-tertiary)] border border-dim">
-                    {operation.result}
-                  </span>
-                )}
-              </button>
-              {!summaryCollapsed && operation.summary && (
-                <div className="bg-[var(--bg-secondary)] p-3">
-                  <p className="text-xs">{operation.summary}</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/*
-          //
           // Prompt (collapsible, collapsed by default).
           //
           */}
@@ -168,6 +141,33 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
                   className="bg-[var(--bg-secondary)] p-3 max-h-96 overflow-auto"
                 >
                   <StyledOutput output={operation.output} />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/*
+          //
+          // Summary (collapsible) with Result tag.
+          //
+          */}
+          {(operation.summary || operation.result) && (
+            <div>
+              <button
+                onClick={() => setSummaryCollapsed(!summaryCollapsed)}
+                className="flex items-center gap-2 text-xs text-muted mb-1 hover:text-[var(--text-primary)] transition-colors"
+              >
+                {summaryCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                Summary
+                {operation.result && (
+                  <span className="px-1.5 py-0.5 text-[10px] font-mono bg-[var(--bg-tertiary)] border border-dim">
+                    {operation.result}
+                  </span>
+                )}
+              </button>
+              {!summaryCollapsed && operation.summary && (
+                <div className="bg-[var(--bg-secondary)] p-3">
+                  <p className="text-xs">{operation.summary}</p>
                 </div>
               )}
             </div>
