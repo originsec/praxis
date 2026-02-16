@@ -2,6 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
+use std::collections::HashMap;
 
 use super::{Database, DatabasePool};
 
@@ -167,6 +168,13 @@ pub struct ChainConnection {
     pub condition: Option<ConnectionCondition>,
 }
 
+/// Element position for visual layout.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElementPosition {
+    pub x: f64,
+    pub y: f64,
+}
+
 /// Complete chain definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainDefinition {
@@ -184,6 +192,9 @@ pub struct ChainDefinition {
     pub disabled: bool,
     /// Timeout for the entire chain execution in seconds
     pub timeout: Option<u64>,
+    /// Visual positions of elements (element_id -> position).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub positions: HashMap<String, ElementPosition>,
     /// Creation timestamp
     pub created_at: DateTime<Utc>,
     /// Last update timestamp

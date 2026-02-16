@@ -17,7 +17,7 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge, Connection, NodeTypes, OnSelectionChangeParams } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, X, Save, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, HardDriveDownload, RefreshCw } from 'lucide-react';
+import { Play, X, Save, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, HardDriveDownload, RefreshCw, Clock, BrainCircuit, FolderOpen } from 'lucide-react';
 import { ConfigModal } from '../common/ConfigModal';
 import type {
   BlockConfig,
@@ -68,10 +68,10 @@ const hoverStyle = 'hover:shadow-[0_0_0_1px_var(--accent-info)]';
 //
 // Custom node components with handles for connections.
 //
-function TriggerNode({ data, selected }: { data: { label: string }; selected?: boolean }) {
+function TriggerNode({ selected }: { data: { label: string }; selected?: boolean }) {
   return (
     <div
-      className={`ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[120px] relative transition-all ${!selected ? hoverStyle : ''}`}
+      className={`ascii-box bg-[var(--bg-secondary)] px-3 py-2 relative transition-all ${!selected ? hoverStyle : ''}`}
       style={selected ? selectedStyle : undefined}
     >
       <Handle
@@ -79,83 +79,180 @@ function TriggerNode({ data, selected }: { data: { label: string }; selected?: b
         position={Position.Right}
         style={handleStyle}
       />
-      <div className="flex items-center gap-2">
-        <Play size={14} className="text-[var(--accent-success)]" />
-        <span className="text-sm font-mono">{data.label}</span>
-      </div>
+      <Play size={18} className="text-[var(--accent-success)]" />
     </div>
   );
 }
 
-function OperationNode({ data, selected }: { data: { label: string; operation: string; sessionColor?: string }; selected?: boolean }) {
+interface OperationNodeData {
+  label: string;
+  operation: string;
+  sessionColor?: string;
+  description?: string;
+  operationPrompt?: string;
+  maxRuntime?: number;
+  modelRef?: string;
+  category?: string;
+  mode?: string;
+  timeout?: number;
+  agentIterations?: number;
+  yoloMode?: boolean;
+  workingDir?: string;
+}
+
+function OperationNode({ data, selected }: { data: OperationNodeData; selected?: boolean }) {
   const baseStyle = data.sessionColor
     ? { borderLeft: `4px solid ${data.sessionColor}` }
     : {};
   const style = selected ? { ...baseStyle, ...selectedStyle } : baseStyle;
   return (
     <div
-      className={`ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative transition-all ${!selected ? hoverStyle : ''}`}
+      className={`ascii-box bg-[var(--bg-secondary)] px-4 py-3 min-w-[220px] max-w-[280px] relative transition-all ${!selected ? hoverStyle : ''}`}
       style={style}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
       <Handle type="source" position={Position.Right} style={handleStyle} />
-      <div className="flex items-center gap-2">
-        <Cpu size={14} className="text-[var(--accent-info)]" />
-        <div className="flex flex-col">
-          <span className="text-sm font-mono">{data.label}</span>
-          <span className="text-xs text-[var(--text-secondary)]">{data.operation}</span>
+      <div className="flex items-center gap-2 mb-2">
+        <Cpu size={14} className="text-[var(--accent-info)] shrink-0" />
+        <span className="text-sm font-mono text-highlight truncate leading-none">{data.operation || 'Operation'}</span>
+      </div>
+      {data.description && (
+        <div className="mb-1.5">
+          <span className="text-[9px] tracking-wider text-[var(--text-secondary)] uppercase">Description</span>
+          <div className="text-[11px] text-muted truncate" title={data.description}>{data.description}</div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function TransformNode({ data, selected }: { data: { label: string; prompt: string; sessionColor?: string }; selected?: boolean }) {
-  const baseStyle = data.sessionColor
-    ? { borderLeft: `4px solid ${data.sessionColor}` }
-    : {};
-  const style = selected ? { ...baseStyle, ...selectedStyle } : baseStyle;
-  return (
-    <div
-      className={`ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative transition-all ${!selected ? hoverStyle : ''}`}
-      style={style}
-    >
-      <Handle type="target" position={Position.Left} style={handleStyle} />
-      <Handle type="source" position={Position.Right} style={handleStyle} />
-      <div className="flex items-center gap-2">
-        <Sparkles size={14} className="text-[var(--accent-warning)]" />
-        <div className="flex flex-col">
-          <span className="text-sm font-mono">{data.label}</span>
-          <span className="text-xs text-[var(--text-secondary)] truncate max-w-[150px]" title={data.prompt}>
-            {data.prompt.length > 30 ? data.prompt.substring(0, 30) + '...' : data.prompt}
+      )}
+      {data.operationPrompt && (
+        <div className="mb-1.5">
+          <span className="text-[9px] tracking-wider text-[var(--text-secondary)] uppercase">Prompt</span>
+          <div className="text-[11px] text-muted line-clamp-2" title={data.operationPrompt}>
+            {data.operationPrompt.length > 80 ? data.operationPrompt.substring(0, 80) + '...' : data.operationPrompt}
+          </div>
+        </div>
+      )}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {data.mode && (
+          <span className="text-[10px] px-1.5 py-0.5 bg-[var(--bg-primary)] text-[var(--text-secondary)] font-mono">{data.mode}</span>
+        )}
+        {data.modelRef && (
+          <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 bg-[var(--accent-info)]/10 text-[var(--accent-info)] font-mono">
+            <BrainCircuit size={10} />{data.modelRef.split('::').pop()}
           </span>
-        </div>
+        )}
+        {(data.maxRuntime || data.timeout) && (
+          <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 bg-[var(--accent-warning)]/10 text-[var(--accent-warning)] font-mono">
+            <Clock size={10} />{data.maxRuntime || data.timeout}s
+          </span>
+        )}
+        {data.mode !== 'oneshot' && data.agentIterations && data.agentIterations > 1 && (
+          <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-purple)]/10 text-[var(--accent-purple)] font-mono">
+            ×{data.agentIterations}
+          </span>
+        )}
+        {data.yoloMode && (
+          <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-error)]/10 text-[var(--accent-error)] font-mono">YOLO</span>
+        )}
       </div>
+      {data.workingDir && (
+        <div className="flex items-center gap-1 mt-1.5 text-[10px] text-muted font-mono truncate" title={data.workingDir}>
+          <FolderOpen size={10} className="shrink-0" />{data.workingDir}
+        </div>
+      )}
     </div>
   );
 }
 
-function GenericPromptNode({ data, selected }: { data: { label: string; prompt: string; sessionColor?: string }; selected?: boolean }) {
+function TransformNode({ data, selected }: { data: { label: string; prompt: string; sessionColor?: string; modelRef?: string; maxRuntime?: number; yoloMode?: boolean; workingDir?: string }; selected?: boolean }) {
   const baseStyle = data.sessionColor
     ? { borderLeft: `4px solid ${data.sessionColor}` }
     : {};
   const style = selected ? { ...baseStyle, ...selectedStyle } : baseStyle;
   return (
     <div
-      className={`ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative transition-all ${!selected ? hoverStyle : ''}`}
+      className={`ascii-box bg-[var(--bg-secondary)] px-4 py-3 min-w-[220px] max-w-[280px] relative transition-all ${!selected ? hoverStyle : ''}`}
       style={style}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
       <Handle type="source" position={Position.Right} style={handleStyle} />
-      <div className="flex items-center gap-2">
-        <MessageSquare size={14} className="text-[var(--accent-purple)]" />
-        <div className="flex flex-col">
-          <span className="text-sm font-mono">{data.label}</span>
-          <span className="text-xs text-[var(--text-secondary)] truncate max-w-[150px]" title={data.prompt}>
-            {data.prompt.length > 30 ? data.prompt.substring(0, 30) + '...' : data.prompt}
-          </span>
-        </div>
+      <div className="flex items-center gap-2 mb-2">
+        <Sparkles size={14} className="text-[var(--accent-warning)] shrink-0" />
+        <span className="text-sm font-mono text-highlight leading-none">Transform</span>
       </div>
+      {data.prompt && (
+        <div className="mb-1.5">
+          <span className="text-[9px] tracking-wider text-[var(--text-secondary)] uppercase">Prompt</span>
+          <div className="text-[11px] text-muted truncate" title={data.prompt}>
+            {data.prompt.length > 50 ? data.prompt.substring(0, 50) + '...' : data.prompt}
+          </div>
+        </div>
+      )}
+      {(data.modelRef || data.maxRuntime || data.yoloMode) && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {data.modelRef && (
+            <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 bg-[var(--accent-info)]/10 text-[var(--accent-info)] font-mono">
+              <BrainCircuit size={10} />{data.modelRef.split('::').pop()}
+            </span>
+          )}
+          {data.maxRuntime && (
+            <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 bg-[var(--accent-warning)]/10 text-[var(--accent-warning)] font-mono">
+              <Clock size={10} />{data.maxRuntime}s
+            </span>
+          )}
+          {data.yoloMode && (
+            <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-error)]/10 text-[var(--accent-error)] font-mono">YOLO</span>
+          )}
+        </div>
+      )}
+      {data.workingDir && (
+        <div className="flex items-center gap-1 mt-1.5 text-[10px] text-muted font-mono truncate" title={data.workingDir}>
+          <FolderOpen size={10} className="shrink-0" />{data.workingDir}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GenericPromptNode({ data, selected }: { data: { label: string; prompt: string; sessionColor?: string; maxRuntime?: number; yoloMode?: boolean; workingDir?: string }; selected?: boolean }) {
+  const baseStyle = data.sessionColor
+    ? { borderLeft: `4px solid ${data.sessionColor}` }
+    : {};
+  const style = selected ? { ...baseStyle, ...selectedStyle } : baseStyle;
+  return (
+    <div
+      className={`ascii-box bg-[var(--bg-secondary)] px-4 py-3 min-w-[220px] max-w-[280px] relative transition-all ${!selected ? hoverStyle : ''}`}
+      style={style}
+    >
+      <Handle type="target" position={Position.Left} style={handleStyle} />
+      <Handle type="source" position={Position.Right} style={handleStyle} />
+      <div className="flex items-center gap-2 mb-2">
+        <MessageSquare size={14} className="text-[var(--accent-purple)] shrink-0" />
+        <span className="text-sm font-mono text-highlight leading-none">Prompt</span>
+      </div>
+      {data.prompt && (
+        <div className="mb-1.5">
+          <span className="text-[9px] tracking-wider text-[var(--text-secondary)] uppercase">Prompt</span>
+          <div className="text-[11px] text-muted truncate" title={data.prompt}>
+            {data.prompt.length > 50 ? data.prompt.substring(0, 50) + '...' : data.prompt}
+          </div>
+        </div>
+      )}
+      {(data.maxRuntime || data.yoloMode) && (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {data.maxRuntime && (
+            <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 bg-[var(--accent-warning)]/10 text-[var(--accent-warning)] font-mono">
+              <Clock size={10} />{data.maxRuntime}s
+            </span>
+          )}
+          {data.yoloMode && (
+            <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-error)]/10 text-[var(--accent-error)] font-mono">YOLO</span>
+          )}
+        </div>
+      )}
+      {data.workingDir && (
+        <div className="flex items-center gap-1 mt-1.5 text-[10px] text-muted font-mono truncate" title={data.workingDir}>
+          <FolderOpen size={10} className="shrink-0" />{data.workingDir}
+        </div>
+      )}
     </div>
   );
 }
@@ -171,7 +268,7 @@ function MemoryStoreNode({ data, selected }: { data: { label: string; memoryKey:
       <Handle type="source" position={Position.Right} style={handleStyle} />
       <div className="flex items-center gap-2">
         <Database size={14} className="text-[var(--accent-success)]" />
-        <span className="text-sm font-mono">{data.memoryKey || 'Store'}</span>
+        <span className="text-sm font-mono leading-none">{data.memoryKey || 'Store'}</span>
         <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-success)]/20 text-[var(--accent-success)] font-mono">STORE</span>
       </div>
     </div>
@@ -204,15 +301,15 @@ function LoopNode({ data, selected }: { data: { label: string; maxIterations: nu
       style={{ ...style, minHeight: 70 }}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
-      <Handle type="source" position={Position.Right} id="0" style={{ ...handleStyle, top: '25%' }} />
-      <Handle type="source" position={Position.Right} id="1" style={{ ...handleStyle, top: '75%' }} />
+      <Handle type="source" position={Position.Bottom} id="0" style={{ ...handleStyle, left: '50%' }} />
+      <Handle type="source" position={Position.Right} id="1" style={handleStyle} />
       <div className="flex items-center gap-2 pr-16">
         <RefreshCw size={14} className="text-[var(--accent-warning)]" />
-        <span className="text-sm font-mono">Loop</span>
+        <span className="text-sm font-mono leading-none">Loop</span>
         <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] font-mono">max {data.maxIterations}</span>
       </div>
-      <span className="absolute text-[9px] text-[var(--accent-warning)]" style={{ right: 28, top: '25%', transform: 'translateY(-50%)' }}>↻ retry</span>
-      <span className="absolute text-[9px] text-muted" style={{ right: 28, top: '75%', transform: 'translateY(-50%)' }}>→ done</span>
+      <span className="absolute text-[9px] text-[var(--accent-warning)]" style={{ bottom: -16, left: '50%', transform: 'translateX(-50%)' }}>↻ retry</span>
+      <span className="absolute text-[9px] text-muted" style={{ right: 28, top: '50%', transform: 'translateY(-50%)' }}>→ done</span>
     </div>
   );
 }
@@ -244,7 +341,7 @@ interface ChainExtraData {
 // Convert chain definition to React Flow nodes and edges (positions computed
 // via dagre).
 //
-function chainToFlow(chain: ChainDefinitionFull | null): { nodes: Node[]; edges: Edge[]; extraData: ChainExtraData } {
+function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: OperationDefinitionInfo[]): { nodes: Node[]; edges: Edge[]; extraData: ChainExtraData } {
   const emptyExtraData: ChainExtraData = {
     transformPrompts: new Map(),
     transformModels: new Map(),
@@ -258,14 +355,17 @@ function chainToFlow(chain: ChainDefinitionFull | null): { nodes: Node[]; edges:
   if (!chain) return { nodes: [], edges: [], extraData: emptyExtraData };
 
   //
-  // Compute positions using dagre layout.
+  // Use stored positions if available, otherwise compute via dagre.
   //
-  const positions = computeLayout(chain.elements, chain.connections);
+  const hasStoredPositions = chain.positions && Object.keys(chain.positions).length > 0;
+  const dagrePositions = hasStoredPositions ? null : computeLayout(chain.elements, chain.connections);
 
   const extraData = { ...emptyExtraData };
 
   const nodes: Node[] = chain.elements.map((elem) => {
-    const position = positions.get(elem.id) || { x: 0, y: 0 };
+    const position = hasStoredPositions
+      ? (chain.positions![elem.id] || { x: 0, y: 0 })
+      : (dagrePositions!.get(elem.id) || { x: 0, y: 0 });
 
     switch (elem.element_type) {
       case 'Trigger':
@@ -275,13 +375,14 @@ function chainToFlow(chain: ChainDefinitionFull | null): { nodes: Node[]; edges:
           position,
           data: { label: 'Manual Trigger' },
         };
-      case 'Operation':
+      case 'Operation': {
         if (elem.session_group) {
           extraData.sessionGroups.set(elem.id, elem.session_group);
         }
         if (elem.block_config) {
           extraData.blockConfigs.set(elem.id, elem.block_config);
         }
+        const opDef = operationDefs?.find(d => d.full_name === elem.operation_name);
         return {
           id: elem.id,
           type: 'operation',
@@ -290,8 +391,19 @@ function chainToFlow(chain: ChainDefinitionFull | null): { nodes: Node[]; edges:
             label: 'Operation',
             operation: elem.operation_name,
             sessionColor: elem.session_group?.color,
+            description: opDef?.description,
+            operationPrompt: opDef?.operation_prompt,
+            maxRuntime: elem.block_config?.max_runtime,
+            modelRef: elem.model_ref || opDef?.model_ref,
+            category: opDef?.category,
+            mode: opDef?.mode,
+            timeout: opDef?.timeout,
+            agentIterations: opDef?.agent_iterations,
+            yoloMode: elem.block_config?.yolo_mode || opDef?.yolo_mode,
+            workingDir: elem.block_config?.working_dir,
           },
         };
+      }
       case 'Transform':
         extraData.transformPrompts.set(elem.id, elem.prompt);
         if (elem.model_ref) {
@@ -311,6 +423,10 @@ function chainToFlow(chain: ChainDefinitionFull | null): { nodes: Node[]; edges:
             label: 'Transform',
             prompt: elem.prompt,
             sessionColor: elem.session_group?.color,
+            modelRef: elem.model_ref,
+            maxRuntime: elem.block_config?.max_runtime,
+            yoloMode: elem.block_config?.yolo_mode,
+            workingDir: elem.block_config?.working_dir,
           },
         };
       case 'GenericPrompt':
@@ -329,6 +445,9 @@ function chainToFlow(chain: ChainDefinitionFull | null): { nodes: Node[]; edges:
             label: 'Prompt',
             prompt: elem.prompt,
             sessionColor: elem.session_group?.color,
+            maxRuntime: elem.block_config?.max_runtime,
+            yoloMode: elem.block_config?.yolo_mode,
+            workingDir: elem.block_config?.working_dir,
           },
         };
       case 'MemoryStore':
@@ -376,8 +495,9 @@ function chainToFlow(chain: ChainDefinitionFull | null): { nodes: Node[]; edges:
       source: conn.from_element,
       target: conn.to_element,
       sourceHandle: conn.from_port > 0 ? String(conn.from_port) : undefined,
+      type: 'smoothstep',
       markerEnd: { type: MarkerType.ArrowClosed },
-      style: { stroke, strokeDasharray },
+      style: { stroke, strokeDasharray, strokeWidth: 2 },
       label,
       labelStyle: { fill: stroke, fontSize: 10, fontWeight: 500 },
       data: { condition: conn.condition || null },
@@ -399,10 +519,15 @@ function flowToChain(
   timeout: number,
   extraData: ChainExtraData
 ): ChainDefinitionInput {
+  //
+  // Store visual positions for each element.
+  //
+  const positions: Record<string, { x: number; y: number }> = {};
+  for (const node of nodes) {
+    positions[node.id] = { x: node.position.x, y: node.position.y };
+  }
+
   const elements: ChainElement[] = nodes.map((node) => {
-    //
-    // Note: We don't store positions - dagre computes them on load.
-    //
     switch (node.type) {
       case 'trigger':
         return {
@@ -476,6 +601,7 @@ function flowToChain(
     connections,
     disabled: false,
     timeout,
+    positions,
   };
 }
 
@@ -534,7 +660,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
   const [timeout, setTimeout] = useState(chain?.timeout || 1800);
   const category = 'default';
 
-  const initialFlow = chainToFlow(chain || null);
+  const initialFlow = chainToFlow(chain || null, operationDefs);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialFlow.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialFlow.edges);
 
@@ -821,8 +947,9 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
     (params: Connection) => setEdges((eds) => addEdge({
       ...params,
       id: generateUUID(),
+      type: 'smoothstep',
       markerEnd: { type: MarkerType.ArrowClosed },
-      style: { stroke: 'var(--text-secondary)' },
+      style: { stroke: 'var(--text-secondary)', strokeWidth: 2 },
     }, eds)),
     [setEdges]
   );
@@ -933,14 +1060,22 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           data: { label: 'Manual Trigger' },
         };
         break;
-      case 'operation':
+      case 'operation': {
+        const opDef = operationDefs.find(d => d.full_name === (nodeExtraData?.operation as string));
         newNode = {
           id: newId,
           type: 'operation',
           position,
-          data: { label: 'Operation', operation: nodeExtraData?.operation || '' },
+          data: {
+            label: 'Operation',
+            operation: nodeExtraData?.operation || '',
+            description: opDef?.description,
+            modelRef: opDef?.model_ref,
+            maxRuntime: nodeExtraData?.maxRuntime,
+          },
         };
         break;
+      }
       case 'transform':
         newNode = {
           id: newId,
@@ -949,6 +1084,8 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           data: {
             label: 'Transform',
             prompt: nodeExtraData?.prompt || '',
+            modelRef: nodeExtraData?.modelRef,
+            maxRuntime: nodeExtraData?.maxRuntime,
           },
         };
         //
@@ -974,6 +1111,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           data: {
             label: 'Prompt',
             prompt: nodeExtraData?.prompt || '',
+            maxRuntime: nodeExtraData?.maxRuntime,
           },
         };
         //
@@ -1093,13 +1231,30 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
   const handleOperationSelect = useCallback(() => {
     if (!selectedOperation) return;
 
+    const opDef = operationDefs.find(d => d.full_name === selectedOperation);
+    const maxRuntime = blockMaxRuntime ? parseInt(blockMaxRuntime, 10) : undefined;
+    const opNodeData = {
+      label: 'Operation',
+      operation: selectedOperation,
+      description: opDef?.description,
+      operationPrompt: opDef?.operation_prompt,
+      modelRef: opDef?.model_ref,
+      maxRuntime,
+      category: opDef?.category,
+      mode: opDef?.mode,
+      timeout: opDef?.timeout,
+      agentIterations: opDef?.agent_iterations,
+      yoloMode: blockYoloMode || opDef?.yolo_mode,
+      workingDir: blockWorkingDir || undefined,
+    };
+
     if (editingNodeId) {
       //
       // Update existing operation node.
       //
       setNodes(nds => nds.map(n =>
         n.id === editingNodeId
-          ? { ...n, data: { ...n.data, operation: selectedOperation } }
+          ? { ...n, data: { ...n.data, ...opNodeData } }
           : n
       ));
       saveBlockConfig(editingNodeId);
@@ -1109,7 +1264,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
         id: newNodeId,
         type: 'operation',
         position: pendingPosition,
-        data: { label: 'Operation', operation: selectedOperation },
+        data: opNodeData,
       };
       setNodes(nds => [...nds, newNode]);
       saveBlockConfig(newNodeId);
@@ -1120,10 +1275,12 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
     setEditingNodeId(null);
     setSelectedOperation('');
     resetBlockConfig();
-  }, [pendingPosition, editingNodeId, selectedOperation, setNodes, blockMaxRuntime, blockYoloMode, blockWorkingDir]);
+  }, [pendingPosition, editingNodeId, selectedOperation, setNodes, blockMaxRuntime, blockYoloMode, blockWorkingDir, operationDefs]);
 
   const handleTransformConfirm = useCallback(() => {
     if (!transformPrompt.trim()) return;
+
+    const maxRuntime = blockMaxRuntime ? parseInt(blockMaxRuntime, 10) : undefined;
 
     if (editingNodeId) {
       //
@@ -1142,7 +1299,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
       });
       setNodes(nds => nds.map(n =>
         n.id === editingNodeId
-          ? { ...n, data: { ...n.data, prompt: transformPrompt } }
+          ? { ...n, data: { ...n.data, prompt: transformPrompt, modelRef: transformModel || undefined, maxRuntime, yoloMode: blockYoloMode || undefined, workingDir: blockWorkingDir || undefined } }
           : n
       ));
       saveBlockConfig(editingNodeId);
@@ -1155,7 +1312,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
         id: newNodeId,
         type: 'transform',
         position: pendingPosition,
-        data: { label: 'Transform', prompt: transformPrompt },
+        data: { label: 'Transform', prompt: transformPrompt, modelRef: transformModel || undefined, maxRuntime, yoloMode: blockYoloMode || undefined, workingDir: blockWorkingDir || undefined },
       };
       setNodes(nds => [...nds, newNode]);
       setExtraData(prev => {
@@ -1181,6 +1338,8 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
   const handleGenericPromptConfirm = useCallback(() => {
     if (!genericPromptText.trim()) return;
 
+    const maxRuntime = blockMaxRuntime ? parseInt(blockMaxRuntime, 10) : undefined;
+
     if (editingNodeId) {
       //
       // Update existing node.
@@ -1192,7 +1351,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
       });
       setNodes(nds => nds.map(n =>
         n.id === editingNodeId
-          ? { ...n, data: { ...n.data, prompt: genericPromptText } }
+          ? { ...n, data: { ...n.data, prompt: genericPromptText, maxRuntime, yoloMode: blockYoloMode || undefined, workingDir: blockWorkingDir || undefined } }
           : n
       ));
       saveBlockConfig(editingNodeId);
@@ -1205,7 +1364,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
         id: newNodeId,
         type: 'genericPrompt',
         position: pendingPosition,
-        data: { label: 'Prompt', prompt: genericPromptText },
+        data: { label: 'Prompt', prompt: genericPromptText, maxRuntime, yoloMode: blockYoloMode || undefined, workingDir: blockWorkingDir || undefined },
       };
       setNodes(nds => [...nds, newNode]);
       setExtraData(prev => {
@@ -1355,7 +1514,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
   // Auto-fit view only on initial load (when entering edit mode with existing
   // chain).
   //
-  const initialFitDone = useRef(false);
+  const initialFitDone = useRef(!chain);
   useEffect(() => {
     if (nodes.length > 0 && !initialFitDone.current) {
       initialFitDone.current = true;
@@ -1429,43 +1588,29 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
 
   const onEdgeMouseLeave = useCallback((_: React.MouseEvent, edge: Edge) => {
     setHoveredEdgeId(null);
+
     //
-    // Reset edge style.
+    // Reset edge style, preserving condition-based colors.
     //
-    setEdges(eds => eds.map(e =>
-      e.id === edge.id
-        ? { ...e, style: { ...e.style, stroke: 'var(--text-secondary)', strokeWidth: 2 } }
-        : e
-    ));
+
+    setEdges(eds => eds.map(e => {
+      if (e.id !== edge.id) return e;
+      const condition = (e.data as Record<string, unknown>)?.condition as string | null;
+      let stroke = 'var(--text-secondary)';
+      if (condition === 'OnSuccess') stroke = 'var(--accent-success)';
+      else if (condition === 'OnFailure') stroke = 'var(--accent-error)';
+      return { ...e, style: { ...e.style, stroke, strokeWidth: 2 } };
+    }));
   }, [setEdges]);
 
   //
   // Handle node click for selection.
   //
-  const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
-    event.stopPropagation();
-
+  const onNodeClick = useCallback((_event: React.MouseEvent, _node: Node) => {
     //
-    // Check if Ctrl/Meta is held for multi-select.
+    // Selection is handled natively by React Flow via multiSelectionKeyCode.
     //
-    const isMultiSelect = event.ctrlKey || event.metaKey;
-
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id === node.id) {
-          //
-          // Clicked node: select it (or toggle if multi-select and already
-          // selected).
-          //
-          return { ...n, selected: isMultiSelect ? !n.selected : true };
-        }
-        //
-        // Other nodes: keep selection if multi-select, clear if single select.
-        //
-        return isMultiSelect ? n : { ...n, selected: false };
-      })
-    );
-  }, [setNodes]);
+  }, []);
 
   //
   // Handle click on empty canvas to deselect all.
@@ -1587,14 +1732,13 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           onPaneClick={onPaneClick}
           onSelectionChange={onSelectionChange}
           nodeTypes={nodeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.5, maxZoom: 1 }}
           minZoom={0.2}
           maxZoom={2}
           defaultViewport={{ x: 0, y: 0, zoom: 0.8 }}
           deleteKeyCode={['Delete', 'Backspace']}
           connectionLineStyle={{ stroke: 'var(--accent-info)', strokeWidth: 2 }}
           defaultEdgeOptions={{
+            type: 'smoothstep',
             style: { stroke: 'var(--text-secondary)', strokeWidth: 2 },
             markerEnd: { type: MarkerType.ArrowClosed },
           }}
@@ -1603,10 +1747,9 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           selectionMode={SelectionMode.Partial}
           selectionOnDrag
           selectionKeyCode={['Control', 'Meta']}
-          multiSelectionKeyCode={null}
+          multiSelectionKeyCode={['Control', 'Meta']}
           panOnDrag
           panOnScroll={false}
-          elementsSelectable={false}
           selectNodesOnDrag={false}
           proOptions={{ hideAttribution: true }}
         >
@@ -1916,6 +2059,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           setMemoryKey('');
           setEditingNodeId(null);
         }}
+        size="sm"
         title={pendingMemoryType === 'memoryStore' ? 'Configure Memory Store' : 'Configure Memory Retrieve'}
         config={[
           {
@@ -1926,6 +2070,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
                 label: 'Memory Key',
                 type: 'text' as const,
                 placeholder: 'Enter a unique key for this memory slot...',
+                span: 'full' as const,
               },
             ],
           },
@@ -1951,6 +2096,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           setPendingPosition(null);
           setEditingNodeId(null);
         }}
+        size="sm"
         title="Configure Loop"
         config={[
           {
@@ -1961,6 +2107,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
                 label: 'Max Iterations',
                 type: 'text' as const,
                 placeholder: 'Maximum number of loop iterations...',
+                span: 'full' as const,
               },
             ],
           },

@@ -73,6 +73,7 @@ pub fn create_implicit_chain(
         // No timeout for implicit chains - the operation has its own timeout.
         //
         timeout: None,
+        positions: std::collections::HashMap::new(),
         created_at: now,
         updated_at: now,
     }

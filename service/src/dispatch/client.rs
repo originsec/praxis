@@ -1539,6 +1539,7 @@ async fn handle_chain_get(ctx: &ServiceContext, client_id: String, chain_id: Str
             .collect(),
         disabled: c.disabled,
         timeout: c.timeout,
+        positions: c.positions.into_iter().map(|(k, v)| (k, common::ElementPosition { x: v.x, y: v.y })).collect(),
         created_at: c.created_at,
         updated_at: c.updated_at,
     });
@@ -1588,6 +1589,7 @@ async fn handle_chain_create(
             .collect(),
         disabled: definition.disabled,
         timeout: definition.timeout,
+        positions: definition.positions.into_iter().map(|(k, v)| (k, database::ElementPosition { x: v.x, y: v.y })).collect(),
         created_at: now,
         updated_at: now,
     };
@@ -1690,6 +1692,7 @@ async fn handle_chain_update(
             .collect(),
         disabled: definition.disabled,
         timeout: definition.timeout,
+        positions: definition.positions.into_iter().map(|(k, v)| (k, database::ElementPosition { x: v.x, y: v.y })).collect(),
         created_at,
         updated_at: chrono::Utc::now(),
     };

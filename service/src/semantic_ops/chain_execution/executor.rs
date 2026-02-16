@@ -312,6 +312,7 @@ impl ChainExecutor {
         let mut resolved: HashMap<String, (String, Option<bool>)> = HashMap::new();
         let mut loop_counters: HashMap<String, u32> = HashMap::new();
         let mut hit_counts: HashMap<String, u32> = HashMap::new();
+        let mut initial_inputs: HashMap<String, String> = HashMap::new();
 
         //
         // Track active session state.
@@ -409,19 +410,27 @@ impl ChainExecutor {
             };
 
             //
-            // Collect inputs from resolved upstream connections that fired.
+            // Collect inputs from resolved upstream connections that fired. On
+            // loop retry (re-execution), reuse the element's initial input so
+            // the block restarts with its original data.
             //
-            let inputs: Vec<String> = graph.incoming_connections(&element_id)
-                .iter()
-                .filter_map(|conn| {
-                    if let Some((output, success)) = resolved.get(&conn.from_element) {
-                        if connection_fires(conn, success) { Some(output.clone()) } else { None }
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            let merged_input = inputs.join("\n\n---\n\n");
+            let merged_input = if let Some(initial) = initial_inputs.get(&element_id) {
+                initial.clone()
+            } else {
+                let inputs: Vec<String> = graph.incoming_connections(&element_id)
+                    .iter()
+                    .filter_map(|conn| {
+                        if let Some((output, success)) = resolved.get(&conn.from_element) {
+                            if connection_fires(conn, success) { Some(output.clone()) } else { None }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                let input = inputs.join("\n\n---\n\n");
+                initial_inputs.insert(element_id.clone(), input.clone());
+                input
+            };
 
             let yolo_mode = current_session_yolo_mode;
 

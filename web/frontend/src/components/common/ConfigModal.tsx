@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Modal } from './Modal';
-import { ChevronRight, Loader2, Save, ToggleLeft, ToggleRight } from 'lucide-react';
+import { ChevronRight, Loader2, Save, Circle, CircleCheck } from 'lucide-react';
 
 export type FieldType = 'text' | 'textarea' | 'select' | 'number' | 'toggle';
 
@@ -111,11 +111,11 @@ export function ConfigModal({
           className="flex items-center gap-2 disabled:opacity-50 hover:opacity-80 transition-opacity"
         >
           {boolValue ? (
-            <ToggleRight size={20} className="text-muted" />
+            <CircleCheck size={16} className="text-[var(--accent-error)]" />
           ) : (
-            <ToggleLeft size={20} className="text-muted" />
+            <Circle size={16} className="text-[var(--text-secondary)]" />
           )}
-          <span className={`text-xs tracking-wider ${boolValue ? 'text-muted' : 'text-muted/60'}`}>
+          <span className={`text-xs tracking-wider ${boolValue ? 'text-[var(--accent-error)]' : 'text-[var(--text-secondary)]'}`}>
             {field.label}
           </span>
         </button>

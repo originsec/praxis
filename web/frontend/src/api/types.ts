@@ -360,9 +360,6 @@ export interface BlockConfig {
 }
 
 //
-// Note: Positions are not stored - they are computed dynamically using Dagre
-// layout.
-//
 export type ChainElement =
   | { element_type: 'Trigger'; id: string; trigger_type: ChainTriggerType }
   | { element_type: 'Operation'; id: string; operation_name: string; model_ref?: string | null; session_group?: SessionGroup | null; block_config?: BlockConfig | null }
@@ -391,6 +388,7 @@ export interface ChainDefinitionInput {
   connections: ChainConnection[];
   disabled?: boolean;
   timeout?: number;
+  positions?: Record<string, { x: number; y: number }>;
 }
 
 export interface ChainDefinitionFull {
@@ -402,6 +400,7 @@ export interface ChainDefinitionFull {
   connections: ChainConnection[];
   disabled: boolean;
   timeout?: number;
+  positions?: Record<string, { x: number; y: number }>;
   created_at: string;
   updated_at: string;
 }

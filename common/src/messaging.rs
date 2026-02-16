@@ -968,6 +968,13 @@ pub struct ChainConnection {
     pub condition: Option<ConnectionCondition>,
 }
 
+/// Element position for visual layout.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElementPosition {
+    pub x: f64,
+    pub y: f64,
+}
+
 /// Complete chain definition (for create/update)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainDefinitionInput {
@@ -984,6 +991,8 @@ pub struct ChainDefinitionInput {
     pub disabled: bool,
     /// Timeout for the entire chain execution in seconds
     pub timeout: Option<u64>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub positions: HashMap<String, ElementPosition>,
 }
 
 /// Full chain definition (including server-generated fields)
@@ -997,6 +1006,8 @@ pub struct ChainDefinitionFull {
     pub connections: Vec<ChainConnection>,
     pub disabled: bool,
     pub timeout: Option<u64>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub positions: HashMap<String, ElementPosition>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

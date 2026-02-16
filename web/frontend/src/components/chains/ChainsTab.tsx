@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Play, Trash2, Clock, Edit2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ChainBuilder } from './ChainBuilder';

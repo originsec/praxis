@@ -11,8 +11,8 @@ import {
   Trash2,
   Plus,
   Edit,
-  ToggleLeft,
-  ToggleRight,
+  Circle,
+  CircleCheck,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -605,9 +605,9 @@ function RulesTab() {
                     className="flex items-center gap-1"
                   >
                     {rule.enabled ? (
-                      <ToggleRight size={16} className="text-[var(--accent-success)]" />
+                      <CircleCheck size={16} className="text-[var(--accent-success)]" />
                     ) : (
-                      <ToggleLeft size={16} className="text-muted" />
+                      <Circle size={16} className="text-[var(--text-secondary)]" />
                     )}
                   </button>
                 </td>

@@ -30,7 +30,7 @@ pub use transactions::{TransactionRecord, TransactionStatus};
 #[allow(unused_imports)]
 pub use chains::{
     BlockConfig, ChainDefinition, ChainDefinitionInfo, ChainElement, ChainConnection,
-    ConnectionCondition, TriggerType, ElementId, ModelRef, SessionGroup,
+    ConnectionCondition, ElementPosition, TriggerType, ElementId, ModelRef, SessionGroup,
 };
 pub use chain_executions::ChainExecutionRecord;
 #[allow(unused_imports)]
