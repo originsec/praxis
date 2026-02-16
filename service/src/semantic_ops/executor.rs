@@ -366,7 +366,7 @@ pub async fn execute_agent_mode(
     database: Arc<Database>,
     mut cancel_rx: oneshot::Receiver<()>,
     use_existing_session: bool,
-) -> Result<(String, String)> {
+) -> Result<(String, String, Option<bool>)> {
     //
     // Create session if needed.
     //
@@ -455,6 +455,7 @@ pub async fn execute_agent_mode(
 
     let mut final_summary = String::new();
     let mut final_result = String::new();
+    let mut semantic_success: Option<bool> = None;
     let start_time = std::time::Instant::now();
     let timeout_duration = std::time::Duration::from_secs(spec.timeout);
 
@@ -605,7 +606,7 @@ pub async fn execute_agent_mode(
         //
         // No tool call found - check for completion signal.
         //
-        if let Some((is_complete, summary, result, _remaining_text, _success)) =
+        if let Some((is_complete, summary, result, _remaining_text, success)) =
             parse_completion_signal(&text_content)
         {
             if is_complete {
@@ -615,10 +616,12 @@ pub async fn execute_agent_mode(
                     text_content.clone()
                 };
                 final_result = result;
+                semantic_success = success;
 
                 //
                 // Log completion.
                 //
+                common::log_info!("SemanticOpComplete: op={} result={} summary={}", &operation_id[..8], final_result, final_summary);
                 let _ = database.append_output(operation_id, &fmt_complete(&final_summary)).await;
 
                 //
@@ -646,14 +649,27 @@ pub async fn execute_agent_mode(
     }
 
     //
+    // If the loop ended without a proper completion signal, treat as failed —
+    // the agent exhausted its iterations without delivering a result.
+    //
+    if semantic_success.is_none() {
+        semantic_success = Some(false);
+        final_result = "failure".to_string();
+        if final_summary.is_empty() {
+            final_summary = "Agent did not complete: iteration limit reached without a result".to_string();
+        }
+    }
+
+    //
     // Close session if we created it.
     //
     if !use_existing_session {
         let _ = close_session(node_id, rabbitmq_channel).await;
     }
 
-    Ok((final_summary, final_result))
+    Ok((final_summary, final_result, semantic_success))
 }
+
 
 /// Send a prompt to a remote node and wait for response
 async fn send_remote_prompt(

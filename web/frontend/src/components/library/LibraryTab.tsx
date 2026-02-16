@@ -477,6 +477,12 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
     setEditingChainId(null);
   };
 
+  const handleDuplicateChain = (definition: ChainDefinitionInput) => {
+    createChain(definition);
+    setShowChainBuilder(false);
+    setEditingChainId(null);
+  };
+
   const handleCancelChain = () => {
     setShowChainBuilder(false);
     setEditingChainId(null);
@@ -517,6 +523,7 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
         <ChainBuilder
           chain={editingChainId ? currentChain : null}
           onSave={handleSaveChain}
+          onDuplicate={handleDuplicateChain}
           onCancel={handleCancelChain}
           operationDefs={operationDefs}
           modelDefs={modelDefs}

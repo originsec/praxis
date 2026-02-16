@@ -187,14 +187,11 @@ pub fn parse_completion_signal(text: &str) -> Option<(bool, String, String, Stri
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
-                        let result = parsed
-                            .get("result")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let success = parsed
-                            .get("success")
-                            .and_then(|v| v.as_bool());
+                        let (result, success) = match parsed.get("result").and_then(|v| v.as_bool()) {
+                            Some(true) => ("success".to_string(), Some(true)),
+                            Some(false) => ("failure".to_string(), Some(false)),
+                            None => ("".to_string(), None),
+                        };
 
                         //
                         // Find the closing fence.
@@ -241,14 +238,11 @@ pub fn parse_completion_signal(text: &str) -> Option<(bool, String, String, Stri
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string();
-                    let result = parsed
-                        .get("result")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    let success = parsed
-                        .get("success")
-                        .and_then(|v| v.as_bool());
+                    let (result, success) = match parsed.get("result").and_then(|v| v.as_bool()) {
+                        Some(true) => ("success".to_string(), Some(true)),
+                        Some(false) => ("failure".to_string(), Some(false)),
+                        None => ("".to_string(), None),
+                    };
 
                     let before = &text[..json_start];
                     let after = &text[json_end + 1..];
@@ -347,7 +341,7 @@ This will help me understand."#;
         let text = r#"I have completed the task successfully.
 
 ```json
-{"complete": true, "summary": "Retrieved user data and sent email notification"}
+{"complete": true, "result": true, "summary": "Retrieved user data and sent email notification"}
 ```
 
 The operation is now finished."#;
@@ -358,16 +352,16 @@ The operation is now finished."#;
         let (is_complete, summary, result_text, remaining, success) = result.unwrap();
         assert!(is_complete);
         assert_eq!(summary, "Retrieved user data and sent email notification");
-        assert_eq!(result_text, "");
+        assert_eq!(result_text, "success");
         assert!(remaining.contains("I have completed the task"));
         assert!(remaining.contains("The operation is now finished"));
-        assert_eq!(success, None);
+        assert_eq!(success, Some(true));
     }
 
     #[test]
-    fn test_parse_completion_signal_with_result() {
+    fn test_parse_completion_signal_failure() {
         let text = r#"```json
-{"complete": true, "summary": "Enumerated all network connections and analyzed them.", "result": "Found 5 suspicious connections:\n1. SYN-SENT to port 29\n2. Multiple CLOSE-WAIT sockets"}
+{"complete": true, "result": false, "summary": "Could not reach target host, connection refused on all ports"}
 ```"#;
 
         let result = parse_completion_signal(text);
@@ -375,15 +369,14 @@ The operation is now finished."#;
 
         let (is_complete, summary, result_text, _remaining, success) = result.unwrap();
         assert!(is_complete);
-        assert_eq!(summary, "Enumerated all network connections and analyzed them.");
-        assert!(result_text.contains("Found 5 suspicious connections"));
-        assert!(result_text.contains("SYN-SENT to port 29"));
-        assert_eq!(success, None);
+        assert_eq!(summary, "Could not reach target host, connection refused on all ports");
+        assert_eq!(result_text, "failure");
+        assert_eq!(success, Some(false));
     }
 
     #[test]
     fn test_parse_completion_signal_false() {
-        let text = r#"Not done yet: {"complete": false, "summary": "Still working"}"#;
+        let text = r#"Not done yet: {"complete": false, "result": true, "summary": "Still working"}"#;
 
         let result = parse_completion_signal(text);
         assert!(result.is_some());

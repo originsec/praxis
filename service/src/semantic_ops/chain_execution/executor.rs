@@ -524,15 +524,20 @@ impl ChainExecutor {
             //
             // Execute based on element type.
             //
-            let (result, active_port): (Result<String>, Option<u32>) = match &node.element {
+            //
+            // semantic_success: overrides Ok/Err for chain edge decisions.
+            // Only agent-mode operations produce this (via the LLM completion
+            // signal). None means "use Ok/Err as-is".
+            //
+            let (result, active_port, semantic_success): (Result<String>, Option<u32>, Option<bool>) = match &node.element {
                 ChainElement::Trigger { .. } => {
-                    (Ok(String::new()), None)
+                    (Ok(String::new()), None, None)
                 }
                 ChainElement::Loop { max_iterations, .. } => {
                     let counter = loop_counters.entry(element_id.clone()).or_insert(0);
                     *counter += 1;
                     let port = if *counter <= *max_iterations { 0 } else { 1 };
-                    (Ok(merged_input.clone()), Some(port))
+                    (Ok(merged_input.clone()), Some(port), None)
                 }
                 ChainElement::Operation {
                     operation_name,
@@ -555,7 +560,10 @@ impl ChainExecutor {
                         response_tracker.clone(),
                         database.clone(),
                     ).await;
-                    (op_result, None)
+                    match op_result {
+                        Ok((output, sem_success)) => (Ok(output), None, sem_success),
+                        Err(e) => (Err(e), None, None),
+                    }
                 }
                 ChainElement::Transform { prompt, model_ref, .. } => {
                     let transform_result = Self::execute_transform(
@@ -564,7 +572,7 @@ impl ChainExecutor {
                         &merged_input,
                         &config,
                     ).await;
-                    (transform_result, None)
+                    (transform_result, None, None)
                 }
                 ChainElement::GenericPrompt { prompt, session_group, .. } => {
                     let gp_result = Self::execute_generic_prompt(
@@ -580,19 +588,19 @@ impl ChainExecutor {
                         response_tracker.clone(),
                         database.clone(),
                     ).await;
-                    (gp_result, None)
+                    (gp_result, None, None)
                 }
                 ChainElement::MemoryStore { key, .. } => {
                     let store_result = database.set_memory(key, &merged_input).await
                         .map_err(|e| anyhow::anyhow!("Failed to store memory '{}': {}", key, e))
                         .map(|_| merged_input.clone());
-                    (store_result, None)
+                    (store_result, None, None)
                 }
                 ChainElement::MemoryRetrieve { key, .. } => {
                     let retrieve_result = database.get_memory(key).await
                         .map_err(|e| anyhow::anyhow!("Failed to retrieve memory '{}': {}", key, e))
                         .map(|v| v.unwrap_or_default());
-                    (retrieve_result, None)
+                    (retrieve_result, None, None)
                 }
             };
 
@@ -621,15 +629,23 @@ impl ChainExecutor {
             };
 
             //
+            // If the agent signalled semantic success/failure, use that for
+            // edge decisions instead of Ok/Err. The operation itself still
+            // completed successfully — this only affects which chain edges
+            // fire.
+            //
+            let edge_success = semantic_success.map(Some).unwrap_or(success);
+
+            //
             // Store resolved output.
             //
-            resolved.insert(element_id.clone(), (output.clone(), success));
+            resolved.insert(element_id.clone(), (output.clone(), edge_success));
 
             //
             // Terminal check: if no outgoing connections, store as output.
             //
             if graph.outgoing_connections(&element_id).is_empty() {
-                if success == Some(true) {
+                if edge_success == Some(true) {
                     state.write().unwrap().add_output(element_id.clone(), output.clone());
                 }
             }
@@ -638,7 +654,7 @@ impl ChainExecutor {
             // Determine fired outgoing connections and enqueue ready targets.
             //
             for conn in graph.outgoing_connections(&element_id) {
-                if !connection_fires(conn, &success) {
+                if !connection_fires(conn, &edge_success) {
                     continue;
                 }
                 if let Some(port) = active_port {
@@ -706,7 +722,7 @@ impl ChainExecutor {
         rabbitmq_channel: &Channel,
         response_tracker: Arc<ResponseTracker>,
         database: Arc<Database>,
-    ) -> Result<String> {
+    ) -> Result<(String, Option<bool>)> {
         let op_def = database
             .get_operation_definition(operation_name)
             .await
@@ -766,8 +782,12 @@ impl ChainExecutor {
         let use_existing_session = active_session.is_some();
         let (_op_cancel_tx, op_cancel_rx) = oneshot::channel::<()>();
 
-        let op_result = if spec.mode == "agent" {
-            execute_agent_mode(
+        //
+        // Agent mode returns (summary, result, semantic_success). One-shot
+        // has no completion signal so semantic_success is always None.
+        //
+        let (op_result, semantic_success): (Result<(String, String)>, Option<bool>) = if spec.mode == "agent" {
+            match execute_agent_mode(
                 &op_id,
                 node_id,
                 &spec,
@@ -780,8 +800,12 @@ impl ChainExecutor {
                 use_existing_session,
             )
             .await
+            {
+                Ok((summary, result, success)) => (Ok((summary, result)), success),
+                Err(e) => (Err(e), None),
+            }
         } else {
-            execute_one_shot(
+            let result = execute_one_shot(
                 &op_id,
                 node_id,
                 &spec,
@@ -792,7 +816,8 @@ impl ChainExecutor {
                 op_cancel_rx,
                 use_existing_session,
             )
-            .await
+            .await;
+            (result, None)
         };
 
         let end_time = Utc::now();
@@ -817,7 +842,7 @@ impl ChainExecutor {
             }
         }
 
-        op_result.map(|(_, result)| result)
+        op_result.map(|(_, result)| (result, semantic_success))
     }
 
     /// Execute a Transform element
@@ -934,7 +959,7 @@ impl ChainExecutor {
 fn connection_fires(conn: &crate::database::ChainConnection, success: &Option<bool>) -> bool {
     match &conn.condition {
         None => true,
-        Some(crate::database::ConnectionCondition::OnSuccess) => success.unwrap_or(true),
+        Some(crate::database::ConnectionCondition::OnSuccess) => matches!(success, Some(true)),
         Some(crate::database::ConnectionCondition::OnFailure) => matches!(success, Some(false)),
     }
 }

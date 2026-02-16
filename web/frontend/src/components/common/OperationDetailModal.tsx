@@ -25,9 +25,9 @@ function formatDuration(start: string, end: string | null): string {
 
 export function OperationDetailModal({ operation, onClose }: OperationDetailModalProps) {
   const outputRef = useRef<HTMLDivElement>(null);
-  const [promptCollapsed, setPromptCollapsed] = useState(false);
+  const [summaryCollapsed, setSummaryCollapsed] = useState(false);
+  const [promptCollapsed, setPromptCollapsed] = useState(true);
   const [outputCollapsed, setOutputCollapsed] = useState(false);
-  const [resultCollapsed, setResultCollapsed] = useState(false);
 
   //
   // Autoscroll output when it changes (for live updates during execution).
@@ -92,14 +92,43 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
               <span className="text-muted">Duration:</span>{' '}
               <span>{formatDuration(operation.start_time, operation.end_time)}</span>
             </div>
-            <div className="col-span-4 mt-1">
-              <span className="text-muted">{operation.spec.description}</span>
-            </div>
+            {operation.spec.description && (
+              <div className="col-span-4 mt-1">
+                <span className="text-muted">{operation.spec.description}</span>
+              </div>
+            )}
           </div>
 
           {/*
           //
-          // Prompt (collapsible).
+          // Summary (collapsible) with Result tag.
+          //
+          */}
+          {(operation.summary || operation.result) && (
+            <div>
+              <button
+                onClick={() => setSummaryCollapsed(!summaryCollapsed)}
+                className="flex items-center gap-2 text-xs text-muted mb-1 hover:text-[var(--text-primary)] transition-colors"
+              >
+                {summaryCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                Summary
+                {operation.result && (
+                  <span className="px-1.5 py-0.5 text-[10px] font-mono bg-[var(--bg-tertiary)] border border-dim">
+                    {operation.result}
+                  </span>
+                )}
+              </button>
+              {!summaryCollapsed && operation.summary && (
+                <div className="bg-[var(--bg-secondary)] p-3">
+                  <p className="text-xs">{operation.summary}</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/*
+          //
+          // Prompt (collapsible, collapsed by default).
           //
           */}
           <div>
@@ -112,7 +141,7 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
             </button>
             {!promptCollapsed && (
               <div className="bg-[var(--bg-secondary)] p-3">
-                <pre className="text-sm whitespace-pre-wrap font-mono">
+                <pre className="text-xs whitespace-pre-wrap font-mono">
                   {operation.spec.operation_prompt}
                 </pre>
               </div>
@@ -144,29 +173,6 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
             </div>
           )}
 
-          {/*
-          //
-          // Result - actual findings/data/output (collapsible).
-          //
-          */}
-          {operation.result && (
-            <div>
-              <button
-                onClick={() => setResultCollapsed(!resultCollapsed)}
-                className="flex items-center gap-1 text-xs text-muted mb-1 hover:text-[var(--text-primary)] transition-colors"
-              >
-                {resultCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                Result
-              </button>
-              {!resultCollapsed && (
-                <div className="bg-[var(--bg-secondary)] p-3 max-h-64 overflow-auto prose prose-sm prose-invert max-w-none [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0 [&_h2]:text-base [&_h2]:mt-3 [&_h2]:mb-2 [&_h3]:text-sm [&_h3]:mt-2 [&_h3]:mb-1">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {operation.result}
-                  </ReactMarkdown>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       )}
     </Modal>

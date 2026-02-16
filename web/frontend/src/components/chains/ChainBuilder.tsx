@@ -17,7 +17,7 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge, Connection, NodeTypes, OnSelectionChangeParams } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, X, Save, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, HardDriveDownload, RefreshCw, Clock, BrainCircuit, FolderOpen } from 'lucide-react';
+import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, HardDriveDownload, RefreshCw, Clock, BrainCircuit, FolderOpen } from 'lucide-react';
 import { ConfigModal } from '../common/ConfigModal';
 import type {
   BlockConfig,
@@ -649,12 +649,13 @@ function PaletteItem({ type, icon, label, disabled, onClick }: PaletteItemProps)
 interface ChainBuilderInnerProps {
   chain?: ChainDefinitionFull | null;
   onSave: (definition: ChainDefinitionInput) => void;
+  onDuplicate?: (definition: ChainDefinitionInput) => void;
   onCancel: () => void;
   operationDefs: OperationDefinitionInfo[];
   modelDefs: ModelDefinition[];
 }
 
-function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }: ChainBuilderInnerProps) {
+function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs, modelDefs }: ChainBuilderInnerProps) {
   const [name, setName] = useState(chain?.name || '');
   const [description, setDescription] = useState(chain?.description || '');
   const [timeout, setTimeout] = useState(chain?.timeout || 1800);
@@ -1437,6 +1438,25 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
   };
 
   //
+  // Duplicate: prompt for new name/description, then create as new chain.
+  //
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [duplicateValues, setDuplicateValues] = useState<Record<string, string | boolean>>({ name: '', description: '' });
+
+  const handleDuplicateClick = () => {
+    setDuplicateValues({ name: `${name} (copy)`, description });
+    setShowDuplicateModal(true);
+  };
+
+  const handleDuplicateConfirm = () => {
+    const dupName = (duplicateValues.name as string).trim();
+    if (!dupName || !onDuplicate) return;
+    const definition = flowToChain(nodes, edges, dupName, duplicateValues.description as string, category, timeout, extraData);
+    onDuplicate(definition);
+    setShowDuplicateModal(false);
+  };
+
+  //
   // Handle keyboard shortcuts.
   //
   useEffect(() => {
@@ -1553,8 +1573,17 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
 
   //
   // Double-click edge to cycle condition: None → OnSuccess → OnFailure → None.
+  // Only available on edges originating from agent-mode operation nodes.
   //
   const onEdgeDoubleClick = useCallback((_: React.MouseEvent, edge: Edge) => {
+    //
+    // Check if source node is an agent-mode operation.
+    //
+    const sourceNode = nodes.find(n => n.id === edge.source);
+    const isAgentOp = sourceNode?.type === 'operation'
+      && (sourceNode.data as OperationNodeData)?.mode === 'agent';
+    if (!isAgentOp) return;
+
     setEdges(eds => eds.map(e => {
       if (e.id !== edge.id) return e;
       const currentCondition = (e.data as Record<string, unknown>)?.condition as string | null;
@@ -1584,7 +1613,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
         data: { ...((e.data as object) || {}), condition: nextCondition },
       };
     }));
-  }, [setEdges]);
+  }, [setEdges, nodes]);
 
   const onEdgeMouseLeave = useCallback((_: React.MouseEvent, edge: Edge) => {
     setHoveredEdgeId(null);
@@ -1696,6 +1725,17 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
             <X size={14} />
             Cancel
           </button>
+          {onDuplicate && (
+            <button
+              onClick={handleDuplicateClick}
+              disabled={!canSave}
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs tracking-wider border border-dim text-muted hover:border-subtle hover:bg-[var(--highlight)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Duplicate as new chain"
+            >
+              <Copy size={14} />
+              Duplicate
+            </button>
+          )}
           <button
             onClick={handleSave}
             disabled={!canSave}
@@ -2120,6 +2160,26 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
         submitVariant="warning"
         submitDisabled={loopMaxIterations < 1}
       />
+
+      <ConfigModal
+        isOpen={showDuplicateModal}
+        onClose={() => setShowDuplicateModal(false)}
+        onSubmit={handleDuplicateConfirm}
+        title="Duplicate Chain"
+        submitLabel="Create"
+        submitIcon={<Copy size={14} />}
+        size="sm"
+        values={duplicateValues}
+        onChange={(key, val) => setDuplicateValues(prev => ({ ...prev, [key]: val }))}
+        config={[
+          {
+            fields: [
+              { name: 'name', label: 'Name', type: 'text' as const, required: true, span: 'full' as const },
+              { name: 'description', label: 'Description', type: 'text' as const, span: 'full' as const },
+            ],
+          },
+        ]}
+      />
     </div>
   );
 }
@@ -2127,6 +2187,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
 interface ChainBuilderProps {
   chain?: ChainDefinitionFull | null;
   onSave: (definition: ChainDefinitionInput) => void;
+  onDuplicate?: (definition: ChainDefinitionInput) => void;
   onCancel: () => void;
   operationDefs: OperationDefinitionInfo[];
   modelDefs?: ModelDefinition[];

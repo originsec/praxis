@@ -69,6 +69,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [chainToDelete, setChainToDelete] = useState<ChainDefinitionInfo | null>(null);
 
+
   //
   // Fetch chains on mount.
   //
@@ -176,6 +177,12 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
     setEditingChainId(null);
   };
 
+  const handleDuplicate = (definition: ChainDefinitionInput) => {
+    createChain(definition);
+    setShowBuilder(false);
+    setEditingChainId(null);
+  };
+
   const handleCancel = () => {
     setShowBuilder(false);
     setEditingChainId(null);
@@ -187,6 +194,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
         <ChainBuilder
           chain={editingChainId ? currentChain : null}
           onSave={handleSave}
+          onDuplicate={handleDuplicate}
           onCancel={handleCancel}
           operationDefs={operationDefs}
           modelDefs={modelDefs}
@@ -361,6 +369,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
           </div>
         </div>
       </Modal>
+
     </div>
   );
 }

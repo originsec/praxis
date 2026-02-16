@@ -635,6 +635,7 @@ impl SemanticOpsManager {
                 true,
             )
             .await
+            .map(|(summary, result, _semantic_success)| (summary, result))
         } else {
             execute_one_shot(
                 &operation_id,
