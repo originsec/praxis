@@ -137,11 +137,19 @@ function getCompletionContext(textBeforeCursor: string): Suggestion[] {
       //
       // Suppress suggestions right after an infix operator or comparison
       // operator — the user needs to type a value, not pick from a list.
+      // Also suppress when partial is empty and the previous token isn't a
+      // keyword that starts a new expression (e.g. after a column name the
+      // user needs to type an operator, not pick another column).
       //
 
       const tokensBeforeCursor = lastPipeSegment.trimEnd().split(/\s+/);
       const prevToken = tokensBeforeCursor[tokensBeforeCursor.length - (partial ? 2 : 1)]?.toLowerCase();
       if (prevToken && (KQL_INFIX_OPS.includes(prevToken) || ['==', '!=', '<', '>', '<=', '>='].includes(prevToken))) {
+        return [];
+      }
+
+      const expressionStarters = ['where', 'extend', 'summarize', 'and', 'or', 'not', 'by', ',', '('];
+      if (!partial && (!prevToken || !expressionStarters.includes(prevToken))) {
         return [];
       }
 
