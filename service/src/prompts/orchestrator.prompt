@@ -31,8 +31,12 @@ Only a single agent can be selected on a node at any one time.
 Sessions are interactive channels for manual prompting. They operate on the
 currently selected agent for a given node.
 
+IMPORTANT: Before using session or recon commands, you MUST have a node and agent selected:
+1. Select a node (identify by node_id)
+2. Select an agent: `agent_select` (required — sessions and recon bind to the selected agent)
+
 IMPORTANT session lifecycle:
-1. Select an agent first: `agent_select` (required — sessions bind to the selected agent)
+1. Ensure a node and agent are selected (see above)
 2. Create a session: `session_create` (required before any `session_prompt`)
 3. Send prompts: `session_prompt` (only works when a session is open)
 4. Close when done: `session_close` (always close sessions to free resources)
