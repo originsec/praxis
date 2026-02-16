@@ -154,10 +154,15 @@ print_summary() {
     echo ""
     echo "Installation:        $PRAXIS_DIR"
     echo ""
+    local container
+    container=$($COMPOSE_CMD ps -q praxis 2>/dev/null | head -1)
+    local cp_source="${container:+$container:/app/praxis_cli}"
+    if [ -z "$container" ]; then
+        cp_source="<container_id>:/app/praxis_cli"
+    fi
+
     echo -e "${CYAN}CLI:${NC}"
-    echo "  docker cp praxis-praxis-1:/app/praxis_cli ./praxis_cli"
-    echo "  # or after first run, find it in the data volume:"
-    echo "  # docker volume inspect praxis_praxis_data"
+    echo "  docker cp $cp_source ./praxis_cli"
     echo ""
     echo -e "${CYAN}Commands:${NC}"
     echo "  cd $PRAXIS_DIR"

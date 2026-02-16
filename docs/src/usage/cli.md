@@ -26,8 +26,10 @@ The binary is installed to `~/.praxis/bin/praxis_cli`.
 When using Docker, the CLI binary is built into the container image and copied to the data volume on startup. You can extract it with:
 
 ```bash
-docker cp praxis-praxis-1:/app/praxis_cli ./praxis_cli
+docker cp $(docker compose ps -q praxis):/app/praxis_cli ./praxis_cli
 ```
+
+> **Note:** The container name depends on your project directory. Run this from the directory containing your `docker-compose.yml`.
 
 ## Interactive REPL (Default Mode)
 
@@ -278,7 +280,7 @@ Once started, you enter a prompt loop:
 - **Ctrl+C** or **Ctrl+D** at the prompt exits the session
 
 The orchestrator displays:
-- Tool executions with success/failure indicators
+- Tool executions with success/failure indicators (click to expand and view input/result JSON)
 - Execution plans with step progress (not started / in progress / done)
 - Token usage statistics
 - Final responses rendered as markdown

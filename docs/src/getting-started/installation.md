@@ -86,10 +86,12 @@ PRAXIS_HEADLESS=1 docker compose up --build
 The CLI binary is built into the Docker image and copied to the data volume on startup. Extract it with:
 
 ```bash
-docker cp praxis-praxis-1:/app/praxis_cli ./praxis_cli
+docker cp $(docker compose ps -q praxis):/app/praxis_cli ./praxis_cli
 chmod +x ./praxis_cli
 ./praxis_cli
 ```
+
+> **Note:** Run this from the directory containing your `docker-compose.yml`. The container name varies by project directory.
 
 To add a macOS node binary to Docker downloads, provide it explicitly (optional):
 

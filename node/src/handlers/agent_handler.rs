@@ -329,14 +329,14 @@ pub async fn handle_agent_command(
                             error: Some(error),
                         });
                     }
-                    read_file_range(&path, line_start, line_end).map_err(|e| e.to_string())
+                    read_file_range(&path, line_start, line_end).map_err(|e| format!("Failed to read config content: {}. Make sure the relevant agent is selected and the path is correct.", e))
                 }
                 AgentFileType::Session => {
                     let locked = selected_agent.lock().unwrap();
                     let agent = locked.as_ref();
                     match agent.and_then(|a| a.read_session_content(&path)) {
                         Some(content) => Ok(select_line_range(&content, line_start, line_end)),
-                        None => Err("Failed to read session content".to_string()),
+                        None => Err("Failed to read session content. Make sure the relevant agent is selected and the path is correct.".to_string()),
                     }
                 }
             };
@@ -468,14 +468,14 @@ pub async fn handle_agent_command(
                             error: Some(error),
                         });
                     }
-                    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))
+                    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read config content: {}. Make sure the relevant agent is selected and the path is correct.", e))
                 }
                 AgentFileType::Session => {
                     let locked = selected_agent.lock().unwrap();
                     let agent = locked.as_ref();
                     match agent.and_then(|a| a.read_session_content(&path)) {
                         Some(content) => Ok(content),
-                        None => Err("Failed to read session content".to_string()),
+                        None => Err("Failed to read session content. Make sure the relevant agent is selected and the path is correct.".to_string()),
                     }
                 }
             };
