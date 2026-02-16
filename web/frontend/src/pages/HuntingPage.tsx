@@ -261,7 +261,7 @@ function HorizontalResizeHandle({ onDrag }: { onDrag: (deltaY: number) => void }
 export function HuntingPage() {
   const { state, huntingQuery, huntingSetQuery } = useApp();
   const query = state.hunting.query;
-  const [showReference, setShowReference] = useState(true);
+  const [showReference, setShowReference] = useState(false);
   const [editorHeight, setEditorHeight] = useState(DEFAULT_EDITOR_HEIGHT);
   const resultsRef = useRef<HTMLDivElement>(null);
   const [resultsMaxHeight, setResultsMaxHeight] = useState('70vh');
