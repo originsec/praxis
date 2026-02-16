@@ -22,20 +22,6 @@ pub enum TriggerType {
 /// Model reference for LLM operations (format: "provider::model")
 pub type ModelRef = String;
 
-/// Termination element types (end of chain)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum TerminationType {
-    /// Raw dump - outputs the accumulated input data
-    Raw,
-    /// Semantic termination - runs LLM with prompt on accumulated data
-    Semantic {
-        prompt: String,
-        /// Optional model override (format: "provider::model")
-        model_ref: Option<ModelRef>,
-    },
-}
-
 /// Session group for elements that share a session
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionGroup {
@@ -45,6 +31,20 @@ pub struct SessionGroup {
     pub color: String,
     /// Whether YOLO mode is enabled for the session
     pub yolo_mode: bool,
+    /// Working directory override for this session group
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
+}
+
+/// Per-block configuration overrides
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BlockConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_runtime: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yolo_mode: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
 }
 
 /// Chain element variants
@@ -66,6 +66,9 @@ pub enum ChainElement {
         model_ref: Option<ModelRef>,
         /// Session group for shared session execution
         session_group: Option<SessionGroup>,
+        /// Per-block configuration overrides
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
     },
     /// Transform element - runs LLM on input and passes result to next element
     Transform {
@@ -76,6 +79,9 @@ pub enum ChainElement {
         model_ref: Option<ModelRef>,
         /// Session group for shared session execution
         session_group: Option<SessionGroup>,
+        /// Per-block configuration overrides
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
     },
     /// Generic prompt element - sends prompt to agent via session
     GenericPrompt {
@@ -84,13 +90,26 @@ pub enum ChainElement {
         prompt: String,
         /// Session group for shared session execution
         session_group: Option<SessionGroup>,
+        /// Per-block configuration overrides
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
     },
-    /// Termination element - end of a branch
-    Termination {
+    /// Memory store element - stores input data under a key
+    MemoryStore {
         id: ElementId,
-        termination_type: TerminationType,
-        /// Label for this output
-        label: String,
+        /// Key to store the value under
+        key: String,
+    },
+    /// Memory retrieve element - retrieves stored data by key
+    MemoryRetrieve {
+        id: ElementId,
+        /// Key to retrieve the value from
+        key: String,
+    },
+    /// Loop element - retries via port 0 until max_iterations, then exits via port 1
+    Loop {
+        id: ElementId,
+        max_iterations: u32,
     },
 }
 
@@ -102,7 +121,9 @@ impl ChainElement {
             ChainElement::Operation { id, .. } => id,
             ChainElement::Transform { id, .. } => id,
             ChainElement::GenericPrompt { id, .. } => id,
-            ChainElement::Termination { id, .. } => id,
+            ChainElement::MemoryStore { id, .. } => id,
+            ChainElement::MemoryRetrieve { id, .. } => id,
+            ChainElement::Loop { id, .. } => id,
         }
     }
 
@@ -113,9 +134,19 @@ impl ChainElement {
             ChainElement::Operation { session_group, .. } => session_group.as_ref(),
             ChainElement::Transform { session_group, .. } => session_group.as_ref(),
             ChainElement::GenericPrompt { session_group, .. } => session_group.as_ref(),
-            _ => None,
+            ChainElement::Trigger { .. }
+            | ChainElement::MemoryStore { .. }
+            | ChainElement::MemoryRetrieve { .. }
+            | ChainElement::Loop { .. } => None,
         }
     }
+}
+
+/// Condition for when a connection fires
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ConnectionCondition {
+    OnSuccess,
+    OnFailure,
 }
 
 /// Connection between two elements
@@ -131,6 +162,9 @@ pub struct ChainConnection {
     pub from_port: u32,
     /// Input port index (for elements with multiple inputs)
     pub to_port: u32,
+    /// Optional condition for when this connection fires
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition: Option<ConnectionCondition>,
 }
 
 /// Complete chain definition
@@ -221,19 +255,6 @@ impl ChainDefinition {
         }
 
         //
-        // Must have at least one termination.
-        //
-        let terminations: Vec<_> = self
-            .elements
-            .iter()
-            .filter(|e| matches!(e, ChainElement::Termination { .. }))
-            .collect();
-
-        if terminations.is_empty() {
-            return Err("Chain must have at least one termination element".to_string());
-        }
-
-        //
         // Validate all connections reference existing elements.
         //
         for conn in &self.connections {
@@ -265,20 +286,148 @@ impl ChainDefinition {
         }
 
         //
-        // Termination should have no outgoing connections.
+        // At least one non-trigger element must have no outgoing connections
+        // (terminal element).
         //
-        for term in &terminations {
-            if self
-                .connections
-                .iter()
-                .any(|c| &c.from_element == term.id())
-            {
-                return Err("Termination element cannot have outgoing connections".to_string());
+        let has_terminal = self.elements.iter().any(|e| {
+            !matches!(e, ChainElement::Trigger { .. })
+                && !self.connections.iter().any(|c| &c.from_element == e.id())
+        });
+
+        if !has_terminal {
+            return Err(
+                "Chain must have at least one element with no outgoing connections".to_string(),
+            );
+        }
+
+        //
+        // Validate Loop elements: max_iterations must be >= 1.
+        //
+        for element in &self.elements {
+            if let ChainElement::Loop { max_iterations, .. } = element {
+                if *max_iterations < 1 {
+                    return Err("Loop element max_iterations must be >= 1".to_string());
+                }
+            }
+        }
+
+        //
+        // Validate cycles: find SCCs using Tarjan's algorithm. Each SCC with
+        // >1 node must contain at least one Loop element.
+        //
+        {
+            let element_ids: Vec<&str> = self.elements.iter().map(|e| e.id().as_str()).collect();
+            let adj: std::collections::HashMap<&str, Vec<&str>> = {
+                let mut map: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
+                for id in &element_ids {
+                    map.entry(id).or_default();
+                }
+                for conn in &self.connections {
+                    map.entry(conn.from_element.as_str())
+                        .or_default()
+                        .push(conn.to_element.as_str());
+                }
+                map
+            };
+
+            let sccs = tarjan_scc(&element_ids, &adj);
+            for scc in &sccs {
+                if scc.len() > 1 {
+                    let has_loop = scc.iter().any(|id| {
+                        self.elements.iter().any(|e| {
+                            e.id().as_str() == *id && matches!(e, ChainElement::Loop { .. })
+                        })
+                    });
+                    if !has_loop {
+                        return Err(
+                            "Chain contains a cycle without a Loop element. Add a Loop block to control iteration."
+                                .to_string(),
+                        );
+                    }
+                }
             }
         }
 
         Ok(())
     }
+}
+
+/// Tarjan's SCC algorithm to find all strongly connected components.
+fn tarjan_scc<'a>(
+    nodes: &[&'a str],
+    adj: &std::collections::HashMap<&'a str, Vec<&'a str>>,
+) -> Vec<Vec<&'a str>> {
+    use std::collections::HashMap;
+
+    struct State<'a> {
+        index_counter: usize,
+        stack: Vec<&'a str>,
+        on_stack: HashMap<&'a str, bool>,
+        index: HashMap<&'a str, usize>,
+        lowlink: HashMap<&'a str, usize>,
+        result: Vec<Vec<&'a str>>,
+    }
+
+    fn strongconnect<'a>(
+        v: &'a str,
+        adj: &HashMap<&'a str, Vec<&'a str>>,
+        state: &mut State<'a>,
+    ) {
+        state.index.insert(v, state.index_counter);
+        state.lowlink.insert(v, state.index_counter);
+        state.index_counter += 1;
+        state.stack.push(v);
+        state.on_stack.insert(v, true);
+
+        if let Some(neighbors) = adj.get(v) {
+            for w in neighbors {
+                if !state.index.contains_key(w) {
+                    strongconnect(w, adj, state);
+                    let w_low = state.lowlink[w];
+                    let v_low = state.lowlink[v];
+                    if w_low < v_low {
+                        state.lowlink.insert(v, w_low);
+                    }
+                } else if *state.on_stack.get(w).unwrap_or(&false) {
+                    let w_idx = state.index[w];
+                    let v_low = state.lowlink[v];
+                    if w_idx < v_low {
+                        state.lowlink.insert(v, w_idx);
+                    }
+                }
+            }
+        }
+
+        if state.lowlink[v] == state.index[v] {
+            let mut component = Vec::new();
+            loop {
+                let w = state.stack.pop().unwrap();
+                state.on_stack.insert(w, false);
+                component.push(w);
+                if w == v {
+                    break;
+                }
+            }
+            state.result.push(component);
+        }
+    }
+
+    let mut state = State {
+        index_counter: 0,
+        stack: Vec::new(),
+        on_stack: HashMap::new(),
+        index: HashMap::new(),
+        lowlink: HashMap::new(),
+        result: Vec::new(),
+    };
+
+    for node in nodes {
+        if !state.index.contains_key(node) {
+            strongconnect(node, adj, &mut state);
+        }
+    }
+
+    state.result
 }
 
 /// Session group colors for migration
@@ -355,24 +504,41 @@ fn migrate_chain_json(json: &str) -> Option<String> {
     };
 
     //
-    // If no SessionBox elements and no positions, already in new format.
+    // Check if we need to migrate Termination elements.
     //
-    if session_boxes.is_empty() && !has_positions {
+    let has_termination = {
+        let elements = value.get("elements")?.as_array()?;
+        elements.iter().any(|e| {
+            e.get("element_type")
+                .and_then(|v| v.as_str())
+                .map(|t| t == "Termination")
+                .unwrap_or(false)
+        })
+    };
+
+    //
+    // If no SessionBox elements, no positions, and no Termination — already
+    // in new format.
+    //
+    if session_boxes.is_empty() && !has_positions && !has_termination {
         return None;
     }
 
     //
-    // If no SessionBox but has positions, just remove position fields.
+    // If no SessionBox but has positions or Termination, just handle those.
     //
     if session_boxes.is_empty() {
-        let elements = value.get_mut("elements")?.as_array_mut()?;
-        for element in elements.iter_mut() {
-            if let Some(obj) = element.as_object_mut() {
-                obj.remove("position");
-                obj.remove("size");
+        if has_positions {
+            let elements = value.get_mut("elements")?.as_array_mut()?;
+            for element in elements.iter_mut() {
+                if let Some(obj) = element.as_object_mut() {
+                    obj.remove("position");
+                    obj.remove("size");
+                }
             }
+            common::log_info!("Migrated chain: removed position fields from elements");
         }
-        common::log_info!("Migrated chain: removed position fields from elements");
+        migrate_termination_elements(&mut value);
         return serde_json::to_string(&value).ok();
     }
 
@@ -460,7 +626,142 @@ fn migrate_chain_json(json: &str) -> Option<String> {
         session_groups.len()
     );
 
+    //
+    // Fall through to Termination migration below.
+    //
+    migrate_termination_elements(&mut value);
+
     serde_json::to_string(&value).ok()
+}
+
+/// Second migration pass: convert or remove Termination elements.
+/// - Raw Termination: remove element + connections pointing to it.
+/// - Semantic Termination: convert to Transform with same id, prompt, model_ref.
+fn migrate_termination_elements(value: &mut serde_json::Value) {
+    let (raw_term_ids, semantic_conversions) = {
+        let elements = match value.get("elements").and_then(|e| e.as_array()) {
+            Some(e) => e,
+            None => return,
+        };
+
+        let mut raw_ids: Vec<String> = Vec::new();
+        let mut semantic: Vec<(String, String, Option<String>)> = Vec::new();
+
+        for e in elements {
+            let element_type = match e.get("element_type").and_then(|v| v.as_str()) {
+                Some(t) => t,
+                None => continue,
+            };
+            if element_type != "Termination" {
+                continue;
+            }
+
+            let id = match e.get("id").and_then(|v| v.as_str()) {
+                Some(id) => id.to_string(),
+                None => continue,
+            };
+
+            let term_type = e
+                .get("termination_type")
+                .and_then(|v| v.get("type"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("Raw");
+
+            if term_type == "Semantic" {
+                let prompt = e
+                    .get("termination_type")
+                    .and_then(|v| v.get("prompt"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let model_ref = e
+                    .get("termination_type")
+                    .and_then(|v| v.get("model_ref"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                semantic.push((id, prompt, model_ref));
+            } else {
+                raw_ids.push(id);
+            }
+        }
+
+        (raw_ids, semantic)
+    };
+
+    if raw_term_ids.is_empty() && semantic_conversions.is_empty() {
+        return;
+    }
+
+    //
+    // Remove connections pointing to Raw Termination elements.
+    //
+    if !raw_term_ids.is_empty() {
+        if let Some(connections) = value.get_mut("connections").and_then(|c| c.as_array_mut()) {
+            connections.retain(|conn| {
+                let to = conn
+                    .get("to_element")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                !raw_term_ids.contains(&to.to_string())
+            });
+        }
+    }
+
+    //
+    // Process elements: remove Raw Termination, convert Semantic to Transform.
+    //
+    if let Some(elements) = value.get_mut("elements").and_then(|e| e.as_array_mut()) {
+        //
+        // Remove Raw Termination elements.
+        //
+        elements.retain(|e| {
+            let id = e.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            !raw_term_ids.contains(&id.to_string())
+        });
+
+        //
+        // Convert Semantic Termination elements to Transform.
+        //
+        for element in elements.iter_mut() {
+            if let Some(obj) = element.as_object_mut() {
+                let id = obj
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if let Some((_, prompt, model_ref)) =
+                    semantic_conversions.iter().find(|(sid, _, _)| *sid == id)
+                {
+                    obj.insert(
+                        "element_type".to_string(),
+                        serde_json::Value::String("Transform".to_string()),
+                    );
+                    obj.insert(
+                        "prompt".to_string(),
+                        serde_json::Value::String(prompt.clone()),
+                    );
+                    if let Some(mref) = model_ref {
+                        obj.insert(
+                            "model_ref".to_string(),
+                            serde_json::Value::String(mref.clone()),
+                        );
+                    }
+                    obj.remove("termination_type");
+                    obj.remove("label");
+                }
+            }
+        }
+    }
+
+    let migrated_count = raw_term_ids.len() + semantic_conversions.len();
+    if migrated_count > 0 {
+        common::log_info!(
+            "Migrated chain: converted {} Termination elements ({} removed, {} converted to Transform)",
+            migrated_count,
+            raw_term_ids.len(),
+            semantic_conversions.len()
+        );
+    }
 }
 
 impl Database {

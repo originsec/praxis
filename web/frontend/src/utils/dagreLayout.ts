@@ -5,11 +5,13 @@ import type { ChainElement, ChainConnection } from '../api/types';
 // Node sizes for different element types.
 //
 const NODE_SIZES: Record<string, { width: number; height: number }> = {
-  Trigger: { width: 150, height: 60 },
-  Operation: { width: 200, height: 80 },
-  Transform: { width: 200, height: 100 },
-  GenericPrompt: { width: 200, height: 100 },
-  Termination: { width: 180, height: 80 },
+  Trigger: { width: 180, height: 60 },
+  Operation: { width: 280, height: 100 },
+  Transform: { width: 280, height: 90 },
+  GenericPrompt: { width: 280, height: 90 },
+  MemoryStore: { width: 220, height: 70 },
+  MemoryRetrieve: { width: 220, height: 70 },
+  Loop: { width: 240, height: 90 },
 };
 
 /**

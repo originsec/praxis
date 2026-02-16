@@ -860,20 +860,6 @@ pub enum ChainTriggerType {
     Manual,
 }
 
-/// Termination element types (end of chain)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum ChainTerminationType {
-    /// Raw dump - outputs the accumulated input data
-    Raw,
-    /// Semantic termination - runs LLM with prompt on accumulated data
-    Semantic {
-        prompt: String,
-        /// Optional model override (format: "provider::model")
-        model_ref: Option<String>,
-    },
-}
-
 /// Session group for elements that share a session
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionGroup {
@@ -883,6 +869,20 @@ pub struct SessionGroup {
     pub color: String,
     /// Whether YOLO mode is enabled for the session
     pub yolo_mode: bool,
+    /// Working directory override for this session group
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
+}
+
+/// Per-block configuration overrides
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BlockConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_runtime: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yolo_mode: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
 }
 
 /// Chain element variants
@@ -904,6 +904,9 @@ pub enum ChainElement {
         model_ref: Option<String>,
         /// Session group for shared session execution
         session_group: Option<SessionGroup>,
+        /// Per-block configuration overrides
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
     },
     /// Transform element - runs LLM on input and passes result to next element
     Transform {
@@ -914,6 +917,9 @@ pub enum ChainElement {
         model_ref: Option<String>,
         /// Session group for shared session execution
         session_group: Option<SessionGroup>,
+        /// Per-block configuration overrides
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
     },
     /// Generic prompt element - sends prompt to agent via session
     GenericPrompt {
@@ -922,14 +928,32 @@ pub enum ChainElement {
         prompt: String,
         /// Session group for shared session execution
         session_group: Option<SessionGroup>,
+        /// Per-block configuration overrides
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
     },
-    /// Termination element - end of a branch
-    Termination {
+    /// Memory store element - stores input data under a key
+    MemoryStore {
         id: String,
-        termination_type: ChainTerminationType,
-        /// Label for this output
-        label: String,
+        key: String,
     },
+    /// Memory retrieve element - retrieves stored data by key
+    MemoryRetrieve {
+        id: String,
+        key: String,
+    },
+    /// Loop element - retries via port 0 until max_iterations, then exits via port 1
+    Loop {
+        id: String,
+        max_iterations: u32,
+    },
+}
+
+/// Condition for when a connection fires
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ConnectionCondition {
+    OnSuccess,
+    OnFailure,
 }
 
 /// Connection between two chain elements
@@ -940,6 +964,8 @@ pub struct ChainConnection {
     pub to_element: String,
     pub from_port: u32,
     pub to_port: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition: Option<ConnectionCondition>,
 }
 
 /// Complete chain definition (for create/update)
@@ -1018,7 +1044,11 @@ pub enum ElementExecutionStatus {
     Pending,
     WaitingForInputs,
     Running,
-    Completed { output: String },
+    Completed {
+        output: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        success: Option<bool>,
+    },
     Failed { error: String },
     Skipped,
 }
@@ -1049,14 +1079,17 @@ pub enum ElementConfig {
         /// Prompt to send to agent
         prompt: String,
     },
-    /// Raw output config (no LLM processing)
-    RawOutput,
-    /// Semantic output config (LLM processing)
-    SemanticOutput {
-        /// Prompt for LLM processing
-        prompt: String,
-        /// Model to use (format: "provider::model")
-        model_ref: Option<String>,
+    /// Memory store config
+    MemoryStore {
+        key: String,
+    },
+    /// Memory retrieve config
+    MemoryRetrieve {
+        key: String,
+    },
+    /// Loop element config
+    Loop {
+        max_iterations: u32,
     },
 }
 

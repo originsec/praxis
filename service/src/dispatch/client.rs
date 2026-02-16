@@ -1531,6 +1531,10 @@ async fn handle_chain_get(ctx: &ServiceContext, client_id: String, chain_id: Str
                 to_element: conn.to_element,
                 from_port: conn.from_port,
                 to_port: conn.to_port,
+                condition: conn.condition.map(|c| match c {
+                    database::ConnectionCondition::OnSuccess => common::ConnectionCondition::OnSuccess,
+                    database::ConnectionCondition::OnFailure => common::ConnectionCondition::OnFailure,
+                }),
             })
             .collect(),
         disabled: c.disabled,
@@ -1576,6 +1580,10 @@ async fn handle_chain_create(
                 to_element: c.to_element,
                 from_port: c.from_port,
                 to_port: c.to_port,
+                condition: c.condition.map(|cond| match cond {
+                    common::ConnectionCondition::OnSuccess => database::ConnectionCondition::OnSuccess,
+                    common::ConnectionCondition::OnFailure => database::ConnectionCondition::OnFailure,
+                }),
             })
             .collect(),
         disabled: definition.disabled,
@@ -1674,6 +1682,10 @@ async fn handle_chain_update(
                 to_element: c.to_element,
                 from_port: c.from_port,
                 to_port: c.to_port,
+                condition: c.condition.map(|cond| match cond {
+                    common::ConnectionCondition::OnSuccess => database::ConnectionCondition::OnSuccess,
+                    common::ConnectionCondition::OnFailure => database::ConnectionCondition::OnFailure,
+                }),
             })
             .collect(),
         disabled: definition.disabled,

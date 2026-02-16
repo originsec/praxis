@@ -5,6 +5,7 @@ mod rules;
 mod transactions;
 mod chains;
 mod chain_executions;
+mod chain_memories;
 mod discovered_endpoints;
 mod event_log;
 mod lua_agent_scripts;
@@ -28,8 +29,8 @@ pub use definitions::OperationDefinition;
 pub use transactions::{TransactionRecord, TransactionStatus};
 #[allow(unused_imports)]
 pub use chains::{
-    ChainDefinition, ChainDefinitionInfo, ChainElement, ChainConnection,
-    TriggerType, TerminationType, ElementId, ModelRef, SessionGroup,
+    BlockConfig, ChainDefinition, ChainDefinitionInfo, ChainElement, ChainConnection,
+    ConnectionCondition, TriggerType, ElementId, ModelRef, SessionGroup,
 };
 pub use chain_executions::ChainExecutionRecord;
 #[allow(unused_imports)]

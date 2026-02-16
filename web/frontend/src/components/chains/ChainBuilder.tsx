@@ -17,10 +17,10 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge, Connection, NodeTypes, OnSelectionChangeParams } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, Zap, X, Save, CircleStop, FileOutput, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users } from 'lucide-react';
-import { Modal } from '../common/Modal';
+import { Play, X, Save, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, HardDriveDownload, RefreshCw } from 'lucide-react';
 import { ConfigModal } from '../common/ConfigModal';
 import type {
+  BlockConfig,
   ChainDefinitionFull,
   ChainDefinitionInput,
   ChainElement,
@@ -160,20 +160,58 @@ function GenericPromptNode({ data, selected }: { data: { label: string; prompt: 
   );
 }
 
-function TerminationNode({ data, selected }: { data: { label: string; termType: string }; selected?: boolean }) {
+function MemoryStoreNode({ data, selected }: { data: { label: string; memoryKey: string }; selected?: boolean }) {
   return (
     <div
-      className={`ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[120px] relative transition-all ${!selected ? hoverStyle : ''}`}
-      style={selected ? selectedStyle : undefined}
+      className={`px-4 py-3 shadow-md bg-[var(--bg-secondary)] border ${selected ? 'border-[var(--accent-success)]' : 'border-subtle'}`}
+      style={{ minWidth: 200 }}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
       <div className="flex items-center gap-2">
-        <CircleStop size={14} className="text-[var(--accent-error)]" />
-        <div className="flex flex-col">
-          <span className="text-sm font-mono">{data.label}</span>
-          <span className="text-xs text-[var(--text-secondary)]">{data.termType}</span>
-        </div>
+        <Database size={16} className="text-[var(--accent-success)]" />
+        <span className="text-xs font-medium text-[var(--text-highlight)]">{data.memoryKey || 'Store'}</span>
+        <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-success)]/20 text-[var(--accent-success)] font-mono">STORE</span>
       </div>
+      <Handle type="source" position={Position.Right} style={handleStyle} />
+    </div>
+  );
+}
+
+function MemoryRetrieveNode({ data, selected }: { data: { label: string; memoryKey: string }; selected?: boolean }) {
+  return (
+    <div
+      className={`px-4 py-3 shadow-md bg-[var(--bg-secondary)] border ${selected ? 'border-[var(--accent-info)]' : 'border-subtle'}`}
+      style={{ minWidth: 200 }}
+    >
+      <Handle type="target" position={Position.Left} style={handleStyle} />
+      <div className="flex items-center gap-2">
+        <HardDriveDownload size={16} className="text-[var(--accent-info)]" />
+        <span className="text-xs font-medium text-[var(--text-highlight)]">{data.memoryKey || 'Retrieve'}</span>
+        <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-info)]/20 text-[var(--accent-info)] font-mono">RETRIEVE</span>
+      </div>
+      <Handle type="source" position={Position.Right} style={handleStyle} />
+    </div>
+  );
+}
+
+function LoopNode({ data, selected }: { data: { label: string; maxIterations: number }; selected?: boolean }) {
+  return (
+    <div
+      className={`px-4 py-3 shadow-md bg-[var(--bg-secondary)] border ${selected ? 'border-[var(--accent-warning)]' : 'border-subtle'}`}
+      style={{ minWidth: 220 }}
+    >
+      <Handle type="target" position={Position.Left} style={handleStyle} />
+      <div className="flex items-center gap-2">
+        <RefreshCw size={16} className="text-[var(--accent-warning)]" />
+        <span className="text-xs font-medium text-[var(--text-highlight)]">Loop</span>
+        <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] font-mono">max {data.maxIterations}</span>
+      </div>
+      <div className="flex justify-between text-[9px] text-muted mt-1">
+        <span>Retry (port 0)</span>
+        <span>Done (port 1)</span>
+      </div>
+      <Handle type="source" position={Position.Right} id="0" style={{ ...handleStyle, top: '30%' }} />
+      <Handle type="source" position={Position.Right} id="1" style={{ ...handleStyle, top: '70%' }} />
     </div>
   );
 }
@@ -183,19 +221,22 @@ const nodeTypes: NodeTypes = {
   operation: OperationNode,
   transform: TransformNode,
   genericPrompt: GenericPromptNode,
-  termination: TerminationNode,
+  memoryStore: MemoryStoreNode,
+  memoryRetrieve: MemoryRetrieveNode,
+  loop: LoopNode,
 };
 
 //
 // Extra data tracked separately (prompts, models, session groups).
 //
 interface ChainExtraData {
-  terminationPrompts: Map<string, string>;
-  terminationModels: Map<string, string>;
   transformPrompts: Map<string, string>;
   transformModels: Map<string, string>;
   genericPrompts: Map<string, string>;
   sessionGroups: Map<string, SessionGroup>;
+  blockConfigs: Map<string, BlockConfig>;
+  memoryKeys: Map<string, string>;
+  loopMaxIterations: Map<string, number>;
 }
 
 //
@@ -204,12 +245,13 @@ interface ChainExtraData {
 //
 function chainToFlow(chain: ChainDefinitionFull | null): { nodes: Node[]; edges: Edge[]; extraData: ChainExtraData } {
   const emptyExtraData: ChainExtraData = {
-    terminationPrompts: new Map(),
-    terminationModels: new Map(),
     transformPrompts: new Map(),
     transformModels: new Map(),
     genericPrompts: new Map(),
     sessionGroups: new Map(),
+    blockConfigs: new Map(),
+    memoryKeys: new Map(),
+    loopMaxIterations: new Map(),
   };
 
   if (!chain) return { nodes: [], edges: [], extraData: emptyExtraData };
@@ -236,6 +278,9 @@ function chainToFlow(chain: ChainDefinitionFull | null): { nodes: Node[]; edges:
         if (elem.session_group) {
           extraData.sessionGroups.set(elem.id, elem.session_group);
         }
+        if (elem.block_config) {
+          extraData.blockConfigs.set(elem.id, elem.block_config);
+        }
         return {
           id: elem.id,
           type: 'operation',
@@ -254,6 +299,9 @@ function chainToFlow(chain: ChainDefinitionFull | null): { nodes: Node[]; edges:
         if (elem.session_group) {
           extraData.sessionGroups.set(elem.id, elem.session_group);
         }
+        if (elem.block_config) {
+          extraData.blockConfigs.set(elem.id, elem.block_config);
+        }
         return {
           id: elem.id,
           type: 'transform',
@@ -269,6 +317,9 @@ function chainToFlow(chain: ChainDefinitionFull | null): { nodes: Node[]; edges:
         if (elem.session_group) {
           extraData.sessionGroups.set(elem.id, elem.session_group);
         }
+        if (elem.block_config) {
+          extraData.blockConfigs.set(elem.id, elem.block_config);
+        }
         return {
           id: elem.id,
           type: 'genericPrompt',
@@ -279,35 +330,58 @@ function chainToFlow(chain: ChainDefinitionFull | null): { nodes: Node[]; edges:
             sessionColor: elem.session_group?.color,
           },
         };
-      case 'Termination':
-        //
-        // Extract prompt and model_ref from Semantic terminations.
-        //
-        if (elem.termination_type.type === 'Semantic' && 'prompt' in elem.termination_type) {
-          extraData.terminationPrompts.set(elem.id, elem.termination_type.prompt);
-          if (elem.termination_type.model_ref) {
-            extraData.terminationModels.set(elem.id, elem.termination_type.model_ref);
-          }
-        }
+      case 'MemoryStore':
+        extraData.memoryKeys.set(elem.id, elem.key);
         return {
           id: elem.id,
-          type: 'termination',
+          type: 'memoryStore',
           position,
-          data: {
-            label: elem.label,
-            termType: elem.termination_type.type,
-          },
+          data: { label: 'Memory Store', memoryKey: elem.key },
+        };
+      case 'MemoryRetrieve':
+        extraData.memoryKeys.set(elem.id, elem.key);
+        return {
+          id: elem.id,
+          type: 'memoryRetrieve',
+          position,
+          data: { label: 'Memory Retrieve', memoryKey: elem.key },
+        };
+      case 'Loop':
+        extraData.loopMaxIterations.set(elem.id, elem.max_iterations);
+        return {
+          id: elem.id,
+          type: 'loop',
+          position,
+          data: { label: 'Loop', maxIterations: elem.max_iterations },
         };
     }
-  });
+  }).filter((n): n is NonNullable<typeof n> => n != null);
 
-  const edges: Edge[] = chain.connections.map((conn) => ({
-    id: conn.id,
-    source: conn.from_element,
-    target: conn.to_element,
-    markerEnd: { type: MarkerType.ArrowClosed },
-    style: { stroke: 'var(--text-secondary)' },
-  }));
+  const edges: Edge[] = chain.connections.map((conn) => {
+    let stroke = 'var(--text-secondary)';
+    let label: string | undefined;
+    let strokeDasharray: string | undefined;
+
+    if (conn.condition === 'OnSuccess') {
+      stroke = 'var(--accent-success)';
+      label = 'Success';
+    } else if (conn.condition === 'OnFailure') {
+      stroke = 'var(--accent-error)';
+      label = 'Failure';
+    }
+
+    return {
+      id: conn.id,
+      source: conn.from_element,
+      target: conn.to_element,
+      sourceHandle: conn.from_port > 0 ? String(conn.from_port) : undefined,
+      markerEnd: { type: MarkerType.ArrowClosed },
+      style: { stroke, strokeDasharray },
+      label,
+      labelStyle: { fill: stroke, fontSize: 10, fontWeight: 500 },
+      data: { condition: conn.condition || null },
+    };
+  });
 
   return { nodes, edges, extraData };
 }
@@ -342,6 +416,7 @@ function flowToChain(
           operation_name: (node.data?.operation as string) || '',
           model_ref: null,
           session_group: extraData.sessionGroups.get(node.id) || null,
+          block_config: extraData.blockConfigs.get(node.id) || null,
         };
       case 'transform':
         return {
@@ -350,6 +425,7 @@ function flowToChain(
           prompt: extraData.transformPrompts.get(node.id) || '',
           model_ref: extraData.transformModels.get(node.id) || null,
           session_group: extraData.sessionGroups.get(node.id) || null,
+          block_config: extraData.blockConfigs.get(node.id) || null,
         };
       case 'genericPrompt':
         return {
@@ -357,17 +433,25 @@ function flowToChain(
           id: node.id,
           prompt: extraData.genericPrompts.get(node.id) || '',
           session_group: extraData.sessionGroups.get(node.id) || null,
+          block_config: extraData.blockConfigs.get(node.id) || null,
         };
-      case 'termination':
-        const prompt = extraData.terminationPrompts.get(node.id) || '';
-        const modelRef = extraData.terminationModels.get(node.id) || null;
+      case 'memoryStore':
         return {
-          element_type: 'Termination' as const,
+          element_type: 'MemoryStore' as const,
           id: node.id,
-          termination_type: node.data?.termType === 'Raw'
-            ? { type: 'Raw' as const }
-            : { type: 'Semantic' as const, prompt, model_ref: modelRef },
-          label: (node.data?.label as string) || 'Output',
+          key: extraData.memoryKeys.get(node.id) || '',
+        };
+      case 'memoryRetrieve':
+        return {
+          element_type: 'MemoryRetrieve' as const,
+          id: node.id,
+          key: extraData.memoryKeys.get(node.id) || '',
+        };
+      case 'loop':
+        return {
+          element_type: 'Loop' as const,
+          id: node.id,
+          max_iterations: extraData.loopMaxIterations.get(node.id) || 3,
         };
       default:
         throw new Error(`Unknown node type: ${node.type}`);
@@ -378,8 +462,9 @@ function flowToChain(
     id: edge.id,
     from_element: edge.source,
     to_element: edge.target,
-    from_port: 0,
+    from_port: edge.sourceHandle ? parseInt(edge.sourceHandle, 10) || 0 : 0,
     to_port: 0,
+    condition: (edge.data as Record<string, unknown>)?.condition as ChainConnectionType['condition'] || null,
   }));
 
   return {
@@ -480,14 +565,6 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
   const [selectedOperation, setSelectedOperation] = useState<string>('');
 
   //
-  // Modal state for termination configuration.
-  //
-  const [showTerminationModal, setShowTerminationModal] = useState(false);
-  const [terminationType, setTerminationType] = useState<'Raw' | 'Semantic'>('Raw');
-  const [terminationPrompt, setTerminationPrompt] = useState('');
-  const [terminationModel, setTerminationModel] = useState<string>('');
-
-  //
   // Modal state for transform configuration.
   //
   const [showTransformModal, setShowTransformModal] = useState(false);
@@ -505,14 +582,23 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
   //
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
 
+  //
+  // Modal state for memory key configuration.
+  //
+  const [showMemoryModal, setShowMemoryModal] = useState(false);
+  const [memoryKey, setMemoryKey] = useState('');
+  const [pendingMemoryType, setPendingMemoryType] = useState<'memoryStore' | 'memoryRetrieve'>('memoryStore');
+
+  const [showLoopModal, setShowLoopModal] = useState(false);
+  const [loopMaxIterations, setLoopMaxIterations] = useState<number>(3);
+
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition, fitView } = useReactFlow();
 
   //
-  // Check if trigger/termination already exists.
+  // Check if trigger already exists.
   //
   const hasTrigger = nodes.some(n => n.type === 'trigger');
-  const hasTermination = nodes.some(n => n.type === 'termination');
 
   //
   // Check which selected nodes can be grouped (Operations, Transforms,
@@ -677,13 +763,6 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
         return;
       }
 
-      //
-      // Prevent adding second termination.
-      //
-      if (type === 'termination' && hasTermination) {
-        return;
-      }
-
       const position = screenToFlowPosition({
         x: event.clientX,
         y: event.clientY,
@@ -720,14 +799,23 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
       }
 
       //
-      // For termination, show the configuration modal.
+      // For memory nodes, show the memory key modal.
       //
-      if (type === 'termination') {
+      if (type === 'memoryStore' || type === 'memoryRetrieve') {
         setPendingPosition(position);
-        setTerminationType('Raw');
-        setTerminationPrompt('');
-        setTerminationModel('');
-        setShowTerminationModal(true);
+        setPendingMemoryType(type as 'memoryStore' | 'memoryRetrieve');
+        setMemoryKey('');
+        setShowMemoryModal(true);
+        return;
+      }
+
+      //
+      // For loop nodes, show the loop configuration modal.
+      //
+      if (type === 'loop') {
+        setPendingPosition(position);
+        setLoopMaxIterations(3);
+        setShowLoopModal(true);
         return;
       }
 
@@ -736,7 +824,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
       //
       addNodeAtPosition(type, position);
     },
-    [screenToFlowPosition, hasTrigger, hasTermination]
+    [screenToFlowPosition, hasTrigger]
   );
 
   const addNodeAtPosition = useCallback((type: string, position: { x: number; y: number }, nodeExtraData?: Record<string, unknown>) => {
@@ -744,13 +832,6 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
     // Prevent adding second trigger.
     //
     if (type === 'trigger' && hasTrigger) {
-      return;
-    }
-
-    //
-    // Prevent adding second termination.
-    //
-    if (type === 'termination' && hasTermination) {
       return;
     }
 
@@ -820,39 +901,55 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           });
         }
         break;
-      case 'termination':
+      case 'memoryStore':
         newNode = {
           id: newId,
-          type: 'termination',
+          type: 'memoryStore',
           position,
-          data: {
-            label: nodeExtraData?.label || 'Output',
-            termType: nodeExtraData?.termType || 'Raw'
-          },
+          data: { label: 'Memory Store', memoryKey: nodeExtraData?.memoryKey || '' },
         };
-        //
-        // Store prompt and model if Semantic.
-        //
-        if (nodeExtraData?.termType === 'Semantic') {
+        if (nodeExtraData?.memoryKey) {
           setExtraData(prev => {
-            const newTermPrompts = new Map(prev.terminationPrompts);
-            const newTermModels = new Map(prev.terminationModels);
-            if (nodeExtraData?.prompt) {
-              newTermPrompts.set(newId, nodeExtraData.prompt as string);
-            }
-            if (nodeExtraData?.modelRef) {
-              newTermModels.set(newId, nodeExtraData.modelRef as string);
-            }
-            return { ...prev, terminationPrompts: newTermPrompts, terminationModels: newTermModels };
+            const newKeys = new Map(prev.memoryKeys);
+            newKeys.set(newId, nodeExtraData.memoryKey as string);
+            return { ...prev, memoryKeys: newKeys };
           });
         }
+        break;
+      case 'memoryRetrieve':
+        newNode = {
+          id: newId,
+          type: 'memoryRetrieve',
+          position,
+          data: { label: 'Memory Retrieve', memoryKey: nodeExtraData?.memoryKey || '' },
+        };
+        if (nodeExtraData?.memoryKey) {
+          setExtraData(prev => {
+            const newKeys = new Map(prev.memoryKeys);
+            newKeys.set(newId, nodeExtraData.memoryKey as string);
+            return { ...prev, memoryKeys: newKeys };
+          });
+        }
+        break;
+      case 'loop':
+        newNode = {
+          id: newId,
+          type: 'loop',
+          position,
+          data: { label: 'Loop', maxIterations: nodeExtraData?.maxIterations || 3 },
+        };
+        setExtraData(prev => {
+          const newMap = new Map(prev.loopMaxIterations);
+          newMap.set(newId, (nodeExtraData?.maxIterations as number) || 3);
+          return { ...prev, loopMaxIterations: newMap };
+        });
         break;
       default:
         return;
     }
 
     setNodes((nds) => [...nds, newNode]);
-  }, [setNodes, hasTrigger, hasTermination, setExtraData]);
+  }, [setNodes, hasTrigger, setExtraData]);
 
   //
   // Quick add from palette click (adds at a default position).
@@ -862,13 +959,6 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
     // Prevent adding second trigger.
     //
     if (type === 'trigger' && hasTrigger) {
-      return;
-    }
-
-    //
-    // Prevent adding second termination.
-    //
-    if (type === 'termination' && hasTermination) {
       return;
     }
 
@@ -895,17 +985,21 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
       return;
     }
 
-    if (type === 'termination') {
-      setPendingPosition(position);
-      setTerminationType('Raw');
-      setTerminationPrompt('');
-      setTerminationModel('');
-      setShowTerminationModal(true);
+    if (type === 'memoryStore' || type === 'memoryRetrieve') {
+      setPendingMemoryType(type as 'memoryStore' | 'memoryRetrieve');
+      setMemoryKey('');
+      setShowMemoryModal(true);
+      return;
+    }
+
+    if (type === 'loop') {
+      setLoopMaxIterations(3);
+      setShowLoopModal(true);
       return;
     }
 
     addNodeAtPosition(type, position);
-  }, [nodes.length, addNodeAtPosition, hasTrigger, hasTermination]);
+  }, [nodes.length, addNodeAtPosition, hasTrigger]);
 
   const handleOperationSelect = useCallback(() => {
     if (pendingPosition && selectedOperation) {
@@ -986,59 +1080,51 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
     }
   }, [pendingPosition, editingNodeId, genericPromptText, addNodeAtPosition, setNodes]);
 
-  const handleTerminationConfirm = useCallback(() => {
+  const handleMemoryConfirm = useCallback(() => {
     if (editingNodeId) {
-      //
-      // Update existing node.
-      //
       setExtraData(prev => {
-        const newTermPrompts = new Map(prev.terminationPrompts);
-        const newTermModels = new Map(prev.terminationModels);
-        if (terminationType === 'Semantic') {
-          newTermPrompts.set(editingNodeId, terminationPrompt);
-          if (terminationModel) {
-            newTermModels.set(editingNodeId, terminationModel);
-          } else {
-            newTermModels.delete(editingNodeId);
-          }
-        } else {
-          newTermPrompts.delete(editingNodeId);
-          newTermModels.delete(editingNodeId);
-        }
-        return { ...prev, terminationPrompts: newTermPrompts, terminationModels: newTermModels };
+        const newKeys = new Map(prev.memoryKeys);
+        newKeys.set(editingNodeId, memoryKey);
+        return { ...prev, memoryKeys: newKeys };
       });
       setNodes(nds => nds.map(n =>
         n.id === editingNodeId
-          ? {
-              ...n,
-              data: {
-                ...n.data,
-                label: terminationType === 'Raw' ? 'Raw Output' : 'Semantic Output',
-                termType: terminationType,
-              },
-            }
+          ? { ...n, data: { ...n.data, memoryKey } }
           : n
       ));
-      setShowTerminationModal(false);
+      setShowMemoryModal(false);
       setEditingNodeId(null);
-      setTerminationPrompt('');
-      setTerminationModel('');
-    } else if (pendingPosition) {
-      //
-      // Add new node.
-      //
-      addNodeAtPosition('termination', pendingPosition, {
-        label: terminationType === 'Raw' ? 'Raw Output' : 'Semantic Output',
-        termType: terminationType,
-        prompt: terminationPrompt,
-        modelRef: terminationModel || undefined,
-      });
-      setShowTerminationModal(false);
+      setMemoryKey('');
+    } else {
+      const position = pendingPosition || { x: 100, y: 100 + nodes.length * 100 };
+      addNodeAtPosition(pendingMemoryType, position, { memoryKey });
+      setShowMemoryModal(false);
       setPendingPosition(null);
-      setTerminationPrompt('');
-      setTerminationModel('');
+      setMemoryKey('');
     }
-  }, [pendingPosition, editingNodeId, terminationType, terminationPrompt, terminationModel, addNodeAtPosition, setNodes]);
+  }, [pendingPosition, editingNodeId, pendingMemoryType, memoryKey, addNodeAtPosition, setNodes, nodes.length]);
+
+  const handleLoopConfirm = useCallback(() => {
+    if (editingNodeId) {
+      setExtraData(prev => {
+        const newMap = new Map(prev.loopMaxIterations);
+        newMap.set(editingNodeId, loopMaxIterations);
+        return { ...prev, loopMaxIterations: newMap };
+      });
+      setNodes(nds => nds.map(n =>
+        n.id === editingNodeId
+          ? { ...n, data: { ...n.data, maxIterations: loopMaxIterations } }
+          : n
+      ));
+      setShowLoopModal(false);
+      setEditingNodeId(null);
+    } else {
+      const position = pendingPosition || { x: 100, y: 100 + nodes.length * 100 };
+      addNodeAtPosition('loop', position, { maxIterations: loopMaxIterations });
+      setShowLoopModal(false);
+      setPendingPosition(null);
+    }
+  }, [pendingPosition, editingNodeId, loopMaxIterations, addNodeAtPosition, setNodes, nodes.length]);
 
   const canSave = name.trim().length > 0;
 
@@ -1083,25 +1169,28 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
             //
             setExtraData(prev => {
               const newSessionGroups = new Map(prev.sessionGroups);
-              const newTermPrompts = new Map(prev.terminationPrompts);
-              const newTermModels = new Map(prev.terminationModels);
+              const newBlockConfigs = new Map(prev.blockConfigs);
               const newTransformPrompts = new Map(prev.transformPrompts);
               const newTransformModels = new Map(prev.transformModels);
               const newGenericPrompts = new Map(prev.genericPrompts);
+              const newMemoryKeys = new Map(prev.memoryKeys);
+              const newLoopMaxIters = new Map(prev.loopMaxIterations);
               newSessionGroups.delete(hoveredNodeId);
-              newTermPrompts.delete(hoveredNodeId);
-              newTermModels.delete(hoveredNodeId);
+              newBlockConfigs.delete(hoveredNodeId);
               newTransformPrompts.delete(hoveredNodeId);
               newTransformModels.delete(hoveredNodeId);
               newGenericPrompts.delete(hoveredNodeId);
+              newMemoryKeys.delete(hoveredNodeId);
+              newLoopMaxIters.delete(hoveredNodeId);
               return {
                 ...prev,
                 sessionGroups: newSessionGroups,
-                terminationPrompts: newTermPrompts,
-                terminationModels: newTermModels,
+                blockConfigs: newBlockConfigs,
                 transformPrompts: newTransformPrompts,
                 transformModels: newTransformModels,
                 genericPrompts: newGenericPrompts,
+                memoryKeys: newMemoryKeys,
+                loopMaxIterations: newLoopMaxIters,
               };
             });
             setNodes((nds) => nds.filter((n) => n.id !== hoveredNodeId));
@@ -1216,17 +1305,19 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
       setTransformPrompt(extraData.transformPrompts.get(node.id) || '');
       setTransformModel(extraData.transformModels.get(node.id) || '');
       setShowTransformModal(true);
-    } else if (node.type === 'termination') {
-      setEditingNodeId(node.id);
-      const termType = (node.data?.termType as string) || 'Raw';
-      setTerminationType(termType as 'Raw' | 'Semantic');
-      setTerminationPrompt(extraData.terminationPrompts.get(node.id) || '');
-      setTerminationModel(extraData.terminationModels.get(node.id) || '');
-      setShowTerminationModal(true);
     } else if (node.type === 'genericPrompt') {
       setEditingNodeId(node.id);
       setGenericPromptText(extraData.genericPrompts.get(node.id) || '');
       setShowGenericPromptModal(true);
+    } else if (node.type === 'memoryStore' || node.type === 'memoryRetrieve') {
+      setEditingNodeId(node.id);
+      setPendingMemoryType(node.type as 'memoryStore' | 'memoryRetrieve');
+      setMemoryKey(extraData.memoryKeys.get(node.id) || '');
+      setShowMemoryModal(true);
+    } else if (node.type === 'loop') {
+      setEditingNodeId(node.id);
+      setLoopMaxIterations(extraData.loopMaxIterations.get(node.id) || 3);
+      setShowLoopModal(true);
     }
   }, [extraData]);
 
@@ -1385,11 +1476,22 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
                   onClick={() => handleQuickAdd('genericPrompt')}
                 />
                 <PaletteItem
-                  type="termination"
-                  icon={<CircleStop size={20} className={hasTermination ? "text-[var(--text-secondary)]" : "text-[var(--accent-error)]"} />}
-                  label="Output"
-                  disabled={hasTermination}
-                  onClick={() => handleQuickAdd('termination')}
+                  type="memoryStore"
+                  icon={<Database size={20} className="text-[var(--accent-success)]" />}
+                  label="Mem Store"
+                  onClick={() => handleQuickAdd('memoryStore')}
+                />
+                <PaletteItem
+                  type="memoryRetrieve"
+                  icon={<HardDriveDownload size={20} className="text-[var(--accent-info)]" />}
+                  label="Mem Load"
+                  onClick={() => handleQuickAdd('memoryRetrieve')}
+                />
+                <PaletteItem
+                  type="loop"
+                  icon={<RefreshCw size={20} className="text-[var(--accent-warning)]" />}
+                  label="Loop"
+                  onClick={() => handleQuickAdd('loop')}
                 />
               </div>
             </div>
@@ -1497,133 +1599,6 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
 
       {/*
       //
-      // Output Configuration Modal.
-      //
-      */}
-      <Modal
-        isOpen={showTerminationModal}
-        onClose={() => {
-          setShowTerminationModal(false);
-          setPendingPosition(null);
-          setTerminationPrompt('');
-          setTerminationModel('');
-        }}
-        title="Configure Output"
-        size="md"
-      >
-        <div className="space-y-0">
-          {/*
-          //
-          // Type selector section.
-          //
-          */}
-          <div className="p-2.5 bg-[var(--bg-secondary)]">
-            <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Type</label>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setTerminationType('Raw')}
-                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 text-sm border transition-colors ${
-                  terminationType === 'Raw'
-                    ? 'bg-[var(--accent-success)]/20 text-[var(--accent-success)] border-[var(--accent-success)]'
-                    : 'bg-[var(--bg-primary)] border-dim hover:border-subtle'
-                }`}
-              >
-                <FileOutput size={14} />
-                Raw
-              </button>
-              <button
-                onClick={() => setTerminationType('Semantic')}
-                className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 text-sm border transition-colors ${
-                  terminationType === 'Semantic'
-                    ? 'bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] border-[var(--accent-purple)]'
-                    : 'bg-[var(--bg-primary)] border-dim hover:border-subtle'
-                }`}
-              >
-                <Zap size={14} />
-                Semantic
-              </button>
-            </div>
-            <p className="text-xs mt-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-              {terminationType === 'Raw'
-                ? 'Raw outputs the accumulated data directly without processing'
-                : 'Semantic processes the data with an LLM using the prompt below'}
-            </p>
-          </div>
-
-          {/*
-          //
-          // Prompt and Model fields for Semantic type.
-          //
-          */}
-          {terminationType === 'Semantic' && (
-            <>
-              <div className="p-2.5 bg-[var(--bg-secondary)]">
-                <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Model</label>
-                <select
-                  value={terminationModel}
-                  onChange={(e) => setTerminationModel(e.target.value)}
-                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
-                >
-                  <option value="">Use default model</option>
-                  {modelDefs.map((m) => (
-                    <option key={m.name} value={m.name}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs mt-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-                  {modelDefs.length === 0
-                    ? 'No models configured. Configure models in Settings.'
-                    : 'Select a model or use the default semantic operations model.'}
-                </p>
-              </div>
-              <div className="p-2.5 bg-[var(--bg-secondary)]">
-                <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">
-                  Prompt<span className="text-[var(--accent-error)]/70"> *</span>
-                </label>
-                <textarea
-                  value={terminationPrompt}
-                  onChange={(e) => setTerminationPrompt(e.target.value)}
-                  placeholder="Enter the prompt for processing the accumulated data..."
-                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight font-mono min-h-[100px] resize-none focus:outline-none focus:border-subtle transition-colors"
-                />
-              </div>
-            </>
-          )}
-
-          {/*
-          //
-          // Actions.
-          //
-          */}
-          <div className="p-2.5 bg-[var(--bg-secondary)]">
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  setShowTerminationModal(false);
-                  setPendingPosition(null);
-                  setTerminationPrompt('');
-                  setTerminationModel('');
-                }}
-                className="px-4 py-2 text-xs tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleTerminationConfirm}
-                disabled={terminationType === 'Semantic' && !terminationPrompt.trim()}
-                className="inline-flex items-center gap-2 px-4 py-2 text-xs tracking-wider border border-dim bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:border-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <CircleStop size={14} />
-                Add
-              </button>
-            </div>
-          </div>
-        </div>
-      </Modal>
-
-      {/*
-      //
       // Transform Configuration Modal.
       //
       */}
@@ -1720,6 +1695,77 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
         submitIcon={<MessageSquare size={14} />}
         submitVariant="purple"
         submitDisabled={!genericPromptText.trim()}
+      />
+
+      {/*
+      //
+      // Memory Key Configuration Modal.
+      //
+      */}
+      <ConfigModal
+        isOpen={showMemoryModal}
+        onClose={() => {
+          setShowMemoryModal(false);
+          setPendingPosition(null);
+          setMemoryKey('');
+          setEditingNodeId(null);
+        }}
+        title={pendingMemoryType === 'memoryStore' ? 'Configure Memory Store' : 'Configure Memory Retrieve'}
+        config={[
+          {
+            type: 'section',
+            fields: [
+              {
+                name: 'memoryKey',
+                label: 'Memory Key',
+                type: 'text' as const,
+                placeholder: 'Enter a unique key for this memory slot...',
+              },
+            ],
+          },
+        ]}
+        values={{ memoryKey }}
+        onChange={(_name, value) => setMemoryKey(value)}
+        onSubmit={handleMemoryConfirm}
+        submitLabel={editingNodeId ? 'Update' : 'Add'}
+        submitIcon={pendingMemoryType === 'memoryStore' ? <Database size={14} /> : <HardDriveDownload size={14} />}
+        submitVariant={pendingMemoryType === 'memoryStore' ? 'success' : 'info'}
+        submitDisabled={!memoryKey.trim()}
+      />
+
+      {/*
+      //
+      // Loop Configuration Modal.
+      //
+      */}
+      <ConfigModal
+        isOpen={showLoopModal}
+        onClose={() => {
+          setShowLoopModal(false);
+          setPendingPosition(null);
+          setEditingNodeId(null);
+        }}
+        title="Configure Loop"
+        config={[
+          {
+            type: 'section',
+            fields: [
+              {
+                name: 'loopMaxIterations',
+                label: 'Max Iterations',
+                type: 'text' as const,
+                placeholder: 'Maximum number of loop iterations...',
+              },
+            ],
+          },
+        ]}
+        values={{ loopMaxIterations: String(loopMaxIterations) }}
+        onChange={(_name, value) => setLoopMaxIterations(parseInt(value) || 3)}
+        onSubmit={handleLoopConfirm}
+        submitLabel={editingNodeId ? 'Update' : 'Add'}
+        submitIcon={<RefreshCw size={14} />}
+        submitVariant="warning"
+        submitDisabled={loopMaxIterations < 1}
       />
     </div>
   );

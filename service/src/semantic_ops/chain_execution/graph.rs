@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::HashMap;
 
-use crate::database::{ChainDefinition, ChainElement, ElementId, SessionGroup};
+use crate::database::{ChainConnection, ChainDefinition, ChainElement, ElementId, SessionGroup};
 
 /// Node in the execution graph
 #[derive(Debug, Clone)]
@@ -13,21 +13,16 @@ pub struct ExecutionNode {
 }
 
 /// Execution graph built from a chain definition
+#[derive(Debug)]
 pub struct ExecutionGraph {
     /// All nodes indexed by element ID
     pub nodes: HashMap<ElementId, ExecutionNode>,
     /// The trigger element ID (start of execution)
-    #[allow(dead_code)]
     pub trigger_id: ElementId,
-    /// All termination element IDs
-    #[allow(dead_code)]
-    pub termination_ids: Vec<ElementId>,
-    /// Session groups and their member element IDs (group_id -> element_ids)
+    /// Full set of connections from the chain definition
+    pub connections: Vec<ChainConnection>,
+    /// Session groups and their member element IDs (group_id -> (SessionGroup, element_ids))
     pub session_groups: HashMap<String, (SessionGroup, Vec<ElementId>)>,
-    /// Elements that are first in their session group (and should include input context)
-    pub first_in_session: HashSet<ElementId>,
-    /// Topologically sorted execution order
-    pub execution_order: Vec<ElementId>,
 }
 
 impl ExecutionGraph {
@@ -40,7 +35,6 @@ impl ExecutionGraph {
 
         let mut nodes: HashMap<ElementId, ExecutionNode> = HashMap::new();
         let mut trigger_id: Option<ElementId> = None;
-        let mut termination_ids: Vec<ElementId> = Vec::new();
         let mut session_groups: HashMap<String, (SessionGroup, Vec<ElementId>)> = HashMap::new();
 
         //
@@ -56,9 +50,9 @@ impl ExecutionGraph {
                 ChainElement::Trigger { .. } => {
                     trigger_id = Some(id.clone());
                 }
-                ChainElement::Termination { .. } => {
-                    termination_ids.push(id.clone());
-                }
+                ChainElement::MemoryStore { .. }
+                | ChainElement::MemoryRetrieve { .. }
+                | ChainElement::Loop { .. } => {}
                 ChainElement::Operation { session_group, .. }
                 | ChainElement::Transform { session_group, .. }
                 | ChainElement::GenericPrompt { session_group, .. } => {
@@ -86,44 +80,15 @@ impl ExecutionGraph {
         // Build edges from connections.
         //
         for conn in &chain.connections {
-            //
-            // Add dependent link.
-            //
             if let Some(from_node) = nodes.get_mut(&conn.from_element) {
                 from_node.dependents.push(conn.to_element.clone());
             }
-            //
-            // Add dependency link.
-            //
             if let Some(to_node) = nodes.get_mut(&conn.to_element) {
                 to_node.dependencies.push(conn.from_element.clone());
             }
         }
 
         let trigger_id = trigger_id.ok_or("Chain has no trigger element")?;
-
-        //
-        // Perform topological sort.
-        //
-        let execution_order = Self::topological_sort(&nodes, &trigger_id)?;
-
-        //
-        // Determine first element in each session group (based on execution
-        // order).
-        //
-        let mut first_in_session: HashSet<ElementId> = HashSet::new();
-        for (_group_id, (_sg, element_ids)) in &session_groups {
-            //
-            // Find the first element in this group that appears in execution
-            // order.
-            //
-            for order_id in &execution_order {
-                if element_ids.contains(order_id) {
-                    first_in_session.insert(order_id.clone());
-                    break;
-                }
-            }
-        }
 
         //
         // Log session groups for debugging.
@@ -137,84 +102,28 @@ impl ExecutionGraph {
                 element_ids.iter().map(|id| &id[..8.min(id.len())]).collect::<Vec<_>>()
             );
         }
-        common::log_info!(
-            "First in session elements: {:?}",
-            first_in_session.iter().map(|id| &id[..8.min(id.len())]).collect::<Vec<_>>()
-        );
 
         Ok(Self {
             nodes,
             trigger_id,
-            termination_ids,
+            connections: chain.connections.clone(),
             session_groups,
-            first_in_session,
-            execution_order,
         })
     }
 
-    /// Perform topological sort using Kahn's algorithm
-    fn topological_sort(
-        nodes: &HashMap<ElementId, ExecutionNode>,
-        trigger_id: &ElementId,
-    ) -> Result<Vec<ElementId>, String> {
-        let mut in_degree: HashMap<ElementId, usize> = HashMap::new();
-        let mut result: Vec<ElementId> = Vec::new();
-        let mut queue: VecDeque<ElementId> = VecDeque::new();
-
-        //
-        // Calculate in-degrees.
-        //
-        for (id, node) in nodes {
-            in_degree.insert(id.clone(), node.dependencies.len());
-        }
-
-        //
-        // Start with the trigger (which has no dependencies).
-        //
-        queue.push_back(trigger_id.clone());
-
-        while let Some(id) = queue.pop_front() {
-            result.push(id.clone());
-
-            if let Some(node) = nodes.get(&id) {
-                for dependent_id in &node.dependents {
-                    if let Some(deg) = in_degree.get_mut(dependent_id) {
-                        *deg -= 1;
-                        if *deg == 0 {
-                            queue.push_back(dependent_id.clone());
-                        }
-                    }
-                }
-            }
-        }
-
-        //
-        // Check for cycles.
-        //
-        if result.len() != nodes.len() {
-            return Err("Chain contains a cycle".to_string());
-        }
-
-        Ok(result)
+    /// Get outgoing connections from an element
+    pub fn outgoing_connections(&self, element_id: &ElementId) -> Vec<&ChainConnection> {
+        self.connections
+            .iter()
+            .filter(|c| &c.from_element == element_id)
+            .collect()
     }
 
-    /// Get element IDs that can execute in parallel at a given point
-    /// (elements with satisfied dependencies that aren't yet executed)
-    #[allow(dead_code)]
-    pub fn get_ready_elements(&self, completed: &HashSet<ElementId>) -> Vec<ElementId> {
-        self.execution_order
+    /// Get incoming connections to an element
+    pub fn incoming_connections(&self, element_id: &ElementId) -> Vec<&ChainConnection> {
+        self.connections
             .iter()
-            .filter(|id| {
-                if completed.contains(*id) {
-                    return false;
-                }
-                let node = match self.nodes.get(*id) {
-                    Some(n) => n,
-                    None => return false,
-                };
-                node.dependencies.iter().all(|dep| completed.contains(dep))
-            })
-            .cloned()
+            .filter(|c| &c.to_element == element_id)
             .collect()
     }
 
@@ -238,26 +147,12 @@ impl ExecutionGraph {
         None
     }
 
-    /// Check if an element is the first in its session group
-    pub fn is_first_in_session(&self, element_id: &ElementId) -> bool {
-        self.first_in_session.contains(element_id)
-    }
-
-    /// Get all elements in a session group in execution order
-    #[allow(dead_code)]
-    pub fn get_session_group_elements(&self, group_id: &str) -> Vec<ElementId> {
-        let element_ids = match self.session_groups.get(group_id) {
-            Some((_, ids)) => ids,
-            None => return Vec::new(),
-        };
-
-        //
-        // Return in execution order.
-        //
-        self.execution_order
+    /// Get elements with no outgoing connections (terminal elements)
+    pub fn terminal_elements(&self) -> Vec<ElementId> {
+        self.nodes
             .iter()
-            .filter(|id| element_ids.contains(id))
-            .cloned()
+            .filter(|(_, node)| node.dependents.is_empty())
+            .map(|(id, _)| id.clone())
             .collect()
     }
 
@@ -283,7 +178,7 @@ impl ExecutionGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::{ChainConnection, TerminationType, TriggerType};
+    use crate::database::TriggerType;
 
     #[test]
     fn test_simple_chain() {
@@ -302,11 +197,7 @@ mod tests {
                     operation_name: "test::op".to_string(),
                     model_ref: None,
                     session_group: None,
-                },
-                ChainElement::Termination {
-                    id: "term1".to_string(),
-                    termination_type: TerminationType::Raw,
-                    label: "Output".to_string(),
+                    block_config: None,
                 },
             ],
             connections: vec![
@@ -316,13 +207,7 @@ mod tests {
                     to_element: "op1".to_string(),
                     from_port: 0,
                     to_port: 0,
-                },
-                ChainConnection {
-                    id: "c2".to_string(),
-                    from_element: "op1".to_string(),
-                    to_element: "term1".to_string(),
-                    from_port: 0,
-                    to_port: 0,
+                    condition: None,
                 },
             ],
             disabled: false,
@@ -332,7 +217,10 @@ mod tests {
         };
 
         let graph = ExecutionGraph::from_chain(&chain).unwrap();
-        assert_eq!(graph.execution_order, vec!["trigger1", "op1", "term1"]);
+        assert_eq!(graph.trigger_id, "trigger1");
+        assert_eq!(graph.terminal_elements(), vec!["op1".to_string()]);
+        assert_eq!(graph.outgoing_connections(&"trigger1".to_string()).len(), 1);
+        assert_eq!(graph.incoming_connections(&"op1".to_string()).len(), 1);
     }
 
     #[test]
@@ -352,22 +240,14 @@ mod tests {
                     operation_name: "test::op1".to_string(),
                     model_ref: None,
                     session_group: None,
+                    block_config: None,
                 },
                 ChainElement::Operation {
                     id: "op2".to_string(),
                     operation_name: "test::op2".to_string(),
                     model_ref: None,
                     session_group: None,
-                },
-                ChainElement::Termination {
-                    id: "term1".to_string(),
-                    termination_type: TerminationType::Raw,
-                    label: "Output 1".to_string(),
-                },
-                ChainElement::Termination {
-                    id: "term2".to_string(),
-                    termination_type: TerminationType::Raw,
-                    label: "Output 2".to_string(),
+                    block_config: None,
                 },
             ],
             connections: vec![
@@ -377,6 +257,7 @@ mod tests {
                     to_element: "op1".to_string(),
                     from_port: 0,
                     to_port: 0,
+                    condition: None,
                 },
                 ChainConnection {
                     id: "c2".to_string(),
@@ -384,20 +265,7 @@ mod tests {
                     to_element: "op2".to_string(),
                     from_port: 0,
                     to_port: 0,
-                },
-                ChainConnection {
-                    id: "c3".to_string(),
-                    from_element: "op1".to_string(),
-                    to_element: "term1".to_string(),
-                    from_port: 0,
-                    to_port: 0,
-                },
-                ChainConnection {
-                    id: "c4".to_string(),
-                    from_element: "op2".to_string(),
-                    to_element: "term2".to_string(),
-                    from_port: 0,
-                    to_port: 0,
+                    condition: None,
                 },
             ],
             disabled: false,
@@ -409,14 +277,16 @@ mod tests {
         let graph = ExecutionGraph::from_chain(&chain).unwrap();
 
         //
-        // Trigger should be first.
-        //
-        assert_eq!(graph.execution_order[0], "trigger1");
-
-        //
-        // Both branches should be detected.
+        // Trigger should have 2 outgoing connections.
         //
         assert_eq!(graph.get_output_count(&"trigger1".to_string()), 2);
+
+        //
+        // Both ops are terminal (no outgoing connections).
+        //
+        let terminals = graph.terminal_elements();
+        assert!(terminals.contains(&"op1".to_string()));
+        assert!(terminals.contains(&"op2".to_string()));
     }
 
     #[test]
@@ -425,6 +295,7 @@ mod tests {
             id: "sg1".to_string(),
             color: "#8B5CF6".to_string(),
             yolo_mode: false,
+            working_dir: None,
         };
 
         let chain = ChainDefinition {
@@ -442,17 +313,14 @@ mod tests {
                     operation_name: "test::op1".to_string(),
                     model_ref: None,
                     session_group: Some(session_group.clone()),
+                    block_config: None,
                 },
                 ChainElement::Operation {
                     id: "op2".to_string(),
                     operation_name: "test::op2".to_string(),
                     model_ref: None,
                     session_group: Some(session_group.clone()),
-                },
-                ChainElement::Termination {
-                    id: "term1".to_string(),
-                    termination_type: TerminationType::Raw,
-                    label: "Output".to_string(),
+                    block_config: None,
                 },
             ],
             connections: vec![
@@ -462,6 +330,7 @@ mod tests {
                     to_element: "op1".to_string(),
                     from_port: 0,
                     to_port: 0,
+                    condition: None,
                 },
                 ChainConnection {
                     id: "c2".to_string(),
@@ -469,13 +338,7 @@ mod tests {
                     to_element: "op2".to_string(),
                     from_port: 0,
                     to_port: 0,
-                },
-                ChainConnection {
-                    id: "c3".to_string(),
-                    from_element: "op2".to_string(),
-                    to_element: "term1".to_string(),
-                    from_port: 0,
-                    to_port: 0,
+                    condition: None,
                 },
             ],
             disabled: false,
@@ -496,15 +359,532 @@ mod tests {
         assert!(elements.contains(&"op2".to_string()));
 
         //
-        // Check first in session (op1 comes before op2 in execution order).
-        //
-        assert!(graph.is_first_in_session(&"op1".to_string()));
-        assert!(!graph.is_first_in_session(&"op2".to_string()));
-
-        //
         // Check get_session_group.
         //
         assert!(graph.get_session_group(&"op1".to_string()).is_some());
         assert!(graph.get_session_group(&"trigger1".to_string()).is_none());
+
+        //
+        // op2 is terminal (last element, no outgoing connections).
+        //
+        assert_eq!(graph.terminal_elements(), vec!["op2".to_string()]);
+    }
+
+    #[test]
+    fn test_memory_elements() {
+        let chain = ChainDefinition {
+            id: "test".to_string(),
+            name: "Test Chain".to_string(),
+            description: "".to_string(),
+            category: "test".to_string(),
+            elements: vec![
+                ChainElement::Trigger {
+                    id: "trigger1".to_string(),
+                    trigger_type: TriggerType::Manual,
+                },
+                ChainElement::MemoryStore {
+                    id: "ms1".to_string(),
+                    key: "data_key".to_string(),
+                },
+                ChainElement::MemoryRetrieve {
+                    id: "mr1".to_string(),
+                    key: "data_key".to_string(),
+                },
+            ],
+            connections: vec![
+                ChainConnection {
+                    id: "c1".to_string(),
+                    from_element: "trigger1".to_string(),
+                    to_element: "ms1".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
+                ChainConnection {
+                    id: "c2".to_string(),
+                    from_element: "ms1".to_string(),
+                    to_element: "mr1".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
+            ],
+            disabled: false,
+            timeout: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let graph = ExecutionGraph::from_chain(&chain).unwrap();
+        assert_eq!(graph.trigger_id, "trigger1");
+
+        //
+        // Memory elements have no session groups.
+        //
+        assert!(graph.get_session_group(&"ms1".to_string()).is_none());
+        assert!(graph.get_session_group(&"mr1".to_string()).is_none());
+
+        //
+        // mr1 is the terminal element.
+        //
+        let terminals = graph.terminal_elements();
+        assert_eq!(terminals.len(), 1);
+        assert!(terminals.contains(&"mr1".to_string()));
+    }
+
+    #[test]
+    fn test_loop_element_valid() {
+        use crate::database::ConnectionCondition;
+
+        //
+        // Valid cycle: Op -> Loop -> Op (via port 0), Loop -> Op2 (via port 1).
+        //
+        let chain = ChainDefinition {
+            id: "test".to_string(),
+            name: "Test Chain".to_string(),
+            description: "".to_string(),
+            category: "test".to_string(),
+            elements: vec![
+                ChainElement::Trigger {
+                    id: "trigger1".to_string(),
+                    trigger_type: TriggerType::Manual,
+                },
+                ChainElement::Operation {
+                    id: "op1".to_string(),
+                    operation_name: "test::op1".to_string(),
+                    model_ref: None,
+                    session_group: None,
+                    block_config: None,
+                },
+                ChainElement::Loop {
+                    id: "loop1".to_string(),
+                    max_iterations: 3,
+                },
+                ChainElement::Operation {
+                    id: "op_done".to_string(),
+                    operation_name: "test::done".to_string(),
+                    model_ref: None,
+                    session_group: None,
+                    block_config: None,
+                },
+            ],
+            connections: vec![
+                ChainConnection {
+                    id: "c1".to_string(),
+                    from_element: "trigger1".to_string(),
+                    to_element: "op1".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
+                ChainConnection {
+                    id: "c2".to_string(),
+                    from_element: "op1".to_string(),
+                    to_element: "loop1".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
+                //
+                // Loop port 0 (retry) -> back to op1.
+                //
+                ChainConnection {
+                    id: "c3".to_string(),
+                    from_element: "loop1".to_string(),
+                    to_element: "op1".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
+                //
+                // Loop port 1 (exhausted) -> op_done.
+                //
+                ChainConnection {
+                    id: "c4".to_string(),
+                    from_element: "loop1".to_string(),
+                    to_element: "op_done".to_string(),
+                    from_port: 1,
+                    to_port: 0,
+                    condition: None,
+                },
+            ],
+            disabled: false,
+            timeout: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        //
+        // Should validate successfully — cycle contains a Loop element.
+        //
+        let result = ExecutionGraph::from_chain(&chain);
+        assert!(result.is_ok());
+
+        let graph = result.unwrap();
+        assert_eq!(graph.outgoing_connections(&"loop1".to_string()).len(), 2);
+        assert_eq!(graph.incoming_connections(&"loop1".to_string()).len(), 1);
+    }
+
+    #[test]
+    fn test_cycle_without_loop_rejected() {
+        //
+        // Invalid cycle: Op1 -> Op2 -> Op1 (no Loop element).
+        //
+        let chain = ChainDefinition {
+            id: "test".to_string(),
+            name: "Test Chain".to_string(),
+            description: "".to_string(),
+            category: "test".to_string(),
+            elements: vec![
+                ChainElement::Trigger {
+                    id: "trigger1".to_string(),
+                    trigger_type: TriggerType::Manual,
+                },
+                ChainElement::Operation {
+                    id: "op1".to_string(),
+                    operation_name: "test::op1".to_string(),
+                    model_ref: None,
+                    session_group: None,
+                    block_config: None,
+                },
+                ChainElement::Operation {
+                    id: "op2".to_string(),
+                    operation_name: "test::op2".to_string(),
+                    model_ref: None,
+                    session_group: None,
+                    block_config: None,
+                },
+            ],
+            connections: vec![
+                ChainConnection {
+                    id: "c1".to_string(),
+                    from_element: "trigger1".to_string(),
+                    to_element: "op1".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
+                ChainConnection {
+                    id: "c2".to_string(),
+                    from_element: "op1".to_string(),
+                    to_element: "op2".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
+                //
+                // Creates cycle: op2 -> op1.
+                //
+                ChainConnection {
+                    id: "c3".to_string(),
+                    from_element: "op2".to_string(),
+                    to_element: "op1".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
+            ],
+            disabled: false,
+            timeout: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        //
+        // Should fail — cycle without Loop element (may also fail on
+        // terminal check since all non-trigger elements have outgoing
+        // connections due to the cycle).
+        //
+        let result = ExecutionGraph::from_chain(&chain);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("cycle without a Loop element")
+                || err.contains("at least one element with no outgoing connections"),
+            "Expected cycle or terminal error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_conditional_connections() {
+        use crate::database::ConnectionCondition;
+
+        let chain = ChainDefinition {
+            id: "test".to_string(),
+            name: "Test Chain".to_string(),
+            description: "".to_string(),
+            category: "test".to_string(),
+            elements: vec![
+                ChainElement::Trigger {
+                    id: "trigger1".to_string(),
+                    trigger_type: TriggerType::Manual,
+                },
+                ChainElement::Operation {
+                    id: "op1".to_string(),
+                    operation_name: "test::op1".to_string(),
+                    model_ref: None,
+                    session_group: None,
+                    block_config: None,
+                },
+                ChainElement::Operation {
+                    id: "op_success".to_string(),
+                    operation_name: "test::success".to_string(),
+                    model_ref: None,
+                    session_group: None,
+                    block_config: None,
+                },
+                ChainElement::Operation {
+                    id: "op_failure".to_string(),
+                    operation_name: "test::failure".to_string(),
+                    model_ref: None,
+                    session_group: None,
+                    block_config: None,
+                },
+            ],
+            connections: vec![
+                ChainConnection {
+                    id: "c1".to_string(),
+                    from_element: "trigger1".to_string(),
+                    to_element: "op1".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
+                ChainConnection {
+                    id: "c2".to_string(),
+                    from_element: "op1".to_string(),
+                    to_element: "op_success".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: Some(ConnectionCondition::OnSuccess),
+                },
+                ChainConnection {
+                    id: "c3".to_string(),
+                    from_element: "op1".to_string(),
+                    to_element: "op_failure".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: Some(ConnectionCondition::OnFailure),
+                },
+            ],
+            disabled: false,
+            timeout: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let graph = ExecutionGraph::from_chain(&chain).unwrap();
+
+        //
+        // op1 has two outgoing connections (success + failure).
+        //
+        let outgoing = graph.outgoing_connections(&"op1".to_string());
+        assert_eq!(outgoing.len(), 2);
+
+        //
+        // Both op_success and op_failure are terminal.
+        //
+        let terminals = graph.terminal_elements();
+        assert!(terminals.contains(&"op_success".to_string()));
+        assert!(terminals.contains(&"op_failure".to_string()));
+
+        //
+        // Verify conditions are preserved on connections.
+        //
+        let success_conn = outgoing
+            .iter()
+            .find(|c| c.to_element == "op_success")
+            .unwrap();
+        assert!(matches!(
+            success_conn.condition,
+            Some(ConnectionCondition::OnSuccess)
+        ));
+
+        let failure_conn = outgoing
+            .iter()
+            .find(|c| c.to_element == "op_failure")
+            .unwrap();
+        assert!(matches!(
+            failure_conn.condition,
+            Some(ConnectionCondition::OnFailure)
+        ));
+    }
+
+    #[test]
+    fn test_no_terminal_elements_rejected() {
+        //
+        // All non-trigger elements have outgoing connections — no terminal.
+        // This creates a cycle, and since there's no Loop, it should be
+        // rejected for the cycle, not the terminal check. But let's test with a
+        // valid cycle + loop that has no terminal port.
+        //
+        // Actually, let's test the simpler case: trigger with no elements
+        // connected.
+        //
+        let chain = ChainDefinition {
+            id: "test".to_string(),
+            name: "Test Chain".to_string(),
+            description: "".to_string(),
+            category: "test".to_string(),
+            elements: vec![ChainElement::Trigger {
+                id: "trigger1".to_string(),
+                trigger_type: TriggerType::Manual,
+            }],
+            connections: vec![],
+            disabled: false,
+            timeout: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        //
+        // Trigger-only chain should fail: no non-trigger terminal element.
+        //
+        let result = ExecutionGraph::from_chain(&chain);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("at least one element with no outgoing connections"));
+    }
+
+    #[test]
+    fn test_loop_max_iterations_validation() {
+        let chain = ChainDefinition {
+            id: "test".to_string(),
+            name: "Test Chain".to_string(),
+            description: "".to_string(),
+            category: "test".to_string(),
+            elements: vec![
+                ChainElement::Trigger {
+                    id: "trigger1".to_string(),
+                    trigger_type: TriggerType::Manual,
+                },
+                ChainElement::Loop {
+                    id: "loop1".to_string(),
+                    max_iterations: 0,
+                },
+            ],
+            connections: vec![ChainConnection {
+                id: "c1".to_string(),
+                from_element: "trigger1".to_string(),
+                to_element: "loop1".to_string(),
+                from_port: 0,
+                to_port: 0,
+                condition: None,
+            }],
+            disabled: false,
+            timeout: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let result = ExecutionGraph::from_chain(&chain);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("max_iterations must be >= 1"));
+    }
+
+    #[test]
+    fn test_connection_query_methods() {
+        let chain = ChainDefinition {
+            id: "test".to_string(),
+            name: "Test Chain".to_string(),
+            description: "".to_string(),
+            category: "test".to_string(),
+            elements: vec![
+                ChainElement::Trigger {
+                    id: "t".to_string(),
+                    trigger_type: TriggerType::Manual,
+                },
+                ChainElement::Operation {
+                    id: "a".to_string(),
+                    operation_name: "test::a".to_string(),
+                    model_ref: None,
+                    session_group: None,
+                    block_config: None,
+                },
+                ChainElement::Operation {
+                    id: "b".to_string(),
+                    operation_name: "test::b".to_string(),
+                    model_ref: None,
+                    session_group: None,
+                    block_config: None,
+                },
+                ChainElement::Transform {
+                    id: "c".to_string(),
+                    prompt: "merge".to_string(),
+                    model_ref: None,
+                    session_group: None,
+                    block_config: None,
+                },
+            ],
+            connections: vec![
+                ChainConnection {
+                    id: "c1".to_string(),
+                    from_element: "t".to_string(),
+                    to_element: "a".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
+                ChainConnection {
+                    id: "c2".to_string(),
+                    from_element: "t".to_string(),
+                    to_element: "b".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
+                ChainConnection {
+                    id: "c3".to_string(),
+                    from_element: "a".to_string(),
+                    to_element: "c".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
+                ChainConnection {
+                    id: "c4".to_string(),
+                    from_element: "b".to_string(),
+                    to_element: "c".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
+            ],
+            disabled: false,
+            timeout: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let graph = ExecutionGraph::from_chain(&chain).unwrap();
+
+        //
+        // Trigger has 2 outgoing, 0 incoming.
+        //
+        assert_eq!(graph.outgoing_connections(&"t".to_string()).len(), 2);
+        assert_eq!(graph.incoming_connections(&"t".to_string()).len(), 0);
+
+        //
+        // 'c' (merge point) has 2 incoming, 0 outgoing.
+        //
+        assert_eq!(graph.incoming_connections(&"c".to_string()).len(), 2);
+        assert_eq!(graph.outgoing_connections(&"c".to_string()).len(), 0);
+
+        //
+        // 'a' has 1 incoming, 1 outgoing.
+        //
+        assert_eq!(graph.incoming_connections(&"a".to_string()).len(), 1);
+        assert_eq!(graph.outgoing_connections(&"a".to_string()).len(), 1);
+
+        //
+        // Only 'c' is terminal.
+        //
+        let terminals = graph.terminal_elements();
+        assert_eq!(terminals.len(), 1);
+        assert!(terminals.contains(&"c".to_string()));
     }
 }

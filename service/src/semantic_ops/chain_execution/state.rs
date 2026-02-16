@@ -113,10 +113,15 @@ impl ChainExecutionState {
         }
     }
 
-    /// Mark an element as completed with output
-    pub fn set_element_completed(&mut self, element_id: &str, output: String) {
+    /// Mark an element as completed with output and optional success flag
+    pub fn set_element_completed(
+        &mut self,
+        element_id: &str,
+        output: String,
+        success: Option<bool>,
+    ) {
         if let Some(elem) = self.elements.get_mut(element_id) {
-            elem.status = ElementExecutionStatus::Completed { output };
+            elem.status = ElementExecutionStatus::Completed { output, success };
             elem.completed_at = Some(Utc::now());
         }
     }

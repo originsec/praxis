@@ -12,7 +12,7 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge, NodeTypes } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, Square, Clock, CheckCircle2, XCircle, AlertCircle, Loader2, Maximize2, Cpu, Sparkles, MessageSquare, CircleStop, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react';
+import { Play, Clock, CheckCircle2, XCircle, AlertCircle, Loader2, Maximize2, Cpu, Sparkles, MessageSquare, ExternalLink, ChevronDown, ChevronRight, Database, HardDriveDownload, RefreshCw } from 'lucide-react';
 import type {
   ChainExecutionUpdate,
   ChainDefinitionFull,
@@ -43,6 +43,8 @@ function getStatusIndicator(status: string) {
       return { icon: Clock, color: 'var(--text-muted)', bg: 'var(--text-muted)' };
   }
 }
+
+const handleStyle = { width: 10, height: 10, background: 'var(--accent-info)' };
 
 //
 // Custom node components with status indicators.
@@ -142,25 +144,60 @@ function GenericPromptNodeView({ data, selected }: { data: { label: string; prom
   );
 }
 
-function TerminationNodeView({ data, selected }: { data: { label: string; termType: string; status?: string }; selected?: boolean }) {
+function MemoryStoreNodeView({ data, selected }: { data: { label: string; memoryKey: string; status?: string }; selected?: boolean }) {
   const statusInfo = getStatusIndicator(data.status || 'Pending');
   const StatusIcon = statusInfo.icon;
-
   return (
-    <div className={`ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[120px] relative ${selected ? 'ring-2 ring-[var(--accent-info)]' : ''}`}>
-      <Handle type="target" position={Position.Left} style={{ width: 10, height: 10, background: 'var(--accent-info)' }} />
-      <div className="flex items-center gap-2">
-        <CircleStop size={14} className="text-[var(--accent-error)]" />
-        <div className="flex flex-col">
-          <span className="text-sm font-mono">{data.label}</span>
-          <span className="text-xs text-[var(--text-secondary)]">{data.termType}</span>
+    <div className={`px-3 py-2 shadow-md bg-[var(--bg-secondary)] border ${selected ? 'border-[var(--accent-success)]' : 'border-subtle'}`} style={{ minWidth: 200 }}>
+      <Handle type="target" position={Position.Left} style={handleStyle} />
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Database size={14} className="text-[var(--accent-success)]" />
+          <span className="text-xs font-medium">{data.memoryKey || 'Store'}</span>
+          <span className="text-[9px] px-1 py-0.5 bg-[var(--accent-success)]/20 text-[var(--accent-success)] font-mono">STORE</span>
         </div>
-        <StatusIcon
-          size={12}
-          style={{ color: statusInfo.color }}
-          className={statusInfo.animate ? 'animate-spin' : ''}
-        />
+        <StatusIcon size={12} style={{ color: statusInfo.color }} className={statusInfo.animate ? 'animate-spin' : ''} />
       </div>
+      <Handle type="source" position={Position.Right} style={handleStyle} />
+    </div>
+  );
+}
+
+function MemoryRetrieveNodeView({ data, selected }: { data: { label: string; memoryKey: string; status?: string }; selected?: boolean }) {
+  const statusInfo = getStatusIndicator(data.status || 'Pending');
+  const StatusIcon = statusInfo.icon;
+  return (
+    <div className={`px-3 py-2 shadow-md bg-[var(--bg-secondary)] border ${selected ? 'border-[var(--accent-info)]' : 'border-subtle'}`} style={{ minWidth: 200 }}>
+      <Handle type="target" position={Position.Left} style={handleStyle} />
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <HardDriveDownload size={14} className="text-[var(--accent-info)]" />
+          <span className="text-xs font-medium">{data.memoryKey || 'Retrieve'}</span>
+          <span className="text-[9px] px-1 py-0.5 bg-[var(--accent-info)]/20 text-[var(--accent-info)] font-mono">RETRIEVE</span>
+        </div>
+        <StatusIcon size={12} style={{ color: statusInfo.color }} className={statusInfo.animate ? 'animate-spin' : ''} />
+      </div>
+      <Handle type="source" position={Position.Right} style={handleStyle} />
+    </div>
+  );
+}
+
+function LoopNodeView({ data, selected }: { data: { label: string; maxIterations: number; status?: string }; selected?: boolean }) {
+  const statusInfo = getStatusIndicator(data.status || 'Pending');
+  const StatusIcon = statusInfo.icon;
+  return (
+    <div className={`px-3 py-2 shadow-md bg-[var(--bg-secondary)] border ${selected ? 'border-[var(--accent-warning)]' : 'border-subtle'}`} style={{ minWidth: 220 }}>
+      <Handle type="target" position={Position.Left} style={handleStyle} />
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <RefreshCw size={14} className="text-[var(--accent-warning)]" />
+          <span className="text-xs font-medium">Loop</span>
+          <span className="text-[9px] px-1 py-0.5 bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] font-mono">max {data.maxIterations}</span>
+        </div>
+        <StatusIcon size={12} style={{ color: statusInfo.color }} className={statusInfo.animate ? 'animate-spin' : ''} />
+      </div>
+      <Handle type="source" position={Position.Right} id="0" style={{ ...handleStyle, top: '30%' }} />
+      <Handle type="source" position={Position.Right} id="1" style={{ ...handleStyle, top: '70%' }} />
     </div>
   );
 }
@@ -170,7 +207,9 @@ const nodeTypes: NodeTypes = {
   operation: OperationNodeView,
   transform: TransformNodeView,
   genericPrompt: GenericPromptNodeView,
-  termination: TerminationNodeView,
+  memoryStore: MemoryStoreNodeView,
+  memoryRetrieve: MemoryRetrieveNodeView,
+  loop: LoopNodeView,
 };
 
 //
@@ -238,15 +277,29 @@ function chainToFlowWithStatus(
             sessionColor: elem.session_group?.color,
           },
         };
-      case 'Termination':
+      case 'MemoryStore':
         return {
           id: elem.id,
-          type: 'termination',
+          type: 'memoryStore',
           position,
-          data: { label: elem.label, termType: elem.termination_type.type, status },
+          data: { label: 'Memory Store', memoryKey: elem.key, status },
+        };
+      case 'MemoryRetrieve':
+        return {
+          id: elem.id,
+          type: 'memoryRetrieve',
+          position,
+          data: { label: 'Memory Retrieve', memoryKey: elem.key, status },
+        };
+      case 'Loop':
+        return {
+          id: elem.id,
+          type: 'loop',
+          position,
+          data: { label: 'Loop', maxIterations: elem.max_iterations, status },
         };
     }
-  });
+  }).filter((n): n is NonNullable<typeof n> => n != null);
 
   const edges: Edge[] = chain.connections.map((conn) => ({
     id: conn.id,
@@ -312,7 +365,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
   }, [selectedElement]);
 
   //
-  // Get outputs from termination nodes.
+  // Get outputs from terminal elements.
   //
   const outputs = execution.outputs;
 
@@ -338,8 +391,12 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
         return { name: 'Transform', type: 'transform' };
       case 'GenericPrompt':
         return { name: 'Prompt', type: 'genericPrompt' };
-      case 'Termination':
-        return { name: element.label || 'Output', type: 'termination' };
+      case 'MemoryStore':
+        return { name: `Store: ${element.key}`, type: 'memoryStore' };
+      case 'MemoryRetrieve':
+        return { name: `Load: ${element.key}`, type: 'memoryRetrieve' };
+      case 'Loop':
+        return { name: `Loop (max ${element.max_iterations})`, type: 'loop' };
       default:
         return { name: elementId.slice(0, 8), type: 'unknown' };
     }
@@ -602,7 +659,9 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
                         {stepInfo.type === 'operation' && <Cpu size={12} className="text-[var(--accent-info)] flex-shrink-0" />}
                         {stepInfo.type === 'transform' && <Sparkles size={12} className="text-[var(--accent-warning)] flex-shrink-0" />}
                         {stepInfo.type === 'genericPrompt' && <MessageSquare size={12} className="text-[var(--accent-purple)] flex-shrink-0" />}
-                        {stepInfo.type === 'termination' && <Square size={12} className="text-[var(--accent-error)] flex-shrink-0" />}
+                        {stepInfo.type === 'memoryStore' && <Database size={12} className="text-[var(--accent-success)] flex-shrink-0" />}
+                        {stepInfo.type === 'memoryRetrieve' && <HardDriveDownload size={12} className="text-[var(--accent-info)] flex-shrink-0" />}
+                        {stepInfo.type === 'loop' && <RefreshCw size={12} className="text-[var(--accent-warning)] flex-shrink-0" />}
                         {stepInfo.type === 'unknown' && <Clock size={12} className="text-[var(--text-secondary)] flex-shrink-0" />}
                         <span className="text-xs font-mono truncate">{stepInfo.name}</span>
                       </div>
@@ -635,7 +694,9 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
                     {stepInfo.type === 'operation' && <Cpu size={18} className="text-[var(--accent-info)] self-center" />}
                     {stepInfo.type === 'transform' && <Sparkles size={18} className="text-[var(--accent-warning)] self-center" />}
                     {stepInfo.type === 'genericPrompt' && <MessageSquare size={18} className="text-[var(--accent-purple)] self-center" />}
-                    {stepInfo.type === 'termination' && <Square size={18} className="text-[var(--accent-error)] self-center" />}
+                    {stepInfo.type === 'memoryStore' && <Database size={18} className="text-[var(--accent-success)] self-center" />}
+                    {stepInfo.type === 'memoryRetrieve' && <HardDriveDownload size={18} className="text-[var(--accent-info)] self-center" />}
+                    {stepInfo.type === 'loop' && <RefreshCw size={18} className="text-[var(--accent-warning)] self-center" />}
                     <span className="text-lg font-medium text-[var(--text-highlight)]">{stepInfo.name}</span>
                     <span className="text-xs text-[var(--text-secondary)] font-mono">{selectedElementId.slice(0, 8)}</span>
                   </div>
@@ -702,19 +763,14 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
                         <pre className="mt-1 text-[var(--text-secondary)] whitespace-pre-wrap font-mono">{selectedElement.config.prompt}</pre>
                       </div>
                     )}
-                    {selectedElement.config.type === 'RawOutput' && (
-                      <span className="text-muted">Raw Output (passthrough)</span>
+                    {selectedElement.config.type === 'MemoryStore' && (
+                      <div><span className="text-muted">Key:</span> <span className="font-mono text-[var(--accent-success)]">{selectedElement.config.key}</span></div>
                     )}
-                    {selectedElement.config.type === 'SemanticOutput' && (
-                      <div className="space-y-2">
-                        {selectedElement.config.model_ref && (
-                          <div><span className="text-muted">Model:</span> <span className="font-mono text-[var(--accent-info)]">{selectedElement.config.model_ref}</span></div>
-                        )}
-                        <div>
-                          <span className="text-muted">Prompt:</span>
-                          <pre className="mt-1 text-[var(--text-secondary)] whitespace-pre-wrap font-mono">{selectedElement.config.prompt}</pre>
-                        </div>
-                      </div>
+                    {selectedElement.config.type === 'MemoryRetrieve' && (
+                      <div><span className="text-muted">Key:</span> <span className="font-mono text-[var(--accent-info)]">{selectedElement.config.key}</span></div>
+                    )}
+                    {selectedElement.config.type === 'Loop' && (
+                      <div><span className="text-muted">Max Iterations:</span> <span className="font-mono text-[var(--accent-warning)]">{selectedElement.config.max_iterations}</span></div>
                     )}
                   </div>
                 </div>
@@ -722,8 +778,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
 
               {/*
               //
-              // Element Output/Error - shown first for Operations and
-              // SemanticOutput.
+              // Element Output/Error - shown first for Operations.
               //
               */}
               {selectedOutput && (

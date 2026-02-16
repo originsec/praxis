@@ -255,13 +255,6 @@ export function exportChainExecution(exec: ChainExecutionUpdate): string {
           lines.push('```');
           lines.push(element.config.prompt);
           lines.push('```');
-        } else if (element.config.type === 'SemanticOutput') {
-          lines.push(`**Type:** Semantic Output`);
-          lines.push('');
-          lines.push('**Prompt:**');
-          lines.push('```');
-          lines.push(element.config.prompt);
-          lines.push('```');
         } else {
           lines.push(`**Type:** ${element.config.type}`);
         }

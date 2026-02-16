@@ -143,14 +143,15 @@ pub fn parse_manual_tool_call(text: &str) -> Option<(String, Value, String)> {
 
 /// Parse completion signal from AI response text
 ///
-/// Returns: (is_complete, summary, result, remaining_text_without_completion_block)
+/// Returns: (is_complete, summary, result, remaining_text, success)
 ///
 /// Looks for JSON blocks in format:
-/// {"complete": true, "summary": "...", "result": "..."}
+/// {"complete": true, "summary": "...", "result": "...", "success": true}
 ///
 /// The 'summary' field should be a brief description of actions taken.
 /// The 'result' field should contain the actual findings/data/output.
-pub fn parse_completion_signal(text: &str) -> Option<(bool, String, String, String)> {
+/// The 'success' field indicates whether the objective was achieved.
+pub fn parse_completion_signal(text: &str) -> Option<(bool, String, String, String, Option<bool>)> {
     //
     // Use JSON parsing for robustness instead of regex.
     // First try code-fenced JSON blocks, then plain JSON.
@@ -191,6 +192,9 @@ pub fn parse_completion_signal(text: &str) -> Option<(bool, String, String, Stri
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
+                        let success = parsed
+                            .get("success")
+                            .and_then(|v| v.as_bool());
 
                         //
                         // Find the closing fence.
@@ -204,7 +208,7 @@ pub fn parse_completion_signal(text: &str) -> Option<(bool, String, String, Stri
                         let after = &text[remaining_text_start..];
                         let remaining_text = format!("{}{}", before, after).trim().to_string();
 
-                        return Some((complete, summary, result, remaining_text));
+                        return Some((complete, summary, result, remaining_text, success));
                     }
                 }
             }
@@ -242,12 +246,15 @@ pub fn parse_completion_signal(text: &str) -> Option<(bool, String, String, Stri
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string();
+                    let success = parsed
+                        .get("success")
+                        .and_then(|v| v.as_bool());
 
                     let before = &text[..json_start];
                     let after = &text[json_end + 1..];
                     let remaining_text = format!("{}{}", before, after).trim().to_string();
 
-                    return Some((complete, summary, result, remaining_text));
+                    return Some((complete, summary, result, remaining_text, success));
                 }
             }
         }
@@ -348,12 +355,13 @@ The operation is now finished."#;
         let result = parse_completion_signal(text);
         assert!(result.is_some());
 
-        let (is_complete, summary, result_text, remaining) = result.unwrap();
+        let (is_complete, summary, result_text, remaining, success) = result.unwrap();
         assert!(is_complete);
         assert_eq!(summary, "Retrieved user data and sent email notification");
-        assert_eq!(result_text, ""); // No result field in this test
+        assert_eq!(result_text, "");
         assert!(remaining.contains("I have completed the task"));
         assert!(remaining.contains("The operation is now finished"));
+        assert_eq!(success, None);
     }
 
     #[test]
@@ -365,11 +373,12 @@ The operation is now finished."#;
         let result = parse_completion_signal(text);
         assert!(result.is_some());
 
-        let (is_complete, summary, result_text, _remaining) = result.unwrap();
+        let (is_complete, summary, result_text, _remaining, success) = result.unwrap();
         assert!(is_complete);
         assert_eq!(summary, "Enumerated all network connections and analyzed them.");
         assert!(result_text.contains("Found 5 suspicious connections"));
         assert!(result_text.contains("SYN-SENT to port 29"));
+        assert_eq!(success, None);
     }
 
     #[test]
@@ -379,7 +388,7 @@ The operation is now finished."#;
         let result = parse_completion_signal(text);
         assert!(result.is_some());
 
-        let (is_complete, summary, _, _) = result.unwrap();
+        let (is_complete, summary, _, _, _) = result.unwrap();
         assert!(!is_complete);
         assert_eq!(summary, "Still working");
     }

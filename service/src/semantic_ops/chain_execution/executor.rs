@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 use lapin::Channel;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{oneshot, RwLock as TokioRwLock};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use chrono::Utc;
@@ -13,7 +14,7 @@ use common::{
 };
 
 use crate::config::ServiceConfig;
-use crate::database::{ChainDefinition, ChainElement, ChainExecutionRecord, OperationRecord, SessionGroup, TerminationType};
+use crate::database::{ChainDefinition, ChainElement, ChainExecutionRecord, OperationRecord, SessionGroup};
 use crate::database::Database;
 use crate::semantic_ops::{
     close_session, create_session, execute_agent_mode, execute_one_shot, select_agent,
@@ -25,7 +26,7 @@ use super::implicit::is_implicit_chain;
 use super::state::{ChainExecutionRegistry, ChainExecutionState};
 
 struct CancelHandle {
-    cancel_tx: oneshot::Sender<()>,
+    cancel_token: CancellationToken,
     node_id: String,
     rabbitmq_channel: Channel,
 }
@@ -114,14 +115,14 @@ impl ChainExecutor {
         }
 
         //
-        // Create cancellation channel.
+        // Create cancellation token.
         //
-        let (cancel_tx, cancel_rx) = oneshot::channel();
+        let cancel_token = CancellationToken::new();
         self.cancel_handles
             .write()
             .await
             .insert(execution_id.clone(), CancelHandle {
-                cancel_tx,
+                cancel_token: cancel_token.clone(),
                 node_id: node_id.clone(),
                 rabbitmq_channel: rabbitmq_channel.clone(),
             });
@@ -199,7 +200,7 @@ impl ChainExecutor {
                         response_tracker,
                         database,
                         state_clone.clone(),
-                        cancel_rx,
+                        cancel_token,
                     )
                     .await
                 }
@@ -271,7 +272,7 @@ impl ChainExecutor {
     /// Cancel a running chain execution
     pub async fn cancel(&self, execution_id: &str) -> bool {
         if let Some(handle) = self.cancel_handles.write().await.remove(execution_id) {
-            let _ = handle.cancel_tx.send(());
+            handle.cancel_token.cancel();
 
             //
             // Immediately abort any running command on the node.
@@ -303,47 +304,60 @@ impl ChainExecutor {
         response_tracker: Arc<ResponseTracker>,
         database: Arc<Database>,
         state: Arc<std::sync::RwLock<ChainExecutionState>>,
-        mut cancel_rx: oneshot::Receiver<()>,
+        cancel_token: CancellationToken,
     ) -> Result<()> {
-        //
-        // Track completed elements and their outputs.
-        //
-        let mut completed: HashSet<String> = HashSet::new();
-        let mut element_outputs: HashMap<String, String> = HashMap::new();
+        use std::collections::VecDeque;
+
+        let mut work_queue: VecDeque<String> = VecDeque::new();
+        let mut resolved: HashMap<String, (String, Option<bool>)> = HashMap::new();
+        let mut loop_counters: HashMap<String, u32> = HashMap::new();
+        let mut hit_counts: HashMap<String, u32> = HashMap::new();
 
         //
-        // Track active session (for session groups).
+        // Track active session state.
         //
         let mut active_session: Option<String> = None;
         let mut current_session_group_id: Option<String> = None;
         let mut current_session_yolo_mode: bool = false;
 
         //
-        // Process elements in execution order.
+        // Seed with trigger.
         //
-        for element_id in &graph.execution_order {
+        work_queue.push_back(graph.trigger_id.clone());
+
+        while let Some(element_id) = work_queue.pop_front() {
             //
-            // Check for cancellation.
+            // Safety check: prevent infinite loops.
             //
-            if cancel_rx.try_recv().is_ok() {
-                //
-                // Close any active session.
-                //
+            let hit = hit_counts.entry(element_id.clone()).or_insert(0);
+            *hit += 1;
+            if *hit > 1000 {
+                if active_session.is_some() {
+                    let _ = close_session(&node_id, &rabbitmq_channel).await;
+                }
+                return Err(anyhow::anyhow!("Safety limit: element {} executed >1000 times", element_id));
+            }
+
+            //
+            // Check cancellation.
+            //
+            if cancel_token.is_cancelled() {
                 if active_session.is_some() {
                     let _ = close_session(&node_id, &rabbitmq_channel).await;
                 }
                 return Err(anyhow::anyhow!("Chain execution cancelled"));
             }
 
-            let node = match graph.nodes.get(element_id) {
+            let node = match graph.nodes.get(&element_id) {
                 Some(n) => n,
                 None => continue,
             };
 
             //
-            // Check if we're entering or exiting a session group.
+            // Session management: check if we're entering or exiting a session
+            // group.
             //
-            let element_session_group_id = graph.get_session_group_id(element_id);
+            let element_session_group_id = graph.get_session_group_id(&element_id);
             common::log_info!(
                 "Chain element {}: session_group_id={:?}, current_session_group_id={:?}, active_session={:?}",
                 &element_id[..8.min(element_id.len())],
@@ -355,22 +369,17 @@ impl ChainExecutor {
                 //
                 // Exiting a session group - close the session.
                 //
-                if current_session_group_id.is_some() {
-                    if active_session.is_some() {
-                        let _ = close_session(&node_id, &rabbitmq_channel).await;
-                        active_session = None;
-                        common::log_info!("Closed session for session group");
-                    }
+                if current_session_group_id.is_some() && active_session.is_some() {
+                    let _ = close_session(&node_id, &rabbitmq_channel).await;
+                    active_session = None;
+                    common::log_info!("Closed session for session group");
                 }
 
                 //
                 // Entering a new session group - create session.
                 //
                 if let Some(ref group_id) = element_session_group_id {
-                    //
-                    // Get YOLO mode setting from the session group.
-                    //
-                    let session_group: Option<&SessionGroup> = graph.get_session_group(element_id);
+                    let session_group = graph.get_session_group(&element_id);
                     let yolo_mode = session_group.map(|sg| sg.yolo_mode).unwrap_or(false);
                     current_session_yolo_mode = yolo_mode;
 
@@ -386,23 +395,34 @@ impl ChainExecutor {
             }
 
             //
-            // Check if this element is first in its session group.
+            // Determine if first in session: no other element in this group has
+            // been resolved yet.
             //
-            let is_first_in_session = graph.is_first_in_session(element_id);
+            let is_first_in_session = if let Some(ref gid) = element_session_group_id {
+                if let Some((_, member_ids)) = graph.session_groups.get(gid) {
+                    !member_ids.iter().any(|mid| mid != &element_id && resolved.contains_key(mid))
+                } else {
+                    true
+                }
+            } else {
+                false
+            };
 
             //
-            // Collect inputs from dependencies.
+            // Collect inputs from resolved upstream connections that fired.
             //
-            let inputs: Vec<String> = node
-                .dependencies
+            let inputs: Vec<String> = graph.incoming_connections(&element_id)
                 .iter()
-                .filter_map(|dep_id| element_outputs.get(dep_id).cloned())
+                .filter_map(|conn| {
+                    if let Some((output, success)) = resolved.get(&conn.from_element) {
+                        if connection_fires(conn, success) { Some(output.clone()) } else { None }
+                    } else {
+                        None
+                    }
+                })
                 .collect();
             let merged_input = inputs.join("\n\n---\n\n");
 
-            //
-            // Get YOLO mode from current session group if applicable.
-            //
             let yolo_mode = current_session_yolo_mode;
 
             //
@@ -453,24 +473,33 @@ impl ChainExecutor {
                         is_first_in_session,
                     },
                 ),
-                ChainElement::Termination { termination_type, .. } => {
-                    let term_config = match termination_type {
-                        TerminationType::Raw => ElementConfig::RawOutput,
-                        TerminationType::Semantic { prompt, model_ref } => ElementConfig::SemanticOutput {
-                            prompt: prompt.clone(),
-                            model_ref: model_ref.clone(),
-                        },
-                    };
-                    (
-                        term_config,
-                        ElementContext {
-                            input: merged_input.clone(),
-                            session_id: active_session.clone(),
-                            yolo_mode,
-                            is_first_in_session,
-                        },
-                    )
-                }
+                ChainElement::MemoryStore { key, .. } => (
+                    ElementConfig::MemoryStore { key: key.clone() },
+                    ElementContext {
+                        input: merged_input.clone(),
+                        session_id: None,
+                        yolo_mode: false,
+                        is_first_in_session: false,
+                    },
+                ),
+                ChainElement::MemoryRetrieve { key, .. } => (
+                    ElementConfig::MemoryRetrieve { key: key.clone() },
+                    ElementContext {
+                        input: String::new(),
+                        session_id: None,
+                        yolo_mode: false,
+                        is_first_in_session: false,
+                    },
+                ),
+                ChainElement::Loop { max_iterations, .. } => (
+                    ElementConfig::Loop { max_iterations: *max_iterations },
+                    ElementContext {
+                        input: merged_input.clone(),
+                        session_id: None,
+                        yolo_mode: false,
+                        is_first_in_session: false,
+                    },
+                ),
             };
 
             //
@@ -478,7 +507,7 @@ impl ChainExecutor {
             //
             {
                 let mut s = state.write().unwrap();
-                s.set_element_running_with_context(element_id, elem_config, elem_context);
+                s.set_element_running_with_context(&element_id, elem_config, elem_context);
             }
             let update = state.read().unwrap().to_update();
             Self::broadcast_update(&broadcast_channel, ClientBroadcastMessage::ChainExecutionUpdate(update)).await;
@@ -486,445 +515,130 @@ impl ChainExecutor {
             //
             // Execute based on element type.
             //
-            let result = match &node.element {
+            let (result, active_port): (Result<String>, Option<u32>) = match &node.element {
                 ChainElement::Trigger { .. } => {
-                    //
-                    // Trigger just activates, doesn't produce output that flows
-                    // to next steps.
-                    //
-                    Ok(String::new())
+                    (Ok(String::new()), None)
+                }
+                ChainElement::Loop { max_iterations, .. } => {
+                    let counter = loop_counters.entry(element_id.clone()).or_insert(0);
+                    *counter += 1;
+                    let port = if *counter <= *max_iterations { 0 } else { 1 };
+                    (Ok(merged_input.clone()), Some(port))
                 }
                 ChainElement::Operation {
                     operation_name,
                     model_ref,
                     ..
                 } => {
-                    //
-                    // Look up the operation definition.
-                    //
-                    let op_def = database
-                        .get_operation_definition(operation_name)
-                        .await
-                        .ok()
-                        .flatten()
-                        .ok_or_else(|| {
-                            anyhow::anyhow!("Operation definition not found: {}", operation_name)
-                        })?;
-
-                    //
-                    // Create spec with merged input
-                    // If first in session or no session, include full input
-                    // context
-                    // If not first in session, omit input (session already has
-                    // context).
-                    //
-                    let full_prompt = if active_session.is_none() || is_first_in_session {
-                        if merged_input.is_empty() {
-                            op_def.operation_prompt.clone()
-                        } else {
-                            format!(
-                                "{}\n\nInput from previous steps:\n{}",
-                                op_def.operation_prompt, merged_input
-                            )
-                        }
-                    } else {
-                        //
-                        // Not first in session - session already has context.
-                        //
-                        op_def.operation_prompt.clone()
-                    };
-
-                    let spec = SemanticOperationSpec {
-                        name: op_def.name.clone(),
-                        description: op_def.description.clone(),
-                        agent_info: op_def.agent_info.clone(),
-                        timeout: op_def.timeout,
-                        operation_prompt: full_prompt.clone(),
-                        mode: op_def.mode.clone(),
-                        agent_iterations: op_def.agent_iterations,
-                        yolo_mode: op_def.yolo_mode,
-                        model_ref: model_ref.clone().or(op_def.model_ref.clone()),
-                    };
-
-                    //
-                    // Create a unique operation ID for this chain operation.
-                    //
-                    let op_id = Uuid::new_v4().to_string();
-                    let now = Utc::now();
-
-                    //
-                    // Record the operation in the database with Running status.
-                    //
-                    let op_record = OperationRecord {
-                        operation_id: op_id.clone(),
-                        node_id: node_id.clone(),
-                        agent_short_name: agent_short_name.clone(),
-                        operation_spec: spec.clone(),
-                        status: SemanticOpStatus::Running,
-                        start_time: now,
-                        end_time: None,
-                        summary: None,
-                        result: None,
-                        queue_position: None,
-                        created_at: now,
-                        output: Some(format!("[Chain: {} | Element: {}]\n", execution_id, element_id)),
-                        chain_execution_id: Some(execution_id.clone()),
-                    };
-                    if let Err(e) = database.insert_operation(&op_record).await {
-                        common::log_warn!("Failed to record chain operation to database: {}", e);
-                    }
-
-                    //
-                    // Determine if we should use existing session
-                    // Operations inside session groups use the existing session
-                    // Standalone operations let the executor handle session
-                    // lifecycle.
-                    //
-                    let use_existing_session = active_session.is_some();
-
-                    //
-                    // Create cancel channel for the operation
-                    // Keep the sender alive (don't drop it) so the receiver
-                    // doesn't error immediately.
-                    //
-                    let (_op_cancel_tx, op_cancel_rx) = oneshot::channel::<()>();
-
-                    let op_result = if spec.mode == "agent" {
-                        execute_agent_mode(
-                            &op_id,
-                            &node_id,
-                            &spec,
-                            working_dir.clone(),
-                            &config,
-                            &rabbitmq_channel,
-                            response_tracker.clone(),
-                            database.clone(),
-                            op_cancel_rx,
-                            use_existing_session,
-                        )
-                        .await
-                    } else {
-                        execute_one_shot(
-                            &op_id,
-                            &node_id,
-                            &spec,
-                            working_dir.clone(),
-                            &rabbitmq_channel,
-                            response_tracker.clone(),
-                            database.clone(),
-                            op_cancel_rx,
-                            use_existing_session,
-                        )
-                        .await
-                    };
-
-                    //
-                    // Update operation record with final status.
-                    //
-                    let end_time = Utc::now();
-                    match &op_result {
-                        Ok((summary, result)) => {
-                            let _ = database.update_status(
-                                &op_id,
-                                SemanticOpStatus::Completed,
-                                Some(end_time),
-                                if summary.is_empty() { None } else { Some(summary.clone()) },
-                                if result.is_empty() { None } else { Some(result.clone()) },
-                            ).await;
-                        }
-                        Err(e) => {
-                            let _ = database.update_status(
-                                &op_id,
-                                SemanticOpStatus::Failed,
-                                Some(end_time),
-                                None,
-                                Some(e.to_string()),
-                            ).await;
-                        }
-                    }
-
-                    //
-                    // For chain flow, we only pass the result (not summary) to downstream.
-                    //
-                    op_result.map(|(_, result)| result)
-                }
-                ChainElement::Transform { prompt, model_ref, .. } => {
-                    //
-                    // Transform element - call LLM with prompt + input, pass
-                    // result to next element
-                    // This is similar to Semantic termination but doesn't
-                    // terminate the chain.
-                    //
-
-                    //
-                    // Resolve model configuration from model definitions.
-                    //
-                    let config_guard = config.read().await;
-                    let model_def = if let Some(mref) = model_ref {
-                        config_guard.find_model_definition(mref)
-                            .ok_or_else(|| anyhow::anyhow!("Model '{}' not found. Configure in Settings > LLM Providers.", mref))?
-                    } else {
-                        config_guard.get_semantic_ops_model_def()
-                            .ok_or_else(|| anyhow::anyhow!("No LLM configured for transform. Configure in Settings > LLM Providers."))?
-                    };
-                    let (provider_str, model_name, api_key) = (model_def.provider, model_def.model, model_def.api_key);
-                    drop(config_guard);
-
-                    //
-                    // Parse provider and create client.
-                    //
-                    let provider = Provider::from_str(&provider_str)
-                        .ok_or_else(|| anyhow::anyhow!("Unknown provider: {}", provider_str))?;
-                    let client = create_ai_client(provider, api_key)?;
-
-                    //
-                    // Build the conversation - input data first, then prompt.
-                    //
-                    let user_content = if merged_input.is_empty() {
-                        prompt.clone()
-                    } else {
-                        format!("{}\n\n{}", merged_input, prompt)
-                    };
-                    let messages = vec![
-                        Message::user(user_content),
-                    ];
-
-                    //
-                    // Execute the LLM call.
-                    //
-                    execute_chat_completion(&client, model_name, messages, Some(8192)).await
-                }
-                ChainElement::GenericPrompt { prompt, session_group, .. } => {
-                    //
-                    // GenericPrompt element - sends prompt to agent via session
-                    // Behavior depends on session context:
-                    // - If first in session: send input + prompt to agent
-                    // - If not first in session: send only prompt (context
-                    // already in session)
-                    // - If NOT in session group: create temp session, send
-                    // input+prompt, close session.
-                    //
-
-                    let prompt_to_send = if active_session.is_some() {
-                        //
-                        // In a session group.
-                        //
-                        if is_first_in_session {
-                            //
-                            // First in session - include input context.
-                            //
-                            if merged_input.is_empty() {
-                                prompt.clone()
-                            } else {
-                                format!("{}\n\n{}", merged_input, prompt)
-                            }
-                        } else {
-                            //
-                            // Not first - session already has context.
-                            //
-                            prompt.clone()
-                        }
-                    } else {
-                        //
-                        // Not in a session group - always include input.
-                        //
-                        if merged_input.is_empty() {
-                            prompt.clone()
-                        } else {
-                            format!("{}\n\n{}", merged_input, prompt)
-                        }
-                    };
-
-                    //
-                    // Create a spec for the generic prompt.
-                    //
-                    let spec = SemanticOperationSpec {
-                        name: "Generic Prompt".to_string(),
-                        description: "Send prompt to agent".to_string(),
-                        agent_info: String::new(),
-                        timeout: 120,
-                        operation_prompt: prompt_to_send,
-                        mode: "one-shot".to_string(),
-                        agent_iterations: 1,
-                        yolo_mode: session_group.as_ref().map(|sg| sg.yolo_mode).unwrap_or(yolo_mode),
-                        model_ref: None,
-                    };
-
-                    //
-                    // Create a unique operation ID.
-                    //
-                    let op_id = Uuid::new_v4().to_string();
-
-                    //
-                    // If not in a session group, we need to handle session
-                    // ourselves.
-                    //
-                    let needs_temp_session = active_session.is_none();
-                    let session_yolo = session_group.as_ref().map(|sg| sg.yolo_mode).unwrap_or(false);
-
-                    if needs_temp_session {
-                        //
-                        // Create temp session for this operation.
-                        //
-                        let _temp_session = create_session(&node_id, session_yolo, working_dir.clone(), &rabbitmq_channel, response_tracker.clone())
-                            .await
-                            .context("Failed to create temp session for generic prompt")?;
-                    }
-
-                    //
-                    // Create cancel channel.
-                    //
-                    let (_op_cancel_tx, op_cancel_rx) = oneshot::channel::<()>();
-
-                    let result = execute_one_shot(
-                        &op_id,
+                    let op_result = Self::execute_operation(
+                        &execution_id,
+                        &element_id,
+                        operation_name,
+                        model_ref,
+                        &merged_input,
+                        is_first_in_session,
+                        &active_session,
+                        &working_dir,
                         &node_id,
-                        &spec,
-                        working_dir.clone(),
+                        &agent_short_name,
+                        &config,
                         &rabbitmq_channel,
                         response_tracker.clone(),
                         database.clone(),
-                        op_cancel_rx,
-                        //
-                        // use_existing_session.
-                        //
-                        !needs_temp_session,
-                    )
-                    .await;
-
-                    if needs_temp_session {
-                        //
-                        // Close temp session.
-                        //
-                        let _ = close_session(&node_id, &rabbitmq_channel).await;
-                    }
-
-                    //
-                    // For chain flow, we only pass the result (not summary) to downstream.
-                    //
-                    result.map(|(_, result)| result)
+                    ).await;
+                    (op_result, None)
                 }
-                ChainElement::Termination {
-                    termination_type,
-                    label,
-                    ..
-                } => {
-                    match termination_type {
-                        TerminationType::Raw => {
-                            //
-                            // Raw termination - just pass through the
-                            // accumulated input.
-                            //
-                            {
-                                let mut s = state.write().unwrap();
-                                s.add_output(label.clone(), merged_input.clone());
-                            }
-                            Ok(merged_input)
-                        }
-                        TerminationType::Semantic { prompt, model_ref } => {
-                            //
-                            // Semantic termination - make a direct LLM call on
-                            // the service side
-                            // This does NOT send to the remote agent - it
-                            // processes locally.
-                            //
-
-                            //
-                            // Resolve model configuration from model definitions.
-                            //
-                            let config_guard = config.read().await;
-                            let model_def = if let Some(mref) = model_ref {
-                                config_guard.find_model_definition(mref)
-                                    .ok_or_else(|| anyhow::anyhow!("Model '{}' not found. Configure in Settings > LLM Providers.", mref))?
-                            } else {
-                                config_guard.get_semantic_ops_model_def()
-                                    .ok_or_else(|| anyhow::anyhow!("No LLM configured for semantic output. Configure in Settings > LLM Providers."))?
-                            };
-                            let (provider_str, model_name, api_key) = (model_def.provider, model_def.model, model_def.api_key);
-                            drop(config_guard);
-
-                            //
-                            // Parse provider and create client.
-                            //
-                            let provider = Provider::from_str(&provider_str)
-                                .ok_or_else(|| anyhow::anyhow!("Unknown provider: {}", provider_str))?;
-                            let client = create_ai_client(provider, api_key)?;
-
-                            //
-                            // Build the conversation - input data first, then prompt.
-                            //
-                            let user_content = if merged_input.is_empty() {
-                                prompt.clone()
-                            } else {
-                                format!("{}\n\n{}", merged_input, prompt)
-                            };
-                            let messages = vec![
-                                Message::user(user_content),
-                            ];
-
-                            //
-                            // Execute the LLM call.
-                            //
-                            let result = execute_chat_completion(&client, model_name, messages, Some(8192)).await;
-
-                            if let Ok(ref output) = result {
-                                let mut s = state.write().unwrap();
-                                s.add_output(label.clone(), output.clone());
-                            }
-
-                            result
-                        }
-                    }
+                ChainElement::Transform { prompt, model_ref, .. } => {
+                    let transform_result = Self::execute_transform(
+                        prompt,
+                        model_ref,
+                        &merged_input,
+                        &config,
+                    ).await;
+                    (transform_result, None)
+                }
+                ChainElement::GenericPrompt { prompt, session_group, .. } => {
+                    let gp_result = Self::execute_generic_prompt(
+                        prompt,
+                        session_group,
+                        &merged_input,
+                        is_first_in_session,
+                        &active_session,
+                        yolo_mode,
+                        &working_dir,
+                        &node_id,
+                        &rabbitmq_channel,
+                        response_tracker.clone(),
+                        database.clone(),
+                    ).await;
+                    (gp_result, None)
+                }
+                ChainElement::MemoryStore { key, .. } => {
+                    let store_result = database.set_memory(key, &merged_input).await
+                        .map_err(|e| anyhow::anyhow!("Failed to store memory '{}': {}", key, e))
+                        .map(|_| merged_input.clone());
+                    (store_result, None)
+                }
+                ChainElement::MemoryRetrieve { key, .. } => {
+                    let retrieve_result = database.get_memory(key).await
+                        .map_err(|e| anyhow::anyhow!("Failed to retrieve memory '{}': {}", key, e))
+                        .map(|v| v.unwrap_or_default());
+                    (retrieve_result, None)
                 }
             };
 
             //
-            // Handle result.
+            // Handle result: store output and enqueue downstream.
             //
-            match result {
+            let (output, success) = match result {
                 Ok(output) => {
+                    let success = Some(true);
                     {
                         let mut s = state.write().unwrap();
-                        s.set_element_completed(element_id, output.clone());
+                        s.set_element_completed(&element_id, output.clone(), success);
                     }
-                    element_outputs.insert(element_id.clone(), output);
-                    completed.insert(element_id.clone());
+                    (output, success)
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
+                    let output = error_msg.clone();
+                    let success = Some(false);
                     {
                         let mut s = state.write().unwrap();
-                        s.set_element_failed(element_id, error_msg.clone());
+                        s.set_element_failed(&element_id, error_msg);
                     }
+                    (output, success)
+                }
+            };
 
-                    //
-                    // Close any active session.
-                    //
-                    if active_session.is_some() {
-                        let _ = close_session(&node_id, &rabbitmq_channel).await;
-                        let _ = active_session.take();
+            //
+            // Store resolved output.
+            //
+            resolved.insert(element_id.clone(), (output.clone(), success));
+
+            //
+            // Terminal check: if no outgoing connections, store as output.
+            //
+            if graph.outgoing_connections(&element_id).is_empty() {
+                if success == Some(true) {
+                    state.write().unwrap().add_output(element_id.clone(), output.clone());
+                }
+            }
+
+            //
+            // Determine fired outgoing connections and enqueue ready targets.
+            //
+            for conn in graph.outgoing_connections(&element_id) {
+                if !connection_fires(conn, &success) {
+                    continue;
+                }
+                if let Some(port) = active_port {
+                    if conn.from_port != port {
+                        continue;
                     }
-
-                    //
-                    // Mark all remaining elements as skipped.
-                    //
-                    for remaining_id in &graph.execution_order {
-                        if !completed.contains(remaining_id) && remaining_id != element_id {
-                            let mut s = state.write().unwrap();
-                            s.set_element_skipped(remaining_id);
-                        }
-                    }
-
-                    //
-                    // Broadcast the failure.
-                    //
-                    let update = state.read().unwrap().to_update();
-                    Self::broadcast_update(&broadcast_channel, ClientBroadcastMessage::ChainExecutionUpdate(update)).await;
-
-                    //
-                    // Fail the entire chain when any step fails.
-                    //
-                    return Err(anyhow::anyhow!("Chain failed at element {}: {}", element_id, error_msg));
+                }
+                if is_target_ready(&conn.to_element, &graph, &resolved) {
+                    work_queue.push_back(conn.to_element.clone());
                 }
             }
 
@@ -936,12 +650,306 @@ impl ChainExecutor {
         }
 
         //
-        // Clean up any remaining session.
+        // Mark unresolved elements as skipped.
+        //
+        for (id, _) in &graph.nodes {
+            if !resolved.contains_key(id) {
+                state.write().unwrap().set_element_skipped(id);
+            }
+        }
+
+        //
+        // Clean up session.
         //
         if active_session.is_some() {
             let _ = close_session(&node_id, &rabbitmq_channel).await;
         }
 
+        //
+        // Determine chain success: at least one terminal element must have
+        // completed successfully.
+        //
+        let terminals = graph.terminal_elements();
+        let any_terminal_success = terminals.iter().any(|tid| {
+            resolved.get(tid).map(|(_, s)| *s == Some(true)).unwrap_or(false)
+        });
+        if !any_terminal_success && !terminals.is_empty() {
+            return Err(anyhow::anyhow!("Chain failed: no terminal element completed successfully"));
+        }
+
         Ok(())
     }
+
+    /// Execute an Operation element
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_operation(
+        execution_id: &str,
+        element_id: &str,
+        operation_name: &str,
+        model_ref: &Option<String>,
+        merged_input: &str,
+        is_first_in_session: bool,
+        active_session: &Option<String>,
+        working_dir: &Option<String>,
+        node_id: &str,
+        agent_short_name: &str,
+        config: &Arc<TokioRwLock<ServiceConfig>>,
+        rabbitmq_channel: &Channel,
+        response_tracker: Arc<ResponseTracker>,
+        database: Arc<Database>,
+    ) -> Result<String> {
+        let op_def = database
+            .get_operation_definition(operation_name)
+            .await
+            .ok()
+            .flatten()
+            .ok_or_else(|| {
+                anyhow::anyhow!("Operation definition not found: {}", operation_name)
+            })?;
+
+        let full_prompt = if active_session.is_none() || is_first_in_session {
+            if merged_input.is_empty() {
+                op_def.operation_prompt.clone()
+            } else {
+                format!(
+                    "{}\n\nInput from previous steps:\n{}",
+                    op_def.operation_prompt, merged_input
+                )
+            }
+        } else {
+            op_def.operation_prompt.clone()
+        };
+
+        let spec = SemanticOperationSpec {
+            name: op_def.name.clone(),
+            description: op_def.description.clone(),
+            agent_info: op_def.agent_info.clone(),
+            timeout: op_def.timeout,
+            operation_prompt: full_prompt,
+            mode: op_def.mode.clone(),
+            agent_iterations: op_def.agent_iterations,
+            yolo_mode: op_def.yolo_mode,
+            model_ref: model_ref.clone().or(op_def.model_ref.clone()),
+        };
+
+        let op_id = Uuid::new_v4().to_string();
+        let now = Utc::now();
+
+        let op_record = OperationRecord {
+            operation_id: op_id.clone(),
+            node_id: node_id.to_string(),
+            agent_short_name: agent_short_name.to_string(),
+            operation_spec: spec.clone(),
+            status: SemanticOpStatus::Running,
+            start_time: now,
+            end_time: None,
+            summary: None,
+            result: None,
+            queue_position: None,
+            created_at: now,
+            output: Some(format!("[Chain: {} | Element: {}]\n", execution_id, element_id)),
+            chain_execution_id: Some(execution_id.to_string()),
+        };
+        if let Err(e) = database.insert_operation(&op_record).await {
+            common::log_warn!("Failed to record chain operation to database: {}", e);
+        }
+
+        let use_existing_session = active_session.is_some();
+        let (_op_cancel_tx, op_cancel_rx) = oneshot::channel::<()>();
+
+        let op_result = if spec.mode == "agent" {
+            execute_agent_mode(
+                &op_id,
+                node_id,
+                &spec,
+                working_dir.clone(),
+                config,
+                rabbitmq_channel,
+                response_tracker.clone(),
+                database.clone(),
+                op_cancel_rx,
+                use_existing_session,
+            )
+            .await
+        } else {
+            execute_one_shot(
+                &op_id,
+                node_id,
+                &spec,
+                working_dir.clone(),
+                rabbitmq_channel,
+                response_tracker.clone(),
+                database.clone(),
+                op_cancel_rx,
+                use_existing_session,
+            )
+            .await
+        };
+
+        let end_time = Utc::now();
+        match &op_result {
+            Ok((summary, result)) => {
+                let _ = database.update_status(
+                    &op_id,
+                    SemanticOpStatus::Completed,
+                    Some(end_time),
+                    if summary.is_empty() { None } else { Some(summary.clone()) },
+                    if result.is_empty() { None } else { Some(result.clone()) },
+                ).await;
+            }
+            Err(e) => {
+                let _ = database.update_status(
+                    &op_id,
+                    SemanticOpStatus::Failed,
+                    Some(end_time),
+                    None,
+                    Some(e.to_string()),
+                ).await;
+            }
+        }
+
+        op_result.map(|(_, result)| result)
+    }
+
+    /// Execute a Transform element
+    async fn execute_transform(
+        prompt: &str,
+        model_ref: &Option<String>,
+        merged_input: &str,
+        config: &Arc<TokioRwLock<ServiceConfig>>,
+    ) -> Result<String> {
+        let config_guard = config.read().await;
+        let model_def = if let Some(mref) = model_ref {
+            config_guard.find_model_definition(mref)
+                .ok_or_else(|| anyhow::anyhow!("Model '{}' not found. Configure in Settings > LLM Providers.", mref))?
+        } else {
+            config_guard.get_semantic_ops_model_def()
+                .ok_or_else(|| anyhow::anyhow!("No LLM configured for transform. Configure in Settings > LLM Providers."))?
+        };
+        let (provider_str, model_name, api_key) = (model_def.provider, model_def.model, model_def.api_key);
+        drop(config_guard);
+
+        let provider = Provider::from_str(&provider_str)
+            .ok_or_else(|| anyhow::anyhow!("Unknown provider: {}", provider_str))?;
+        let client = create_ai_client(provider, api_key)?;
+
+        let user_content = if merged_input.is_empty() {
+            prompt.to_string()
+        } else {
+            format!("{}\n\n{}", merged_input, prompt)
+        };
+        let messages = vec![Message::user(user_content)];
+
+        execute_chat_completion(&client, model_name, messages, Some(8192)).await
+    }
+
+    /// Execute a GenericPrompt element
+    #[allow(clippy::too_many_arguments)]
+    async fn execute_generic_prompt(
+        prompt: &str,
+        session_group: &Option<SessionGroup>,
+        merged_input: &str,
+        is_first_in_session: bool,
+        active_session: &Option<String>,
+        yolo_mode: bool,
+        working_dir: &Option<String>,
+        node_id: &str,
+        rabbitmq_channel: &Channel,
+        response_tracker: Arc<ResponseTracker>,
+        database: Arc<Database>,
+    ) -> Result<String> {
+        let prompt_to_send = if active_session.is_some() {
+            if is_first_in_session {
+                if merged_input.is_empty() {
+                    prompt.to_string()
+                } else {
+                    format!("{}\n\n{}", merged_input, prompt)
+                }
+            } else {
+                prompt.to_string()
+            }
+        } else {
+            if merged_input.is_empty() {
+                prompt.to_string()
+            } else {
+                format!("{}\n\n{}", merged_input, prompt)
+            }
+        };
+
+        let spec = SemanticOperationSpec {
+            name: "Generic Prompt".to_string(),
+            description: "Send prompt to agent".to_string(),
+            agent_info: String::new(),
+            timeout: 120,
+            operation_prompt: prompt_to_send,
+            mode: "one-shot".to_string(),
+            agent_iterations: 1,
+            yolo_mode: session_group.as_ref().map(|sg| sg.yolo_mode).unwrap_or(yolo_mode),
+            model_ref: None,
+        };
+
+        let op_id = Uuid::new_v4().to_string();
+        let needs_temp_session = active_session.is_none();
+        let session_yolo = session_group.as_ref().map(|sg| sg.yolo_mode).unwrap_or(false);
+
+        if needs_temp_session {
+            let _temp_session = create_session(node_id, session_yolo, working_dir.clone(), rabbitmq_channel, response_tracker.clone())
+                .await
+                .context("Failed to create temp session for generic prompt")?;
+        }
+
+        let (_op_cancel_tx, op_cancel_rx) = oneshot::channel::<()>();
+
+        let result = execute_one_shot(
+            &op_id,
+            node_id,
+            &spec,
+            working_dir.clone(),
+            rabbitmq_channel,
+            response_tracker.clone(),
+            database.clone(),
+            op_cancel_rx,
+            !needs_temp_session,
+        )
+        .await;
+
+        if needs_temp_session {
+            let _ = close_session(node_id, rabbitmq_channel).await;
+        }
+
+        result.map(|(_, result)| result)
+    }
+}
+
+/// Check if a connection fires based on its condition and the source element's success.
+fn connection_fires(conn: &crate::database::ChainConnection, success: &Option<bool>) -> bool {
+    match &conn.condition {
+        None => true,
+        Some(crate::database::ConnectionCondition::OnSuccess) => success.unwrap_or(true),
+        Some(crate::database::ConnectionCondition::OnFailure) => matches!(success, Some(false)),
+    }
+}
+
+/// Check if a target element is ready to execute (all sources resolved, at
+/// least one fires).
+fn is_target_ready(
+    target_id: &str,
+    graph: &ExecutionGraph,
+    resolved: &HashMap<String, (String, Option<bool>)>,
+) -> bool {
+    let incoming = graph.incoming_connections(&target_id.to_string());
+    let mut all_sources_resolved = true;
+    let mut any_fires = false;
+
+    for conn in &incoming {
+        if let Some((_, success)) = resolved.get(&conn.from_element) {
+            if connection_fires(conn, success) {
+                any_fires = true;
+            }
+        } else {
+            all_sources_resolved = false;
+        }
+    }
+
+    all_sources_resolved && any_fires
 }

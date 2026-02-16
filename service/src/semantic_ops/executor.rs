@@ -605,7 +605,7 @@ pub async fn execute_agent_mode(
         //
         // No tool call found - check for completion signal.
         //
-        if let Some((is_complete, summary, result, _remaining_text)) =
+        if let Some((is_complete, summary, result, _remaining_text, _success)) =
             parse_completion_signal(&text_content)
         {
             if is_complete {

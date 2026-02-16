@@ -343,10 +343,6 @@ export interface OperationDefinitionInfo {
 
 export type ChainTriggerType = { type: 'Manual' };
 
-export type ChainTerminationType =
-  | { type: 'Raw' }
-  | { type: 'Semantic'; prompt: string; model_ref?: string | null };
-
 //
 // Session group for elements that share a session.
 //
@@ -354,6 +350,13 @@ export interface SessionGroup {
   id: string;
   color: string;
   yolo_mode: boolean;
+  working_dir?: string | null;
+}
+
+export interface BlockConfig {
+  max_runtime?: number | null;
+  yolo_mode?: boolean | null;
+  working_dir?: string | null;
 }
 
 //
@@ -362,10 +365,14 @@ export interface SessionGroup {
 //
 export type ChainElement =
   | { element_type: 'Trigger'; id: string; trigger_type: ChainTriggerType }
-  | { element_type: 'Operation'; id: string; operation_name: string; model_ref?: string | null; session_group?: SessionGroup | null }
-  | { element_type: 'Transform'; id: string; prompt: string; model_ref?: string | null; session_group?: SessionGroup | null }
-  | { element_type: 'GenericPrompt'; id: string; prompt: string; session_group?: SessionGroup | null }
-  | { element_type: 'Termination'; id: string; termination_type: ChainTerminationType; label: string };
+  | { element_type: 'Operation'; id: string; operation_name: string; model_ref?: string | null; session_group?: SessionGroup | null; block_config?: BlockConfig | null }
+  | { element_type: 'Transform'; id: string; prompt: string; model_ref?: string | null; session_group?: SessionGroup | null; block_config?: BlockConfig | null }
+  | { element_type: 'GenericPrompt'; id: string; prompt: string; session_group?: SessionGroup | null; block_config?: BlockConfig | null }
+  | { element_type: 'MemoryStore'; id: string; key: string }
+  | { element_type: 'MemoryRetrieve'; id: string; key: string }
+  | { element_type: 'Loop'; id: string; max_iterations: number };
+
+export type ConnectionCondition = 'OnSuccess' | 'OnFailure';
 
 export interface ChainConnection {
   id: string;
@@ -373,6 +380,7 @@ export interface ChainConnection {
   to_element: string;
   from_port: number;
   to_port: number;
+  condition?: ConnectionCondition | null;
 }
 
 export interface ChainDefinitionInput {
@@ -417,7 +425,7 @@ export type ElementExecutionStatus =
   | 'Pending'
   | 'WaitingForInputs'
   | 'Running'
-  | { Completed: { output: string } }
+  | { Completed: { output: string; success?: boolean | null } }
   | { Failed: { error: string } }
   | 'Skipped';
 
@@ -429,8 +437,9 @@ export type ElementConfig =
   | { type: 'Operation'; operation_name: string; model_ref?: string | null }
   | { type: 'Transform'; prompt: string; model_ref?: string | null }
   | { type: 'GenericPrompt'; prompt: string }
-  | { type: 'RawOutput' }
-  | { type: 'SemanticOutput'; prompt: string; model_ref?: string | null };
+  | { type: 'MemoryStore'; key: string }
+  | { type: 'MemoryRetrieve'; key: string }
+  | { type: 'Loop'; max_iterations: number };
 
 //
 // Element runtime context (dynamic, during execution).
