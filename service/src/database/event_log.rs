@@ -10,18 +10,19 @@ use super::{Database, DatabasePool};
 const MAX_EVENT_LOG_ENTRIES: usize = 1_000_000;
 
 /// Maximum number of event log entries to return in a single query
-const MAX_EVENT_LOG_QUERY_LIMIT: usize = 1000;
+const MAX_EVENT_LOG_QUERY_LIMIT: usize = 1_000_000;
 
 impl Database {
     /// Insert an event log entry
     pub async fn insert_event_log(&self, entry: &ApplicationLogEntry) -> Result<i64> {
-        let sql = "INSERT INTO event_log (source, level, message, target, timestamp)
-             VALUES ($1, $2, $3, $4, $5)";
+        let sql = "INSERT INTO event_log (source, source_id, level, message, target, timestamp)
+             VALUES ($1, $2, $3, $4, $5, $6)";
 
         let id = match &self.pool {
             DatabasePool::Sqlite(pool) => {
                 sqlx::query(sql)
                     .bind(&entry.source)
+                    .bind(&entry.source_id)
                     .bind(&entry.level)
                     .bind(&entry.message)
                     .bind(&entry.target)
@@ -36,11 +37,12 @@ impl Database {
             }
             DatabasePool::Postgres(pool) => {
                 let row = sqlx::query(
-                    "INSERT INTO event_log (source, level, message, target, timestamp)
-                     VALUES ($1, $2, $3, $4, $5)
+                    "INSERT INTO event_log (source, source_id, level, message, target, timestamp)
+                     VALUES ($1, $2, $3, $4, $5, $6)
                      RETURNING id",
                 )
                 .bind(&entry.source)
+                .bind(&entry.source_id)
                 .bind(&entry.level)
                 .bind(&entry.message)
                 .bind(&entry.target)
@@ -116,7 +118,7 @@ impl Database {
         let query_all_sources = source_id.is_empty();
 
         let mut sql = String::from(
-            "SELECT source, level, message, target, timestamp FROM event_log",
+            "SELECT source, source_id, level, message, target, timestamp FROM event_log",
         );
         let mut count_sql = String::from("SELECT COUNT(*) FROM event_log");
 
@@ -323,10 +325,11 @@ impl Database {
 
 fn parse_event_log_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> Result<ApplicationLogEntry> {
     let source: String = row.get(0);
-    let level: String = row.get(1);
-    let message: String = row.get(2);
-    let target: Option<String> = row.get(3);
-    let timestamp_str: String = row.get(4);
+    let source_id: String = row.get(1);
+    let level: String = row.get(2);
+    let message: String = row.get(3);
+    let target: Option<String> = row.get(4);
+    let timestamp_str: String = row.get(5);
 
     let timestamp = DateTime::parse_from_rfc3339(&timestamp_str)
         .map(|dt| dt.with_timezone(&Utc))
@@ -334,6 +337,7 @@ fn parse_event_log_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> Result<Applicati
 
     Ok(ApplicationLogEntry {
         source,
+        source_id,
         level,
         message,
         target,
@@ -343,10 +347,11 @@ fn parse_event_log_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> Result<Applicati
 
 fn parse_event_log_row_postgres(row: &sqlx::postgres::PgRow) -> Result<ApplicationLogEntry> {
     let source: String = row.get(0);
-    let level: String = row.get(1);
-    let message: String = row.get(2);
-    let target: Option<String> = row.get(3);
-    let timestamp_str: String = row.get(4);
+    let source_id: String = row.get(1);
+    let level: String = row.get(2);
+    let message: String = row.get(3);
+    let target: Option<String> = row.get(4);
+    let timestamp_str: String = row.get(5);
 
     let timestamp = DateTime::parse_from_rfc3339(&timestamp_str)
         .map(|dt| dt.with_timezone(&Utc))
@@ -354,6 +359,7 @@ fn parse_event_log_row_postgres(row: &sqlx::postgres::PgRow) -> Result<Applicati
 
     Ok(ApplicationLogEntry {
         source,
+        source_id,
         level,
         message,
         target,

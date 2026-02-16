@@ -120,7 +120,7 @@ async fn listen_to_queues(
     //
     // Initialize the global event log sender.
     //
-    common::logging::init(node_id.clone(), event_log_tx);
+    common::logging::init("node".to_string(), node_id.clone(), event_log_tx);
 
     //
     // Node state for intercept and terminal management.

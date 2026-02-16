@@ -235,6 +235,7 @@ type Action =
   | { type: 'UPDATE_OPERATION'; update: SemanticOpUpdate }
   | { type: 'SET_OPERATION_DEFS'; definitions: OperationDefinitionInfo[] }
   | { type: 'ADD_EVENT'; entry: EventLogEntry }
+  | { type: 'CLEAR_EVENTS' }
   | { type: 'SET_CONFIG'; values: Record<string, string> }
   | { type: 'SET_OP_DEF_ERROR'; error: string | null }
   | { type: 'SET_OP_DEF_SUCCESS'; fullName: string | null }
@@ -347,6 +348,8 @@ function reduceCore(state: AppState, action: Action): AppState | null {
       // Keep last 1000 events to avoid memory issues.
       //
       return { ...state, events: [...state.events.slice(-999), action.entry] };
+    case 'CLEAR_EVENTS':
+      return { ...state, events: [] };
     case 'SET_CONFIG':
       return { ...state, config: { ...state.config, ...action.values } };
     case 'SET_OP_DEF_ERROR':
@@ -1033,6 +1036,7 @@ interface AppContextValue {
   cancelOperation: (operationId: string) => void;
   removeOperation: (operationId: string) => void;
   clearOperations: () => void;
+  clearEventLog: () => void;
   //
   // Node Management.
   //
@@ -1511,6 +1515,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     wsClient.send({ type: 'semantic_op_clear' });
   }, []);
 
+  const clearEventLog = useCallback(() => {
+    wsClient.send({ type: 'application_log_clear', node_id: null });
+    dispatch({ type: 'CLEAR_EVENTS' });
+  }, []);
+
   //
   // Node management.
   //
@@ -1893,6 +1902,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     cancelOperation,
     removeOperation,
     clearOperations,
+    clearEventLog,
     removeNode,
     getConfig,
     setConfig,

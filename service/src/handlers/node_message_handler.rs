@@ -28,17 +28,19 @@ impl NodeMessageHandler {
         &self,
         registration: NodeRegistration,
         lua_scripts: Vec<String>,
+        event_logging_enabled: bool,
     ) -> Result<()> {
         let node = self.registry.register(&registration).await;
 
         //
-        // Send NodeRegistrationAck with Lua scripts via the node's direct
-        // queue. This avoids a race condition where a fanout broadcast
-        // arrives before the node binds its consumer to the exchange.
+        // Send NodeRegistrationAck with Lua scripts and logging state via the
+        // node's direct queue. This avoids a race condition where a fanout
+        // broadcast arrives before the node binds its consumer to the exchange.
         //
         let ack = NodeRegistrationAck {
             id: node.id.clone(),
             lua_scripts,
+            event_logging_enabled,
         };
         let message = NodeDirectMessage::RegistrationAck(ack);
 

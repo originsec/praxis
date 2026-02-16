@@ -384,7 +384,7 @@ async fn run_server(addr: SocketAddr) -> anyhow::Result<()> {
     // Initialize event log channel for web logs.
     //
     let (event_log_tx, mut event_log_rx) = tokio::sync::mpsc::unbounded_channel::<common::ApplicationLogEntry>();
-    common::logging::init("web".to_string(), event_log_tx);
+    common::logging::init("web".to_string(), client_id.clone(), event_log_tx);
 
     //
     // Create shared state.

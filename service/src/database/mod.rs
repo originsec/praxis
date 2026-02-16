@@ -120,12 +120,12 @@ impl Database {
                         .await
                     {
                         Ok(pool) => {
-                            tracing::info!("Connected to PostgreSQL (attempt {})", attempt);
+                            common::log_info!("Connected to PostgreSQL (attempt {})", attempt);
                             pool_opt = Some(pool);
                             break;
                         }
                         Err(e) => {
-                            tracing::warn!(
+                            common::log_warn!(
                                 "PostgreSQL connection attempt {}/30 failed: {}",
                                 attempt, e
                             );
@@ -235,6 +235,33 @@ impl Database {
                 let _ = sqlx::query("ALTER TABLE operations ADD COLUMN IF NOT EXISTS summary TEXT")
                     .execute(pool)
                     .await;
+            }
+        }
+
+        //
+        // Migration: Add source_id column to event_log table and backfill existing
+        // rows where source is a node UUID (not "web" or "service").
+        //
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let added = sqlx::query("ALTER TABLE event_log ADD COLUMN source_id TEXT NOT NULL DEFAULT ''")
+                    .execute(pool)
+                    .await;
+                if added.is_ok() {
+                    let _ = sqlx::query(
+                        "UPDATE event_log SET source_id = source, source = 'node' WHERE source NOT IN ('web', 'service')"
+                    ).execute(pool).await;
+                }
+            }
+            DatabasePool::Postgres(pool) => {
+                let added = sqlx::query("ALTER TABLE event_log ADD COLUMN IF NOT EXISTS source_id TEXT NOT NULL DEFAULT ''")
+                    .execute(pool)
+                    .await;
+                if added.is_ok() {
+                    let _ = sqlx::query(
+                        "UPDATE event_log SET source_id = source, source = 'node' WHERE source NOT IN ('web', 'service') AND source_id = ''"
+                    ).execute(pool).await;
+                }
             }
         }
 

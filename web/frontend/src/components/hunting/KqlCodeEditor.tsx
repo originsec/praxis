@@ -46,15 +46,15 @@ interface TableSchema {
 }
 
 const TABLE_SCHEMAS: TableSchema[] = [
+  { name: 'AgentLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'agent_name', 'version'] },
+  { name: 'EventLogs', columns: ['timestamp', 'source', 'source_id', 'level', 'target', 'message'] },
+  { name: 'NodeLogs', columns: ['timestamp', 'node_id', 'machine_name', 'os_details', 'intercept_active'] },
+  { name: 'ReconLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'is_semantic', 'mcp_server_count', 'skill_count', 'internal_tool_count', 'config_count', 'session_count', 'project_path_count'] },
+  { name: 'ReconMetadataLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'entry_type', 'value'] },
+  { name: 'ReconSessionLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'session_id', 'context_path', 'last_modified', 'message_count'] },
+  { name: 'ReconToolLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'tool_type', 'server_name', 'tool_name', 'tool_description', 'transport'] },
   { name: 'TrafficLogs', columns: ['timestamp', 'traffic_id', 'node_id', 'agent_short_name', 'intercept_method', 'direction', 'method', 'url', 'host', 'request_headers', 'request_body', 'response_status', 'response_headers', 'response_body'] },
   { name: 'TrafficMatchLogs', columns: ['timestamp', 'traffic_id', 'node_id', 'agent_short_name', 'rule_id', 'rule_name', 'summary', 'method', 'url', 'host', 'direction', 'response_status'] },
-  { name: 'NodeLogs', columns: ['timestamp', 'node_id', 'machine_name', 'os_details', 'intercept_active'] },
-  { name: 'AgentLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'agent_name', 'version'] },
-  { name: 'ReconLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'is_semantic', 'mcp_server_count', 'skill_count', 'internal_tool_count', 'config_count', 'session_count', 'project_path_count'] },
-  { name: 'ReconToolLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'tool_type', 'server_name', 'tool_name', 'tool_description', 'transport'] },
-  { name: 'ReconSessionLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'session_id', 'context_path', 'last_modified', 'message_count'] },
-  { name: 'ReconMetadataLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'entry_type', 'value'] },
-  { name: 'EventLogs', columns: ['timestamp', 'source', 'level', 'target', 'message'] },
 ];
 
 const KQL_OPERATORS = [
@@ -63,9 +63,14 @@ const KQL_OPERATORS = [
 ];
 
 const KQL_FUNCTIONS = [
-  'contains', 'startswith', 'endswith', 'has', 'strlen', 'tolower', 'toupper',
+  'strlen', 'tolower', 'toupper',
   'isnotempty', 'isnull', 'isempty', 'isnotnull', 'now', 'count', 'sum',
   'avg', 'min', 'max', 'dcount', 'tostring', 'toint', 'tolong',
+];
+
+const KQL_INFIX_OPS = [
+  'contains', '!contains', 'startswith', '!startswith',
+  'endswith', '!endswith', 'has', '!has',
 ];
 
 const KQL_KEYWORDS = ['and', 'or', 'not', 'by', 'on', '$left', '$right', 'asc', 'desc', 'true', 'false', 'null'];
@@ -128,10 +133,31 @@ function getCompletionContext(textBeforeCursor: string): Suggestion[] {
   if (['where', 'extend', 'summarize'].includes(segOp ?? '')) {
     const wordCount = lastPipeSegment.trim().split(/\s+/).length;
     if (wordCount > 1 || partial !== segOp) {
+
+      //
+      // Suppress suggestions right after an infix operator or comparison
+      // operator — the user needs to type a value, not pick from a list.
+      // Also suppress when partial is empty and the previous token isn't a
+      // keyword that starts a new expression (e.g. after a column name the
+      // user needs to type an operator, not pick another column).
+      //
+
+      const tokensBeforeCursor = lastPipeSegment.trimEnd().split(/\s+/);
+      const prevToken = tokensBeforeCursor[tokensBeforeCursor.length - (partial ? 2 : 1)]?.toLowerCase();
+      if (prevToken && (KQL_INFIX_OPS.includes(prevToken) || ['==', '!=', '<', '>', '<=', '>='].includes(prevToken))) {
+        return [];
+      }
+
+      const expressionStarters = ['where', 'extend', 'summarize', 'and', 'or', 'not', 'by', ',', '('];
+      if (!partial && (!prevToken || !expressionStarters.includes(prevToken))) {
+        return [];
+      }
+
       const items: Suggestion[] = [];
       if (table) {
         items.push(...table.columns.map(c => ({ label: c, kind: 'column' as const })));
       }
+      items.push(...KQL_INFIX_OPS.map(op => ({ label: op, kind: 'keyword' as const })));
       items.push(...KQL_FUNCTIONS.map(f => ({ label: f, kind: 'function' as const })));
       items.push(...KQL_KEYWORDS.map(k => ({ label: k, kind: 'keyword' as const })));
       return filterSuggestions(items, partial);

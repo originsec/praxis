@@ -14,6 +14,7 @@ pub struct RegistrationResult {
     pub node_queue: String,
     pub channel: Channel,
     pub lua_scripts: Vec<String>,
+    pub event_logging_enabled: bool,
 }
 
 pub async fn publish_registration(channel: &Channel, node_id: &str) -> Result<()> {
@@ -206,6 +207,7 @@ pub async fn register_with_service(
                     node_queue,
                     channel,
                     lua_scripts: ack.lua_scripts,
+                    event_logging_enabled: ack.event_logging_enabled,
                 }));
             }
             Ok(None) => {

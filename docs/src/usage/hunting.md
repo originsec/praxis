@@ -1,8 +1,103 @@
 # Hunting
 
-The Hunting feature provides a KQL (Kusto Query Language) query interface for exploring and correlating data across Praxis virtual tables. Write KQL queries in a code editor, execute them with Ctrl+Enter, and browse paginated results.
+The Hunting feature provides a KQL-like query interface for exploring and correlating data across Praxis virtual tables. The syntax is inspired by Kusto Query Language but only a subset of KQL is implemented — not all features or functions from the full Kusto specification will work. Write queries in the code editor, execute them with Ctrl+Enter, and browse paginated results.
 
 ## Available Tables
+
+### AgentLogs
+
+Discovered agents across all nodes (in-memory).
+
+| Column | Description |
+|--------|-------------|
+| timestamp | Last update time |
+| node_id | Node identifier |
+| agent_short_name | Agent short name |
+| agent_name | Agent display name |
+| version | Agent version (if known) |
+
+### EventLogs
+
+Centralized application log entries from service, web, and nodes. Requires `application_logs_enabled` to be set to `true` in settings.
+
+| Column | Description |
+|--------|-------------|
+| timestamp | When the log entry was recorded |
+| source | Origin category: "service", "web", or "node" |
+| source_id | Instance identifier (e.g. node UUID, web client ID; empty for service) |
+| level | Log level: error, warn, info, debug, trace |
+| target | Log target/module (may be null) |
+| message | Log message text |
+
+### NodeLogs
+
+Currently connected nodes (in-memory).
+
+| Column | Description |
+|--------|-------------|
+| timestamp | Last update time |
+| node_id | Node identifier |
+| machine_name | Machine hostname |
+| os_details | Operating system details |
+| intercept_active | Whether interception is active |
+
+### ReconLogs
+
+Summary of reconnaissance results per node+agent.
+
+| Column | Description |
+|--------|-------------|
+| timestamp | When recon was performed |
+| node_id | Node identifier |
+| agent_short_name | Agent short name |
+| is_semantic | Whether this was a semantic recon |
+| mcp_server_count | Number of MCP servers discovered |
+| skill_count | Number of skills discovered |
+| internal_tool_count | Number of internal tools discovered |
+| config_count | Number of config items discovered |
+| session_count | Number of sessions discovered |
+| project_path_count | Number of project paths discovered |
+
+### ReconMetadataLogs
+
+User identities and API keys extracted from agent configurations.
+
+| Column | Description |
+|--------|-------------|
+| timestamp | When recon was performed |
+| node_id | Node identifier |
+| agent_short_name | Agent short name |
+| entry_type | "user_identity" or "api_key" |
+| value | The identity or key value |
+
+### ReconSessionLogs
+
+Sessions discovered during reconnaissance.
+
+| Column | Description |
+|--------|-------------|
+| timestamp | When recon was performed |
+| node_id | Node identifier |
+| agent_short_name | Agent short name |
+| session_id | Session identifier |
+| context_path | Project/context path |
+| last_modified | When the session was last modified |
+| message_count | Number of messages in the session |
+
+### ReconToolLogs
+
+Individual tools discovered during reconnaissance (MCP tools, skills, internal tools).
+
+| Column | Description |
+|--------|-------------|
+| timestamp | When recon was performed |
+| node_id | Node identifier |
+| agent_short_name | Agent short name |
+| tool_type | Type: "mcp", "skill", or "internal" |
+| server_name | MCP server name (null for skills/internal) |
+| tool_name | Tool name |
+| tool_description | Tool description |
+| transport | MCP transport type (null for skills/internal) |
 
 ### TrafficLogs
 
@@ -43,100 +138,6 @@ Traffic that matched intercept rules, joined with traffic details.
 | host | Host/domain |
 | direction | send or receive |
 | response_status | HTTP response status code |
-
-### NodeLogs
-
-Currently connected nodes (in-memory).
-
-| Column | Description |
-|--------|-------------|
-| timestamp | Last update time |
-| node_id | Node identifier |
-| machine_name | Machine hostname |
-| os_details | Operating system details |
-| intercept_active | Whether interception is active |
-
-### AgentLogs
-
-Discovered agents across all nodes (in-memory).
-
-| Column | Description |
-|--------|-------------|
-| timestamp | Last update time |
-| node_id | Node identifier |
-| agent_short_name | Agent short name |
-| agent_name | Agent display name |
-| version | Agent version (if known) |
-
-### ReconLogs
-
-Summary of reconnaissance results per node+agent.
-
-| Column | Description |
-|--------|-------------|
-| timestamp | When recon was performed |
-| node_id | Node identifier |
-| agent_short_name | Agent short name |
-| is_semantic | Whether this was a semantic recon |
-| mcp_server_count | Number of MCP servers discovered |
-| skill_count | Number of skills discovered |
-| internal_tool_count | Number of internal tools discovered |
-| config_count | Number of config items discovered |
-| session_count | Number of sessions discovered |
-| project_path_count | Number of project paths discovered |
-
-### ReconToolLogs
-
-Individual tools discovered during reconnaissance (MCP tools, skills, internal tools).
-
-| Column | Description |
-|--------|-------------|
-| timestamp | When recon was performed |
-| node_id | Node identifier |
-| agent_short_name | Agent short name |
-| tool_type | Type: "mcp", "skill", or "internal" |
-| server_name | MCP server name (null for skills/internal) |
-| tool_name | Tool name |
-| tool_description | Tool description |
-| transport | MCP transport type (null for skills/internal) |
-
-### ReconSessionLogs
-
-Sessions discovered during reconnaissance.
-
-| Column | Description |
-|--------|-------------|
-| timestamp | When recon was performed |
-| node_id | Node identifier |
-| agent_short_name | Agent short name |
-| session_id | Session identifier |
-| context_path | Project/context path |
-| last_modified | When the session was last modified |
-| message_count | Number of messages in the session |
-
-### ReconMetadataLogs
-
-User identities and API keys extracted from agent configurations.
-
-| Column | Description |
-|--------|-------------|
-| timestamp | When recon was performed |
-| node_id | Node identifier |
-| agent_short_name | Agent short name |
-| entry_type | "user_identity" or "api_key" |
-| value | The identity or key value |
-
-### EventLogs
-
-Centralized application log entries from service, web, and nodes. Requires `application_logs_enabled` to be set to `true` in settings.
-
-| Column | Description |
-|--------|-------------|
-| timestamp | When the log entry was recorded |
-| source | Origin: "service", "web", or a node ID |
-| level | Log level: error, warn, info, debug, trace |
-| target | Log target/module (may be null) |
-| message | Log message text |
 
 ## Supported KQL Operators
 
@@ -208,8 +209,31 @@ EventLogs | where level == "error" | take 50
 EventLogs | summarize count() by source
 ```
 
+## Query Execution
+
+### SQL Pushdown
+
+Tables backed by the database (EventLogs, TrafficLogs, TrafficMatchLogs) benefit from automatic SQL pushdown. When the executor encounters leading `where` and `take`/`limit` operators in a query pipeline, it translates KQL expressions directly into SQL WHERE clauses with parameterized queries. This means the database handles filtering before rows are loaded into memory, enabling efficient queries over large datasets.
+
+The following KQL constructs are translated to SQL:
+
+- **Comparisons:** `==`, `!=`, `<`, `>`, `<=`, `>=` become SQL comparison operators
+- **Logical:** `and`, `or` become SQL AND/OR
+- **String functions:** `contains`/`has` become `LOWER(col) LIKE '%value%'`, `startswith` becomes `LIKE 'value%'`, `endswith` becomes `LIKE '%value'`
+- **Null checks:** `isnull()`/`isempty()` become `IS NULL OR = ''`, `isnotnull()`/`isnotempty()` become `IS NOT NULL AND != ''`
+- **Case functions:** `tolower()`, `toupper()` become SQL `LOWER()`, `UPPER()`
+- **Utility:** `strlen()` becomes `LENGTH()`, `tostring()` becomes `CAST(... AS TEXT)`, `toint()`/`tolong()` become `CAST(... AS INTEGER)`, `now()` binds the current UTC timestamp
+
+User-provided string values in LIKE patterns are escaped to prevent SQL wildcard injection (`%` and `_` are matched literally).
+
+If any expression in the leading where clauses cannot be translated to SQL (e.g. an unsupported function), the executor falls back to fetching all rows with just a LIMIT and applies all filtering in memory. Operators that appear after a non-pushable operator (like `project`, `extend`, `summarize`) always run in memory.
+
+In-memory tables (NodeLogs, AgentLogs) and JSON-expanded tables (ReconLogs, ReconToolLogs, etc.) are always materialized fully and filtered in memory.
+
+### Result Limits
+
+Results are capped by the `hunting_query_row_limit` setting, which defaults to 10,000,000 rows. This limit can be configured in **Settings > Service > Event Logging**. The `total_count` field reflects the actual count before capping. Use `take` or `limit` to reduce result size for large tables.
+
 ## KQL Parser
 
-The hunting feature uses a vendored fork of the [kqlparser](https://github.com/irtimmer/rust-kql) crate (v0.0.4, Apache-2.0) for parsing KQL syntax. The vendored copy lives in `service/src/hunting/parser/` and includes fixes for multiline join expressions and native `$left`/`$right` join key syntax. Not all KQL features from the full Kusto specification are supported.
-
-Results are capped at 10,000 rows from the service. The `total_count` field reflects the actual count before capping.
+The hunting feature uses a vendored fork of the [kqlparser](https://github.com/irtimmer/rust-kql) crate (v0.0.4, Apache-2.0) for parsing KQL syntax. The vendored copy lives in `service/src/hunting/parser/` and includes fixes for multiline join expressions and native `$left`/`$right` join key syntax. Only the subset of KQL operators and functions listed above are supported; unsupported constructs will return an error.

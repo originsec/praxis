@@ -83,7 +83,7 @@ pub fn table_columns(table: VirtualTable) -> Vec<&'static str> {
             "timestamp", "node_id", "agent_short_name", "entry_type", "value",
         ],
         VirtualTable::EventLogs => vec![
-            "timestamp", "source", "level", "target", "message",
+            "timestamp", "source", "source_id", "level", "target", "message",
         ],
     }
 }
@@ -267,46 +267,6 @@ pub async fn materialize_recon_session_logs(
             ]);
         }
     }
-
-    Ok((columns, rows))
-}
-
-pub async fn materialize_event_logs(
-    database: &Arc<Database>,
-    source: Option<&str>,
-    level: Option<&str>,
-    limit: usize,
-) -> anyhow::Result<(Vec<String>, Vec<Vec<Value>>)> {
-    let columns: Vec<String> = table_columns(VirtualTable::EventLogs)
-        .into_iter()
-        .map(String::from)
-        .collect();
-
-    let level_filter = level.map(|l| vec![l.to_string()]);
-    let source_id = source.unwrap_or("");
-
-    let (entries, _) = database
-        .query_event_log(
-            source_id,
-            level_filter.as_deref(),
-            None,
-            limit as u32,
-            0,
-        )
-        .await?;
-
-    let rows: Vec<Vec<Value>> = entries
-        .into_iter()
-        .map(|e| {
-            vec![
-                Value::String(e.timestamp.to_rfc3339()),
-                Value::String(e.source),
-                Value::String(e.level),
-                e.target.map(Value::String).unwrap_or(Value::Null),
-                Value::String(e.message),
-            ]
-        })
-        .collect();
 
     Ok((columns, rows))
 }

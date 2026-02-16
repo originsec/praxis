@@ -162,6 +162,7 @@ CREATE INDEX IF NOT EXISTS idx_discovered_at ON discovered_endpoints(discovered_
 CREATE TABLE IF NOT EXISTS event_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source TEXT NOT NULL,
+    source_id TEXT NOT NULL DEFAULT '',
     level TEXT NOT NULL,
     message TEXT NOT NULL,
     target TEXT,

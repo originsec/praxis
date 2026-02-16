@@ -33,7 +33,6 @@ use lapin::{
 };
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{error, info, warn};
 
 //
 // Re-export banner for main.rs.
@@ -59,14 +58,14 @@ async fn setup_rabbitmq() -> Connection {
     let url = rabbitmq_url();
 
     loop {
-        info!("Connecting to RabbitMQ at: {}", url);
+        common::log_info!("Connecting to RabbitMQ at: {}", url);
         match Connection::connect(&url, ConnectionProperties::default()).await {
             Ok(conn) => {
-                info!("Connected to RabbitMQ");
+                common::log_info!("Connected to RabbitMQ");
                 return conn;
             }
             Err(e) => {
-                warn!(
+                common::log_warn!(
                     "Failed to connect to RabbitMQ: {}. Retrying in {} seconds...",
                     e, RABBITMQ_RETRY_SECS
                 );
@@ -84,10 +83,10 @@ pub async fn run() -> Result<()> {
                 //
                 // Connection lost, restart.
                 //
-                warn!("RabbitMQ connection lost. Restarting in {} seconds...", RABBITMQ_RETRY_SECS);
+                common::log_warn!("RabbitMQ connection lost. Restarting in {} seconds...", RABBITMQ_RETRY_SECS);
             }
             Err(e) => {
-                error!("Service error: {}. Restarting in {} seconds...", e, RABBITMQ_RETRY_SECS);
+                common::log_error!("Service error: {}. Restarting in {} seconds...", e, RABBITMQ_RETRY_SECS);
             }
         }
         tokio::time::sleep(std::time::Duration::from_secs(RABBITMQ_RETRY_SECS)).await;
@@ -121,7 +120,7 @@ async fn run_main_loop() -> Result<()> {
     let purged = node_signal_channel
         .queue_purge(NODE_SIGNAL_QUEUE, QueuePurgeOptions::default())
         .await?;
-    info!("Declared queue: {} (purged {} stale messages)", NODE_SIGNAL_QUEUE, purged);
+    common::log_info!("Declared queue: {} (purged {} stale messages)", NODE_SIGNAL_QUEUE, purged);
 
     broadcast_channel
         .exchange_declare(
@@ -131,7 +130,7 @@ async fn run_main_loop() -> Result<()> {
             FieldTable::default(),
         )
         .await?;
-    info!("Declared exchange: {}", NODE_BROADCAST_EXCHANGE);
+    common::log_info!("Declared exchange: {}", NODE_BROADCAST_EXCHANGE);
 
     let client_signal_channel = connection.create_channel().await?;
     client_signal_channel
@@ -148,7 +147,7 @@ async fn run_main_loop() -> Result<()> {
     let purged = client_signal_channel
         .queue_purge(CLIENT_SIGNAL_QUEUE, QueuePurgeOptions::default())
         .await?;
-    info!("Declared queue: {} (purged {} stale messages)", CLIENT_SIGNAL_QUEUE, purged);
+    common::log_info!("Declared queue: {} (purged {} stale messages)", CLIENT_SIGNAL_QUEUE, purged);
 
     broadcast_channel
         .exchange_declare(
@@ -158,7 +157,7 @@ async fn run_main_loop() -> Result<()> {
             FieldTable::default(),
         )
         .await?;
-    info!("Declared exchange: {}", CLIENT_BROADCAST_EXCHANGE);
+    common::log_info!("Declared exchange: {}", CLIENT_BROADCAST_EXCHANGE);
 
     //
     // Initialise service components.
@@ -177,7 +176,7 @@ async fn run_main_loop() -> Result<()> {
     // Supports SQLite (default) or PostgreSQL via PRAXIS_DATABASE_URL.
     //
     let db_config = DatabaseConfig::from_env();
-    info!("Database configuration: {}", db_config.display_name());
+    common::log_info!("Database configuration: {}", db_config.display_name());
 
     let database = Arc::new(Database::new(&db_config).await?);
 
@@ -204,7 +203,7 @@ async fn run_main_loop() -> Result<()> {
                             if let Err(e) = database.upsert_lua_agent_script(
                                 &id, name, content, false, true, Some(current_version),
                             ).await {
-                                warn!("Failed to seed Lua agent script '{}': {}", name, e);
+                                common::log_warn!("Failed to seed Lua agent script '{}': {}", name, e);
                             } else {
                                 seeded += 1;
                             }
@@ -213,7 +212,7 @@ async fn run_main_loop() -> Result<()> {
                             if let Err(e) = database.upsert_lua_agent_script(
                                 &s.id, name, content, s.disabled, true, Some(current_version),
                             ).await {
-                                warn!("Failed to update builtin script '{}': {}", name, e);
+                                common::log_warn!("Failed to update builtin script '{}': {}", name, e);
                             } else {
                                 updated += 1;
                             }
@@ -223,10 +222,10 @@ async fn run_main_loop() -> Result<()> {
                 }
 
                 if seeded > 0 {
-                    info!("Seeded {} new default Lua agent script(s)", seeded);
+                    common::log_info!("Seeded {} new default Lua agent script(s)", seeded);
                 }
                 if updated > 0 {
-                    info!("Updated {} builtin Lua agent script(s) to version {}", updated, current_version);
+                    common::log_info!("Updated {} builtin Lua agent script(s) to version {}", updated, current_version);
                 }
 
                 if should_update {
@@ -234,7 +233,7 @@ async fn run_main_loop() -> Result<()> {
                 }
             }
             Err(e) => {
-                warn!("Failed to check Lua agent scripts for seeding: {}", e);
+                common::log_warn!("Failed to check Lua agent scripts for seeding: {}", e);
             }
         }
     }
@@ -245,10 +244,10 @@ async fn run_main_loop() -> Result<()> {
     //
     match database.mark_running_as_failed().await {
         Ok(failed_count) if failed_count > 0 => {
-            info!("Marked {} running operations as failed due to service restart", failed_count);
+            common::log_info!("Marked {} running operations as failed due to service restart", failed_count);
         }
         Err(e) => {
-            warn!("Failed to mark running operations as failed: {} (continuing anyway)", e);
+            common::log_warn!("Failed to mark running operations as failed: {} (continuing anyway)", e);
         }
         _ => {}
     }
@@ -259,10 +258,10 @@ async fn run_main_loop() -> Result<()> {
     //
     match database.mark_running_chain_executions_as_failed().await {
         Ok(failed_chains) if failed_chains > 0 => {
-            info!("Marked {} running chain executions as failed due to service restart", failed_chains);
+            common::log_info!("Marked {} running chain executions as failed due to service restart", failed_chains);
         }
         Err(e) => {
-            warn!("Failed to mark running chain executions as failed: {} (continuing anyway)", e);
+            common::log_warn!("Failed to mark running chain executions as failed: {} (continuing anyway)", e);
         }
         _ => {}
     }
@@ -286,13 +285,13 @@ async fn run_main_loop() -> Result<()> {
         response_tracker.clone(),
     ));
 
-    info!("Initialized semantic operations manager");
+    common::log_info!("Initialized semantic operations manager");
 
     //
     // Initialize chain executor.
     //
     let chain_executor = Arc::new(ChainExecutor::new());
-    info!("Initialized chain executor");
+    common::log_info!("Initialized chain executor");
 
     //
     // Initialize AgentChat manager.
@@ -304,19 +303,19 @@ async fn run_main_loop() -> Result<()> {
         node_registry.clone(),
         pending_commands.clone(),
     ));
-    info!("Initialized AgentChat manager");
+    common::log_info!("Initialized AgentChat manager");
 
     //
     // Initialize Orchestrator manager.
     //
     let orchestrator_manager = Arc::new(OrchestratorManager::new());
-    info!("Initialized Orchestrator manager");
+    common::log_info!("Initialized Orchestrator manager");
 
     //
     // Initialize event logging system.
     //
     let (event_log_tx, mut event_log_rx) = tokio::sync::mpsc::unbounded_channel();
-    common::logging::init("service".to_string(), event_log_tx);
+    common::logging::init("service".to_string(), String::new(), event_log_tx);
 
     //
     // Spawn task to process event log entries.
@@ -325,12 +324,12 @@ async fn run_main_loop() -> Result<()> {
     tokio::spawn(async move {
         while let Some(entry) = event_log_rx.recv().await {
             if let Err(e) = event_log_database.insert_event_log(&entry).await {
-                error!("Failed to insert event log entry: {}", e);
+                common::log_error!("Failed to insert event log entry: {}", e);
             }
         }
     });
 
-    info!("Initialized event logging system");
+    common::log_info!("Initialized event logging system");
     common::log_info!("Service started successfully");
 
     //
@@ -344,7 +343,7 @@ async fn run_main_loop() -> Result<()> {
             FieldTable::default(),
         )
         .await?;
-    info!("Declared queue: {}", common::WEB_EVENT_LOG_QUEUE);
+    common::log_info!("Declared queue: {}", common::WEB_EVENT_LOG_QUEUE);
 
     let node_event_log_channel = connection.create_channel().await?;
     node_event_log_channel
@@ -354,7 +353,7 @@ async fn run_main_loop() -> Result<()> {
             FieldTable::default(),
         )
         .await?;
-    info!("Declared queue: {}", common::NODE_EVENT_LOG_QUEUE);
+    common::log_info!("Declared queue: {}", common::NODE_EVENT_LOG_QUEUE);
 
     let mut web_event_log_consumer = web_event_log_channel
         .basic_consume(
@@ -387,20 +386,20 @@ async fn run_main_loop() -> Result<()> {
                         Ok(entry) => {
                             if common::logging::is_event_log_enabled() {
                                 if let Err(e) = database_for_web_logs.insert_event_log(&entry).await {
-                                    error!("Failed to insert web event log: {}", e);
+                                    common::log_error!("Failed to insert web event log: {}", e);
                                 }
                             }
                         }
                         Err(e) => {
-                            error!("Failed to deserialize web event log: {}", e);
+                            common::log_error!("Failed to deserialize web event log: {}", e);
                         }
                     }
                     if let Err(e) = delivery.ack(BasicAckOptions::default()).await {
-                        error!("Failed to ack web event log message: {}", e);
+                        common::log_error!("Failed to ack web event log message: {}", e);
                     }
                 }
                 Err(e) => {
-                    error!("Error receiving web event log: {}", e);
+                    common::log_error!("Error receiving web event log: {}", e);
                 }
             }
         }
@@ -416,26 +415,26 @@ async fn run_main_loop() -> Result<()> {
                         Ok(entry) => {
                             if common::logging::is_event_log_enabled() {
                                 if let Err(e) = database_for_node_logs.insert_event_log(&entry).await {
-                                    error!("Failed to insert node event log: {}", e);
+                                    common::log_error!("Failed to insert node event log: {}", e);
                                 }
                             }
                         }
                         Err(e) => {
-                            error!("Failed to deserialize node event log: {}", e);
+                            common::log_error!("Failed to deserialize node event log: {}", e);
                         }
                     }
                     if let Err(e) = delivery.ack(BasicAckOptions::default()).await {
-                        error!("Failed to ack node event log message: {}", e);
+                        common::log_error!("Failed to ack node event log message: {}", e);
                     }
                 }
                 Err(e) => {
-                    error!("Error receiving node event log: {}", e);
+                    common::log_error!("Error receiving node event log: {}", e);
                 }
             }
         }
     });
 
-    info!("Started event log consumers for web and nodes");
+    common::log_info!("Started event log consumers for web and nodes");
 
 
     //
@@ -443,7 +442,7 @@ async fn run_main_loop() -> Result<()> {
     //
     let service_online_message = ClientBroadcastMessage::ServiceOnline;
     let _ = publish_json_exchange(&broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &service_online_message).await;
-    info!("Broadcast ServiceOnline to clients");
+    common::log_info!("Broadcast ServiceOnline to clients");
 
     //
     // Broadcast current event logging setting to clients and nodes.
@@ -500,7 +499,7 @@ async fn run_main_loop() -> Result<()> {
             //
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             if let Err(e) = broadcast_state_to_clients(&broadcast_channel_clone, &node_registry_broadcast).await {
-                error!("Failed to broadcast state to clients: {}", e);
+                common::log_error!("Failed to broadcast state to clients: {}", e);
             }
         }
     });
@@ -527,7 +526,7 @@ async fn run_main_loop() -> Result<()> {
             let updates = match ops_manager_broadcast.get_all_updates().await {
                 Ok(u) => u,
                 Err(e) => {
-                    error!("Failed to get operation updates: {}", e);
+                    common::log_error!("Failed to get operation updates: {}", e);
                     continue;
                 }
             };
@@ -554,7 +553,7 @@ async fn run_main_loop() -> Result<()> {
             let port = config.get_mcp_server_port();
             let url = rabbitmq_url();
             if let Err(e) = mcp_manager.start(&url, port).await {
-                error!("Failed to start MCP server: {}", e);
+                common::log_error!("Failed to start MCP server: {}", e);
             }
         }
     }
@@ -587,7 +586,7 @@ async fn run_main_loop() -> Result<()> {
     // queues.
     //
 
-    info!("Waiting for messages on {} and {}...", NODE_SIGNAL_QUEUE, CLIENT_SIGNAL_QUEUE);
+    common::log_info!("Waiting for messages on {} and {}...", NODE_SIGNAL_QUEUE, CLIENT_SIGNAL_QUEUE);
 
     loop {
         tokio::select! {
@@ -597,20 +596,20 @@ async fn run_main_loop() -> Result<()> {
                         match serde_json::from_slice::<NodeSignalMessage>(&delivery.data) {
                             Ok(message) => {
                                 if let Err(e) = dispatch::node::handle(&ctx, message).await {
-                                    error!("Error handling node message: {}", e);
+                                    common::log_error!("Error handling node message: {}", e);
                                 }
                             }
                             Err(e) => {
-                                error!("Failed to deserialize node message: {}", e);
+                                common::log_error!("Failed to deserialize node message: {}", e);
                             }
                         }
 
                         if let Err(e) = delivery.ack(BasicAckOptions::default()).await {
-                            error!("Failed to ack message: {}", e);
+                            common::log_error!("Failed to ack message: {}", e);
                         }
                     }
                     Err(e) => {
-                        error!("Error receiving node message: {}", e);
+                        common::log_error!("Error receiving node message: {}", e);
                         return Ok(());
                     }
                 }
@@ -621,20 +620,20 @@ async fn run_main_loop() -> Result<()> {
                         match serde_json::from_slice::<ClientSignalMessage>(&delivery.data) {
                             Ok(message) => {
                                 if let Err(e) = dispatch::client::handle(&ctx, message).await {
-                                    error!("Error handling client message: {}", e);
+                                    common::log_error!("Error handling client message: {}", e);
                                 }
                             }
                             Err(e) => {
-                                error!("Failed to deserialize client message: {}", e);
+                                common::log_error!("Failed to deserialize client message: {}", e);
                             }
                         }
 
                         if let Err(e) = delivery.ack(BasicAckOptions::default()).await {
-                            error!("Failed to ack message: {}", e);
+                            common::log_error!("Failed to ack message: {}", e);
                         }
                     }
                     Err(e) => {
-                        error!("Error receiving client message: {}", e);
+                        common::log_error!("Error receiving client message: {}", e);
                         return Ok(());
                     }
                 }

@@ -16,7 +16,6 @@ use rmcp::{
     transport::SseClientTransport,
     ServiceExt,
 };
-use tracing::{error, info, warn};
 
 use crate::config::ServiceConfig;
 use crate::messaging::send_to_client;
@@ -179,12 +178,12 @@ impl OrchestratorManager {
                 // Connect to MCP SSE server (this is the slow part).
                 //
                 let sse_url = format!("http://127.0.0.1:{}/sse", mcp_port);
-                info!("Orchestrator connecting to MCP server at {}", sse_url);
+                common::log_info!("Orchestrator connecting to MCP server at {}", sse_url);
 
                 let transport = match SseClientTransport::start(sse_url.clone()).await {
                     Ok(t) => t,
                     Err(e) => {
-                        error!("Failed to connect to MCP server at {}: {}", sse_url, e);
+                        common::log_error!("Failed to connect to MCP server at {}: {}", sse_url, e);
                         let _ = send_to_client(
                             &publish_channel_clone,
                             &client_id_owned,
@@ -199,7 +198,7 @@ impl OrchestratorManager {
                 let mcp_service = match ().serve(transport).await {
                     Ok(s) => s,
                     Err(e) => {
-                        error!("Failed to initialize MCP client: {}", e);
+                        common::log_error!("Failed to initialize MCP client: {}", e);
                         let _ = send_to_client(
                             &publish_channel_clone,
                             &client_id_owned,
@@ -216,7 +215,7 @@ impl OrchestratorManager {
                 let mcp_tools = match peer.list_all_tools().await {
                     Ok(t) => t,
                     Err(e) => {
-                        error!("Failed to list MCP tools: {}", e);
+                        common::log_error!("Failed to list MCP tools: {}", e);
                         let _ = send_to_client(
                             &publish_channel_clone,
                             &client_id_owned,
@@ -228,14 +227,14 @@ impl OrchestratorManager {
                     }
                 };
 
-                info!("Orchestrator fetched {} tools from MCP server", mcp_tools.len());
+                common::log_info!("Orchestrator fetched {} tools from MCP server", mcp_tools.len());
 
                 let mut tools = convert_mcp_tools(mcp_tools);
                 tools.extend(get_local_tool_definitions());
 
                 let system_prompt = get_system_prompt_with_tools(ORCHESTRATOR_PROMPT, &tools);
 
-                info!(
+                common::log_info!(
                     "Orchestrator ready for client {} with provider {:?}, model {}, max_tokens {}, tools {}",
                     &client_id_owned[..8.min(client_id_owned.len())], provider, model, max_tokens, tools.len()
                 );
@@ -253,7 +252,7 @@ impl OrchestratorManager {
 
                     cancel_flag_clone.store(false, Ordering::SeqCst);
 
-                    info!(
+                    common::log_info!(
                         "Orchestrator received prompt for {}: {}...",
                         &client_id_owned[..8.min(client_id_owned.len())],
                         &prompt[..prompt.len().min(50)]
@@ -291,7 +290,7 @@ impl OrchestratorManager {
                             },
                             Err(e) => {
                                 let err_msg = format!("AI request failed: {}", e);
-                                error!("{}", err_msg);
+                                common::log_error!("{}", err_msg);
                                 let _ = send_to_client(
                                     &publish_channel_clone,
                                     &client_id_owned,
@@ -323,7 +322,7 @@ impl OrchestratorManager {
                                 break;
                             }
 
-                            info!("Orchestrator executing tool: {}", tool_name);
+                            common::log_info!("Orchestrator executing tool: {}", tool_name);
 
                             let tool_input_display = if tool_name == "session_prompt" {
                                 tool_args.get("text").and_then(|v| v.as_str()).map(String::from)
@@ -353,7 +352,7 @@ impl OrchestratorManager {
                                 .and_then(|v| v.get("display").and_then(|d| d.as_str()).map(String::from))
                                 .unwrap_or_else(|| if success { "Done".to_string() } else { "Error".to_string() });
 
-                            info!("Tool {} result: {}", tool_name, &result[..result.len().min(100)]);
+                            common::log_info!("Tool {} result: {}", tool_name, &result[..result.len().min(100)]);
 
                             if tool_name == "report_plan" {
                                 if let Ok(result_json) = serde_json::from_str::<Value>(&result) {
@@ -443,7 +442,7 @@ impl OrchestratorManager {
         let sessions = self.sessions.read().await;
         if let Some(session) = sessions.get(client_id) {
             if let Err(e) = session.prompt_tx.send(message).await {
-                warn!("Failed to send prompt to Orchestrator session: {}", e);
+                common::log_warn!("Failed to send prompt to Orchestrator session: {}", e);
                 let _ = send_to_client(
                     publish_channel,
                     client_id,

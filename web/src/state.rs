@@ -105,17 +105,9 @@ impl AppState {
 
     /// Broadcast a message to all connected WebSocket clients
     pub fn broadcast(&self, message: ServerMessage) {
-        //
-        // Log receiver count for debugging.
-        //
-        let receiver_count = self.broadcast_tx.receiver_count();
-        match self.broadcast_tx.send(message) {
-            Ok(_) => {
-                common::log_debug!("[WEB] Broadcast sent to {} receivers", receiver_count);
-            }
-            Err(_) => {
-                common::log_warn!("[WEB] Broadcast failed - no receivers (count: {})", receiver_count);
-            }
+        if let Err(_) = self.broadcast_tx.send(message) {
+            let receiver_count = self.broadcast_tx.receiver_count();
+            common::log_warn!("[WEB] Broadcast failed - no receivers (count: {})", receiver_count);
         }
     }
 

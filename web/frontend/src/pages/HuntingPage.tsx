@@ -29,6 +29,18 @@ const TABLES: TableInfo[] = [
     ],
   },
   {
+    name: 'EventLogs',
+    description: 'System event log entries',
+    source: 'Database',
+    columns: [
+      { name: 'timestamp', description: 'Event time' },
+      { name: 'source', description: 'Event source' },
+      { name: 'level', description: 'Log level' },
+      { name: 'target', description: 'Log target module' },
+      { name: 'message', description: 'Log message' },
+    ],
+  },
+  {
     name: 'NodeLogs',
     description: 'Connected nodes',
     source: 'In-memory',
@@ -249,7 +261,7 @@ function HorizontalResizeHandle({ onDrag }: { onDrag: (deltaY: number) => void }
 export function HuntingPage() {
   const { state, huntingQuery, huntingSetQuery } = useApp();
   const query = state.hunting.query;
-  const [showReference, setShowReference] = useState(true);
+  const [showReference, setShowReference] = useState(false);
   const [editorHeight, setEditorHeight] = useState(DEFAULT_EDITOR_HEIGHT);
   const resultsRef = useRef<HTMLDivElement>(null);
   const [resultsMaxHeight, setResultsMaxHeight] = useState('70vh');

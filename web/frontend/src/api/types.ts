@@ -623,6 +623,7 @@ export type BrowserMessage =
   | { type: 'semantic_op_cancel'; operation_id: string }
   | { type: 'semantic_op_remove'; operation_id: string }
   | { type: 'semantic_op_clear' }
+  | { type: 'application_log_clear'; node_id: string | null }
   | { type: 'semantic_op_list_request' }
   | { type: 'remove_node'; node_id: string }
   | { type: 'config_get'; keys: string[] }
