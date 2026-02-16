@@ -10,7 +10,7 @@ use super::{Database, DatabasePool};
 const MAX_EVENT_LOG_ENTRIES: usize = 1_000_000;
 
 /// Maximum number of event log entries to return in a single query
-const MAX_EVENT_LOG_QUERY_LIMIT: usize = 10_000;
+const MAX_EVENT_LOG_QUERY_LIMIT: usize = 1_000_000;
 
 impl Database {
     /// Insert an event log entry

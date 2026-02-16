@@ -16,7 +16,7 @@ use super::tables::{
     materialize_recon_tool_logs, resolve_table, table_columns,
 };
 
-const MAX_RESULT_ROWS: usize = 10_000;
+const MAX_RESULT_ROWS: usize = 1_000_000;
 
 pub struct HuntingResult {
     pub columns: Vec<String>,
