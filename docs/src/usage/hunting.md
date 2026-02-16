@@ -1,6 +1,6 @@
 # Hunting
 
-The Hunting feature provides a KQL (Kusto Query Language) query interface for exploring and correlating data across Praxis virtual tables. Write KQL queries in a code editor, execute them with Ctrl+Enter, and browse paginated results.
+The Hunting feature provides a KQL-like query interface for exploring and correlating data across Praxis virtual tables. The syntax is inspired by Kusto Query Language but only a subset of KQL is implemented — not all features or functions from the full Kusto specification will work. Write queries in the code editor, execute them with Ctrl+Enter, and browse paginated results.
 
 ## Available Tables
 
@@ -232,8 +232,8 @@ In-memory tables (NodeLogs, AgentLogs) and JSON-expanded tables (ReconLogs, Reco
 
 ### Result Limits
 
-Results are capped at 50,000,000 rows from the service. The `total_count` field reflects the actual count before capping. Use `take` or `limit` to reduce result size for large tables.
+Results are capped by the `hunting_query_row_limit` setting, which defaults to 10,000,000 rows. This limit can be configured in **Settings > Service > Event Logging**. The `total_count` field reflects the actual count before capping. Use `take` or `limit` to reduce result size for large tables.
 
 ## KQL Parser
 
-The hunting feature uses a vendored fork of the [kqlparser](https://github.com/irtimmer/rust-kql) crate (v0.0.4, Apache-2.0) for parsing KQL syntax. The vendored copy lives in `service/src/hunting/parser/` and includes fixes for multiline join expressions and native `$left`/`$right` join key syntax. Not all KQL features from the full Kusto specification are supported.
+The hunting feature uses a vendored fork of the [kqlparser](https://github.com/irtimmer/rust-kql) crate (v0.0.4, Apache-2.0) for parsing KQL syntax. The vendored copy lives in `service/src/hunting/parser/` and includes fixes for multiline join expressions and native `$left`/`$right` join key syntax. Only the subset of KQL operators and functions listed above are supported; unsupported constructs will return an error.
