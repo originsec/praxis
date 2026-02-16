@@ -1392,6 +1392,41 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
     ));
   }, [setEdges]);
 
+  //
+  // Double-click edge to cycle condition: None → OnSuccess → OnFailure → None.
+  //
+  const onEdgeDoubleClick = useCallback((_: React.MouseEvent, edge: Edge) => {
+    setEdges(eds => eds.map(e => {
+      if (e.id !== edge.id) return e;
+      const currentCondition = (e.data as Record<string, unknown>)?.condition as string | null;
+      let nextCondition: string | null;
+      let stroke: string;
+      let label: string | undefined;
+
+      if (!currentCondition) {
+        nextCondition = 'OnSuccess';
+        stroke = 'var(--accent-success)';
+        label = 'Success';
+      } else if (currentCondition === 'OnSuccess') {
+        nextCondition = 'OnFailure';
+        stroke = 'var(--accent-error)';
+        label = 'Failure';
+      } else {
+        nextCondition = null;
+        stroke = 'var(--text-secondary)';
+        label = undefined;
+      }
+
+      return {
+        ...e,
+        style: { ...e.style, stroke },
+        label,
+        labelStyle: label ? { fill: stroke, fontSize: 10, fontWeight: 500 } : undefined,
+        data: { ...((e.data as object) || {}), condition: nextCondition },
+      };
+    }));
+  }, [setEdges]);
+
   const onEdgeMouseLeave = useCallback((_: React.MouseEvent, edge: Edge) => {
     setHoveredEdgeId(null);
     //
@@ -1548,6 +1583,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           onNodeDoubleClick={onNodeDoubleClick}
           onEdgeMouseEnter={onEdgeMouseEnter}
           onEdgeMouseLeave={onEdgeMouseLeave}
+          onEdgeDoubleClick={onEdgeDoubleClick}
           onPaneClick={onPaneClick}
           onSelectionChange={onSelectionChange}
           nodeTypes={nodeTypes}
@@ -1700,7 +1736,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           */}
           <Panel position="bottom-left" className="!m-2">
             <div className="text-[10px] tracking-wide border border-dim bg-[var(--bg-secondary)]/95 px-2.5 py-1.5" style={{ color: 'var(--text-muted)' }}>
-              Drag from handles to connect • Ctrl+Click to multi-select • Delete to remove
+              Drag from handles to connect • Double-click connection for Success/Failure • Ctrl+Click to multi-select • Delete to remove
             </div>
           </Panel>
         </ReactFlow>

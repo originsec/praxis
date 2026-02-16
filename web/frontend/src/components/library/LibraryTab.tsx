@@ -487,7 +487,7 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
   //
   if (showChainBuilder) {
     return (
-      <div className="h-[calc(100vh-280px)] min-h-[300px] border border-subtle ascii-box">
+      <div className="flex-1 min-h-[400px] border border-subtle" style={{ height: 'calc(100vh - 160px)' }}>
         <ChainBuilder
           chain={editingChainId ? currentChain : null}
           onSave={handleSaveChain}
