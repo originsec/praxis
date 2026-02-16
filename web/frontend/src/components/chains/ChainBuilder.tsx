@@ -211,9 +211,9 @@ function LoopNode({ data, selected }: { data: { label: string; maxIterations: nu
         <span className="text-sm font-mono">Loop</span>
         <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] font-mono">max {data.maxIterations}</span>
       </div>
-      <div className="flex justify-between text-[9px] text-muted mt-1">
-        <span>Retry</span>
-        <span>Done</span>
+      <div className="flex flex-col items-end text-[9px] text-muted mt-1 gap-0.5">
+        <span className="text-[var(--accent-warning)]">↻ retry</span>
+        <span>→ done</span>
       </div>
     </div>
   );
