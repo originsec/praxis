@@ -145,6 +145,7 @@ async fn process_events_until_done(
     let mut output_lines: usize = 0;
     let mut current_plan: Option<OrchestratorPlan> = None;
     let mut current_tool: Option<String> = None;
+    let mut has_token_line = false;
 
     //
     // Enable raw mode for key event detection (Ctrl+O toggle, Ctrl+C
@@ -233,6 +234,11 @@ async fn process_events_until_done(
                         clear_output(output_lines);
                         output_lines = 0;
 
+                        if has_token_line {
+                            render_token_line(total_prompt_tokens, total_completion_tokens, total_tokens);
+                            output_lines += 1;
+                        }
+
                         current_plan = Some(plan);
                         output_lines += render_plan(current_plan.as_ref().unwrap());
 
@@ -250,12 +256,36 @@ async fn process_events_until_done(
                         total_completion_tokens += completion_tokens;
                         total_tokens += batch_total;
 
-                        let usage = format!(
-                            "  tokens: {} prompt + {} completion = {}",
-                            total_prompt_tokens, total_completion_tokens, total_tokens
-                        );
-                        print!("\r\x1B[2K{}", usage.dimmed());
-                        let _ = std::io::stdout().flush();
+                        if let Some(s) = spinner.take() {
+                            s.finish().await;
+                        }
+
+                        if !has_token_line {
+                            render_token_line(total_prompt_tokens, total_completion_tokens, total_tokens);
+                            output_lines += 1;
+                            has_token_line = true;
+                        } else {
+                            //
+                            // Navigate up to the token line (first tracked
+                            // line), update in-place, then return.
+                            //
+
+                            print!("\r\x1B[2K");
+                            if output_lines > 0 {
+                                print!("\x1B[{}A", output_lines);
+                            }
+                            print!("\r\x1B[2K  {}", format_token_usage(total_prompt_tokens, total_completion_tokens, total_tokens).dimmed());
+                            if output_lines > 0 {
+                                print!("\x1B[{}B", output_lines);
+                            }
+                            print!("\r");
+                            let _ = std::io::stdout().flush();
+                        }
+
+                        if let Some(ref name) = current_tool {
+                            let label = spinner_label(name, tool_calls.len(), *expanded);
+                            spinner = Some(Spinner::start_with_elapsed(&label));
+                        }
                     }
                     ClientDirectMessage::OrchestratorError { message } => {
                         if let Some(s) = spinner.take() {
@@ -267,10 +297,6 @@ async fn process_events_until_done(
                     ClientDirectMessage::OrchestratorDone => {
                         if let Some(s) = spinner.take() {
                             s.finish().await;
-                        }
-
-                        if total_tokens > 0 {
-                            rprintln!();
                         }
 
                         if !tool_calls.is_empty() {
@@ -340,6 +366,11 @@ async fn process_events_until_done(
                             *expanded = !*expanded;
                             output_lines = 0;
 
+                            if has_token_line {
+                                render_token_line(total_prompt_tokens, total_completion_tokens, total_tokens);
+                                output_lines += 1;
+                            }
+
                             if let Some(ref plan) = current_plan {
                                 output_lines += render_plan(plan);
                             }
@@ -380,6 +411,14 @@ async fn process_events_until_done(
             }
         }
     }
+}
+
+fn format_token_usage(prompt: u32, completion: u32, total: u32) -> String {
+    format!("tokens: {} prompt + {} completion = {}", prompt, completion, total)
+}
+
+fn render_token_line(prompt: u32, completion: u32, total: u32) {
+    rprintln!("  {}", format_token_usage(prompt, completion, total).dimmed());
 }
 
 fn spinner_label(name: &str, tool_count: usize, expanded: bool) -> String {
