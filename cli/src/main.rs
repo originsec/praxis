@@ -133,18 +133,12 @@ fn print_fullhelp() {
     println!("================================================================================");
     println!();
 
-    //
-    // Print main help.
-    //
     println!("MAIN COMMAND");
     println!("------------");
     cmd.print_help().ok();
     println!();
     println!();
 
-    //
-    // Print help for each subcommand.
-    //
     let subcommands = ["node", "agent", "recon", "session", "traffic", "op", "orchestrate"];
 
     for sub_name in subcommands {
@@ -158,9 +152,6 @@ fn print_fullhelp() {
             println!();
             println!();
 
-            //
-            // Print help for nested subcommands.
-            //
             let nested: Vec<String> = sub
                 .get_subcommands()
                 .map(|s| s.get_name().to_string())
@@ -224,26 +215,17 @@ fn main() {
 async fn run() -> Result<()> {
     let cli = Cli::parse();
 
-    //
-    // Handle --fullhelp early.
-    //
     if cli.fullhelp {
         print_fullhelp();
         return Ok(());
     }
 
-    //
-    // Handle --clear early.
-    //
     if cli.clear {
         state::CliState::clear()?;
         output::print_success("Local state cleared");
         return Ok(());
     }
 
-    //
-    // Handle --status early.
-    //
     if cli.status {
         let mut cli_state = state::CliState::load()?;
         let client_id = cli_state.get_or_create_client_id()?;
@@ -273,9 +255,6 @@ async fn run() -> Result<()> {
         return Ok(());
     }
 
-    //
-    // Handle --mcp early.
-    //
     if cli.mcp {
         return mcp::run_server(&cli.rabbitmq_url, cli.timeout).await;
     }

@@ -138,9 +138,7 @@ pub struct ChainConnection {
 pub struct ChainDefinition {
     /// Unique chain ID (UUID)
     pub id: String,
-    /// Human-readable name
     pub name: String,
-    /// Description
     pub description: String,
     /// Category for organization
     pub category: String,

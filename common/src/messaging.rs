@@ -821,7 +821,6 @@ pub struct OperationDefinitionInfo {
     pub short_name: String,
     /// Display name
     pub name: String,
-    /// Description
     pub description: String,
     /// Information for semantic agents
     pub agent_info: String,
@@ -944,9 +943,7 @@ pub struct ChainConnection {
 /// Complete chain definition (for create/update)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainDefinitionInput {
-    /// Human-readable name
     pub name: String,
-    /// Description
     pub description: String,
     /// Category for organization
     pub category: String,
@@ -2137,7 +2134,6 @@ pub struct TrafficSearchFilters {
 /// Intercept status for a node
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct InterceptStatus {
-    /// Node ID
     pub node_id: String,
     /// Whether interception is enabled
     pub enabled: bool,

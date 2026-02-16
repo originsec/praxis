@@ -1,9 +1,11 @@
 use anyhow::Result;
 use colored::Colorize;
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use futures_util::StreamExt;
 use rustyline::error::ReadlineError;
 use rustyline::history::DefaultHistory;
 use rustyline::{Config, Editor};
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use tokio::sync::mpsc;
 
 use common::{ClientDirectMessage, OrchestratorPlan, PlanStepStatus};
@@ -11,28 +13,58 @@ use common::{ClientDirectMessage, OrchestratorPlan, PlanStepStatus};
 use crate::client::CliClient;
 use crate::spinner::Spinner;
 
+//
+// Raw-mode-safe println: uses \r\n so output renders correctly regardless of
+// the terminal OPOST setting. Harmless in cooked mode (\r before \r\n is
+// redundant but invisible).
+//
+
+macro_rules! rprintln {
+    () => {{
+        print!("\r\n");
+        let _ = std::io::stdout().flush();
+    }};
+    ($($arg:tt)*) => {{
+        print!("{}\r\n", format!($($arg)*));
+        let _ = std::io::stdout().flush();
+    }};
+}
+
+struct RawModeGuard;
+
+impl RawModeGuard {
+    fn enable() -> Option<Self> {
+        crossterm::terminal::enable_raw_mode().ok().map(|_| Self)
+    }
+}
+
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        let _ = crossterm::terminal::disable_raw_mode();
+    }
+}
+
 pub async fn execute(client: &mut CliClient) -> Result<()> {
-    //
-    // Subscribe to orchestrator events before starting the session.
-    //
     let mut event_rx = client.subscribe_orchestrator_events();
 
     client.start_orchestrator().await?;
 
-    //
-    // Wait for OrchestratorStarted or OrchestratorError.
-    //
     let started = wait_for_started(&mut event_rx).await;
     if !started {
         client.unsubscribe_orchestrator_events().await;
         return Ok(());
     }
 
-    println!("  {}", "Type your prompt, Ctrl+C to cancel inference, Ctrl+D to exit".dimmed());
+    println!(
+        "  {}",
+        "Type your prompt, Ctrl+C to cancel, Ctrl+O to toggle tool details, Ctrl+D to exit"
+            .dimmed()
+    );
     println!();
 
     let config = Config::builder().build();
     let mut rl: Editor<(), DefaultHistory> = Editor::with_config(config)?;
+    let mut expanded = false;
 
     loop {
         let line = rl.readline(&format!("  {} ", "▸".bold()));
@@ -47,15 +79,9 @@ pub async fn execute(client: &mut CliClient) -> Result<()> {
 
                 client.send_orchestrator_prompt(trimmed.to_string()).await?;
 
-                //
-                // Process events until Done.
-                //
-                process_events_until_done(client, &mut event_rx).await;
+                process_events_until_done(client, &mut event_rx, &mut expanded).await;
             }
             Err(ReadlineError::Interrupted) => {
-                //
-                // Ctrl+C at prompt — exit.
-                //
                 break;
             }
             Err(ReadlineError::Eof) => {
@@ -68,9 +94,6 @@ pub async fn execute(client: &mut CliClient) -> Result<()> {
         }
     }
 
-    //
-    // Clean up.
-    //
     client.stop_orchestrator().await?;
     client.unsubscribe_orchestrator_events().await;
     println!();
@@ -111,6 +134,7 @@ async fn wait_for_started(event_rx: &mut mpsc::UnboundedReceiver<ClientDirectMes
 async fn process_events_until_done(
     client: &CliClient,
     event_rx: &mut mpsc::UnboundedReceiver<ClientDirectMessage>,
+    expanded: &mut bool,
 ) {
     let mut spinner: Option<Spinner> = None;
     let mut accumulated_content = String::new();
@@ -118,23 +142,36 @@ async fn process_events_until_done(
     let mut total_prompt_tokens: u32 = 0;
     let mut total_completion_tokens: u32 = 0;
     let mut total_tokens: u32 = 0;
+    let mut output_lines: usize = 0;
+    let mut current_plan: Option<OrchestratorPlan> = None;
+    let mut current_tool: Option<String> = None;
 
     //
-    // Install Ctrl+C handler for cancelling inference.
+    // Enable raw mode for key event detection (Ctrl+O toggle, Ctrl+C
+    // cancel). Falls back to signal-based Ctrl+C when not a TTY.
     //
-    let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let cancel_flag_clone = cancel_flag.clone();
 
-    let ctrlc_handle = tokio::spawn(async move {
-        loop {
-            if tokio::signal::ctrl_c().await.is_ok() {
-                cancel_flag_clone.store(true, std::sync::atomic::Ordering::SeqCst);
-                break;
-            }
-        }
-    });
+    let _raw_guard = if std::io::stdin().is_terminal() {
+        RawModeGuard::enable()
+    } else {
+        None
+    };
+    let interactive = _raw_guard.is_some();
+
+    let mut term_events = if interactive {
+        Some(EventStream::new())
+    } else {
+        None
+    };
 
     loop {
+        let key_event = async {
+            match &mut term_events {
+                Some(s) => s.next().await,
+                None => std::future::pending().await,
+            }
+        };
+
         tokio::select! {
             event = event_rx.recv() => {
                 let Some(event) = event else { break };
@@ -144,6 +181,7 @@ async fn process_events_until_done(
                         if let Some(s) = spinner.take() {
                             s.finish().await;
                         }
+                        current_tool = None;
                         accumulated_content.push_str(&content);
                     }
                     ClientDirectMessage::OrchestratorToolExecuting { name, input: _ } => {
@@ -157,12 +195,10 @@ async fn process_events_until_done(
                             }
                             print!("\r\x1B[2K");
                             let _ = std::io::stdout().flush();
-                            let count = tool_calls.len();
-                            let label = if count == 0 {
-                                format!("◆ {}", name)
-                            } else {
-                                format!("◆ {} ({})", name, count)
-                            };
+
+                            current_tool = Some(name.clone());
+
+                            let label = spinner_label(&name, tool_calls.len(), *expanded);
                             spinner = Some(Spinner::start_with_elapsed(&label));
                         }
                     }
@@ -171,6 +207,14 @@ async fn process_events_until_done(
                             if let Some(s) = spinner.take() {
                                 s.finish().await;
                             }
+                            current_tool = None;
+
+                            if *expanded {
+                                let icon = if success { "\u{2713}".green() } else { "\u{2717}".red() };
+                                rprintln!("  {} {}", icon, name);
+                                output_lines += 1;
+                            }
+
                             tool_calls.push((name, success));
                         }
                     }
@@ -180,17 +224,36 @@ async fn process_events_until_done(
                         }
                         print!("\r\x1B[2K");
                         let _ = std::io::stdout().flush();
-                        render_plan(&plan);
+
+                        //
+                        // Clear previous output and re-render with the
+                        // updated plan.
+                        //
+
+                        clear_output(output_lines);
+                        output_lines = 0;
+
+                        current_plan = Some(plan);
+                        output_lines += render_plan(current_plan.as_ref().unwrap());
+
+                        if *expanded {
+                            output_lines += render_expanded_tool_calls(&tool_calls);
+                        }
+
+                        if let Some(ref name) = current_tool {
+                            let label = spinner_label(name, tool_calls.len(), *expanded);
+                            spinner = Some(Spinner::start_with_elapsed(&label));
+                        }
                     }
                     ClientDirectMessage::OrchestratorTokenUsage { prompt_tokens, completion_tokens, total_tokens: batch_total } => {
                         total_prompt_tokens += prompt_tokens;
                         total_completion_tokens += completion_tokens;
                         total_tokens += batch_total;
 
-                        //
-                        // Update token counter in-place below the prompt line.
-                        //
-                        let usage = format!("  tokens: {} prompt + {} completion = {}", total_prompt_tokens, total_completion_tokens, total_tokens);
+                        let usage = format!(
+                            "  tokens: {} prompt + {} completion = {}",
+                            total_prompt_tokens, total_completion_tokens, total_tokens
+                        );
                         print!("\r\x1B[2K{}", usage.dimmed());
                         let _ = std::io::stdout().flush();
                     }
@@ -198,32 +261,33 @@ async fn process_events_until_done(
                         if let Some(s) = spinner.take() {
                             s.finish().await;
                         }
-                        eprintln!("  {} {}", "✗".red(), message);
+                        rprintln!("  {} {}", "\u{2717}".red(), message);
+                        output_lines += 1;
                     }
                     ClientDirectMessage::OrchestratorDone => {
                         if let Some(s) = spinner.take() {
                             s.finish().await;
                         }
 
-                        //
-                        // Finalize the in-place token counter line.
-                        //
                         if total_tokens > 0 {
-                            println!();
+                            rprintln!();
                         }
 
                         if !tool_calls.is_empty() {
-                            render_tool_summary(&tool_calls);
+                            if *expanded {
+                                let total = tool_calls.len();
+                                let label = if total == 1 { "tool call" } else { "tool calls" };
+                                rprintln!("  {} {} {}", "\u{2500}\u{2500}".dimmed(), total, label);
+                            } else {
+                                render_tool_summary(&tool_calls);
+                            }
                             tool_calls.clear();
                         }
 
-                        //
-                        // Render accumulated content as markdown.
-                        //
                         if !accumulated_content.trim().is_empty() {
-                            println!();
+                            rprintln!();
                             render_markdown(&accumulated_content);
-                            println!();
+                            rprintln!();
                         }
 
                         accumulated_content.clear();
@@ -238,28 +302,75 @@ async fn process_events_until_done(
                     _ => {}
                 }
             }
-            _ = async {
-                loop {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    if cancel_flag.load(std::sync::atomic::Ordering::SeqCst) {
-                        break;
+
+            Some(Ok(term_event)) = key_event, if interactive => {
+                if let Event::Key(KeyEvent {
+                    code, modifiers, kind: KeyEventKind::Press, ..
+                }) = term_event {
+                    match (code, modifiers) {
+                        (KeyCode::Char('c'), m) if m.contains(KeyModifiers::CONTROL) => {
+                            if let Some(s) = spinner.take() {
+                                s.finish().await;
+                            }
+                            let _ = client.cancel_orchestrator().await;
+                            rprintln!("  {}", "Cancelled".yellow());
+
+                            while let Some(event) = event_rx.recv().await {
+                                if matches!(
+                                    event,
+                                    ClientDirectMessage::OrchestratorDone
+                                        | ClientDirectMessage::OrchestratorStopped
+                                ) {
+                                    break;
+                                }
+                            }
+
+                            accumulated_content.clear();
+                            break;
+                        }
+                        (KeyCode::Char('o'), m) if m.contains(KeyModifiers::CONTROL) => {
+                            if let Some(s) = spinner.take() {
+                                s.finish().await;
+                            }
+                            print!("\r\x1B[2K");
+                            let _ = std::io::stdout().flush();
+
+                            clear_output(output_lines);
+
+                            *expanded = !*expanded;
+                            output_lines = 0;
+
+                            if let Some(ref plan) = current_plan {
+                                output_lines += render_plan(plan);
+                            }
+
+                            if *expanded {
+                                output_lines += render_expanded_tool_calls(&tool_calls);
+                            }
+
+                            if let Some(ref name) = current_tool {
+                                let label = spinner_label(name, tool_calls.len(), *expanded);
+                                spinner = Some(Spinner::start_with_elapsed(&label));
+                            }
+                        }
+                        _ => {}
                     }
                 }
-            } => {
-                //
-                // Ctrl+C during inference — cancel and continue loop.
-                //
+            }
+
+            _ = tokio::signal::ctrl_c(), if !interactive => {
                 if let Some(s) = spinner.take() {
                     s.finish().await;
                 }
                 let _ = client.cancel_orchestrator().await;
-                println!("  {}", "Cancelled".yellow());
+                rprintln!("  {}", "Cancelled".yellow());
 
-                //
-                // Drain until Done.
-                //
                 while let Some(event) = event_rx.recv().await {
-                    if matches!(event, ClientDirectMessage::OrchestratorDone | ClientDirectMessage::OrchestratorStopped) {
+                    if matches!(
+                        event,
+                        ClientDirectMessage::OrchestratorDone
+                            | ClientDirectMessage::OrchestratorStopped
+                    ) {
                         break;
                     }
                 }
@@ -269,8 +380,29 @@ async fn process_events_until_done(
             }
         }
     }
+}
 
-    ctrlc_handle.abort();
+fn spinner_label(name: &str, tool_count: usize, expanded: bool) -> String {
+    if expanded || tool_count == 0 {
+        format!("\u{25c6} {}", name)
+    } else {
+        format!("\u{25c6} {} ({})", name, tool_count)
+    }
+}
+
+fn clear_output(lines: usize) {
+    if lines > 0 {
+        print!("\x1B[{}A\x1B[J", lines);
+        let _ = std::io::stdout().flush();
+    }
+}
+
+fn render_expanded_tool_calls(tool_calls: &[(String, bool)]) -> usize {
+    for (name, success) in tool_calls {
+        let icon = if *success { "\u{2713}".green() } else { "\u{2717}".red() };
+        rprintln!("  {} {}", icon, name);
+    }
+    tool_calls.len()
 }
 
 fn render_tool_summary(tool_calls: &[(String, bool)]) {
@@ -302,45 +434,52 @@ fn render_tool_summary(tool_calls: &[(String, bool)]) {
     let label = if total == 1 { "tool call" } else { "tool calls" };
 
     if failures > 0 {
-        println!(
+        rprintln!(
             "  {} {} {} ({}) \u{00b7} {} failed",
             icon, total, label, parts.join(", "), failures
         );
     } else {
-        println!("  {} {} {} ({})", icon, total, label, parts.join(", "));
+        rprintln!("  {} {} {} ({})", icon, total, label, parts.join(", "));
     }
 }
 
-fn render_plan(plan: &OrchestratorPlan) {
-    println!();
+fn render_plan(plan: &OrchestratorPlan) -> usize {
+    let mut lines = 0;
+
+    rprintln!();
+    lines += 1;
 
     if let Some(ref desc) = plan.current_step_description {
-        println!("  {} {}", "▸".bold(), desc.as_str().bold());
+        rprintln!("  {} {}", "\u{25b8}".bold(), desc.as_str().bold());
+        lines += 1;
     }
 
     for step in &plan.steps {
         let (icon, style) = match step.status {
-            PlanStepStatus::Done => ("✓".to_string().green(), step.description.as_str().dimmed()),
-            PlanStepStatus::InProgress => ("●".to_string().yellow(), step.description.as_str().normal()),
-            PlanStepStatus::NotStarted => ("○".to_string().dimmed(), step.description.as_str().dimmed()),
+            PlanStepStatus::Done => ("\u{2713}".to_string().green(), step.description.as_str().dimmed()),
+            PlanStepStatus::InProgress => ("\u{25cf}".to_string().yellow(), step.description.as_str().normal()),
+            PlanStepStatus::NotStarted => ("\u{25cb}".to_string().dimmed(), step.description.as_str().dimmed()),
         };
-        println!("  {} {}", icon, style);
+        rprintln!("  {} {}", icon, style);
+        lines += 1;
     }
 
     if let Some(ref summary) = plan.summary {
-        println!("  {}", summary.as_str().dimmed());
+        rprintln!("  {}", summary.as_str().dimmed());
+        lines += 1;
     }
 
-    println!();
+    rprintln!();
+    lines += 1;
+
+    lines
 }
 
 fn render_markdown(content: &str) {
     let skin = termimad::MadSkin::default();
     let rendered = skin.text(content, None);
-    //
-    // Indent each line for consistent layout.
-    //
+
     for line in rendered.to_string().lines() {
-        println!("  {}", line);
+        rprintln!("  {}", line);
     }
 }

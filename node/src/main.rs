@@ -69,9 +69,6 @@ async fn main() {
         .with_env_filter(filter)
         .init();
 
-    //
-    // Install the ring crypto provider for rustls.
-    //
     rustls::crypto::ring::default_provider()
         .install_default()
         .expect("Failed to install rustls crypto provider");
@@ -122,9 +119,6 @@ async fn main() {
 
         let selected_agent: Arc<Mutex<Option<Arc<dyn Agent>>>> = Arc::new(Mutex::new(None));
 
-        //
-        // Register with the service via RabbitMQ.
-        //
         let result = match register_with_service(node_id.clone(), shutdown_token.clone()).await {
             Ok(Some(result)) => {
                 common::log_info!(
@@ -155,9 +149,6 @@ async fn main() {
             }
         };
 
-        //
-        // Run the main event loop - listen to queues.
-        //
         match runtime::run(
             Arc::new(result.channel),
             result.node_id,
@@ -171,9 +162,6 @@ async fn main() {
         .await
         {
             Ok(()) => {
-                //
-                // Clean shutdown (e.g., SIGTERM).
-                //
                 common::log_info!("Runtime exited cleanly");
                 break;
             }
@@ -187,9 +175,6 @@ async fn main() {
             break;
         }
 
-        //
-        // Connection lost - reconnect.
-        //
         common::log_warn!(
             "Connection lost. Reconnecting in {} seconds...",
             RECONNECT_DELAY_SECS

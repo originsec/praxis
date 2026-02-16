@@ -1,9 +1,6 @@
 
 #[tokio::main]
 async fn main() {
-    //
-    // Initialize logging.
-    //
     tracing_subscriber::fmt::init();
 
     if let Err(e) = praxis_web::run().await {

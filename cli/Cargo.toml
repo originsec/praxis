@@ -26,3 +26,4 @@ dirs = "5"
 async-trait = "0.1"
 rustyline = "15"
 termimad = "0.31"
+crossterm = { version = "0.29", features = ["event-stream"] }
