@@ -296,18 +296,29 @@ pub async fn execute_hunting_query(
 fn extract_pushdown_hints(operators: &[Operator], table: VirtualTable) -> PushdownHints {
     let mut hints = PushdownHints::default();
     let columns = table_columns(table);
+    let mut has_unpushed_where = false;
 
     for op in operators {
         match op {
             Operator::Where(expr) => {
                 collect_where_hints(expr, &columns, &mut hints);
+                if !where_fully_pushed(expr, &columns) {
+                    has_unpushed_where = true;
+                }
             }
-            Operator::Take(n) => {
+
+            //
+            // Only push take/limit to the DB when every preceding where was
+            // fully captured as a pushdown hint. Otherwise the SQL LIMIT runs
+            // before the in-memory filter, returning wrong results.
+            //
+            Operator::Take(n) if !has_unpushed_where => {
                 let limit = (*n as usize).min(MAX_RESULT_ROWS);
                 hints.take_limit = Some(
                     hints.take_limit.map(|prev| prev.min(limit)).unwrap_or(limit),
                 );
             }
+
             //
             // Stop scanning once we hit a column-reshaping operator.
             //
@@ -382,6 +393,51 @@ fn collect_where_hints(expr: &Expr, columns: &[&str], hints: &mut PushdownHints)
         }
 
         _ => {}
+    }
+}
+
+//
+// Returns true when every predicate in the expression maps to a pushdown
+// hint — i.e. collect_where_hints would fully capture it. When false, a
+// subsequent `take` must NOT be pushed down because the SQL LIMIT would
+// apply before the in-memory where filter.
+//
+
+fn where_fully_pushed(expr: &Expr, columns: &[&str]) -> bool {
+    match expr {
+        Expr::And(lhs, rhs) => {
+            where_fully_pushed(lhs, columns) && where_fully_pushed(rhs, columns)
+        }
+
+        Expr::Equals(lhs, rhs) => {
+            matches!(
+                (lhs.as_ref(), rhs.as_ref()),
+                (Expr::Ident(col), Expr::Literal(Literal::String(_)))
+                | (Expr::Literal(Literal::String(_)), Expr::Ident(col))
+                    if matches!(col.to_lowercase().as_str(),
+                        "node_id" | "agent_short_name" | "direction" | "host" | "source" | "level"
+                    )
+            ) || matches!(
+                (lhs.as_ref(), rhs.as_ref()),
+                (Expr::Ident(col), Expr::Literal(Literal::Int(Some(_))))
+                | (Expr::Literal(Literal::Int(Some(_))), Expr::Ident(col))
+                | (Expr::Ident(col), Expr::Literal(Literal::Long(Some(_))))
+                | (Expr::Literal(Literal::Long(Some(_))), Expr::Ident(col))
+                    if col.eq_ignore_ascii_case("rule_id")
+            )
+        }
+
+        Expr::Func(name, args)
+            if name.eq_ignore_ascii_case("contains") || name.eq_ignore_ascii_case("has") =>
+        {
+            matches!(
+                args.as_slice(),
+                [Expr::Ident(col), Expr::Literal(Literal::String(_))]
+                    if matches!(col.to_lowercase().as_str(), "url" | "host")
+            )
+        }
+
+        _ => false,
     }
 }
 
