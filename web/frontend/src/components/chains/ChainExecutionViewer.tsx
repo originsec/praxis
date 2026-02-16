@@ -322,7 +322,7 @@ interface ChainExecutionViewerInnerProps {
 function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }: ChainExecutionViewerInnerProps) {
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [outputExpanded, setOutputExpanded] = useState(true);
-  const { fitView } = useReactFlow();
+  const { fitView, setCenter } = useReactFlow();
 
   //
   // Use JSON.stringify for deep comparison since React's shallow comparison
@@ -349,6 +349,30 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
       return () => clearTimeout(timer);
     }
   }, [nodes.length, fitView]);
+
+  //
+  // Auto-zoom to the currently running element.
+  //
+  useEffect(() => {
+    if (execution.status !== 'Running') return;
+
+    const runningId = Object.entries(execution.elements).find(
+      ([, elem]) => elem.status === 'Running'
+    )?.[0];
+    if (!runningId) return;
+
+    const runningNode = nodes.find(n => n.id === runningId);
+    if (!runningNode) return;
+
+    const timer = setTimeout(() => {
+      setCenter(
+        runningNode.position.x + 100,
+        runningNode.position.y + 40,
+        { zoom: 1.2, duration: 400 }
+      );
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [execution.status, execution.elements, nodes, setCenter]);
 
   //
   // Get selected element's execution info.
