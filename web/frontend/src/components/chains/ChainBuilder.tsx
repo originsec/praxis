@@ -200,21 +200,19 @@ function LoopNode({ data, selected }: { data: { label: string; maxIterations: nu
   const style = selected ? { borderColor: 'var(--accent-warning)' } : undefined;
   return (
     <div
-      className="ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[180px] relative"
-      style={style}
+      className="ascii-box bg-[var(--bg-secondary)] px-4 py-3 min-w-[180px] relative"
+      style={{ ...style, minHeight: 70 }}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
-      <Handle type="source" position={Position.Right} id="0" style={{ ...handleStyle, top: '30%' }} />
-      <Handle type="source" position={Position.Right} id="1" style={{ ...handleStyle, top: '70%' }} />
-      <div className="flex items-center gap-2">
+      <Handle type="source" position={Position.Right} id="0" style={{ ...handleStyle, top: '25%' }} />
+      <Handle type="source" position={Position.Right} id="1" style={{ ...handleStyle, top: '75%' }} />
+      <div className="flex items-center gap-2 pr-16">
         <RefreshCw size={14} className="text-[var(--accent-warning)]" />
         <span className="text-sm font-mono">Loop</span>
         <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] font-mono">max {data.maxIterations}</span>
       </div>
-      <div className="flex flex-col items-end text-[9px] text-muted mt-1 gap-0.5">
-        <span className="text-[var(--accent-warning)]">↻ retry</span>
-        <span>→ done</span>
-      </div>
+      <span className="absolute text-[9px] text-[var(--accent-warning)]" style={{ right: 28, top: '25%', transform: 'translateY(-50%)' }}>↻ retry</span>
+      <span className="absolute text-[9px] text-muted" style={{ right: 28, top: '75%', transform: 'translateY(-50%)' }}>→ done</span>
     </div>
   );
 }
@@ -533,7 +531,7 @@ interface ChainBuilderInnerProps {
 function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }: ChainBuilderInnerProps) {
   const [name, setName] = useState(chain?.name || '');
   const [description, setDescription] = useState(chain?.description || '');
-  const [timeout, setTimeout] = useState(chain?.timeout || 300);
+  const [timeout, setTimeout] = useState(chain?.timeout || 1800);
   const category = 'default';
 
   const initialFlow = chainToFlow(chain || null);
@@ -594,6 +592,88 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
 
   const [showLoopModal, setShowLoopModal] = useState(false);
   const [loopMaxIterations, setLoopMaxIterations] = useState<number>(3);
+
+  //
+  // Per-block config state (shared across Operation, Transform, GenericPrompt
+  // modals).
+  //
+  const [blockMaxRuntime, setBlockMaxRuntime] = useState<string>('');
+  const [blockYoloMode, setBlockYoloMode] = useState<boolean>(false);
+  const [blockWorkingDir, setBlockWorkingDir] = useState<string>('');
+
+  const advancedSectionConfig = {
+    type: 'section' as const,
+    title: 'Advanced',
+    collapsible: true,
+    fields: [
+      {
+        name: 'maxRuntime',
+        label: 'Max Runtime (seconds)',
+        type: 'text' as const,
+        placeholder: 'Default',
+        span: 'full' as const,
+      },
+      {
+        name: 'workingDir',
+        label: 'Working Directory',
+        type: 'text' as const,
+        placeholder: 'Default',
+        span: 'full' as const,
+      },
+      {
+        name: 'yoloMode',
+        label: 'YOLO Mode',
+        type: 'toggle' as const,
+        span: 'full' as const,
+      },
+    ],
+  };
+
+  const blockConfigValues = {
+    maxRuntime: blockMaxRuntime,
+    workingDir: blockWorkingDir,
+    yoloMode: blockYoloMode,
+  };
+
+  const handleBlockConfigChange = (name: string, value: any) => {
+    if (name === 'maxRuntime') setBlockMaxRuntime(value);
+    if (name === 'workingDir') setBlockWorkingDir(value);
+    if (name === 'yoloMode') setBlockYoloMode(!!value);
+  };
+
+  const resetBlockConfig = () => {
+    setBlockMaxRuntime('');
+    setBlockYoloMode(false);
+    setBlockWorkingDir('');
+  };
+
+  const loadBlockConfig = (nodeId: string) => {
+    const existing = extraData.blockConfigs.get(nodeId);
+    setBlockMaxRuntime(existing?.max_runtime ? String(existing.max_runtime) : '');
+    setBlockYoloMode(existing?.yolo_mode || false);
+    setBlockWorkingDir(existing?.working_dir || '');
+  };
+
+  //
+  // Build a BlockConfig from current state and save it to extraData for the
+  // given node ID. Clears the entry if no fields are set.
+  //
+  const saveBlockConfig = (nodeId: string) => {
+    const blockConfig: BlockConfig = {};
+    if (blockMaxRuntime) blockConfig.max_runtime = parseInt(blockMaxRuntime) || null;
+    if (blockYoloMode) blockConfig.yolo_mode = true;
+    if (blockWorkingDir) blockConfig.working_dir = blockWorkingDir;
+
+    setExtraData(prev => {
+      const newConfigs = new Map(prev.blockConfigs);
+      if (blockConfig.max_runtime || blockConfig.yolo_mode || blockConfig.working_dir) {
+        newConfigs.set(nodeId, blockConfig);
+      } else {
+        newConfigs.delete(nodeId);
+      }
+      return { ...prev, blockConfigs: newConfigs };
+    });
+  };
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition, fitView } = useReactFlow();
@@ -776,6 +856,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
       //
       if (type === 'operation') {
         setPendingPosition(position);
+        resetBlockConfig();
         setShowOperationModal(true);
         return;
       }
@@ -787,6 +868,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
         setPendingPosition(position);
         setTransformPrompt('');
         setTransformModel('');
+        resetBlockConfig();
         setShowTransformModal(true);
         return;
       }
@@ -797,6 +879,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
       if (type === 'genericPrompt') {
         setPendingPosition(position);
         setGenericPromptText('');
+        resetBlockConfig();
         setShowGenericPromptModal(true);
         return;
       }
@@ -969,6 +1052,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
 
     if (type === 'operation') {
       setPendingPosition(position);
+      resetBlockConfig();
       setShowOperationModal(true);
       return;
     }
@@ -977,6 +1061,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
       setPendingPosition(position);
       setTransformPrompt('');
       setTransformModel('');
+      resetBlockConfig();
       setShowTransformModal(true);
       return;
     }
@@ -984,6 +1069,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
     if (type === 'genericPrompt') {
       setPendingPosition(position);
       setGenericPromptText('');
+      resetBlockConfig();
       setShowGenericPromptModal(true);
       return;
     }
@@ -1005,83 +1091,137 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
   }, [nodes.length, addNodeAtPosition, hasTrigger]);
 
   const handleOperationSelect = useCallback(() => {
-    if (pendingPosition && selectedOperation) {
-      addNodeAtPosition('operation', pendingPosition, { operation: selectedOperation });
-      setShowOperationModal(false);
-      setPendingPosition(null);
-      setSelectedOperation('');
+    if (!selectedOperation) return;
+
+    if (editingNodeId) {
+      //
+      // Update existing operation node.
+      //
+      setNodes(nds => nds.map(n =>
+        n.id === editingNodeId
+          ? { ...n, data: { ...n.data, operation: selectedOperation } }
+          : n
+      ));
+      saveBlockConfig(editingNodeId);
+    } else if (pendingPosition) {
+      const newNodeId = generateUUID();
+      const newNode: Node = {
+        id: newNodeId,
+        type: 'operation',
+        position: pendingPosition,
+        data: { label: 'Operation', operation: selectedOperation },
+      };
+      setNodes(nds => [...nds, newNode]);
+      saveBlockConfig(newNodeId);
     }
-  }, [pendingPosition, selectedOperation, addNodeAtPosition]);
+
+    setShowOperationModal(false);
+    setPendingPosition(null);
+    setEditingNodeId(null);
+    setSelectedOperation('');
+    resetBlockConfig();
+  }, [pendingPosition, editingNodeId, selectedOperation, setNodes, blockMaxRuntime, blockYoloMode, blockWorkingDir]);
 
   const handleTransformConfirm = useCallback(() => {
-    if (transformPrompt.trim()) {
-      if (editingNodeId) {
-        //
-        // Update existing node.
-        //
-        setExtraData(prev => {
-          const newTransformPrompts = new Map(prev.transformPrompts);
-          const newTransformModels = new Map(prev.transformModels);
-          newTransformPrompts.set(editingNodeId, transformPrompt);
-          if (transformModel) {
-            newTransformModels.set(editingNodeId, transformModel);
-          } else {
-            newTransformModels.delete(editingNodeId);
-          }
-          return { ...prev, transformPrompts: newTransformPrompts, transformModels: newTransformModels };
-        });
-        setNodes(nds => nds.map(n =>
-          n.id === editingNodeId
-            ? { ...n, data: { ...n.data, prompt: transformPrompt } }
-            : n
-        ));
-      } else if (pendingPosition) {
-        //
-        // Add new node.
-        //
-        addNodeAtPosition('transform', pendingPosition, {
-          prompt: transformPrompt,
-          modelRef: transformModel || undefined,
-        });
-      }
-      setShowTransformModal(false);
-      setPendingPosition(null);
-      setEditingNodeId(null);
-      setTransformPrompt('');
-      setTransformModel('');
+    if (!transformPrompt.trim()) return;
+
+    if (editingNodeId) {
+      //
+      // Update existing node.
+      //
+      setExtraData(prev => {
+        const newTransformPrompts = new Map(prev.transformPrompts);
+        const newTransformModels = new Map(prev.transformModels);
+        newTransformPrompts.set(editingNodeId, transformPrompt);
+        if (transformModel) {
+          newTransformModels.set(editingNodeId, transformModel);
+        } else {
+          newTransformModels.delete(editingNodeId);
+        }
+        return { ...prev, transformPrompts: newTransformPrompts, transformModels: newTransformModels };
+      });
+      setNodes(nds => nds.map(n =>
+        n.id === editingNodeId
+          ? { ...n, data: { ...n.data, prompt: transformPrompt } }
+          : n
+      ));
+      saveBlockConfig(editingNodeId);
+    } else if (pendingPosition) {
+      //
+      // Add new node.
+      //
+      const newNodeId = generateUUID();
+      const newNode: Node = {
+        id: newNodeId,
+        type: 'transform',
+        position: pendingPosition,
+        data: { label: 'Transform', prompt: transformPrompt },
+      };
+      setNodes(nds => [...nds, newNode]);
+      setExtraData(prev => {
+        const newTransformPrompts = new Map(prev.transformPrompts);
+        newTransformPrompts.set(newNodeId, transformPrompt);
+        const newTransformModels = new Map(prev.transformModels);
+        if (transformModel) {
+          newTransformModels.set(newNodeId, transformModel);
+        }
+        return { ...prev, transformPrompts: newTransformPrompts, transformModels: newTransformModels };
+      });
+      saveBlockConfig(newNodeId);
     }
-  }, [pendingPosition, editingNodeId, transformPrompt, transformModel, addNodeAtPosition, setNodes]);
+
+    setShowTransformModal(false);
+    setPendingPosition(null);
+    setEditingNodeId(null);
+    setTransformPrompt('');
+    setTransformModel('');
+    resetBlockConfig();
+  }, [pendingPosition, editingNodeId, transformPrompt, transformModel, setNodes, blockMaxRuntime, blockYoloMode, blockWorkingDir]);
 
   const handleGenericPromptConfirm = useCallback(() => {
-    if (genericPromptText.trim()) {
-      if (editingNodeId) {
-        //
-        // Update existing node.
-        //
-        setExtraData(prev => {
-          const newGenericPrompts = new Map(prev.genericPrompts);
-          newGenericPrompts.set(editingNodeId, genericPromptText);
-          return { ...prev, genericPrompts: newGenericPrompts };
-        });
-        setNodes(nds => nds.map(n =>
-          n.id === editingNodeId
-            ? { ...n, data: { ...n.data, prompt: genericPromptText } }
-            : n
-        ));
-      } else if (pendingPosition) {
-        //
-        // Add new node.
-        //
-        addNodeAtPosition('genericPrompt', pendingPosition, {
-          prompt: genericPromptText,
-        });
-      }
-      setShowGenericPromptModal(false);
-      setPendingPosition(null);
-      setEditingNodeId(null);
-      setGenericPromptText('');
+    if (!genericPromptText.trim()) return;
+
+    if (editingNodeId) {
+      //
+      // Update existing node.
+      //
+      setExtraData(prev => {
+        const newGenericPrompts = new Map(prev.genericPrompts);
+        newGenericPrompts.set(editingNodeId, genericPromptText);
+        return { ...prev, genericPrompts: newGenericPrompts };
+      });
+      setNodes(nds => nds.map(n =>
+        n.id === editingNodeId
+          ? { ...n, data: { ...n.data, prompt: genericPromptText } }
+          : n
+      ));
+      saveBlockConfig(editingNodeId);
+    } else if (pendingPosition) {
+      //
+      // Add new node.
+      //
+      const newNodeId = generateUUID();
+      const newNode: Node = {
+        id: newNodeId,
+        type: 'genericPrompt',
+        position: pendingPosition,
+        data: { label: 'Prompt', prompt: genericPromptText },
+      };
+      setNodes(nds => [...nds, newNode]);
+      setExtraData(prev => {
+        const newGenericPrompts = new Map(prev.genericPrompts);
+        newGenericPrompts.set(newNodeId, genericPromptText);
+        return { ...prev, genericPrompts: newGenericPrompts };
+      });
+      saveBlockConfig(newNodeId);
     }
-  }, [pendingPosition, editingNodeId, genericPromptText, addNodeAtPosition, setNodes]);
+
+    setShowGenericPromptModal(false);
+    setPendingPosition(null);
+    setEditingNodeId(null);
+    setGenericPromptText('');
+    resetBlockConfig();
+  }, [pendingPosition, editingNodeId, genericPromptText, setNodes, blockMaxRuntime, blockYoloMode, blockWorkingDir]);
 
   const handleMemoryConfirm = useCallback(() => {
     if (editingNodeId) {
@@ -1303,14 +1443,21 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
   // Handle double-click on nodes to open configuration modal.
   //
   const onNodeDoubleClick = useCallback((_event: React.MouseEvent, node: Node) => {
-    if (node.type === 'transform') {
+    if (node.type === 'operation') {
+      setEditingNodeId(node.id);
+      setSelectedOperation((node.data as Record<string, unknown>)?.operation as string || '');
+      loadBlockConfig(node.id);
+      setShowOperationModal(true);
+    } else if (node.type === 'transform') {
       setEditingNodeId(node.id);
       setTransformPrompt(extraData.transformPrompts.get(node.id) || '');
       setTransformModel(extraData.transformModels.get(node.id) || '');
+      loadBlockConfig(node.id);
       setShowTransformModal(true);
     } else if (node.type === 'genericPrompt') {
       setEditingNodeId(node.id);
       setGenericPromptText(extraData.genericPrompts.get(node.id) || '');
+      loadBlockConfig(node.id);
       setShowGenericPromptModal(true);
     } else if (node.type === 'memoryStore' || node.type === 'memoryRetrieve') {
       setEditingNodeId(node.id);
@@ -1354,7 +1501,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
             <input
               type="number"
               value={timeout}
-              onChange={(e) => setTimeout(parseInt(e.target.value) || 300)}
+              onChange={(e) => setTimeout(parseInt(e.target.value) || 1800)}
               min={1}
               className="bg-[var(--bg-primary)] border border-dim px-2 py-1.5 text-sm text-highlight w-20 text-center focus:outline-none focus:border-subtle transition-colors"
             />
@@ -1386,7 +1533,7 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
       // Flow Canvas.
       //
       */}
-      <div className="flex-1" ref={reactFlowWrapper}>
+      <div className="flex-1 min-h-0" ref={reactFlowWrapper}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -1449,8 +1596,8 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           // Element Palette.
           //
           */}
-          <Panel position="top-left" className="!m-2">
-            <div className="ascii-box bg-[var(--bg-secondary)] p-3 flex flex-col gap-0.5">
+          <Panel position="top-left" className="!m-2" style={{ maxHeight: 'calc(100% - 60px)', overflow: 'hidden' }}>
+            <div className="ascii-box bg-[var(--bg-secondary)] p-3 flex flex-col gap-0.5 max-h-full overflow-y-auto">
               <div className="text-[11px] tracking-widest text-[var(--text-secondary)] mb-2 px-1" style={{ letterSpacing: '0.1em' }}>ELEMENTS</div>
               <div className="flex flex-col gap-0.5">
                 <PaletteItem
@@ -1567,8 +1714,10 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           setShowOperationModal(false);
           setPendingPosition(null);
           setSelectedOperation('');
+          setEditingNodeId(null);
+          resetBlockConfig();
         }}
-        title="Select Operation"
+        title={editingNodeId ? 'Edit Operation' : 'Select Operation'}
         size="sm"
         config={[
           {
@@ -1590,11 +1739,15 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
               },
             ],
           },
+          advancedSectionConfig,
         ]}
-        values={{ operation: selectedOperation }}
-        onChange={(_name, value) => setSelectedOperation(value)}
+        values={{ operation: selectedOperation, ...blockConfigValues }}
+        onChange={(name, value) => {
+          if (name === 'operation') setSelectedOperation(value);
+          else handleBlockConfigChange(name, value);
+        }}
         onSubmit={handleOperationSelect}
-        submitLabel="Add"
+        submitLabel={editingNodeId ? 'Update' : 'Add'}
         submitIcon={<Cpu size={14} />}
         submitVariant="info"
         submitDisabled={!selectedOperation}
@@ -1610,10 +1763,12 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
         onClose={() => {
           setShowTransformModal(false);
           setPendingPosition(null);
+          setEditingNodeId(null);
           setTransformPrompt('');
           setTransformModel('');
+          resetBlockConfig();
         }}
-        title="Configure Transform"
+        title={editingNodeId ? 'Edit Transform' : 'Configure Transform'}
         size="sm"
         config={[
           {
@@ -1644,17 +1799,20 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
               },
             ],
           },
+          advancedSectionConfig,
         ]}
         values={{
           model: transformModel,
           prompt: transformPrompt,
+          ...blockConfigValues,
         }}
         onChange={(name, value) => {
           if (name === 'model') setTransformModel(value);
-          if (name === 'prompt') setTransformPrompt(value);
+          else if (name === 'prompt') setTransformPrompt(value);
+          else handleBlockConfigChange(name, value);
         }}
         onSubmit={handleTransformConfirm}
-        submitLabel="Add"
+        submitLabel={editingNodeId ? 'Update' : 'Add'}
         submitIcon={<Sparkles size={14} />}
         submitVariant="warning"
         submitDisabled={!transformPrompt.trim()}
@@ -1670,9 +1828,11 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
         onClose={() => {
           setShowGenericPromptModal(false);
           setPendingPosition(null);
+          setEditingNodeId(null);
           setGenericPromptText('');
+          resetBlockConfig();
         }}
-        title="Configure Prompt"
+        title={editingNodeId ? 'Edit Prompt' : 'Configure Prompt'}
         size="sm"
         config={[
           {
@@ -1690,11 +1850,15 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
               },
             ],
           },
+          advancedSectionConfig,
         ]}
-        values={{ prompt: genericPromptText }}
-        onChange={(_name, value) => setGenericPromptText(value)}
+        values={{ prompt: genericPromptText, ...blockConfigValues }}
+        onChange={(name, value) => {
+          if (name === 'prompt') setGenericPromptText(value);
+          else handleBlockConfigChange(name, value);
+        }}
         onSubmit={handleGenericPromptConfirm}
-        submitLabel="Add"
+        submitLabel={editingNodeId ? 'Update' : 'Add'}
         submitIcon={<MessageSquare size={14} />}
         submitVariant="purple"
         submitDisabled={!genericPromptText.trim()}
