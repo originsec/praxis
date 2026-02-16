@@ -161,57 +161,60 @@ function GenericPromptNode({ data, selected }: { data: { label: string; prompt: 
 }
 
 function MemoryStoreNode({ data, selected }: { data: { label: string; memoryKey: string }; selected?: boolean }) {
+  const style = selected ? { borderColor: 'var(--accent-success)' } : undefined;
   return (
     <div
-      className={`px-4 py-3 shadow-md bg-[var(--bg-secondary)] border ${selected ? 'border-[var(--accent-success)]' : 'border-subtle'}`}
-      style={{ minWidth: 200 }}
+      className="ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative"
+      style={style}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
+      <Handle type="source" position={Position.Right} style={handleStyle} />
       <div className="flex items-center gap-2">
-        <Database size={16} className="text-[var(--accent-success)]" />
-        <span className="text-xs font-medium text-[var(--text-highlight)]">{data.memoryKey || 'Store'}</span>
+        <Database size={14} className="text-[var(--accent-success)]" />
+        <span className="text-sm font-mono">{data.memoryKey || 'Store'}</span>
         <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-success)]/20 text-[var(--accent-success)] font-mono">STORE</span>
       </div>
-      <Handle type="source" position={Position.Right} style={handleStyle} />
     </div>
   );
 }
 
 function MemoryRetrieveNode({ data, selected }: { data: { label: string; memoryKey: string }; selected?: boolean }) {
+  const style = selected ? { borderColor: 'var(--accent-info)' } : undefined;
   return (
     <div
-      className={`px-4 py-3 shadow-md bg-[var(--bg-secondary)] border ${selected ? 'border-[var(--accent-info)]' : 'border-subtle'}`}
-      style={{ minWidth: 200 }}
+      className="ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative"
+      style={style}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
+      <Handle type="source" position={Position.Right} style={handleStyle} />
       <div className="flex items-center gap-2">
-        <HardDriveDownload size={16} className="text-[var(--accent-info)]" />
-        <span className="text-xs font-medium text-[var(--text-highlight)]">{data.memoryKey || 'Retrieve'}</span>
+        <HardDriveDownload size={14} className="text-[var(--accent-info)]" />
+        <span className="text-sm font-mono">{data.memoryKey || 'Retrieve'}</span>
         <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-info)]/20 text-[var(--accent-info)] font-mono">RETRIEVE</span>
       </div>
-      <Handle type="source" position={Position.Right} style={handleStyle} />
     </div>
   );
 }
 
 function LoopNode({ data, selected }: { data: { label: string; maxIterations: number }; selected?: boolean }) {
+  const style = selected ? { borderColor: 'var(--accent-warning)' } : undefined;
   return (
     <div
-      className={`px-4 py-3 shadow-md bg-[var(--bg-secondary)] border ${selected ? 'border-[var(--accent-warning)]' : 'border-subtle'}`}
-      style={{ minWidth: 220 }}
+      className="ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[180px] relative"
+      style={style}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
+      <Handle type="source" position={Position.Right} id="0" style={{ ...handleStyle, top: '30%' }} />
+      <Handle type="source" position={Position.Right} id="1" style={{ ...handleStyle, top: '70%' }} />
       <div className="flex items-center gap-2">
-        <RefreshCw size={16} className="text-[var(--accent-warning)]" />
-        <span className="text-xs font-medium text-[var(--text-highlight)]">Loop</span>
+        <RefreshCw size={14} className="text-[var(--accent-warning)]" />
+        <span className="text-sm font-mono">Loop</span>
         <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] font-mono">max {data.maxIterations}</span>
       </div>
       <div className="flex justify-between text-[9px] text-muted mt-1">
-        <span>Retry (port 0)</span>
-        <span>Done (port 1)</span>
+        <span>Retry</span>
+        <span>Done</span>
       </div>
-      <Handle type="source" position={Position.Right} id="0" style={{ ...handleStyle, top: '30%' }} />
-      <Handle type="source" position={Position.Right} id="1" style={{ ...handleStyle, top: '70%' }} />
     </div>
   );
 }
