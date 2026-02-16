@@ -138,6 +138,18 @@ const TABLES: TableInfo[] = [
       { name: 'response_status', description: 'HTTP status code' },
     ],
   },
+  {
+    name: 'EventLogs',
+    description: 'System event log entries',
+    source: 'Database',
+    columns: [
+      { name: 'timestamp', description: 'Event time' },
+      { name: 'source', description: 'Event source' },
+      { name: 'level', description: 'Log level' },
+      { name: 'target', description: 'Log target module' },
+      { name: 'message', description: 'Log message' },
+    ],
+  },
 ];
 
 function TableReference() {
