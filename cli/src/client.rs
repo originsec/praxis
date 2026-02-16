@@ -4,7 +4,7 @@ use common::{
     client_queue_name, mcp::McpClient, publish_json, CLIENT_BROADCAST_EXCHANGE,
     CLIENT_SIGNAL_QUEUE, ClientBroadcastMessage, ClientDirectMessage, ClientRegistration,
     ClientSignalMessage, CommandRequest, CommandResponse, NodeCommand, NodeCommandResult,
-    SemanticOpUpdate, SystemState, InterceptedTrafficEntry, TrafficSearchFilters,
+    ReconResult, SemanticOpUpdate, SystemState, InterceptedTrafficEntry, TrafficSearchFilters,
     ChainExecutionUpdate, ChainDefinitionInfo, OperationDefinitionInfo,
 };
 use futures_util::StreamExt;
@@ -34,10 +34,23 @@ struct ClientState {
     pending_commands: std::collections::HashMap<String, Option<NodeCommandResult>>,
     pending_semantic_ops: std::collections::HashMap<String, Option<String>>,
     pending_traffic_search: Option<(Vec<InterceptedTrafficEntry>, usize)>,
+    pending_recon_get: Option<ReconGetResult>,
+    cached_project_paths: Vec<String>,
+    cached_config_paths: Vec<String>,
+    cached_session_paths: Vec<String>,
     operations: Vec<SemanticOpUpdate>,
     operation_definitions: Vec<OperationDefinitionInfo>,
     chain_definitions: Vec<ChainDefinitionInfo>,
     chain_executions: Vec<ChainExecutionUpdate>,
+    orchestrator_event_tx: Option<tokio::sync::mpsc::UnboundedSender<ClientDirectMessage>>,
+}
+
+struct ReconGetResult {
+    recon_result: Option<ReconResult>,
+    #[allow(dead_code)]
+    performed_at: Option<String>,
+    #[allow(dead_code)]
+    is_semantic: Option<bool>,
 }
 
 impl CliClient {
@@ -246,6 +259,36 @@ impl CliClient {
             ClientDirectMessage::ChainExecutionListResponse { executions } => {
                 state.chain_executions = executions;
             }
+            ClientDirectMessage::ReconGetResponse { recon_result, performed_at, is_semantic, .. } => {
+                if let Some(ref recon) = recon_result {
+                    state.cached_project_paths = recon.project_paths.clone();
+                    state.cached_config_paths = recon.config.iter().map(|c| c.path.clone()).collect();
+                    state.cached_session_paths = recon.sessions.iter().map(|s| s.session_file.clone()).collect();
+                }
+                state.pending_recon_get = Some(ReconGetResult {
+                    recon_result,
+                    performed_at,
+                    is_semantic,
+                });
+            }
+
+            //
+            // Forward orchestrator events to subscriber if present.
+            //
+            msg @ (ClientDirectMessage::OrchestratorStarted { .. }
+                | ClientDirectMessage::OrchestratorContent { .. }
+                | ClientDirectMessage::OrchestratorToolExecuting { .. }
+                | ClientDirectMessage::OrchestratorToolExecuted { .. }
+                | ClientDirectMessage::OrchestratorPlanUpdated { .. }
+                | ClientDirectMessage::OrchestratorDone
+                | ClientDirectMessage::OrchestratorStopped
+                | ClientDirectMessage::OrchestratorError { .. }
+                | ClientDirectMessage::OrchestratorTokenUsage { .. }) => {
+                if let Some(ref tx) = state.orchestrator_event_tx {
+                    let _ = tx.send(msg);
+                }
+            }
+
             _ => {}
         }
     }
@@ -514,6 +557,124 @@ impl CliClient {
     pub async fn get_chain_executions(&self) -> Vec<ChainExecutionUpdate> {
         self.state.lock().await.chain_executions.clone()
     }
+
+    //
+    // Blocking fetch of recon result — used by the interactive project picker
+    // where the user is explicitly waiting.
+    //
+
+    pub async fn get_recon_result(
+        &self,
+        node_id: &str,
+        agent_short_name: &str,
+    ) -> Result<Option<ReconResult>> {
+        {
+            let mut state = self.state.lock().await;
+            state.pending_recon_get = None;
+        }
+
+        let message = ClientSignalMessage::ReconGet {
+            client_id: self.client_id.clone(),
+            node_id: node_id.to_string(),
+            agent_short_name: agent_short_name.to_string(),
+        };
+        self.publish_signal(message).await?;
+
+        let poll_interval = Duration::from_millis(100);
+        let max_polls = 50;
+
+        for _ in 0..max_polls {
+            tokio::time::sleep(poll_interval).await;
+            let mut state = self.state.lock().await;
+            if let Some(result) = state.pending_recon_get.take() {
+                return Ok(result.recon_result);
+            }
+        }
+
+        Err(anyhow!("Timeout waiting for recon result"))
+    }
+
+    //
+    // Fire-and-forget recon request — the response will be picked up by the
+    // background consumer and cached in `cached_project_paths`. Use
+    // `get_cached_project_paths()` to read the result.
+    //
+
+    pub async fn request_recon_result(&self, node_id: &str, agent_short_name: &str) {
+        let message = ClientSignalMessage::ReconGet {
+            client_id: self.client_id.clone(),
+            node_id: node_id.to_string(),
+            agent_short_name: agent_short_name.to_string(),
+        };
+        let _ = self.publish_signal(message).await;
+    }
+
+    pub async fn get_cached_project_paths(&self) -> Vec<String> {
+        self.state.lock().await.cached_project_paths.clone()
+    }
+
+    pub async fn get_cached_config_paths(&self) -> Vec<String> {
+        self.state.lock().await.cached_config_paths.clone()
+    }
+
+    pub async fn get_cached_session_paths(&self) -> Vec<String> {
+        self.state.lock().await.cached_session_paths.clone()
+    }
+
+    //
+    // Orchestrator methods.
+    //
+
+    pub fn subscribe_orchestrator_events(&self) -> tokio::sync::mpsc::UnboundedReceiver<ClientDirectMessage> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        //
+        // Store the sender synchronously via a blocking lock. The consumer
+        // task holds the async lock only briefly, so this won't deadlock.
+        //
+        let state = self.state.clone();
+        tokio::task::block_in_place(|| {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let mut state = state.lock().await;
+                state.orchestrator_event_tx = Some(tx);
+            });
+        });
+        rx
+    }
+
+    pub async fn unsubscribe_orchestrator_events(&self) {
+        let mut state = self.state.lock().await;
+        state.orchestrator_event_tx = None;
+    }
+
+    pub async fn start_orchestrator(&self) -> Result<()> {
+        let message = ClientSignalMessage::OrchestratorStart {
+            client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn send_orchestrator_prompt(&self, prompt: String) -> Result<()> {
+        let message = ClientSignalMessage::OrchestratorPrompt {
+            client_id: self.client_id.clone(),
+            message: prompt,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn stop_orchestrator(&self) -> Result<()> {
+        let message = ClientSignalMessage::OrchestratorStop {
+            client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn cancel_orchestrator(&self) -> Result<()> {
+        let message = ClientSignalMessage::OrchestratorCancel {
+            client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
 }
 
 //
@@ -598,5 +759,13 @@ impl McpClient for CliClient {
 
     async fn get_chain_executions(&self) -> Vec<ChainExecutionUpdate> {
         CliClient::get_chain_executions(self).await
+    }
+
+    async fn get_stored_recon(
+        &self,
+        node_id: &str,
+        agent_short_name: &str,
+    ) -> Result<Option<ReconResult>> {
+        CliClient::get_recon_result(self, node_id, agent_short_name).await
     }
 }

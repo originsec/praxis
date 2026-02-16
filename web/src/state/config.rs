@@ -3,19 +3,15 @@ use std::collections::HashMap;
 use super::AppState;
 
 impl AppState {
-    //
-    // --- Configuration ---.
-    //
-
-    /// Update cached config values
     pub async fn update_config(&self, values: HashMap<String, String>) {
         let mut cache = self.config_cache.write().await;
         for (k, v) in values {
             cache.insert(k, v);
         }
+        drop(cache);
+        self.config_notify.notify_waiters();
     }
 
-    /// Get cached config values
     #[allow(dead_code)]
     pub async fn get_config(&self, keys: &[&str]) -> HashMap<String, String> {
         let cache = self.config_cache.read().await;

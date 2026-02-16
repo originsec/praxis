@@ -35,20 +35,6 @@ pub enum AgentCommand {
         node: String,
     },
 
-    /// Perform static reconnaissance
-    Recon {
-        /// Node ID prefix
-        #[arg(short, long)]
-        node: String,
-    },
-
-    /// Perform semantic reconnaissance (includes internal tools)
-    ReconSemantic {
-        /// Node ID prefix
-        #[arg(short, long)]
-        node: String,
-    },
-
     /// Config content operations
     Config {
         #[command(subcommand)]
@@ -116,8 +102,6 @@ pub async fn execute(client: &mut CliClient, command: AgentCommand, output: &Out
         AgentCommand::List { node } => list_agents(client, &node, output).await,
         AgentCommand::Select { node, short_name } => select_agent(client, &node, &short_name, output).await,
         AgentCommand::Update { node } => update_agent(client, &node, output).await,
-        AgentCommand::Recon { node } => recon_agent(client, &node, false, output).await,
-        AgentCommand::ReconSemantic { node } => recon_agent(client, &node, true, output).await,
         AgentCommand::Config { command } => match command {
             AgentConfigCommand::Read { node, path, line_start, line_end } => {
                 read_file(client, &node, NodeFileType::Config, &path, line_start, line_end, output).await
@@ -136,7 +120,7 @@ pub async fn execute(client: &mut CliClient, command: AgentCommand, output: &Out
             AgentSessionCommand::Grep { node, session_file, pattern } => {
                 grep_file(client, &node, NodeFileType::Session, &session_file, &pattern, output).await
             }
-        }
+        },
     }
 }
 
@@ -226,72 +210,6 @@ async fn update_agent(client: &CliClient, node_prefix: &str, output: &OutputForm
             match output {
                 OutputFormat::Json => print_json(&json!({"status": "success", "message": "Update request sent"})),
                 OutputFormat::Text => print_success("Update request sent"),
-            }
-            Ok(())
-        }
-        NodeCommandResult::Error { message } => {
-            if matches!(output, OutputFormat::Json) {
-                print_json(&json!({"status": "error", "message": message}));
-            }
-            Err(anyhow!("{}", message))
-        }
-        _ => Err(anyhow!("Unexpected response")),
-    }
-}
-
-async fn recon_agent(client: &CliClient, node_prefix: &str, semantic: bool, output: &OutputFormat) -> Result<()> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
-    let node_id = find_node_id(&state, node_prefix).ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
-
-    let cmd = if semantic {
-        NodeCmd::Agent(NodeAgentCommand::ReconSemantic)
-    } else {
-        NodeCmd::Agent(NodeAgentCommand::Recon)
-    };
-
-    let response = client.send_command(&node_id, cmd).await?;
-
-    match response.result {
-        NodeCommandResult::Agent(AgentCommandResult::ReconComplete { result }) => {
-            let mcp_tools_count: usize = result.tools.mcp_servers.iter().map(|s| s.tools.len()).sum();
-
-            match output {
-                OutputFormat::Json => {
-                    print_json(&json!({
-                        "status": "success",
-                        "mcp_servers": result.tools.mcp_servers.len(),
-                        "mcp_tools": mcp_tools_count,
-                        "skills": result.tools.skills.len(),
-                        "internal_tools": result.tools.internal_tools.len(),
-                        "config_items": result.config.len(),
-                        "sessions": result.sessions.len(),
-                        "project_paths": result.project_paths
-                    }));
-                }
-                OutputFormat::Text => {
-                    let recon_type = if semantic { "Semantic recon" } else { "Recon" };
-                    print_header(&format!("{} Results", recon_type));
-                    println!();
-                    println!("  MCP Servers: {} ({} tools)", result.tools.mcp_servers.len(), mcp_tools_count);
-                    println!("  Skills: {}", result.tools.skills.len());
-                    if semantic {
-                        println!("  Internal Tools: {}", result.tools.internal_tools.len());
-                    }
-                    println!("  Config Items: {}", result.config.len());
-                    println!("  Sessions: {}", result.sessions.len());
-                    println!("  Project Paths: {}", result.project_paths.len());
-
-                    if !result.project_paths.is_empty() {
-                        println!();
-                        println!("  Projects:");
-                        for path in &result.project_paths {
-                            println!("    - {}", path);
-                        }
-                    }
-
-                    println!();
-                    print_success(&format!("{} complete", recon_type));
-                }
             }
             Ok(())
         }

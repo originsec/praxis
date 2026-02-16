@@ -166,10 +166,11 @@ export function SettingsPage() {
   const [showBuiltinWarning, setShowBuiltinWarning] = useState(false);
 
   //
-  // Load config on mount
+  // Load config once connected.
   // All llm_* keys go to Service (not starting with orchestrator_).
   //
   useEffect(() => {
+    if (!state.connected) return;
     getConfig([
       'llm_model_definitions',
       'llm_feature_orchestrator',
@@ -181,7 +182,7 @@ export function SettingsPage() {
       'mcp_server_enabled',
       'mcp_server_port',
     ]);
-  }, [getConfig]);
+  }, [state.connected, getConfig]);
 
   //
   // Fetch providers from API on mount.

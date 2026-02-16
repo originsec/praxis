@@ -3,8 +3,9 @@ use std::time::Duration;
 
 use crate::mcp::McpClient;
 use crate::{
-    ChainDefinitionInfo, ChainExecutionUpdate, OperationDefinitionInfo, SemanticOpUpdate,
-    SystemState,
+    AgentCommand, AgentCommandResult, AgentFileType, AgentTool, ChainDefinitionInfo,
+    ChainExecutionUpdate, ConfigItem, GrepMatch, McpServer, NodeCommand, NodeCommandResult,
+    OperationDefinitionInfo, SemanticOpUpdate, SessionItem, SystemState,
 };
 
 //
@@ -51,7 +52,21 @@ pub fn resolve_node_id(state: &SystemState, prefix: &str) -> Result<String> {
                 .starts_with(&prefix.to_lowercase())
         })
         .map(|n| n.node_id.clone())
-        .ok_or_else(|| anyhow!("No node found matching '{}'", prefix))
+        .ok_or_else(|| anyhow!("No node found matching '{}'. Use node_list to see connected nodes.", prefix))
+}
+
+//
+// Resolve the selected agent short name for a node.
+//
+
+fn resolve_selected_agent(state: &SystemState, node_id: &str) -> Result<String> {
+    state
+        .nodes
+        .iter()
+        .find(|n| n.node_id == node_id)
+        .and_then(|n| n.selected_agent.as_ref())
+        .map(|a| a.short_name.clone())
+        .ok_or_else(|| anyhow!("No agent selected on node. Use agent_select to select one first."))
 }
 
 //
@@ -95,7 +110,7 @@ pub async fn run(
     let state = client
         .get_state()
         .await
-        .ok_or_else(|| anyhow!("No state available"))?;
+        .ok_or_else(|| anyhow!("No state available. The service may still be starting — try again in a moment."))?;
     let node_id = resolve_node_id(&state, node_prefix)?;
 
     //
@@ -172,7 +187,7 @@ pub async fn run(
                 execution_id,
             })
         }
-        None => Err(anyhow!("No operation or chain found matching '{}'", name)),
+        None => Err(anyhow!("No operation or chain found matching '{}'. Use op_available to list what's available.", name)),
     }
 }
 
@@ -211,7 +226,7 @@ pub async fn get_info(
     }
 
     Err(anyhow!(
-        "No operation or chain execution found matching '{}'",
+        "No operation or chain execution found matching '{}'. Use op_list to see tracked executions.",
         short_id
     ))
 }
@@ -242,7 +257,7 @@ pub async fn cancel(
     }
 
     Err(anyhow!(
-        "No operation or chain execution found matching '{}'",
+        "No operation or chain execution found matching '{}'. Use op_list to see tracked executions.",
         short_id
     ))
 }
@@ -260,4 +275,218 @@ pub async fn list_tracked(client: &(impl McpClient + Sync)) -> Result<OpListResu
     let chains = client.get_chain_executions().await;
 
     Ok(OpListResult { operations, chains })
+}
+
+//
+// Unified recon list — returns stored recon data for a specific section or all.
+//
+
+pub struct ReconListResult {
+    pub sessions: Option<Vec<SessionItem>>,
+    pub projects: Option<Vec<String>>,
+    pub mcp_servers: Option<Vec<McpServer>>,
+    pub skills: Option<Vec<AgentTool>>,
+    pub internal_tools: Option<Vec<AgentTool>>,
+    pub configs: Option<Vec<ConfigItem>>,
+}
+
+pub async fn recon_list(
+    client: &(impl McpClient + Sync),
+    node_prefix: &str,
+    agent: &str,
+    section: Option<&str>,
+) -> Result<ReconListResult> {
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available. The service may still be starting — try again in a moment."))?;
+    let node_id = resolve_node_id(&state, node_prefix)?;
+    let recon = client
+        .get_stored_recon(&node_id, agent)
+        .await?
+        .ok_or_else(|| anyhow!("No stored recon for {}:{}. Run recon_run first to discover files and tools.", node_prefix, agent))?;
+
+    let show_all = section.is_none() || section == Some("all");
+
+    Ok(ReconListResult {
+        sessions: if show_all || section == Some("sessions") {
+            Some(recon.sessions)
+        } else {
+            None
+        },
+        projects: if show_all || section == Some("projects") {
+            Some(recon.project_paths)
+        } else {
+            None
+        },
+        mcp_servers: if show_all || section == Some("tools") {
+            Some(recon.tools.mcp_servers)
+        } else {
+            None
+        },
+        skills: if show_all || section == Some("tools") {
+            Some(recon.tools.skills)
+        } else {
+            None
+        },
+        internal_tools: if show_all || section == Some("tools") {
+            Some(recon.tools.internal_tools)
+        } else {
+            None
+        },
+        configs: if show_all || section == Some("configs") {
+            Some(recon.config)
+        } else {
+            None
+        },
+    })
+}
+
+//
+// Read a single file on a node.
+//
+
+pub struct ReadFileResult {
+    pub path: String,
+    pub content: Option<String>,
+    pub line_start: Option<usize>,
+    pub line_end: Option<usize>,
+    pub error: Option<String>,
+}
+
+pub async fn recon_read_file(
+    client: &(impl McpClient + Sync),
+    node_id: &str,
+    file_type: AgentFileType,
+    path: &str,
+    line_start: Option<usize>,
+    line_end: Option<usize>,
+) -> Result<ReadFileResult> {
+    let cmd = NodeCommand::Agent(AgentCommand::ReadFile {
+        file_type,
+        path: path.to_string(),
+        line_start,
+        line_end,
+    });
+    let response = client.send_command(node_id, cmd).await?;
+    match response.result {
+        NodeCommandResult::Agent(AgentCommandResult::ReadFileResult {
+            path, content, line_start, line_end, error, ..
+        }) => Ok(ReadFileResult { path, content, line_start, line_end, error }),
+        NodeCommandResult::Error { message } => Err(anyhow!(message)),
+        _ => Err(anyhow!("Unexpected response")),
+    }
+}
+
+//
+// Read all files of a given type from stored recon.
+//
+
+pub async fn recon_read_all(
+    client: &(impl McpClient + Sync),
+    node_prefix: &str,
+    file_type: AgentFileType,
+    line_start: Option<usize>,
+    line_end: Option<usize>,
+) -> Result<Vec<ReadFileResult>> {
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available. The service may still be starting — try again in a moment."))?;
+    let node_id = resolve_node_id(&state, node_prefix)?;
+    let agent = resolve_selected_agent(&state, &node_id)?;
+    let recon = client
+        .get_stored_recon(&node_id, &agent)
+        .await?
+        .ok_or_else(|| anyhow!("No stored recon data. Run recon_run first, then select an agent with agent_select."))?;
+
+    let paths: Vec<String> = match file_type {
+        AgentFileType::Config => recon.config.iter().map(|c| c.path.clone()).collect(),
+        AgentFileType::Session => recon.sessions.iter().map(|s| s.session_file.clone()).collect(),
+    };
+
+    if paths.is_empty() {
+        return Err(anyhow!("No files found in recon data. Run recon_run to discover files."));
+    }
+
+    let mut results = Vec::new();
+    for path in &paths {
+        match recon_read_file(client, &node_id, file_type, path, line_start, line_end).await {
+            Ok(r) => results.push(r),
+            Err(e) => results.push(ReadFileResult {
+                path: path.clone(),
+                content: None,
+                line_start,
+                line_end,
+                error: Some(e.to_string()),
+            }),
+        }
+    }
+    Ok(results)
+}
+
+//
+// Grep a single file on a node.
+//
+
+pub struct GrepFileResult {
+    pub path: String,
+    pub pattern: String,
+    pub matches: Vec<GrepMatch>,
+    pub error: Option<String>,
+}
+
+pub async fn recon_grep_file(
+    client: &(impl McpClient + Sync),
+    node_id: &str,
+    file_type: AgentFileType,
+    path: &str,
+    pattern: &str,
+) -> Result<GrepFileResult> {
+    let cmd = NodeCommand::Agent(AgentCommand::GrepFile {
+        file_type,
+        path: path.to_string(),
+        pattern: pattern.to_string(),
+    });
+    let response = client.send_command(node_id, cmd).await?;
+    match response.result {
+        NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
+            path, pattern, matches, error, ..
+        }) => Ok(GrepFileResult { path, pattern, matches, error }),
+        NodeCommandResult::Error { message } => Err(anyhow!(message)),
+        _ => Err(anyhow!("Unexpected response")),
+    }
+}
+
+//
+// Grep all files of a given type from stored recon. Returns only files with
+// matches (skips files with zero matches).
+//
+
+pub async fn recon_grep_all(
+    client: &(impl McpClient + Sync),
+    node_prefix: &str,
+    file_type: AgentFileType,
+    pattern: &str,
+) -> Result<Vec<GrepFileResult>> {
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available. The service may still be starting — try again in a moment."))?;
+    let node_id = resolve_node_id(&state, node_prefix)?;
+    let agent = resolve_selected_agent(&state, &node_id)?;
+    let recon = client
+        .get_stored_recon(&node_id, &agent)
+        .await?
+        .ok_or_else(|| anyhow!("No stored recon data. Run recon_run first, then select an agent with agent_select."))?;
+
+    let paths: Vec<String> = match file_type {
+        AgentFileType::Config => recon.config.iter().map(|c| c.path.clone()).collect(),
+        AgentFileType::Session => recon.sessions.iter().map(|s| s.session_file.clone()).collect(),
+    };
+
+    if paths.is_empty() {
+        return Err(anyhow!("No files found in recon data. Run recon_run to discover files."));
+    }
+
+    let mut results = Vec::new();
+    for path in &paths {
+        if let Ok(r) = recon_grep_file(client, &node_id, file_type, path, pattern).await {
+            if r.error.is_none() && !r.matches.is_empty() {
+                results.push(r);
+            }
+        }
+    }
+    Ok(results)
 }

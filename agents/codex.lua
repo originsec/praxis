@@ -248,9 +248,10 @@ local function run_session_transact(state, prompt)
       end
     end
 
-    if state.working_dir and state.working_dir ~= "" then
+    local wd = state.working_dir
+    if type(wd) == "string" and wd ~= "" then
       table.insert(args, "--cd")
-      table.insert(args, state.working_dir)
+      table.insert(args, wd)
     end
   end
 
@@ -260,12 +261,15 @@ local function run_session_transact(state, prompt)
 
   table.insert(args, "-")
 
+  local wd = state.working_dir
   local spec = {
     program = state.process_path,
     args = args,
-    cwd = state.working_dir,
     stdin = prompt,
   }
+  if type(wd) == "string" and wd ~= "" then
+    spec.cwd = wd
+  end
 
   local result = praxis.command_run_handle(spec, state.handle)
   if not result.success then

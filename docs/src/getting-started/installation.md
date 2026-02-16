@@ -71,6 +71,7 @@ docker compose up --build
 This starts:
 - **Praxis** (service + web) on port 8080
 - **RabbitMQ** on ports 5672 (AMQP) and 15672 (management UI)
+- **MCP server** on port 8585 (when enabled in Settings > MCP Server)
 
 Open **http://localhost:8080** and you're in.
 

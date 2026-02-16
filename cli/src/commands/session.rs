@@ -5,6 +5,7 @@ use serde_json::json;
 
 use crate::client::CliClient;
 use crate::output::{format_short_id, print_json, print_success, OutputFormat};
+use crate::spinner::Spinner;
 
 #[derive(Subcommand)]
 pub enum SessionCommand {
@@ -29,8 +30,8 @@ pub enum SessionCommand {
         #[arg(short, long)]
         node: String,
 
-        /// Prompt text
-        text: String,
+        /// Prompt text (omit for interactive mode)
+        text: Option<String>,
     },
 
     /// Close the current session
@@ -44,7 +45,8 @@ pub enum SessionCommand {
 pub async fn execute(client: &mut CliClient, command: SessionCommand, output: &OutputFormat) -> Result<()> {
     match command {
         SessionCommand::Create { node, yolo, project } => create_session(client, &node, yolo, project, output).await,
-        SessionCommand::Prompt { node, text } => send_prompt(client, &node, &text, output).await,
+        SessionCommand::Prompt { node, text: Some(text) } => send_prompt(client, &node, &text, output).await,
+        SessionCommand::Prompt { node, text: None } => interactive_prompt(client, &node, output).await,
         SessionCommand::Close { node } => close_session(client, &node, output).await,
     }
 }
@@ -66,7 +68,14 @@ async fn create_session(client: &CliClient, node_prefix: &str, yolo: bool, proje
     };
 
     let cmd = NodeCmd::Session(NodeSessionCommand::Create { context });
-    let response = client.send_command(&node_id, cmd).await?;
+    let spinner = if matches!(output, OutputFormat::Text) {
+        Some(Spinner::start("Creating session..."))
+    } else {
+        None
+    };
+    let response = client.send_command(&node_id, cmd).await;
+    if let Some(s) = spinner { s.finish().await; }
+    let response = response?;
 
     match response.result {
         NodeCommandResult::Session(SessionCommandResult::Created { session_id }) => {
@@ -110,14 +119,24 @@ async fn send_prompt(client: &CliClient, node_prefix: &str, text: &str, output: 
         transaction_id: transaction_id.clone(),
     });
 
+    let spinner = if matches!(output, OutputFormat::Text) {
+        Some(Spinner::start_with_elapsed("Thinking..."))
+    } else {
+        None
+    };
+
     //
     // Race send_command against Ctrl+C. On interrupt, send CancelTransaction
     // to abort the running prompt on the node.
     //
 
     let response = tokio::select! {
-        result = client.send_command(&node_id, cmd) => result?,
+        result = client.send_command(&node_id, cmd) => {
+            if let Some(s) = spinner { s.finish().await; }
+            result?
+        }
         _ = tokio::signal::ctrl_c() => {
+            if let Some(s) = spinner { s.finish().await; }
             let cancel_cmd = NodeCmd::Session(NodeSessionCommand::CancelTransaction {
                 transaction_id: transaction_id.clone(),
                 force: true,
@@ -160,6 +179,126 @@ async fn send_prompt(client: &CliClient, node_prefix: &str, text: &str, output: 
         }
         _ => Err(anyhow!("Unexpected response")),
     }
+}
+
+async fn interactive_prompt(client: &CliClient, node_prefix: &str, output: &OutputFormat) -> Result<()> {
+    use colored::Colorize;
+    use rustyline::error::ReadlineError;
+    use rustyline::history::DefaultHistory;
+    use rustyline::{Config, Editor};
+
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let node_id = find_node_id(&state, node_prefix)
+        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+
+    //
+    // Bail early if there's no active session on this node.
+    //
+
+    let has_session = state.nodes.iter()
+        .find(|n| n.node_id == node_id)
+        .and_then(|n| n.selected_agent.as_ref())
+        .and_then(|a| a.session_id.as_ref())
+        .is_some();
+
+    if !has_session {
+        return Err(anyhow!("No active session — create one first with 'session create'"));
+    }
+
+    let config = Config::builder().build();
+    let mut rl: Editor<(), DefaultHistory> = Editor::with_config(config)?;
+
+    println!();
+    println!("  {} {}", "Interactive session".bold(), "(ctrl+c to exit)".dimmed());
+    println!();
+
+    let prompt = format!("  {} ", "▸".cyan());
+
+    loop {
+        match rl.readline(&prompt) {
+            Ok(line) => {
+                let text = line.trim();
+                if text.is_empty() {
+                    continue;
+                }
+                let _ = rl.add_history_entry(text);
+
+                let transaction_id = uuid::Uuid::new_v4().to_string();
+                let cmd = NodeCmd::Session(NodeSessionCommand::Prompt {
+                    text: text.to_string(),
+                    transaction_id: transaction_id.clone(),
+                });
+
+                let spinner = if matches!(output, OutputFormat::Text) {
+                    Some(Spinner::start_with_elapsed("Thinking..."))
+                } else {
+                    None
+                };
+
+                let response = tokio::select! {
+                    result = client.send_command(&node_id, cmd) => {
+                        if let Some(s) = spinner { s.finish().await; }
+                        match result {
+                            Ok(r) => r,
+                            Err(e) => {
+                                crate::output::print_error(&e.to_string());
+                                continue;
+                            }
+                        }
+                    }
+                    _ = tokio::signal::ctrl_c() => {
+                        if let Some(s) = spinner { s.finish().await; }
+                        let cancel_cmd = NodeCmd::Session(NodeSessionCommand::CancelTransaction {
+                            transaction_id: transaction_id.clone(),
+                            force: true,
+                        });
+                        let _ = client.send_command(&node_id, cancel_cmd).await;
+                        println!();
+                        println!("  {}", "Cancelled".dimmed());
+                        continue;
+                    }
+                };
+
+                match response.result {
+                    NodeCommandResult::Session(SessionCommandResult::PromptResponse { response, .. }) => {
+                        match output {
+                            OutputFormat::Json => {
+                                print_json(&json!({
+                                    "status": "success",
+                                    "prompt": text,
+                                    "response": response
+                                }));
+                            }
+                            OutputFormat::Text => {
+                                println!();
+                                crate::output::print_markdown(&response);
+                                println!();
+                            }
+                        }
+                    }
+                    NodeCommandResult::Session(SessionCommandResult::TransactionCancelled { .. }) => {
+                        println!("  {}", "Cancelled".dimmed());
+                    }
+                    NodeCommandResult::Error { message } => {
+                        crate::output::print_error(&message);
+                    }
+                    _ => {
+                        crate::output::print_error("Unexpected response");
+                    }
+                }
+            }
+            Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
+                println!();
+                break;
+            }
+            Err(e) => {
+                crate::output::print_error(&format!("Input error: {}", e));
+                break;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 async fn close_session(client: &CliClient, node_prefix: &str, output: &OutputFormat) -> Result<()> {

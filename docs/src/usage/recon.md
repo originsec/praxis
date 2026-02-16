@@ -53,6 +53,28 @@ Best for: Full capability discovery, understanding what tools do
 
 Semantic recon requires the **Semantic Parser** LLM to be configured. Choose a model that balances speed and capability - multiple parsing calls may be made so fast inference helps, but the model also needs to be capable enough to extract meaningful information from complex configurations.
 
+## Querying Stored Recon Data
+
+After running recon, the results are stored in the service database. You can query specific sections without re-running recon:
+
+**CLI (REPL or one-shot):**
+```bash
+agent recon list                  # all stored recon details
+agent recon list sessions         # just sessions
+agent recon list tools            # MCP servers, skills, internal tools
+agent recon list projects         # project paths
+agent recon list configs          # config items
+agent recon list --agent codex    # specify agent explicitly
+```
+
+**MCP tools:**
+- `recon_sessions` - list sessions (requires node + agent params)
+- `recon_projects` - list project paths
+- `recon_tools` - list MCP servers, skills, and internal tools
+- `recon_configs` - list config items
+
+These are useful for quick lookups and for AI agents that need to browse specific recon data without triggering a full scan.
+
 ## Using Recon Data
 
 ### View Config Files

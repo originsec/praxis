@@ -9,14 +9,11 @@ use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
 use crate::messages::ServerMessage;
 use crate::rabbitmq::RabbitMqClient;
-use crate::orchestrator::{self, OrchestratorEvent, OrchestratorSession};
 use crate::state::AppState;
 
 mod handlers;
@@ -25,8 +22,6 @@ mod handlers;
 pub struct WsState {
     pub app_state: Arc<AppState>,
     pub rabbitmq: Arc<RabbitMqClient>,
-    /// Active Orchestrator sessions keyed by connection ID
-    pub orchestrator_sessions: RwLock<HashMap<String, OrchestratorSession>>,
 }
 
 impl WsState {
@@ -34,7 +29,6 @@ impl WsState {
         Self {
             app_state,
             rabbitmq,
-            orchestrator_sessions: RwLock::new(HashMap::new()),
         }
     }
 }
@@ -167,11 +161,7 @@ async fn handle_incoming(
                     }
                 }
             }
-            Ok(Message::Ping(_)) => {
-                //
-                // Pong is handled automatically by axum.
-                //
-            }
+            Ok(Message::Ping(_)) => {}
             Ok(Message::Pong(_)) => {}
             Ok(Message::Close(_)) => {
                 break;
@@ -184,150 +174,9 @@ async fn handle_incoming(
     }
 
     //
-    // Clean up Orchestrator session when connection closes.
+    // Stop orchestrator session when connection closes (via RabbitMQ).
     //
-    let mut sessions = state.orchestrator_sessions.write().await;
-    if let Some(session) = sessions.remove(&connection_id) {
-        session.stop();
+    if let Err(e) = state.rabbitmq.stop_orchestrator().await {
+        common::log_warn!("Failed to send OrchestratorStop on disconnect: {}", e);
     }
-}
-
-/// Handle OrchestratorStart message - create a new Orchestrator session for this connection
-pub(super) async fn handle_orchestrator_start(
-    state: &Arc<WsState>,
-    connection_id: &str,
-) -> anyhow::Result<()> {
-    //
-    // Stop any existing session first.
-    //
-    {
-        let mut sessions = state.orchestrator_sessions.write().await;
-        if let Some(session) = sessions.remove(connection_id) {
-            session.stop();
-        }
-    }
-
-    //
-    // Fetch LLM and MCP config from Service if not already cached.
-    //
-    let _ = state.rabbitmq.get_config(vec![
-        "llm_model_definitions".to_string(),
-        "llm_feature_orchestrator".to_string(),
-        "llm_orchestrator_max_tokens".to_string(),
-        "mcp_server_enabled".to_string(),
-        "mcp_server_port".to_string(),
-    ]).await;
-    //
-    // Wait briefly for config response.
-    //
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-
-    //
-    // Create event channel for this session.
-    //
-    let (event_tx, mut event_rx) = mpsc::channel::<OrchestratorEvent>(100);
-
-    //
-    // Start the Orchestrator session.
-    //
-    let session = match orchestrator::start_orchestrator_session(
-        Arc::clone(&state.app_state),
-        event_tx,
-    ).await {
-        Ok(s) => s,
-        Err(e) => {
-            state.app_state.broadcast(ServerMessage::OrchestratorError { message: e });
-            return Ok(());
-        }
-    };
-
-    //
-    // Store the session.
-    //
-    {
-        let mut sessions = state.orchestrator_sessions.write().await;
-        sessions.insert(connection_id.to_string(), session);
-    }
-
-    //
-    // Send started message via broadcast.
-    //
-    state.app_state.broadcast(ServerMessage::OrchestratorStarted);
-
-    //
-    // Spawn task to forward Orchestrator events to the browser.
-    //
-    let state_clone = Arc::clone(state);
-    tokio::spawn(async move {
-        while let Some(event) = event_rx.recv().await {
-            let msg = match event {
-                OrchestratorEvent::Content(content) => ServerMessage::OrchestratorContent { content },
-                OrchestratorEvent::Done => ServerMessage::OrchestratorDone,
-                OrchestratorEvent::Error(message) => ServerMessage::OrchestratorError { message },
-                OrchestratorEvent::ToolExecuting { name, input } => ServerMessage::OrchestratorToolExecuting { name, input },
-                OrchestratorEvent::ToolExecuted { name, display, success, result } => {
-                    ServerMessage::OrchestratorToolExecuted { name, display, success, result }
-                }
-                OrchestratorEvent::PlanUpdated(plan) => ServerMessage::OrchestratorPlanUpdated { plan },
-                OrchestratorEvent::TokenUsage { prompt_tokens, completion_tokens, total_tokens } => {
-                    ServerMessage::OrchestratorTokenUsage { prompt_tokens, completion_tokens, total_tokens }
-                }
-            };
-            state_clone.app_state.broadcast(msg);
-        }
-    });
-
-    Ok(())
-}
-
-/// Handle OrchestratorPrompt message - send a prompt to the active Orchestrator session
-pub(super) async fn handle_orchestrator_prompt(
-    state: &Arc<WsState>,
-    connection_id: &str,
-    message: &str,
-) -> anyhow::Result<()> {
-    let sessions = state.orchestrator_sessions.read().await;
-    if let Some(session) = sessions.get(connection_id) {
-        if let Err(e) = session.prompt_tx.send(message.to_string()).await {
-            common::log_warn!("Failed to send prompt to Orchestrator session: {}", e);
-            state.app_state.broadcast(ServerMessage::OrchestratorError {
-                message: format!("Failed to send prompt: {}", e),
-            });
-        }
-    } else {
-        common::log_warn!("No active Orchestrator session for connection {}", connection_id);
-        state.app_state.broadcast(ServerMessage::OrchestratorError {
-            message: "No active Orchestrator session. Click 'New Session' to start.".to_string(),
-        });
-    }
-    Ok(())
-}
-
-/// Handle OrchestratorStop message - stop the Orchestrator session for this connection
-pub(super) async fn handle_orchestrator_stop(
-    state: &Arc<WsState>,
-    connection_id: &str,
-) -> anyhow::Result<()> {
-    let mut sessions = state.orchestrator_sessions.write().await;
-    if let Some(session) = sessions.remove(connection_id) {
-        session.stop();
-    }
-    state.app_state.broadcast(ServerMessage::OrchestratorStopped);
-    Ok(())
-}
-
-/// Handle OrchestratorCancel message - cancel current inference but keep session alive
-pub(super) async fn handle_orchestrator_cancel(
-    state: &Arc<WsState>,
-    connection_id: &str,
-) -> anyhow::Result<()> {
-    let sessions = state.orchestrator_sessions.read().await;
-    if let Some(session) = sessions.get(connection_id) {
-        session.cancel();
-    }
-    //
-    // Broadcast Done to finalize any streaming content (session stays active).
-    //
-    state.app_state.broadcast(ServerMessage::OrchestratorDone);
-    Ok(())
 }

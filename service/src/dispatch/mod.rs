@@ -15,6 +15,7 @@ use crate::config::ServiceConfig;
 use crate::database::Database;
 use crate::handlers::{ClientMessageHandler, NodeMessageHandler};
 use crate::mcp::McpServerManager;
+use crate::orchestrator::OrchestratorManager;
 use crate::semantic_ops::{ChainExecutor, ResponseTracker, SemanticOpsManager};
 use crate::state::{ClientRegistry, NodeRegistry, PendingCommands};
 
@@ -33,6 +34,7 @@ pub struct ServiceContext {
     pub semantic_ops_manager: Arc<SemanticOpsManager>,
     pub chain_executor: Arc<ChainExecutor>,
     pub agent_chat_manager: Arc<AgentChatManager>,
+    pub orchestrator_manager: Arc<OrchestratorManager>,
     pub mcp_manager: Arc<McpServerManager>,
 
     //

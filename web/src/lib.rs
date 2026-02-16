@@ -5,7 +5,6 @@
 
 mod messages;
 mod rabbitmq;
-mod orchestrator;
 mod state;
 mod websocket;
 

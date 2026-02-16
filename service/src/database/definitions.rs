@@ -16,7 +16,6 @@ pub struct OperationDefinition {
     pub short_name: String,
     /// Display name
     pub name: String,
-    /// Description
     pub description: String,
     /// Information for semantic agents to enrich their understanding
     pub agent_info: String,

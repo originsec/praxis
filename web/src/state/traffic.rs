@@ -1,18 +1,12 @@
 use super::AppState;
 
 impl AppState {
-    //
-    // --- Traffic search tracking ---.
-    //
-
-    /// Add a pending traffic search request ID
     #[allow(dead_code)]
     pub async fn add_pending_traffic_search(&self, request_id: String) {
         let mut pending = self.pending_traffic_searches.write().await;
         pending.insert(request_id);
     }
 
-    /// Store a traffic search response
     pub async fn store_traffic_search_response(
         &self,
         entries: Vec<common::InterceptedTrafficEntry>,
@@ -29,16 +23,12 @@ impl AppState {
         };
         if !pending.is_empty() {
             let mut responses = self.traffic_search_responses.write().await;
-            //
-            // Store for all pending requests (they'll each get a copy).
-            //
             for request_id in pending {
                 responses.insert(request_id, (entries.clone(), total_count));
             }
         }
     }
 
-    /// Take a traffic search response
     #[allow(dead_code)]
     pub async fn take_traffic_search_response(
         &self,

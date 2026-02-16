@@ -3,6 +3,7 @@ mod commands;
 mod interactive;
 mod mcp;
 mod output;
+mod spinner;
 mod state;
 
 use anyhow::Result;
@@ -12,6 +13,7 @@ use commands::{
     agent::AgentCommand,
     node::NodeCommand,
     op::OpCommand,
+    recon::ReconCommand,
     session::SessionCommand,
     traffic::TrafficCommand,
 };
@@ -73,6 +75,12 @@ pub(crate) enum Commands {
         command: AgentCommand,
     },
 
+    /// Reconnaissance operations
+    Recon {
+        #[command(subcommand)]
+        command: ReconCommand,
+    },
+
     /// Session management commands
     Session {
         #[command(subcommand)]
@@ -90,6 +98,9 @@ pub(crate) enum Commands {
         #[command(subcommand)]
         command: OpCommand,
     },
+
+    /// Interactive LLM orchestrator session
+    Orchestrate,
 }
 
 impl Commands {
@@ -101,6 +112,7 @@ impl Commands {
         match self {
             Commands::Node { command } => commands::node::execute(client, command, output).await,
             Commands::Agent { command } => commands::agent::execute(client, command, output).await,
+            Commands::Recon { command } => commands::recon::execute(client, command, output).await,
             Commands::Session { command } => {
                 commands::session::execute(client, command, output).await
             }
@@ -108,6 +120,7 @@ impl Commands {
                 commands::traffic::execute(client, command, output).await
             }
             Commands::Op { command } => commands::op::execute(client, command, output).await,
+            Commands::Orchestrate => commands::orchestrate::execute(client).await,
         }
     }
 }
@@ -120,19 +133,13 @@ fn print_fullhelp() {
     println!("================================================================================");
     println!();
 
-    //
-    // Print main help.
-    //
     println!("MAIN COMMAND");
     println!("------------");
     cmd.print_help().ok();
     println!();
     println!();
 
-    //
-    // Print help for each subcommand.
-    //
-    let subcommands = ["node", "agent", "session", "traffic", "op"];
+    let subcommands = ["node", "agent", "recon", "session", "traffic", "op", "orchestrate"];
 
     for sub_name in subcommands {
         println!("================================================================================");
@@ -145,9 +152,6 @@ fn print_fullhelp() {
             println!();
             println!();
 
-            //
-            // Print help for nested subcommands.
-            //
             let nested: Vec<String> = sub
                 .get_subcommands()
                 .map(|s| s.get_name().to_string())
@@ -211,26 +215,17 @@ fn main() {
 async fn run() -> Result<()> {
     let cli = Cli::parse();
 
-    //
-    // Handle --fullhelp early.
-    //
     if cli.fullhelp {
         print_fullhelp();
         return Ok(());
     }
 
-    //
-    // Handle --clear early.
-    //
     if cli.clear {
         state::CliState::clear()?;
         output::print_success("Local state cleared");
         return Ok(());
     }
 
-    //
-    // Handle --status early.
-    //
     if cli.status {
         let mut cli_state = state::CliState::load()?;
         let client_id = cli_state.get_or_create_client_id()?;
@@ -260,9 +255,6 @@ async fn run() -> Result<()> {
         return Ok(());
     }
 
-    //
-    // Handle --mcp early.
-    //
     if cli.mcp {
         return mcp::run_server(&cli.rabbitmq_url, cli.timeout).await;
     }

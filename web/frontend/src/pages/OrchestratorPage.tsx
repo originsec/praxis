@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -18,10 +18,13 @@ import {
   ChevronRight,
   ChevronDown,
   Download,
+  Activity,
 } from 'lucide-react';
 import { exportOrchestratorSession, downloadTextFile } from '../utils/export';
 import { useApp, type OrchestratorMessage, type OrchestratorToolExecution } from '../context/AppContext';
-import type { OrchestratorPlan, PlanStep } from '../api/types';
+import type { OrchestratorPlan, PlanStep, NodeState } from '../api/types';
+import type { OrchestratorState } from '../context/orchestratorTypes';
+import { getFeatureFlags } from '../utils/featureFlags';
 
 //
 // Plan step status icon.
@@ -123,7 +126,7 @@ function PlanDisplay({ plan }: { plan: OrchestratorPlan }) {
 //
 function ToolExecutionItem({ exec }: { exec: OrchestratorToolExecution }) {
   const [expanded, setExpanded] = useState(false);
-  const canExpand = !exec.executing && exec.result;
+  const canExpand = exec.input || exec.result;
 
   return (
     <div
@@ -148,20 +151,31 @@ function ToolExecutionItem({ exec }: { exec: OrchestratorToolExecution }) {
         <span className="font-mono">{exec.name}</span>
         {!exec.executing && <span className="text-[var(--text-highlight)]/60">- {exec.display}</span>}
       </div>
-      {exec.input && (
-        <div className="mt-1 ml-5 pl-2 border-l border-current/30 text-[var(--text-highlight)]/60 italic">
-          {exec.input}
-        </div>
-      )}
-      {expanded && exec.result && (
-        <div className="mt-2 ml-5 p-2 bg-[var(--bg-primary)] rounded border border-subtle text-[var(--text-muted)] font-mono text-[10px] overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
-          {(() => {
-            try {
-              return JSON.stringify(JSON.parse(exec.result), null, 2);
-            } catch {
-              return exec.result;
-            }
-          })()}
+      {expanded && (
+        <div className="mt-2 ml-5 space-y-2">
+          {exec.input && (
+            <div className="p-2 bg-[var(--bg-primary)] rounded border border-subtle text-[var(--text-muted)] font-mono text-[10px] overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
+              <span className="text-[var(--text-highlight)]/40 select-none">input: </span>
+              {(() => {
+                try {
+                  return JSON.stringify(JSON.parse(exec.input), null, 2);
+                } catch {
+                  return exec.input;
+                }
+              })()}
+            </div>
+          )}
+          {exec.result && (
+            <div className="p-2 bg-[var(--bg-primary)] rounded border border-subtle text-[var(--text-muted)] font-mono text-[10px] overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
+              {(() => {
+                try {
+                  return JSON.stringify(JSON.parse(exec.result), null, 2);
+                } catch {
+                  return exec.result;
+                }
+              })()}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -329,19 +343,480 @@ function StreamingMessage({
   );
 }
 
+type VizNodeKind = 'orchestrator' | 'plan' | 'tool' | 'node' | 'agent';
+type VizNodeStatus = 'idle' | 'running' | 'done' | 'error';
+type VizEdgeKind = 'flow' | 'relation' | 'impact';
+
+interface VizNode {
+  id: string;
+  label: string;
+  subtitle?: string;
+  kind: VizNodeKind;
+  status: VizNodeStatus;
+  x: number;
+  y: number;
+  z: number;
+  size: number;
+}
+
+interface VizEdge {
+  id: string;
+  source: string;
+  target: string;
+  kind: VizEdgeKind;
+}
+
+function safeParseJson(value?: string): unknown | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function collectExecutionTargets(
+  value: unknown,
+  acc: { nodeIds: Set<string>; agentShortNames: Set<string> },
+  depth = 0
+) {
+  if (value == null || depth > 5) return;
+  if (Array.isArray(value)) {
+    for (const item of value) collectExecutionTargets(item, acc, depth + 1);
+    return;
+  }
+  if (typeof value !== 'object') return;
+
+  const obj = value as Record<string, unknown>;
+  for (const [keyRaw, inner] of Object.entries(obj)) {
+    const key = keyRaw.toLowerCase();
+    if (typeof inner === 'string') {
+      if (key === 'node_id' && inner.trim()) acc.nodeIds.add(inner);
+      if ((key === 'agent_short_name' || key === 'short_name') && inner.trim()) {
+        acc.agentShortNames.add(inner);
+      }
+    }
+    collectExecutionTargets(inner, acc, depth + 1);
+  }
+}
+
+function toNodeIdKey(nodeId: string): string {
+  return `node:${nodeId}`;
+}
+
+function toAgentIdKey(nodeId: string, shortName: string): string {
+  return `agent:${nodeId}:${shortName}`;
+}
+
+function OrchestratorLiveMap({
+  orchestrator,
+  nodes,
+}: {
+  orchestrator: OrchestratorState;
+  nodes: NodeState[];
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [rotation, setRotation] = useState(0);
+  const [viewport, setViewport] = useState({ width: 920, height: 320 });
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const width = Math.max(640, Math.floor(entry.contentRect.width));
+      setViewport({ width, height: 320 });
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    let rafId = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      const dt = Math.min(80, now - last);
+      last = now;
+      setRotation((prev) => (prev + dt * 0.00035) % (Math.PI * 2));
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, []);
+
+  const latestAssistantTools = useMemo(() => {
+    const latest = [...orchestrator.messages].reverse().find((m) => m.role === 'assistant' && m.toolExecutions?.length);
+    return latest?.toolExecutions ?? [];
+  }, [orchestrator.messages]);
+
+  const activeTools = orchestrator.currentToolExecutions.length > 0
+    ? orchestrator.currentToolExecutions
+    : latestAssistantTools;
+
+  const hasVizData = orchestrator.sessionActive
+    || orchestrator.isLoading
+    || (orchestrator.currentPlan?.steps.length ?? 0) > 0
+    || activeTools.length > 0;
+
+  const viz = useMemo(() => {
+    const vizNodes: VizNode[] = [];
+    const vizEdges: VizEdge[] = [];
+    const nodeById = new Map<string, VizNode>();
+
+    const addNode = (node: VizNode) => {
+      if (!nodeById.has(node.id)) {
+        nodeById.set(node.id, node);
+        vizNodes.push(node);
+      }
+    };
+    const addEdge = (edge: VizEdge) => {
+      if (edge.source === edge.target) return;
+      if (!vizEdges.find((e) => e.source === edge.source && e.target === edge.target && e.kind === edge.kind)) {
+        vizEdges.push(edge);
+      }
+    };
+
+    const placeLayer = (layer: VizNode[], x: number, spreadY: number, spreadZ: number) => {
+      if (layer.length === 0) return;
+      const center = (layer.length - 1) / 2;
+      for (let i = 0; i < layer.length; i += 1) {
+        const yOffset = (i - center) * spreadY;
+        const zOffset = ((i % 2 === 0 ? 1 : -1) * ((Math.floor(i / 2) + 1) * spreadZ));
+        layer[i].x = x;
+        layer[i].y = yOffset;
+        layer[i].z = zOffset;
+      }
+    };
+
+    const layerOrchestrator: VizNode[] = [];
+    const layerPlan: VizNode[] = [];
+    const layerTools: VizNode[] = [];
+    const layerNodes: VizNode[] = [];
+    const layerAgents: VizNode[] = [];
+
+    const coreNode: VizNode = {
+      id: 'orchestrator:core',
+      label: 'Orchestrator',
+      subtitle: orchestrator.isLoading ? 'running' : 'idle',
+      kind: 'orchestrator',
+      status: orchestrator.isLoading ? 'running' : orchestrator.sessionActive ? 'idle' : 'done',
+      x: 0,
+      y: 0,
+      z: 0,
+      size: 12,
+    };
+    addNode(coreNode);
+    layerOrchestrator.push(coreNode);
+
+    const plan = orchestrator.currentPlan;
+    const fullSteps = plan?.steps ?? [];
+    const activeIndex = fullSteps.findIndex((s) => s.status === 'in_progress');
+    const windowStart = activeIndex >= 0 ? Math.max(0, activeIndex - 1) : Math.max(0, fullSteps.length - 3);
+    const visiblePlan = fullSteps.slice(windowStart, windowStart + 4);
+    const planStepIds: string[] = [];
+    for (let i = 0; i < visiblePlan.length; i += 1) {
+      const sourceIndex = windowStart + i;
+      const step = visiblePlan[i];
+      const stepId = `plan:${sourceIndex}`;
+      planStepIds.push(stepId);
+      const stepNode: VizNode = {
+        id: stepId,
+        label: `S${sourceIndex + 1}`,
+        subtitle: step.description,
+        kind: 'plan',
+        status: step.status === 'done' ? 'done' : step.status === 'in_progress' ? 'running' : 'idle',
+        x: 0,
+        y: 0,
+        z: 0,
+        size: 10,
+      };
+      addNode(stepNode);
+      layerPlan.push(stepNode);
+      addEdge({
+        id: `edge:plan-link:${sourceIndex}`,
+        source: i === 0 ? 'orchestrator:core' : `plan:${windowStart + i - 1}`,
+        target: stepId,
+        kind: 'flow',
+      });
+    }
+
+    const focusedNodeIds = new Set<string>();
+    const focusedAgents = new Set<string>();
+
+    const visibleTools = activeTools.slice(-8);
+    for (let i = 0; i < visibleTools.length; i += 1) {
+      const tool = visibleTools[i];
+      const toolId = `tool:${i}:${tool.name}`;
+      const toolNode: VizNode = {
+        id: toolId,
+        label: tool.name,
+        subtitle: tool.executing ? 'Pending' : tool.display,
+        kind: 'tool',
+        status: tool.executing ? 'running' : tool.success ? 'done' : 'error',
+        x: 0,
+        y: 0,
+        z: 0,
+        size: 10,
+      };
+      addNode(toolNode);
+      layerTools.push(toolNode);
+      addEdge({
+        id: `edge:tool:source:${i}`,
+        source: planStepIds[planStepIds.length - 1] || 'orchestrator:core',
+        target: toolId,
+        kind: 'impact',
+      });
+
+      const targets = { nodeIds: new Set<string>(), agentShortNames: new Set<string>() };
+      collectExecutionTargets(safeParseJson(tool.input), targets);
+      collectExecutionTargets(safeParseJson(tool.result), targets);
+
+      for (const nodeId of targets.nodeIds) {
+        focusedNodeIds.add(nodeId);
+      }
+      for (const shortName of targets.agentShortNames) {
+        focusedAgents.add(shortName);
+      }
+    }
+
+    let shownNodes = 0;
+    const maxNodes = 8;
+    const maxAgents = 10;
+    let shownAgents = 0;
+
+    const sortedNodes = [...nodes].sort((a, b) => {
+      const aHit = focusedNodeIds.has(a.node_id) ? 1 : 0;
+      const bHit = focusedNodeIds.has(b.node_id) ? 1 : 0;
+      if (aHit !== bHit) return bHit - aHit;
+      return (b.selected_agent ? 1 : 0) - (a.selected_agent ? 1 : 0);
+    });
+
+    for (const node of sortedNodes) {
+      if (shownNodes >= maxNodes) break;
+      const hasFocus = focusedNodeIds.size === 0 || focusedNodeIds.has(node.node_id) || !!node.selected_agent;
+      if (!hasFocus && shownNodes >= 4) continue;
+
+      const nodeKey = toNodeIdKey(node.node_id);
+      const nodeNode: VizNode = {
+        id: nodeKey,
+        label: node.machine_name || node.node_id.slice(0, 8),
+        subtitle: node.node_id.slice(0, 8),
+        kind: 'node',
+        status: focusedNodeIds.has(node.node_id) ? 'running' : 'idle',
+        x: 0,
+        y: 0,
+        z: 0,
+        size: 11,
+      };
+      addNode(nodeNode);
+      layerNodes.push(nodeNode);
+      addEdge({ id: `edge:core:${nodeKey}`, source: 'orchestrator:core', target: nodeKey, kind: 'relation' });
+      shownNodes += 1;
+
+      const selected = node.selected_agent?.short_name;
+      if (selected && shownAgents < maxAgents) {
+        const selectedKey = toAgentIdKey(node.node_id, selected);
+        const selectedAgentNode: VizNode = {
+          id: selectedKey,
+          label: selected,
+          subtitle: focusedAgents.has(selected) ? 'In tool path' : 'Selected',
+          kind: 'agent',
+          status: focusedAgents.has(selected) ? 'running' : 'idle',
+          x: 0,
+          y: 0,
+          z: 0,
+          size: 9,
+        };
+        addNode(selectedAgentNode);
+        layerAgents.push(selectedAgentNode);
+        addEdge({ id: `edge:${nodeKey}:${selectedKey}`, source: nodeKey, target: selectedKey, kind: 'relation' });
+        shownAgents += 1;
+      }
+
+      const interestingAgents = node.discovered_agents.filter((agent) => focusedAgents.has(agent.short_name)).slice(0, 2);
+      for (const agent of interestingAgents) {
+        if (shownAgents >= maxAgents) break;
+        if (agent.short_name === selected) continue;
+        const agentKey = toAgentIdKey(node.node_id, agent.short_name);
+        const agentNode: VizNode = {
+          id: agentKey,
+          label: agent.short_name,
+          subtitle: 'Referenced',
+          kind: 'agent',
+          status: agent.available ? 'running' : 'error',
+          x: 0,
+          y: 0,
+          z: 0,
+          size: 9,
+        };
+        addNode(agentNode);
+        layerAgents.push(agentNode);
+        addEdge({ id: `edge:${nodeKey}:${agentKey}`, source: nodeKey, target: agentKey, kind: 'relation' });
+        shownAgents += 1;
+      }
+    }
+
+    for (const edge of vizEdges) {
+      const sourceNode = nodeById.get(edge.source);
+      const targetNode = nodeById.get(edge.target);
+      if (!sourceNode || !targetNode) continue;
+      if (sourceNode.kind === 'tool' && targetNode.kind === 'node') {
+        sourceNode.status = sourceNode.status === 'error' ? 'error' : 'running';
+        targetNode.status = 'running';
+      }
+      if (sourceNode.kind === 'tool' && targetNode.kind === 'agent') {
+        targetNode.status = 'running';
+      }
+    }
+
+    placeLayer(layerOrchestrator, -280, 120, 50);
+    placeLayer(layerPlan, -110, 85, 35);
+    placeLayer(layerTools, 60, 70, 30);
+    placeLayer(layerNodes, 260, 82, 35);
+    placeLayer(layerAgents, 430, 70, 28);
+
+    return {
+      nodes: vizNodes,
+      edges: vizEdges,
+      toolCount: visibleTools.length,
+      pendingTools: visibleTools.filter((t) => t.executing).length,
+    };
+  }, [activeTools, nodes, orchestrator.currentPlan, orchestrator.isLoading, orchestrator.sessionActive]);
+
+  const edgeColor = (kind: VizEdgeKind): string => {
+    if (kind === 'flow') return 'var(--accent-info)';
+    if (kind === 'impact') return 'var(--accent-warning)';
+    return 'var(--text-secondary)';
+  };
+
+  const kindColor = (kind: VizNodeKind): string => {
+    if (kind === 'orchestrator') return 'var(--accent-purple)';
+    if (kind === 'plan') return 'var(--accent-info)';
+    if (kind === 'tool') return 'var(--accent-warning)';
+    if (kind === 'node') return 'var(--accent-success)';
+    return 'var(--text-highlight)';
+  };
+
+  const projected = useMemo(() => {
+    const cos = Math.cos(rotation);
+    const sin = Math.sin(rotation);
+    const fov = 780;
+    const depthOffset = 980;
+    const cx = viewport.width / 2;
+    const cy = viewport.height / 2;
+
+    const nodeMap = new Map<string, { x: number; y: number; r: number; depth: number; node: VizNode }>();
+    for (const node of viz.nodes) {
+      const rx = node.x * cos - node.z * sin;
+      const rz = node.x * sin + node.z * cos;
+      const scale = fov / Math.max(240, depthOffset + rz);
+      nodeMap.set(node.id, {
+        x: cx + rx * scale,
+        y: cy + node.y * scale,
+        r: Math.max(3.5, node.size * scale),
+        depth: rz,
+        node,
+      });
+    }
+
+    const edges = viz.edges
+      .map((edge) => {
+        const source = nodeMap.get(edge.source);
+        const target = nodeMap.get(edge.target);
+        if (!source || !target) return null;
+        return {
+          edge,
+          source,
+          target,
+          depth: (source.depth + target.depth) / 2,
+        };
+      })
+      .filter((e): e is NonNullable<typeof e> => !!e)
+      .sort((a, b) => a.depth - b.depth);
+
+    const nodesSorted = [...nodeMap.values()].sort((a, b) => a.depth - b.depth);
+    return { edges, nodes: nodesSorted };
+  }, [rotation, viewport.height, viewport.width, viz.edges, viz.nodes]);
+
+  if (!hasVizData) return null;
+
+  return (
+    <div className="mb-4 bg-card ascii-box border border-subtle">
+      <div className="px-3 py-2 border-b border-subtle flex items-center gap-3 text-xs">
+        <div className="flex items-center gap-2 text-[var(--text-primary)]">
+          <Activity size={13} className={orchestrator.isLoading ? 'animate-pulse text-[var(--accent-warning)]' : 'text-[var(--accent-info)]'} />
+          <span className="font-medium">Execution Topology</span>
+        </div>
+        <span className="text-muted">{viz.toolCount} tool calls</span>
+        {viz.pendingTools > 0 && <span className="text-[var(--accent-warning)]">{viz.pendingTools} pending</span>}
+        <span className="text-muted ml-auto">Live map of plan, tools, nodes, and agents</span>
+      </div>
+      <div ref={containerRef} className="relative h-[320px] overflow-hidden bg-[radial-gradient(ellipse_at_center,var(--bg-secondary),var(--bg-primary))]">
+        <svg width={viewport.width} height={viewport.height} className="absolute inset-0">
+          {projected.edges.map(({ edge, source, target }) => (
+            <line
+              key={edge.id}
+              x1={source.x}
+              y1={source.y}
+              x2={target.x}
+              y2={target.y}
+              stroke={edgeColor(edge.kind)}
+              strokeWidth={edge.kind === 'impact' ? 1.8 : 1.1}
+              opacity={edge.kind === 'impact' ? 0.85 : 0.45}
+            />
+          ))}
+          {projected.nodes.map(({ node, x, y, r, depth }) => {
+            const depthOpacity = Math.max(0.45, Math.min(1, 1 - (depth + 520) / 1700));
+            const fill = node.status === 'error'
+              ? 'var(--accent-error)'
+              : node.status === 'running'
+              ? 'var(--accent-warning)'
+              : node.status === 'done'
+              ? 'var(--accent-success)'
+              : kindColor(node.kind);
+            return (
+              <g key={node.id} opacity={depthOpacity}>
+                <circle cx={x} cy={y} r={r + 2.5} fill={fill} opacity={0.18} />
+                <circle cx={x} cy={y} r={r} fill={fill} stroke="var(--bg-primary)" strokeWidth={1.2} />
+                <title>{`${node.label}${node.subtitle ? ` • ${node.subtitle}` : ''}`}</title>
+                <text
+                  x={x}
+                  y={y - (r + 5)}
+                  textAnchor="middle"
+                  fontSize={10}
+                  fill="var(--text-primary)"
+                  style={{ pointerEvents: 'none' }}
+                >
+                  {node.label}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+        <div className="absolute bottom-2 left-3 text-[10px] text-muted">
+          rotating 3D projection • focused on active plan/tools
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function OrchestratorPage() {
   const { state, orchestratorStart, orchestratorStop, orchestratorCancel, orchestratorPrompt, getConfig } = useApp();
   const { orchestrator } = state;
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const showExecutionTopology = getFeatureFlags().orchestratorExecutionTopology;
 
   //
   // Fetch config on mount to check if Orchestrator is configured.
   //
   useEffect(() => {
+    if (!state.connected) return;
     getConfig(['llm_feature_orchestrator', 'llm_model_definitions']);
-  }, [getConfig]);
+  }, [state.connected, getConfig]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -497,6 +972,10 @@ export function OrchestratorPage() {
             </p>
           </div>
         </div>
+      )}
+
+      {showExecutionTopology && (
+        <OrchestratorLiveMap orchestrator={orchestrator} nodes={state.systemState?.nodes ?? []} />
       )}
 
       {/*

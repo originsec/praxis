@@ -1,14 +1,7 @@
 
 #[tokio::main]
 async fn main() {
-    //
-    // Initialize logging.
-    //
     tracing_subscriber::fmt::init();
-
-    //
-    // Print startup banner.
-    //
     praxis_service::print_banner(&common::rabbitmq_url());
 
     common::log_info!("Starting Praxis Service");

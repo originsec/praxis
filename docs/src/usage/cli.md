@@ -42,7 +42,7 @@ $ praxis_cli
  / ____/ /  / /_/ />  </ (__  )
 /_/   /_/   \__,_/_/|_/_/____/
 
-  praxis 0.9.3 | client 953da792 | 1 node(s)
+  praxis 0.9.4 | client 953da792 | 1 node(s)
   amqp://praxis:praxis@localhost:5672
   Type help for commands, exit (or ctrl+d) to quit
 
@@ -55,9 +55,9 @@ The REPL tracks your selected node, agent, and active session. The prompt update
 
 ```
 praxis ❯                                 # nothing selected
-praxis [b3bf7460] ❯                      # node selected
-praxis [b3bf7460:claudecode] ❯           # node + agent
-praxis [b3bf7460:claudecode *] ❯         # node + agent + active session
+praxis [myhost] ❯                        # node selected (shows machine name)
+praxis [myhost:claudecode] ❯             # node + agent
+praxis [myhost:claudecode *] ❯           # node + agent + active session
 ```
 
 Select a node and agent:
@@ -69,7 +69,7 @@ praxis ❯ node select b3bf7460
 praxis [b3bf7460] ❯ agent select claudecode
 ✓ Selected agent: claudecode
 
-praxis [b3bf7460:claudecode] ❯
+praxis [myhost:claudecode] ❯
 ```
 
 On startup, if there is exactly one active node, it is auto-selected along with any existing agent selection and session state.
@@ -79,10 +79,10 @@ On startup, if there is exactly one active node, it is auto-selected along with 
 Once a node and agent are selected, the `-n` and `-a` flags are injected automatically. You don't need to pass them for every command:
 
 ```
-praxis [b3bf7460:claudecode] ❯ session create
+praxis [myhost:claudecode] ❯ session create
 ✓ Session created: a1b2c3d4
 
-praxis [b3bf7460:claudecode *] ❯ session prompt "list files"
+praxis [myhost:claudecode *] ❯ session prompt "list files"
 ```
 
 This is equivalent to typing `session create -n b3bf7460` and `session prompt -n b3bf7460 "list files"`. You can always override by passing the flag explicitly.
@@ -96,13 +96,30 @@ The REPL provides context-aware tab completion:
 - **Agent names**: `agent select <TAB>` shows discovered agent names
 - **Operation names**: `op run <TAB>` shows available operations and chains
 - **Short IDs**: `op status <TAB>` shows tracked operation/chain IDs
+- **Project paths**: `session create <TAB>` or `-p <TAB>` shows project paths from recon
 - **Flag values**: `-n <TAB>` shows node IDs, `-a <TAB>` shows agent names
 
 The completion cache refreshes after every command.
 
+### Usage Help
+
+All commands show usage instructions when invoked with missing or incorrect arguments. Typing a command group without a subcommand shows available subcommands:
+
+```
+praxis [myhost:claudecode] ❯ session
+error: 'praxis session' requires a subcommand but one was not provided
+  [subcommands: create, prompt, close]
+
+Usage: session <COMMAND>
+
+For more information, try '--help'
+```
+
+The same usage help is available both in the REPL and in non-interactive mode (`-C` or direct subcommand).
+
 ### Error Messages
 
-The REPL provides contextual error messages instead of raw usage text:
+The REPL provides contextual error messages for runtime errors:
 
 ```
 praxis ❯ session prompt "hi"
@@ -164,19 +181,36 @@ agent select claudecode
 # Request agent info update
 agent update
 
-# Perform reconnaissance
-agent recon
-agent recon-semantic
+# Request agent info update
+agent update
+```
 
-# Read/write/grep config content
-agent config read /home/user/.codex/config.toml
-agent config read /home/user/.codex/config.toml --line-start 1 --line-end 50
-agent config write /home/user/.codex/config.toml "new content"
-agent config grep /home/user/.codex/config.toml "model|profile"
+### Reconnaissance
 
-# Read/grep session content
-agent session read /home/user/.codex/sessions/2026-02-13.jsonl
-agent session grep /home/user/.codex/sessions/2026-02-13.jsonl "error|warning"
+```bash
+# Run reconnaissance
+recon run                           # static recon (shows summary)
+recon run-semantic                  # semantic recon (shows summary)
+
+# List stored recon data (without re-running)
+recon list                          # all details
+recon list sessions                 # just sessions
+recon list tools                    # MCP servers, skills, internal tools
+recon list projects                 # project paths
+recon list configs                  # config items
+
+# Read config/session content discovered by recon
+recon config-read /home/user/.codex/config.toml
+recon config-read /home/user/.codex/config.toml --line-start 1 --line-end 50
+recon session-read /home/user/.codex/sessions/2026-02-13.jsonl
+recon config-read                               # omit path to read all (interactive picker)
+recon session-read                              # omit path to read all
+
+# Grep config/session content with regex (pattern first, then optional path)
+recon config-grep "model|profile" /home/user/.codex/config.toml
+recon session-grep "error|warning" /home/user/.codex/sessions/2026-02-13.jsonl
+recon config-grep "model|profile"               # omit path to grep all (interactive picker)
+recon session-grep "error|warning"              # omit path to grep all
 ```
 
 ### Sessions
@@ -188,6 +222,9 @@ session create --yolo --project /path/to/project
 # Send a prompt
 session prompt "list files in current directory"
 
+# Interactive prompt mode (prompt→response loop, ctrl+c to exit)
+session prompt
+
 # Close session
 session close
 ```
@@ -195,6 +232,8 @@ session close
 Session options:
 - `--yolo`: Enable YOLO mode (auto-approve actions)
 - `--project <PATH>`: Set the working directory for the session
+
+In the REPL, running `session create` without `--project` will show an interactive project picker if recon has been run and project paths were discovered. You can also pass a project path as a positional argument: `session create /path/to/project`.
 
 ### Operations and Chains
 
@@ -222,6 +261,31 @@ op status abc123
 # Cancel a running operation or chain
 op cancel abc123
 ```
+
+### Orchestrator
+
+The `orchestrate` command starts an interactive LLM orchestrator session. The orchestrator is an AI tool-calling loop that coordinates operations across your nodes using the service's MCP tools.
+
+```bash
+# Start interactive orchestrator session
+orchestrate
+```
+
+Once started, you enter a prompt loop:
+- Type a prompt and press Enter to send it to the orchestrator
+- The orchestrator will execute tools, show plans, and stream responses
+- **Ctrl+C** during inference cancels the current request (session stays active)
+- **Ctrl+C** or **Ctrl+D** at the prompt exits the session
+
+The orchestrator displays:
+- Tool executions with success/failure indicators
+- Execution plans with step progress (not started / in progress / done)
+- Token usage statistics
+- Final responses rendered as markdown
+
+Prerequisites:
+- MCP server must be enabled in Settings
+- An LLM model must be configured for the Orchestrator feature in Settings > LLM Providers > Feature Selection
 
 ### Traffic Search
 
@@ -312,13 +376,18 @@ The MCP server exposes the following tools:
 
 **Agent Management:**
 - `agent_list` - List agents on a node
-- `agent_select` - Get details for a specific agent
+- `agent_select` - Select an agent on a node
 - `agent_update` - Request agent info refresh
-- `agent_recon` - Run agent reconnaissance
-- `agent_recon_semantic` - Run semantic reconnaissance
-- `read_file` - Read config/session file content (`file_type: Config|Session`, optional line range)
-- `write_file` - Write file content (`file_type: Config` only)
-- `grep_file` - Search config/session file content with regex (`file_type: Config|Session`)
+
+**Reconnaissance:**
+- `recon_run` - Run static reconnaissance
+- `recon_run_semantic` - Run semantic reconnaissance (includes internal tools)
+- `recon_list` - List stored recon data (section: all/sessions/tools/projects/configs)
+- `recon_config_read` - Read config file content (omit path to read all)
+- `recon_session_read` - Read session file content (omit path to read all)
+- `recon_config_grep` - Grep config files with regex (omit path to grep all)
+- `recon_session_grep` - Grep session files with regex (omit path to grep all)
+- `write_file` - Write file content
 
 **Sessions:**
 - `session_create` - Create a new session
@@ -328,7 +397,7 @@ The MCP server exposes the following tools:
 **Operations & Chains:**
 - `op_available` - List available operations and chains
 - `op_run` - Run an operation or chain
-- `op_info` - Show info for an operation or chain execution
+- `op_info` - Show full info for an operation or chain execution (includes result/output)
 - `op_cancel` - Cancel a running operation or chain execution
 - `op_list` - List tracked operations and chain executions
 
@@ -380,6 +449,7 @@ The CLI currently supports a subset of Praxis features focused on orchestration:
 - Node and agent management
 - Sessions and prompts
 - Semantic operations and chains
+- Interactive LLM orchestrator
 - Traffic search
 - MCP server mode for AI assistant integration
 

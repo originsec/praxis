@@ -186,7 +186,7 @@ end
 local function create_chat(process_path, working_dir)
   local args = { "create-chat", "--output-format", "text" }
 
-  if working_dir and working_dir ~= "" then
+  if type(working_dir) == "string" and working_dir ~= "" then
     table.insert(args, "--workspace")
     table.insert(args, working_dir)
   end
@@ -194,8 +194,10 @@ local function create_chat(process_path, working_dir)
   local spec = {
     program = process_path,
     args = args,
-    cwd = working_dir,
   }
+  if type(working_dir) == "string" and working_dir ~= "" then
+    spec.cwd = working_dir
+  end
 
   local result = praxis.command_run(spec)
   if not result.success then
@@ -212,8 +214,12 @@ end
 
 local function run_create_session(ctx)
   local working_dir = ctx.working_dir
+  if type(working_dir) ~= "string" or working_dir == "" then
+    working_dir = nil
+  end
+
   local pp = ctx.process_path
-  if pp == nil or pp == "" then
+  if type(pp) ~= "string" or pp == "" then
     return nil
   end
 
@@ -235,9 +241,10 @@ local function run_session_transact(state, prompt)
     "-p",
   }
 
-  if state.working_dir and state.working_dir ~= "" then
+  local wd = state.working_dir
+  if type(wd) == "string" and wd ~= "" then
     table.insert(args, "--workspace")
-    table.insert(args, state.working_dir)
+    table.insert(args, wd)
   end
 
   if state.yolo_mode then
@@ -249,9 +256,11 @@ local function run_session_transact(state, prompt)
   local spec = {
     program = state.process_path,
     args = args,
-    cwd = state.working_dir,
     stdin = prompt,
   }
+  if type(wd) == "string" and wd ~= "" then
+    spec.cwd = wd
+  end
 
   local result = praxis.command_run_handle(spec, state.handle)
   if not result.success then

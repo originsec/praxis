@@ -1,32 +1,24 @@
 use super::AppState;
 
 impl AppState {
-    //
-    // --- Command tracking for Orchestrator ---.
-    //
-
-    /// Add a pending command ID
     #[allow(dead_code)]
     pub async fn add_pending_command(&self, command_id: String) {
         let mut pending = self.pending_commands.write().await;
         pending.insert(command_id);
     }
 
-    /// Remove a pending command ID
     #[allow(dead_code)]
     pub async fn remove_pending_command(&self, command_id: &str) {
         let mut pending = self.pending_commands.write().await;
         pending.remove(command_id);
     }
 
-    /// Check if a command is pending
     #[allow(dead_code)]
     pub async fn is_command_pending(&self, command_id: &str) -> bool {
         let pending = self.pending_commands.read().await;
         pending.contains(command_id)
     }
 
-    /// Store a command response
     pub async fn store_command_response(&self, command_id: String, result: common::NodeCommandResult) {
         //
         // Only store if it's a pending command.
@@ -57,11 +49,6 @@ impl AppState {
         }
     }
 
-    //
-    // --- Semantic operation request tracking ---.
-    //
-
-    /// Add a pending semantic op request ID
     #[allow(dead_code)]
     pub async fn add_pending_semantic_op(&self, request_id: String) {
         let mut pending = self.pending_semantic_ops.write().await;

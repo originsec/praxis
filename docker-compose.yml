@@ -8,6 +8,7 @@
 #
 # Access:
 #   Web UI: http://localhost:8080
+#   MCP Server: http://localhost:8585/sse (when enabled in settings)
 #   RabbitMQ Management: http://localhost:15672 (praxis/praxis)
 #
 # Environment Variables:
@@ -19,6 +20,7 @@
 #                         Useful for debugging/testing DevTools-based agents
 #   SKIP_NODE_BUILD=1   - Skip building praxis_node binaries (faster builds)
 #   PRAXIS_HEADLESS=1   - Run without web UI (service + RabbitMQ only)
+#   PRAXIS_MCP_PORT     - MCP server port (default: 8585)
 #   CARGO_PROFILE       - Cargo build profile (default: release)
 #                         Set to release-fast for faster builds with thin LTO
 #
@@ -77,6 +79,7 @@ services:
       RUST_LOG: info
     ports:
       - "8080:8080"
+      - "${PRAXIS_MCP_PORT:-8585}:${PRAXIS_MCP_PORT:-8585}"
     volumes:
       - praxis_data:/app/data
     restart: unless-stopped
@@ -100,6 +103,7 @@ services:
       RUST_LOG: info
     ports:
       - "8080:8080"
+      - "${PRAXIS_MCP_PORT:-8585}:${PRAXIS_MCP_PORT:-8585}"
     restart: unless-stopped
     profiles:
       - postgres

@@ -53,6 +53,8 @@ export interface AgentSessionMessage {
 const initialOrchestratorState: OrchestratorState = {
   sessionActive: false,
   isStarting: false,
+  provider: null,
+  model: null,
   messages: [],
   currentPlan: null,
   isLoading: false,
@@ -237,7 +239,7 @@ type Action =
   | { type: 'SET_OP_DEF_ERROR'; error: string | null }
   | { type: 'SET_OP_DEF_SUCCESS'; fullName: string | null }
   | { type: 'ORCHESTRATOR_STARTING' }
-  | { type: 'ORCHESTRATOR_STARTED' }
+  | { type: 'ORCHESTRATOR_STARTED'; provider: string; model: string }
   | { type: 'ORCHESTRATOR_STOPPED' }
   | { type: 'ORCHESTRATOR_ADD_USER_MESSAGE'; message: string }
   | { type: 'ORCHESTRATOR_ADD_CONTENT'; content: string }
@@ -375,10 +377,12 @@ function reduceOrchestrator(state: AppState, action: Action): AppState | null {
           ...initialOrchestratorState,
           sessionActive: true,
           isStarting: false,
+          provider: action.provider,
+          model: action.model,
           messages: [{
             id: generateUUID(),
             role: 'system',
-            content: 'Orchestrator session started.',
+            content: `Orchestrator session started (${action.provider}::${action.model}).`,
             timestamp: new Date(),
           }],
         },
@@ -1218,7 +1222,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Orchestrator messages.
         //
         case 'orchestrator_started':
-          dispatch({ type: 'ORCHESTRATOR_STARTED' });
+          dispatch({ type: 'ORCHESTRATOR_STARTED', provider: message.provider, model: message.model });
           break;
         case 'orchestrator_stopped':
           dispatch({ type: 'ORCHESTRATOR_STOPPED' });
@@ -1227,10 +1231,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'ORCHESTRATOR_ADD_CONTENT', content: message.content });
           break;
         case 'orchestrator_tool_executing':
-          dispatch({ type: 'ORCHESTRATOR_TOOL_EXECUTING', name: message.name, input: message.input });
+          if (message.name !== 'report_plan') {
+            dispatch({ type: 'ORCHESTRATOR_TOOL_EXECUTING', name: message.name, input: message.input });
+          }
           break;
         case 'orchestrator_tool_executed':
-          dispatch({ type: 'ORCHESTRATOR_TOOL_EXECUTED', name: message.name, display: message.display, success: message.success, result: message.result });
+          if (message.name !== 'report_plan') {
+            dispatch({ type: 'ORCHESTRATOR_TOOL_EXECUTED', name: message.name, display: message.display, success: message.success, result: message.result });
+          }
           break;
         case 'orchestrator_plan_updated':
           dispatch({ type: 'ORCHESTRATOR_PLAN_UPDATED', plan: message.plan });

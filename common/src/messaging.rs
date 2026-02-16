@@ -821,7 +821,6 @@ pub struct OperationDefinitionInfo {
     pub short_name: String,
     /// Display name
     pub name: String,
-    /// Description
     pub description: String,
     /// Information for semantic agents
     pub agent_info: String,
@@ -944,9 +943,7 @@ pub struct ChainConnection {
 /// Complete chain definition (for create/update)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainDefinitionInput {
-    /// Human-readable name
     pub name: String,
-    /// Description
     pub description: String,
     /// Category for organization
     pub category: String,
@@ -1215,6 +1212,34 @@ pub struct AgentChatSessionState {
     pub agents: Vec<AgentChatAgentInfo>,
     pub channels: Vec<AgentChatChannelInfo>,
     pub created_at: DateTime<Utc>,
+}
+
+//
+// Orchestrator - Shared types for the LLM tool-calling orchestrator.
+//
+
+/// Status of an Orchestrator plan step
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanStepStatus {
+    NotStarted,
+    InProgress,
+    Done,
+}
+
+/// A step in the Orchestrator execution plan
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanStep {
+    pub description: String,
+    pub status: PlanStepStatus,
+}
+
+/// The current plan being executed by Orchestrator
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OrchestratorPlan {
+    pub steps: Vec<PlanStep>,
+    pub summary: Option<String>,
+    pub current_step_description: Option<String>,
 }
 
 //
@@ -1498,6 +1523,18 @@ pub enum ClientSignalMessage {
         client_id: String,
         query: String,
     },
+
+    //
+    // Orchestrator - LLM tool-calling orchestration.
+    //
+    /// Start an orchestrator session for this client
+    OrchestratorStart { client_id: String },
+    /// Send a prompt to the orchestrator session
+    OrchestratorPrompt { client_id: String, message: String },
+    /// Stop the orchestrator session (ends entirely)
+    OrchestratorStop { client_id: String },
+    /// Cancel current orchestrator inference (keeps session alive)
+    OrchestratorCancel { client_id: String },
 
     //
     // AgentChat - IRC-style multi-agent chat.
@@ -1796,6 +1833,31 @@ pub enum ClientDirectMessage {
     },
 
     //
+    // Orchestrator responses.
+    //
+    /// Orchestrator session started
+    OrchestratorStarted {
+        provider: String,
+        model: String,
+    },
+    /// Orchestrator streaming text content
+    OrchestratorContent { content: String },
+    /// Orchestrator started executing a tool
+    OrchestratorToolExecuting { name: String, input: Option<String> },
+    /// Orchestrator finished executing a tool
+    OrchestratorToolExecuted { name: String, display: String, success: bool, result: String },
+    /// Orchestrator plan updated
+    OrchestratorPlanUpdated { plan: OrchestratorPlan },
+    /// Orchestrator response complete
+    OrchestratorDone,
+    /// Orchestrator session stopped
+    OrchestratorStopped,
+    /// Orchestrator error
+    OrchestratorError { message: String },
+    /// Orchestrator token usage update
+    OrchestratorTokenUsage { prompt_tokens: u32, completion_tokens: u32, total_tokens: u32 },
+
+    //
     // AgentChat responses.
     //
     /// AgentChat session started
@@ -2072,7 +2134,6 @@ pub struct TrafficSearchFilters {
 /// Intercept status for a node
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct InterceptStatus {
-    /// Node ID
     pub node_id: String,
     /// Whether interception is enabled
     pub enabled: bool,

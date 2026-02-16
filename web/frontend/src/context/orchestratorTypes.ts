@@ -28,6 +28,8 @@ export interface OrchestratorTokenUsage {
 export interface OrchestratorState {
   sessionActive: boolean;
   isStarting: boolean;
+  provider: string | null;
+  model: string | null;
   messages: OrchestratorMessage[];
   currentPlan: OrchestratorPlan | null;
   isLoading: boolean;
