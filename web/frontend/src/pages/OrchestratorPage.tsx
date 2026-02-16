@@ -130,24 +130,29 @@ function ToolExecutionItem({ exec }: { exec: OrchestratorToolExecution }) {
 
   return (
     <div
-      className={`text-[10px] px-2 py-1 rounded ${
+      className={`text-[10px] px-2 py-1 rounded cursor-pointer ${
         exec.executing
           ? 'bg-[var(--accent-warning)]/5 text-[var(--accent-warning)]/80'
           : exec.success
           ? 'bg-[var(--accent-success)]/5 text-[var(--accent-success)]/80'
           : 'bg-[var(--accent-error)]/5 text-[var(--accent-error)]/80'
-      } ${canExpand ? 'cursor-pointer hover:bg-[var(--bg-tertiary)]' : ''}`}
+      } hover:bg-[var(--bg-tertiary)]`}
       onClick={() => canExpand && setExpanded(!expanded)}
     >
       <div className="flex items-center gap-2">
-        {exec.executing ? (
-          <Loader2 size={10} className="animate-spin" />
-        ) : exec.success ? (
-          <CheckCircle size={10} />
-        ) : (
-          <XCircle size={10} />
+        {canExpand && (
+          expanded
+            ? <ChevronDown size={10} className="flex-shrink-0" />
+            : <ChevronRight size={10} className="flex-shrink-0" />
         )}
-        <Wrench size={10} />
+        {exec.executing ? (
+          <Loader2 size={10} className="animate-spin flex-shrink-0" />
+        ) : exec.success ? (
+          <CheckCircle size={10} className="flex-shrink-0" />
+        ) : (
+          <XCircle size={10} className="flex-shrink-0" />
+        )}
+        <Wrench size={10} className="flex-shrink-0" />
         <span className="font-mono">{exec.name}</span>
         {!exec.executing && <span className="text-[var(--text-highlight)]/60">- {exec.display}</span>}
       </div>
@@ -167,6 +172,7 @@ function ToolExecutionItem({ exec }: { exec: OrchestratorToolExecution }) {
           )}
           {exec.result && (
             <div className="p-2 bg-[var(--bg-primary)] rounded border border-subtle text-[var(--text-muted)] font-mono text-[10px] overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
+              <span className="text-[var(--text-highlight)]/40 select-none">result: </span>
               {(() => {
                 try {
                   return JSON.stringify(JSON.parse(exec.result), null, 2);

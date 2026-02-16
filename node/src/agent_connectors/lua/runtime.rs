@@ -997,26 +997,52 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
             let output = child.wait_with_output();
             pid_cell.store(0, Ordering::SeqCst);
             match output {
-                Ok(output) => json!({
-                    "success": output.status.success(),
-                    "status": output.status.code().unwrap_or_default(),
-                    "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
-                    "stderr": String::from_utf8_lossy(&output.stderr).to_string()
-                }),
-                Err(e) => json!({
-                    "success": false,
-                    "status": 1,
-                    "stdout": "",
-                    "stderr": e.to_string()
-                }),
+                Ok(output) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+                    if output.status.success() {
+                        let preview = if stdout.len() > 2000 {
+                            format!("{}... ({} bytes total)", &stdout[..2000], stdout.len())
+                        } else {
+                            stdout.clone()
+                        };
+                        common::log_info!("command output:\n{}", preview);
+                    } else {
+                        common::log_warn!(
+                            "command failed (status {}): {}",
+                            output.status.code().unwrap_or(-1),
+                            if stderr.is_empty() { &stdout } else { &stderr }
+                        );
+                    }
+
+                    json!({
+                        "success": output.status.success(),
+                        "status": output.status.code().unwrap_or_default(),
+                        "stdout": stdout,
+                        "stderr": stderr
+                    })
+                }
+                Err(e) => {
+                    common::log_warn!("command wait failed: {}", e);
+                    json!({
+                        "success": false,
+                        "status": 1,
+                        "stdout": "",
+                        "stderr": e.to_string()
+                    })
+                }
             }
         }
-        Err(e) => json!({
-            "success": false,
-            "status": 1,
-            "stdout": "",
-            "stderr": e.to_string()
-        }),
+        Err(e) => {
+            common::log_warn!("command spawn failed: {}", e);
+            json!({
+                "success": false,
+                "status": 1,
+                "stdout": "",
+                "stderr": e.to_string()
+            })
+        }
     };
 
     Ok(result)

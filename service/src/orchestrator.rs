@@ -324,11 +324,7 @@ impl OrchestratorManager {
 
                             common::log_info!("Orchestrator executing tool: {}", tool_name);
 
-                            let tool_input_display = if tool_name == "session_prompt" {
-                                tool_args.get("text").and_then(|v| v.as_str()).map(String::from)
-                            } else {
-                                None
-                            };
+                            let tool_input_display = serde_json::to_string(&tool_args).ok();
 
                             let _ = send_to_client(
                                 &publish_channel_clone,
