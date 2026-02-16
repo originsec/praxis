@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   ReactFlow,
   Panel,
@@ -336,13 +336,12 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
   );
 
   //
-  // Auto-fit view when nodes change.
+  // Auto-fit view on initial load only.
   //
+  const initialFitDone = useRef(false);
   useEffect(() => {
-    if (nodes.length > 0) {
-      //
-      // Small delay to ensure nodes are rendered.
-      //
+    if (nodes.length > 0 && !initialFitDone.current) {
+      initialFitDone.current = true;
       const timer = setTimeout(() => {
         fitView({ padding: 0.05, maxZoom: 1.5 });
       }, 50);
@@ -351,15 +350,20 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
   }, [nodes.length, fitView]);
 
   //
-  // Auto-zoom to the currently running element.
+  // Auto-zoom to the currently running element (only when it changes).
   //
-  useEffect(() => {
-    if (execution.status !== 'Running') return;
-
-    const runningId = Object.entries(execution.elements).find(
+  const lastRunningIdRef = useRef<string | null>(null);
+  const runningId = useMemo(() => {
+    if (execution.status !== 'Running') return null;
+    return Object.entries(execution.elements).find(
       ([, elem]) => elem.status === 'Running'
-    )?.[0];
-    if (!runningId) return;
+    )?.[0] ?? null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [execution.status, elementsKey]);
+
+  useEffect(() => {
+    if (!runningId || runningId === lastRunningIdRef.current) return;
+    lastRunningIdRef.current = runningId;
 
     const runningNode = nodes.find(n => n.id === runningId);
     if (!runningNode) return;
@@ -370,9 +374,9 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
         runningNode.position.y + 40,
         { zoom: 1.2, duration: 400 }
       );
-    }, 100);
+    }, 150);
     return () => clearTimeout(timer);
-  }, [execution.status, execution.elements, nodes, setCenter]);
+  }, [runningId, nodes, setCenter]);
 
   //
   // Get selected element's execution info.
