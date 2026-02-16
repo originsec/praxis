@@ -83,7 +83,7 @@ pub fn table_columns(table: VirtualTable) -> Vec<&'static str> {
             "timestamp", "node_id", "agent_short_name", "entry_type", "value",
         ],
         VirtualTable::EventLogs => vec![
-            "timestamp", "source", "level", "target", "message",
+            "timestamp", "source", "source_id", "level", "target", "message",
         ],
     }
 }
