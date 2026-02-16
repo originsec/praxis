@@ -58,7 +58,7 @@ interface NodeDownloadInfo {
 }
 
 export function SettingsPage() {
-  const { state, getConfig, setConfig, listLuaAgentScripts, addLuaAgentScript, updateLuaAgentScript, deleteLuaAgentScript, resetLuaAgentScriptDefaults, toggleLuaAgentScriptDisabled } = useApp();
+  const { state, getConfig, setConfig, clearEventLog, listLuaAgentScripts, addLuaAgentScript, updateLuaAgentScript, deleteLuaAgentScript, resetLuaAgentScriptDefaults, toggleLuaAgentScriptDisabled } = useApp();
   const [searchParams, setSearchParams] = useSearchParams();
 
   //
@@ -145,6 +145,8 @@ export function SettingsPage() {
   // Event logging toggle.
   //
   const [eventLoggingEnabled, setEventLoggingEnabled] = useState(false);
+  const [huntingQueryRowLimit, setEventLogQueryLimit] = useState('10000000');
+  const [showClearEventLogConfirm, setShowClearEventLogConfirm] = useState(false);
 
   //
   // MCP Server settings.
@@ -179,6 +181,7 @@ export function SettingsPage() {
       'llm_feature_traffic_parser',
       'llm_orchestrator_max_tokens',
       'application_logs_enabled',
+      'hunting_query_row_limit',
       'mcp_server_enabled',
       'mcp_server_port',
     ]);
@@ -269,6 +272,11 @@ export function SettingsPage() {
     } else {
       setEventLoggingEnabled(false);
     }
+
+    //
+    // Load event log query limit.
+    //
+    setEventLogQueryLimit(cfg.hunting_query_row_limit || '10000000');
 
     //
     // Load MCP server settings.
@@ -1427,20 +1435,68 @@ export function SettingsPage() {
                   <h3 className="text-md font-semibold text-highlight mb-1">Event Logging</h3>
                   <p className="text-sm text-muted">Centralized application logs from service, nodes, and web</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleEventLoggingToggle}
-                  className="flex items-center gap-2 text-sm text-muted hover:text-highlight transition-colors"
-                >
-                  {eventLoggingEnabled ? (
-                    <ToggleRight size={20} className="text-muted" />
+                <div className="flex items-center gap-4">
+                  <button
+                    type="button"
+                    onClick={handleEventLoggingToggle}
+                    className="flex items-center gap-2 text-sm text-muted hover:text-highlight transition-colors"
+                  >
+                    {eventLoggingEnabled ? (
+                      <ToggleRight size={20} className="text-muted" />
+                    ) : (
+                      <ToggleLeft size={20} className="text-muted" />
+                    )}
+                    <span className="tracking-wider">
+                      {eventLoggingEnabled ? 'Enabled' : 'Disabled'}
+                    </span>
+                  </button>
+
+                  {!showClearEventLogConfirm ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowClearEventLogConfirm(true)}
+                      className="flex items-center gap-1.5 text-sm text-muted hover:text-highlight transition-colors"
+                    >
+                      <Trash2 size={14} />
+                      <span>Clear</span>
+                    </button>
                   ) : (
-                    <ToggleLeft size={20} className="text-muted" />
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-muted">Clear all logs?</span>
+                      <button
+                        type="button"
+                        onClick={() => { clearEventLog(); setShowClearEventLogConfirm(false); }}
+                        className="text-red-400 hover:text-red-300 transition-colors"
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowClearEventLogConfirm(false)}
+                        className="text-muted hover:text-highlight transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   )}
-                  <span className="tracking-wider">
-                    {eventLoggingEnabled ? 'Enabled' : 'Disabled'}
-                  </span>
-                </button>
+                </div>
+                <div className="flex items-center gap-3 mt-3">
+                  <label className="text-xs text-muted">Row limit</label>
+                  <input
+                    type="number"
+                    value={huntingQueryRowLimit}
+                    onChange={(e) => setEventLogQueryLimit(e.target.value)}
+                    onBlur={() => {
+                      const n = parseInt(huntingQueryRowLimit, 10);
+                      if (n > 0) {
+                        setConfig({ hunting_query_row_limit: huntingQueryRowLimit });
+                      }
+                    }}
+                    min="1"
+                    className="w-32 bg-[var(--bg-primary)] border border-dim px-2 py-1 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
+                  />
+                  <span className="text-xs text-muted">Max rows held per database table</span>
+                </div>
               </div>
 
               {/*

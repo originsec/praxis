@@ -2,21 +2,22 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use serde_json::Value;
+use tokio::sync::RwLock;
 
 use super::parser::ast::{Expr, JoinKey, Literal, Operator, Source, Statement, TabularExpression};
 use super::parser::parser::parse;
+use super::sql::{build_sql_where, materialize_sql_table};
 
+use crate::config::service_config::{HUNTING_QUERY_ROW_LIMIT, HUNTING_QUERY_ROW_LIMIT_DEFAULT};
+use crate::config::ServiceConfig;
 use crate::database::Database;
 use crate::state::NodeRegistry;
 
 use super::tables::{
-    VirtualTable, materialize_agent_logs, materialize_event_logs,
-    materialize_node_logs, materialize_recon_logs,
+    VirtualTable, materialize_agent_logs, materialize_node_logs, materialize_recon_logs,
     materialize_recon_metadata_logs, materialize_recon_session_logs,
-    materialize_recon_tool_logs, resolve_table, table_columns,
+    materialize_recon_tool_logs, resolve_table,
 };
-
-const MAX_RESULT_ROWS: usize = 1_000_000;
 
 pub struct HuntingResult {
     pub columns: Vec<String>,
@@ -24,30 +25,11 @@ pub struct HuntingResult {
     pub total_count: usize,
 }
 
-//
-// Hints extracted from the KQL AST before materialization. These narrow the SQL
-// query so we don't pull the entire table into memory. The in-memory operators
-// still run on the result — pushdown is purely an optimisation, not a
-// correctness requirement.
-//
-
-#[derive(Debug, Default)]
-struct PushdownHints {
-    node_id: Option<String>,
-    agent_short_name: Option<String>,
-    direction: Option<String>,
-    host: Option<String>,
-    url_pattern: Option<String>,
-    rule_id: Option<i64>,
-    source: Option<String>,
-    level: Option<String>,
-    take_limit: Option<usize>,
-}
-
 pub async fn execute_hunting_query(
     query: &str,
     database: &Arc<Database>,
     node_registry: &Arc<NodeRegistry>,
+    service_config: &Arc<RwLock<ServiceConfig>>,
 ) -> Result<HuntingResult> {
     let statements = parse(query)
         .map(|(_, stmts)| stmts)
@@ -84,18 +66,25 @@ pub async fn execute_hunting_query(
         ))?;
 
     //
-    // Extract pushdown hints from the operator pipeline. We scan all leading
-    // `where` and `take` operators for simple predicates we can fold into the
-    // SQL query.
+    // Materialize the table. For SQL-backed tables, push all leading where
+    // predicates and the first take/limit down to SQL. For in-memory and
+    // JSON-expanded tables, fetch the full dataset.
     //
 
-    let hints = extract_pushdown_hints(&tabular.operators, table);
-
     //
-    // Materialize the table data, narrowed by pushdown hints.
+    // Read the configurable row limit from service config.
     //
 
-    let (columns, mut rows) = materialize_table(table, database, node_registry, &hints).await?;
+    let row_cap = {
+        let cfg = service_config.read().await;
+        cfg.get(HUNTING_QUERY_ROW_LIMIT)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(HUNTING_QUERY_ROW_LIMIT_DEFAULT)
+    };
+
+    let (columns, mut rows) = materialize_table(
+        table, database, node_registry, &tabular.operators, row_cap,
+    ).await?;
 
     //
     // Apply pipeline operators sequentially. Operators whose predicates were
@@ -161,7 +150,7 @@ pub async fn execute_hunting_query(
             }
 
             Operator::Take(n) => {
-                let limit = (*n as usize).min(MAX_RESULT_ROWS);
+                let limit = (*n as usize).min(row_cap);
                 rows.truncate(limit);
             }
 
@@ -248,13 +237,13 @@ pub async fn execute_hunting_query(
                     }
                 }
                 let _ = nulls_last;
-                let limit = (*n as usize).min(MAX_RESULT_ROWS);
+                let limit = (*n as usize).min(row_cap);
                 rows.truncate(limit);
             }
 
             Operator::Join(_options, right_expr, join_keys) => {
                 let (right_columns, right_rows) = materialize_tabular_expression(
-                    right_expr, database, node_registry,
+                    right_expr, database, node_registry, row_cap,
                 ).await?;
 
                 apply_join(
@@ -275,8 +264,8 @@ pub async fn execute_hunting_query(
     //
 
     let total_count = rows.len();
-    if rows.len() > MAX_RESULT_ROWS {
-        rows.truncate(MAX_RESULT_ROWS);
+    if rows.len() > row_cap {
+        rows.truncate(row_cap);
     }
 
     Ok(HuntingResult {
@@ -287,171 +276,74 @@ pub async fn execute_hunting_query(
 }
 
 //
-// Pre-scan the operator pipeline and extract hints that can narrow the SQL
-// query. We only look at leading `where` and `take` operators — once we hit
-// anything that reshapes the data (project, extend, summarize …) we stop,
-// because columns may no longer map 1:1 to DB columns.
-//
-
-fn extract_pushdown_hints(operators: &[Operator], table: VirtualTable) -> PushdownHints {
-    let mut hints = PushdownHints::default();
-    let columns = table_columns(table);
-    let mut has_unpushed_where = false;
-
-    for op in operators {
-        match op {
-            Operator::Where(expr) => {
-                collect_where_hints(expr, &columns, &mut hints);
-                if !where_fully_pushed(expr, &columns) {
-                    has_unpushed_where = true;
-                }
-            }
-
-            //
-            // Only push take/limit to the DB when every preceding where was
-            // fully captured as a pushdown hint. Otherwise the SQL LIMIT runs
-            // before the in-memory filter, returning wrong results.
-            //
-            Operator::Take(n) if !has_unpushed_where => {
-                let limit = (*n as usize).min(MAX_RESULT_ROWS);
-                hints.take_limit = Some(
-                    hints.take_limit.map(|prev| prev.min(limit)).unwrap_or(limit),
-                );
-            }
-
-            //
-            // Stop scanning once we hit a column-reshaping operator.
-            //
-            Operator::Project(_)
-            | Operator::ProjectAway(_)
-            | Operator::Extend(_)
-            | Operator::Summarize(_, _) => break,
-            _ => {}
-        }
-    }
-
-    hints
-}
-
-//
-// Walk a `where` expression and extract simple `column == "literal"` and
-// `column contains "literal"` predicates that map to known DB filter fields.
-// We only handle AND-connected top-level predicates — anything complex is left
-// for the in-memory evaluator.
-//
-
-fn collect_where_hints(expr: &Expr, columns: &[&str], hints: &mut PushdownHints) {
-    match expr {
-        Expr::And(lhs, rhs) => {
-            collect_where_hints(lhs, columns, hints);
-            collect_where_hints(rhs, columns, hints);
-        }
-
-        Expr::Equals(lhs, rhs) => {
-            if let (Expr::Ident(col), Expr::Literal(Literal::String(val)))
-            | (Expr::Literal(Literal::String(val)), Expr::Ident(col)) = (lhs.as_ref(), rhs.as_ref())
-            {
-                match col.to_lowercase().as_str() {
-                    "node_id" => hints.node_id = Some(val.clone()),
-                    "agent_short_name" => hints.agent_short_name = Some(val.clone()),
-                    "direction" => hints.direction = Some(val.clone()),
-                    "host" => hints.host = Some(val.clone()),
-                    "source" => hints.source = Some(val.clone()),
-                    "level" => hints.level = Some(val.clone()),
-                    _ => {}
-                }
-            }
-            if let (Expr::Ident(col), Expr::Literal(Literal::Int(Some(val))))
-            | (Expr::Literal(Literal::Int(Some(val))), Expr::Ident(col)) = (lhs.as_ref(), rhs.as_ref())
-            {
-                if col.eq_ignore_ascii_case("rule_id") {
-                    hints.rule_id = Some(*val as i64);
-                }
-            }
-            if let (Expr::Ident(col), Expr::Literal(Literal::Long(Some(val))))
-            | (Expr::Literal(Literal::Long(Some(val))), Expr::Ident(col)) = (lhs.as_ref(), rhs.as_ref())
-            {
-                if col.eq_ignore_ascii_case("rule_id") {
-                    hints.rule_id = Some(*val);
-                }
-            }
-        }
-
-        //
-        // `host contains "openai"` → push as url_pattern (substring match via
-        // the existing regex-based filter in query_traffic).
-        //
-        Expr::Func(name, args) if name.eq_ignore_ascii_case("contains") || name.eq_ignore_ascii_case("has") => {
-            if let [Expr::Ident(col), Expr::Literal(Literal::String(val))] = args.as_slice() {
-                match col.to_lowercase().as_str() {
-                    "url" | "host" => {
-                        hints.url_pattern = Some(val.clone());
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        _ => {}
-    }
-}
-
-//
-// Returns true when every predicate in the expression maps to a pushdown
-// hint — i.e. collect_where_hints would fully capture it. When false, a
-// subsequent `take` must NOT be pushed down because the SQL LIMIT would
-// apply before the in-memory where filter.
-//
-
-fn where_fully_pushed(expr: &Expr, columns: &[&str]) -> bool {
-    match expr {
-        Expr::And(lhs, rhs) => {
-            where_fully_pushed(lhs, columns) && where_fully_pushed(rhs, columns)
-        }
-
-        Expr::Equals(lhs, rhs) => {
-            matches!(
-                (lhs.as_ref(), rhs.as_ref()),
-                (Expr::Ident(col), Expr::Literal(Literal::String(_)))
-                | (Expr::Literal(Literal::String(_)), Expr::Ident(col))
-                    if matches!(col.to_lowercase().as_str(),
-                        "node_id" | "agent_short_name" | "direction" | "host" | "source" | "level"
-                    )
-            ) || matches!(
-                (lhs.as_ref(), rhs.as_ref()),
-                (Expr::Ident(col), Expr::Literal(Literal::Int(Some(_))))
-                | (Expr::Literal(Literal::Int(Some(_))), Expr::Ident(col))
-                | (Expr::Ident(col), Expr::Literal(Literal::Long(Some(_))))
-                | (Expr::Literal(Literal::Long(Some(_))), Expr::Ident(col))
-                    if col.eq_ignore_ascii_case("rule_id")
-            )
-        }
-
-        Expr::Func(name, args)
-            if name.eq_ignore_ascii_case("contains") || name.eq_ignore_ascii_case("has") =>
-        {
-            matches!(
-                args.as_slice(),
-                [Expr::Ident(col), Expr::Literal(Literal::String(_))]
-                    if matches!(col.to_lowercase().as_str(), "url" | "host")
-            )
-        }
-
-        _ => false,
-    }
-}
-
-//
-// Materialize a table into (columns, rows), using pushdown hints to narrow
-// the DB query.
+// Materialize a table. SQL-backed tables try to push all leading where/take
+// operators down to the database. If any expression can't be translated, the
+// table is fetched with just a limit and in-memory operators handle the rest.
 //
 
 async fn materialize_table(
     table: VirtualTable,
     database: &Arc<Database>,
     node_registry: &Arc<NodeRegistry>,
-    hints: &PushdownHints,
+    operators: &[Operator],
+    row_cap: usize,
 ) -> Result<(Vec<String>, Vec<Vec<Value>>)> {
+    if let Some(config) = table.sql_config() {
+
+        //
+        // Build a column name mapper from KQL names to SQL expressions.
+        //
+
+        let col_map = |kql_name: &str| -> Option<String> {
+            config.columns.iter()
+                .find(|c| c.kql_name.eq_ignore_ascii_case(kql_name))
+                .map(|c| c.sql_expr.to_string())
+        };
+
+        //
+        // Collect leading where expressions and the first take limit,
+        // stopping at any column-reshaping operator.
+        //
+
+        let mut where_exprs: Vec<&Expr> = Vec::new();
+        let mut take_limit: Option<usize> = None;
+
+        for op in operators {
+            match op {
+                Operator::Where(expr) => where_exprs.push(expr),
+                Operator::Take(n) => {
+                    let n = (*n as usize).min(row_cap);
+                    take_limit = Some(take_limit.map(|prev| prev.min(n)).unwrap_or(n));
+                }
+                Operator::Sort(_) => {}
+                _ => break,
+            }
+        }
+
+        //
+        // Try to translate all where expressions to SQL.
+        //
+
+        match build_sql_where(&where_exprs, &col_map, 0) {
+            Ok((where_clause, params)) => {
+                let limit = take_limit.unwrap_or(row_cap).min(row_cap);
+                return materialize_sql_table(database, &config, &where_clause, &params, limit).await;
+            }
+            Err(_) => {
+                //
+                // Fallback: fetch with just a limit, let in-memory handle
+                // where filtering.
+                //
+
+                return materialize_sql_table(database, &config, "", &[], row_cap).await;
+            }
+        }
+    }
+
+    //
+    // Non-SQL tables: in-memory or JSON-expanded from database.
+    //
+
     match table {
         VirtualTable::NodeLogs => Ok(materialize_node_logs(node_registry).await),
         VirtualTable::AgentLogs => Ok(materialize_agent_logs(node_registry).await),
@@ -459,17 +351,7 @@ async fn materialize_table(
         VirtualTable::ReconToolLogs => materialize_recon_tool_logs(database).await,
         VirtualTable::ReconSessionLogs => materialize_recon_session_logs(database).await,
         VirtualTable::ReconMetadataLogs => materialize_recon_metadata_logs(database).await,
-        VirtualTable::TrafficLogs => materialize_traffic_logs(database, hints).await,
-        VirtualTable::TrafficMatchLogs => materialize_traffic_match_logs(database, hints).await,
-        VirtualTable::EventLogs => {
-            let limit = hints.take_limit.unwrap_or(MAX_RESULT_ROWS).min(MAX_RESULT_ROWS);
-            materialize_event_logs(
-                database,
-                hints.source.as_deref(),
-                hints.level.as_deref(),
-                limit,
-            ).await
-        }
+        _ => Err(anyhow!("Table has no materializer")),
     }
 }
 
@@ -482,6 +364,7 @@ async fn materialize_tabular_expression(
     expr: &TabularExpression,
     database: &Arc<Database>,
     node_registry: &Arc<NodeRegistry>,
+    row_cap: usize,
 ) -> Result<(Vec<String>, Vec<Vec<Value>>)> {
     let table_name = match &expr.source {
         Source::Reference(name) => name.clone(),
@@ -491,8 +374,9 @@ async fn materialize_tabular_expression(
     let table = resolve_table(&table_name)
         .ok_or_else(|| anyhow!("Join: unknown table '{}'", table_name))?;
 
-    let hints = extract_pushdown_hints(&expr.operators, table);
-    let (mut columns, mut rows) = materialize_table(table, database, node_registry, &hints).await?;
+    let (mut columns, mut rows) = materialize_table(
+        table, database, node_registry, &expr.operators, row_cap,
+    ).await?;
 
     //
     // Apply any operators on the right side (e.g. where filters).
@@ -507,7 +391,7 @@ async fn materialize_tabular_expression(
                     .collect();
             }
             Operator::Take(n) => {
-                rows.truncate((*n as usize).min(MAX_RESULT_ROWS));
+                rows.truncate((*n as usize).min(row_cap));
             }
             Operator::Project(projections) => {
                 let proj_names: Vec<String> = projections
@@ -637,110 +521,6 @@ fn apply_join(
         left_columns.push(name.clone());
     }
     *left_rows = joined_rows;
-}
-
-fn traffic_direction_from_hint(s: &str) -> Option<common::TrafficDirection> {
-    match s.to_lowercase().as_str() {
-        "send" => Some(common::TrafficDirection::Send),
-        "receive" => Some(common::TrafficDirection::Receive),
-        _ => None,
-    }
-}
-
-async fn materialize_traffic_logs(
-    database: &Arc<Database>,
-    hints: &PushdownHints,
-) -> Result<(Vec<String>, Vec<Vec<Value>>)> {
-    let columns: Vec<String> = table_columns(VirtualTable::TrafficLogs)
-        .into_iter()
-        .map(String::from)
-        .collect();
-
-    let filters = common::TrafficLogFilters {
-        node_id: hints.node_id.clone(),
-        agent_short_name: hints.agent_short_name.clone(),
-        direction: hints.direction.as_deref().and_then(traffic_direction_from_hint),
-        url_pattern: hints.url_pattern.clone().or_else(|| hints.host.clone()),
-        limit: hints.take_limit.unwrap_or(MAX_RESULT_ROWS).min(MAX_RESULT_ROWS),
-        ..Default::default()
-    };
-    let (entries, _) = database.query_traffic(&filters).await?;
-
-    let rows: Vec<Vec<Value>> = entries
-        .into_iter()
-        .map(|e| {
-            let req_headers = e.request_headers
-                .as_ref()
-                .map(|h| serde_json::to_value(h).unwrap_or(Value::Null))
-                .unwrap_or(Value::Null);
-            let req_body = e.request_body
-                .as_ref()
-                .map(|b| Value::String(String::from_utf8_lossy(b).to_string()))
-                .unwrap_or(Value::Null);
-            let resp_headers = e.response_headers
-                .as_ref()
-                .map(|h| serde_json::to_value(h).unwrap_or(Value::Null))
-                .unwrap_or(Value::Null);
-            let resp_body = e.response_body
-                .as_ref()
-                .map(|b| Value::String(String::from_utf8_lossy(b).to_string()))
-                .unwrap_or(Value::Null);
-
-            vec![
-                Value::String(e.timestamp.to_rfc3339()),
-                e.id.map(|id| Value::Number(id.into())).unwrap_or(Value::Null),
-                Value::String(e.node_id),
-                Value::String(e.agent_short_name),
-                Value::String(format!("{}", e.intercept_method)),
-                Value::String(format!("{}", e.direction)),
-                e.method.map(Value::String).unwrap_or(Value::Null),
-                Value::String(e.url),
-                Value::String(e.host),
-                req_headers,
-                req_body,
-                e.response_status.map(|s| Value::Number(s.into())).unwrap_or(Value::Null),
-                resp_headers,
-                resp_body,
-            ]
-        })
-        .collect();
-
-    Ok((columns, rows))
-}
-
-async fn materialize_traffic_match_logs(
-    database: &Arc<Database>,
-    hints: &PushdownHints,
-) -> Result<(Vec<String>, Vec<Vec<Value>>)> {
-    let columns: Vec<String> = table_columns(VirtualTable::TrafficMatchLogs)
-        .into_iter()
-        .map(String::from)
-        .collect();
-
-    let limit = hints.take_limit.unwrap_or(MAX_RESULT_ROWS).min(MAX_RESULT_ROWS);
-    let (matches, _) = database.query_matches(hints.rule_id, limit, 0).await?;
-
-    let rows: Vec<Vec<Value>> = matches
-        .into_iter()
-        .map(|m| {
-            vec![
-                Value::String(m.match_info.matched_at.to_rfc3339()),
-                Value::Number(m.match_info.traffic_id.into()),
-                Value::String(m.traffic.node_id),
-                Value::String(m.traffic.agent_short_name),
-                Value::Number(m.match_info.rule_id.into()),
-                Value::String(m.match_info.rule_name),
-                m.match_info.summary.map(Value::String).unwrap_or(Value::Null),
-                m.traffic.method.map(Value::String).unwrap_or(Value::Null),
-                Value::String(m.traffic.url),
-                Value::String(m.traffic.host),
-                Value::String(format!("{}", m.traffic.direction)),
-                m.traffic.response_status.map(|s| Value::Number(s.into())).unwrap_or(Value::Null),
-            ]
-        })
-        .collect();
-
-    Ok((columns, rows))
 }
 
 //

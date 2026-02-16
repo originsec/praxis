@@ -7,7 +7,6 @@ use common::{
     CommandRequest, CommandResponse, NodeBroadcastMessage, NodeDirectMessage,
     CLIENT_BROADCAST_EXCHANGE, NODE_BROADCAST_EXCHANGE,
 };
-use tracing::{error, info, warn};
 
 use crate::config::service_config::{APPLICATION_LOGS_ENABLED, MCP_SERVER_ENABLED, MCP_SERVER_PORT};
 use crate::conversions::{to_common as convert_chain_element, to_database as convert_msg_chain_element};
@@ -252,8 +251,8 @@ async fn broadcast_lua_script_registry(ctx: &ServiceContext, action: &str) {
         )
         .await
         {
-            Ok(_) => info!("Broadcast AgentRegistryUpdate ({} scripts) after {}", script_count, action),
-            Err(e) => error!("Failed to broadcast AgentRegistryUpdate after {}: {}", action, e),
+            Ok(_) => common::log_info!("Broadcast AgentRegistryUpdate ({} scripts) after {}", script_count, action),
+            Err(e) => common::log_error!("Failed to broadcast AgentRegistryUpdate after {}: {}", action, e),
         }
     }
 }
@@ -264,7 +263,7 @@ async fn broadcast_lua_script_registry(ctx: &ServiceContext, action: &str) {
 
 async fn handle_registration(ctx: &ServiceContext, registration: common::ClientRegistration) {
     if let Err(e) = ctx.client_handler.handle_client_registration(registration).await {
-        error!("Failed to handle ClientRegistration: {}", e);
+        common::log_error!("Failed to handle ClientRegistration: {}", e);
     }
 
     //
@@ -281,13 +280,13 @@ async fn handle_registration(ctx: &ServiceContext, registration: common::ClientR
 }
 
 async fn handle_command(ctx: &ServiceContext, request: CommandRequest) {
-    info!(
+    common::log_info!(
         "Received command from client {}: {:?}",
         request.client_id, request.command
     );
 
     if ctx.node_registry.get(&request.node_id).await.is_none() {
-        warn!("Command targets unknown node: {}", request.node_id);
+        common::log_warn!("Command targets unknown node: {}", request.node_id);
         let response = CommandResponse {
             command_id: request.command_id.clone(),
             node_id: request.node_id.clone(),
@@ -309,13 +308,13 @@ async fn handle_command(ctx: &ServiceContext, request: CommandRequest) {
         let node_message = NodeDirectMessage::Command(request.clone());
         if let Err(e) = send_to_node(&ctx.publish_channel, &request.node_id, node_message).await
         {
-            error!(
+            common::log_error!(
                 "Failed to forward command to node {}: {}",
                 request.node_id, e
             );
             ctx.pending_commands.remove(&request.command_id).await;
         } else {
-            info!(
+            common::log_info!(
                 "Forwarded command {} to node {}",
                 request.command_id, request.node_id
             );
@@ -324,7 +323,7 @@ async fn handle_command(ctx: &ServiceContext, request: CommandRequest) {
 }
 
 async fn handle_remove_node(ctx: &ServiceContext, node_id: String) {
-    info!(
+    common::log_info!(
         "Received RemoveNode request for node {}",
         &node_id[..8.min(node_id.len())]
     );
@@ -339,10 +338,10 @@ async fn handle_remove_node(ctx: &ServiceContext, node_id: String) {
         )
         .await
         {
-            error!("Failed to broadcast state after node removal: {}", e);
+            common::log_error!("Failed to broadcast state after node removal: {}", e);
         }
     } else {
-        warn!("Attempted to remove unknown node: {}", node_id);
+        common::log_warn!("Attempted to remove unknown node: {}", node_id);
     }
 }
 
@@ -359,7 +358,7 @@ async fn handle_semantic_op_run(
     request_id: String,
     working_dir: Option<String>,
 ) {
-    info!(
+    common::log_info!(
         "Received SemanticOpRun from client {} for node {} agent {}: {} (working_dir: {:?})",
         client_id.get(..8).unwrap_or(&client_id),
         node_id.get(..8).unwrap_or(&node_id),
@@ -388,13 +387,13 @@ async fn handle_semantic_op_run(
 
             if let Err(e) = send_to_client(&ctx.client_publish_channel, &client_id, message).await
             {
-                error!(
+                common::log_error!(
                     "Failed to send queued confirmation to client {}: {}",
                     client_id, e
                 );
             }
 
-            info!(
+            common::log_info!(
                 "Queued operation {} at position {}",
                 operation_id.get(..8).unwrap_or(&operation_id),
                 queue_position
@@ -411,20 +410,20 @@ async fn handle_semantic_op_run(
             }
         }
         Err(e) => {
-            error!("Failed to queue operation: {}", e);
+            common::log_error!("Failed to queue operation: {}", e);
         }
     }
 }
 
 async fn handle_semantic_op_cancel(ctx: &ServiceContext, operation_id: String) {
-    info!(
+    common::log_info!(
         "Received SemanticOpCancel for operation {}",
         operation_id.get(..8).unwrap_or(&operation_id)
     );
 
     match ctx.semantic_ops_manager.cancel_operation(&operation_id).await {
         Ok(()) => {
-            info!(
+            common::log_info!(
                 "Cancelled operation {}",
                 operation_id.get(..8).unwrap_or(&operation_id)
             );
@@ -440,20 +439,20 @@ async fn handle_semantic_op_cancel(ctx: &ServiceContext, operation_id: String) {
             }
         }
         Err(e) => {
-            error!("Failed to cancel operation: {}", e);
+            common::log_error!("Failed to cancel operation: {}", e);
         }
     }
 }
 
 async fn handle_semantic_op_remove(ctx: &ServiceContext, operation_id: String) {
-    info!(
+    common::log_info!(
         "Received SemanticOpRemove for operation {}",
         &operation_id[..8.min(operation_id.len())]
     );
 
     match ctx.semantic_ops_manager.remove_operation(&operation_id).await {
         Ok(()) => {
-            info!(
+            common::log_info!(
                 "Removed operation {}",
                 &operation_id[..8.min(operation_id.len())]
             );
@@ -475,23 +474,23 @@ async fn handle_semantic_op_remove(ctx: &ServiceContext, operation_id: String) {
             }
         }
         Err(e) => {
-            error!("Failed to remove operation: {}", e);
+            common::log_error!("Failed to remove operation: {}", e);
         }
     }
 }
 
 async fn handle_semantic_op_clear(ctx: &ServiceContext) {
-    info!("Received SemanticOpClear");
+    common::log_info!("Received SemanticOpClear");
 
     //
     // Clear finished operations.
     //
     match ctx.semantic_ops_manager.clear_finished_operations().await {
         Ok(count) => {
-            info!("Cleared {} finished operation(s)", count);
+            common::log_info!("Cleared {} finished operation(s)", count);
         }
         Err(e) => {
-            error!("Failed to clear finished operations: {}", e);
+            common::log_error!("Failed to clear finished operations: {}", e);
         }
     }
 
@@ -513,11 +512,11 @@ async fn handle_semantic_op_clear(ctx: &ServiceContext) {
     {
         Ok(count) => {
             if count > 0 {
-                info!("Cleared {} orphaned queued operation(s)", count);
+                common::log_info!("Cleared {} orphaned queued operation(s)", count);
             }
         }
         Err(e) => {
-            error!("Failed to clear orphaned queued operations: {}", e);
+            common::log_error!("Failed to clear orphaned queued operations: {}", e);
         }
     }
 
@@ -535,7 +534,7 @@ async fn handle_semantic_op_clear(ctx: &ServiceContext) {
 }
 
 async fn handle_semantic_op_list(ctx: &ServiceContext) {
-    info!("Received SemanticOpListRequest");
+    common::log_info!("Received SemanticOpListRequest");
 
     match ctx.semantic_ops_manager.get_all_updates().await {
         Ok(updates) => {
@@ -550,12 +549,12 @@ async fn handle_semantic_op_list(ctx: &ServiceContext) {
                 )
                 .await
                 {
-                    error!("Failed to send operation list to client {}: {}", client.id, e);
+                    common::log_error!("Failed to send operation list to client {}: {}", client.id, e);
                 }
             }
         }
         Err(e) => {
-            error!("Failed to get operation list: {}", e);
+            common::log_error!("Failed to get operation list: {}", e);
         }
     }
 }
@@ -565,7 +564,7 @@ async fn handle_semantic_op_list(ctx: &ServiceContext) {
 // ---------------------------------------------------------------------------
 
 async fn handle_config_get(ctx: &ServiceContext, client_id: String, keys: Vec<String>) {
-    info!(
+    common::log_info!(
         "Received ServiceConfigGet from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -585,7 +584,7 @@ async fn handle_config_get(ctx: &ServiceContext, client_id: String, keys: Vec<St
 
     let message = ClientDirectMessage::ServiceConfigResponse { values };
     if let Err(e) = send_to_client(&ctx.client_publish_channel, &client_id, message).await {
-        error!("Failed to send config to client {}: {}", client_id, e);
+        common::log_error!("Failed to send config to client {}: {}", client_id, e);
     }
 }
 
@@ -594,7 +593,7 @@ async fn handle_config_set(
     client_id: String,
     values: std::collections::HashMap<String, String>,
 ) {
-    info!(
+    common::log_info!(
         "Received ServiceConfigSet from client {} with {} values",
         &client_id[..8.min(client_id.len())],
         values.len()
@@ -623,14 +622,14 @@ async fn handle_config_set(
             }
         }
         if let Some(e) = save_error {
-            error!("Failed to save config: {}", e);
+            common::log_error!("Failed to save config: {}", e);
         } else {
-            info!("Service config saved to database");
+            common::log_info!("Service config saved to database");
             let message = ClientDirectMessage::ServiceConfigSaved;
             if let Err(e) =
                 send_to_client(&ctx.client_publish_channel, &client_id, message).await
             {
-                error!(
+                common::log_error!(
                     "Failed to send config saved confirmation to client {}: {}",
                     client_id, e
                 );
@@ -651,12 +650,12 @@ async fn handle_config_set(
                 if config.is_mcp_server_enabled() {
                     let port = config.get_mcp_server_port();
                     let url = common::rabbitmq_url();
-                    info!("MCP server config changed, starting on port {}", port);
+                    common::log_info!("MCP server config changed, starting on port {}", port);
                     if let Err(e) = ctx.mcp_manager.start(&url, port).await {
-                        error!("Failed to start MCP server: {}", e);
+                        common::log_error!("Failed to start MCP server: {}", e);
                     }
                 } else {
-                    info!("MCP server config changed, stopping server");
+                    common::log_info!("MCP server config changed, stopping server");
                     ctx.mcp_manager.stop().await;
                 }
             }
@@ -669,7 +668,7 @@ async fn handle_config_set(
 // ---------------------------------------------------------------------------
 
 async fn handle_opdef_add(ctx: &ServiceContext, client_id: String, content: String) {
-    info!(
+    common::log_info!(
         "Received OpDefAdd from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -690,17 +689,17 @@ async fn handle_opdef_add(ctx: &ServiceContext, client_id: String, content: Stri
             let full_name = definition.full_name.clone();
             match ctx.database.upsert_operation_definition(&definition).await {
                 Ok(()) => {
-                    info!("Added/updated operation definition: {}", full_name);
+                    common::log_info!("Added/updated operation definition: {}", full_name);
                     let message = ClientDirectMessage::OpDefAdded { full_name };
                     if let Err(e) =
                         send_to_client(&ctx.client_publish_channel, &client_id, message)
                             .await
                     {
-                        error!("Failed to send OpDefAdded to client {}: {}", client_id, e);
+                        common::log_error!("Failed to send OpDefAdded to client {}: {}", client_id, e);
                     }
                 }
                 Err(e) => {
-                    error!("Failed to save operation definition: {}", e);
+                    common::log_error!("Failed to save operation definition: {}", e);
                     let message = ClientDirectMessage::OpDefError {
                         message: format!("Failed to save: {}", e),
                     };
@@ -711,7 +710,7 @@ async fn handle_opdef_add(ctx: &ServiceContext, client_id: String, content: Stri
             }
         }
         Err(e) => {
-            error!("Failed to parse operation definition: {}", e);
+            common::log_error!("Failed to parse operation definition: {}", e);
             let message = ClientDirectMessage::OpDefError { message: e };
             let _ =
                 send_to_client(&ctx.client_publish_channel, &client_id, message).await;
@@ -720,27 +719,27 @@ async fn handle_opdef_add(ctx: &ServiceContext, client_id: String, content: Stri
 }
 
 async fn handle_opdef_list(ctx: &ServiceContext, client_id: String) {
-    info!(
+    common::log_info!(
         "Received OpDefList from client {}",
         &client_id[..8.min(client_id.len())]
     );
 
     match ctx.database.list_operation_definitions().await {
         Ok(definitions) => {
-            info!("Found {} operation definitions in database", definitions.len());
+            common::log_info!("Found {} operation definitions in database", definitions.len());
             let infos: Vec<_> = definitions.iter().map(|d| d.to_info()).collect();
             let message = ClientDirectMessage::OpDefListResponse { definitions: infos };
             if let Err(e) =
                 send_to_client(&ctx.client_publish_channel, &client_id, message).await
             {
-                error!(
+                common::log_error!(
                     "Failed to send OpDefListResponse to client {}: {}",
                     client_id, e
                 );
             }
         }
         Err(e) => {
-            error!("Failed to list operation definitions: {}", e);
+            common::log_error!("Failed to list operation definitions: {}", e);
             let message = ClientDirectMessage::OpDefError {
                 message: format!("Failed to list: {}", e),
             };
@@ -751,7 +750,7 @@ async fn handle_opdef_list(ctx: &ServiceContext, client_id: String) {
 }
 
 async fn handle_opdef_delete(ctx: &ServiceContext, client_id: String, full_name: String) {
-    info!(
+    common::log_info!(
         "Received OpDefDelete for {} from client {}",
         full_name,
         &client_id[..8.min(client_id.len())]
@@ -760,20 +759,20 @@ async fn handle_opdef_delete(ctx: &ServiceContext, client_id: String, full_name:
     match ctx.database.delete_operation_definition(&full_name).await {
         Ok(success) => {
             if success {
-                info!("Deleted operation definition: {}", full_name);
+                common::log_info!("Deleted operation definition: {}", full_name);
             }
             let message = ClientDirectMessage::OpDefDeleted { full_name, success };
             if let Err(e) =
                 send_to_client(&ctx.client_publish_channel, &client_id, message).await
             {
-                error!(
+                common::log_error!(
                     "Failed to send OpDefDeleted to client {}: {}",
                     client_id, e
                 );
             }
         }
         Err(e) => {
-            error!("Failed to delete operation definition: {}", e);
+            common::log_error!("Failed to delete operation definition: {}", e);
             let message = ClientDirectMessage::OpDefError {
                 message: format!("Failed to delete: {}", e),
             };
@@ -784,7 +783,7 @@ async fn handle_opdef_delete(ctx: &ServiceContext, client_id: String, full_name:
 }
 
 async fn handle_opdef_get(ctx: &ServiceContext, client_id: String, full_name: String) {
-    info!(
+    common::log_info!(
         "Received OpDefGet for {} from client {}",
         full_name,
         &client_id[..8.min(client_id.len())]
@@ -797,14 +796,14 @@ async fn handle_opdef_get(ctx: &ServiceContext, client_id: String, full_name: St
             if let Err(e) =
                 send_to_client(&ctx.client_publish_channel, &client_id, message).await
             {
-                error!(
+                common::log_error!(
                     "Failed to send OpDefGetResponse to client {}: {}",
                     client_id, e
                 );
             }
         }
         Err(e) => {
-            error!("Failed to get operation definition: {}", e);
+            common::log_error!("Failed to get operation definition: {}", e);
             let message = ClientDirectMessage::OpDefError {
                 message: format!("Failed to get: {}", e),
             };
@@ -823,7 +822,7 @@ async fn handle_traffic_log(
     client_id: String,
     filters: common::TrafficLogFilters,
 ) {
-    info!(
+    common::log_info!(
         "Received TrafficLogRequest from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -837,14 +836,14 @@ async fn handle_traffic_log(
             if let Err(e) =
                 send_to_client(&ctx.client_publish_channel, &client_id, message).await
             {
-                error!(
+                common::log_error!(
                     "Failed to send TrafficLogResponse to client {}: {}",
                     client_id, e
                 );
             }
         }
         Err(e) => {
-            error!("Failed to query traffic log: {}", e);
+            common::log_error!("Failed to query traffic log: {}", e);
         }
     }
 }
@@ -856,7 +855,7 @@ async fn handle_traffic_matches(
     limit: usize,
     offset: usize,
 ) {
-    info!(
+    common::log_info!(
         "Received TrafficMatchesRequest from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -870,39 +869,39 @@ async fn handle_traffic_matches(
             if let Err(e) =
                 send_to_client(&ctx.client_publish_channel, &client_id, message).await
             {
-                error!(
+                common::log_error!(
                     "Failed to send TrafficMatchesResponse to client {}: {}",
                     client_id, e
                 );
             }
         }
         Err(e) => {
-            error!("Failed to query traffic matches: {}", e);
+            common::log_error!("Failed to query traffic matches: {}", e);
         }
     }
 }
 
 async fn handle_traffic_clear(ctx: &ServiceContext, client_id: String) {
-    info!(
+    common::log_info!(
         "Received TrafficClear from client {}",
         &client_id[..8.min(client_id.len())]
     );
 
     match ctx.database.clear_all_traffic().await {
         Ok(deleted_count) => {
-            info!("Cleared {} traffic entries", deleted_count);
+            common::log_info!("Cleared {} traffic entries", deleted_count);
             let message = ClientDirectMessage::TrafficCleared { deleted_count };
             if let Err(e) =
                 send_to_client(&ctx.client_publish_channel, &client_id, message).await
             {
-                error!(
+                common::log_error!(
                     "Failed to send TrafficCleared to client {}: {}",
                     client_id, e
                 );
             }
         }
         Err(e) => {
-            error!("Failed to clear traffic: {}", e);
+            common::log_error!("Failed to clear traffic: {}", e);
         }
     }
 }
@@ -912,7 +911,7 @@ async fn handle_traffic_search(
     client_id: String,
     filters: common::TrafficSearchFilters,
 ) {
-    info!(
+    common::log_info!(
         "Received TrafficSearchRequest from client {} with pattern: {}",
         &client_id[..8.min(client_id.len())],
         filters.regex_pattern
@@ -920,7 +919,7 @@ async fn handle_traffic_search(
 
     match ctx.database.search_traffic(&filters).await {
         Ok((entries, total_count)) => {
-            info!("Traffic search found {} matches", total_count);
+            common::log_info!("Traffic search found {} matches", total_count);
             let message = ClientDirectMessage::TrafficSearchResponse {
                 entries,
                 total_count,
@@ -928,14 +927,14 @@ async fn handle_traffic_search(
             if let Err(e) =
                 send_to_client(&ctx.client_publish_channel, &client_id, message).await
             {
-                error!(
+                common::log_error!(
                     "Failed to send TrafficSearchResponse to client {}: {}",
                     client_id, e
                 );
             }
         }
         Err(e) => {
-            error!("Failed to search traffic: {}", e);
+            common::log_error!("Failed to search traffic: {}", e);
         }
     }
 }
@@ -953,7 +952,7 @@ async fn handle_intercept_rule_create(
     scope: common::RuleScope,
     summarization_prompt: Option<String>,
 ) {
-    info!(
+    common::log_info!(
         "Received InterceptRuleCreate from client {}: {}",
         &client_id[..8.min(client_id.len())],
         name
@@ -970,19 +969,19 @@ async fn handle_intercept_rule_create(
         ).await
     {
         Ok(rule) => {
-            info!("Created intercept rule: {} (id={})", name, rule.id);
+            common::log_info!("Created intercept rule: {} (id={})", name, rule.id);
             let message = ClientDirectMessage::InterceptRuleCreated { rule };
             if let Err(e) =
                 send_to_client(&ctx.client_publish_channel, &client_id, message).await
             {
-                error!(
+                common::log_error!(
                     "Failed to send InterceptRuleCreated to client {}: {}",
                     client_id, e
                 );
             }
         }
         Err(e) => {
-            error!("Failed to create intercept rule: {}", e);
+            common::log_error!("Failed to create intercept rule: {}", e);
             let message = ClientDirectMessage::InterceptRuleError {
                 message: format!("Failed to create: {}", e),
             };
@@ -1004,7 +1003,7 @@ async fn handle_intercept_rule_update(
     enabled: Option<bool>,
     summarization_prompt: Option<Option<String>>,
 ) {
-    info!(
+    common::log_info!(
         "Received InterceptRuleUpdate from client {} for rule {}",
         &client_id[..8.min(client_id.len())],
         id
@@ -1025,12 +1024,12 @@ async fn handle_intercept_rule_update(
         .await
     {
         Ok(Some(rule)) => {
-            info!("Updated intercept rule: {}", id);
+            common::log_info!("Updated intercept rule: {}", id);
             let message = ClientDirectMessage::InterceptRuleUpdated { rule };
             if let Err(e) =
                 send_to_client(&ctx.client_publish_channel, &client_id, message).await
             {
-                error!(
+                common::log_error!(
                     "Failed to send InterceptRuleUpdated to client {}: {}",
                     client_id, e
                 );
@@ -1044,7 +1043,7 @@ async fn handle_intercept_rule_update(
                 send_to_client(&ctx.client_publish_channel, &client_id, message).await;
         }
         Err(e) => {
-            error!("Failed to update intercept rule: {}", e);
+            common::log_error!("Failed to update intercept rule: {}", e);
             let message = ClientDirectMessage::InterceptRuleError {
                 message: format!("Failed to update: {}", e),
             };
@@ -1055,7 +1054,7 @@ async fn handle_intercept_rule_update(
 }
 
 async fn handle_intercept_rule_delete(ctx: &ServiceContext, client_id: String, id: i64) {
-    info!(
+    common::log_info!(
         "Received InterceptRuleDelete from client {} for rule {}",
         &client_id[..8.min(client_id.len())],
         id
@@ -1064,20 +1063,20 @@ async fn handle_intercept_rule_delete(ctx: &ServiceContext, client_id: String, i
     match ctx.database.delete_rule(id).await {
         Ok(success) => {
             if success {
-                info!("Deleted intercept rule: {}", id);
+                common::log_info!("Deleted intercept rule: {}", id);
             }
             let message = ClientDirectMessage::InterceptRuleDeleted { id, success };
             if let Err(e) =
                 send_to_client(&ctx.client_publish_channel, &client_id, message).await
             {
-                error!(
+                common::log_error!(
                     "Failed to send InterceptRuleDeleted to client {}: {}",
                     client_id, e
                 );
             }
         }
         Err(e) => {
-            error!("Failed to delete intercept rule: {}", e);
+            common::log_error!("Failed to delete intercept rule: {}", e);
             let message = ClientDirectMessage::InterceptRuleError {
                 message: format!("Failed to delete: {}", e),
             };
@@ -1088,7 +1087,7 @@ async fn handle_intercept_rule_delete(ctx: &ServiceContext, client_id: String, i
 }
 
 async fn handle_intercept_rule_list(ctx: &ServiceContext, client_id: String) {
-    info!(
+    common::log_info!(
         "Received InterceptRuleList from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -1099,14 +1098,14 @@ async fn handle_intercept_rule_list(ctx: &ServiceContext, client_id: String) {
             if let Err(e) =
                 send_to_client(&ctx.client_publish_channel, &client_id, message).await
             {
-                error!(
+                common::log_error!(
                     "Failed to send InterceptRuleListResponse to client {}: {}",
                     client_id, e
                 );
             }
         }
         Err(e) => {
-            error!("Failed to list intercept rules: {}", e);
+            common::log_error!("Failed to list intercept rules: {}", e);
             let message = ClientDirectMessage::InterceptRuleError {
                 message: format!("Failed to list: {}", e),
             };
@@ -1126,7 +1125,7 @@ async fn handle_intercept_enable(
     node_id: String,
     method: Option<common::InterceptMethod>,
 ) {
-    info!(
+    common::log_info!(
         "Received InterceptEnable from client {} for node {} (method: {:?})",
         &client_id[..8.min(client_id.len())],
         &node_id[..8.min(node_id.len())],
@@ -1152,7 +1151,7 @@ async fn handle_intercept_enable(
             .await;
         let node_message = NodeDirectMessage::Command(request);
         if let Err(e) = send_to_node(&ctx.publish_channel, &node_id, node_message).await {
-            error!("Failed to send InterceptEnable to node {}: {}", node_id, e);
+            common::log_error!("Failed to send InterceptEnable to node {}: {}", node_id, e);
             ctx.pending_commands.remove(&command_id).await;
         }
     } else {
@@ -1173,7 +1172,7 @@ async fn handle_intercept_enable(
 }
 
 async fn handle_intercept_disable(ctx: &ServiceContext, client_id: String, node_id: String) {
-    info!(
+    common::log_info!(
         "Received InterceptDisable from client {} for node {}",
         &client_id[..8.min(client_id.len())],
         &node_id[..8.min(node_id.len())]
@@ -1196,7 +1195,7 @@ async fn handle_intercept_disable(ctx: &ServiceContext, client_id: String, node_
             .await;
         let node_message = NodeDirectMessage::Command(request);
         if let Err(e) = send_to_node(&ctx.publish_channel, &node_id, node_message).await {
-            error!(
+            common::log_error!(
                 "Failed to send InterceptDisable to node {}: {}",
                 node_id, e
             );
@@ -1224,7 +1223,7 @@ async fn handle_intercept_disable(ctx: &ServiceContext, client_id: String, node_
 // ---------------------------------------------------------------------------
 
 async fn handle_agent_discovery_enable(ctx: &ServiceContext, client_id: String, node_id: String) {
-    info!(
+    common::log_info!(
         "Received AgentDiscoveryEnable from client {} for node {}",
         &client_id[..8.min(client_id.len())],
         &node_id[..8.min(node_id.len())]
@@ -1244,7 +1243,7 @@ async fn handle_agent_discovery_enable(ctx: &ServiceContext, client_id: String, 
             .await;
         let node_message = NodeDirectMessage::Command(request);
         if let Err(e) = send_to_node(&ctx.publish_channel, &node_id, node_message).await {
-            error!(
+            common::log_error!(
                 "Failed to send AgentDiscoveryEnable to node {}: {}",
                 node_id, e
             );
@@ -1263,7 +1262,7 @@ async fn handle_agent_discovery_enable(ctx: &ServiceContext, client_id: String, 
 }
 
 async fn handle_agent_discovery_disable(ctx: &ServiceContext, client_id: String, node_id: String) {
-    info!(
+    common::log_info!(
         "Received AgentDiscoveryDisable from client {} for node {}",
         &client_id[..8.min(client_id.len())],
         &node_id[..8.min(node_id.len())]
@@ -1285,7 +1284,7 @@ async fn handle_agent_discovery_disable(ctx: &ServiceContext, client_id: String,
             .await;
         let node_message = NodeDirectMessage::Command(request);
         if let Err(e) = send_to_node(&ctx.publish_channel, &node_id, node_message).await {
-            error!(
+            common::log_error!(
                 "Failed to send AgentDiscoveryDisable to node {}: {}",
                 node_id, e
             );
@@ -1308,7 +1307,7 @@ async fn handle_discovered_endpoints_list(
     client_id: String,
     node_id: Option<String>,
 ) {
-    info!(
+    common::log_info!(
         "Received DiscoveredEndpointsList from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -1370,13 +1369,13 @@ async fn handle_app_log_request(
             .await;
         }
         Err(e) => {
-            error!("Failed to query node event log: {}", e);
+            common::log_error!("Failed to query node event log: {}", e);
         }
     }
 }
 
 async fn handle_app_log_clear(ctx: &ServiceContext, client_id: String, node_id: Option<String>) {
-    info!(
+    common::log_info!(
         "Received ApplicationLogClear from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -1391,7 +1390,7 @@ async fn handle_app_log_clear(ctx: &ServiceContext, client_id: String, node_id: 
             .await;
         }
         Err(e) => {
-            error!("Failed to clear node event log: {}", e);
+            common::log_error!("Failed to clear node event log: {}", e);
         }
     }
 }
@@ -1480,7 +1479,7 @@ async fn handle_recon_get(
 // ---------------------------------------------------------------------------
 
 async fn handle_chain_list(ctx: &ServiceContext, client_id: String) {
-    info!(
+    common::log_info!(
         "Received ChainDefList from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -1511,7 +1510,7 @@ async fn handle_chain_list(ctx: &ServiceContext, client_id: String) {
 }
 
 async fn handle_chain_get(ctx: &ServiceContext, client_id: String, chain_id: String) {
-    info!(
+    common::log_info!(
         "Received ChainGet from client {} for chain {}",
         &client_id[..8.min(client_id.len())],
         chain_id
@@ -1552,7 +1551,7 @@ async fn handle_chain_create(
     client_id: String,
     definition: common::ChainDefinitionInput,
 ) {
-    info!(
+    common::log_info!(
         "Received ChainCreate from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -1642,7 +1641,7 @@ async fn handle_chain_update(
     chain_id: String,
     definition: common::ChainDefinitionInput,
 ) {
-    info!(
+    common::log_info!(
         "Received ChainUpdate from client {} for chain {}",
         &client_id[..8.min(client_id.len())],
         chain_id
@@ -1735,7 +1734,7 @@ async fn handle_chain_update(
 }
 
 async fn handle_chain_delete(ctx: &ServiceContext, client_id: String, chain_id: String) {
-    info!(
+    common::log_info!(
         "Received ChainDelete from client {} for chain {}",
         &client_id[..8.min(client_id.len())],
         chain_id
@@ -1761,7 +1760,7 @@ async fn handle_chain_run(
     agent_short_name: String,
     working_dir: Option<String>,
 ) {
-    info!(
+    common::log_info!(
         "Received ChainRun from client {} for chain {} on node {} (working_dir: {:?})",
         &client_id[..8.min(client_id.len())],
         chain_id,
@@ -1839,7 +1838,7 @@ async fn handle_chain_run(
 }
 
 async fn handle_chain_cancel(ctx: &ServiceContext, client_id: String, execution_id: String) {
-    info!(
+    common::log_info!(
         "Received ChainCancel from client {} for execution {}",
         &client_id[..8.min(client_id.len())],
         execution_id
@@ -1861,7 +1860,7 @@ async fn handle_chain_cancel(ctx: &ServiceContext, client_id: String, execution_
 }
 
 async fn handle_chain_execution_list(ctx: &ServiceContext, client_id: String) {
-    info!(
+    common::log_info!(
         "Received ChainExecutionList from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -1872,7 +1871,7 @@ async fn handle_chain_execution_list(ctx: &ServiceContext, client_id: String) {
     let executions = match ctx.database.list_chain_executions(100).await {
         Ok(records) => records.into_iter().map(|r| r.to_update()).collect(),
         Err(e) => {
-            error!("Failed to list chain executions: {}", e);
+            common::log_error!("Failed to list chain executions: {}", e);
             //
             // Fall back to in-memory registry.
             //
@@ -1888,12 +1887,12 @@ async fn handle_chain_execution_list(ctx: &ServiceContext, client_id: String) {
 }
 
 async fn handle_chain_execution_remove(ctx: &ServiceContext, execution_id: String) {
-    info!(
+    common::log_info!(
         "Received ChainExecutionRemove for {}",
         &execution_id[..8.min(execution_id.len())]
     );
     if let Err(e) = ctx.database.delete_chain_execution(&execution_id).await {
-        error!("Failed to delete chain execution: {}", e);
+        common::log_error!("Failed to delete chain execution: {}", e);
     }
     //
     // Also remove from in-memory registry if present.
@@ -1902,13 +1901,13 @@ async fn handle_chain_execution_remove(ctx: &ServiceContext, execution_id: Strin
 }
 
 async fn handle_chain_execution_clear(ctx: &ServiceContext) {
-    info!("Received ChainExecutionClear");
+    common::log_info!("Received ChainExecutionClear");
     match ctx.database.clear_finished_chain_executions().await {
         Ok(count) => {
-            info!("Cleared {} finished chain executions", count);
+            common::log_info!("Cleared {} finished chain executions", count);
         }
         Err(e) => {
-            error!("Failed to clear chain executions: {}", e);
+            common::log_error!("Failed to clear chain executions: {}", e);
         }
     }
 }
@@ -1923,7 +1922,7 @@ async fn handle_lua_script_add(
     name: String,
     script: String,
 ) {
-    info!(
+    common::log_info!(
         "Received LuaAgentScriptAdd from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -1943,13 +1942,13 @@ async fn handle_lua_script_add(
             broadcast_lua_script_registry(ctx, "add").await;
         }
         Err(e) => {
-            error!("Failed to add Lua agent script: {}", e);
+            common::log_error!("Failed to add Lua agent script: {}", e);
         }
     }
 }
 
 async fn handle_lua_script_delete(ctx: &ServiceContext, client_id: String, script_id: String) {
-    info!(
+    common::log_info!(
         "Received LuaAgentScriptDelete from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -1971,7 +1970,7 @@ async fn handle_lua_script_delete(ctx: &ServiceContext, client_id: String, scrip
             }
         }
         Err(e) => {
-            error!("Failed to delete Lua agent script: {}", e);
+            common::log_error!("Failed to delete Lua agent script: {}", e);
         }
     }
 }
@@ -1983,7 +1982,7 @@ async fn handle_lua_script_update(
     name: String,
     script: String,
 ) {
-    info!(
+    common::log_info!(
         "Received LuaAgentScriptUpdate from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -2002,13 +2001,13 @@ async fn handle_lua_script_update(
             broadcast_lua_script_registry(ctx, "update").await;
         }
         Err(e) => {
-            error!("Failed to update Lua agent script: {}", e);
+            common::log_error!("Failed to update Lua agent script: {}", e);
         }
     }
 }
 
 async fn handle_lua_script_reset_defaults(ctx: &ServiceContext, client_id: String) {
-    info!(
+    common::log_info!(
         "Received LuaAgentScriptResetDefaults from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -2021,7 +2020,7 @@ async fn handle_lua_script_reset_defaults(ctx: &ServiceContext, client_id: Strin
                 if let Err(e) = ctx.database.upsert_lua_agent_script(
                     &id, name, content, false, true, Some(crate::EMBEDDED_LUA_SCRIPTS_VERSION),
                 ).await {
-                    error!("Failed to seed Lua agent script '{}': {}", name, e);
+                    common::log_error!("Failed to seed Lua agent script '{}': {}", name, e);
                 } else {
                     count += 1;
                 }
@@ -2036,13 +2035,13 @@ async fn handle_lua_script_reset_defaults(ctx: &ServiceContext, client_id: Strin
             broadcast_lua_script_registry(ctx, "reset defaults").await;
         }
         Err(e) => {
-            error!("Failed to reset Lua agent scripts to defaults: {}", e);
+            common::log_error!("Failed to reset Lua agent scripts to defaults: {}", e);
         }
     }
 }
 
 async fn handle_lua_script_list(ctx: &ServiceContext, client_id: String) {
-    info!(
+    common::log_info!(
         "Received LuaAgentScriptList from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -2057,7 +2056,7 @@ async fn handle_lua_script_list(ctx: &ServiceContext, client_id: String) {
             .await;
         }
         Err(e) => {
-            error!("Failed to list Lua agent scripts: {}", e);
+            common::log_error!("Failed to list Lua agent scripts: {}", e);
         }
     }
 }
@@ -2068,7 +2067,7 @@ async fn handle_lua_script_toggle_disabled(
     script_id: String,
     disabled: bool,
 ) {
-    info!(
+    common::log_info!(
         "Received LuaAgentScriptToggleDisabled from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -2090,7 +2089,7 @@ async fn handle_lua_script_toggle_disabled(
             }
         }
         Err(e) => {
-            error!("Failed to toggle disabled for script {}: {}", script_id, e);
+            common::log_error!("Failed to toggle disabled for script {}: {}", script_id, e);
         }
     }
 }
@@ -2100,7 +2099,7 @@ async fn handle_lua_script_toggle_disabled(
 // ---------------------------------------------------------------------------
 
 async fn handle_hunting_query(ctx: &ServiceContext, client_id: String, query: String) {
-    info!(
+    common::log_info!(
         "Received HuntingQuery from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -2109,6 +2108,7 @@ async fn handle_hunting_query(ctx: &ServiceContext, client_id: String, query: St
         &query,
         &ctx.database,
         &ctx.node_registry,
+        &ctx.service_config,
     )
     .await
     {
@@ -2121,7 +2121,7 @@ async fn handle_hunting_query(ctx: &ServiceContext, client_id: String, query: St
             if let Err(e) =
                 send_to_client(&ctx.client_publish_channel, &client_id, message).await
             {
-                error!(
+                common::log_error!(
                     "Failed to send HuntingQueryResponse to client {}: {}",
                     client_id, e
                 );
@@ -2142,7 +2142,7 @@ async fn handle_hunting_query(ctx: &ServiceContext, client_id: String, query: St
 // ---------------------------------------------------------------------------
 
 async fn handle_orchestrator_start(ctx: &ServiceContext, client_id: String) {
-    info!(
+    common::log_info!(
         "Received OrchestratorStart from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -2152,7 +2152,7 @@ async fn handle_orchestrator_start(ctx: &ServiceContext, client_id: String) {
 }
 
 async fn handle_orchestrator_prompt(ctx: &ServiceContext, client_id: String, message: String) {
-    info!(
+    common::log_info!(
         "Received OrchestratorPrompt from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -2162,7 +2162,7 @@ async fn handle_orchestrator_prompt(ctx: &ServiceContext, client_id: String, mes
 }
 
 async fn handle_orchestrator_stop(ctx: &ServiceContext, client_id: String) {
-    info!(
+    common::log_info!(
         "Received OrchestratorStop from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -2172,7 +2172,7 @@ async fn handle_orchestrator_stop(ctx: &ServiceContext, client_id: String) {
 }
 
 async fn handle_orchestrator_cancel(ctx: &ServiceContext, client_id: String) {
-    info!(
+    common::log_info!(
         "Received OrchestratorCancel from client {}",
         &client_id[..8.min(client_id.len())]
     );
@@ -2191,7 +2191,7 @@ async fn handle_agent_chat_start(
     goal: Option<String>,
     yolo_mode: bool,
 ) {
-    info!(
+    common::log_info!(
         "Received AgentChatStart from client {} (yolo_mode: {})",
         client_id, yolo_mode
     );
@@ -2201,10 +2201,10 @@ async fn handle_agent_chat_start(
         .await
     {
         Ok(session_id) => {
-            info!("Started AgentChat session {}", session_id);
+            common::log_info!("Started AgentChat session {}", session_id);
         }
         Err(e) => {
-            error!("Failed to start AgentChat session: {}", e);
+            common::log_error!("Failed to start AgentChat session: {}", e);
             let _ = send_to_client(
                 &ctx.client_publish_channel,
                 &client_id,
@@ -2218,13 +2218,13 @@ async fn handle_agent_chat_start(
 }
 
 async fn handle_agent_chat_stop(ctx: &ServiceContext, client_id: String, session_id: String) {
-    info!("Received AgentChatStop from client {}", client_id);
+    common::log_info!("Received AgentChatStop from client {}", client_id);
     if let Err(e) = ctx
         .agent_chat_manager
         .stop_session(&client_id, &session_id)
         .await
     {
-        error!("Failed to stop AgentChat session: {}", e);
+        common::log_error!("Failed to stop AgentChat session: {}", e);
         let _ = send_to_client(
             &ctx.client_publish_channel,
             &client_id,
@@ -2243,17 +2243,17 @@ async fn handle_agent_chat_add_agent(
     node_id: String,
     agent_short_name: String,
 ) {
-    info!("Received AgentChatAddAgent from client {}", client_id);
+    common::log_info!("Received AgentChatAddAgent from client {}", client_id);
     match ctx
         .agent_chat_manager
         .add_agent(&client_id, &session_id, &node_id, &agent_short_name)
         .await
     {
         Ok(agent_id) => {
-            info!("Added agent {} to AgentChat session", agent_id);
+            common::log_info!("Added agent {} to AgentChat session", agent_id);
         }
         Err(e) => {
-            error!("Failed to add agent to AgentChat: {}", e);
+            common::log_error!("Failed to add agent to AgentChat: {}", e);
             let _ = send_to_client(
                 &ctx.client_publish_channel,
                 &client_id,
@@ -2272,13 +2272,13 @@ async fn handle_agent_chat_remove_agent(
     session_id: String,
     agent_id: String,
 ) {
-    info!("Received AgentChatRemoveAgent from client {}", client_id);
+    common::log_info!("Received AgentChatRemoveAgent from client {}", client_id);
     if let Err(e) = ctx
         .agent_chat_manager
         .remove_agent(&client_id, &session_id, &agent_id)
         .await
     {
-        error!("Failed to remove agent from AgentChat: {}", e);
+        common::log_error!("Failed to remove agent from AgentChat: {}", e);
         let _ = send_to_client(
             &ctx.client_publish_channel,
             &client_id,
@@ -2296,13 +2296,13 @@ async fn handle_agent_chat_reorder_agents(
     session_id: String,
     agent_ids: Vec<String>,
 ) {
-    info!("Received AgentChatReorderAgents from client {}", client_id);
+    common::log_info!("Received AgentChatReorderAgents from client {}", client_id);
     if let Err(e) = ctx
         .agent_chat_manager
         .reorder_agents(&client_id, &session_id, agent_ids)
         .await
     {
-        error!("Failed to reorder AgentChat agents: {}", e);
+        common::log_error!("Failed to reorder AgentChat agents: {}", e);
         let _ = send_to_client(
             &ctx.client_publish_channel,
             &client_id,
@@ -2322,7 +2322,7 @@ async fn handle_agent_chat_send_message(
     channel_id: Option<String>,
     recipient_nickname: Option<String>,
 ) {
-    info!("Received AgentChatSendMessage from client {}", client_id);
+    common::log_info!("Received AgentChatSendMessage from client {}", client_id);
     if let Err(e) = ctx
         .agent_chat_manager
         .send_message(
@@ -2334,7 +2334,7 @@ async fn handle_agent_chat_send_message(
         )
         .await
     {
-        error!("Failed to send AgentChat message: {}", e);
+        common::log_error!("Failed to send AgentChat message: {}", e);
         let _ = send_to_client(
             &ctx.client_publish_channel,
             &client_id,
@@ -2352,7 +2352,7 @@ async fn handle_agent_chat_join_channel(
     session_id: String,
     channel_name: String,
 ) {
-    info!("Received AgentChatJoinChannel from client {}", client_id);
+    common::log_info!("Received AgentChatJoinChannel from client {}", client_id);
     match ctx
         .agent_chat_manager
         .join_channel(&client_id, &session_id, &channel_name)
@@ -2360,7 +2360,7 @@ async fn handle_agent_chat_join_channel(
     {
         Ok(_) => {}
         Err(e) => {
-            error!("Failed to join AgentChat channel: {}", e);
+            common::log_error!("Failed to join AgentChat channel: {}", e);
             let _ = send_to_client(
                 &ctx.client_publish_channel,
                 &client_id,
@@ -2380,13 +2380,13 @@ async fn handle_agent_chat_get_history(
     channel_id: Option<String>,
     limit: u32,
 ) {
-    info!("Received AgentChatGetHistory from client {}", client_id);
+    common::log_info!("Received AgentChatGetHistory from client {}", client_id);
     if let Err(e) = ctx
         .agent_chat_manager
         .get_history(&client_id, &session_id, channel_id.as_deref(), limit)
         .await
     {
-        error!("Failed to get AgentChat history: {}", e);
+        common::log_error!("Failed to get AgentChat history: {}", e);
         let _ = send_to_client(
             &ctx.client_publish_channel,
             &client_id,
@@ -2403,13 +2403,13 @@ async fn handle_agent_chat_get_state(
     client_id: String,
     session_id: Option<String>,
 ) {
-    info!("Received AgentChatGetState from client {}", client_id);
+    common::log_info!("Received AgentChatGetState from client {}", client_id);
     if let Err(e) = ctx
         .agent_chat_manager
         .get_state(&client_id, session_id.as_deref())
         .await
     {
-        error!("Failed to get AgentChat state: {}", e);
+        common::log_error!("Failed to get AgentChat state: {}", e);
         let _ = send_to_client(
             &ctx.client_publish_channel,
             &client_id,
