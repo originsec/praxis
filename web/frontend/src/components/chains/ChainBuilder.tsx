@@ -1596,8 +1596,11 @@ function ChainBuilderInner({ chain, onSave, onCancel, operationDefs, modelDefs }
           // Element Palette.
           //
           */}
-          <Panel position="top-left" className="!m-2" style={{ maxHeight: 'calc(100% - 60px)', overflow: 'hidden' }}>
-            <div className="ascii-box bg-[var(--bg-secondary)] p-3 flex flex-col gap-0.5 max-h-full overflow-y-auto">
+          <Panel position="top-left" className="!m-2" style={{ maxHeight: 'calc(100% - 40px)' }}>
+            <div
+              className="bg-[var(--bg-secondary)] border border-[var(--border-color)] p-3 flex flex-col gap-0.5 overflow-y-auto"
+              style={{ maxHeight: 'calc(100%)', borderRadius: 2, boxShadow: '3px 3px 0 0 rgba(0,0,0,0.4)' }}
+            >
               <div className="text-[11px] tracking-widest text-[var(--text-secondary)] mb-2 px-1" style={{ letterSpacing: '0.1em' }}>ELEMENTS</div>
               <div className="flex flex-col gap-0.5">
                 <PaletteItem
