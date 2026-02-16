@@ -101,6 +101,35 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
 
           {/*
           //
+          // Summary (collapsible) with Result tag, markdown content.
+          //
+          */}
+          {(operation.summary || operation.result) && (
+            <div>
+              <button
+                onClick={() => setSummaryCollapsed(!summaryCollapsed)}
+                className="flex items-center gap-2 text-xs text-muted mb-1 hover:text-[var(--text-primary)] transition-colors"
+              >
+                {summaryCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                Summary
+                {operation.result && (
+                  <span className="px-1.5 py-0.5 text-[10px] font-mono bg-[var(--bg-tertiary)] border border-dim">
+                    {operation.result}
+                  </span>
+                )}
+              </button>
+              {!summaryCollapsed && operation.summary && (
+                <div className="bg-[var(--bg-secondary)] p-3 max-h-64 overflow-auto prose prose-sm prose-invert max-w-none text-xs [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0 [&_h2]:text-sm [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:mt-1 [&_h3]:mb-0.5">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {operation.summary}
+                  </ReactMarkdown>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/*
+          //
           // Prompt (collapsible, collapsed by default).
           //
           */}
@@ -146,32 +175,6 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
             </div>
           )}
 
-          {/*
-          //
-          // Summary (collapsible) with Result tag.
-          //
-          */}
-          {(operation.summary || operation.result) && (
-            <div>
-              <button
-                onClick={() => setSummaryCollapsed(!summaryCollapsed)}
-                className="flex items-center gap-2 text-xs text-muted mb-1 hover:text-[var(--text-primary)] transition-colors"
-              >
-                {summaryCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                Summary
-                {operation.result && (
-                  <span className="px-1.5 py-0.5 text-[10px] font-mono bg-[var(--bg-tertiary)] border border-dim">
-                    {operation.result}
-                  </span>
-                )}
-              </button>
-              {!summaryCollapsed && operation.summary && (
-                <div className="bg-[var(--bg-secondary)] p-3">
-                  <p className="text-xs">{operation.summary}</p>
-                </div>
-              )}
-            </div>
-          )}
 
         </div>
       )}

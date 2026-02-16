@@ -18,6 +18,7 @@ Signal completion ONLY when you have gathered REAL data from tool responses.
    - NEVER fabricate, guess, or make up data
    - NEVER use placeholder text like "..." or "[additional entries]"
    - When result is `false`, explain what went wrong and why
+   - Must be in markdown format
 
 3. **ONLY complete AFTER receiving tool results**
    - You MUST have called at least one tool

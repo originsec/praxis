@@ -842,7 +842,7 @@ impl ChainExecutor {
             }
         }
 
-        op_result.map(|(_, result)| (result, semantic_success))
+        op_result.map(|(summary, _result)| (summary, semantic_success))
     }
 
     /// Execute a Transform element

@@ -622,7 +622,7 @@ pub async fn execute_agent_mode(
                 // Log completion.
                 //
                 common::log_info!("SemanticOpComplete: op={} result={} summary={}", &operation_id[..8], final_result, final_summary);
-                let _ = database.append_output(operation_id, &fmt_complete(&final_summary)).await;
+                let _ = database.append_output(operation_id, &fmt_complete(&final_result, &final_summary)).await;
 
                 //
                 // Add final assistant message to history.
