@@ -340,7 +340,53 @@ pub async fn recon_list(
 }
 
 //
-// Read a single file on a node.
+// Resolve node prefix, selected agent, and recon data. Returns the resolved
+// node ID and the list of known file paths for the given file type.
+//
+
+struct ResolvedRecon {
+    node_id: String,
+    paths: Vec<String>,
+}
+
+async fn resolve_recon(
+    client: &(impl McpClient + Sync),
+    node_prefix: &str,
+    file_type: AgentFileType,
+) -> Result<ResolvedRecon> {
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available. The service may still be starting — try again in a moment."))?;
+    let node_id = resolve_node_id(&state, node_prefix)?;
+    let agent = resolve_selected_agent(&state, &node_id)?;
+    let recon = client
+        .get_stored_recon(&node_id, &agent)
+        .await?
+        .ok_or_else(|| anyhow!("No stored recon data. Run recon_run first, then select an agent with agent_select."))?;
+
+    let paths: Vec<String> = match file_type {
+        AgentFileType::Config => recon.config.iter().map(|c| c.path.clone()).collect(),
+        AgentFileType::Session => recon.sessions.iter().map(|s| s.session_file.clone()).collect(),
+    };
+
+    Ok(ResolvedRecon { node_id, paths })
+}
+
+fn validate_path(paths: &[String], path: &str, file_type: AgentFileType) -> Result<()> {
+    if !paths.iter().any(|p| p == path) {
+        let type_name = match file_type {
+            AgentFileType::Config => "config",
+            AgentFileType::Session => "session",
+        };
+        return Err(anyhow!(
+            "Path '{}' not found in recon {} files. Use recon_list to see available files.",
+            path, type_name
+        ));
+    }
+    Ok(())
+}
+
+//
+// Read a single file on a node. Resolves node prefix, validates the path
+// exists in stored recon data.
 //
 
 pub struct ReadFileResult {
@@ -352,6 +398,19 @@ pub struct ReadFileResult {
 }
 
 pub async fn recon_read_file(
+    client: &(impl McpClient + Sync),
+    node_prefix: &str,
+    file_type: AgentFileType,
+    path: &str,
+    line_start: Option<usize>,
+    line_end: Option<usize>,
+) -> Result<ReadFileResult> {
+    let resolved = resolve_recon(client, node_prefix, file_type).await?;
+    validate_path(&resolved.paths, path, file_type)?;
+    read_file_inner(client, &resolved.node_id, file_type, path, line_start, line_end).await
+}
+
+async fn read_file_inner(
     client: &(impl McpClient + Sync),
     node_id: &str,
     file_type: AgentFileType,
@@ -386,26 +445,15 @@ pub async fn recon_read_all(
     line_start: Option<usize>,
     line_end: Option<usize>,
 ) -> Result<Vec<ReadFileResult>> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available. The service may still be starting — try again in a moment."))?;
-    let node_id = resolve_node_id(&state, node_prefix)?;
-    let agent = resolve_selected_agent(&state, &node_id)?;
-    let recon = client
-        .get_stored_recon(&node_id, &agent)
-        .await?
-        .ok_or_else(|| anyhow!("No stored recon data. Run recon_run first, then select an agent with agent_select."))?;
+    let resolved = resolve_recon(client, node_prefix, file_type).await?;
 
-    let paths: Vec<String> = match file_type {
-        AgentFileType::Config => recon.config.iter().map(|c| c.path.clone()).collect(),
-        AgentFileType::Session => recon.sessions.iter().map(|s| s.session_file.clone()).collect(),
-    };
-
-    if paths.is_empty() {
+    if resolved.paths.is_empty() {
         return Err(anyhow!("No files found in recon data. Run recon_run to discover files."));
     }
 
     let mut results = Vec::new();
-    for path in &paths {
-        match recon_read_file(client, &node_id, file_type, path, line_start, line_end).await {
+    for path in &resolved.paths {
+        match read_file_inner(client, &resolved.node_id, file_type, path, line_start, line_end).await {
             Ok(r) => results.push(r),
             Err(e) => results.push(ReadFileResult {
                 path: path.clone(),
@@ -420,7 +468,8 @@ pub async fn recon_read_all(
 }
 
 //
-// Grep a single file on a node.
+// Grep a single file on a node. Resolves node prefix, validates the path
+// exists in stored recon data.
 //
 
 pub struct GrepFileResult {
@@ -431,6 +480,18 @@ pub struct GrepFileResult {
 }
 
 pub async fn recon_grep_file(
+    client: &(impl McpClient + Sync),
+    node_prefix: &str,
+    file_type: AgentFileType,
+    path: &str,
+    pattern: &str,
+) -> Result<GrepFileResult> {
+    let resolved = resolve_recon(client, node_prefix, file_type).await?;
+    validate_path(&resolved.paths, path, file_type)?;
+    grep_file_inner(client, &resolved.node_id, file_type, path, pattern).await
+}
+
+async fn grep_file_inner(
     client: &(impl McpClient + Sync),
     node_id: &str,
     file_type: AgentFileType,
@@ -463,26 +524,15 @@ pub async fn recon_grep_all(
     file_type: AgentFileType,
     pattern: &str,
 ) -> Result<Vec<GrepFileResult>> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available. The service may still be starting — try again in a moment."))?;
-    let node_id = resolve_node_id(&state, node_prefix)?;
-    let agent = resolve_selected_agent(&state, &node_id)?;
-    let recon = client
-        .get_stored_recon(&node_id, &agent)
-        .await?
-        .ok_or_else(|| anyhow!("No stored recon data. Run recon_run first, then select an agent with agent_select."))?;
+    let resolved = resolve_recon(client, node_prefix, file_type).await?;
 
-    let paths: Vec<String> = match file_type {
-        AgentFileType::Config => recon.config.iter().map(|c| c.path.clone()).collect(),
-        AgentFileType::Session => recon.sessions.iter().map(|s| s.session_file.clone()).collect(),
-    };
-
-    if paths.is_empty() {
+    if resolved.paths.is_empty() {
         return Err(anyhow!("No files found in recon data. Run recon_run to discover files."));
     }
 
     let mut results = Vec::new();
-    for path in &paths {
-        if let Ok(r) = recon_grep_file(client, &node_id, file_type, path, pattern).await {
+    for path in &resolved.paths {
+        if let Ok(r) = grep_file_inner(client, &resolved.node_id, file_type, path, pattern).await {
             if r.error.is_none() && !r.matches.is_empty() {
                 results.push(r);
             }

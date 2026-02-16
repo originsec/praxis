@@ -372,9 +372,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
 
         match params.path {
             Some(path) => {
-                let node_id = resolve_node!(client, params.node);
                 let r = super::ops::recon_read_file(
-                    client, &node_id, AgentFileType::Config, &path, params.line_start, params.line_end,
+                    client, &params.node, AgentFileType::Config, &path, params.line_start, params.line_end,
                 ).await.map_err(mcp_err)?;
                 json_result(json!({
                     "path": r.path, "content": r.content,
@@ -403,9 +402,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
 
         match params.path {
             Some(path) => {
-                let node_id = resolve_node!(client, params.node);
                 let r = super::ops::recon_read_file(
-                    client, &node_id, AgentFileType::Session, &path, params.line_start, params.line_end,
+                    client, &params.node, AgentFileType::Session, &path, params.line_start, params.line_end,
                 ).await.map_err(mcp_err)?;
                 json_result(json!({
                     "path": r.path, "content": r.content,
@@ -434,9 +432,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
 
         match params.path {
             Some(path) => {
-                let node_id = resolve_node!(client, params.node);
                 let r = super::ops::recon_grep_file(
-                    client, &node_id, AgentFileType::Config, &path, &params.pattern,
+                    client, &params.node, AgentFileType::Config, &path, &params.pattern,
                 ).await.map_err(mcp_err)?;
                 json_result(json!({
                     "path": r.path, "pattern": r.pattern,
@@ -469,9 +466,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
 
         match params.path {
             Some(path) => {
-                let node_id = resolve_node!(client, params.node);
                 let r = super::ops::recon_grep_file(
-                    client, &node_id, AgentFileType::Session, &path, &params.pattern,
+                    client, &params.node, AgentFileType::Session, &path, &params.pattern,
                 ).await.map_err(mcp_err)?;
                 json_result(json!({
                     "path": r.path, "pattern": r.pattern,
