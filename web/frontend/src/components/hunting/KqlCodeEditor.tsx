@@ -46,15 +46,15 @@ interface TableSchema {
 }
 
 const TABLE_SCHEMAS: TableSchema[] = [
+  { name: 'AgentLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'agent_name', 'version'] },
+  { name: 'EventLogs', columns: ['timestamp', 'source', 'level', 'target', 'message'] },
+  { name: 'NodeLogs', columns: ['timestamp', 'node_id', 'machine_name', 'os_details', 'intercept_active'] },
+  { name: 'ReconLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'is_semantic', 'mcp_server_count', 'skill_count', 'internal_tool_count', 'config_count', 'session_count', 'project_path_count'] },
+  { name: 'ReconMetadataLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'entry_type', 'value'] },
+  { name: 'ReconSessionLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'session_id', 'context_path', 'last_modified', 'message_count'] },
+  { name: 'ReconToolLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'tool_type', 'server_name', 'tool_name', 'tool_description', 'transport'] },
   { name: 'TrafficLogs', columns: ['timestamp', 'traffic_id', 'node_id', 'agent_short_name', 'intercept_method', 'direction', 'method', 'url', 'host', 'request_headers', 'request_body', 'response_status', 'response_headers', 'response_body'] },
   { name: 'TrafficMatchLogs', columns: ['timestamp', 'traffic_id', 'node_id', 'agent_short_name', 'rule_id', 'rule_name', 'summary', 'method', 'url', 'host', 'direction', 'response_status'] },
-  { name: 'NodeLogs', columns: ['timestamp', 'node_id', 'machine_name', 'os_details', 'intercept_active'] },
-  { name: 'AgentLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'agent_name', 'version'] },
-  { name: 'ReconLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'is_semantic', 'mcp_server_count', 'skill_count', 'internal_tool_count', 'config_count', 'session_count', 'project_path_count'] },
-  { name: 'ReconToolLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'tool_type', 'server_name', 'tool_name', 'tool_description', 'transport'] },
-  { name: 'ReconSessionLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'session_id', 'context_path', 'last_modified', 'message_count'] },
-  { name: 'ReconMetadataLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'entry_type', 'value'] },
-  { name: 'EventLogs', columns: ['timestamp', 'source', 'level', 'target', 'message'] },
 ];
 
 const KQL_OPERATORS = [

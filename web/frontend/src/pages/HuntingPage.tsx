@@ -29,6 +29,18 @@ const TABLES: TableInfo[] = [
     ],
   },
   {
+    name: 'EventLogs',
+    description: 'System event log entries',
+    source: 'Database',
+    columns: [
+      { name: 'timestamp', description: 'Event time' },
+      { name: 'source', description: 'Event source' },
+      { name: 'level', description: 'Log level' },
+      { name: 'target', description: 'Log target module' },
+      { name: 'message', description: 'Log message' },
+    ],
+  },
+  {
     name: 'NodeLogs',
     description: 'Connected nodes',
     source: 'In-memory',
@@ -136,18 +148,6 @@ const TABLES: TableInfo[] = [
       { name: 'host', description: 'Host/domain' },
       { name: 'direction', description: 'send or receive' },
       { name: 'response_status', description: 'HTTP status code' },
-    ],
-  },
-  {
-    name: 'EventLogs',
-    description: 'System event log entries',
-    source: 'Database',
-    columns: [
-      { name: 'timestamp', description: 'Event time' },
-      { name: 'source', description: 'Event source' },
-      { name: 'level', description: 'Log level' },
-      { name: 'target', description: 'Log target module' },
-      { name: 'message', description: 'Log message' },
     ],
   },
 ];
