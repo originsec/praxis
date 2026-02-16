@@ -21,7 +21,6 @@ use lapin::Channel;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::database::Database;
@@ -147,7 +146,7 @@ impl AgentChatManager {
             message_queue: VecDeque::new(),
         });
 
-        info!("Started AgentChat session {} with goal: {:?}, yolo_mode: {}", session_id, goal, yolo_mode);
+        common::log_info!("Started AgentChat session {} with goal: {:?}, yolo_mode: {}", session_id, goal, yolo_mode);
 
         //
         // Notify the client.
@@ -199,7 +198,7 @@ impl AgentChatManager {
         //
         self.db.update_agent_chat_session_status(session_id, "stopped").await?;
 
-        info!("Stopped AgentChat session {}", session_id);
+        common::log_info!("Stopped AgentChat session {}", session_id);
 
         //
         // Clear in-memory state.
@@ -329,7 +328,7 @@ impl AgentChatManager {
             status: AgentChatAgentStatus::Initializing,
         };
 
-        info!("Added agent {} ({}) to AgentChat session {}", nickname, agent_id, session_id);
+        common::log_info!("Added agent {} ({}) to AgentChat session {}", nickname, agent_id, session_id);
 
         //
         // Notify client.
@@ -381,7 +380,7 @@ impl AgentChatManager {
         //
         self.db.remove_agent_chat_agent(agent_id).await?;
 
-        info!("Removed agent {} from AgentChat session {}", agent.nickname, session_id);
+        common::log_info!("Removed agent {} from AgentChat session {}", agent.nickname, session_id);
 
         //
         // Notify client.
@@ -434,7 +433,7 @@ impl AgentChatManager {
         //
         self.db.update_agent_chat_agent_precedence(&agent_ids).await?;
 
-        info!("Reordered agents in AgentChat session {}", session_id);
+        common::log_info!("Reordered agents in AgentChat session {}", session_id);
 
         Ok(())
     }
@@ -553,7 +552,7 @@ impl AgentChatManager {
 
         session.channels.insert(channel_id.clone(), channel);
 
-        info!("Created channel {} in AgentChat session {}", channel_name, session_id);
+        common::log_info!("Created channel {} in AgentChat session {}", channel_name, session_id);
 
         //
         // Notify client.
@@ -722,7 +721,7 @@ impl AgentChatManager {
         if let common::NodeCommandResult::Session(
             common::SessionCommandResult::Created { session_id: agent_session_id }
         ) = result {
-            info!("AgentChat agent {} session created: {}", agent.nickname, agent_session_id);
+            common::log_info!("AgentChat agent {} session created: {}", agent.nickname, agent_session_id);
 
             //
             // Update agent with session ID and get pending system prompt.
@@ -762,7 +761,7 @@ impl AgentChatManager {
             // Send system prompt to the agent.
             //
             if let Some(system_prompt) = pending_prompt {
-                info!("Sending system prompt to agent {}", agent.nickname);
+                common::log_info!("Sending system prompt to agent {}", agent.nickname);
                 self.send_prompt_to_agent(
                     client_id,
                     &agent.node_id,
@@ -792,7 +791,7 @@ impl AgentChatManager {
         if let common::NodeCommandResult::Session(
             common::SessionCommandResult::PromptResponse { response, .. }
         ) = result {
-            info!("AgentChat agent {} responded (command {})", agent.nickname, command_id);
+            common::log_info!("AgentChat agent {} responded (command {})", agent.nickname, command_id);
 
             //
             // Parse the response.
@@ -896,7 +895,7 @@ impl AgentChatManager {
             client_id.to_string(),
         ).await;
 
-        info!("Started agent session setup on node {} for {} (yolo_mode: {})", node_id, agent_short_name, yolo_mode);
+        common::log_info!("Started agent session setup on node {} for {} (yolo_mode: {})", node_id, agent_short_name, yolo_mode);
 
         Ok(())
     }
@@ -1490,7 +1489,7 @@ impl AgentChatManager {
             .any(|a| a.nickname == recipient_nickname) || recipient_nickname == USER_NICKNAME;
 
         if !recipient_exists {
-            warn!("Agent {} tried to DM non-existent user {}", sender_nickname, recipient_nickname);
+            common::log_warn!("Agent {} tried to DM non-existent user {}", sender_nickname, recipient_nickname);
             return Ok(());
         }
 

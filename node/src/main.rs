@@ -33,8 +33,8 @@ fn setup_shutdown_signal() -> CancellationToken {
             let mut sigint =
                 signal(SignalKind::interrupt()).expect("Failed to register SIGINT handler");
             tokio::select! {
-                _ = sigterm.recv() => tracing::info!("Received SIGTERM"),
-                _ = sigint.recv() => tracing::info!("Received SIGINT"),
+                _ = sigterm.recv() => common::log_info!("Received SIGTERM"),
+                _ = sigint.recv() => common::log_info!("Received SIGINT"),
             }
         }
         #[cfg(windows)]
@@ -42,7 +42,7 @@ fn setup_shutdown_signal() -> CancellationToken {
             tokio::signal::ctrl_c()
                 .await
                 .expect("Failed to register Ctrl+C handler");
-            tracing::info!("Received Ctrl+C");
+            common::log_info!("Received Ctrl+C");
         }
         agent_connectors::lua::cdp::request_shutdown();
         token_clone.cancel();
@@ -125,6 +125,13 @@ async fn main() {
                     "Successfully registered with service. Node ID: {}",
                     result.node_id
                 );
+
+                common::logging::set_event_log_enabled(result.event_logging_enabled);
+                common::log_info!(
+                    "Event logging {} from registration ack",
+                    if result.event_logging_enabled { "enabled" } else { "disabled" }
+                );
+
                 result
             }
             Ok(None) => {

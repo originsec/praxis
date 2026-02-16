@@ -24,7 +24,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
 use uuid::Uuid;
 
 //
@@ -161,7 +160,7 @@ impl ServiceMcpClient {
             {
                 Ok(c) => c,
                 Err(e) => {
-                    error!("Failed to create direct consumer: {}", e);
+                    common::log_error!("Failed to create direct consumer: {}", e);
                     return;
                 }
             };
@@ -178,7 +177,7 @@ impl ServiceMcpClient {
             {
                 Ok(c) => c,
                 Err(e) => {
-                    error!("Failed to create broadcast consumer: {}", e);
+                    common::log_error!("Failed to create broadcast consumer: {}", e);
                     return;
                 }
             };
@@ -582,7 +581,7 @@ impl McpServerManager {
         self.stop().await;
 
         let bind_addr: SocketAddr = format!("0.0.0.0:{}", port).parse()?;
-        info!("Starting MCP SSE server on {}", bind_addr);
+        common::log_info!("Starting MCP SSE server on {}", bind_addr);
 
         let sse_server = rmcp::transport::sse_server::SseServer::serve(bind_addr).await?;
 
@@ -597,7 +596,7 @@ impl McpServerManager {
             match client {
                 Ok(c) => PraxisServer::with_client(c),
                 Err(e) => {
-                    error!("Failed to create MCP client: {}", e);
+                    common::log_error!("Failed to create MCP client: {}", e);
                     //
                     // Return a server that will fail - there's no good fallback.
                     //
@@ -608,14 +607,14 @@ impl McpServerManager {
 
         *self.cancellation_token.write().await = Some(ct);
 
-        info!("MCP SSE server started on port {}", port);
+        common::log_info!("MCP SSE server started on port {}", port);
         Ok(())
     }
 
     pub async fn stop(&self) {
         let mut guard = self.cancellation_token.write().await;
         if let Some(ct) = guard.take() {
-            info!("Stopping MCP SSE server");
+            common::log_info!("Stopping MCP SSE server");
             ct.cancel();
         }
     }

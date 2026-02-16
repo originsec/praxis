@@ -279,38 +279,80 @@ fn addsub_expr(i: &str) -> IResult<&str, Expr> {
     })(i)
 }
 
+//
+// KQL infix string operators. Parsed as keyword operators and converted to
+// Func(op, [left, right]) in the AST. Word boundaries prevent matching
+// inside identifiers (e.g. "has" must not match "hasPrefix").
+//
+
+fn string_op_keyword(i: &str) -> IResult<&str, &str> {
+    let (rest, matched) = alt((
+        tag("!contains"),
+        tag("!endswith"),
+        tag("!has"),
+        tag("!startswith"),
+        tag("contains"),
+        tag("endswith"),
+        tag("has"),
+        tag("startswith"),
+    ))(i)?;
+    if rest.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+        return Err(nom::Err::Error(nom::error::Error::new(i, nom::error::ErrorKind::Tag)));
+    }
+    Ok((rest, matched))
+}
+
 fn predicate(i: &str) -> IResult<&str, Expr> {
     let (i, initial) = addsub_expr(i)?;
-    let (i, e) = fold_many0(pair(trim(is_a("!=<>")), addsub_expr), move || Ok(initial.clone()), |acc, (o, g)| acc.and_then(|acc| Ok(match o {
+    let (i, e) = fold_many0(pair(trim(alt((string_op_keyword, is_a("!=<>")))), addsub_expr), move || Ok(initial.clone()), |acc, (o, g)| acc.and_then(|acc| Ok(match o {
         "==" => Expr::Equals(Box::new(acc), Box::new(g)),
         "!=" => Expr::NotEquals(Box::new(acc), Box::new(g)),
         "<" => Expr::Less(Box::new(acc), Box::new(g)),
         ">" => Expr::Greater(Box::new(acc), Box::new(g)),
         "<=" => Expr::LessOrEqual(Box::new(acc), Box::new(g)),
         ">=" => Expr::GreaterOrEqual(Box::new(acc), Box::new(g)),
-        _ => return Err(nom::Err::Error(nom::error::Error::new(i, nom::error::ErrorKind::Tag)))
+        _ => Expr::Func(o.to_string(), vec![acc, g]),
     })))(i)?;
     Ok((i, e?))
 }
 
+//
+// Word-boundary keyword matchers. Prevent `and`/`or` from matching inside
+// identifiers like `android` or `oracle`.
+//
+
+fn and_keyword(i: &str) -> IResult<&str, &str> {
+    let (rest, matched) = tag("and")(i)?;
+    if rest.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+        return Err(nom::Err::Error(nom::error::Error::new(i, nom::error::ErrorKind::Tag)));
+    }
+    Ok((rest, matched))
+}
+
+fn or_keyword(i: &str) -> IResult<&str, &str> {
+    let (rest, matched) = tag("or")(i)?;
+    if rest.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+        return Err(nom::Err::Error(nom::error::Error::new(i, nom::error::ErrorKind::Tag)));
+    }
+    Ok((rest, matched))
+}
+
 fn and_expr(i: &str) -> IResult<&str, Expr> {
-    alt((
-        map(
-            separated_pair(delim_expr, trim(tag("and")), or_expr),
-            |(first, second)| Expr::And(Box::new(first), Box::new(second)),
-        ),
-        predicate,
-    ))(i)
+    let (i, initial) = predicate(i)?;
+    fold_many0(
+        preceded(trim(and_keyword), predicate),
+        move || initial.clone(),
+        |acc, rhs| Expr::And(Box::new(acc), Box::new(rhs)),
+    )(i)
 }
 
 fn or_expr(i: &str) -> IResult<&str, Expr> {
-    alt((
-        map(
-            separated_pair(and_expr, trim(tag("or")), or_expr),
-            |(first, second)| Expr::Or(Box::new(first), Box::new(second)),
-        ),
-        and_expr,
-    ))(i)
+    let (i, initial) = and_expr(i)?;
+    fold_many0(
+        preceded(trim(or_keyword), and_expr),
+        move || initial.clone(),
+        |acc, rhs| Expr::Or(Box::new(acc), Box::new(rhs)),
+    )(i)
 }
 
 pub fn expr(i: &str) -> IResult<&str, Expr> {

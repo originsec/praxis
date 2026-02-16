@@ -120,12 +120,12 @@ impl Database {
                         .await
                     {
                         Ok(pool) => {
-                            tracing::info!("Connected to PostgreSQL (attempt {})", attempt);
+                            common::log_info!("Connected to PostgreSQL (attempt {})", attempt);
                             pool_opt = Some(pool);
                             break;
                         }
                         Err(e) => {
-                            tracing::warn!(
+                            common::log_warn!(
                                 "PostgreSQL connection attempt {}/30 failed: {}",
                                 attempt, e
                             );

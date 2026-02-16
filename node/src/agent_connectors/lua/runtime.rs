@@ -627,7 +627,7 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         .set(
             "log_debug",
             lua.create_function(|_, msg: String| {
-                tracing::debug!("lua: {}", msg);
+                common::log_debug!("lua: {}", msg);
                 Ok(())
             })
             .map_err(lua_error)?,

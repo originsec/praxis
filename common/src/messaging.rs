@@ -423,6 +423,8 @@ pub struct NodeRegistrationAck {
     pub id: String,
     #[serde(default)]
     pub lua_scripts: Vec<String>,
+    #[serde(default)]
+    pub event_logging_enabled: bool,
 }
 
 //

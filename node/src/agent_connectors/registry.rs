@@ -58,11 +58,11 @@ impl AgentRegistry {
 
         if lua_scripts.is_empty() {
             let embedded = lua::load_embedded_agents();
-            tracing::info!("Loading {} embedded Lua agent(s)", embedded.len());
+            common::log_info!("Loading {} embedded Lua agent(s)", embedded.len());
             for (agent, info) in embedded {
                 match self.register_lua(agent, info) {
                     Ok(()) => {}
-                    Err(e) => tracing::warn!("Failed to register embedded Lua agent: {}", e),
+                    Err(e) => common::log_warn!("Failed to register embedded Lua agent: {}", e),
                 }
             }
         }

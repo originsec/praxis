@@ -63,9 +63,14 @@ const KQL_OPERATORS = [
 ];
 
 const KQL_FUNCTIONS = [
-  'contains', 'startswith', 'endswith', 'has', 'strlen', 'tolower', 'toupper',
+  'strlen', 'tolower', 'toupper',
   'isnotempty', 'isnull', 'isempty', 'isnotnull', 'now', 'count', 'sum',
   'avg', 'min', 'max', 'dcount', 'tostring', 'toint', 'tolong',
+];
+
+const KQL_INFIX_OPS = [
+  'contains', '!contains', 'startswith', '!startswith',
+  'endswith', '!endswith', 'has', '!has',
 ];
 
 const KQL_KEYWORDS = ['and', 'or', 'not', 'by', 'on', '$left', '$right', 'asc', 'desc', 'true', 'false', 'null'];
@@ -128,10 +133,23 @@ function getCompletionContext(textBeforeCursor: string): Suggestion[] {
   if (['where', 'extend', 'summarize'].includes(segOp ?? '')) {
     const wordCount = lastPipeSegment.trim().split(/\s+/).length;
     if (wordCount > 1 || partial !== segOp) {
+
+      //
+      // Suppress suggestions right after an infix operator or comparison
+      // operator — the user needs to type a value, not pick from a list.
+      //
+
+      const tokensBeforeCursor = lastPipeSegment.trimEnd().split(/\s+/);
+      const prevToken = tokensBeforeCursor[tokensBeforeCursor.length - (partial ? 2 : 1)]?.toLowerCase();
+      if (prevToken && (KQL_INFIX_OPS.includes(prevToken) || ['==', '!=', '<', '>', '<=', '>='].includes(prevToken))) {
+        return [];
+      }
+
       const items: Suggestion[] = [];
       if (table) {
         items.push(...table.columns.map(c => ({ label: c, kind: 'column' as const })));
       }
+      items.push(...KQL_INFIX_OPS.map(op => ({ label: op, kind: 'keyword' as const })));
       items.push(...KQL_FUNCTIONS.map(f => ({ label: f, kind: 'function' as const })));
       items.push(...KQL_KEYWORDS.map(k => ({ label: k, kind: 'keyword' as const })));
       return filterSuggestions(items, partial);
