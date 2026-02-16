@@ -2164,6 +2164,8 @@ pub enum NodeDirectMessage {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ApplicationLogEntry {
     pub source: String,
+    #[serde(default)]
+    pub source_id: String,
     pub level: String,
     pub message: String,
     pub target: Option<String>,

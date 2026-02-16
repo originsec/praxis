@@ -47,7 +47,7 @@ interface TableSchema {
 
 const TABLE_SCHEMAS: TableSchema[] = [
   { name: 'AgentLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'agent_name', 'version'] },
-  { name: 'EventLogs', columns: ['timestamp', 'source', 'level', 'target', 'message'] },
+  { name: 'EventLogs', columns: ['timestamp', 'source', 'source_id', 'level', 'target', 'message'] },
   { name: 'NodeLogs', columns: ['timestamp', 'node_id', 'machine_name', 'os_details', 'intercept_active'] },
   { name: 'ReconLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'is_semantic', 'mcp_server_count', 'skill_count', 'internal_tool_count', 'config_count', 'session_count', 'project_path_count'] },
   { name: 'ReconMetadataLogs', columns: ['timestamp', 'node_id', 'agent_short_name', 'entry_type', 'value'] },

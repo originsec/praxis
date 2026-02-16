@@ -56,6 +56,7 @@ impl VirtualTable {
                 columns: vec![
                     SqlColumn { kql_name: "timestamp", sql_expr: "timestamp", col_type: SqlColumnType::Text, nullable: false },
                     SqlColumn { kql_name: "source", sql_expr: "source", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "source_id", sql_expr: "source_id", col_type: SqlColumnType::Text, nullable: false },
                     SqlColumn { kql_name: "level", sql_expr: "level", col_type: SqlColumnType::Text, nullable: false },
                     SqlColumn { kql_name: "target", sql_expr: "target", col_type: SqlColumnType::Text, nullable: true },
                     SqlColumn { kql_name: "message", sql_expr: "message", col_type: SqlColumnType::Text, nullable: false },

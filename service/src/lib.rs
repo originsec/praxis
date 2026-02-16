@@ -315,7 +315,7 @@ async fn run_main_loop() -> Result<()> {
     // Initialize event logging system.
     //
     let (event_log_tx, mut event_log_rx) = tokio::sync::mpsc::unbounded_channel();
-    common::logging::init("service".to_string(), event_log_tx);
+    common::logging::init("service".to_string(), String::new(), event_log_tx);
 
     //
     // Spawn task to process event log entries.

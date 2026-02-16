@@ -12,12 +12,14 @@ use tokio::sync::mpsc;
 // Global channel for sending log events.
 //
 static EVENT_LOG_TX: OnceLock<mpsc::UnboundedSender<ApplicationLogEntry>> = OnceLock::new();
+static SOURCE: OnceLock<String> = OnceLock::new();
 static SOURCE_ID: OnceLock<String> = OnceLock::new();
 static EVENT_LOG_ENABLED: AtomicBool = AtomicBool::new(false);
 
 /// Initialize the event log sender. Call this once during startup.
-/// source_id can be a node_id, "service", "web", etc.
-pub fn init(source_id: String, tx: mpsc::UnboundedSender<ApplicationLogEntry>) {
+/// source is the category ("node", "service", "web"), source_id is the instance identifier.
+pub fn init(source: String, source_id: String, tx: mpsc::UnboundedSender<ApplicationLogEntry>) {
+    let _ = SOURCE.set(source);
     let _ = SOURCE_ID.set(source_id);
     let _ = EVENT_LOG_TX.set(tx);
 }
@@ -39,9 +41,10 @@ pub fn send_event(level: &str, target: &str, message: String) {
         return;
     }
 
-    if let (Some(tx), Some(source_id)) = (EVENT_LOG_TX.get(), SOURCE_ID.get()) {
+    if let (Some(tx), Some(source)) = (EVENT_LOG_TX.get(), SOURCE.get()) {
         let entry = ApplicationLogEntry {
-            source: source_id.clone(),
+            source: source.clone(),
+            source_id: SOURCE_ID.get().cloned().unwrap_or_default(),
             level: level.to_string(),
             message,
             target: Some(target.to_string()),
@@ -57,7 +60,7 @@ pub fn send_event(level: &str, target: &str, message: String) {
 
 /// Check if event logging is initialized.
 pub fn is_initialized() -> bool {
-    EVENT_LOG_TX.get().is_some() && SOURCE_ID.get().is_some()
+    EVENT_LOG_TX.get().is_some() && SOURCE.get().is_some()
 }
 
 //

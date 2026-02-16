@@ -23,7 +23,8 @@ Centralized application log entries from service, web, and nodes. Requires `appl
 | Column | Description |
 |--------|-------------|
 | timestamp | When the log entry was recorded |
-| source | Origin: "service", "web", or a node ID |
+| source | Origin category: "service", "web", or "node" |
+| source_id | Instance identifier (e.g. node UUID, web client ID; empty for service) |
 | level | Log level: error, warn, info, debug, trace |
 | target | Log target/module (may be null) |
 | message | Log message text |
