@@ -883,6 +883,10 @@ pub struct BlockConfig {
     pub yolo_mode: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// When false, the element runs as soon as any input fires (for merge
+    /// points with conditional branches). Default (None/true): wait for all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub require_all_inputs: Option<bool>,
 }
 
 /// Chain element variants

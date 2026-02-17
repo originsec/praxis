@@ -357,6 +357,7 @@ export interface BlockConfig {
   max_runtime?: number | null;
   yolo_mode?: boolean | null;
   working_dir?: string | null;
+  require_all_inputs?: boolean | null;
 }
 
 //

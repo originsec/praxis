@@ -448,6 +448,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
   const [blockMaxRuntime, setBlockMaxRuntime] = useState<string>('');
   const [blockYoloMode, setBlockYoloMode] = useState<boolean>(false);
   const [blockWorkingDir, setBlockWorkingDir] = useState<string>('');
+  const [blockRequireAllInputs, setBlockRequireAllInputs] = useState<boolean>(true);
 
   const advancedSectionConfig = {
     type: 'section' as const,
@@ -474,6 +475,13 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
         type: 'toggle' as const,
         span: 'full' as const,
       },
+      {
+        name: 'requireAllInputs',
+        label: 'Require All Inputs',
+        type: 'toggle' as const,
+        span: 'full' as const,
+        help: 'When off, runs with partial inputs at merge points where some branches don\'t fire.',
+      },
     ],
   };
 
@@ -481,18 +489,21 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
     maxRuntime: blockMaxRuntime,
     workingDir: blockWorkingDir,
     yoloMode: blockYoloMode,
+    requireAllInputs: blockRequireAllInputs,
   };
 
   const handleBlockConfigChange = (name: string, value: any) => {
     if (name === 'maxRuntime') setBlockMaxRuntime(value);
     if (name === 'workingDir') setBlockWorkingDir(value);
     if (name === 'yoloMode') setBlockYoloMode(!!value);
+    if (name === 'requireAllInputs') setBlockRequireAllInputs(!!value);
   };
 
   const resetBlockConfig = () => {
     setBlockMaxRuntime('');
     setBlockYoloMode(false);
     setBlockWorkingDir('');
+    setBlockRequireAllInputs(true);
   };
 
   const loadBlockConfig = (nodeId: string) => {
@@ -500,6 +511,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
     setBlockMaxRuntime(existing?.max_runtime ? String(existing.max_runtime) : '');
     setBlockYoloMode(existing?.yolo_mode || false);
     setBlockWorkingDir(existing?.working_dir || '');
+    setBlockRequireAllInputs(existing?.require_all_inputs !== false);
   };
 
   //
@@ -511,10 +523,11 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
     if (blockMaxRuntime) blockConfig.max_runtime = parseInt(blockMaxRuntime) || null;
     if (blockYoloMode) blockConfig.yolo_mode = true;
     if (blockWorkingDir) blockConfig.working_dir = blockWorkingDir;
+    if (!blockRequireAllInputs) blockConfig.require_all_inputs = false;
 
     setExtraData(prev => {
       const newConfigs = new Map(prev.blockConfigs);
-      if (blockConfig.max_runtime || blockConfig.yolo_mode || blockConfig.working_dir) {
+      if (blockConfig.max_runtime || blockConfig.yolo_mode || blockConfig.working_dir || blockConfig.require_all_inputs === false) {
         newConfigs.set(nodeId, blockConfig);
       } else {
         newConfigs.delete(nodeId);

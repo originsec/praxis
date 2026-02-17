@@ -28,6 +28,7 @@ pub fn to_common(e: database::ChainElement) -> common::ChainElement {
                     max_runtime: bc.max_runtime,
                     yolo_mode: bc.yolo_mode,
                     working_dir: bc.working_dir,
+                    require_all_inputs: bc.require_all_inputs,
                 }),
             }
         }
@@ -46,6 +47,7 @@ pub fn to_common(e: database::ChainElement) -> common::ChainElement {
                     max_runtime: bc.max_runtime,
                     yolo_mode: bc.yolo_mode,
                     working_dir: bc.working_dir,
+                    require_all_inputs: bc.require_all_inputs,
                 }),
             }
         }
@@ -63,6 +65,7 @@ pub fn to_common(e: database::ChainElement) -> common::ChainElement {
                     max_runtime: bc.max_runtime,
                     yolo_mode: bc.yolo_mode,
                     working_dir: bc.working_dir,
+                    require_all_inputs: bc.require_all_inputs,
                 }),
             }
         }
@@ -104,6 +107,7 @@ pub fn to_database(e: common::ChainElement) -> database::ChainElement {
                     max_runtime: bc.max_runtime,
                     yolo_mode: bc.yolo_mode,
                     working_dir: bc.working_dir,
+                    require_all_inputs: bc.require_all_inputs,
                 }),
             }
         }
@@ -122,6 +126,7 @@ pub fn to_database(e: common::ChainElement) -> database::ChainElement {
                     max_runtime: bc.max_runtime,
                     yolo_mode: bc.yolo_mode,
                     working_dir: bc.working_dir,
+                    require_all_inputs: bc.require_all_inputs,
                 }),
             }
         }
@@ -139,6 +144,7 @@ pub fn to_database(e: common::ChainElement) -> database::ChainElement {
                     max_runtime: bc.max_runtime,
                     yolo_mode: bc.yolo_mode,
                     working_dir: bc.working_dir,
+                    require_all_inputs: bc.require_all_inputs,
                 }),
             }
         }

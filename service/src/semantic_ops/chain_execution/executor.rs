@@ -668,17 +668,21 @@ impl ChainExecutor {
             }
 
             //
-            // If the work queue is drained, check for elements at merge points
-            // that have at least one fired input but are waiting on sources
-            // that will never resolve (e.g. from a conditional branch that
-            // didn't fire). Run them with the inputs they have.
+            // If the work queue is drained, check for elements configured with
+            // require_all_inputs=false that have at least one fired input but
+            // are waiting on sources that will never resolve (e.g. from a
+            // conditional branch that didn't fire).
             //
             if work_queue.is_empty() {
-                for (id, _) in &graph.nodes {
+                for (id, node) in &graph.nodes {
                     if resolved.contains_key(id) {
                         continue;
                     }
-                    if has_any_fired_input(id, &graph, &resolved) {
+                    let allows_partial = node.element.block_config()
+                        .and_then(|bc| bc.require_all_inputs)
+                        .map(|v| !v)
+                        .unwrap_or(false);
+                    if allows_partial && has_any_fired_input(id, &graph, &resolved) {
                         work_queue.push_back(id.clone());
                     }
                 }

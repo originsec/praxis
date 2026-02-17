@@ -46,6 +46,10 @@ pub struct BlockConfig {
     pub yolo_mode: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<String>,
+    /// When false, the element runs as soon as any input fires (for merge
+    /// points with conditional branches). Default (None/true): wait for all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub require_all_inputs: Option<bool>,
 }
 
 /// Chain element variants
@@ -125,6 +129,19 @@ impl ChainElement {
             ChainElement::MemoryStore { id, .. } => id,
             ChainElement::MemoryRetrieve { id, .. } => id,
             ChainElement::Loop { id, .. } => id,
+        }
+    }
+
+    /// Get the element's block config (if any)
+    pub fn block_config(&self) -> Option<&BlockConfig> {
+        match self {
+            ChainElement::Operation { block_config, .. } => block_config.as_ref(),
+            ChainElement::Transform { block_config, .. } => block_config.as_ref(),
+            ChainElement::GenericPrompt { block_config, .. } => block_config.as_ref(),
+            ChainElement::Trigger { .. }
+            | ChainElement::MemoryStore { .. }
+            | ChainElement::MemoryRetrieve { .. }
+            | ChainElement::Loop { .. } => None,
         }
     }
 
