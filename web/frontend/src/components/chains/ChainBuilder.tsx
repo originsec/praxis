@@ -1014,7 +1014,13 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       return;
     }
 
-    const position = { x: 100 + nodes.length * 30, y: 100 + nodes.length * 30 };
+    //
+    // Place new element at the center of the current viewport.
+    //
+    const bounds = reactFlowWrapper.current?.getBoundingClientRect();
+    const position = bounds
+      ? screenToFlowPosition({ x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 })
+      : { x: 100, y: 100 };
 
     if (type === 'operation') {
       setPendingPosition(position);
@@ -1054,7 +1060,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
     }
 
     addNodeAtPosition(type, position);
-  }, [nodes.length, addNodeAtPosition, hasTrigger, hasTermination]);
+  }, [addNodeAtPosition, hasTrigger, hasTermination, screenToFlowPosition]);
 
   const handleOperationSelect = useCallback(() => {
     if (!selectedOperation) return;
