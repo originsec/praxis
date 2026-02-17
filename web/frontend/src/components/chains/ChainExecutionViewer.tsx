@@ -283,6 +283,15 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
   //
   const outputs = execution.outputs;
 
+  //
+  // Auto-collapse graph when execution completes with output.
+  //
+  useEffect(() => {
+    if (execution.status === 'Completed' && Object.keys(outputs).length > 0) {
+      setGraphExpanded(false);
+    }
+  }, [execution.status, outputs]);
+
   const handleNodeClick = (_: React.MouseEvent, node: Node) => {
     setSelectedElementId(node.id);
   };
