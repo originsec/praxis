@@ -356,8 +356,8 @@ function LoopNode({ data, selected }: { data: LoopNodeData; selected?: boolean }
       className="ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative"
       style={style}
     >
-      <Handle type="target" position={Position.Left} style={handleStyle} />
-      <Handle type="source" position={Position.Top} id="0" style={{ ...handleStyle, left: '50%' }} />
+      <Handle type="target" position={Position.Top} style={{ ...handleStyle, left: '50%' }} />
+      <Handle type="source" position={Position.Left} id="0" style={handleStyle} />
       {data.status && <StatusOverlay status={data.status} />}
       <div className="flex items-center gap-2">
         <RefreshCw size={14} className="text-[var(--accent-warning)]" />

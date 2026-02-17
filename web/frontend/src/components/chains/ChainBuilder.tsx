@@ -750,14 +750,30 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
   }, [groupableSelectedNodes, extraData.sessionGroups, setNodes]);
 
   const onConnect = useCallback(
-    (params: Connection) => setEdges((eds) => addEdge({
-      ...params,
-      id: generateUUID(),
-      type: 'smoothstep',
-      markerEnd: { type: MarkerType.ArrowClosed },
-      style: { stroke: 'var(--text-secondary)', strokeWidth: 2 },
-    }, eds)),
-    [setEdges]
+    (params: Connection) => {
+      //
+      // Loop elements: max one incoming and one outgoing connection.
+      //
+      const sourceNode = nodes.find(n => n.id === params.source);
+      const targetNode = nodes.find(n => n.id === params.target);
+      if (sourceNode?.type === 'loop') {
+        const existing = edges.filter(e => e.source === params.source);
+        if (existing.length >= 1) return;
+      }
+      if (targetNode?.type === 'loop') {
+        const existing = edges.filter(e => e.target === params.target);
+        if (existing.length >= 1) return;
+      }
+
+      setEdges((eds) => addEdge({
+        ...params,
+        id: generateUUID(),
+        type: 'smoothstep',
+        markerEnd: { type: MarkerType.ArrowClosed },
+        style: { stroke: 'var(--text-secondary)', strokeWidth: 2 },
+      }, eds));
+    },
+    [setEdges, nodes, edges]
   );
 
   const onDragOver = useCallback((event: DragEvent) => {

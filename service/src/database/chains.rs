@@ -352,12 +352,25 @@ impl ChainDefinition {
         }
 
         //
-        // Validate Loop elements: max_iterations must be >= 1.
+        // Validate Loop elements: max_iterations >= 1, exactly one incoming
+        // and one outgoing connection.
         //
         for element in &self.elements {
             if let ChainElement::Loop { max_iterations, .. } = element {
                 if *max_iterations < 1 {
                     return Err("Loop element max_iterations must be >= 1".to_string());
+                }
+                let incoming = self.connections.iter().filter(|c| &c.to_element == element.id()).count();
+                let outgoing = self.connections.iter().filter(|c| &c.from_element == element.id()).count();
+                if incoming != 1 {
+                    return Err(format!(
+                        "Loop element must have exactly one incoming connection (has {})", incoming
+                    ));
+                }
+                if outgoing != 1 {
+                    return Err(format!(
+                        "Loop element must have exactly one outgoing connection (has {})", outgoing
+                    ));
                 }
             }
         }
