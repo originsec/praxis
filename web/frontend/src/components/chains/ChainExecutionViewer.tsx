@@ -322,7 +322,15 @@ interface ChainExecutionViewerInnerProps {
 function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }: ChainExecutionViewerInnerProps) {
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [outputExpanded, setOutputExpanded] = useState(true);
-  const { fitView, setCenter } = useReactFlow();
+  const { fitView, setCenter, getNodes } = useReactFlow();
+
+  //
+  // Cache the chain definition so nodes don't disappear if the parent's
+  // chain prop goes null (e.g. currentChain changes elsewhere).
+  //
+  const chainRef = useRef(chain);
+  if (chain) chainRef.current = chain;
+  const stableChain = chainRef.current;
 
   //
   // Use JSON.stringify for deep comparison since React's shallow comparison
@@ -330,9 +338,9 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
   //
   const elementsKey = JSON.stringify(execution.elements);
   const { nodes, edges } = useMemo(
-    () => chainToFlowWithStatus(chain, execution.elements),
+    () => chainToFlowWithStatus(stableChain, execution.elements),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [chain, elementsKey]
+    [stableChain, elementsKey]
   );
 
   //
@@ -353,30 +361,32 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
   // Auto-zoom to the currently running element (only when it changes).
   //
   const lastRunningIdRef = useRef<string | null>(null);
-  const runningId = useMemo(() => {
-    if (execution.status !== 'Running') return null;
-    return Object.entries(execution.elements).find(
-      ([, elem]) => elem.status === 'Running'
-    )?.[0] ?? null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [execution.status, elementsKey]);
-
   useEffect(() => {
+    if (execution.status !== 'Running') return;
+
+    const runningId = Object.entries(execution.elements).find(
+      ([, elem]) => elem.status === 'Running'
+    )?.[0];
     if (!runningId || runningId === lastRunningIdRef.current) return;
     lastRunningIdRef.current = runningId;
 
-    const runningNode = nodes.find(n => n.id === runningId);
-    if (!runningNode) return;
-
+    //
+    // Read node positions from React Flow's internal state to ensure
+    // they're laid out.
+    //
     const timer = setTimeout(() => {
+      const flowNodes = getNodes();
+      const target = flowNodes.find(n => n.id === runningId);
+      if (!target) return;
       setCenter(
-        runningNode.position.x + 100,
-        runningNode.position.y + 40,
+        target.position.x + (target.measured?.width ?? 200) / 2,
+        target.position.y + (target.measured?.height ?? 60) / 2,
         { zoom: 1.2, duration: 400 }
       );
-    }, 150);
+    }, 200);
     return () => clearTimeout(timer);
-  }, [runningId, nodes, setCenter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [elementsKey, execution.status, setCenter, getNodes]);
 
   //
   // Get selected element's execution info.
