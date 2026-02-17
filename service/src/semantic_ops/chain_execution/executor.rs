@@ -692,14 +692,13 @@ impl ChainExecutor {
 
         //
         // Determine chain success: at least one terminal element must have
-        // completed successfully.
+        // been reached (resolved). Semantic success/failure of individual
+        // operations does not affect the chain's own completion status.
         //
         let terminals = graph.terminal_elements();
-        let any_terminal_success = terminals.iter().any(|tid| {
-            resolved.get(tid).map(|(_, s)| *s == Some(true)).unwrap_or(false)
-        });
-        if !any_terminal_success && !terminals.is_empty() {
-            return Err(anyhow::anyhow!("Chain failed: no terminal element completed successfully"));
+        let any_terminal_reached = terminals.iter().any(|tid| resolved.contains_key(tid));
+        if !any_terminal_reached && !terminals.is_empty() {
+            return Err(anyhow::anyhow!("Chain failed: no terminal element was reached"));
         }
 
         Ok(())
