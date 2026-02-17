@@ -204,7 +204,7 @@ function TransformNode({ data, selected }: { data: TransformNodeData; selected?:
           </div>
         </div>
       )}
-      {(data.modelRef || data.maxRuntime || data.yoloMode) && (
+      {(data.modelRef || data.maxRuntime || data.yoloMode || data.requireAllInputs === false) && (
         <div className="flex items-center gap-1.5 flex-wrap">
           {data.modelRef && (
             <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 bg-[var(--accent-info)]/10 text-[var(--accent-info)] font-mono">
@@ -218,6 +218,9 @@ function TransformNode({ data, selected }: { data: TransformNodeData; selected?:
           )}
           {data.yoloMode && (
             <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-error)]/10 text-[var(--accent-error)] font-mono">YOLO</span>
+          )}
+          {data.requireAllInputs === false && (
+            <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-info)]/10 text-[var(--accent-info)] font-mono">ANY</span>
           )}
         </div>
       )}
@@ -266,7 +269,7 @@ function GenericPromptNode({ data, selected }: { data: GenericPromptNodeData; se
           </div>
         </div>
       )}
-      {(data.maxRuntime || data.yoloMode) && (
+      {(data.maxRuntime || data.yoloMode || data.requireAllInputs === false) && (
         <div className="flex items-center gap-1.5 flex-wrap">
           {data.maxRuntime && (
             <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 bg-[var(--accent-warning)]/10 text-[var(--accent-warning)] font-mono">
@@ -275,6 +278,9 @@ function GenericPromptNode({ data, selected }: { data: GenericPromptNodeData; se
           )}
           {data.yoloMode && (
             <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-error)]/10 text-[var(--accent-error)] font-mono">YOLO</span>
+          )}
+          {data.requireAllInputs === false && (
+            <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-info)]/10 text-[var(--accent-info)] font-mono">ANY</span>
           )}
         </div>
       )}
