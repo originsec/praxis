@@ -186,6 +186,7 @@ interface ChainExecutionViewerInnerProps {
 function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }: ChainExecutionViewerInnerProps) {
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [outputExpanded, setOutputExpanded] = useState(true);
+  const [graphExpanded, setGraphExpanded] = useState(true);
   const { fitView, setCenter, getNodes } = useReactFlow();
 
   //
@@ -491,10 +492,22 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
 
       {/*
       //
-      // Flow graph on top.
+      // Collapsible flow graph.
       //
       */}
-      <div className="h-64 min-h-[16rem] border-b border-subtle">
+      <div className="border-b border-subtle">
+        <button
+          onClick={() => setGraphExpanded(!graphExpanded)}
+          className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-[var(--bg-tertiary)] transition-colors text-left"
+        >
+          {graphExpanded ? (
+            <ChevronDown size={12} className="text-[var(--text-secondary)]" />
+          ) : (
+            <ChevronRight size={12} className="text-[var(--text-secondary)]" />
+          )}
+          <span className="text-xs font-medium text-[var(--text-secondary)]">Graph</span>
+        </button>
+        {graphExpanded && <div className="h-40 min-h-[10rem]">
         {stableChain ? (
           <ReactFlow
             nodes={nodes}
@@ -535,6 +548,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
             )}
           </div>
         )}
+      </div>}
       </div>
 
       {/*
