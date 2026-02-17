@@ -257,7 +257,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
       setCenter(
         target.position.x + (target.measured?.width ?? 200) / 2,
         target.position.y + (target.measured?.height ?? 60) / 2,
-        { zoom: 1.2, duration: 400 }
+        { zoom: 0.7, duration: 400 }
       );
     }, 200);
     return () => clearTimeout(timer);
