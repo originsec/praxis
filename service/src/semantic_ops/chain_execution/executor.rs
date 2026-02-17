@@ -432,7 +432,12 @@ impl ChainExecutor {
                 input
             };
 
-            let yolo_mode = current_session_yolo_mode;
+            //
+            // Per-block yolo_mode override takes precedence over session group.
+            //
+            let block_yolo = node.element.block_config()
+                .and_then(|bc| bc.yolo_mode);
+            let yolo_mode = block_yolo.unwrap_or(current_session_yolo_mode);
 
             //
             // Build element config and context based on element type.
@@ -580,6 +585,7 @@ impl ChainExecutor {
                         model_ref,
                         &merged_input,
                         is_first_in_session,
+                        yolo_mode,
                         &active_session,
                         &working_dir,
                         &node_id,
@@ -783,6 +789,7 @@ impl ChainExecutor {
         model_ref: &Option<String>,
         merged_input: &str,
         is_first_in_session: bool,
+        yolo_mode_override: bool,
         active_session: &Option<String>,
         working_dir: &Option<String>,
         node_id: &str,
@@ -822,7 +829,7 @@ impl ChainExecutor {
             operation_prompt: full_prompt,
             mode: op_def.mode.clone(),
             agent_iterations: op_def.agent_iterations,
-            yolo_mode: op_def.yolo_mode,
+            yolo_mode: yolo_mode_override || op_def.yolo_mode,
             model_ref: model_ref.clone().or(op_def.model_ref.clone()),
         };
 
