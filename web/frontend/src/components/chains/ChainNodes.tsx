@@ -357,7 +357,7 @@ function LoopNode({ data, selected }: { data: LoopNodeData; selected?: boolean }
       style={style}
     >
       <Handle type="target" position={Position.Top} style={{ ...handleStyle, left: '50%' }} />
-      <Handle type="source" position={Position.Left} id="0" style={handleStyle} />
+      <Handle type="source" position={Position.Bottom} id="0" style={{ ...handleStyle, left: '50%' }} />
       {data.status && <StatusOverlay status={data.status} />}
       <div className="flex items-center gap-2">
         <RefreshCw size={14} className="text-[var(--accent-warning)]" />

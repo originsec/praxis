@@ -474,8 +474,6 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
     } else {
       createChain(definition);
     }
-    setShowChainBuilder(false);
-    setEditingChainId(null);
   };
 
   const handleDuplicateChain = (definition: ChainDefinitionInput) => {

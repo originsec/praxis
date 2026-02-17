@@ -362,14 +362,14 @@ impl ChainDefinition {
                 }
                 let incoming = self.connections.iter().filter(|c| &c.to_element == element.id()).count();
                 let outgoing = self.connections.iter().filter(|c| &c.from_element == element.id()).count();
-                if incoming != 1 {
+                if incoming > 1 {
                     return Err(format!(
-                        "Loop element must have exactly one incoming connection (has {})", incoming
+                        "Loop element can have at most one incoming connection (has {})", incoming
                     ));
                 }
-                if outgoing != 1 {
+                if outgoing > 1 {
                     return Err(format!(
-                        "Loop element must have exactly one outgoing connection (has {})", outgoing
+                        "Loop element can have at most one outgoing connection (has {})", outgoing
                     ));
                 }
             }
