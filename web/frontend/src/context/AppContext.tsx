@@ -731,7 +731,15 @@ function reduceChains(state: AppState, action: Action): AppState | null {
       return { ...state, chains: { ...state.chains, chains: [...state.chains.chains, action.chain] } };
     case 'UPDATE_CHAIN': {
       const updatedChains = state.chains.chains.map(c => c.id === action.chain.id ? action.chain : c);
-      return { ...state, chains: { ...state.chains, chains: updatedChains } };
+      //
+      // Invalidate cached full definition so next load fetches fresh data
+      // with updated block_config and other settings.
+      //
+      const { [action.chain.id]: _, ...remainingCache } = state.chains.chainDefinitionsCache;
+      const clearedCurrentChain = state.chains.currentChain?.id === action.chain.id
+        ? null
+        : state.chains.currentChain;
+      return { ...state, chains: { ...state.chains, chains: updatedChains, currentChain: clearedCurrentChain, chainDefinitionsCache: remainingCache } };
     }
     case 'DELETE_CHAIN':
       return { ...state, chains: { ...state.chains, chains: state.chains.chains.filter(c => c.id !== action.chain_id) } };
