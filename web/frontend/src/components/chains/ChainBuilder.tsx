@@ -122,6 +122,7 @@ function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: Operatio
             agentIterations: opDef?.agent_iterations,
             yoloMode: elem.block_config?.yolo_mode || opDef?.yolo_mode,
             workingDir: elem.block_config?.working_dir,
+            requireAllInputs: elem.block_config?.require_all_inputs,
           },
         };
       }
@@ -148,6 +149,7 @@ function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: Operatio
             maxRuntime: elem.block_config?.max_runtime,
             yoloMode: elem.block_config?.yolo_mode,
             workingDir: elem.block_config?.working_dir,
+            requireAllInputs: elem.block_config?.require_all_inputs,
           },
         };
       case 'GenericPrompt':
@@ -169,6 +171,7 @@ function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: Operatio
             maxRuntime: elem.block_config?.max_runtime,
             yoloMode: elem.block_config?.yolo_mode,
             workingDir: elem.block_config?.working_dir,
+            requireAllInputs: elem.block_config?.require_all_inputs,
           },
         };
       case 'MemoryStore':
@@ -981,6 +984,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       agentIterations: opDef?.agent_iterations,
       yoloMode: blockYoloMode || opDef?.yolo_mode,
       workingDir: blockWorkingDir || undefined,
+      requireAllInputs: blockRequireAllInputs === false ? false : undefined,
     };
 
     if (editingNodeId) {
@@ -1034,7 +1038,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       });
       setNodes(nds => nds.map(n =>
         n.id === editingNodeId
-          ? { ...n, data: { ...n.data, prompt: transformPrompt, modelRef: transformModel || undefined, maxRuntime, yoloMode: blockYoloMode || undefined, workingDir: blockWorkingDir || undefined } }
+          ? { ...n, data: { ...n.data, prompt: transformPrompt, modelRef: transformModel || undefined, maxRuntime, yoloMode: blockYoloMode || undefined, workingDir: blockWorkingDir || undefined, requireAllInputs: blockRequireAllInputs === false ? false : undefined } }
           : n
       ));
       saveBlockConfig(editingNodeId);
@@ -1047,7 +1051,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
         id: newNodeId,
         type: 'transform',
         position: pendingPosition,
-        data: { label: 'Transform', prompt: transformPrompt, modelRef: transformModel || undefined, maxRuntime, yoloMode: blockYoloMode || undefined, workingDir: blockWorkingDir || undefined },
+        data: { label: 'Transform', prompt: transformPrompt, modelRef: transformModel || undefined, maxRuntime, yoloMode: blockYoloMode || undefined, workingDir: blockWorkingDir || undefined, requireAllInputs: blockRequireAllInputs === false ? false : undefined },
       };
       setNodes(nds => [...nds, newNode]);
       setExtraData(prev => {
@@ -1086,7 +1090,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       });
       setNodes(nds => nds.map(n =>
         n.id === editingNodeId
-          ? { ...n, data: { ...n.data, prompt: genericPromptText, maxRuntime, yoloMode: blockYoloMode || undefined, workingDir: blockWorkingDir || undefined } }
+          ? { ...n, data: { ...n.data, prompt: genericPromptText, maxRuntime, yoloMode: blockYoloMode || undefined, workingDir: blockWorkingDir || undefined, requireAllInputs: blockRequireAllInputs === false ? false : undefined } }
           : n
       ));
       saveBlockConfig(editingNodeId);
@@ -1099,7 +1103,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
         id: newNodeId,
         type: 'genericPrompt',
         position: pendingPosition,
-        data: { label: 'Prompt', prompt: genericPromptText, maxRuntime, yoloMode: blockYoloMode || undefined, workingDir: blockWorkingDir || undefined },
+        data: { label: 'Prompt', prompt: genericPromptText, maxRuntime, yoloMode: blockYoloMode || undefined, workingDir: blockWorkingDir || undefined, requireAllInputs: blockRequireAllInputs === false ? false : undefined },
       };
       setNodes(nds => [...nds, newNode]);
       setExtraData(prev => {

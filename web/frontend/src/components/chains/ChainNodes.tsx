@@ -97,6 +97,7 @@ export interface OperationNodeData {
   agentIterations?: number;
   yoloMode?: boolean;
   workingDir?: string;
+  requireAllInputs?: boolean;
   status?: string;
 }
 
@@ -153,6 +154,9 @@ function OperationNode({ data, selected }: { data: OperationNodeData; selected?:
         {data.yoloMode && (
           <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-error)]/10 text-[var(--accent-error)] font-mono">YOLO</span>
         )}
+        {data.requireAllInputs === false && (
+          <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-info)]/10 text-[var(--accent-info)] font-mono">ANY</span>
+        )}
       </div>
       {data.workingDir && (
         <div className="flex items-center gap-1 mt-1.5 text-[10px] text-muted font-mono truncate" title={data.workingDir}>
@@ -171,6 +175,7 @@ interface TransformNodeData {
   maxRuntime?: number;
   yoloMode?: boolean;
   workingDir?: string;
+  requireAllInputs?: boolean;
   status?: string;
 }
 
@@ -232,6 +237,7 @@ interface GenericPromptNodeData {
   maxRuntime?: number;
   yoloMode?: boolean;
   workingDir?: string;
+  requireAllInputs?: boolean;
   status?: string;
 }
 

@@ -89,6 +89,7 @@ function chainToFlowWithStatus(
             modelRef: elem.model_ref,
             yoloMode: elem.block_config?.yolo_mode,
             workingDir: elem.block_config?.working_dir,
+            requireAllInputs: elem.block_config?.require_all_inputs,
             status,
           },
         };
@@ -105,6 +106,7 @@ function chainToFlowWithStatus(
             maxRuntime: elem.block_config?.max_runtime,
             yoloMode: elem.block_config?.yolo_mode,
             workingDir: elem.block_config?.working_dir,
+            requireAllInputs: elem.block_config?.require_all_inputs,
             status,
           },
         };
@@ -120,6 +122,7 @@ function chainToFlowWithStatus(
             maxRuntime: elem.block_config?.max_runtime,
             yoloMode: elem.block_config?.yolo_mode,
             workingDir: elem.block_config?.working_dir,
+            requireAllInputs: elem.block_config?.require_all_inputs,
             status,
           },
         };
