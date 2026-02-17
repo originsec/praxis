@@ -148,6 +148,25 @@ impl ExecutionGraph {
         None
     }
 
+    /// Check if `to` is reachable from `from` via outgoing connections (BFS).
+    pub fn is_reachable(&self, from: &str, to: &str) -> bool {
+        let mut visited = std::collections::HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(from.to_string());
+        while let Some(current) = queue.pop_front() {
+            if current == to {
+                return true;
+            }
+            if !visited.insert(current.clone()) {
+                continue;
+            }
+            for conn in self.outgoing_connections(&current) {
+                queue.push_back(conn.to_element.clone());
+            }
+        }
+        false
+    }
+
     /// Get elements with no outgoing connections (terminal elements)
     #[allow(dead_code)]
     pub fn terminal_elements(&self) -> Vec<ElementId> {

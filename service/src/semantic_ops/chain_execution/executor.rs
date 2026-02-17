@@ -1048,15 +1048,21 @@ fn connection_fires(conn: &crate::database::ChainConnection, success: &Option<bo
     }
 }
 
-/// Check if a target element is ready to execute (all sources resolved, at
-/// least one fires).
+/// Check if a target element is ready to execute (all forward-edge sources
+/// resolved, at least one fires).
+///
+/// On first execution of a target (not yet resolved), back-edge sources are
+/// skipped. A back-edge is a connection from a source that the target can
+/// reach via forward traversal (i.e. they form a cycle). This prevents
+/// deadlock in loop structures like Op → Loop → (port 0) → Op.
 fn is_target_ready(
     target_id: &str,
     graph: &ExecutionGraph,
     resolved: &HashMap<String, (String, Option<bool>)>,
 ) -> bool {
+    let first_execution = !resolved.contains_key(target_id);
     let incoming = graph.incoming_connections(&target_id.to_string());
-    let mut all_sources_resolved = true;
+    let mut all_required_resolved = true;
     let mut any_fires = false;
 
     for conn in &incoming {
@@ -1065,11 +1071,18 @@ fn is_target_ready(
                 any_fires = true;
             }
         } else {
-            all_sources_resolved = false;
+            //
+            // Source not resolved. If this is a back-edge on first pass,
+            // skip it — the loop will re-enqueue when it fires.
+            //
+            if first_execution && graph.is_reachable(target_id, &conn.from_element) {
+                continue;
+            }
+            all_required_resolved = false;
         }
     }
 
-    all_sources_resolved && any_fires
+    all_required_resolved && any_fires
 }
 
 /// Check if a target element has at least one incoming connection that fires,
