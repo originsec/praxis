@@ -54,19 +54,17 @@ function chainToFlowWithStatus(
   if (!chain) return { nodes: [], edges: [] };
 
   //
-  // Use stored positions if available, otherwise compute via dagre.
+  // Always use dagre auto-layout for the execution viewer so chains
+  // render cleanly regardless of stored positions.
   //
-  const hasStoredPositions = chain.positions && Object.keys(chain.positions).length > 0;
-  const dagrePositions = hasStoredPositions ? null : computeLayout(chain.elements, chain.connections);
+  const positions = computeLayout(chain.elements, chain.connections);
 
   const nodes: Node[] = chain.elements.map((elem) => {
     const execStatus = elements[elem.id]?.status;
     const status = typeof execStatus === 'object'
       ? (Object.keys(execStatus)[0] as string)
       : execStatus;
-    const position = hasStoredPositions
-      ? (chain.positions![elem.id] || { x: 0, y: 0 })
-      : (dagrePositions!.get(elem.id) || { x: 0, y: 0 });
+    const position = positions.get(elem.id) || { x: 0, y: 0 };
 
     switch (elem.element_type) {
       case 'Trigger':
