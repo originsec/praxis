@@ -1010,7 +1010,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
     setEditingNodeId(null);
     setSelectedOperation('');
     resetBlockConfig();
-  }, [pendingPosition, editingNodeId, selectedOperation, setNodes, blockMaxRuntime, blockYoloMode, blockWorkingDir, operationDefs]);
+  }, [pendingPosition, editingNodeId, selectedOperation, setNodes, blockMaxRuntime, blockYoloMode, blockWorkingDir, blockRequireAllInputs, operationDefs]);
 
   const handleTransformConfirm = useCallback(() => {
     if (!transformPrompt.trim()) return;
@@ -1068,7 +1068,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
     setTransformPrompt('');
     setTransformModel('');
     resetBlockConfig();
-  }, [pendingPosition, editingNodeId, transformPrompt, transformModel, setNodes, blockMaxRuntime, blockYoloMode, blockWorkingDir]);
+  }, [pendingPosition, editingNodeId, transformPrompt, transformModel, setNodes, blockMaxRuntime, blockYoloMode, blockWorkingDir, blockRequireAllInputs]);
 
   const handleGenericPromptConfirm = useCallback(() => {
     if (!genericPromptText.trim()) return;
@@ -1115,7 +1115,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
     setEditingNodeId(null);
     setGenericPromptText('');
     resetBlockConfig();
-  }, [pendingPosition, editingNodeId, genericPromptText, setNodes, blockMaxRuntime, blockYoloMode, blockWorkingDir]);
+  }, [pendingPosition, editingNodeId, genericPromptText, setNodes, blockMaxRuntime, blockYoloMode, blockWorkingDir, blockRequireAllInputs]);
 
   const handleMemoryConfirm = useCallback(() => {
     if (editingNodeId) {
