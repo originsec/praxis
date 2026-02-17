@@ -15,7 +15,7 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge, Connection, OnSelectionChangeParams } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, HardDriveDownload, RefreshCw, LayoutGrid } from 'lucide-react';
+import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, HardDriveDownload, RefreshCw, LayoutGrid, Square } from 'lucide-react';
 import { ConfigModal } from '../common/ConfigModal';
 import type {
   BlockConfig,
@@ -198,6 +198,19 @@ function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: Operatio
           position,
           data: { label: 'Loop', maxIterations: elem.max_iterations },
         };
+      case 'Termination':
+        if (elem.block_config) {
+          extraData.blockConfigs.set(elem.id, elem.block_config);
+        }
+        return {
+          id: elem.id,
+          type: 'termination',
+          position,
+          data: {
+            label: 'End',
+            requireAllInputs: elem.block_config?.require_all_inputs,
+          },
+        };
     }
   }).filter((n): n is NonNullable<typeof n> => n != null);
 
@@ -303,6 +316,12 @@ function flowToChain(
           id: node.id,
           max_iterations: extraData.loopMaxIterations.get(node.id) || 3,
         };
+      case 'termination':
+        return {
+          element_type: 'Termination' as const,
+          id: node.id,
+          block_config: extraData.blockConfigs.get(node.id) || null,
+        };
       default:
         throw new Error(`Unknown node type: ${node.type}`);
     }
@@ -352,7 +371,7 @@ function PaletteItem({ type, icon, label, disabled, onClick }: PaletteItemProps)
 
   return (
     <div
-      className={`flex flex-col items-center gap-2 py-3 px-2 transition-all group ${
+      className={`flex items-center gap-1.5 py-1.5 px-2 transition-all group ${
         disabled
           ? 'opacity-30 cursor-not-allowed'
           : 'cursor-grab hover:bg-[var(--bg-primary)]/50 active:scale-95'
@@ -365,7 +384,7 @@ function PaletteItem({ type, icon, label, disabled, onClick }: PaletteItemProps)
       <div className={`transition-transform ${disabled ? '' : 'group-hover:scale-110'}`}>
         {icon}
       </div>
-      <span className="text-[10px] tracking-widest text-[var(--text-secondary)] group-hover:text-highlight transition-colors" style={{ letterSpacing: '0.08em' }}>{label}</span>
+      <span className="text-[10px] tracking-wider text-[var(--text-secondary)] group-hover:text-highlight transition-colors">{label}</span>
     </div>
   );
 }
@@ -455,7 +474,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
 
   const advancedSectionConfig = {
     type: 'section' as const,
-    title: 'Advanced',
+    title: 'Additional settings',
     collapsible: true,
     fields: [
       {
@@ -546,6 +565,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
   // Check if trigger already exists.
   //
   const hasTrigger = nodes.some(n => n.type === 'trigger');
+  const hasTermination = nodes.some(n => n.type === 'termination');
 
   //
   // Check which selected nodes can be grouped (Operations, Transforms,
@@ -705,9 +725,12 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       if (!type || !reactFlowWrapper.current) return;
 
       //
-      // Prevent adding second trigger.
+      // Prevent adding second trigger or termination.
       //
       if (type === 'trigger' && hasTrigger) {
+        return;
+      }
+      if (type === 'termination' && hasTermination) {
         return;
       }
 
@@ -775,14 +798,17 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       //
       addNodeAtPosition(type, position);
     },
-    [screenToFlowPosition, hasTrigger]
+    [screenToFlowPosition, hasTrigger, hasTermination]
   );
 
   const addNodeAtPosition = useCallback((type: string, position: { x: number; y: number }, nodeExtraData?: Record<string, unknown>) => {
     //
-    // Prevent adding second trigger.
+    // Prevent adding second trigger or termination.
     //
     if (type === 'trigger' && hasTrigger) {
+      return;
+    }
+    if (type === 'termination' && hasTermination) {
       return;
     }
 
@@ -906,21 +932,37 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
           return { ...prev, loopMaxIterations: newMap };
         });
         break;
+      case 'termination':
+        newNode = {
+          id: newId,
+          type: 'termination',
+          position,
+          data: { label: 'End', requireAllInputs: false },
+        };
+        setExtraData(prev => {
+          const newConfigs = new Map(prev.blockConfigs);
+          newConfigs.set(newId, { require_all_inputs: false });
+          return { ...prev, blockConfigs: newConfigs };
+        });
+        break;
       default:
         return;
     }
 
     setNodes((nds) => [...nds, newNode]);
-  }, [setNodes, hasTrigger, setExtraData]);
+  }, [setNodes, hasTrigger, hasTermination, setExtraData]);
 
   //
   // Quick add from palette click (adds at a default position).
   //
   const handleQuickAdd = useCallback((type: string) => {
     //
-    // Prevent adding second trigger.
+    // Prevent adding second trigger or termination.
     //
     if (type === 'trigger' && hasTrigger) {
+      return;
+    }
+    if (type === 'termination' && hasTermination) {
       return;
     }
 
@@ -964,7 +1006,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
     }
 
     addNodeAtPosition(type, position);
-  }, [nodes.length, addNodeAtPosition, hasTrigger]);
+  }, [nodes.length, addNodeAtPosition, hasTrigger, hasTermination]);
 
   const handleOperationSelect = useCallback(() => {
     if (!selectedOperation) return;
@@ -1186,6 +1228,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
     memoryStore: 'MemoryStore',
     memoryRetrieve: 'MemoryRetrieve',
     loop: 'Loop',
+    termination: 'Termination',
   };
 
   const handleAutoLayout = useCallback(() => {
@@ -1604,51 +1647,58 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
           */}
           <Panel position="top-left" className="!m-2" style={{ maxHeight: 'calc(100% - 40px)' }}>
             <div
-              className="bg-[var(--bg-secondary)] border border-[var(--border-color)] p-3 flex flex-col gap-0.5 overflow-y-auto"
+              className="bg-[var(--bg-secondary)] border border-[var(--border-color)] p-2 overflow-y-auto"
               style={{ maxHeight: 'calc(100%)', borderRadius: 2, boxShadow: '3px 3px 0 0 rgba(0,0,0,0.4)' }}
             >
-              <div className="text-[11px] tracking-widest text-[var(--text-secondary)] mb-2 px-1" style={{ letterSpacing: '0.1em' }}>ELEMENTS</div>
-              <div className="flex flex-col gap-0.5">
+              <div className="text-[10px] tracking-widest text-[var(--text-secondary)] mb-1.5 px-1" style={{ letterSpacing: '0.1em' }}>ELEMENTS</div>
+              <div className="grid grid-cols-2 gap-x-1 gap-y-0">
                 <PaletteItem
                   type="trigger"
-                  icon={<Play size={20} className={hasTrigger ? "text-[var(--text-secondary)]" : "text-[var(--accent-success)]"} />}
+                  icon={<Play size={16} className={hasTrigger ? "text-[var(--text-secondary)]" : "text-[var(--accent-success)]"} />}
                   label="Trigger"
                   disabled={hasTrigger}
                   onClick={() => handleQuickAdd('trigger')}
                 />
                 <PaletteItem
+                  type="termination"
+                  icon={<Square size={16} className={hasTermination ? "text-[var(--text-secondary)]" : "text-[var(--accent-error)]"} />}
+                  label="End"
+                  disabled={hasTermination}
+                  onClick={() => handleQuickAdd('termination')}
+                />
+                <PaletteItem
                   type="operation"
-                  icon={<Cpu size={20} className="text-[var(--accent-info)]" />}
+                  icon={<Cpu size={16} className="text-[var(--accent-info)]" />}
                   label="Operation"
                   onClick={() => handleQuickAdd('operation')}
                 />
                 <PaletteItem
                   type="transform"
-                  icon={<Sparkles size={20} className="text-[var(--accent-warning)]" />}
+                  icon={<Sparkles size={16} className="text-[var(--accent-warning)]" />}
                   label="Transform"
                   onClick={() => handleQuickAdd('transform')}
                 />
                 <PaletteItem
                   type="genericPrompt"
-                  icon={<MessageSquare size={20} className="text-[var(--accent-purple)]" />}
+                  icon={<MessageSquare size={16} className="text-[var(--accent-purple)]" />}
                   label="Prompt"
                   onClick={() => handleQuickAdd('genericPrompt')}
                 />
                 <PaletteItem
                   type="memoryStore"
-                  icon={<Database size={20} className="text-[var(--accent-success)]" />}
+                  icon={<Database size={16} className="text-[var(--accent-success)]" />}
                   label="Mem Store"
                   onClick={() => handleQuickAdd('memoryStore')}
                 />
                 <PaletteItem
                   type="memoryRetrieve"
-                  icon={<HardDriveDownload size={20} className="text-[var(--accent-info)]" />}
+                  icon={<HardDriveDownload size={16} className="text-[var(--accent-info)]" />}
                   label="Mem Load"
                   onClick={() => handleQuickAdd('memoryRetrieve')}
                 />
                 <PaletteItem
                   type="loop"
-                  icon={<RefreshCw size={20} className="text-[var(--accent-warning)]" />}
+                  icon={<RefreshCw size={16} className="text-[var(--accent-warning)]" />}
                   label="Loop"
                   onClick={() => handleQuickAdd('loop')}
                 />

@@ -438,8 +438,26 @@ async fn handle_semantic_op_cancel(ctx: &ServiceContext, operation_id: String) {
                 let _ = publish_json_exchange(&ctx.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &message).await;
             }
         }
-        Err(e) => {
-            common::log_error!("Failed to cancel operation: {}", e);
+        Err(_) => {
+            //
+            // Operation not found in manager — check if it's a
+            // chain-spawned operation and cancel the parent chain instead.
+            //
+            if let Ok(Some(op)) = ctx.database.get_operation(&operation_id).await {
+                if let Some(chain_exec_id) = op.chain_execution_id {
+                    common::log_info!(
+                        "Operation {} belongs to chain execution {}, cancelling chain",
+                        operation_id.get(..8).unwrap_or(&operation_id),
+                        chain_exec_id.get(..8).unwrap_or(&chain_exec_id)
+                    );
+                    let cancelled = ctx.chain_executor.cancel(&chain_exec_id).await;
+                    if !cancelled {
+                        common::log_error!("Failed to cancel parent chain execution {}", chain_exec_id.get(..8).unwrap_or(&chain_exec_id));
+                    }
+                    return;
+                }
+            }
+            common::log_error!("Failed to cancel operation: not found in manager or chain");
         }
     }
 }

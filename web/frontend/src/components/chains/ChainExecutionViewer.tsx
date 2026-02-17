@@ -12,11 +12,12 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, Clock, CheckCircle2, XCircle, AlertCircle, Loader2, Maximize2, Cpu, Sparkles, MessageSquare, ExternalLink, ChevronDown, ChevronRight, Database, HardDriveDownload, RefreshCw } from 'lucide-react';
+import { Play, Clock, CheckCircle2, XCircle, AlertCircle, Loader2, Maximize2, Cpu, Sparkles, MessageSquare, ExternalLink, ChevronDown, ChevronRight, Database, HardDriveDownload, RefreshCw, Square } from 'lucide-react';
 import type {
   ChainExecutionUpdate,
   ChainDefinitionFull,
   ElementExecution,
+  OperationDefinitionInfo,
 } from '../../api/types';
 import { StyledOutput } from '../common/StyledOutput';
 import { computeLayout } from '../../utils/dagreLayout';
@@ -49,7 +50,8 @@ function getStatusIndicator(status: string) {
 //
 function chainToFlowWithStatus(
   chain: ChainDefinitionFull | null,
-  elements: Record<string, ElementExecution>
+  elements: Record<string, ElementExecution>,
+  operationDefs?: OperationDefinitionInfo[],
 ): { nodes: Node[]; edges: Edge[] } {
   if (!chain) return { nodes: [], edges: [] };
 
@@ -74,7 +76,8 @@ function chainToFlowWithStatus(
           position,
           data: { label: 'Manual Trigger', status },
         };
-      case 'Operation':
+      case 'Operation': {
+        const opDef = operationDefs?.find(d => d.full_name === elem.operation_name);
         return {
           id: elem.id,
           type: 'operation',
@@ -83,14 +86,21 @@ function chainToFlowWithStatus(
             label: 'Operation',
             operation: elem.operation_name || 'Operation',
             sessionColor: elem.session_group?.color,
+            description: opDef?.description,
+            operationPrompt: opDef?.operation_prompt,
             maxRuntime: elem.block_config?.max_runtime,
-            modelRef: elem.model_ref,
-            yoloMode: elem.block_config?.yolo_mode,
+            modelRef: elem.model_ref || opDef?.model_ref,
+            category: opDef?.category,
+            mode: opDef?.mode,
+            timeout: opDef?.timeout,
+            agentIterations: opDef?.agent_iterations,
+            yoloMode: elem.block_config?.yolo_mode || opDef?.yolo_mode,
             workingDir: elem.block_config?.working_dir,
             requireAllInputs: elem.block_config?.require_all_inputs,
             status,
           },
         };
+      }
       case 'Transform':
         return {
           id: elem.id,
@@ -145,6 +155,17 @@ function chainToFlowWithStatus(
           position,
           data: { label: 'Loop', maxIterations: elem.max_iterations, status },
         };
+      case 'Termination':
+        return {
+          id: elem.id,
+          type: 'termination',
+          position,
+          data: {
+            label: 'End',
+            requireAllInputs: elem.block_config?.require_all_inputs,
+            status,
+          },
+        };
     }
   }).filter((n): n is NonNullable<typeof n> => n != null);
 
@@ -181,9 +202,10 @@ interface ChainExecutionViewerInnerProps {
   chain: ChainDefinitionFull | null;
   isLoading?: boolean;
   onEditChain?: (chainId: string) => void;
+  operationDefs?: OperationDefinitionInfo[];
 }
 
-function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }: ChainExecutionViewerInnerProps) {
+function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, operationDefs }: ChainExecutionViewerInnerProps) {
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [outputExpanded, setOutputExpanded] = useState(true);
   const [graphExpanded, setGraphExpanded] = useState(true);
@@ -203,9 +225,9 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
   //
   const elementsKey = JSON.stringify(execution.elements);
   const computedFlow = useMemo(
-    () => chainToFlowWithStatus(stableChain, execution.elements),
+    () => chainToFlowWithStatus(stableChain, execution.elements, operationDefs),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [stableChain, elementsKey]
+    [stableChain, elementsKey, operationDefs]
   );
 
   //
@@ -320,6 +342,8 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
         return { name: `Load: ${element.key}`, type: 'memoryRetrieve' };
       case 'Loop':
         return { name: `Loop (max ${element.max_iterations})`, type: 'loop' };
+      case 'Termination':
+        return { name: 'End', type: 'termination' };
       default:
         return { name: elementId.slice(0, 8), type: 'unknown' };
     }
@@ -600,6 +624,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
                         {stepInfo.type === 'memoryStore' && <Database size={12} className="text-[var(--accent-success)] flex-shrink-0" />}
                         {stepInfo.type === 'memoryRetrieve' && <HardDriveDownload size={12} className="text-[var(--accent-info)] flex-shrink-0" />}
                         {stepInfo.type === 'loop' && <RefreshCw size={12} className="text-[var(--accent-warning)] flex-shrink-0" />}
+                        {stepInfo.type === 'termination' && <Square size={12} className="text-[var(--accent-error)] flex-shrink-0" />}
                         {stepInfo.type === 'unknown' && <Clock size={12} className="text-[var(--text-secondary)] flex-shrink-0" />}
                         <span className="text-xs font-mono truncate">{stepInfo.name}</span>
                       </div>
@@ -635,6 +660,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
                     {stepInfo.type === 'memoryStore' && <Database size={18} className="text-[var(--accent-success)] self-center" />}
                     {stepInfo.type === 'memoryRetrieve' && <HardDriveDownload size={18} className="text-[var(--accent-info)] self-center" />}
                     {stepInfo.type === 'loop' && <RefreshCw size={18} className="text-[var(--accent-warning)] self-center" />}
+                    {stepInfo.type === 'termination' && <Square size={18} className="text-[var(--accent-error)] self-center" />}
                     <span className="text-lg font-medium text-[var(--text-highlight)]">{stepInfo.name}</span>
                     <span className="text-xs text-[var(--text-secondary)] font-mono">{selectedElementId.slice(0, 8)}</span>
                   </div>
@@ -710,6 +736,9 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
                     {selectedElement.config.type === 'Loop' && (
                       <div><span className="text-muted">Max Iterations:</span> <span className="font-mono text-[var(--accent-warning)]">{selectedElement.config.max_iterations}</span></div>
                     )}
+                    {selectedElement.config.type === 'Termination' && (
+                      <span className="text-muted">Termination (End)</span>
+                    )}
                   </div>
                 </div>
               )}
@@ -773,6 +802,7 @@ interface ChainExecutionViewerProps {
   chain: ChainDefinitionFull | null;
   isLoading?: boolean;
   onEditChain?: (chainId: string) => void;
+  operationDefs?: OperationDefinitionInfo[];
 }
 
 export function ChainExecutionViewer(props: ChainExecutionViewerProps) {

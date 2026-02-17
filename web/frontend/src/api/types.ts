@@ -368,7 +368,8 @@ export type ChainElement =
   | { element_type: 'GenericPrompt'; id: string; prompt: string; session_group?: SessionGroup | null; block_config?: BlockConfig | null }
   | { element_type: 'MemoryStore'; id: string; key: string }
   | { element_type: 'MemoryRetrieve'; id: string; key: string }
-  | { element_type: 'Loop'; id: string; max_iterations: number };
+  | { element_type: 'Loop'; id: string; max_iterations: number }
+  | { element_type: 'Termination'; id: string; block_config?: BlockConfig | null };
 
 export type ConnectionCondition = 'OnSuccess' | 'OnFailure';
 
@@ -439,7 +440,8 @@ export type ElementConfig =
   | { type: 'GenericPrompt'; prompt: string }
   | { type: 'MemoryStore'; key: string }
   | { type: 'MemoryRetrieve'; key: string }
-  | { type: 'Loop'; max_iterations: number };
+  | { type: 'Loop'; max_iterations: number }
+  | { type: 'Termination' };
 
 //
 // Element runtime context (dynamic, during execution).

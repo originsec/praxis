@@ -2,7 +2,7 @@ import { Handle, Position } from '@xyflow/react';
 import type { NodeTypes } from '@xyflow/react';
 import {
   Play, Cpu, Sparkles, MessageSquare, Database, HardDriveDownload,
-  RefreshCw, Clock, BrainCircuit, FolderOpen,
+  RefreshCw, Clock, BrainCircuit, FolderOpen, Square,
   CheckCircle2, XCircle, AlertCircle, Loader2,
 } from 'lucide-react';
 
@@ -371,6 +371,29 @@ function LoopNode({ data, selected }: { data: LoopNodeData; selected?: boolean }
   );
 }
 
+interface TerminationNodeData {
+  label: string;
+  requireAllInputs?: boolean;
+  status?: string;
+}
+
+function TerminationNode({ data, selected }: { data: TerminationNodeData; selected?: boolean }) {
+  return (
+    <div
+      className={`ascii-box bg-[var(--bg-secondary)] px-3 py-2 relative transition-all ${!selected ? hoverStyle : ''}`}
+      style={selected ? selectedStyle : undefined}
+    >
+      <Handle
+        type="target"
+        position={Position.Left}
+        style={handleStyle}
+      />
+      {data.status && <StatusOverlay status={data.status} />}
+      <Square size={18} className="text-[var(--accent-error)]" />
+    </div>
+  );
+}
+
 export const nodeTypes: NodeTypes = {
   trigger: TriggerNode,
   operation: OperationNode,
@@ -379,4 +402,5 @@ export const nodeTypes: NodeTypes = {
   memoryStore: MemoryStoreNode,
   memoryRetrieve: MemoryRetrieveNode,
   loop: LoopNode,
+  termination: TerminationNode,
 };

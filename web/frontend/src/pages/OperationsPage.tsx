@@ -130,13 +130,15 @@ export function OperationsPage() {
     ).sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
 
   //
-  // Fetch chain definition when execution is selected.
+  // Fetch chain definition once when a new execution is selected. Depend on
+  // chain_id only so status updates don't re-trigger the fetch.
   //
+  const selectedChainId = selectedChainExec?.chain_id ?? null;
   useEffect(() => {
-    if (selectedChainExec) {
-      requestChain(selectedChainExec.chain_id);
+    if (selectedChainId) {
+      requestChain(selectedChainId);
     }
-  }, [selectedChainExec, requestChain]);
+  }, [selectedChainId, requestChain]);
 
   //
   // Use the cached chain definition or current chain from state.
@@ -584,6 +586,7 @@ export function OperationsPage() {
           setSelectedChainExecId(null);
           setMainTab('library');
         }}
+        operationDefs={definitions}
       />
     </div>
   );

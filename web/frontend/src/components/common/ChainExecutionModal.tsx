@@ -2,7 +2,7 @@ import { Download } from 'lucide-react';
 import { Modal } from './Modal';
 import { ChainExecutionViewer } from '../chains/ChainExecutionViewer';
 import { exportChainExecution, downloadTextFile } from '../../utils/export';
-import type { ChainExecutionUpdate, ChainDefinitionFull } from '../../api/types';
+import type { ChainExecutionUpdate, ChainDefinitionFull, OperationDefinitionInfo } from '../../api/types';
 
 interface ChainExecutionModalProps {
   execution: ChainExecutionUpdate | null;
@@ -10,9 +10,10 @@ interface ChainExecutionModalProps {
   isLoading?: boolean;
   onClose: () => void;
   onEditChain?: (chainId: string) => void;
+  operationDefs?: OperationDefinitionInfo[];
 }
 
-export function ChainExecutionModal({ execution, chain, isLoading, onClose, onEditChain }: ChainExecutionModalProps) {
+export function ChainExecutionModal({ execution, chain, isLoading, onClose, onEditChain, operationDefs }: ChainExecutionModalProps) {
   const handleExport = () => {
     if (!execution) return;
     const content = exportChainExecution(execution);
@@ -44,6 +45,7 @@ export function ChainExecutionModal({ execution, chain, isLoading, onClose, onEd
             chain={chain}
             isLoading={isLoading}
             onEditChain={onEditChain}
+            operationDefs={operationDefs}
           />
         </div>
       )}

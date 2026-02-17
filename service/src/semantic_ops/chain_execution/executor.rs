@@ -294,7 +294,7 @@ impl ChainExecutor {
     async fn run_chain(
         execution_id: String,
         graph: ExecutionGraph,
-        _chain: ChainDefinition,
+        chain: ChainDefinition,
         node_id: String,
         agent_short_name: String,
         working_dir: Option<String>,
@@ -509,17 +509,46 @@ impl ChainExecutor {
                         is_first_in_session: false,
                     },
                 ),
+                ChainElement::Termination { .. } => (
+                    ElementConfig::Termination,
+                    ElementContext {
+                        input: merged_input.clone(),
+                        session_id: None,
+                        yolo_mode: false,
+                        is_first_in_session: false,
+                    },
+                ),
             };
 
             //
             // Update state to running with config and context.
             //
+            let element_type_name = match &node.element {
+                ChainElement::Trigger { .. } => "Trigger",
+                ChainElement::Operation { operation_name, .. } => operation_name.as_str(),
+                ChainElement::Transform { .. } => "Transform",
+                ChainElement::GenericPrompt { .. } => "GenericPrompt",
+                ChainElement::MemoryStore { key, .. } => key.as_str(),
+                ChainElement::MemoryRetrieve { key, .. } => key.as_str(),
+                ChainElement::Loop { .. } => "Loop",
+                ChainElement::Termination { .. } => "Termination",
+            };
+            let eid_short = &element_id[..8.min(element_id.len())];
+
             {
                 let mut s = state.write().unwrap();
                 s.set_element_running_with_context(&element_id, elem_config, elem_context);
             }
             let update = state.read().unwrap().to_update();
             Self::broadcast_update(&broadcast_channel, ClientBroadcastMessage::ChainExecutionUpdate(update)).await;
+
+            common::log_debug!(
+                "[chain {}] START {} ({}) | input: {} bytes",
+                &execution_id[..8],
+                element_type_name,
+                eid_short,
+                merged_input.len()
+            );
 
             //
             // Execute based on element type.
@@ -602,6 +631,9 @@ impl ChainExecutor {
                         .map(|v| v.unwrap_or_default());
                     (retrieve_result, None, None)
                 }
+                ChainElement::Termination { .. } => {
+                    (Ok(merged_input.clone()), None, None)
+                }
             };
 
             //
@@ -609,6 +641,13 @@ impl ChainExecutor {
             //
             let (output, success) = match result {
                 Ok(output) => {
+                    common::log_debug!(
+                        "[chain {}] END   {} ({}) | ok | output: {} bytes",
+                        &execution_id[..8],
+                        element_type_name,
+                        eid_short,
+                        output.len()
+                    );
                     let success = Some(true);
                     {
                         let mut s = state.write().unwrap();
@@ -618,6 +657,13 @@ impl ChainExecutor {
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
+                    common::log_debug!(
+                        "[chain {}] END   {} ({}) | FAILED | {}",
+                        &execution_id[..8],
+                        element_type_name,
+                        eid_short,
+                        &error_msg[..200.min(error_msg.len())]
+                    );
                     let output = error_msg.clone();
                     let success = Some(false);
                     {
@@ -712,14 +758,17 @@ impl ChainExecutor {
         }
 
         //
-        // Determine chain success: at least one terminal element must have
-        // been reached (resolved). Semantic success/failure of individual
+        // Determine chain success: the Termination element must have been
+        // reached (resolved). Semantic success/failure of individual
         // operations does not affect the chain's own completion status.
         //
-        let terminals = graph.terminal_elements();
-        let any_terminal_reached = terminals.iter().any(|tid| resolved.contains_key(tid));
-        if !any_terminal_reached && !terminals.is_empty() {
-            return Err(anyhow::anyhow!("Chain failed: no terminal element was reached"));
+        let termination_id = chain.elements.iter()
+            .find(|e| matches!(e, ChainElement::Termination { .. }))
+            .map(|e| e.id().clone());
+        if let Some(ref tid) = termination_id {
+            if !resolved.contains_key(tid) {
+                return Err(anyhow::anyhow!("Chain failed: Termination element was not reached"));
+            }
         }
 
         Ok(())

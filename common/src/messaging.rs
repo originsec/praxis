@@ -951,6 +951,12 @@ pub enum ChainElement {
         id: String,
         max_iterations: u32,
     },
+    /// Termination element - explicit end of chain (exactly one per chain)
+    Termination {
+        id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
+    },
 }
 
 /// Condition for when a connection fires
@@ -1106,6 +1112,8 @@ pub enum ElementConfig {
     Loop {
         max_iterations: u32,
     },
+    /// Termination element config
+    Termination,
 }
 
 /// Element runtime context (dynamic, during execution)

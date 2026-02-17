@@ -222,6 +222,11 @@ pub async fn execute_one_shot(
     mut cancel_rx: oneshot::Receiver<()>,
     use_existing_session: bool,
 ) -> Result<(String, String)> {
+    common::log_debug!(
+        "[semop {}] START one-shot '{}' | input: {} bytes",
+        &operation_id[..8], spec.name, spec.operation_prompt.len()
+    );
+
     //
     // Create session if needed.
     //
@@ -344,9 +349,11 @@ pub async fn execute_one_shot(
         let _ = close_session(node_id, rabbitmq_channel).await;
     }
 
-    //
-    // Response is already a (String, String) tuple from the match arm.
-    //
+    common::log_debug!(
+        "[semop {}] END   one-shot '{}' | output: {} bytes",
+        &operation_id[..8], spec.name, response.1.len()
+    );
+
     Ok(response)
 }
 
@@ -367,6 +374,11 @@ pub async fn execute_agent_mode(
     mut cancel_rx: oneshot::Receiver<()>,
     use_existing_session: bool,
 ) -> Result<(String, String, Option<bool>)> {
+    common::log_debug!(
+        "[semop {}] START agent '{}' | iterations: {} | input: {} bytes",
+        &operation_id[..8], spec.name, spec.agent_iterations, spec.operation_prompt.len()
+    );
+
     //
     // Create session if needed.
     //
@@ -493,11 +505,18 @@ pub async fn execute_agent_mode(
         //
         // Log iteration start.
         //
+        common::log_debug!(
+            "[semop {}] iteration {}/{}", &operation_id[..8], iteration, spec.agent_iterations
+        );
         let _ = database.append_output(operation_id, &fmt_iteration(iteration as usize, spec.agent_iterations as usize)).await;
 
         //
         // Build and execute AI request.
         //
+        common::log_debug!(
+            "[semop {}] sending to LLM ({}) | {} messages",
+            &operation_id[..8], model, conversation_history.len()
+        );
         let request = ChatCompletionRequest::new(model.clone(), conversation_history.clone())
             .with_max_tokens(4096);
 
@@ -519,6 +538,11 @@ pub async fn execute_agent_mode(
         // Extract response text.
         //
         let text_content = response.text().unwrap_or_default().to_string();
+
+        common::log_debug!(
+            "[semop {}] AI response: {} bytes\n{}",
+            &operation_id[..8], text_content.len(), text_content
+        );
 
         //
         // Log AI response.
@@ -554,6 +578,10 @@ pub async fn execute_agent_mode(
                 //
                 // Log tool call.
                 //
+                common::log_debug!(
+                    "[semop {}] tool call session_prompt: {} bytes\n{}",
+                    &operation_id[..8], prompt_text.len(), prompt_text
+                );
                 let _ = database.append_output(operation_id, &fmt_outgoing("Tool call: session_prompt", prompt_text)).await;
 
                 //
@@ -570,11 +598,18 @@ pub async fn execute_agent_mode(
                     ) => {
                         match result {
                             Ok(response) => {
+                                common::log_debug!(
+                                    "[semop {}] tool result: {} bytes\n{}",
+                                    &operation_id[..8], response.len(), response
+                                );
                                 let _ = database.append_output(operation_id, &fmt_incoming("Tool result", &response)).await;
                                 response
                             }
                             Err(e) => {
                                 let error_msg = format!("Tool error: {}", e);
+                                common::log_debug!(
+                                    "[semop {}] tool error: {}", &operation_id[..8], error_msg
+                                );
                                 let _ = database.append_output(operation_id, &fmt_error(&error_msg)).await;
                                 error_msg
                             }
@@ -659,6 +694,11 @@ pub async fn execute_agent_mode(
             final_summary = "Agent did not complete: iteration limit reached without a result".to_string();
         }
     }
+
+    common::log_debug!(
+        "[semop {}] END   agent '{}' | success: {:?} | summary: {} bytes | result: {}",
+        &operation_id[..8], spec.name, semantic_success, final_summary.len(), final_result
+    );
 
     //
     // Close session if we created it.

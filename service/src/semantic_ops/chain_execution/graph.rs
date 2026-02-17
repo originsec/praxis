@@ -52,7 +52,8 @@ impl ExecutionGraph {
                 }
                 ChainElement::MemoryStore { .. }
                 | ChainElement::MemoryRetrieve { .. }
-                | ChainElement::Loop { .. } => {}
+                | ChainElement::Loop { .. }
+                | ChainElement::Termination { .. } => {}
                 ChainElement::Operation { session_group, .. }
                 | ChainElement::Transform { session_group, .. }
                 | ChainElement::GenericPrompt { session_group, .. } => {
@@ -148,6 +149,7 @@ impl ExecutionGraph {
     }
 
     /// Get elements with no outgoing connections (terminal elements)
+    #[allow(dead_code)]
     pub fn terminal_elements(&self) -> Vec<ElementId> {
         self.nodes
             .iter()
@@ -179,6 +181,7 @@ impl ExecutionGraph {
 mod tests {
     use super::*;
     use crate::database::TriggerType;
+    use std::collections::HashMap;
 
     #[test]
     fn test_simple_chain() {
@@ -199,6 +202,10 @@ mod tests {
                     session_group: None,
                     block_config: None,
                 },
+                ChainElement::Termination {
+                    id: "end1".to_string(),
+                    block_config: None,
+                },
             ],
             connections: vec![
                 ChainConnection {
@@ -209,16 +216,25 @@ mod tests {
                     to_port: 0,
                     condition: None,
                 },
+                ChainConnection {
+                    id: "c2".to_string(),
+                    from_element: "op1".to_string(),
+                    to_element: "end1".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
             ],
             disabled: false,
             timeout: None,
+            positions: HashMap::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
 
         let graph = ExecutionGraph::from_chain(&chain).unwrap();
         assert_eq!(graph.trigger_id, "trigger1");
-        assert_eq!(graph.terminal_elements(), vec!["op1".to_string()]);
+        assert_eq!(graph.terminal_elements(), vec!["end1".to_string()]);
         assert_eq!(graph.outgoing_connections(&"trigger1".to_string()).len(), 1);
         assert_eq!(graph.incoming_connections(&"op1".to_string()).len(), 1);
     }
@@ -249,6 +265,10 @@ mod tests {
                     session_group: None,
                     block_config: None,
                 },
+                ChainElement::Termination {
+                    id: "end1".to_string(),
+                    block_config: None,
+                },
             ],
             connections: vec![
                 ChainConnection {
@@ -267,9 +287,26 @@ mod tests {
                     to_port: 0,
                     condition: None,
                 },
+                ChainConnection {
+                    id: "c3".to_string(),
+                    from_element: "op1".to_string(),
+                    to_element: "end1".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
+                ChainConnection {
+                    id: "c4".to_string(),
+                    from_element: "op2".to_string(),
+                    to_element: "end1".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
             ],
             disabled: false,
             timeout: None,
+            positions: HashMap::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -282,11 +319,10 @@ mod tests {
         assert_eq!(graph.get_output_count(&"trigger1".to_string()), 2);
 
         //
-        // Both ops are terminal (no outgoing connections).
+        // Termination is the only terminal element.
         //
         let terminals = graph.terminal_elements();
-        assert!(terminals.contains(&"op1".to_string()));
-        assert!(terminals.contains(&"op2".to_string()));
+        assert_eq!(terminals, vec!["end1".to_string()]);
     }
 
     #[test]
@@ -322,6 +358,10 @@ mod tests {
                     session_group: Some(session_group.clone()),
                     block_config: None,
                 },
+                ChainElement::Termination {
+                    id: "end1".to_string(),
+                    block_config: None,
+                },
             ],
             connections: vec![
                 ChainConnection {
@@ -340,9 +380,18 @@ mod tests {
                     to_port: 0,
                     condition: None,
                 },
+                ChainConnection {
+                    id: "c3".to_string(),
+                    from_element: "op2".to_string(),
+                    to_element: "end1".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
             ],
             disabled: false,
             timeout: None,
+            positions: HashMap::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -365,9 +414,9 @@ mod tests {
         assert!(graph.get_session_group(&"trigger1".to_string()).is_none());
 
         //
-        // op2 is terminal (last element, no outgoing connections).
+        // Termination is the terminal element.
         //
-        assert_eq!(graph.terminal_elements(), vec!["op2".to_string()]);
+        assert_eq!(graph.terminal_elements(), vec!["end1".to_string()]);
     }
 
     #[test]
@@ -390,6 +439,10 @@ mod tests {
                     id: "mr1".to_string(),
                     key: "data_key".to_string(),
                 },
+                ChainElement::Termination {
+                    id: "end1".to_string(),
+                    block_config: None,
+                },
             ],
             connections: vec![
                 ChainConnection {
@@ -408,9 +461,18 @@ mod tests {
                     to_port: 0,
                     condition: None,
                 },
+                ChainConnection {
+                    id: "c3".to_string(),
+                    from_element: "mr1".to_string(),
+                    to_element: "end1".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
             ],
             disabled: false,
             timeout: None,
+            positions: HashMap::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -425,19 +487,19 @@ mod tests {
         assert!(graph.get_session_group(&"mr1".to_string()).is_none());
 
         //
-        // mr1 is the terminal element.
+        // Termination is the terminal element.
         //
         let terminals = graph.terminal_elements();
         assert_eq!(terminals.len(), 1);
-        assert!(terminals.contains(&"mr1".to_string()));
+        assert!(terminals.contains(&"end1".to_string()));
     }
 
     #[test]
     fn test_loop_element_valid() {
-        use crate::database::ConnectionCondition;
 
         //
-        // Valid cycle: Op -> Loop -> Op (via port 0), Loop -> Op2 (via port 1).
+        // Valid cycle: Op -> Loop -> Op (via port 0), Loop -> Op2 (via
+        // port 1) -> Termination.
         //
         let chain = ChainDefinition {
             id: "test".to_string(),
@@ -465,6 +527,10 @@ mod tests {
                     operation_name: "test::done".to_string(),
                     model_ref: None,
                     session_group: None,
+                    block_config: None,
+                },
+                ChainElement::Termination {
+                    id: "end1".to_string(),
                     block_config: None,
                 },
             ],
@@ -507,9 +573,18 @@ mod tests {
                     to_port: 0,
                     condition: None,
                 },
+                ChainConnection {
+                    id: "c5".to_string(),
+                    from_element: "op_done".to_string(),
+                    to_element: "end1".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
             ],
             disabled: false,
             timeout: None,
+            positions: HashMap::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -528,7 +603,9 @@ mod tests {
     #[test]
     fn test_cycle_without_loop_rejected() {
         //
-        // Invalid cycle: Op1 -> Op2 -> Op1 (no Loop element).
+        // Invalid cycle: Op1 -> Op2 -> Op1 (no Loop element). Termination
+        // is present but unreachable — the cycle check should still catch
+        // this.
         //
         let chain = ChainDefinition {
             id: "test".to_string(),
@@ -552,6 +629,10 @@ mod tests {
                     operation_name: "test::op2".to_string(),
                     model_ref: None,
                     session_group: None,
+                    block_config: None,
+                },
+                ChainElement::Termination {
+                    id: "end1".to_string(),
                     block_config: None,
                 },
             ],
@@ -586,22 +667,17 @@ mod tests {
             ],
             disabled: false,
             timeout: None,
+            positions: HashMap::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
 
-        //
-        // Should fail — cycle without Loop element (may also fail on
-        // terminal check since all non-trigger elements have outgoing
-        // connections due to the cycle).
-        //
         let result = ExecutionGraph::from_chain(&chain);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
-            err.contains("cycle without a Loop element")
-                || err.contains("at least one element with no outgoing connections"),
-            "Expected cycle or terminal error, got: {}",
+            err.contains("cycle without a Loop element"),
+            "Expected cycle error, got: {}",
             err
         );
     }
@@ -641,6 +717,10 @@ mod tests {
                     session_group: None,
                     block_config: None,
                 },
+                ChainElement::Termination {
+                    id: "end1".to_string(),
+                    block_config: None,
+                },
             ],
             connections: vec![
                 ChainConnection {
@@ -667,9 +747,26 @@ mod tests {
                     to_port: 0,
                     condition: Some(ConnectionCondition::OnFailure),
                 },
+                ChainConnection {
+                    id: "c4".to_string(),
+                    from_element: "op_success".to_string(),
+                    to_element: "end1".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
+                ChainConnection {
+                    id: "c5".to_string(),
+                    from_element: "op_failure".to_string(),
+                    to_element: "end1".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
             ],
             disabled: false,
             timeout: None,
+            positions: HashMap::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -683,11 +780,10 @@ mod tests {
         assert_eq!(outgoing.len(), 2);
 
         //
-        // Both op_success and op_failure are terminal.
+        // Termination is the only terminal element.
         //
         let terminals = graph.terminal_elements();
-        assert!(terminals.contains(&"op_success".to_string()));
-        assert!(terminals.contains(&"op_failure".to_string()));
+        assert_eq!(terminals, vec!["end1".to_string()]);
 
         //
         // Verify conditions are preserved on connections.
@@ -712,40 +808,48 @@ mod tests {
     }
 
     #[test]
-    fn test_no_terminal_elements_rejected() {
+    fn test_missing_termination_rejected() {
         //
-        // All non-trigger elements have outgoing connections — no terminal.
-        // This creates a cycle, and since there's no Loop, it should be
-        // rejected for the cycle, not the terminal check. But let's test with a
-        // valid cycle + loop that has no terminal port.
-        //
-        // Actually, let's test the simpler case: trigger with no elements
-        // connected.
+        // Chain with no Termination element should fail validation.
         //
         let chain = ChainDefinition {
             id: "test".to_string(),
             name: "Test Chain".to_string(),
             description: "".to_string(),
             category: "test".to_string(),
-            elements: vec![ChainElement::Trigger {
-                id: "trigger1".to_string(),
-                trigger_type: TriggerType::Manual,
+            elements: vec![
+                ChainElement::Trigger {
+                    id: "trigger1".to_string(),
+                    trigger_type: TriggerType::Manual,
+                },
+                ChainElement::Operation {
+                    id: "op1".to_string(),
+                    operation_name: "test::op".to_string(),
+                    model_ref: None,
+                    session_group: None,
+                    block_config: None,
+                },
+            ],
+            connections: vec![ChainConnection {
+                id: "c1".to_string(),
+                from_element: "trigger1".to_string(),
+                to_element: "op1".to_string(),
+                from_port: 0,
+                to_port: 0,
+                condition: None,
             }],
-            connections: vec![],
             disabled: false,
             timeout: None,
+            positions: HashMap::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
 
-        //
-        // Trigger-only chain should fail: no non-trigger terminal element.
-        //
         let result = ExecutionGraph::from_chain(&chain);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
-            .contains("at least one element with no outgoing connections"));
+            .contains("must have exactly one termination element"));
     }
 
     #[test]
@@ -764,6 +868,10 @@ mod tests {
                     id: "loop1".to_string(),
                     max_iterations: 0,
                 },
+                ChainElement::Termination {
+                    id: "end1".to_string(),
+                    block_config: None,
+                },
             ],
             connections: vec![ChainConnection {
                 id: "c1".to_string(),
@@ -775,6 +883,7 @@ mod tests {
             }],
             disabled: false,
             timeout: None,
+            positions: HashMap::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -819,6 +928,10 @@ mod tests {
                     session_group: None,
                     block_config: None,
                 },
+                ChainElement::Termination {
+                    id: "end1".to_string(),
+                    block_config: None,
+                },
             ],
             connections: vec![
                 ChainConnection {
@@ -853,9 +966,18 @@ mod tests {
                     to_port: 0,
                     condition: None,
                 },
+                ChainConnection {
+                    id: "c5".to_string(),
+                    from_element: "c".to_string(),
+                    to_element: "end1".to_string(),
+                    from_port: 0,
+                    to_port: 0,
+                    condition: None,
+                },
             ],
             disabled: false,
             timeout: None,
+            positions: HashMap::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -869,10 +991,10 @@ mod tests {
         assert_eq!(graph.incoming_connections(&"t".to_string()).len(), 0);
 
         //
-        // 'c' (merge point) has 2 incoming, 0 outgoing.
+        // 'c' (merge point) has 2 incoming, 1 outgoing (to termination).
         //
         assert_eq!(graph.incoming_connections(&"c".to_string()).len(), 2);
-        assert_eq!(graph.outgoing_connections(&"c".to_string()).len(), 0);
+        assert_eq!(graph.outgoing_connections(&"c".to_string()).len(), 1);
 
         //
         // 'a' has 1 incoming, 1 outgoing.
@@ -881,10 +1003,10 @@ mod tests {
         assert_eq!(graph.outgoing_connections(&"a".to_string()).len(), 1);
 
         //
-        // Only 'c' is terminal.
+        // Only Termination is terminal.
         //
         let terminals = graph.terminal_elements();
         assert_eq!(terminals.len(), 1);
-        assert!(terminals.contains(&"c".to_string()));
+        assert!(terminals.contains(&"end1".to_string()));
     }
 }

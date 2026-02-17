@@ -116,6 +116,12 @@ pub enum ChainElement {
         id: ElementId,
         max_iterations: u32,
     },
+    /// Termination element - explicit end of chain (exactly one per chain)
+    Termination {
+        id: ElementId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
+    },
 }
 
 impl ChainElement {
@@ -129,6 +135,7 @@ impl ChainElement {
             ChainElement::MemoryStore { id, .. } => id,
             ChainElement::MemoryRetrieve { id, .. } => id,
             ChainElement::Loop { id, .. } => id,
+            ChainElement::Termination { id, .. } => id,
         }
     }
 
@@ -138,6 +145,7 @@ impl ChainElement {
             ChainElement::Operation { block_config, .. } => block_config.as_ref(),
             ChainElement::Transform { block_config, .. } => block_config.as_ref(),
             ChainElement::GenericPrompt { block_config, .. } => block_config.as_ref(),
+            ChainElement::Termination { block_config, .. } => block_config.as_ref(),
             ChainElement::Trigger { .. }
             | ChainElement::MemoryStore { .. }
             | ChainElement::MemoryRetrieve { .. }
@@ -155,7 +163,8 @@ impl ChainElement {
             ChainElement::Trigger { .. }
             | ChainElement::MemoryStore { .. }
             | ChainElement::MemoryRetrieve { .. }
-            | ChainElement::Loop { .. } => None,
+            | ChainElement::Loop { .. }
+            | ChainElement::Termination { .. } => None,
         }
     }
 }
@@ -314,18 +323,32 @@ impl ChainDefinition {
         }
 
         //
-        // At least one non-trigger element must have no outgoing connections
-        // (terminal element).
+        // Must have exactly one Termination element.
         //
-        let has_terminal = self.elements.iter().any(|e| {
-            !matches!(e, ChainElement::Trigger { .. })
-                && !self.connections.iter().any(|c| &c.from_element == e.id())
-        });
+        let terminations: Vec<_> = self
+            .elements
+            .iter()
+            .filter(|e| matches!(e, ChainElement::Termination { .. }))
+            .collect();
 
-        if !has_terminal {
-            return Err(
-                "Chain must have at least one element with no outgoing connections".to_string(),
-            );
+        if terminations.is_empty() {
+            return Err("Chain must have exactly one termination element".to_string());
+        }
+        if terminations.len() > 1 {
+            return Err("Chain cannot have more than one termination element".to_string());
+        }
+
+        //
+        // Termination element must not have outgoing connections.
+        //
+        for term in &terminations {
+            if self
+                .connections
+                .iter()
+                .any(|c| &c.from_element == term.id())
+            {
+                return Err("Termination element cannot have outgoing connections".to_string());
+            }
         }
 
         //
@@ -532,7 +555,9 @@ fn migrate_chain_json(json: &str) -> Option<String> {
     };
 
     //
-    // Check if we need to migrate Termination elements.
+    // Check if we need to migrate old-style Termination elements (ones with
+    // termination_type field). New-style Termination elements (no
+    // termination_type) are left alone.
     //
     let has_termination = {
         let elements = value.get("elements")?.as_array()?;
@@ -541,6 +566,7 @@ fn migrate_chain_json(json: &str) -> Option<String> {
                 .and_then(|v| v.as_str())
                 .map(|t| t == "Termination")
                 .unwrap_or(false)
+                && e.get("termination_type").is_some()
         })
     };
 
@@ -662,9 +688,11 @@ fn migrate_chain_json(json: &str) -> Option<String> {
     serde_json::to_string(&value).ok()
 }
 
-/// Second migration pass: convert or remove Termination elements.
+/// Second migration pass: convert or remove old-style Termination elements
+/// (ones with termination_type field).
 /// - Raw Termination: remove element + connections pointing to it.
 /// - Semantic Termination: convert to Transform with same id, prompt, model_ref.
+/// New-style Termination elements (no termination_type) are left untouched.
 fn migrate_termination_elements(value: &mut serde_json::Value) {
     let (raw_term_ids, semantic_conversions) = {
         let elements = match value.get("elements").and_then(|e| e.as_array()) {
@@ -681,6 +709,14 @@ fn migrate_termination_elements(value: &mut serde_json::Value) {
                 None => continue,
             };
             if element_type != "Termination" {
+                continue;
+            }
+
+            //
+            // Only migrate old-style Termination elements that have a
+            // termination_type field. New-style ones are valid as-is.
+            //
+            if e.get("termination_type").is_none() {
                 continue;
             }
 
