@@ -16,7 +16,7 @@ const sizeClasses = {
   md: 'max-w-lg',
   lg: 'max-w-2xl',
   xl: 'max-w-4xl',
-  full: 'max-w-[90vw]',
+  full: 'max-w-[80vw]',
 };
 
 export function Modal({ isOpen, onClose, title, children, size = 'md', headerActions, noPadding }: ModalProps) {
