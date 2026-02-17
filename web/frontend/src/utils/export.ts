@@ -356,6 +356,7 @@ export function exportChainDefinition(chain: {
   connections: unknown[];
   disabled?: boolean;
   timeout?: number;
+  positions?: Record<string, { x: number; y: number }>;
 }): object {
   return {
     name: chain.name,
@@ -365,6 +366,7 @@ export function exportChainDefinition(chain: {
     connections: chain.connections,
     disabled: chain.disabled ?? false,
     timeout: chain.timeout,
+    positions: chain.positions,
   };
 }
 

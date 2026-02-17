@@ -5,12 +5,12 @@ import {
   Background,
   BackgroundVariant,
   MarkerType,
-  Handle,
-  Position,
   ReactFlowProvider,
   useReactFlow,
+  useNodesState,
+  useEdgesState,
 } from '@xyflow/react';
-import type { Node, Edge, NodeTypes } from '@xyflow/react';
+import type { Node, Edge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Play, Clock, CheckCircle2, XCircle, AlertCircle, Loader2, Maximize2, Cpu, Sparkles, MessageSquare, ExternalLink, ChevronDown, ChevronRight, Database, HardDriveDownload, RefreshCw } from 'lucide-react';
 import type {
@@ -20,200 +20,32 @@ import type {
 } from '../../api/types';
 import { StyledOutput } from '../common/StyledOutput';
 import { computeLayout } from '../../utils/dagreLayout';
+import { nodeTypes } from './ChainNodes';
 
 //
-// Status colors and icons.
+// Status colors and icons (used by step list and detail panel).
 //
 function getStatusIndicator(status: string) {
   switch (status) {
     case 'Completed':
-      return { icon: CheckCircle2, color: 'var(--text-highlight)', bg: 'var(--text-highlight)' };
+      return { icon: CheckCircle2, color: 'var(--text-highlight)', animate: false };
     case 'Failed':
-      return { icon: XCircle, color: 'var(--accent-error)', bg: 'var(--accent-error)' };
+      return { icon: XCircle, color: 'var(--accent-error)', animate: false };
     case 'Running':
-      return { icon: Loader2, color: 'var(--text-secondary)', bg: 'var(--text-secondary)', animate: true };
+      return { icon: Loader2, color: 'var(--text-secondary)', animate: true };
     case 'WaitingForInputs':
-      return { icon: Clock, color: 'var(--accent-warning)', bg: 'var(--accent-warning)' };
+      return { icon: Clock, color: 'var(--accent-warning)', animate: false };
     case 'Skipped':
-      return { icon: AlertCircle, color: 'var(--text-muted)', bg: 'var(--text-muted)' };
-    //
-    // Pending.
-    //
+      return { icon: AlertCircle, color: 'var(--text-muted)', animate: false };
     default:
-      return { icon: Clock, color: 'var(--text-muted)', bg: 'var(--text-muted)' };
+      return { icon: Clock, color: 'var(--text-muted)', animate: false };
   }
 }
 
-const handleStyle = { width: 10, height: 10, background: 'var(--accent-info)' };
-
 //
-// Custom node components with status indicators.
-//
-function TriggerNodeView({ data, selected }: { data: { label: string; status?: string }; selected?: boolean }) {
-  const statusInfo = getStatusIndicator(data.status || 'Pending');
-  const StatusIcon = statusInfo.icon;
-
-  return (
-    <div className={`ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[120px] relative ${selected ? 'ring-2 ring-[var(--accent-info)]' : ''}`}>
-      <Handle type="source" position={Position.Right} style={{ width: 10, height: 10, background: 'var(--accent-info)' }} />
-      <div className="flex items-center gap-2">
-        <Play size={14} className="text-[var(--accent-success)]" />
-        <span className="text-sm font-mono">{data.label}</span>
-        <StatusIcon
-          size={12}
-          style={{ color: statusInfo.color }}
-          className={statusInfo.animate ? 'animate-spin' : ''}
-        />
-      </div>
-    </div>
-  );
-}
-
-function OperationNodeView({ data, selected }: { data: { label: string; operation: string; status?: string; sessionColor?: string }; selected?: boolean }) {
-  const statusInfo = getStatusIndicator(data.status || 'Pending');
-  const StatusIcon = statusInfo.icon;
-  const borderStyle = data.sessionColor ? { borderLeft: `4px solid ${data.sessionColor}` } : {};
-
-  return (
-    <div className={`ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative ${selected ? 'ring-2 ring-[var(--accent-info)]' : ''}`} style={borderStyle}>
-      <Handle type="target" position={Position.Left} style={{ width: 10, height: 10, background: 'var(--accent-info)' }} />
-      <Handle type="source" position={Position.Right} style={{ width: 10, height: 10, background: 'var(--accent-info)' }} />
-      <div className="flex items-center gap-2">
-        <Cpu size={14} className="text-[var(--accent-info)]" />
-        <div className="flex flex-col">
-          <span className="text-sm font-mono">{data.label}</span>
-          <span className="text-xs text-[var(--text-secondary)]">{data.operation}</span>
-        </div>
-        <StatusIcon
-          size={12}
-          style={{ color: statusInfo.color }}
-          className={statusInfo.animate ? 'animate-spin' : ''}
-        />
-      </div>
-    </div>
-  );
-}
-
-function TransformNodeView({ data, selected }: { data: { label: string; prompt: string; status?: string; sessionColor?: string }; selected?: boolean }) {
-  const statusInfo = getStatusIndicator(data.status || 'Pending');
-  const StatusIcon = statusInfo.icon;
-  const borderStyle = data.sessionColor ? { borderLeft: `4px solid ${data.sessionColor}` } : {};
-
-  return (
-    <div className={`ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative ${selected ? 'ring-2 ring-[var(--accent-info)]' : ''}`} style={borderStyle}>
-      <Handle type="target" position={Position.Left} style={{ width: 10, height: 10, background: 'var(--accent-info)' }} />
-      <Handle type="source" position={Position.Right} style={{ width: 10, height: 10, background: 'var(--accent-info)' }} />
-      <div className="flex items-center gap-2">
-        <Sparkles size={14} className="text-[var(--accent-warning)]" />
-        <div className="flex flex-col">
-          <span className="text-sm font-mono">{data.label}</span>
-          <span className="text-xs text-[var(--text-secondary)] truncate max-w-[100px]">{data.prompt}</span>
-        </div>
-        <StatusIcon
-          size={12}
-          style={{ color: statusInfo.color }}
-          className={statusInfo.animate ? 'animate-spin' : ''}
-        />
-      </div>
-    </div>
-  );
-}
-
-function GenericPromptNodeView({ data, selected }: { data: { label: string; prompt: string; status?: string; sessionColor?: string }; selected?: boolean }) {
-  const statusInfo = getStatusIndicator(data.status || 'Pending');
-  const StatusIcon = statusInfo.icon;
-  const borderStyle = data.sessionColor ? { borderLeft: `4px solid ${data.sessionColor}` } : {};
-
-  return (
-    <div className={`ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative ${selected ? 'ring-2 ring-[var(--accent-info)]' : ''}`} style={borderStyle}>
-      <Handle type="target" position={Position.Left} style={{ width: 10, height: 10, background: 'var(--accent-info)' }} />
-      <Handle type="source" position={Position.Right} style={{ width: 10, height: 10, background: 'var(--accent-info)' }} />
-      <div className="flex items-center gap-2">
-        <MessageSquare size={14} className="text-[var(--accent-purple)]" />
-        <div className="flex flex-col">
-          <span className="text-sm font-mono">{data.label}</span>
-          <span className="text-xs text-[var(--text-secondary)] truncate max-w-[100px]">{data.prompt}</span>
-        </div>
-        <StatusIcon
-          size={12}
-          style={{ color: statusInfo.color }}
-          className={statusInfo.animate ? 'animate-spin' : ''}
-        />
-      </div>
-    </div>
-  );
-}
-
-function MemoryStoreNodeView({ data, selected }: { data: { label: string; memoryKey: string; status?: string }; selected?: boolean }) {
-  const statusInfo = getStatusIndicator(data.status || 'Pending');
-  const StatusIcon = statusInfo.icon;
-  return (
-    <div className={`px-3 py-2 shadow-md bg-[var(--bg-secondary)] border ${selected ? 'border-[var(--accent-success)]' : 'border-subtle'}`} style={{ minWidth: 200 }}>
-      <Handle type="target" position={Position.Left} style={handleStyle} />
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Database size={14} className="text-[var(--accent-success)]" />
-          <span className="text-xs font-medium">{data.memoryKey || 'Store'}</span>
-          <span className="text-[9px] px-1 py-0.5 bg-[var(--accent-success)]/20 text-[var(--accent-success)] font-mono">STORE</span>
-        </div>
-        <StatusIcon size={12} style={{ color: statusInfo.color }} className={statusInfo.animate ? 'animate-spin' : ''} />
-      </div>
-      <Handle type="source" position={Position.Right} style={handleStyle} />
-    </div>
-  );
-}
-
-function MemoryRetrieveNodeView({ data, selected }: { data: { label: string; memoryKey: string; status?: string }; selected?: boolean }) {
-  const statusInfo = getStatusIndicator(data.status || 'Pending');
-  const StatusIcon = statusInfo.icon;
-  return (
-    <div className={`px-3 py-2 shadow-md bg-[var(--bg-secondary)] border ${selected ? 'border-[var(--accent-info)]' : 'border-subtle'}`} style={{ minWidth: 200 }}>
-      <Handle type="target" position={Position.Left} style={handleStyle} />
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <HardDriveDownload size={14} className="text-[var(--accent-info)]" />
-          <span className="text-xs font-medium">{data.memoryKey || 'Retrieve'}</span>
-          <span className="text-[9px] px-1 py-0.5 bg-[var(--accent-info)]/20 text-[var(--accent-info)] font-mono">RETRIEVE</span>
-        </div>
-        <StatusIcon size={12} style={{ color: statusInfo.color }} className={statusInfo.animate ? 'animate-spin' : ''} />
-      </div>
-      <Handle type="source" position={Position.Right} style={handleStyle} />
-    </div>
-  );
-}
-
-function LoopNodeView({ data, selected }: { data: { label: string; maxIterations: number; status?: string }; selected?: boolean }) {
-  const statusInfo = getStatusIndicator(data.status || 'Pending');
-  const StatusIcon = statusInfo.icon;
-  return (
-    <div className={`px-3 py-2 shadow-md bg-[var(--bg-secondary)] border ${selected ? 'border-[var(--accent-warning)]' : 'border-subtle'}`} style={{ minWidth: 220 }}>
-      <Handle type="target" position={Position.Left} style={handleStyle} />
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <RefreshCw size={14} className="text-[var(--accent-warning)]" />
-          <span className="text-xs font-medium">Loop</span>
-          <span className="text-[9px] px-1 py-0.5 bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] font-mono">max {data.maxIterations}</span>
-        </div>
-        <StatusIcon size={12} style={{ color: statusInfo.color }} className={statusInfo.animate ? 'animate-spin' : ''} />
-      </div>
-      <Handle type="source" position={Position.Right} id="0" style={{ ...handleStyle, top: '30%' }} />
-      <Handle type="source" position={Position.Right} id="1" style={{ ...handleStyle, top: '70%' }} />
-    </div>
-  );
-}
-
-const nodeTypes: NodeTypes = {
-  trigger: TriggerNodeView,
-  operation: OperationNodeView,
-  transform: TransformNodeView,
-  genericPrompt: GenericPromptNodeView,
-  memoryStore: MemoryStoreNodeView,
-  memoryRetrieve: MemoryRetrieveNodeView,
-  loop: LoopNodeView,
-};
-
-//
-// Convert chain definition to React Flow nodes with execution status.
+// Convert chain definition to React Flow nodes with execution status. Uses
+// stored positions from chain definition (same as builder) and populates full
+// node data so the shared node components render identically.
 //
 function chainToFlowWithStatus(
   chain: ChainDefinitionFull | null,
@@ -222,16 +54,19 @@ function chainToFlowWithStatus(
   if (!chain) return { nodes: [], edges: [] };
 
   //
-  // Compute layout using dagre.
+  // Use stored positions if available, otherwise compute via dagre.
   //
-  const positions = computeLayout(chain.elements, chain.connections);
+  const hasStoredPositions = chain.positions && Object.keys(chain.positions).length > 0;
+  const dagrePositions = hasStoredPositions ? null : computeLayout(chain.elements, chain.connections);
 
   const nodes: Node[] = chain.elements.map((elem) => {
     const execStatus = elements[elem.id]?.status;
     const status = typeof execStatus === 'object'
       ? (Object.keys(execStatus)[0] as string)
       : execStatus;
-    const position = positions.get(elem.id) || { x: 0, y: 0 };
+    const position = hasStoredPositions
+      ? (chain.positions![elem.id] || { x: 0, y: 0 })
+      : (dagrePositions!.get(elem.id) || { x: 0, y: 0 });
 
     switch (elem.element_type) {
       case 'Trigger':
@@ -247,10 +82,14 @@ function chainToFlowWithStatus(
           type: 'operation',
           position,
           data: {
-            label: elem.operation_name || 'Operation',
-            operation: elem.id.slice(0, 8),
-            status,
+            label: 'Operation',
+            operation: elem.operation_name || 'Operation',
             sessionColor: elem.session_group?.color,
+            maxRuntime: elem.block_config?.max_runtime,
+            modelRef: elem.model_ref,
+            yoloMode: elem.block_config?.yolo_mode,
+            workingDir: elem.block_config?.working_dir,
+            status,
           },
         };
       case 'Transform':
@@ -261,8 +100,12 @@ function chainToFlowWithStatus(
           data: {
             label: 'Transform',
             prompt: elem.prompt || '',
-            status,
             sessionColor: elem.session_group?.color,
+            modelRef: elem.model_ref,
+            maxRuntime: elem.block_config?.max_runtime,
+            yoloMode: elem.block_config?.yolo_mode,
+            workingDir: elem.block_config?.working_dir,
+            status,
           },
         };
       case 'GenericPrompt':
@@ -273,8 +116,11 @@ function chainToFlowWithStatus(
           data: {
             label: 'Prompt',
             prompt: elem.prompt || '',
-            status,
             sessionColor: elem.session_group?.color,
+            maxRuntime: elem.block_config?.max_runtime,
+            yoloMode: elem.block_config?.yolo_mode,
+            workingDir: elem.block_config?.working_dir,
+            status,
           },
         };
       case 'MemoryStore':
@@ -301,13 +147,30 @@ function chainToFlowWithStatus(
     }
   }).filter((n): n is NonNullable<typeof n> => n != null);
 
-  const edges: Edge[] = chain.connections.map((conn) => ({
-    id: conn.id,
-    source: conn.from_element,
-    target: conn.to_element,
-    markerEnd: { type: MarkerType.ArrowClosed },
-    style: { stroke: 'var(--text-secondary)' },
-  }));
+  const edges: Edge[] = chain.connections.map((conn) => {
+    let stroke = 'var(--text-secondary)';
+    let label: string | undefined;
+
+    if (conn.condition === 'OnSuccess') {
+      stroke = 'var(--accent-success)';
+      label = 'Success';
+    } else if (conn.condition === 'OnFailure') {
+      stroke = 'var(--accent-error)';
+      label = 'Failure';
+    }
+
+    return {
+      id: conn.id,
+      source: conn.from_element,
+      target: conn.to_element,
+      sourceHandle: conn.from_port > 0 ? String(conn.from_port) : undefined,
+      type: 'smoothstep',
+      markerEnd: { type: MarkerType.ArrowClosed },
+      style: { stroke, strokeWidth: 2 },
+      label,
+      labelStyle: label ? { fill: stroke, fontSize: 10, fontWeight: 500 } : undefined,
+    };
+  });
 
   return { nodes, edges };
 }
@@ -337,25 +200,36 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
   // may not detect changes in the elements object when updates arrive.
   //
   const elementsKey = JSON.stringify(execution.elements);
-  const { nodes, edges } = useMemo(
+  const computedFlow = useMemo(
     () => chainToFlowWithStatus(stableChain, execution.elements),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [stableChain, elementsKey]
   );
 
   //
+  // Use React Flow's state hooks to ensure proper node rendering. Sync
+  // from computed flow whenever it changes.
+  //
+  const [nodes, setNodes, onNodesChange] = useNodesState(computedFlow.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(computedFlow.edges);
+  useEffect(() => {
+    setNodes(computedFlow.nodes);
+    setEdges(computedFlow.edges);
+  }, [computedFlow, setNodes, setEdges]);
+
+  //
   // Auto-fit view on initial load only.
   //
   const initialFitDone = useRef(false);
   useEffect(() => {
-    if (nodes.length > 0 && !initialFitDone.current) {
+    if (computedFlow.nodes.length > 0 && !initialFitDone.current) {
       initialFitDone.current = true;
       const timer = setTimeout(() => {
         fitView({ padding: 0.05, maxZoom: 1.5 });
       }, 50);
       return () => clearTimeout(timer);
     }
-  }, [nodes.length, fitView]);
+  }, [computedFlow.nodes.length, fitView]);
 
   //
   // Auto-zoom to the currently running element (only when it changes).
@@ -619,11 +493,13 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
       // Flow graph on top.
       //
       */}
-      <div className="h-48 min-h-[12rem] border-b border-subtle">
-        {chain ? (
+      <div className="h-64 min-h-[16rem] border-b border-subtle">
+        {stableChain ? (
           <ReactFlow
             nodes={nodes}
             edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
             nodeTypes={nodeTypes}
             onNodeClick={handleNodeClick}
             fitView

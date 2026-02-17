@@ -668,6 +668,23 @@ impl ChainExecutor {
             }
 
             //
+            // If the work queue is drained, check for elements at merge points
+            // that have at least one fired input but are waiting on sources
+            // that will never resolve (e.g. from a conditional branch that
+            // didn't fire). Run them with the inputs they have.
+            //
+            if work_queue.is_empty() {
+                for (id, _) in &graph.nodes {
+                    if resolved.contains_key(id) {
+                        continue;
+                    }
+                    if has_any_fired_input(id, &graph, &resolved) {
+                        work_queue.push_back(id.clone());
+                    }
+                }
+            }
+
+            //
             // Broadcast progress.
             //
             let update = state.read().unwrap().to_update();
@@ -985,4 +1002,23 @@ fn is_target_ready(
     }
 
     all_sources_resolved && any_fires
+}
+
+/// Check if a target element has at least one incoming connection that fires,
+/// regardless of whether all sources are resolved. Used at merge points where
+/// some upstream branches didn't fire (e.g. conditional paths).
+fn has_any_fired_input(
+    target_id: &str,
+    graph: &ExecutionGraph,
+    resolved: &HashMap<String, (String, Option<bool>)>,
+) -> bool {
+    let incoming = graph.incoming_connections(&target_id.to_string());
+    for conn in &incoming {
+        if let Some((_, success)) = resolved.get(&conn.from_element) {
+            if connection_fires(conn, success) {
+                return true;
+            }
+        }
+    }
+    false
 }

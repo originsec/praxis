@@ -148,6 +148,7 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
         connections: currentChain.connections,
         disabled: currentChain.disabled,
         timeout: currentChain.timeout,
+        positions: currentChain.positions,
       };
       const content = JSON.stringify(exportData, null, 2);
       const filename = `chain_${currentChain.name.toLowerCase().replace(/\s+/g, '_')}.json`;
