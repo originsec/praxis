@@ -384,8 +384,16 @@ impl ChainExecutor {
                     let yolo_mode = session_group.map(|sg| sg.yolo_mode).unwrap_or(false);
                     current_session_yolo_mode = yolo_mode;
 
+                    //
+                    // Session group working_dir overrides chain-level
+                    // working_dir.
+                    //
+                    let session_working_dir = session_group
+                        .and_then(|sg| sg.working_dir.clone())
+                        .or_else(|| working_dir.clone());
+
                     active_session = Some(
-                        create_session(&node_id, yolo_mode, working_dir.clone(), &rabbitmq_channel, response_tracker.clone())
+                        create_session(&node_id, yolo_mode, session_working_dir, &rabbitmq_channel, response_tracker.clone())
                             .await
                             .context("Failed to create session for session group")?,
                     );

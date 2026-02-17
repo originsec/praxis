@@ -15,7 +15,7 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge, Connection, OnSelectionChangeParams } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, HardDriveDownload, RefreshCw, LayoutGrid, Square } from 'lucide-react';
+import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, HardDriveDownload, RefreshCw, LayoutGrid, Square, Settings } from 'lucide-react';
 import { ConfigModal } from '../common/ConfigModal';
 import type {
   BlockConfig,
@@ -464,6 +464,14 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
   const [loopMaxIterations, setLoopMaxIterations] = useState<number>(3);
 
   //
+  // Modal state for session group configuration.
+  //
+  const [showSessionGroupModal, setShowSessionGroupModal] = useState(false);
+  const [sessionGroupYolo, setSessionGroupYolo] = useState(false);
+  const [sessionGroupWorkingDir, setSessionGroupWorkingDir] = useState('');
+  const [editingSessionGroupId, setEditingSessionGroupId] = useState<string | null>(null);
+
+  //
   // Per-block config state (shared across Operation, Transform, GenericPrompt
   // modals).
   //
@@ -581,6 +589,20 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
   const canGroupSelection = groupableSelectedNodes.length >= 2;
 
   //
+  // Check if all selected groupable nodes share the same session group.
+  //
+  const selectedSessionGroup = useMemo(() => {
+    if (groupableSelectedNodes.length === 0) return null;
+    const groups = groupableSelectedNodes
+      .map(n => extraData.sessionGroups.get(n.id))
+      .filter((g): g is SessionGroup => g != null);
+    if (groups.length === 0) return null;
+    const firstId = groups[0].id;
+    if (groups.every(g => g.id === firstId)) return groups[0];
+    return null;
+  }, [groupableSelectedNodes, extraData.sessionGroups]);
+
+  //
   // Handle selection change.
   //
   const onSelectionChange = useCallback((params: OnSelectionChangeParams) => {
@@ -588,54 +610,80 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
   }, []);
 
   //
-  // Group selected nodes into a session.
+  // Group selected nodes into a session — show config modal first.
   //
   const handleGroupIntoSession = useCallback(() => {
     if (!canGroupSelection) return;
+    setEditingSessionGroupId(null);
+    setSessionGroupYolo(false);
+    setSessionGroupWorkingDir('');
+    setShowSessionGroupModal(true);
+  }, [canGroupSelection]);
 
-    const usedColors = getUsedColors(
-      Array.from(extraData.sessionGroups.values()).map(sg => ({ session_group: sg }))
-    );
-    const newColor = getNextSessionColor(usedColors);
-    const newGroupId = generateUUID();
-
-    const newSessionGroup: SessionGroup = {
-      id: newGroupId,
-      color: newColor,
-      yolo_mode: false,
-    };
-
-    //
-    // Update extra data with new session group for all selected nodes.
-    //
-    setExtraData(prev => {
-      const newSessionGroups = new Map(prev.sessionGroups);
-      for (const node of groupableSelectedNodes) {
-        newSessionGroups.set(node.id, newSessionGroup);
-      }
-      return { ...prev, sessionGroups: newSessionGroups };
-    });
-
-    //
-    // Update node data to show session color.
-    //
-    setNodes(nds =>
-      nds.map(n => {
-        if (groupableSelectedNodes.some(gn => gn.id === n.id)) {
-          return {
-            ...n,
-            data: { ...n.data, sessionColor: newColor },
-          };
+  //
+  // Confirm session group creation/edit from modal.
+  //
+  const handleSessionGroupConfirm = useCallback(() => {
+    if (editingSessionGroupId) {
+      //
+      // Editing existing session group — update all nodes in this group.
+      //
+      setExtraData(prev => {
+        const newSessionGroups = new Map(prev.sessionGroups);
+        for (const [nodeId, sg] of newSessionGroups) {
+          if (sg.id === editingSessionGroupId) {
+            newSessionGroups.set(nodeId, {
+              ...sg,
+              yolo_mode: sessionGroupYolo,
+              working_dir: sessionGroupWorkingDir || undefined,
+            });
+          }
         }
-        return n;
-      })
-    );
+        return { ...prev, sessionGroups: newSessionGroups };
+      });
+    } else {
+      //
+      // Creating new session group.
+      //
+      const usedColors = getUsedColors(
+        Array.from(extraData.sessionGroups.values()).map(sg => ({ session_group: sg }))
+      );
+      const newColor = getNextSessionColor(usedColors);
+      const newGroupId = generateUUID();
 
-    //
-    // Clear selection.
-    //
-    setSelectedNodeIds(new Set());
-  }, [canGroupSelection, groupableSelectedNodes, extraData.sessionGroups, setNodes]);
+      const newSessionGroup: SessionGroup = {
+        id: newGroupId,
+        color: newColor,
+        yolo_mode: sessionGroupYolo,
+        working_dir: sessionGroupWorkingDir || undefined,
+      };
+
+      setExtraData(prev => {
+        const newSessionGroups = new Map(prev.sessionGroups);
+        for (const node of groupableSelectedNodes) {
+          newSessionGroups.set(node.id, newSessionGroup);
+        }
+        return { ...prev, sessionGroups: newSessionGroups };
+      });
+
+      setNodes(nds =>
+        nds.map(n => {
+          if (groupableSelectedNodes.some(gn => gn.id === n.id)) {
+            return {
+              ...n,
+              data: { ...n.data, sessionColor: newColor },
+            };
+          }
+          return n;
+        })
+      );
+
+      setSelectedNodeIds(new Set());
+    }
+
+    setShowSessionGroupModal(false);
+    setEditingSessionGroupId(null);
+  }, [editingSessionGroupId, sessionGroupYolo, sessionGroupWorkingDir, groupableSelectedNodes, extraData.sessionGroups, setNodes]);
 
   //
   // Remove session group from selected nodes.
@@ -1731,12 +1779,28 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
 
           {/*
           //
-          // Ungroup Panel - show when selected nodes have session groups.
+          // Ungroup / Edit Session Panel - show when selected nodes have
+          // session groups.
           //
           */}
           {groupableSelectedNodes.length > 0 && groupableSelectedNodes.some(n => extraData.sessionGroups.has(n.id)) && (
             <Panel position="top-center" className="!m-2 !mt-14">
               <div className="ascii-box bg-[var(--bg-secondary)] p-2.5 flex items-center gap-2">
+                {selectedSessionGroup && (
+                  <button
+                    onClick={() => {
+                      setEditingSessionGroupId(selectedSessionGroup.id);
+                      setSessionGroupYolo(selectedSessionGroup.yolo_mode);
+                      setSessionGroupWorkingDir(selectedSessionGroup.working_dir || '');
+                      setShowSessionGroupModal(true);
+                    }}
+                    className="flex items-center gap-2 px-3 py-1.5 text-xs tracking-wider border border-dim bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] hover:border-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/30 transition-colors"
+                    title="Edit session group settings"
+                  >
+                    <Settings size={12} />
+                    Edit Session
+                  </button>
+                )}
                 <button
                   onClick={handleUngroupSelection}
                   className="flex items-center gap-2 px-3 py-1.5 text-xs tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
@@ -2016,6 +2080,54 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
             ],
           },
         ]}
+      />
+
+      {/*
+      //
+      // Session Group Configuration Modal.
+      //
+      */}
+      <ConfigModal
+        isOpen={showSessionGroupModal}
+        onClose={() => {
+          setShowSessionGroupModal(false);
+          setEditingSessionGroupId(null);
+        }}
+        title={editingSessionGroupId ? 'Edit Session Group' : 'Configure Session Group'}
+        size="sm"
+        config={[
+          {
+            type: 'section',
+            fields: [
+              {
+                name: 'workingDir',
+                label: 'Working Directory',
+                type: 'text' as const,
+                placeholder: 'Default',
+                span: 'full' as const,
+              },
+              {
+                name: 'yoloMode',
+                label: 'YOLO Mode',
+                type: 'toggle' as const,
+                span: 'full' as const,
+                help: 'Auto-approve agent actions without prompting.',
+              },
+            ],
+          },
+        ]}
+        values={{
+          workingDir: sessionGroupWorkingDir,
+          yoloMode: sessionGroupYolo,
+        }}
+        onChange={(name, value) => {
+          if (name === 'workingDir') setSessionGroupWorkingDir(value);
+          if (name === 'yoloMode') setSessionGroupYolo(!!value);
+        }}
+        onSubmit={handleSessionGroupConfirm}
+        submitLabel={editingSessionGroupId ? 'Update' : 'Create'}
+        submitIcon={<Users size={14} />}
+        submitVariant="purple"
       />
     </div>
   );
