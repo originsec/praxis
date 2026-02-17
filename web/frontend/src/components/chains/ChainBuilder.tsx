@@ -582,7 +582,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
   const groupableSelectedNodes = useMemo(() => {
     return nodes.filter(n =>
       selectedNodeIds.has(n.id) &&
-      (n.type === 'operation' || n.type === 'transform' || n.type === 'genericPrompt')
+      (n.type === 'operation' || n.type === 'genericPrompt')
     );
   }, [nodes, selectedNodeIds]);
 
