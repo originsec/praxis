@@ -25,7 +25,7 @@ export function ChainExecutionModal({ execution, chain, isLoading, onClose, onEd
       isOpen={execution !== null}
       title={`Chain Execution: ${execution?.chain_name ?? ''}`}
       onClose={onClose}
-      size="xl"
+      size="full"
       noPadding
       headerActions={execution && (
         <button
@@ -38,7 +38,7 @@ export function ChainExecutionModal({ execution, chain, isLoading, onClose, onEd
       )}
     >
       {execution && (
-        <div className="h-[70vh] overflow-auto">
+        <div className="h-[85vh] overflow-auto">
           <ChainExecutionViewer
             execution={execution}
             chain={chain}
