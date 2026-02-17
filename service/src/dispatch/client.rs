@@ -672,6 +672,7 @@ async fn handle_opdef_add(ctx: &ServiceContext, client_id: String, content: Stri
         "Received OpDefAdd from client {}",
         &client_id[..8.min(client_id.len())]
     );
+    common::log_debug!("OpDefAdd: content={}", &content[..content.len().min(2000)]);
 
     //
     // Auto-detect format: if content starts with '{', parse as JSON,
@@ -1516,6 +1517,9 @@ async fn handle_chain_get(ctx: &ServiceContext, client_id: String, chain_id: Str
         chain_id
     );
     let chain = ctx.database.get_chain(&chain_id).await.ok().flatten();
+    if let Some(ref c) = chain {
+        common::log_debug!("ChainGet {}: definition={}", chain_id, serde_json::to_string(c).unwrap_or_default());
+    }
     let chain_full = chain.map(|c| common::ChainDefinitionFull {
         id: c.id,
         name: c.name,
@@ -1560,6 +1564,7 @@ async fn handle_chain_create(
         "Received ChainCreate from client {}",
         &client_id[..8.min(client_id.len())]
     );
+    common::log_debug!("ChainCreate: definition={}", serde_json::to_string(&definition).unwrap_or_default());
     let now = chrono::Utc::now();
     let chain_id = uuid::Uuid::new_v4().to_string();
     let db_chain = database::ChainDefinition {
@@ -1656,6 +1661,7 @@ async fn handle_chain_update(
         &client_id[..8.min(client_id.len())],
         chain_id
     );
+    common::log_debug!("ChainUpdate {}: definition={}", chain_id, serde_json::to_string(&definition).unwrap_or_default());
 
     //
     // Get existing chain to preserve created_at.
