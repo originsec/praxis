@@ -52,6 +52,13 @@ pub struct BlockConfig {
     pub require_all_inputs: Option<bool>,
 }
 
+/// Memory element mode
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MemoryMode {
+    Store,
+    Retrieve,
+}
+
 /// Chain element variants
 /// Note: Positions are not stored - they are computed dynamically using Dagre layout
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,17 +106,11 @@ pub enum ChainElement {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         block_config: Option<BlockConfig>,
     },
-    /// Memory store element - stores input data under a key
-    MemoryStore {
+    /// Memory element - stores or retrieves data by key
+    Memory {
         id: ElementId,
-        /// Key to store the value under
         key: String,
-    },
-    /// Memory retrieve element - retrieves stored data by key
-    MemoryRetrieve {
-        id: ElementId,
-        /// Key to retrieve the value from
-        key: String,
+        mode: MemoryMode,
     },
     /// Loop element - retries via port 0 until max_iterations, then exits via port 1
     Loop {
@@ -132,8 +133,7 @@ impl ChainElement {
             ChainElement::Operation { id, .. } => id,
             ChainElement::Transform { id, .. } => id,
             ChainElement::GenericPrompt { id, .. } => id,
-            ChainElement::MemoryStore { id, .. } => id,
-            ChainElement::MemoryRetrieve { id, .. } => id,
+            ChainElement::Memory { id, .. } => id,
             ChainElement::Loop { id, .. } => id,
             ChainElement::Termination { id, .. } => id,
         }
@@ -147,8 +147,7 @@ impl ChainElement {
             ChainElement::GenericPrompt { block_config, .. } => block_config.as_ref(),
             ChainElement::Termination { block_config, .. } => block_config.as_ref(),
             ChainElement::Trigger { .. }
-            | ChainElement::MemoryStore { .. }
-            | ChainElement::MemoryRetrieve { .. }
+            | ChainElement::Memory { .. }
             | ChainElement::Loop { .. } => None,
         }
     }
@@ -161,8 +160,7 @@ impl ChainElement {
             ChainElement::Transform { session_group, .. } => session_group.as_ref(),
             ChainElement::GenericPrompt { session_group, .. } => session_group.as_ref(),
             ChainElement::Trigger { .. }
-            | ChainElement::MemoryStore { .. }
-            | ChainElement::MemoryRetrieve { .. }
+            | ChainElement::Memory { .. }
             | ChainElement::Loop { .. }
             | ChainElement::Termination { .. } => None,
         }

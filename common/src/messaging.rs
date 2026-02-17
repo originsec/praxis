@@ -889,6 +889,13 @@ pub struct BlockConfig {
     pub require_all_inputs: Option<bool>,
 }
 
+/// Memory element mode
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MemoryMode {
+    Store,
+    Retrieve,
+}
+
 /// Chain element variants
 /// Note: Positions are not stored - they are computed dynamically using Dagre layout
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -936,15 +943,11 @@ pub enum ChainElement {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         block_config: Option<BlockConfig>,
     },
-    /// Memory store element - stores input data under a key
-    MemoryStore {
+    /// Memory element - stores or retrieves data by key
+    Memory {
         id: String,
         key: String,
-    },
-    /// Memory retrieve element - retrieves stored data by key
-    MemoryRetrieve {
-        id: String,
-        key: String,
+        mode: MemoryMode,
     },
     /// Loop element - retries via port 0 until max_iterations, then exits via port 1
     Loop {
@@ -1100,13 +1103,10 @@ pub enum ElementConfig {
         /// Prompt to send to agent
         prompt: String,
     },
-    /// Memory store config
-    MemoryStore {
+    /// Memory element config (store or retrieve)
+    Memory {
         key: String,
-    },
-    /// Memory retrieve config
-    MemoryRetrieve {
-        key: String,
+        mode: MemoryMode,
     },
     /// Loop element config
     Loop {

@@ -12,7 +12,7 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, Clock, CheckCircle2, XCircle, AlertCircle, Loader2, Maximize2, Cpu, Sparkles, MessageSquare, ExternalLink, ChevronDown, ChevronRight, Database, HardDriveDownload, RefreshCw, Square } from 'lucide-react';
+import { Play, Clock, CheckCircle2, XCircle, AlertCircle, Loader2, Maximize2, Cpu, Sparkles, MessageSquare, ExternalLink, ChevronDown, ChevronRight, Database, RefreshCw, Square } from 'lucide-react';
 import type {
   ChainExecutionUpdate,
   ChainDefinitionFull,
@@ -134,19 +134,12 @@ function chainToFlowWithStatus(
             status,
           },
         };
-      case 'MemoryStore':
+      case 'Memory':
         return {
           id: elem.id,
-          type: 'memoryStore',
+          type: 'memory',
           position,
-          data: { label: 'Memory Store', memoryKey: elem.key, status },
-        };
-      case 'MemoryRetrieve':
-        return {
-          id: elem.id,
-          type: 'memoryRetrieve',
-          position,
-          data: { label: 'Memory Retrieve', memoryKey: elem.key, status },
+          data: { label: 'Memory', memoryKey: elem.key, memoryMode: elem.mode, status },
         };
       case 'Loop':
         return {
@@ -336,10 +329,11 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
         return { name: 'Transform', type: 'transform' };
       case 'GenericPrompt':
         return { name: 'Prompt', type: 'genericPrompt' };
-      case 'MemoryStore':
-        return { name: `Store: ${element.key}`, type: 'memoryStore' };
-      case 'MemoryRetrieve':
-        return { name: `Load: ${element.key}`, type: 'memoryRetrieve' };
+      case 'Memory':
+        return {
+          name: `${element.mode === 'Store' ? 'Store' : 'Load'}: ${element.key}`,
+          type: 'memory',
+        };
       case 'Loop':
         return { name: `Loop (max ${element.max_iterations})`, type: 'loop' };
       case 'Termination':
@@ -621,8 +615,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
                         {stepInfo.type === 'operation' && <Cpu size={12} className="text-[var(--accent-info)] flex-shrink-0" />}
                         {stepInfo.type === 'transform' && <Sparkles size={12} className="text-[var(--accent-warning)] flex-shrink-0" />}
                         {stepInfo.type === 'genericPrompt' && <MessageSquare size={12} className="text-[var(--accent-purple)] flex-shrink-0" />}
-                        {stepInfo.type === 'memoryStore' && <Database size={12} className="text-[var(--accent-success)] flex-shrink-0" />}
-                        {stepInfo.type === 'memoryRetrieve' && <HardDriveDownload size={12} className="text-[var(--accent-info)] flex-shrink-0" />}
+                        {stepInfo.type === 'memory' && <Database size={12} className="text-[var(--accent-success)] flex-shrink-0" />}
                         {stepInfo.type === 'loop' && <RefreshCw size={12} className="text-[var(--accent-warning)] flex-shrink-0" />}
                         {stepInfo.type === 'termination' && <Square size={12} className="text-[var(--accent-error)] flex-shrink-0" />}
                         {stepInfo.type === 'unknown' && <Clock size={12} className="text-[var(--text-secondary)] flex-shrink-0" />}
@@ -657,8 +650,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
                     {stepInfo.type === 'operation' && <Cpu size={18} className="text-[var(--accent-info)] self-center" />}
                     {stepInfo.type === 'transform' && <Sparkles size={18} className="text-[var(--accent-warning)] self-center" />}
                     {stepInfo.type === 'genericPrompt' && <MessageSquare size={18} className="text-[var(--accent-purple)] self-center" />}
-                    {stepInfo.type === 'memoryStore' && <Database size={18} className="text-[var(--accent-success)] self-center" />}
-                    {stepInfo.type === 'memoryRetrieve' && <HardDriveDownload size={18} className="text-[var(--accent-info)] self-center" />}
+                    {stepInfo.type === 'memory' && <Database size={18} className="text-[var(--accent-success)] self-center" />}
                     {stepInfo.type === 'loop' && <RefreshCw size={18} className="text-[var(--accent-warning)] self-center" />}
                     {stepInfo.type === 'termination' && <Square size={18} className="text-[var(--accent-error)] self-center" />}
                     <span className="text-lg font-medium text-[var(--text-highlight)]">{stepInfo.name}</span>
@@ -727,11 +719,11 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
                         <pre className="mt-1 text-[var(--text-secondary)] whitespace-pre-wrap font-mono">{selectedElement.config.prompt}</pre>
                       </div>
                     )}
-                    {selectedElement.config.type === 'MemoryStore' && (
-                      <div><span className="text-muted">Key:</span> <span className="font-mono text-[var(--accent-success)]">{selectedElement.config.key}</span></div>
-                    )}
-                    {selectedElement.config.type === 'MemoryRetrieve' && (
-                      <div><span className="text-muted">Key:</span> <span className="font-mono text-[var(--accent-info)]">{selectedElement.config.key}</span></div>
+                    {selectedElement.config.type === 'Memory' && (
+                      <div className="space-y-1">
+                        <div><span className="text-muted">Mode:</span> <span className="font-mono">{selectedElement.config.mode}</span></div>
+                        <div><span className="text-muted">Key:</span> <span className={`font-mono ${selectedElement.config.mode === 'Store' ? 'text-[var(--accent-success)]' : 'text-[var(--accent-info)]'}`}>{selectedElement.config.key}</span></div>
+                      </div>
                     )}
                     {selectedElement.config.type === 'Loop' && (
                       <div><span className="text-muted">Max Iterations:</span> <span className="font-mono text-[var(--accent-warning)]">{selectedElement.config.max_iterations}</span></div>

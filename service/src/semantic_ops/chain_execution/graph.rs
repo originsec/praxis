@@ -50,8 +50,7 @@ impl ExecutionGraph {
                 ChainElement::Trigger { .. } => {
                     trigger_id = Some(id.clone());
                 }
-                ChainElement::MemoryStore { .. }
-                | ChainElement::MemoryRetrieve { .. }
+                ChainElement::Memory { .. }
                 | ChainElement::Loop { .. }
                 | ChainElement::Termination { .. } => {}
                 ChainElement::Operation { session_group, .. }
@@ -440,6 +439,8 @@ mod tests {
 
     #[test]
     fn test_memory_elements() {
+        use crate::database::MemoryMode;
+
         let chain = ChainDefinition {
             id: "test".to_string(),
             name: "Test Chain".to_string(),
@@ -450,13 +451,15 @@ mod tests {
                     id: "trigger1".to_string(),
                     trigger_type: TriggerType::Manual,
                 },
-                ChainElement::MemoryStore {
+                ChainElement::Memory {
                     id: "ms1".to_string(),
                     key: "data_key".to_string(),
+                    mode: MemoryMode::Store,
                 },
-                ChainElement::MemoryRetrieve {
+                ChainElement::Memory {
                     id: "mr1".to_string(),
                     key: "data_key".to_string(),
+                    mode: MemoryMode::Retrieve,
                 },
                 ChainElement::Termination {
                     id: "end1".to_string(),

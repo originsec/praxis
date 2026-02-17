@@ -366,8 +366,7 @@ export type ChainElement =
   | { element_type: 'Operation'; id: string; operation_name: string; model_ref?: string | null; session_group?: SessionGroup | null; block_config?: BlockConfig | null }
   | { element_type: 'Transform'; id: string; prompt: string; model_ref?: string | null; session_group?: SessionGroup | null; block_config?: BlockConfig | null }
   | { element_type: 'GenericPrompt'; id: string; prompt: string; session_group?: SessionGroup | null; block_config?: BlockConfig | null }
-  | { element_type: 'MemoryStore'; id: string; key: string }
-  | { element_type: 'MemoryRetrieve'; id: string; key: string }
+  | { element_type: 'Memory'; id: string; key: string; mode: 'Store' | 'Retrieve' }
   | { element_type: 'Loop'; id: string; max_iterations: number }
   | { element_type: 'Termination'; id: string; block_config?: BlockConfig | null };
 
@@ -438,8 +437,7 @@ export type ElementConfig =
   | { type: 'Operation'; operation_name: string; model_ref?: string | null }
   | { type: 'Transform'; prompt: string; model_ref?: string | null }
   | { type: 'GenericPrompt'; prompt: string }
-  | { type: 'MemoryStore'; key: string }
-  | { type: 'MemoryRetrieve'; key: string }
+  | { type: 'Memory'; key: string; mode: 'Store' | 'Retrieve' }
   | { type: 'Loop'; max_iterations: number }
   | { type: 'Termination' };
 

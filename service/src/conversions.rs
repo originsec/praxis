@@ -69,11 +69,15 @@ pub fn to_common(e: database::ChainElement) -> common::ChainElement {
                 }),
             }
         }
-        database::ChainElement::MemoryStore { id, key } => {
-            common::ChainElement::MemoryStore { id, key }
-        }
-        database::ChainElement::MemoryRetrieve { id, key } => {
-            common::ChainElement::MemoryRetrieve { id, key }
+        database::ChainElement::Memory { id, key, mode } => {
+            common::ChainElement::Memory {
+                id,
+                key,
+                mode: match mode {
+                    database::MemoryMode::Store => common::MemoryMode::Store,
+                    database::MemoryMode::Retrieve => common::MemoryMode::Retrieve,
+                },
+            }
         }
         database::ChainElement::Loop { id, max_iterations } => {
             common::ChainElement::Loop { id, max_iterations }
@@ -159,11 +163,15 @@ pub fn to_database(e: common::ChainElement) -> database::ChainElement {
                 }),
             }
         }
-        common::ChainElement::MemoryStore { id, key } => {
-            database::ChainElement::MemoryStore { id, key }
-        }
-        common::ChainElement::MemoryRetrieve { id, key } => {
-            database::ChainElement::MemoryRetrieve { id, key }
+        common::ChainElement::Memory { id, key, mode } => {
+            database::ChainElement::Memory {
+                id,
+                key,
+                mode: match mode {
+                    common::MemoryMode::Store => database::MemoryMode::Store,
+                    common::MemoryMode::Retrieve => database::MemoryMode::Retrieve,
+                },
+            }
         }
         common::ChainElement::Loop { id, max_iterations } => {
             database::ChainElement::Loop { id, max_iterations }

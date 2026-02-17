@@ -495,19 +495,19 @@ impl ChainExecutor {
                         is_first_in_session,
                     },
                 ),
-                ChainElement::MemoryStore { key, .. } => (
-                    ElementConfig::MemoryStore { key: key.clone() },
-                    ElementContext {
-                        input: merged_input.clone(),
-                        session_id: None,
-                        yolo_mode: false,
-                        is_first_in_session: false,
+                ChainElement::Memory { key, mode, .. } => (
+                    ElementConfig::Memory {
+                        key: key.clone(),
+                        mode: match mode {
+                            crate::database::MemoryMode::Store => common::MemoryMode::Store,
+                            crate::database::MemoryMode::Retrieve => common::MemoryMode::Retrieve,
+                        },
                     },
-                ),
-                ChainElement::MemoryRetrieve { key, .. } => (
-                    ElementConfig::MemoryRetrieve { key: key.clone() },
                     ElementContext {
-                        input: String::new(),
+                        input: match mode {
+                            crate::database::MemoryMode::Store => merged_input.clone(),
+                            crate::database::MemoryMode::Retrieve => String::new(),
+                        },
                         session_id: None,
                         yolo_mode: false,
                         is_first_in_session: false,
@@ -541,8 +541,7 @@ impl ChainExecutor {
                 ChainElement::Operation { operation_name, .. } => operation_name.as_str(),
                 ChainElement::Transform { .. } => "Transform",
                 ChainElement::GenericPrompt { .. } => "GenericPrompt",
-                ChainElement::MemoryStore { key, .. } => key.as_str(),
-                ChainElement::MemoryRetrieve { key, .. } => key.as_str(),
+                ChainElement::Memory { key, .. } => key.as_str(),
                 ChainElement::Loop { .. } => "Loop",
                 ChainElement::Termination { .. } => "Termination",
             };
@@ -643,17 +642,20 @@ impl ChainExecutor {
                     ).await;
                     (gp_result, None, None)
                 }
-                ChainElement::MemoryStore { key, .. } => {
-                    let store_result = database.set_memory(key, &merged_input).await
-                        .map_err(|e| anyhow::anyhow!("Failed to store memory '{}': {}", key, e))
-                        .map(|_| merged_input.clone());
-                    (store_result, None, None)
-                }
-                ChainElement::MemoryRetrieve { key, .. } => {
-                    let retrieve_result = database.get_memory(key).await
-                        .map_err(|e| anyhow::anyhow!("Failed to retrieve memory '{}': {}", key, e))
-                        .map(|v| v.unwrap_or_default());
-                    (retrieve_result, None, None)
+                ChainElement::Memory { key, mode, .. } => {
+                    let mem_result = match mode {
+                        crate::database::MemoryMode::Store => {
+                            database.set_memory(key, &merged_input).await
+                                .map_err(|e| anyhow::anyhow!("Failed to store memory '{}': {}", key, e))
+                                .map(|_| merged_input.clone())
+                        }
+                        crate::database::MemoryMode::Retrieve => {
+                            database.get_memory(key).await
+                                .map_err(|e| anyhow::anyhow!("Failed to retrieve memory '{}': {}", key, e))
+                                .map(|v| v.unwrap_or_default())
+                        }
+                    };
+                    (mem_result, None, None)
                 }
                 ChainElement::Termination { .. } => {
                     (Ok(merged_input.clone()), None, None)

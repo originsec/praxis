@@ -293,14 +293,19 @@ function GenericPromptNode({ data, selected }: { data: GenericPromptNodeData; se
   );
 }
 
-interface MemoryStoreNodeData {
+interface MemoryNodeData {
   label: string;
   memoryKey: string;
+  memoryMode: 'Store' | 'Retrieve';
   status?: string;
 }
 
-function MemoryStoreNode({ data, selected }: { data: MemoryStoreNodeData; selected?: boolean }) {
-  const style = selected ? { borderColor: 'var(--accent-success)' } : undefined;
+function MemoryNode({ data, selected }: { data: MemoryNodeData; selected?: boolean }) {
+  const isStore = data.memoryMode === 'Store';
+  const accent = isStore ? 'var(--accent-success)' : 'var(--accent-info)';
+  const style = selected ? { borderColor: accent } : undefined;
+  const Icon = isStore ? Database : HardDriveDownload;
+  const badge = isStore ? 'STORE' : 'LOAD';
   return (
     <div
       className="ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative"
@@ -310,34 +315,9 @@ function MemoryStoreNode({ data, selected }: { data: MemoryStoreNodeData; select
       <Handle type="source" position={Position.Right} style={handleStyle} />
       {data.status && <StatusOverlay status={data.status} />}
       <div className="flex items-center gap-2">
-        <Database size={14} className="text-[var(--accent-success)]" />
-        <span className="text-sm font-mono leading-none">{data.memoryKey || 'Store'}</span>
-        <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-success)]/20 text-[var(--accent-success)] font-mono">STORE</span>
-      </div>
-    </div>
-  );
-}
-
-interface MemoryRetrieveNodeData {
-  label: string;
-  memoryKey: string;
-  status?: string;
-}
-
-function MemoryRetrieveNode({ data, selected }: { data: MemoryRetrieveNodeData; selected?: boolean }) {
-  const style = selected ? { borderColor: 'var(--accent-info)' } : undefined;
-  return (
-    <div
-      className="ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative"
-      style={style}
-    >
-      <Handle type="target" position={Position.Left} style={handleStyle} />
-      <Handle type="source" position={Position.Right} style={handleStyle} />
-      {data.status && <StatusOverlay status={data.status} />}
-      <div className="flex items-center gap-2">
-        <HardDriveDownload size={14} className="text-[var(--accent-info)]" />
-        <span className="text-sm font-mono">{data.memoryKey || 'Retrieve'}</span>
-        <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-info)]/20 text-[var(--accent-info)] font-mono">RETRIEVE</span>
+        <Icon size={14} style={{ color: accent }} />
+        <span className="text-sm font-mono leading-none">{data.memoryKey || (isStore ? 'Store' : 'Retrieve')}</span>
+        <span className="text-[10px] px-1.5 py-0.5 font-mono" style={{ backgroundColor: `color-mix(in srgb, ${accent} 20%, transparent)`, color: accent }}>{badge}</span>
       </div>
     </div>
   );
@@ -396,8 +376,7 @@ export const nodeTypes: NodeTypes = {
   operation: OperationNode,
   transform: TransformNode,
   genericPrompt: GenericPromptNode,
-  memoryStore: MemoryStoreNode,
-  memoryRetrieve: MemoryRetrieveNode,
+  memory: MemoryNode,
   loop: LoopNode,
   termination: TerminationNode,
 };

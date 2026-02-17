@@ -15,7 +15,7 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge, Connection, OnSelectionChangeParams } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, HardDriveDownload, RefreshCw, LayoutGrid, Square, Settings } from 'lucide-react';
+import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings } from 'lucide-react';
 import { ConfigModal } from '../common/ConfigModal';
 import type {
   BlockConfig,
@@ -48,13 +48,18 @@ import type { OperationNodeData } from './ChainNodes';
 //
 // Extra data tracked separately (prompts, models, session groups).
 //
+interface MemoryConfig {
+  key: string;
+  mode: 'Store' | 'Retrieve';
+}
+
 interface ChainExtraData {
   transformPrompts: Map<string, string>;
   transformModels: Map<string, string>;
   genericPrompts: Map<string, string>;
   sessionGroups: Map<string, SessionGroup>;
   blockConfigs: Map<string, BlockConfig>;
-  memoryKeys: Map<string, string>;
+  memoryConfigs: Map<string, MemoryConfig>;
   loopMaxIterations: Map<string, number>;
 }
 
@@ -69,7 +74,7 @@ function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: Operatio
     genericPrompts: new Map(),
     sessionGroups: new Map(),
     blockConfigs: new Map(),
-    memoryKeys: new Map(),
+    memoryConfigs: new Map(),
     loopMaxIterations: new Map(),
   };
 
@@ -174,21 +179,13 @@ function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: Operatio
             requireAllInputs: elem.block_config?.require_all_inputs,
           },
         };
-      case 'MemoryStore':
-        extraData.memoryKeys.set(elem.id, elem.key);
+      case 'Memory':
+        extraData.memoryConfigs.set(elem.id, { key: elem.key, mode: elem.mode });
         return {
           id: elem.id,
-          type: 'memoryStore',
+          type: 'memory',
           position,
-          data: { label: 'Memory Store', memoryKey: elem.key },
-        };
-      case 'MemoryRetrieve':
-        extraData.memoryKeys.set(elem.id, elem.key);
-        return {
-          id: elem.id,
-          type: 'memoryRetrieve',
-          position,
-          data: { label: 'Memory Retrieve', memoryKey: elem.key },
+          data: { label: 'Memory', memoryKey: elem.key, memoryMode: elem.mode },
         };
       case 'Loop':
         extraData.loopMaxIterations.set(elem.id, elem.max_iterations);
@@ -298,18 +295,15 @@ function flowToChain(
           session_group: extraData.sessionGroups.get(node.id) || null,
           block_config: extraData.blockConfigs.get(node.id) || null,
         };
-      case 'memoryStore':
+      case 'memory': {
+        const memCfg = extraData.memoryConfigs.get(node.id);
         return {
-          element_type: 'MemoryStore' as const,
+          element_type: 'Memory' as const,
           id: node.id,
-          key: extraData.memoryKeys.get(node.id) || '',
+          key: memCfg?.key || '',
+          mode: memCfg?.mode || 'Store',
         };
-      case 'memoryRetrieve':
-        return {
-          element_type: 'MemoryRetrieve' as const,
-          id: node.id,
-          key: extraData.memoryKeys.get(node.id) || '',
-        };
+      }
       case 'loop':
         return {
           element_type: 'Loop' as const,
@@ -458,7 +452,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
   //
   const [showMemoryModal, setShowMemoryModal] = useState(false);
   const [memoryKey, setMemoryKey] = useState('');
-  const [pendingMemoryType, setPendingMemoryType] = useState<'memoryStore' | 'memoryRetrieve'>('memoryStore');
+  const [memoryMode, setMemoryMode] = useState<'Store' | 'Retrieve'>('Store');
 
   const [showLoopModal, setShowLoopModal] = useState(false);
   const [loopMaxIterations, setLoopMaxIterations] = useState<number>(3);
@@ -839,10 +833,10 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       //
       // For memory nodes, show the memory key modal.
       //
-      if (type === 'memoryStore' || type === 'memoryRetrieve') {
+      if (type === 'memory') {
         setPendingPosition(position);
-        setPendingMemoryType(type as 'memoryStore' | 'memoryRetrieve');
         setMemoryKey('');
+        setMemoryMode('Store');
         setShowMemoryModal(true);
         return;
       }
@@ -953,36 +947,23 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
           });
         }
         break;
-      case 'memoryStore':
+      case 'memory': {
+        const mode = (nodeExtraData?.memoryMode as 'Store' | 'Retrieve') || 'Store';
         newNode = {
           id: newId,
-          type: 'memoryStore',
+          type: 'memory',
           position,
-          data: { label: 'Memory Store', memoryKey: nodeExtraData?.memoryKey || '' },
+          data: { label: 'Memory', memoryKey: nodeExtraData?.memoryKey || '', memoryMode: mode },
         };
         if (nodeExtraData?.memoryKey) {
           setExtraData(prev => {
-            const newKeys = new Map(prev.memoryKeys);
-            newKeys.set(newId, nodeExtraData.memoryKey as string);
-            return { ...prev, memoryKeys: newKeys };
+            const newConfigs = new Map(prev.memoryConfigs);
+            newConfigs.set(newId, { key: nodeExtraData.memoryKey as string, mode });
+            return { ...prev, memoryConfigs: newConfigs };
           });
         }
         break;
-      case 'memoryRetrieve':
-        newNode = {
-          id: newId,
-          type: 'memoryRetrieve',
-          position,
-          data: { label: 'Memory Retrieve', memoryKey: nodeExtraData?.memoryKey || '' },
-        };
-        if (nodeExtraData?.memoryKey) {
-          setExtraData(prev => {
-            const newKeys = new Map(prev.memoryKeys);
-            newKeys.set(newId, nodeExtraData.memoryKey as string);
-            return { ...prev, memoryKeys: newKeys };
-          });
-        }
-        break;
+      }
       case 'loop':
         newNode = {
           id: newId,
@@ -1062,9 +1043,10 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       return;
     }
 
-    if (type === 'memoryStore' || type === 'memoryRetrieve') {
-      setPendingMemoryType(type as 'memoryStore' | 'memoryRetrieve');
+    if (type === 'memory') {
+      setPendingPosition(position);
       setMemoryKey('');
+      setMemoryMode('Store');
       setShowMemoryModal(true);
       return;
     }
@@ -1236,13 +1218,13 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
   const handleMemoryConfirm = useCallback(() => {
     if (editingNodeId) {
       setExtraData(prev => {
-        const newKeys = new Map(prev.memoryKeys);
-        newKeys.set(editingNodeId, memoryKey);
-        return { ...prev, memoryKeys: newKeys };
+        const newConfigs = new Map(prev.memoryConfigs);
+        newConfigs.set(editingNodeId, { key: memoryKey, mode: memoryMode });
+        return { ...prev, memoryConfigs: newConfigs };
       });
       setNodes(nds => nds.map(n =>
         n.id === editingNodeId
-          ? { ...n, data: { ...n.data, memoryKey } }
+          ? { ...n, data: { ...n.data, memoryKey, memoryMode } }
           : n
       ));
       setShowMemoryModal(false);
@@ -1250,12 +1232,12 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       setMemoryKey('');
     } else {
       const position = pendingPosition || { x: 100, y: 100 + nodes.length * 100 };
-      addNodeAtPosition(pendingMemoryType, position, { memoryKey });
+      addNodeAtPosition('memory', position, { memoryKey, memoryMode });
       setShowMemoryModal(false);
       setPendingPosition(null);
       setMemoryKey('');
     }
-  }, [pendingPosition, editingNodeId, pendingMemoryType, memoryKey, addNodeAtPosition, setNodes, nodes.length]);
+  }, [pendingPosition, editingNodeId, memoryMode, memoryKey, addNodeAtPosition, setNodes, nodes.length]);
 
   const handleLoopConfirm = useCallback(() => {
     if (editingNodeId) {
@@ -1295,8 +1277,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
     operation: 'Operation',
     transform: 'Transform',
     genericPrompt: 'GenericPrompt',
-    memoryStore: 'MemoryStore',
-    memoryRetrieve: 'MemoryRetrieve',
+    memory: 'Memory',
     loop: 'Loop',
     termination: 'Termination',
   };
@@ -1386,14 +1367,14 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
               const newTransformPrompts = new Map(prev.transformPrompts);
               const newTransformModels = new Map(prev.transformModels);
               const newGenericPrompts = new Map(prev.genericPrompts);
-              const newMemoryKeys = new Map(prev.memoryKeys);
+              const newMemoryConfigs = new Map(prev.memoryConfigs);
               const newLoopMaxIters = new Map(prev.loopMaxIterations);
               newSessionGroups.delete(hoveredNodeId);
               newBlockConfigs.delete(hoveredNodeId);
               newTransformPrompts.delete(hoveredNodeId);
               newTransformModels.delete(hoveredNodeId);
               newGenericPrompts.delete(hoveredNodeId);
-              newMemoryKeys.delete(hoveredNodeId);
+              newMemoryConfigs.delete(hoveredNodeId);
               newLoopMaxIters.delete(hoveredNodeId);
               return {
                 ...prev,
@@ -1402,7 +1383,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
                 transformPrompts: newTransformPrompts,
                 transformModels: newTransformModels,
                 genericPrompts: newGenericPrompts,
-                memoryKeys: newMemoryKeys,
+                memoryConfigs: newMemoryConfigs,
                 loopMaxIterations: newLoopMaxIters,
               };
             });
@@ -1559,10 +1540,11 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       setGenericPromptText(extraData.genericPrompts.get(node.id) || '');
       loadBlockConfig(node.id);
       setShowGenericPromptModal(true);
-    } else if (node.type === 'memoryStore' || node.type === 'memoryRetrieve') {
+    } else if (node.type === 'memory') {
       setEditingNodeId(node.id);
-      setPendingMemoryType(node.type as 'memoryStore' | 'memoryRetrieve');
-      setMemoryKey(extraData.memoryKeys.get(node.id) || '');
+      const cfg = extraData.memoryConfigs.get(node.id);
+      setMemoryKey(cfg?.key || '');
+      setMemoryMode(cfg?.mode || 'Store');
       setShowMemoryModal(true);
     } else if (node.type === 'loop') {
       setEditingNodeId(node.id);
@@ -1755,16 +1737,10 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
                   onClick={() => handleQuickAdd('genericPrompt')}
                 />
                 <PaletteItem
-                  type="memoryStore"
+                  type="memory"
                   icon={<Database size={16} className="text-[var(--accent-success)]" />}
-                  label="Mem Store"
-                  onClick={() => handleQuickAdd('memoryStore')}
-                />
-                <PaletteItem
-                  type="memoryRetrieve"
-                  icon={<HardDriveDownload size={16} className="text-[var(--accent-info)]" />}
-                  label="Mem Load"
-                  onClick={() => handleQuickAdd('memoryRetrieve')}
+                  label="Memory"
+                  onClick={() => handleQuickAdd('memory')}
                 />
                 <PaletteItem
                   type="loop"
@@ -2023,11 +1999,21 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
           setEditingNodeId(null);
         }}
         size="sm"
-        title={pendingMemoryType === 'memoryStore' ? 'Configure Memory Store' : 'Configure Memory Retrieve'}
+        title="Configure Memory"
         config={[
           {
             type: 'section',
             fields: [
+              {
+                name: 'memoryMode',
+                label: 'Mode',
+                type: 'select' as const,
+                span: 'full' as const,
+                options: [
+                  { value: 'Store', label: 'Store' },
+                  { value: 'Retrieve', label: 'Retrieve' },
+                ],
+              },
               {
                 name: 'memoryKey',
                 label: 'Memory Key',
@@ -2038,12 +2024,15 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
             ],
           },
         ]}
-        values={{ memoryKey }}
-        onChange={(_name, value) => setMemoryKey(value)}
+        values={{ memoryKey, memoryMode }}
+        onChange={(name, value) => {
+          if (name === 'memoryKey') setMemoryKey(value);
+          if (name === 'memoryMode') setMemoryMode(value as 'Store' | 'Retrieve');
+        }}
         onSubmit={handleMemoryConfirm}
         submitLabel={editingNodeId ? 'Update' : 'Add'}
-        submitIcon={pendingMemoryType === 'memoryStore' ? <Database size={14} /> : <HardDriveDownload size={14} />}
-        submitVariant={pendingMemoryType === 'memoryStore' ? 'success' : 'info'}
+        submitIcon={<Database size={14} />}
+        submitVariant={memoryMode === 'Store' ? 'success' : 'info'}
         submitDisabled={!memoryKey.trim()}
       />
 
