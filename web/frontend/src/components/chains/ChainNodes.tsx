@@ -353,20 +353,17 @@ function LoopNode({ data, selected }: { data: LoopNodeData; selected?: boolean }
   const style = selected ? { borderColor: 'var(--accent-warning)' } : undefined;
   return (
     <div
-      className="ascii-box bg-[var(--bg-secondary)] px-4 py-3 min-w-[180px] relative"
-      style={{ ...style, minHeight: 70 }}
+      className="ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative"
+      style={style}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
-      <Handle type="source" position={Position.Bottom} id="0" style={{ ...handleStyle, left: '50%' }} />
-      <Handle type="source" position={Position.Right} id="1" style={handleStyle} />
+      <Handle type="source" position={Position.Top} id="0" style={{ ...handleStyle, left: '50%' }} />
       {data.status && <StatusOverlay status={data.status} />}
-      <div className="flex items-center gap-2 pr-16">
+      <div className="flex items-center gap-2">
         <RefreshCw size={14} className="text-[var(--accent-warning)]" />
         <span className="text-sm font-mono leading-none">Loop</span>
         <span className="text-[10px] px-1.5 py-0.5 bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] font-mono">max {data.maxIterations}</span>
       </div>
-      <span className="absolute text-[9px] text-[var(--accent-warning)]" style={{ bottom: -16, left: '50%', transform: 'translateX(-50%)' }}>↻ retry</span>
-      <span className="absolute text-[9px] text-muted" style={{ right: 28, top: '50%', transform: 'translateY(-50%)' }}>→ done</span>
     </div>
   );
 }

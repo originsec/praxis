@@ -11,7 +11,7 @@ const NODE_SIZES: Record<string, { width: number; height: number }> = {
   GenericPrompt: { width: 280, height: 120 },
   MemoryStore: { width: 220, height: 70 },
   MemoryRetrieve: { width: 220, height: 70 },
-  Loop: { width: 240, height: 90 },
+  Loop: { width: 200, height: 60 },
   Termination: { width: 180, height: 60 },
 };
 

@@ -578,8 +578,18 @@ impl ChainExecutor {
                 ChainElement::Loop { max_iterations, .. } => {
                     let counter = loop_counters.entry(element_id.clone()).or_insert(0);
                     *counter += 1;
-                    let port = if *counter <= *max_iterations { 0 } else { 1 };
-                    (Ok(merged_input.clone()), Some(port), None)
+                    if *counter <= *max_iterations {
+                        //
+                        // Retry: fire port 0 (back to target element).
+                        //
+                        (Ok(merged_input.clone()), Some(0), None)
+                    } else {
+                        //
+                        // Exhausted: don't fire any port. Use non-existent
+                        // port so no outgoing connections match.
+                        //
+                        (Ok(merged_input.clone()), Some(u32::MAX), None)
+                    }
                 }
                 ChainElement::Operation {
                     operation_name,
