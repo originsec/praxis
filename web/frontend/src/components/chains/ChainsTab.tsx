@@ -35,10 +35,11 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
     deleteChain,
     runChain,
     clearChainStatus,
+    clearLastCreatedChain,
     getConfig,
   } = useApp();
 
-  const { chains, currentChain, chainError, chainSuccess } = state.chains;
+  const { chains, currentChain, chainError, chainSuccess, lastCreatedChainId } = state.chains;
   const operationDefs = state.operationDefs;
 
   //
@@ -118,6 +119,17 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
   }, [editingChainId, currentChain]);
 
   //
+  // After creating a new chain, transition to editing it so subsequent saves
+  // update the same instance instead of creating duplicates.
+  //
+  useEffect(() => {
+    if (lastCreatedChainId && showBuilder && !editingChainId) {
+      setEditingChainId(lastCreatedChainId);
+      clearLastCreatedChain();
+    }
+  }, [lastCreatedChainId, showBuilder, editingChainId, clearLastCreatedChain]);
+
+  //
   // Handle external trigger to create new chain.
   //
   useEffect(() => {
@@ -171,10 +183,22 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
     if (editingChainId) {
       updateChain(editingChainId, definition);
     } else {
+
+      //
+      // If a chain with this name already exists, update it instead of
+      // creating a duplicate.
+      //
+
+      const existing = chains.find(
+        c => c.name.toLowerCase() === definition.name.trim().toLowerCase()
+      );
+      if (existing) {
+        setEditingChainId(existing.id);
+        updateChain(existing.id, definition);
+        return;
+      }
       createChain(definition);
     }
-    setShowBuilder(false);
-    setEditingChainId(null);
   };
 
   const handleDuplicate = (definition: ChainDefinitionInput) => {
@@ -198,6 +222,8 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
           onCancel={handleCancel}
           operationDefs={operationDefs}
           modelDefs={modelDefs}
+          saveStatus={chainSuccess}
+          saveError={chainError}
         />
       </div>
     );

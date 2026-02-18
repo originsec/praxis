@@ -15,7 +15,7 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge, Connection, OnSelectionChangeParams } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings } from 'lucide-react';
+import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings, Check, AlertTriangle } from 'lucide-react';
 import { ConfigModal } from '../common/ConfigModal';
 import type {
   BlockConfig,
@@ -390,9 +390,11 @@ interface ChainBuilderInnerProps {
   onCancel: () => void;
   operationDefs: OperationDefinitionInfo[];
   modelDefs: ModelDefinition[];
+  saveStatus?: string | null;
+  saveError?: string | null;
 }
 
-function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs, modelDefs }: ChainBuilderInnerProps) {
+function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs, modelDefs, saveStatus, saveError }: ChainBuilderInnerProps) {
   const [name, setName] = useState(chain?.name || '');
   const [description, setDescription] = useState(chain?.description || '');
   const [timeout, setTimeout] = useState(chain?.timeout || 1800);
@@ -1261,6 +1263,27 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
     }
   }, [pendingPosition, editingNodeId, loopMaxIterations, addNodeAtPosition, setNodes, nodes.length]);
 
+  //
+  // Brief "Saved" flash when save succeeds.
+  //
+  const [saveFlash, setSaveFlash] = useState<'saved' | 'error' | null>(null);
+
+  useEffect(() => {
+    if (saveStatus) {
+      setSaveFlash('saved');
+      const timer = window.setTimeout(() => setSaveFlash(null), 2000);
+      return () => window.clearTimeout(timer);
+    }
+  }, [saveStatus]);
+
+  useEffect(() => {
+    if (saveError) {
+      setSaveFlash('error');
+      const timer = window.setTimeout(() => setSaveFlash(null), 3000);
+      return () => window.clearTimeout(timer);
+    }
+  }, [saveError]);
+
   const canSave = name.trim().length > 0;
 
   const handleSave = () => {
@@ -1612,11 +1635,17 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
           <button
             onClick={handleSave}
             disabled={!canSave}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs tracking-wider border border-dim bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:border-[var(--accent-info)] hover:bg-[var(--accent-info)]/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className={`inline-flex items-center gap-2 px-4 py-2 text-xs tracking-wider border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+              saveFlash === 'saved'
+                ? 'border-[var(--accent-success)] bg-[var(--accent-success)]/20 text-[var(--accent-success)]'
+                : saveFlash === 'error'
+                ? 'border-[var(--accent-error)] bg-[var(--accent-error)]/20 text-[var(--accent-error)]'
+                : 'border-dim bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:border-[var(--accent-info)] hover:bg-[var(--accent-info)]/30'
+            }`}
             title={!canSave ? 'Chain name is required' : undefined}
           >
-            <Save size={14} />
-            Save
+            {saveFlash === 'saved' ? <Check size={14} /> : saveFlash === 'error' ? <AlertTriangle size={14} /> : <Save size={14} />}
+            {saveFlash === 'saved' ? 'Saved' : saveFlash === 'error' ? 'Error' : 'Save'}
           </button>
         </div>
       </div>
@@ -2151,12 +2180,14 @@ interface ChainBuilderProps {
   onCancel: () => void;
   operationDefs: OperationDefinitionInfo[];
   modelDefs?: ModelDefinition[];
+  saveStatus?: string | null;
+  saveError?: string | null;
 }
 
-export function ChainBuilder({ modelDefs = [], ...props }: ChainBuilderProps) {
+export function ChainBuilder({ modelDefs = [], saveStatus, saveError, ...props }: ChainBuilderProps) {
   return (
     <ReactFlowProvider>
-      <ChainBuilderInner {...props} modelDefs={modelDefs} />
+      <ChainBuilderInner {...props} modelDefs={modelDefs} saveStatus={saveStatus} saveError={saveError} />
     </ReactFlowProvider>
   );
 }

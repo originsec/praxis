@@ -99,6 +99,7 @@ interface ChainState {
   executions: ChainExecutionUpdate[];
   chainError: string | null;
   chainSuccess: string | null;
+  lastCreatedChainId: string | null;
 }
 
 const initialChainState: ChainState = {
@@ -109,6 +110,7 @@ const initialChainState: ChainState = {
   executions: [],
   chainError: null,
   chainSuccess: null,
+  lastCreatedChainId: null,
 };
 
 //
@@ -289,6 +291,7 @@ type Action =
   | { type: 'UPDATE_CHAIN_EXECUTION'; execution: ChainExecutionUpdate }
   | { type: 'SET_CHAIN_ERROR'; error: string | null }
   | { type: 'SET_CHAIN_SUCCESS'; message: string | null }
+  | { type: 'SET_LAST_CREATED_CHAIN_ID'; chainId: string | null }
   //
   // Recent nodes action.
   //
@@ -758,6 +761,8 @@ function reduceChains(state: AppState, action: Action): AppState | null {
       return { ...state, chains: { ...state.chains, chainError: action.error, chainSuccess: null } };
     case 'SET_CHAIN_SUCCESS':
       return { ...state, chains: { ...state.chains, chainSuccess: action.message, chainError: null } };
+    case 'SET_LAST_CREATED_CHAIN_ID':
+      return { ...state, chains: { ...state.chains, lastCreatedChainId: action.chainId } };
     default:
       return null;
   }
@@ -1106,6 +1111,7 @@ interface AppContextValue {
   clearChainExecutions: () => void;
   requestChainExecutions: () => void;
   clearChainStatus: () => void;
+  clearLastCreatedChain: () => void;
   //
   // Agent discovery.
   //
@@ -1312,6 +1318,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         case 'chain_created':
           dispatch({ type: 'ADD_CHAIN', chain: message.chain });
           dispatch({ type: 'SET_CHAIN_SUCCESS', message: `Chain '${message.chain.name}' created` });
+          dispatch({ type: 'SET_LAST_CREATED_CHAIN_ID', chainId: message.chain.id });
           break;
         case 'chain_updated':
           dispatch({ type: 'UPDATE_CHAIN', chain: message.chain });
@@ -1743,6 +1750,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'SET_CHAIN_SUCCESS', message: null });
   }, []);
 
+  const clearLastCreatedChain = useCallback(() => {
+    dispatch({ type: 'SET_LAST_CREATED_CHAIN_ID', chainId: null });
+  }, []);
+
   const trackNodeAccess = useCallback((nodeId: string) => {
     dispatch({ type: 'ACCESS_NODE', nodeId });
   }, []);
@@ -1947,6 +1958,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     clearChainExecutions,
     requestChainExecutions,
     clearChainStatus,
+    clearLastCreatedChain,
     trackNodeAccess,
     //
     // Agent discovery.
