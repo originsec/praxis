@@ -211,7 +211,7 @@ pub enum NodeCommand {
 - `ReconSemantic` - perform semantic reconnaissance
 - `ReadFile` - read file contents for config or session (optional line range)
 - `WriteFile` - write config file contents (session writes are not allowed)
-- `GrepFile` - search config/session file contents with regex
+- `GrepFiles` - search config/session file contents with regex (batch, glob support)
 
 ### Session Commands
 

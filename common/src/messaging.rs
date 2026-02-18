@@ -474,10 +474,12 @@ pub enum AgentCommand {
         path: String,
         contents: String,
     },
-    /// Search file content using a regex pattern and return matching lines
-    GrepFile {
+    /// Search file content using a regex pattern and return matching lines.
+    /// Accepts multiple paths (including globs) for batch grep in a single
+    /// round-trip.
+    GrepFiles {
         file_type: AgentFileType,
-        path: String,
+        paths: Vec<String>,
         pattern: String,
     },
 }
@@ -492,6 +494,13 @@ pub enum AgentFileType {
 pub struct GrepMatch {
     pub line_number: usize,
     pub line_content: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GrepFileEntry {
+    pub path: String,
+    pub matches: Vec<GrepMatch>,
+    pub error: Option<String>,
 }
 
 /// Unique identifier for tracking session transactions
@@ -664,13 +673,12 @@ pub enum AgentCommandResult {
         line_end: Option<usize>,
         error: Option<String>,
     },
-    /// File grep response
-    GrepFileResult {
+    /// Batch file grep response
+    GrepFilesResult {
         file_type: AgentFileType,
-        path: String,
         pattern: String,
-        matches: Vec<GrepMatch>,
-        error: Option<String>,
+        results: Vec<GrepFileEntry>,
+        errors: Vec<String>,
     },
 }
 
@@ -1588,7 +1596,7 @@ pub enum ClientSignalMessage {
     /// Start an orchestrator session for this client
     OrchestratorStart { client_id: String },
     /// Send a prompt to the orchestrator session
-    OrchestratorPrompt { client_id: String, message: String },
+    OrchestratorPrompt { client_id: String, prompt_id: String, message: String },
     /// Stop the orchestrator session (ends entirely)
     OrchestratorStop { client_id: String },
     /// Cancel current orchestrator inference (keeps session alive)
@@ -1899,21 +1907,21 @@ pub enum ClientDirectMessage {
         model: String,
     },
     /// Orchestrator streaming text content
-    OrchestratorContent { content: String },
+    OrchestratorContent { prompt_id: String, content: String },
     /// Orchestrator started executing a tool
-    OrchestratorToolExecuting { name: String, input: Option<String> },
+    OrchestratorToolExecuting { prompt_id: String, name: String, input: Option<String> },
     /// Orchestrator finished executing a tool
-    OrchestratorToolExecuted { name: String, display: String, success: bool, result: String },
+    OrchestratorToolExecuted { prompt_id: String, name: String, display: String, success: bool, result: String },
     /// Orchestrator plan updated
-    OrchestratorPlanUpdated { plan: OrchestratorPlan },
+    OrchestratorPlanUpdated { prompt_id: String, plan: OrchestratorPlan },
     /// Orchestrator response complete
-    OrchestratorDone,
+    OrchestratorDone { prompt_id: String },
     /// Orchestrator session stopped
     OrchestratorStopped,
     /// Orchestrator error
-    OrchestratorError { message: String },
+    OrchestratorError { prompt_id: String, message: String },
     /// Orchestrator token usage update
-    OrchestratorTokenUsage { prompt_tokens: u32, completion_tokens: u32, total_tokens: u32 },
+    OrchestratorTokenUsage { prompt_id: String, prompt_tokens: u32, completion_tokens: u32, total_tokens: u32 },
 
     //
     // AgentChat responses.

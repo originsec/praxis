@@ -422,7 +422,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         }
     }
 
-    #[tool(description = "Grep config file content with regex. Omit path to grep all config files (returns only files with matches).")]
+    #[tool(description = "Grep config file content with regex. Supports glob patterns (e.g. '/etc/*.conf'). Pass multiple paths to grep in a single call instead of calling file-by-file. Omit paths to grep all config files from recon (returns only files with matches).")]
     async fn recon_config_grep(
         &self,
         Parameters(params): Parameters<ReconGrepParams>,
@@ -430,33 +430,31 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let guard = acquire_client!(self);
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
-        match params.path {
-            Some(path) => {
-                let r = super::ops::recon_grep_file(
-                    client, &params.node, AgentFileType::Config, &path, &params.pattern,
-                ).await.map_err(mcp_err)?;
-                json_result(json!({
-                    "path": r.path, "pattern": r.pattern,
-                    "matches": r.matches, "match_count": r.matches.len(), "error": r.error
-                }))
+        let result = match params.paths {
+            Some(paths) => {
+                super::ops::recon_grep_file(
+                    client, &params.node, AgentFileType::Config, &paths, &params.pattern,
+                ).await.map_err(mcp_err)?
             }
             None => {
-                let results = super::ops::recon_grep_all(
+                super::ops::recon_grep_all(
                     client, &params.node, AgentFileType::Config, &params.pattern,
-                ).await.map_err(mcp_err)?;
-                let files: Vec<_> = results.iter().map(|r| json!({
-                    "path": r.path, "matches": r.matches, "match_count": r.matches.len()
-                })).collect();
-                json_result(json!({
-                    "pattern": params.pattern,
-                    "files_with_matches": files.len(),
-                    "results": files
-                }))
+                ).await.map_err(mcp_err)?
             }
-        }
+        };
+
+        let files: Vec<_> = result.results.iter().map(|r| json!({
+            "path": r.path, "matches": r.matches, "match_count": r.matches.len(), "error": r.error
+        })).collect();
+        json_result(json!({
+            "pattern": result.pattern,
+            "files_with_matches": files.len(),
+            "results": files,
+            "errors": result.errors
+        }))
     }
 
-    #[tool(description = "Grep session file content with regex. Omit path to grep all session files (returns only files with matches).")]
+    #[tool(description = "Grep session file content with regex. Supports multiple paths in a single call. Omit paths to grep all session files from recon (returns only files with matches).")]
     async fn recon_session_grep(
         &self,
         Parameters(params): Parameters<ReconGrepParams>,
@@ -464,30 +462,28 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let guard = acquire_client!(self);
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
 
-        match params.path {
-            Some(path) => {
-                let r = super::ops::recon_grep_file(
-                    client, &params.node, AgentFileType::Session, &path, &params.pattern,
-                ).await.map_err(mcp_err)?;
-                json_result(json!({
-                    "path": r.path, "pattern": r.pattern,
-                    "matches": r.matches, "match_count": r.matches.len(), "error": r.error
-                }))
+        let result = match params.paths {
+            Some(paths) => {
+                super::ops::recon_grep_file(
+                    client, &params.node, AgentFileType::Session, &paths, &params.pattern,
+                ).await.map_err(mcp_err)?
             }
             None => {
-                let results = super::ops::recon_grep_all(
+                super::ops::recon_grep_all(
                     client, &params.node, AgentFileType::Session, &params.pattern,
-                ).await.map_err(mcp_err)?;
-                let files: Vec<_> = results.iter().map(|r| json!({
-                    "path": r.path, "matches": r.matches, "match_count": r.matches.len()
-                })).collect();
-                json_result(json!({
-                    "pattern": params.pattern,
-                    "files_with_matches": files.len(),
-                    "results": files
-                }))
+                ).await.map_err(mcp_err)?
             }
-        }
+        };
+
+        let files: Vec<_> = result.results.iter().map(|r| json!({
+            "path": r.path, "matches": r.matches, "match_count": r.matches.len(), "error": r.error
+        })).collect();
+        json_result(json!({
+            "pattern": result.pattern,
+            "files_with_matches": files.len(),
+            "results": files,
+            "errors": result.errors
+        }))
     }
 
     // ── Sessions ─────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 use crate::agent_connectors::{Agent, AgentRegistry};
-use common::{AgentCommand, AgentCommandResult, AgentFileType, GrepMatch, NodeCommandResult, ReconResult};
+use common::{AgentCommand, AgentCommandResult, AgentFileType, GrepFileEntry, GrepMatch, NodeCommandResult, ReconResult};
 use regex::Regex;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -144,6 +144,61 @@ fn grep_content(content: &str, re: &Regex) -> Vec<GrepMatch> {
         }
     }
     matches
+}
+
+fn has_glob_chars(path: &str) -> bool {
+    path.contains('*') || path.contains('?') || path.contains('[')
+}
+
+//
+// Expand a list of paths that may contain glob patterns into concrete file
+// paths. Non-glob paths are passed through as-is. Each expanded path is
+// validated with canonicalize_and_validate_path.
+//
+
+fn expand_config_paths(paths: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for p in paths {
+        if has_glob_chars(p) {
+            if let Ok(entries) = glob::glob(p) {
+                for entry in entries.flatten() {
+                    if let Some(s) = entry.to_str() {
+                        if canonicalize_and_validate_path(s).is_ok() {
+                            out.push(s.to_string());
+                        }
+                    }
+                }
+            }
+        } else {
+            out.push(p.clone());
+        }
+    }
+    out
+}
+
+fn grep_single_config_file(path: &str, re: &Regex) -> GrepFileEntry {
+    if let Err(error) = canonicalize_and_validate_path(path) {
+        return GrepFileEntry {
+            path: path.to_string(),
+            matches: Vec::new(),
+            error: Some(error),
+        };
+    }
+    match std::fs::read_to_string(path) {
+        Ok(content) => {
+            let matches = grep_content(&content, re);
+            GrepFileEntry {
+                path: path.to_string(),
+                matches,
+                error: None,
+            }
+        }
+        Err(e) => GrepFileEntry {
+            path: path.to_string(),
+            matches: Vec::new(),
+            error: Some(format!("Failed to read: {}", e)),
+        },
+    }
 }
 
 pub async fn handle_agent_command(
@@ -439,74 +494,81 @@ pub async fn handle_agent_command(
                 }
             }
         }
-        AgentCommand::GrepFile {
+        AgentCommand::GrepFiles {
             file_type,
-            path,
+            paths,
             pattern,
         } => {
             let re = match Regex::new(&pattern) {
                 Ok(re) => re,
                 Err(e) => {
-                    return NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
+                    return NodeCommandResult::Agent(AgentCommandResult::GrepFilesResult {
                         file_type,
-                        path,
                         pattern,
-                        matches: Vec::new(),
-                        error: Some(format!("Invalid regex pattern: {}", e)),
+                        results: Vec::new(),
+                        errors: vec![format!("Invalid regex pattern: {}", e)],
                     });
                 }
             };
 
-            let content_result = match file_type {
+            let mut results = Vec::new();
+            let mut errors = Vec::new();
+
+            match file_type {
                 AgentFileType::Config => {
-                    if let Err(error) = canonicalize_and_validate_path(&path) {
-                        return NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
-                            file_type,
-                            path,
-                            pattern,
-                            matches: Vec::new(),
-                            error: Some(error),
-                        });
+                    let expanded = expand_config_paths(&paths);
+                    for path in expanded {
+                        results.push(grep_single_config_file(&path, &re));
                     }
-                    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read config content: {}. Make sure the relevant agent is selected and the path is correct.", e))
+                    // Report glob patterns that matched nothing
+                    for p in &paths {
+                        if has_glob_chars(p) {
+                            let expanded: Vec<_> = glob::glob(p)
+                                .map(|iter| iter.filter_map(|r| r.ok()).collect())
+                                .unwrap_or_default();
+                            if expanded.is_empty() {
+                                errors.push(format!("Glob pattern '{}' matched no files", p));
+                            }
+                        }
+                    }
                 }
                 AgentFileType::Session => {
                     let locked = selected_agent.lock().unwrap();
                     let agent = locked.as_ref();
-                    match agent.and_then(|a| a.read_session_content(&path)) {
-                        Some(content) => Ok(content),
-                        None => Err("Failed to read session content. Make sure the relevant agent is selected and the path is correct.".to_string()),
+                    for path in &paths {
+                        match agent.and_then(|a| a.read_session_content(path)) {
+                            Some(content) => {
+                                let matches = grep_content(&content, &re);
+                                results.push(GrepFileEntry {
+                                    path: path.clone(),
+                                    matches,
+                                    error: None,
+                                });
+                            }
+                            None => {
+                                results.push(GrepFileEntry {
+                                    path: path.clone(),
+                                    matches: Vec::new(),
+                                    error: Some("Failed to read session content".to_string()),
+                                });
+                            }
+                        }
                     }
                 }
-            };
+            }
 
-            let content = match content_result {
-                Ok(content) => content,
-                Err(error) => {
-                    return NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
-                        file_type,
-                        path,
-                        pattern,
-                        matches: Vec::new(),
-                        error: Some(error),
-                    });
-                }
-            };
-
-            let matches = grep_content(&content, &re);
-
+            let total_matches: usize = results.iter().map(|r| r.matches.len()).sum();
             common::log_info!(
-                "Grep file: {} pattern='{}' matches={}",
-                path,
+                "Grep {} files: pattern='{}' total_matches={}",
+                results.len(),
                 pattern,
-                matches.len()
+                total_matches
             );
-            NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
+            NodeCommandResult::Agent(AgentCommandResult::GrepFilesResult {
                 file_type,
-                path,
                 pattern,
-                matches,
-                error: None,
+                results,
+                errors,
             })
         }
     }

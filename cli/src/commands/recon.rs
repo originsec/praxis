@@ -129,13 +129,13 @@ pub async fn execute(client: &mut CliClient, command: ReconCommand, output: &Out
         }
         ReconCommand::ConfigGrep { node, pattern, path } => {
             match path {
-                Some(p) => grep_file(client, &node, NodeFileType::Config, &p, &pattern, output).await,
+                Some(p) => grep_files(client, &node, NodeFileType::Config, &[p], &pattern, output).await,
                 None => grep_all(client, &node, NodeFileType::Config, &pattern, output).await,
             }
         }
         ReconCommand::SessionGrep { node, pattern, path } => {
             match path {
-                Some(p) => grep_file(client, &node, NodeFileType::Session, &p, &pattern, output).await,
+                Some(p) => grep_files(client, &node, NodeFileType::Session, &[p], &pattern, output).await,
                 None => grep_all(client, &node, NodeFileType::Session, &pattern, output).await,
             }
         }
@@ -436,11 +436,11 @@ async fn read_file(
     }
 }
 
-async fn grep_file(
+async fn grep_files(
     client: &CliClient,
     node_prefix: &str,
     file_type: NodeFileType,
-    path: &str,
+    paths: &[String],
     pattern: &str,
     output: &OutputFormat,
 ) -> Result<()> {
@@ -448,9 +448,9 @@ async fn grep_file(
     let node_id = find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
-    let cmd = NodeCmd::Agent(NodeAgentCommand::GrepFile {
+    let cmd = NodeCmd::Agent(NodeAgentCommand::GrepFiles {
         file_type,
-        path: path.to_string(),
+        paths: paths.to_vec(),
         pattern: pattern.to_string(),
     });
     let spinner = if matches!(output, OutputFormat::Text) {
@@ -463,41 +463,53 @@ async fn grep_file(
     let response = response?;
 
     match response.result {
-        NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
+        NodeCommandResult::Agent(AgentCommandResult::GrepFilesResult {
             file_type: result_file_type,
-            path,
             pattern,
-            matches,
-            error,
+            results,
+            errors,
         }) => {
             match output {
                 OutputFormat::Json => {
+                    let files: Vec<_> = results.iter().map(|r| json!({
+                        "path": r.path, "matches": r.matches, "match_count": r.matches.len(), "error": r.error
+                    })).collect();
                     print_json(&json!({
                         "file_type": format!("{:?}", result_file_type),
-                        "path": path,
                         "pattern": pattern,
-                        "matches": matches,
-                        "match_count": matches.len(),
-                        "error": error
+                        "results": files,
+                        "files_with_matches": results.iter().filter(|r| !r.matches.is_empty()).count(),
+                        "errors": errors
                     }));
                 }
                 OutputFormat::Text => {
-                    if let Some(error) = error {
-                        return Err(anyhow!(error));
-                    }
                     let title = match result_file_type {
                         NodeFileType::Config => "Config Grep Results",
                         NodeFileType::Session => "Session Grep Results",
                     };
                     print_header(title);
                     println!();
-                    println!("  Path: {}", path);
                     println!("  Pattern: {}", pattern);
-                    println!("  Matches: {}", matches.len());
-                    println!();
-                    for m in matches {
-                        println!("  {:>6}: {}", m.line_number, m.line_content);
+
+                    for r in &results {
+                        if let Some(error) = &r.error {
+                            println!("  {}: error: {}", r.path, error);
+                            continue;
+                        }
+                        if r.matches.is_empty() {
+                            continue;
+                        }
+                        println!();
+                        println!("  {} ({} matches)", r.path, r.matches.len());
+                        for m in &r.matches {
+                            println!("    {:>6}: {}", m.line_number, m.line_content);
+                        }
                     }
+
+                    for e in &errors {
+                        println!("  Warning: {}", e);
+                    }
+
                     println!();
                     print_success("Grep complete");
                 }
@@ -582,61 +594,74 @@ async fn grep_all(
     };
 
     //
-    // Collect results, keeping only files with matches.
+    // Single round-trip: send all paths in one GrepFiles command.
     //
 
-    let mut results = Vec::new();
-    for path in &paths {
-        let cmd = NodeCmd::Agent(NodeAgentCommand::GrepFile {
-            file_type,
-            path: path.to_string(),
-            pattern: pattern.to_string(),
-        });
-        let response = client.send_command(&node_id, cmd).await?;
-        if let NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
-            path, matches, error, ..
-        }) = response.result {
-            if error.is_none() && !matches.is_empty() {
-                results.push((path, matches));
-            }
-        }
-    }
-
+    let cmd = NodeCmd::Agent(NodeAgentCommand::GrepFiles {
+        file_type,
+        paths: paths.clone(),
+        pattern: pattern.to_string(),
+    });
+    let response = client.send_command(&node_id, cmd).await;
     if let Some(s) = spinner { s.finish().await; }
+    let response = response?;
 
     let title = match file_type {
         NodeFileType::Config => "Config Grep Results",
         NodeFileType::Session => "Session Grep Results",
     };
 
-    match output {
-        OutputFormat::Json => {
-            let entries: Vec<_> = results.iter().map(|(path, matches)| {
-                json!({ "path": path, "matches": matches, "match_count": matches.len() })
-            }).collect();
-            print_json(&json!({
-                "pattern": pattern,
-                "files_with_matches": entries.len(),
-                "results": entries,
-            }));
-        }
-        OutputFormat::Text => {
-            print_header(title);
-            println!();
-            println!("  Pattern: {}", pattern);
-            println!("  Files with matches: {} / {}", results.len(), paths.len());
+    match response.result {
+        NodeCommandResult::Agent(AgentCommandResult::GrepFilesResult {
+            pattern, results, errors, ..
+        }) => {
+            let matched: Vec<_> = results.iter()
+                .filter(|r| r.error.is_none() && !r.matches.is_empty())
+                .collect();
 
-            for (path, matches) in &results {
-                println!();
-                println!("  {} ({} matches)", path, matches.len());
-                for m in matches {
-                    println!("  {:>6}: {}", m.line_number, m.line_content);
+            match output {
+                OutputFormat::Json => {
+                    let entries: Vec<_> = matched.iter().map(|r| {
+                        json!({ "path": r.path, "matches": r.matches, "match_count": r.matches.len() })
+                    }).collect();
+                    print_json(&json!({
+                        "pattern": pattern,
+                        "files_with_matches": entries.len(),
+                        "total_files": paths.len(),
+                        "results": entries,
+                        "errors": errors,
+                    }));
+                }
+                OutputFormat::Text => {
+                    print_header(title);
+                    println!();
+                    println!("  Pattern: {}", pattern);
+                    println!("  Files with matches: {} / {}", matched.len(), paths.len());
+
+                    for r in &matched {
+                        println!();
+                        println!("  {} ({} matches)", r.path, r.matches.len());
+                        for m in &r.matches {
+                            println!("    {:>6}: {}", m.line_number, m.line_content);
+                        }
+                    }
+
+                    for e in &errors {
+                        println!("  Warning: {}", e);
+                    }
+
+                    println!();
+                    print_success("Grep complete");
                 }
             }
-
-            println!();
-            print_success("Grep complete");
+            Ok(())
         }
+        NodeCommandResult::Error { message } => {
+            if matches!(output, OutputFormat::Json) {
+                print_json(&json!({"status": "error", "message": message}));
+            }
+            Err(anyhow!("{}", message))
+        }
+        _ => Err(anyhow!("Unexpected response")),
     }
-    Ok(())
 }

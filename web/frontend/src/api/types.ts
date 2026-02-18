@@ -128,7 +128,7 @@ export type AgentCommand =
   | { Select: { short_name: string } }
   | { ReadFile: { file_type: AgentFileType; path: string; line_start?: number; line_end?: number } }
   | { WriteFile: { file_type: AgentFileType; path: string; contents: string } }
-  | { GrepFile: { file_type: AgentFileType; path: string; pattern: string } };
+  | { GrepFiles: { file_type: AgentFileType; paths: string[]; pattern: string } };
 
 export type AgentFileType = 'Config' | 'Session';
 
@@ -205,11 +205,17 @@ export type AgentCommandResult =
   | { YoloSet: { enabled: boolean } }
   | { WriteFileResult: { file_type: AgentFileType; path: string; success: boolean; error?: string } }
   | { ReadFileResult: { file_type: AgentFileType; path: string; content?: string; line_start?: number; line_end?: number; error?: string } }
-  | { GrepFileResult: { file_type: AgentFileType; path: string; pattern: string; matches: GrepMatch[]; error?: string } };
+  | { GrepFilesResult: { file_type: AgentFileType; pattern: string; results: GrepFileEntry[]; errors: string[] } };
 
 export interface GrepMatch {
   line_number: number;
   line_content: string;
+}
+
+export interface GrepFileEntry {
+  path: string;
+  matches: GrepMatch[];
+  error?: string;
 }
 
 export type SessionCommandResult =

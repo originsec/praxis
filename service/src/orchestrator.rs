@@ -24,11 +24,12 @@ const ORCHESTRATOR_PROMPT: &str = include_str!("prompts/orchestrator.prompt");
 
 /// Orchestrator session state
 struct OrchestratorSession {
-    prompt_tx: mpsc::Sender<String>,
+    prompt_tx: mpsc::Sender<(String, String)>,
     #[allow(dead_code)]
     task_handle: tokio::task::JoinHandle<()>,
     stop_flag: Arc<AtomicBool>,
     cancel_flag: Arc<AtomicBool>,
+    current_prompt_id: RwLock<String>,
 }
 
 impl OrchestratorSession {
@@ -80,6 +81,7 @@ impl OrchestratorManager {
                 publish_channel,
                 client_id,
                 ClientDirectMessage::OrchestratorError {
+                    prompt_id: String::new(),
                     message: "MCP server is not enabled. Go to Settings > MCP Server to enable it before using the Orchestrator.".to_string(),
                 },
             ).await;
@@ -98,6 +100,7 @@ impl OrchestratorManager {
                     publish_channel,
                     client_id,
                     ClientDirectMessage::OrchestratorError {
+                        prompt_id: String::new(),
                         message: "No model selected for Orchestrator. Go to Settings > LLM Providers > Feature Selection to configure.".to_string(),
                     },
                 ).await;
@@ -110,6 +113,7 @@ impl OrchestratorManager {
                 publish_channel,
                 client_id,
                 ClientDirectMessage::OrchestratorError {
+                    prompt_id: String::new(),
                     message: "No API key configured for the selected model. Go to Settings > LLM Providers to configure.".to_string(),
                 },
             ).await;
@@ -134,6 +138,7 @@ impl OrchestratorManager {
                     publish_channel,
                     client_id,
                     ClientDirectMessage::OrchestratorError {
+                        prompt_id: String::new(),
                         message: format!("Failed to create AI client: {}", e),
                     },
                 ).await;
@@ -158,7 +163,7 @@ impl OrchestratorManager {
             },
         ).await;
 
-        let (prompt_tx, mut prompt_rx) = mpsc::channel::<String>(32);
+        let (prompt_tx, mut prompt_rx) = mpsc::channel::<(String, String)>(32);
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_flag_clone = Arc::clone(&stop_flag);
         let cancel_flag = Arc::new(AtomicBool::new(false));
@@ -188,6 +193,7 @@ impl OrchestratorManager {
                             &publish_channel_clone,
                             &client_id_owned,
                             ClientDirectMessage::OrchestratorError {
+                                prompt_id: String::new(),
                                 message: format!("Failed to connect to MCP server at {}: {}", sse_url, e),
                             },
                         ).await;
@@ -203,6 +209,7 @@ impl OrchestratorManager {
                             &publish_channel_clone,
                             &client_id_owned,
                             ClientDirectMessage::OrchestratorError {
+                                prompt_id: String::new(),
                                 message: format!("Failed to initialize MCP client: {}", e),
                             },
                         ).await;
@@ -220,6 +227,7 @@ impl OrchestratorManager {
                             &publish_channel_clone,
                             &client_id_owned,
                             ClientDirectMessage::OrchestratorError {
+                                prompt_id: String::new(),
                                 message: format!("Failed to list MCP tools: {}", e),
                             },
                         ).await;
@@ -245,7 +253,7 @@ impl OrchestratorManager {
                 let mut conversation_history: Vec<Message> = Vec::new();
                 conversation_history.push(Message::system(&system_prompt));
 
-                while let Some(prompt) = prompt_rx.recv().await {
+                while let Some((prompt_id, prompt)) = prompt_rx.recv().await {
                     if stop_flag_clone.load(Ordering::SeqCst) {
                         break;
                     }
@@ -294,7 +302,7 @@ impl OrchestratorManager {
                                 let _ = send_to_client(
                                     &publish_channel_clone,
                                     &client_id_owned,
-                                    ClientDirectMessage::OrchestratorError { message: err_msg },
+                                    ClientDirectMessage::OrchestratorError { prompt_id: prompt_id.clone(), message: err_msg },
                                 ).await;
                                 conversation_history.pop();
                                 break;
@@ -306,6 +314,7 @@ impl OrchestratorManager {
                                 &publish_channel_clone,
                                 &client_id_owned,
                                 ClientDirectMessage::OrchestratorTokenUsage {
+                                    prompt_id: prompt_id.clone(),
                                     prompt_tokens: usage.prompt_tokens,
                                     completion_tokens: usage.completion_tokens,
                                     total_tokens: usage.total_tokens,
@@ -330,6 +339,7 @@ impl OrchestratorManager {
                                 &publish_channel_clone,
                                 &client_id_owned,
                                 ClientDirectMessage::OrchestratorToolExecuting {
+                                    prompt_id: prompt_id.clone(),
                                     name: tool_name.clone(),
                                     input: tool_input_display,
                                 },
@@ -357,7 +367,7 @@ impl OrchestratorManager {
                                             let _ = send_to_client(
                                                 &publish_channel_clone,
                                                 &client_id_owned,
-                                                ClientDirectMessage::OrchestratorPlanUpdated { plan },
+                                                ClientDirectMessage::OrchestratorPlanUpdated { prompt_id: prompt_id.clone(), plan },
                                             ).await;
                                         }
                                     }
@@ -368,6 +378,7 @@ impl OrchestratorManager {
                                 &publish_channel_clone,
                                 &client_id_owned,
                                 ClientDirectMessage::OrchestratorToolExecuted {
+                                    prompt_id: prompt_id.clone(),
                                     name: tool_name.clone(),
                                     display,
                                     success,
@@ -385,7 +396,7 @@ impl OrchestratorManager {
                                 let _ = send_to_client(
                                     &publish_channel_clone,
                                     &client_id_owned,
-                                    ClientDirectMessage::OrchestratorContent { content: remaining.to_string() },
+                                    ClientDirectMessage::OrchestratorContent { prompt_id: prompt_id.clone(), content: remaining.to_string() },
                                 ).await;
                             }
 
@@ -404,7 +415,7 @@ impl OrchestratorManager {
                             let _ = send_to_client(
                                 &publish_channel_clone,
                                 &client_id_owned,
-                                ClientDirectMessage::OrchestratorContent { content: full_response.clone() },
+                                ClientDirectMessage::OrchestratorContent { prompt_id: prompt_id.clone(), content: full_response.clone() },
                             ).await;
                         }
 
@@ -415,7 +426,7 @@ impl OrchestratorManager {
                     let _ = send_to_client(
                         &publish_channel_clone,
                         &client_id_owned,
-                        ClientDirectMessage::OrchestratorDone,
+                        ClientDirectMessage::OrchestratorDone { prompt_id: prompt_id.clone() },
                     ).await;
                 }
 
@@ -426,6 +437,7 @@ impl OrchestratorManager {
             }),
             stop_flag,
             cancel_flag,
+            current_prompt_id: RwLock::new(String::new()),
         };
 
         {
@@ -434,15 +446,17 @@ impl OrchestratorManager {
         }
     }
 
-    pub async fn send_prompt(&self, client_id: &str, message: String, publish_channel: &Channel) {
+    pub async fn send_prompt(&self, client_id: &str, prompt_id: String, message: String, publish_channel: &Channel) {
         let sessions = self.sessions.read().await;
         if let Some(session) = sessions.get(client_id) {
-            if let Err(e) = session.prompt_tx.send(message).await {
+            *session.current_prompt_id.write().await = prompt_id.clone();
+            if let Err(e) = session.prompt_tx.send((prompt_id.clone(), message)).await {
                 common::log_warn!("Failed to send prompt to Orchestrator session: {}", e);
                 let _ = send_to_client(
                     publish_channel,
                     client_id,
                     ClientDirectMessage::OrchestratorError {
+                        prompt_id,
                         message: format!("Failed to send prompt: {}", e),
                     },
                 ).await;
@@ -452,6 +466,7 @@ impl OrchestratorManager {
                 publish_channel,
                 client_id,
                 ClientDirectMessage::OrchestratorError {
+                    prompt_id,
                     message: "No active Orchestrator session. Start one first.".to_string(),
                 },
             ).await;
@@ -472,13 +487,16 @@ impl OrchestratorManager {
 
     pub async fn cancel_inference(&self, client_id: &str, publish_channel: &Channel) {
         let sessions = self.sessions.read().await;
-        if let Some(session) = sessions.get(client_id) {
+        let prompt_id = if let Some(session) = sessions.get(client_id) {
             session.cancel();
-        }
+            session.current_prompt_id.read().await.clone()
+        } else {
+            String::new()
+        };
         let _ = send_to_client(
             publish_channel,
             client_id,
-            ClientDirectMessage::OrchestratorDone,
+            ClientDirectMessage::OrchestratorDone { prompt_id },
         ).await;
     }
 }

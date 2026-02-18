@@ -558,9 +558,10 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
-    pub async fn send_orchestrator_prompt(&self, prompt: String) -> Result<()> {
+    pub async fn send_orchestrator_prompt(&self, prompt_id: String, prompt: String) -> Result<()> {
         let message = ClientSignalMessage::OrchestratorPrompt {
             client_id: self.state.client_id.clone(),
+            prompt_id,
             message: prompt,
         };
         self.publish_signal(message).await
@@ -1075,29 +1076,29 @@ impl RabbitMqClient {
             ClientDirectMessage::OrchestratorStarted { provider, model } => {
                 self.state.broadcast(ServerMessage::OrchestratorStarted { provider, model });
             }
-            ClientDirectMessage::OrchestratorContent { content } => {
-                self.state.broadcast(ServerMessage::OrchestratorContent { content });
+            ClientDirectMessage::OrchestratorContent { prompt_id, content } => {
+                self.state.broadcast(ServerMessage::OrchestratorContent { prompt_id, content });
             }
-            ClientDirectMessage::OrchestratorToolExecuting { name, input } => {
-                self.state.broadcast(ServerMessage::OrchestratorToolExecuting { name, input });
+            ClientDirectMessage::OrchestratorToolExecuting { prompt_id, name, input } => {
+                self.state.broadcast(ServerMessage::OrchestratorToolExecuting { prompt_id, name, input });
             }
-            ClientDirectMessage::OrchestratorToolExecuted { name, display, success, result } => {
-                self.state.broadcast(ServerMessage::OrchestratorToolExecuted { name, display, success, result });
+            ClientDirectMessage::OrchestratorToolExecuted { prompt_id, name, display, success, result } => {
+                self.state.broadcast(ServerMessage::OrchestratorToolExecuted { prompt_id, name, display, success, result });
             }
-            ClientDirectMessage::OrchestratorPlanUpdated { plan } => {
-                self.state.broadcast(ServerMessage::OrchestratorPlanUpdated { plan });
+            ClientDirectMessage::OrchestratorPlanUpdated { prompt_id, plan } => {
+                self.state.broadcast(ServerMessage::OrchestratorPlanUpdated { prompt_id, plan });
             }
-            ClientDirectMessage::OrchestratorDone => {
-                self.state.broadcast(ServerMessage::OrchestratorDone);
+            ClientDirectMessage::OrchestratorDone { prompt_id } => {
+                self.state.broadcast(ServerMessage::OrchestratorDone { prompt_id });
             }
             ClientDirectMessage::OrchestratorStopped => {
                 self.state.broadcast(ServerMessage::OrchestratorStopped);
             }
-            ClientDirectMessage::OrchestratorError { message } => {
-                self.state.broadcast(ServerMessage::OrchestratorError { message });
+            ClientDirectMessage::OrchestratorError { prompt_id, message } => {
+                self.state.broadcast(ServerMessage::OrchestratorError { prompt_id, message });
             }
-            ClientDirectMessage::OrchestratorTokenUsage { prompt_tokens, completion_tokens, total_tokens } => {
-                self.state.broadcast(ServerMessage::OrchestratorTokenUsage { prompt_tokens, completion_tokens, total_tokens });
+            ClientDirectMessage::OrchestratorTokenUsage { prompt_id, prompt_tokens, completion_tokens, total_tokens } => {
+                self.state.broadcast(ServerMessage::OrchestratorTokenUsage { prompt_id, prompt_tokens, completion_tokens, total_tokens });
             }
 
             //

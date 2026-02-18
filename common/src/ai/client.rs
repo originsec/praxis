@@ -77,6 +77,14 @@ pub fn create_ai_client(provider: Provider, api_key: String) -> Result<AiClient>
             api_key,
             "https://integrate.api.nvidia.com/v1".to_string(),
         ))),
+        Provider::MiniMax => Ok(AiClient::OpenAI(OpenAIClient::with_base_url(
+            api_key,
+            "https://api.minimax.io/v1".to_string(),
+        ))),
+        Provider::Moonshot => Ok(AiClient::OpenAI(OpenAIClient::with_base_url(
+            api_key,
+            "https://api.moonshot.ai/v1".to_string(),
+        ))),
     }
 }
 

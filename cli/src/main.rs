@@ -34,7 +34,7 @@ struct Cli {
     output: OutputFormat,
 
     /// Command timeout in seconds
-    #[arg(short = 't', long = "timeout", default_value = "300")]
+    #[arg(short = 't', long = "timeout", default_value = "600")]
     timeout: u64,
 
     /// Run a single command and exit

@@ -590,7 +590,7 @@ impl McpServerManager {
             let url = rabbitmq_url.clone();
             let client = tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(async {
-                    ServiceMcpClient::connect(&url, 120).await
+                    ServiceMcpClient::connect(&url, 600).await
                 })
             });
             match client {

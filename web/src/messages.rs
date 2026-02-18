@@ -75,6 +75,7 @@ pub enum BrowserMessage {
     OrchestratorStart,
     /// Send a prompt to Orchestrator
     OrchestratorPrompt {
+        prompt_id: String,
         message: String,
     },
     /// Stop/interrupt Orchestrator session
@@ -381,15 +382,18 @@ pub enum ServerMessage {
     },
     /// Orchestrator streaming text content
     OrchestratorContent {
+        prompt_id: String,
         content: String,
     },
     /// Orchestrator started executing a tool
     OrchestratorToolExecuting {
+        prompt_id: String,
         name: String,
         input: Option<String>,
     },
     /// Orchestrator finished executing a tool
     OrchestratorToolExecuted {
+        prompt_id: String,
         name: String,
         display: String,
         success: bool,
@@ -397,18 +401,23 @@ pub enum ServerMessage {
     },
     /// Orchestrator plan updated
     OrchestratorPlanUpdated {
+        prompt_id: String,
         plan: OrchestratorPlan,
     },
     /// Orchestrator response complete
-    OrchestratorDone,
+    OrchestratorDone {
+        prompt_id: String,
+    },
     /// Orchestrator session stopped
     OrchestratorStopped,
     /// Orchestrator error
     OrchestratorError {
+        prompt_id: String,
         message: String,
     },
     /// Orchestrator token usage update
     OrchestratorTokenUsage {
+        prompt_id: String,
         prompt_tokens: u32,
         completion_tokens: u32,
         total_tokens: u32,

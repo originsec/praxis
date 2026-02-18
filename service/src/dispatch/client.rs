@@ -193,8 +193,8 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
 
         ClientSignalMessage::OrchestratorStart { client_id } =>
             handle_orchestrator_start(ctx, client_id).await,
-        ClientSignalMessage::OrchestratorPrompt { client_id, message } =>
-            handle_orchestrator_prompt(ctx, client_id, message).await,
+        ClientSignalMessage::OrchestratorPrompt { client_id, prompt_id, message } =>
+            handle_orchestrator_prompt(ctx, client_id, prompt_id, message).await,
         ClientSignalMessage::OrchestratorStop { client_id } =>
             handle_orchestrator_stop(ctx, client_id).await,
         ClientSignalMessage::OrchestratorCancel { client_id } =>
@@ -2190,13 +2190,13 @@ async fn handle_orchestrator_start(ctx: &ServiceContext, client_id: String) {
         .await;
 }
 
-async fn handle_orchestrator_prompt(ctx: &ServiceContext, client_id: String, message: String) {
+async fn handle_orchestrator_prompt(ctx: &ServiceContext, client_id: String, prompt_id: String, message: String) {
     common::log_info!(
         "Received OrchestratorPrompt from client {}",
         &client_id[..8.min(client_id.len())]
     );
     ctx.orchestrator_manager
-        .send_prompt(&client_id, message, &ctx.client_publish_channel)
+        .send_prompt(&client_id, prompt_id, message, &ctx.client_publish_channel)
         .await;
 }
 

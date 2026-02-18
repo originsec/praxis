@@ -15,6 +15,38 @@ impl Spinner {
         Self::spawn(message, true)
     }
 
+    pub fn start_cursor() -> Self {
+        let (tx, mut rx) = tokio::sync::watch::channel(false);
+
+        let handle = tokio::spawn(async move {
+            let mut visible = true;
+
+            loop {
+                if *rx.borrow() {
+                    break;
+                }
+
+                if visible {
+                    print!("\r  {}", "\u{258D}".dimmed());
+                } else {
+                    print!("\r  \x1B[2K");
+                }
+                let _ = std::io::stdout().flush();
+                visible = !visible;
+
+                tokio::select! {
+                    _ = rx.changed() => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(530)) => {}
+                }
+            }
+
+            print!("\r\x1B[2K");
+            let _ = std::io::stdout().flush();
+        });
+
+        Self { stop: tx, handle }
+    }
+
     fn spawn(message: &str, show_elapsed: bool) -> Self {
         let (tx, mut rx) = tokio::sync::watch::channel(false);
         let msg = message.to_string();
