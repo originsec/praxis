@@ -79,6 +79,28 @@ impl SemanticOpsManager {
         }
     }
 
+    /// Cancel any operations left as Queued or Running in the database from a
+    /// previous run. These are zombies — no in-memory state exists for them.
+    pub async fn cancel_stale_operations(&self) -> Result<usize> {
+        let mut count = 0;
+
+        for status in [SemanticOpStatus::Queued, SemanticOpStatus::Running] {
+            let ops = self.database.list_by_status(status).await?;
+            for op in &ops {
+                self.database.update_status(
+                    &op.operation_id,
+                    SemanticOpStatus::Cancelled,
+                    Some(Utc::now()),
+                    None,
+                    Some("Cancelled: service restarted".to_string()),
+                ).await?;
+            }
+            count += ops.len();
+        }
+
+        Ok(count)
+    }
+
     /// Queue an operation for execution by name
     /// Looks up the operation definition from the database
     /// Returns (operation_id, queue_position)
@@ -219,7 +241,30 @@ impl SemanticOpsManager {
             op_to_node_guard.get(operation_id).cloned()
         };
 
-        let node_id = node_id.ok_or_else(|| anyhow::anyhow!("Operation not found"))?;
+        //
+        // If not found in memory, fall back to database. This handles cases
+        // where in-memory state was lost (e.g. service restart) but the
+        // operation still exists in the DB.
+        //
+
+        let node_id = match node_id {
+            Some(id) => id,
+            None => {
+                if let Some(op) = self.database.get_operation(operation_id).await? {
+                    if op.status == SemanticOpStatus::Queued || op.status == SemanticOpStatus::Running {
+                        self.database.update_status(
+                            operation_id,
+                            SemanticOpStatus::Cancelled,
+                            Some(Utc::now()),
+                            None,
+                            Some("Cancelled by user".to_string()),
+                        ).await?;
+                        return Ok(());
+                    }
+                }
+                return Err(anyhow::anyhow!("Operation not found"));
+            }
+        };
 
         //
         // Check if operation is running.

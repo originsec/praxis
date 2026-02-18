@@ -471,7 +471,7 @@ export function OperationsPage() {
                       </td>
                       <td className="px-4 py-2">
                         <div className="flex items-center gap-2 justify-end" onClick={(e) => e.stopPropagation()}>
-                          {op.status === 'Running' && (
+                          {(op.status === 'Running' || op.status === 'Queued') && (
                             <button
                               onClick={() => cancelOperation(op.operation_id)}
                               className="p-2  hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
