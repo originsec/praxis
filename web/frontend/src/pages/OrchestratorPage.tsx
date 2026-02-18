@@ -20,6 +20,7 @@ import {
   ChevronUp,
   Download,
   Activity,
+  Brain,
 } from 'lucide-react';
 import { exportOrchestratorSession, downloadTextFile } from '../utils/export';
 import { useApp, type OrchestratorMessage, type OrchestratorToolExecution } from '../context/AppContext';
@@ -118,9 +119,10 @@ function ThinkingDisplay({ blocks, collapsible = false }: { blocks: string[]; co
     <div className="mb-2">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 text-xs px-3 py-1.5 rounded bg-[var(--bg-tertiary)] text-muted/40 hover:text-muted/60 hover:bg-[var(--bg-secondary)] transition-colors w-full text-left"
+        className="flex items-center gap-2 text-xs px-3 py-1.5 rounded bg-[var(--bg-tertiary)] text-muted hover:bg-[var(--bg-secondary)] transition-colors w-full text-left"
       >
         {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <Brain size={12} />
         <span>
           {blocks.length} thinking block{blocks.length !== 1 ? 's' : ''}
         </span>
