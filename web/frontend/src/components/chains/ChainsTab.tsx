@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Play, Trash2, Clock, Edit2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ChainBuilder } from './ChainBuilder';
@@ -35,10 +35,11 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
     deleteChain,
     runChain,
     clearChainStatus,
+    clearLastCreatedChain,
     getConfig,
   } = useApp();
 
-  const { chains, currentChain, chainError, chainSuccess } = state.chains;
+  const { chains, currentChain, chainError, chainSuccess, lastCreatedChainId } = state.chains;
   const operationDefs = state.operationDefs;
 
   //
@@ -68,6 +69,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
   //
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [chainToDelete, setChainToDelete] = useState<ChainDefinitionInfo | null>(null);
+
 
   //
   // Fetch chains on mount.
@@ -115,6 +117,17 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
       setShowBuilder(true);
     }
   }, [editingChainId, currentChain]);
+
+  //
+  // After creating a new chain, transition to editing it so subsequent saves
+  // update the same instance instead of creating duplicates.
+  //
+  useEffect(() => {
+    if (lastCreatedChainId && showBuilder && !editingChainId) {
+      setEditingChainId(lastCreatedChainId);
+      clearLastCreatedChain();
+    }
+  }, [lastCreatedChainId, showBuilder, editingChainId, clearLastCreatedChain]);
 
   //
   // Handle external trigger to create new chain.
@@ -170,8 +183,26 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
     if (editingChainId) {
       updateChain(editingChainId, definition);
     } else {
+
+      //
+      // If a chain with this name already exists, update it instead of
+      // creating a duplicate.
+      //
+
+      const existing = chains.find(
+        c => c.name.toLowerCase() === definition.name.trim().toLowerCase()
+      );
+      if (existing) {
+        setEditingChainId(existing.id);
+        updateChain(existing.id, definition);
+        return;
+      }
       createChain(definition);
     }
+  };
+
+  const handleDuplicate = (definition: ChainDefinitionInput) => {
+    createChain(definition);
     setShowBuilder(false);
     setEditingChainId(null);
   };
@@ -183,13 +214,16 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
 
   if (showBuilder) {
     return (
-      <div className="h-[calc(100vh-280px)] min-h-[300px] border border-subtle ascii-box">
+      <div className="flex-1 min-h-[400px] border border-subtle" style={{ height: 'calc(100vh - 160px)' }}>
         <ChainBuilder
           chain={editingChainId ? currentChain : null}
           onSave={handleSave}
+          onDuplicate={handleDuplicate}
           onCancel={handleCancel}
           operationDefs={operationDefs}
           modelDefs={modelDefs}
+          saveStatus={chainSuccess}
+          saveError={chainError}
         />
       </div>
     );
@@ -361,6 +395,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
           </div>
         </div>
       </Modal>
+
     </div>
   );
 }

@@ -47,10 +47,10 @@ pub fn fmt_agent_start(provider: &str, model: &str, max_iterations: usize) -> St
 }
 
 /// Format the operation complete message
-pub fn fmt_complete(summary: &str) -> String {
+pub fn fmt_complete(result: &str, summary: &str) -> String {
     format!(
-        "{} Operation Complete {}\nSummary: {}\n\n",
-        PREFIX_SECTION, PREFIX_SECTION, summary
+        "{} Operation Complete [{}] {}\nSummary: {}\n\n",
+        PREFIX_SECTION, result, PREFIX_SECTION, summary
     )
 }
 

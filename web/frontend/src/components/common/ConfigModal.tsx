@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Modal } from './Modal';
-import { Loader2, Save, ToggleLeft, ToggleRight } from 'lucide-react';
+import { ChevronRight, Loader2, Save, Circle, CircleCheck } from 'lucide-react';
 
 export type FieldType = 'text' | 'textarea' | 'select' | 'number' | 'toggle';
 
@@ -25,6 +25,8 @@ export interface FieldConfig {
 
 export interface SectionConfig {
   type: 'section';
+  title?: string;
+  collapsible?: boolean;
   fields: FieldConfig[];
 }
 
@@ -109,11 +111,11 @@ export function ConfigModal({
           className="flex items-center gap-2 disabled:opacity-50 hover:opacity-80 transition-opacity"
         >
           {boolValue ? (
-            <ToggleRight size={20} className="text-muted" />
+            <CircleCheck size={16} className="text-[var(--accent-error)]" />
           ) : (
-            <ToggleLeft size={20} className="text-muted" />
+            <Circle size={16} className="text-[var(--text-secondary)]" />
           )}
-          <span className={`text-xs tracking-wider ${boolValue ? 'text-muted' : 'text-muted/60'}`}>
+          <span className={`text-xs tracking-wider ${boolValue ? 'text-[var(--accent-error)]' : 'text-[var(--text-secondary)]'}`}>
             {field.label}
           </span>
         </button>
@@ -186,7 +188,27 @@ export function ConfigModal({
     );
   };
 
-  const renderSection = (section: SectionConfig, index: number) => {
+  //
+  // Track collapsed state for collapsible sections by index.
+  //
+  const [collapsedSections, setCollapsedSections] = useState<Set<number>>(
+    () => new Set(
+      config
+        .map((item, i) => (item.type === 'section' && (item as SectionConfig).collapsible ? i : -1))
+        .filter(i => i >= 0)
+    )
+  );
+
+  const toggleSection = (index: number) => {
+    setCollapsedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+
+  const renderSectionFields = (section: SectionConfig) => {
     const fullSpanFields = section.fields.filter(f => f.span === 'full');
     const halfSpanFields = section.fields.filter(f => !f.span || f.span === 'half');
     const toggleFields = section.fields.filter(f => f.type === 'toggle');
@@ -194,7 +216,7 @@ export function ConfigModal({
     const nonToggleHalfSpan = halfSpanFields.filter(f => f.type !== 'toggle');
 
     return (
-      <div key={`section-${index}`} className="space-y-3 p-2.5 bg-[var(--bg-secondary)]">
+      <>
         {nonToggleFullSpan.map(renderField)}
         {nonToggleHalfSpan.length > 0 && (
           <div className="grid grid-cols-2 gap-3">
@@ -204,6 +226,40 @@ export function ConfigModal({
         {toggleFields.length > 0 && (
           <div className="flex items-center gap-6">
             {toggleFields.map(renderField)}
+          </div>
+        )}
+      </>
+    );
+  };
+
+  const renderSection = (section: SectionConfig, index: number) => {
+    const isCollapsible = section.collapsible;
+    const isCollapsed = collapsedSections.has(index);
+
+    return (
+      <div key={`section-${index}`} className="bg-[var(--bg-secondary)]">
+        {section.title && (
+          <button
+            type="button"
+            onClick={isCollapsible ? () => toggleSection(index) : undefined}
+            className={`flex items-center gap-1.5 px-2.5 pt-2.5 pb-1 text-[11px] tracking-widest text-[var(--text-secondary)] ${
+              isCollapsible ? 'cursor-pointer hover:text-highlight transition-colors' : ''
+            }`}
+            style={{ letterSpacing: '0.08em' }}
+            disabled={!isCollapsible}
+          >
+            {isCollapsible && (
+              <ChevronRight
+                size={12}
+                className={`transition-transform ${isCollapsed ? '' : 'rotate-90'}`}
+              />
+            )}
+            {section.title.toUpperCase()}
+          </button>
+        )}
+        {!isCollapsed && (
+          <div className="space-y-3 p-2.5">
+            {renderSectionFields(section)}
           </div>
         )}
       </div>

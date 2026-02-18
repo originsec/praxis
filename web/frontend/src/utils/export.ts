@@ -255,13 +255,6 @@ export function exportChainExecution(exec: ChainExecutionUpdate): string {
           lines.push('```');
           lines.push(element.config.prompt);
           lines.push('```');
-        } else if (element.config.type === 'SemanticOutput') {
-          lines.push(`**Type:** Semantic Output`);
-          lines.push('');
-          lines.push('**Prompt:**');
-          lines.push('```');
-          lines.push(element.config.prompt);
-          lines.push('```');
         } else {
           lines.push(`**Type:** ${element.config.type}`);
         }
@@ -363,6 +356,7 @@ export function exportChainDefinition(chain: {
   connections: unknown[];
   disabled?: boolean;
   timeout?: number;
+  positions?: Record<string, { x: number; y: number }>;
 }): object {
   return {
     name: chain.name,
@@ -372,6 +366,7 @@ export function exportChainDefinition(chain: {
     connections: chain.connections,
     disabled: chain.disabled ?? false,
     timeout: chain.timeout,
+    positions: chain.positions,
   };
 }
 

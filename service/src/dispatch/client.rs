@@ -438,8 +438,26 @@ async fn handle_semantic_op_cancel(ctx: &ServiceContext, operation_id: String) {
                 let _ = publish_json_exchange(&ctx.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &message).await;
             }
         }
-        Err(e) => {
-            common::log_error!("Failed to cancel operation: {}", e);
+        Err(_) => {
+            //
+            // Operation not found in manager — check if it's a
+            // chain-spawned operation and cancel the parent chain instead.
+            //
+            if let Ok(Some(op)) = ctx.database.get_operation(&operation_id).await {
+                if let Some(chain_exec_id) = op.chain_execution_id {
+                    common::log_info!(
+                        "Operation {} belongs to chain execution {}, cancelling chain",
+                        operation_id.get(..8).unwrap_or(&operation_id),
+                        chain_exec_id.get(..8).unwrap_or(&chain_exec_id)
+                    );
+                    let cancelled = ctx.chain_executor.cancel(&chain_exec_id).await;
+                    if !cancelled {
+                        common::log_error!("Failed to cancel parent chain execution {}", chain_exec_id.get(..8).unwrap_or(&chain_exec_id));
+                    }
+                    return;
+                }
+            }
+            common::log_error!("Failed to cancel operation: not found in manager or chain");
         }
     }
 }
@@ -672,6 +690,7 @@ async fn handle_opdef_add(ctx: &ServiceContext, client_id: String, content: Stri
         "Received OpDefAdd from client {}",
         &client_id[..8.min(client_id.len())]
     );
+    common::log_debug!("OpDefAdd: content={}", &content[..content.len().min(2000)]);
 
     //
     // Auto-detect format: if content starts with '{', parse as JSON,
@@ -1516,6 +1535,9 @@ async fn handle_chain_get(ctx: &ServiceContext, client_id: String, chain_id: Str
         chain_id
     );
     let chain = ctx.database.get_chain(&chain_id).await.ok().flatten();
+    if let Some(ref c) = chain {
+        common::log_debug!("ChainGet {}: definition={}", chain_id, serde_json::to_string(c).unwrap_or_default());
+    }
     let chain_full = chain.map(|c| common::ChainDefinitionFull {
         id: c.id,
         name: c.name,
@@ -1531,10 +1553,15 @@ async fn handle_chain_get(ctx: &ServiceContext, client_id: String, chain_id: Str
                 to_element: conn.to_element,
                 from_port: conn.from_port,
                 to_port: conn.to_port,
+                condition: conn.condition.map(|c| match c {
+                    database::ConnectionCondition::OnSuccess => common::ConnectionCondition::OnSuccess,
+                    database::ConnectionCondition::OnFailure => common::ConnectionCondition::OnFailure,
+                }),
             })
             .collect(),
         disabled: c.disabled,
         timeout: c.timeout,
+        positions: c.positions.into_iter().map(|(k, v)| (k, common::ElementPosition { x: v.x, y: v.y })).collect(),
         created_at: c.created_at,
         updated_at: c.updated_at,
     });
@@ -1555,6 +1582,7 @@ async fn handle_chain_create(
         "Received ChainCreate from client {}",
         &client_id[..8.min(client_id.len())]
     );
+    common::log_debug!("ChainCreate: definition={}", serde_json::to_string(&definition).unwrap_or_default());
     let now = chrono::Utc::now();
     let chain_id = uuid::Uuid::new_v4().to_string();
     let db_chain = database::ChainDefinition {
@@ -1576,10 +1604,15 @@ async fn handle_chain_create(
                 to_element: c.to_element,
                 from_port: c.from_port,
                 to_port: c.to_port,
+                condition: c.condition.map(|cond| match cond {
+                    common::ConnectionCondition::OnSuccess => database::ConnectionCondition::OnSuccess,
+                    common::ConnectionCondition::OnFailure => database::ConnectionCondition::OnFailure,
+                }),
             })
             .collect(),
         disabled: definition.disabled,
         timeout: definition.timeout,
+        positions: definition.positions.into_iter().map(|(k, v)| (k, database::ElementPosition { x: v.x, y: v.y })).collect(),
         created_at: now,
         updated_at: now,
     };
@@ -1646,6 +1679,7 @@ async fn handle_chain_update(
         &client_id[..8.min(client_id.len())],
         chain_id
     );
+    common::log_debug!("ChainUpdate {}: definition={}", chain_id, serde_json::to_string(&definition).unwrap_or_default());
 
     //
     // Get existing chain to preserve created_at.
@@ -1674,10 +1708,15 @@ async fn handle_chain_update(
                 to_element: c.to_element,
                 from_port: c.from_port,
                 to_port: c.to_port,
+                condition: c.condition.map(|cond| match cond {
+                    common::ConnectionCondition::OnSuccess => database::ConnectionCondition::OnSuccess,
+                    common::ConnectionCondition::OnFailure => database::ConnectionCondition::OnFailure,
+                }),
             })
             .collect(),
         disabled: definition.disabled,
         timeout: definition.timeout,
+        positions: definition.positions.into_iter().map(|(k, v)| (k, database::ElementPosition { x: v.x, y: v.y })).collect(),
         created_at,
         updated_at: chrono::Utc::now(),
     };

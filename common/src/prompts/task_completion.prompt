@@ -3,29 +3,38 @@
 Signal completion ONLY when you have gathered REAL data from tool responses.
 
 ```json
-{"complete": true, "summary": "Brief summary of actions", "result": "The actual data"}
+{"complete": true, "result": true, "summary": "Detailed findings and data from the operation"}
 ```
 
-### CRITICAL REQUIREMENTS
+### FIELDS
 
-1. **'summary'**: Brief description of what you did (1-2 sentences)
+1. **'result'**: Boolean indicating whether the task objective was achieved.
+   - `true` — the objective was met
+   - `false` — the objective could not be achieved
+   - This MUST be a JSON boolean, not a string.
 
-2. **'result'**: Must contain REAL DATA that you received from tool responses.
-   - Copy actual output from the tool results you received
+2. **'summary'**: All findings, data, and details from the operation.
+   - Include REAL DATA from tool responses
    - NEVER fabricate, guess, or make up data
    - NEVER use placeholder text like "..." or "[additional entries]"
+   - When result is `false`, explain what went wrong and why
+   - Must be in markdown format
 
 3. **ONLY complete AFTER receiving tool results**
    - You MUST have called at least one tool
    - You MUST have received the tool's response
-   - The result field MUST contain data FROM that response
+   - The summary MUST contain data FROM that response
 
 ### WHEN TO COMPLETE
 
-Complete ONLY when:
+Set result to `true` when:
 - You have received actual tool results with real data
-- The task objective has been satisfied with that real data
-- You can populate 'result' with actual data from tool responses
+- The task objective has been satisfied
+
+Set result to `false` when:
+- The task objective could not be achieved despite best effort
+- The target or resource was not accessible or not found
+- The required conditions for the task were not met
 
 ### DO NOT complete when:
 - You just sent a tool call (wait for the response first!)
@@ -46,7 +55,5 @@ Tool 'session_prompt' result: file1.txt file2.txt file3.txt
 
 Message 3 (you):
 ```json
-{"complete": true, "summary": "Listed files in directory", "result": "file1.txt file2.txt file3.txt"}
+{"complete": true, "result": true, "summary": "Listed files in directory: file1.txt file2.txt file3.txt"}
 ```
-
-The 'result' field contains the ACTUAL data received from the tool, not made-up data.

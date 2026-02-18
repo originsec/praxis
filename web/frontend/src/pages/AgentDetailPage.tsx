@@ -18,8 +18,8 @@ import {
   Zap,
   Clock,
   Sparkles,
-  ToggleLeft,
-  ToggleRight,
+  Circle,
+  CircleCheck,
   Shield,
   FolderOpen,
   Pencil,
@@ -1114,9 +1114,9 @@ export function AgentDetailPage() {
               title={hasSession ? "Close session to change YOLO mode" : (localYoloMode ? "YOLO mode enabled - agent will auto-approve actions" : "YOLO mode disabled - agent requires approval")}
             >
               {localYoloMode ? (
-                <ToggleRight size={16} className="text-[var(--accent-warning)]" />
+                <CircleCheck size={16} className="text-[var(--accent-warning)]" />
               ) : (
-                <ToggleLeft size={16} className="text-muted" />
+                <Circle size={16} className="text-[var(--text-secondary)]" />
               )}
               <span className={localYoloMode ? "text-[var(--accent-warning)]" : "text-muted"}>
                 YOLO

@@ -255,6 +255,13 @@ CREATE TABLE IF NOT EXISTS agent_chat_messages (
 CREATE INDEX IF NOT EXISTS idx_agent_chat_messages_channel ON agent_chat_messages(channel_id);
 CREATE INDEX IF NOT EXISTS idx_agent_chat_messages_timestamp ON agent_chat_messages(timestamp);
 
+-- Chain memories table (key-value store for chain memory blocks)
+CREATE TABLE IF NOT EXISTS chain_memories (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- Lua agent scripts (centrally managed by service)
 CREATE TABLE IF NOT EXISTS lua_agent_scripts (
     id TEXT PRIMARY KEY,

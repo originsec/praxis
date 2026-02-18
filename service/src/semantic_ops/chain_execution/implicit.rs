@@ -1,9 +1,7 @@
 use chrono::Utc;
 use uuid::Uuid;
 
-use crate::database::{
-    ChainConnection, ChainDefinition, ChainElement, TerminationType, TriggerType,
-};
+use crate::database::{ChainConnection, ChainDefinition, ChainElement, TriggerType};
 
 //
 // Creates an implicit (transient) chain for running a standalone operation.
@@ -26,12 +24,11 @@ pub fn create_implicit_chain(
     let chain_id = format!("implicit_{}", Uuid::new_v4());
     let trigger_id = format!("trigger_{}", Uuid::new_v4());
     let op_id = format!("op_{}", Uuid::new_v4());
-    let term_id = format!("term_{}", Uuid::new_v4());
 
     let now = Utc::now();
 
     //
-    // Create elements: Trigger -> Operation -> Termination.
+    // Create elements: Trigger -> Operation (terminal).
     //
 
     let elements = vec![
@@ -47,34 +44,22 @@ pub fn create_implicit_chain(
             // No session group - the operation's own YOLO mode will be used.
             //
             session_group: None,
-        },
-        ChainElement::Termination {
-            id: term_id.clone(),
-            termination_type: TerminationType::Raw,
-            label: "Output".to_string(),
+            block_config: None,
         },
     ];
 
     //
-    // Create connections: Trigger -> Operation -> Termination.
+    // Create connections: Trigger -> Operation.
     //
 
-    let connections = vec![
-        ChainConnection {
-            id: format!("conn_{}", Uuid::new_v4()),
-            from_element: trigger_id,
-            to_element: op_id.clone(),
-            from_port: 0,
-            to_port: 0,
-        },
-        ChainConnection {
-            id: format!("conn_{}", Uuid::new_v4()),
-            from_element: op_id,
-            to_element: term_id,
-            from_port: 0,
-            to_port: 0,
-        },
-    ];
+    let connections = vec![ChainConnection {
+        id: format!("conn_{}", Uuid::new_v4()),
+        from_element: trigger_id,
+        to_element: op_id,
+        from_port: 0,
+        to_port: 0,
+        condition: None,
+    }];
 
     ChainDefinition {
         id: chain_id,
@@ -88,6 +73,7 @@ pub fn create_implicit_chain(
         // No timeout for implicit chains - the operation has its own timeout.
         //
         timeout: None,
+        positions: std::collections::HashMap::new(),
         created_at: now,
         updated_at: now,
     }

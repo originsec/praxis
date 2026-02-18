@@ -860,20 +860,6 @@ pub enum ChainTriggerType {
     Manual,
 }
 
-/// Termination element types (end of chain)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum ChainTerminationType {
-    /// Raw dump - outputs the accumulated input data
-    Raw,
-    /// Semantic termination - runs LLM with prompt on accumulated data
-    Semantic {
-        prompt: String,
-        /// Optional model override (format: "provider::model")
-        model_ref: Option<String>,
-    },
-}
-
 /// Session group for elements that share a session
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionGroup {
@@ -883,6 +869,31 @@ pub struct SessionGroup {
     pub color: String,
     /// Whether YOLO mode is enabled for the session
     pub yolo_mode: bool,
+    /// Working directory override for this session group
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
+}
+
+/// Per-block configuration overrides
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BlockConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_runtime: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yolo_mode: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
+    /// When false, the element runs as soon as any input fires (for merge
+    /// points with conditional branches). Default (None/true): wait for all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub require_all_inputs: Option<bool>,
+}
+
+/// Memory element mode
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MemoryMode {
+    Store,
+    Retrieve,
 }
 
 /// Chain element variants
@@ -904,6 +915,9 @@ pub enum ChainElement {
         model_ref: Option<String>,
         /// Session group for shared session execution
         session_group: Option<SessionGroup>,
+        /// Per-block configuration overrides
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
     },
     /// Transform element - runs LLM on input and passes result to next element
     Transform {
@@ -914,6 +928,9 @@ pub enum ChainElement {
         model_ref: Option<String>,
         /// Session group for shared session execution
         session_group: Option<SessionGroup>,
+        /// Per-block configuration overrides
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
     },
     /// Generic prompt element - sends prompt to agent via session
     GenericPrompt {
@@ -922,14 +939,34 @@ pub enum ChainElement {
         prompt: String,
         /// Session group for shared session execution
         session_group: Option<SessionGroup>,
+        /// Per-block configuration overrides
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
     },
-    /// Termination element - end of a branch
+    /// Memory element - stores or retrieves data by key
+    Memory {
+        id: String,
+        key: String,
+        mode: MemoryMode,
+    },
+    /// Loop element - retries via port 0 until max_iterations, then exits via port 1
+    Loop {
+        id: String,
+        max_iterations: u32,
+    },
+    /// Termination element - explicit end of chain (exactly one per chain)
     Termination {
         id: String,
-        termination_type: ChainTerminationType,
-        /// Label for this output
-        label: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
     },
+}
+
+/// Condition for when a connection fires
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ConnectionCondition {
+    OnSuccess,
+    OnFailure,
 }
 
 /// Connection between two chain elements
@@ -940,6 +977,15 @@ pub struct ChainConnection {
     pub to_element: String,
     pub from_port: u32,
     pub to_port: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition: Option<ConnectionCondition>,
+}
+
+/// Element position for visual layout.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElementPosition {
+    pub x: f64,
+    pub y: f64,
 }
 
 /// Complete chain definition (for create/update)
@@ -958,6 +1004,8 @@ pub struct ChainDefinitionInput {
     pub disabled: bool,
     /// Timeout for the entire chain execution in seconds
     pub timeout: Option<u64>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub positions: HashMap<String, ElementPosition>,
 }
 
 /// Full chain definition (including server-generated fields)
@@ -971,6 +1019,8 @@ pub struct ChainDefinitionFull {
     pub connections: Vec<ChainConnection>,
     pub disabled: bool,
     pub timeout: Option<u64>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub positions: HashMap<String, ElementPosition>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -1018,7 +1068,11 @@ pub enum ElementExecutionStatus {
     Pending,
     WaitingForInputs,
     Running,
-    Completed { output: String },
+    Completed {
+        output: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        success: Option<bool>,
+    },
     Failed { error: String },
     Skipped,
 }
@@ -1049,15 +1103,17 @@ pub enum ElementConfig {
         /// Prompt to send to agent
         prompt: String,
     },
-    /// Raw output config (no LLM processing)
-    RawOutput,
-    /// Semantic output config (LLM processing)
-    SemanticOutput {
-        /// Prompt for LLM processing
-        prompt: String,
-        /// Model to use (format: "provider::model")
-        model_ref: Option<String>,
+    /// Memory element config (store or retrieve)
+    Memory {
+        key: String,
+        mode: MemoryMode,
     },
+    /// Loop element config
+    Loop {
+        max_iterations: u32,
+    },
+    /// Termination element config
+    Termination,
 }
 
 /// Element runtime context (dynamic, during execution)

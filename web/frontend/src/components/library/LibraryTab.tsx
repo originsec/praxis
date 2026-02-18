@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { Play, Trash2, Edit2, Zap, GitBranch, Download, Upload, Search, Plus, ChevronDown, Loader2, ToggleLeft, ToggleRight, Save } from 'lucide-react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Play, Trash2, Edit2, Zap, GitBranch, Download, Upload, Search, Plus, ChevronDown, Loader2, Circle, CircleCheck, Save } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ChainBuilder } from '../chains/ChainBuilder';
 import { Modal } from '../common/Modal';
@@ -148,6 +148,7 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
         connections: currentChain.connections,
         disabled: currentChain.disabled,
         timeout: currentChain.timeout,
+        positions: currentChain.positions,
       };
       const content = JSON.stringify(exportData, null, 2);
       const filename = `chain_${currentChain.name.toLowerCase().replace(/\s+/g, '_')}.json`;
@@ -473,6 +474,10 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
     } else {
       createChain(definition);
     }
+  };
+
+  const handleDuplicateChain = (definition: ChainDefinitionInput) => {
+    createChain(definition);
     setShowChainBuilder(false);
     setEditingChainId(null);
   };
@@ -485,12 +490,39 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
   //
   // If chain builder is open, show it full screen.
   //
+  //
+  // Dynamic height for chain builder: measure container top offset and fill
+  // to bottom of viewport.
+  //
+  const chainBuilderRef = useRef<HTMLDivElement>(null);
+  const [chainBuilderHeight, setChainBuilderHeight] = useState<number | null>(null);
+
+  const updateChainBuilderHeight = useCallback(() => {
+    if (chainBuilderRef.current) {
+      const top = chainBuilderRef.current.getBoundingClientRect().top;
+      setChainBuilderHeight(window.innerHeight - top - 16);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showChainBuilder) {
+      updateChainBuilderHeight();
+      window.addEventListener('resize', updateChainBuilderHeight);
+      return () => window.removeEventListener('resize', updateChainBuilderHeight);
+    }
+  }, [showChainBuilder, updateChainBuilderHeight]);
+
   if (showChainBuilder) {
     return (
-      <div className="h-[calc(100vh-280px)] min-h-[300px] border border-subtle ascii-box">
+      <div
+        ref={chainBuilderRef}
+        className="border border-subtle"
+        style={{ height: chainBuilderHeight ? `${chainBuilderHeight}px` : 'calc(100vh - 200px)', minHeight: 400 }}
+      >
         <ChainBuilder
           chain={editingChainId ? currentChain : null}
           onSave={handleSaveChain}
+          onDuplicate={handleDuplicateChain}
           onCancel={handleCancelChain}
           operationDefs={operationDefs}
           modelDefs={modelDefs}
@@ -884,7 +916,7 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className={`grid ${editDef.mode === 'agent' ? 'grid-cols-2' : 'grid-cols-1'} gap-3`}>
                 <div>
                   <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Timeout (seconds)</label>
                   <input
@@ -895,16 +927,18 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
                     className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
                   />
                 </div>
-                <div>
-                  <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Agent Iterations</label>
-                  <input
-                    type="number"
-                    value={editDef.agent_iterations}
-                    onChange={(e) => updateEditDef('agent_iterations', parseInt(e.target.value) || 5)}
-                    disabled={isEditing}
-                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
-                  />
-                </div>
+                {editDef.mode === 'agent' && (
+                  <div>
+                    <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Agent Iterations</label>
+                    <input
+                      type="number"
+                      value={editDef.agent_iterations}
+                      onChange={(e) => updateEditDef('agent_iterations', parseInt(e.target.value) || 5)}
+                      disabled={isEditing}
+                      className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                    />
+                  </div>
+                )}
               </div>
 
               <div>
@@ -984,11 +1018,11 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
                   type="button"
                 >
                   {editDef.yolo_mode ? (
-                    <ToggleLeft size={20} className="text-muted/60" />
+                    <CircleCheck size={16} className="text-[var(--accent-error)]" />
                   ) : (
-                    <ToggleRight size={20} className="text-muted" />
+                    <Circle size={16} className="text-[var(--text-secondary)]" />
                   )}
-                  <span className={`text-xs tracking-wider ${editDef.yolo_mode ? 'text-muted/60' : 'text-muted'}`}>
+                  <span className={`text-xs tracking-wider ${editDef.yolo_mode ? 'text-[var(--accent-error)]' : 'text-[var(--text-secondary)]'}`}>
                     YOLO Mode
                   </span>
                 </button>
@@ -1000,11 +1034,11 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
                   type="button"
                 >
                   {editDef.disabled ? (
-                    <ToggleLeft size={20} className="text-muted/60" />
+                    <CircleCheck size={16} className="text-[var(--accent-error)]" />
                   ) : (
-                    <ToggleRight size={20} className="text-muted" />
+                    <Circle size={16} className="text-[var(--text-secondary)]" />
                   )}
-                  <span className={`text-xs tracking-wider ${editDef.disabled ? 'text-muted/60' : 'text-muted'}`}>
+                  <span className={`text-xs tracking-wider ${editDef.disabled ? 'text-[var(--accent-error)]' : 'text-[var(--text-secondary)]'}`}>
                     Disabled
                   </span>
                 </button>

@@ -201,6 +201,7 @@ export function ImportModal({ isOpen, onClose }: ImportModalProps) {
         connections: (parsed.raw.connections as ChainConnection[]) || [],
         disabled: (parsed.raw.disabled as boolean) || false,
         timeout: (parsed.raw.timeout as number) || undefined,
+        positions: (parsed.raw.positions as Record<string, { x: number; y: number }>) || undefined,
       };
       createChain(chainInput);
     }

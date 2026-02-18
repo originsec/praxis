@@ -203,12 +203,7 @@ Praxis includes a visual chain builder using React Flow:
 
 ### Chain Structure
 
-Every chain requires two essential elements:
-
-1. **Trigger** - The starting point that initiates execution
-2. **Termination** - The endpoint that collects and outputs results
-
-Between these, you can add various processing elements connected in sequence or parallel.
+Every chain starts with a **Trigger** element. Elements with no outgoing connections are terminal — their output becomes the chain's final output. Between the trigger and terminal elements, you build processing workflows using various block types.
 
 ### Element Types
 
@@ -218,30 +213,50 @@ Chains support several element types:
 
 **Operation** - Executes a semantic operation from your library. Select an existing operation by name. The operation runs against the target agent and its output flows to the next element.
 
-**Transform** - An LLM-powered transformation step. Takes input from the previous element and applies a prompt to transform it. Useful for:
-- Extracting specific data from operation results
-- Reformatting output for the next step
-- Filtering or summarizing information
+**Transform** - An LLM-powered transformation step. Takes input from the previous element and applies a prompt to transform it. Useful for extracting specific data, reformatting output, or summarizing information.
 
-**GenericPrompt** - Sends a prompt directly to the agent session (not through an orchestrator). Simpler than an operation - just sends the prompt and captures the response.
+**GenericPrompt** - Sends a prompt directly to the agent session (not through an orchestrator). Simpler than an operation — just sends the prompt and captures the response.
 
-**Termination** - Collects output and ends a chain path. Two types available:
+**Memory Store** - Stores incoming data under a named key for later retrieval. The data passes through unchanged to downstream elements.
 
-- **Raw Output** - Passes through whatever it receives unchanged. Use when you want the exact output from the previous element.
-- **Semantic Output** - Applies an LLM prompt to process/summarize the incoming data before outputting. Use when you want to extract specific information or format the final result.
+**Memory Retrieve** - Retrieves previously stored data by key. Useful for accessing earlier results later in the chain.
+
+**Loop** - Controls iteration in the chain. A Loop element has two output ports:
+- **Port 0 (Retry)** - Fires on each iteration until `max_iterations` is reached
+- **Port 1 (Exhausted)** - Fires after all iterations are complete
+
+Loops enable retry patterns and iterative workflows. Connections from port 0 typically go back to an earlier element in the chain, creating a cycle.
+
+### Conditional Connections
+
+Connections between elements can have conditions:
+
+- **Always** (default) - The connection always fires when the source completes
+- **On Success** - Fires only when the source element completes successfully
+- **On Failure** - Fires only when the source element fails
+
+This enables branching workflows with error handling paths.
+
+### Per-Block Configuration
+
+Operation, Transform, and GenericPrompt elements support per-block configuration overrides:
+- **Max Runtime** - Timeout in seconds for this specific element
+- **YOLO Mode** - Enable auto-approve for this element's session
+- **Working Directory** - Override the working directory
 
 ### Building a Chain
 
 1. **Add a Trigger** - Drag a Trigger element onto the canvas. This is your starting point.
 
-2. **Add Processing Elements** - Add Operations, Transforms, or GenericPrompts as needed. Connect them by dragging from one element's output handle to another's input handle.
+2. **Add Processing Elements** - Add Operations, Transforms, GenericPrompts, Memory blocks, or Loops as needed. Connect them by dragging from one element's output handle to another's input handle.
 
-3. **Add Termination** - Every chain path must end with a Termination element. Choose Raw Output for passthrough or Semantic Output to process the final result.
+3. **Ensure Terminal Elements** - At least one element must have no outgoing connections. Its output becomes the chain's result.
 
-4. **Configure Elements** - Click each element to configure:
+4. **Configure Elements** - Double-click each element to configure:
    - Operations: Select which operation to run
    - Transforms: Write the transformation prompt
-   - Semantic Output: Write the output processing prompt
+   - Memory blocks: Set the memory key
+   - Loops: Set max iterations
    - Set model overrides if needed
 
 5. **Assign Session Groups** - Group elements that should share an agent session (see below).

@@ -1,189 +1,63 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   ReactFlow,
   Panel,
   Background,
   BackgroundVariant,
   MarkerType,
-  Handle,
-  Position,
   ReactFlowProvider,
   useReactFlow,
+  useNodesState,
+  useEdgesState,
 } from '@xyflow/react';
-import type { Node, Edge, NodeTypes } from '@xyflow/react';
+import type { Node, Edge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, Square, Clock, CheckCircle2, XCircle, AlertCircle, Loader2, Maximize2, Cpu, Sparkles, MessageSquare, CircleStop, ExternalLink, ChevronDown, ChevronRight } from 'lucide-react';
+import { Play, Clock, CheckCircle2, XCircle, AlertCircle, Loader2, Maximize2, Cpu, Sparkles, MessageSquare, ExternalLink, ChevronDown, ChevronRight, Database, RefreshCw, Square } from 'lucide-react';
 import type {
   ChainExecutionUpdate,
   ChainDefinitionFull,
   ElementExecution,
+  OperationDefinitionInfo,
 } from '../../api/types';
 import { StyledOutput } from '../common/StyledOutput';
 import { computeLayout } from '../../utils/dagreLayout';
+import { nodeTypes } from './ChainNodes';
 
 //
-// Status colors and icons.
+// Status colors and icons (used by step list and detail panel).
 //
 function getStatusIndicator(status: string) {
   switch (status) {
     case 'Completed':
-      return { icon: CheckCircle2, color: 'var(--text-highlight)', bg: 'var(--text-highlight)' };
+      return { icon: CheckCircle2, color: 'var(--text-highlight)', animate: false };
     case 'Failed':
-      return { icon: XCircle, color: 'var(--accent-error)', bg: 'var(--accent-error)' };
+      return { icon: XCircle, color: 'var(--accent-error)', animate: false };
     case 'Running':
-      return { icon: Loader2, color: 'var(--text-secondary)', bg: 'var(--text-secondary)', animate: true };
+      return { icon: Loader2, color: 'var(--text-secondary)', animate: true };
     case 'WaitingForInputs':
-      return { icon: Clock, color: 'var(--accent-warning)', bg: 'var(--accent-warning)' };
+      return { icon: Clock, color: 'var(--accent-warning)', animate: false };
     case 'Skipped':
-      return { icon: AlertCircle, color: 'var(--text-muted)', bg: 'var(--text-muted)' };
-    //
-    // Pending.
-    //
+      return { icon: AlertCircle, color: 'var(--text-muted)', animate: false };
     default:
-      return { icon: Clock, color: 'var(--text-muted)', bg: 'var(--text-muted)' };
+      return { icon: Clock, color: 'var(--text-muted)', animate: false };
   }
 }
 
 //
-// Custom node components with status indicators.
-//
-function TriggerNodeView({ data, selected }: { data: { label: string; status?: string }; selected?: boolean }) {
-  const statusInfo = getStatusIndicator(data.status || 'Pending');
-  const StatusIcon = statusInfo.icon;
-
-  return (
-    <div className={`ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[120px] relative ${selected ? 'ring-2 ring-[var(--accent-info)]' : ''}`}>
-      <Handle type="source" position={Position.Right} style={{ width: 10, height: 10, background: 'var(--accent-info)' }} />
-      <div className="flex items-center gap-2">
-        <Play size={14} className="text-[var(--accent-success)]" />
-        <span className="text-sm font-mono">{data.label}</span>
-        <StatusIcon
-          size={12}
-          style={{ color: statusInfo.color }}
-          className={statusInfo.animate ? 'animate-spin' : ''}
-        />
-      </div>
-    </div>
-  );
-}
-
-function OperationNodeView({ data, selected }: { data: { label: string; operation: string; status?: string; sessionColor?: string }; selected?: boolean }) {
-  const statusInfo = getStatusIndicator(data.status || 'Pending');
-  const StatusIcon = statusInfo.icon;
-  const borderStyle = data.sessionColor ? { borderLeft: `4px solid ${data.sessionColor}` } : {};
-
-  return (
-    <div className={`ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative ${selected ? 'ring-2 ring-[var(--accent-info)]' : ''}`} style={borderStyle}>
-      <Handle type="target" position={Position.Left} style={{ width: 10, height: 10, background: 'var(--accent-info)' }} />
-      <Handle type="source" position={Position.Right} style={{ width: 10, height: 10, background: 'var(--accent-info)' }} />
-      <div className="flex items-center gap-2">
-        <Cpu size={14} className="text-[var(--accent-info)]" />
-        <div className="flex flex-col">
-          <span className="text-sm font-mono">{data.label}</span>
-          <span className="text-xs text-[var(--text-secondary)]">{data.operation}</span>
-        </div>
-        <StatusIcon
-          size={12}
-          style={{ color: statusInfo.color }}
-          className={statusInfo.animate ? 'animate-spin' : ''}
-        />
-      </div>
-    </div>
-  );
-}
-
-function TransformNodeView({ data, selected }: { data: { label: string; prompt: string; status?: string; sessionColor?: string }; selected?: boolean }) {
-  const statusInfo = getStatusIndicator(data.status || 'Pending');
-  const StatusIcon = statusInfo.icon;
-  const borderStyle = data.sessionColor ? { borderLeft: `4px solid ${data.sessionColor}` } : {};
-
-  return (
-    <div className={`ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative ${selected ? 'ring-2 ring-[var(--accent-info)]' : ''}`} style={borderStyle}>
-      <Handle type="target" position={Position.Left} style={{ width: 10, height: 10, background: 'var(--accent-info)' }} />
-      <Handle type="source" position={Position.Right} style={{ width: 10, height: 10, background: 'var(--accent-info)' }} />
-      <div className="flex items-center gap-2">
-        <Sparkles size={14} className="text-[var(--accent-warning)]" />
-        <div className="flex flex-col">
-          <span className="text-sm font-mono">{data.label}</span>
-          <span className="text-xs text-[var(--text-secondary)] truncate max-w-[100px]">{data.prompt}</span>
-        </div>
-        <StatusIcon
-          size={12}
-          style={{ color: statusInfo.color }}
-          className={statusInfo.animate ? 'animate-spin' : ''}
-        />
-      </div>
-    </div>
-  );
-}
-
-function GenericPromptNodeView({ data, selected }: { data: { label: string; prompt: string; status?: string; sessionColor?: string }; selected?: boolean }) {
-  const statusInfo = getStatusIndicator(data.status || 'Pending');
-  const StatusIcon = statusInfo.icon;
-  const borderStyle = data.sessionColor ? { borderLeft: `4px solid ${data.sessionColor}` } : {};
-
-  return (
-    <div className={`ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative ${selected ? 'ring-2 ring-[var(--accent-info)]' : ''}`} style={borderStyle}>
-      <Handle type="target" position={Position.Left} style={{ width: 10, height: 10, background: 'var(--accent-info)' }} />
-      <Handle type="source" position={Position.Right} style={{ width: 10, height: 10, background: 'var(--accent-info)' }} />
-      <div className="flex items-center gap-2">
-        <MessageSquare size={14} className="text-[var(--accent-purple)]" />
-        <div className="flex flex-col">
-          <span className="text-sm font-mono">{data.label}</span>
-          <span className="text-xs text-[var(--text-secondary)] truncate max-w-[100px]">{data.prompt}</span>
-        </div>
-        <StatusIcon
-          size={12}
-          style={{ color: statusInfo.color }}
-          className={statusInfo.animate ? 'animate-spin' : ''}
-        />
-      </div>
-    </div>
-  );
-}
-
-function TerminationNodeView({ data, selected }: { data: { label: string; termType: string; status?: string }; selected?: boolean }) {
-  const statusInfo = getStatusIndicator(data.status || 'Pending');
-  const StatusIcon = statusInfo.icon;
-
-  return (
-    <div className={`ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[120px] relative ${selected ? 'ring-2 ring-[var(--accent-info)]' : ''}`}>
-      <Handle type="target" position={Position.Left} style={{ width: 10, height: 10, background: 'var(--accent-info)' }} />
-      <div className="flex items-center gap-2">
-        <CircleStop size={14} className="text-[var(--accent-error)]" />
-        <div className="flex flex-col">
-          <span className="text-sm font-mono">{data.label}</span>
-          <span className="text-xs text-[var(--text-secondary)]">{data.termType}</span>
-        </div>
-        <StatusIcon
-          size={12}
-          style={{ color: statusInfo.color }}
-          className={statusInfo.animate ? 'animate-spin' : ''}
-        />
-      </div>
-    </div>
-  );
-}
-
-const nodeTypes: NodeTypes = {
-  trigger: TriggerNodeView,
-  operation: OperationNodeView,
-  transform: TransformNodeView,
-  genericPrompt: GenericPromptNodeView,
-  termination: TerminationNodeView,
-};
-
-//
-// Convert chain definition to React Flow nodes with execution status.
+// Convert chain definition to React Flow nodes with execution status. Uses
+// stored positions from chain definition (same as builder) and populates full
+// node data so the shared node components render identically.
 //
 function chainToFlowWithStatus(
   chain: ChainDefinitionFull | null,
-  elements: Record<string, ElementExecution>
+  elements: Record<string, ElementExecution>,
+  operationDefs?: OperationDefinitionInfo[],
 ): { nodes: Node[]; edges: Edge[] } {
   if (!chain) return { nodes: [], edges: [] };
 
   //
-  // Compute layout using dagre.
+  // Always use dagre auto-layout for the execution viewer so chains
+  // render cleanly regardless of stored positions.
   //
   const positions = computeLayout(chain.elements, chain.connections);
 
@@ -202,18 +76,31 @@ function chainToFlowWithStatus(
           position,
           data: { label: 'Manual Trigger', status },
         };
-      case 'Operation':
+      case 'Operation': {
+        const opDef = operationDefs?.find(d => d.full_name === elem.operation_name);
         return {
           id: elem.id,
           type: 'operation',
           position,
           data: {
-            label: elem.operation_name || 'Operation',
-            operation: elem.id.slice(0, 8),
-            status,
+            label: 'Operation',
+            operation: elem.operation_name || 'Operation',
             sessionColor: elem.session_group?.color,
+            description: opDef?.description,
+            operationPrompt: opDef?.operation_prompt,
+            maxRuntime: elem.block_config?.max_runtime,
+            modelRef: elem.model_ref || opDef?.model_ref,
+            category: opDef?.category,
+            mode: opDef?.mode,
+            timeout: opDef?.timeout,
+            agentIterations: opDef?.agent_iterations,
+            yoloMode: elem.block_config?.yolo_mode || opDef?.yolo_mode,
+            workingDir: elem.block_config?.working_dir,
+            requireAllInputs: elem.block_config?.require_all_inputs,
+            status,
           },
         };
+      }
       case 'Transform':
         return {
           id: elem.id,
@@ -222,8 +109,13 @@ function chainToFlowWithStatus(
           data: {
             label: 'Transform',
             prompt: elem.prompt || '',
-            status,
             sessionColor: elem.session_group?.color,
+            modelRef: elem.model_ref,
+            maxRuntime: elem.block_config?.max_runtime,
+            yoloMode: elem.block_config?.yolo_mode,
+            workingDir: elem.block_config?.working_dir,
+            requireAllInputs: elem.block_config?.require_all_inputs,
+            status,
           },
         };
       case 'GenericPrompt':
@@ -234,27 +126,66 @@ function chainToFlowWithStatus(
           data: {
             label: 'Prompt',
             prompt: elem.prompt || '',
-            status,
             sessionColor: elem.session_group?.color,
+            maxRuntime: elem.block_config?.max_runtime,
+            yoloMode: elem.block_config?.yolo_mode,
+            workingDir: elem.block_config?.working_dir,
+            requireAllInputs: elem.block_config?.require_all_inputs,
+            status,
           },
+        };
+      case 'Memory':
+        return {
+          id: elem.id,
+          type: 'memory',
+          position,
+          data: { label: 'Memory', memoryKey: elem.key, memoryMode: elem.mode, status },
+        };
+      case 'Loop':
+        return {
+          id: elem.id,
+          type: 'loop',
+          position,
+          data: { label: 'Loop', maxIterations: elem.max_iterations, status },
         };
       case 'Termination':
         return {
           id: elem.id,
           type: 'termination',
           position,
-          data: { label: elem.label, termType: elem.termination_type.type, status },
+          data: {
+            label: 'End',
+            requireAllInputs: elem.block_config?.require_all_inputs,
+            status,
+          },
         };
     }
-  });
+  }).filter((n): n is NonNullable<typeof n> => n != null);
 
-  const edges: Edge[] = chain.connections.map((conn) => ({
-    id: conn.id,
-    source: conn.from_element,
-    target: conn.to_element,
-    markerEnd: { type: MarkerType.ArrowClosed },
-    style: { stroke: 'var(--text-secondary)' },
-  }));
+  const edges: Edge[] = chain.connections.map((conn) => {
+    let stroke = 'var(--text-secondary)';
+    let label: string | undefined;
+
+    if (conn.condition === 'OnSuccess') {
+      stroke = 'var(--accent-success)';
+      label = 'Success';
+    } else if (conn.condition === 'OnFailure') {
+      stroke = 'var(--accent-error)';
+      label = 'Failure';
+    }
+
+    return {
+      id: conn.id,
+      source: conn.from_element,
+      target: conn.to_element,
+      sourceHandle: conn.from_port > 0 ? String(conn.from_port) : undefined,
+      type: 'smoothstep',
+      markerEnd: { type: MarkerType.ArrowClosed },
+      style: { stroke, strokeWidth: 2 },
+      label,
+      labelStyle: label ? { fill: stroke, fontSize: 10, fontWeight: 500 } : undefined,
+    };
+  });
 
   return { nodes, edges };
 }
@@ -264,38 +195,89 @@ interface ChainExecutionViewerInnerProps {
   chain: ChainDefinitionFull | null;
   isLoading?: boolean;
   onEditChain?: (chainId: string) => void;
+  operationDefs?: OperationDefinitionInfo[];
 }
 
-function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }: ChainExecutionViewerInnerProps) {
+function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, operationDefs }: ChainExecutionViewerInnerProps) {
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [outputExpanded, setOutputExpanded] = useState(true);
-  const { fitView } = useReactFlow();
+  const [graphExpanded, setGraphExpanded] = useState(true);
+  const { fitView, setCenter, getNodes } = useReactFlow();
+
+  //
+  // Cache the chain definition so nodes don't disappear if the parent's
+  // chain prop goes null (e.g. currentChain changes elsewhere).
+  //
+  const chainRef = useRef(chain);
+  if (chain) chainRef.current = chain;
+  const stableChain = chainRef.current;
 
   //
   // Use JSON.stringify for deep comparison since React's shallow comparison
   // may not detect changes in the elements object when updates arrive.
   //
   const elementsKey = JSON.stringify(execution.elements);
-  const { nodes, edges } = useMemo(
-    () => chainToFlowWithStatus(chain, execution.elements),
+  const computedFlow = useMemo(
+    () => chainToFlowWithStatus(stableChain, execution.elements, operationDefs),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [chain, elementsKey]
+    [stableChain, elementsKey, operationDefs]
   );
 
   //
-  // Auto-fit view when nodes change.
+  // Use React Flow's state hooks to ensure proper node rendering. Sync
+  // from computed flow whenever it changes.
   //
+  const [nodes, setNodes, onNodesChange] = useNodesState(computedFlow.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(computedFlow.edges);
   useEffect(() => {
-    if (nodes.length > 0) {
-      //
-      // Small delay to ensure nodes are rendered.
-      //
+    setNodes(computedFlow.nodes);
+    setEdges(computedFlow.edges);
+  }, [computedFlow, setNodes, setEdges]);
+
+  //
+  // Auto-fit view on initial load only.
+  //
+  const initialFitDone = useRef(false);
+  useEffect(() => {
+    if (computedFlow.nodes.length > 0 && !initialFitDone.current) {
+      initialFitDone.current = true;
       const timer = setTimeout(() => {
         fitView({ padding: 0.05, maxZoom: 1.5 });
       }, 50);
       return () => clearTimeout(timer);
     }
-  }, [nodes.length, fitView]);
+  }, [computedFlow.nodes.length, fitView]);
+
+  //
+  // Auto-zoom to the currently running element (only when it changes).
+  //
+  const lastRunningIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (execution.status !== 'Running') return;
+
+    const runningId = Object.entries(execution.elements).find(
+      ([, elem]) => elem.status === 'Running'
+    )?.[0];
+    if (!runningId || runningId === lastRunningIdRef.current) return;
+    lastRunningIdRef.current = runningId;
+
+    //
+    // Read node positions from React Flow's internal state to ensure
+    // they're laid out.
+    //
+    const timer = setTimeout(() => {
+      const flowNodes = getNodes();
+      const target = flowNodes.find(n => n.id === runningId);
+      if (!target) return;
+      setCenter(
+        target.position.x + (target.measured?.width ?? 200) / 2,
+        target.position.y + (target.measured?.height ?? 60) / 2,
+        { zoom: 0.7, duration: 400 }
+      );
+    }, 200);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [elementsKey, execution.status, setCenter, getNodes]);
 
   //
   // Get selected element's execution info.
@@ -312,9 +294,18 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
   }, [selectedElement]);
 
   //
-  // Get outputs from termination nodes.
+  // Get outputs from terminal elements.
   //
   const outputs = execution.outputs;
+
+  //
+  // Auto-collapse graph when execution completes with output.
+  //
+  useEffect(() => {
+    if (execution.status === 'Completed' && Object.keys(outputs).length > 0) {
+      setGraphExpanded(false);
+    }
+  }, [execution.status, outputs]);
 
   const handleNodeClick = (_: React.MouseEvent, node: Node) => {
     setSelectedElementId(node.id);
@@ -338,8 +329,15 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
         return { name: 'Transform', type: 'transform' };
       case 'GenericPrompt':
         return { name: 'Prompt', type: 'genericPrompt' };
+      case 'Memory':
+        return {
+          name: `${element.mode === 'Store' ? 'Store' : 'Load'}: ${element.key}`,
+          type: 'memory',
+        };
+      case 'Loop':
+        return { name: `Loop (max ${element.max_iterations})`, type: 'loop' };
       case 'Termination':
-        return { name: element.label || 'Output', type: 'termination' };
+        return { name: 'End', type: 'termination' };
       default:
         return { name: elementId.slice(0, 8), type: 'unknown' };
     }
@@ -521,14 +519,28 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
 
       {/*
       //
-      // Flow graph on top.
+      // Collapsible flow graph.
       //
       */}
-      <div className="h-48 min-h-[12rem] border-b border-subtle">
-        {chain ? (
+      <div className="border-b border-subtle">
+        <button
+          onClick={() => setGraphExpanded(!graphExpanded)}
+          className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-[var(--bg-tertiary)] transition-colors text-left"
+        >
+          {graphExpanded ? (
+            <ChevronDown size={12} className="text-[var(--text-secondary)]" />
+          ) : (
+            <ChevronRight size={12} className="text-[var(--text-secondary)]" />
+          )}
+          <span className="text-xs font-medium text-[var(--text-secondary)]">Graph</span>
+        </button>
+        {graphExpanded && <div className="h-40 min-h-[10rem]">
+        {stableChain ? (
           <ReactFlow
             nodes={nodes}
             edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
             nodeTypes={nodeTypes}
             onNodeClick={handleNodeClick}
             fitView
@@ -563,6 +575,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
             )}
           </div>
         )}
+      </div>}
       </div>
 
       {/*
@@ -602,6 +615,8 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
                         {stepInfo.type === 'operation' && <Cpu size={12} className="text-[var(--accent-info)] flex-shrink-0" />}
                         {stepInfo.type === 'transform' && <Sparkles size={12} className="text-[var(--accent-warning)] flex-shrink-0" />}
                         {stepInfo.type === 'genericPrompt' && <MessageSquare size={12} className="text-[var(--accent-purple)] flex-shrink-0" />}
+                        {stepInfo.type === 'memory' && <Database size={12} className="text-[var(--accent-success)] flex-shrink-0" />}
+                        {stepInfo.type === 'loop' && <RefreshCw size={12} className="text-[var(--accent-warning)] flex-shrink-0" />}
                         {stepInfo.type === 'termination' && <Square size={12} className="text-[var(--accent-error)] flex-shrink-0" />}
                         {stepInfo.type === 'unknown' && <Clock size={12} className="text-[var(--text-secondary)] flex-shrink-0" />}
                         <span className="text-xs font-mono truncate">{stepInfo.name}</span>
@@ -635,6 +650,8 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
                     {stepInfo.type === 'operation' && <Cpu size={18} className="text-[var(--accent-info)] self-center" />}
                     {stepInfo.type === 'transform' && <Sparkles size={18} className="text-[var(--accent-warning)] self-center" />}
                     {stepInfo.type === 'genericPrompt' && <MessageSquare size={18} className="text-[var(--accent-purple)] self-center" />}
+                    {stepInfo.type === 'memory' && <Database size={18} className="text-[var(--accent-success)] self-center" />}
+                    {stepInfo.type === 'loop' && <RefreshCw size={18} className="text-[var(--accent-warning)] self-center" />}
                     {stepInfo.type === 'termination' && <Square size={18} className="text-[var(--accent-error)] self-center" />}
                     <span className="text-lg font-medium text-[var(--text-highlight)]">{stepInfo.name}</span>
                     <span className="text-xs text-[var(--text-secondary)] font-mono">{selectedElementId.slice(0, 8)}</span>
@@ -702,19 +719,17 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
                         <pre className="mt-1 text-[var(--text-secondary)] whitespace-pre-wrap font-mono">{selectedElement.config.prompt}</pre>
                       </div>
                     )}
-                    {selectedElement.config.type === 'RawOutput' && (
-                      <span className="text-muted">Raw Output (passthrough)</span>
-                    )}
-                    {selectedElement.config.type === 'SemanticOutput' && (
-                      <div className="space-y-2">
-                        {selectedElement.config.model_ref && (
-                          <div><span className="text-muted">Model:</span> <span className="font-mono text-[var(--accent-info)]">{selectedElement.config.model_ref}</span></div>
-                        )}
-                        <div>
-                          <span className="text-muted">Prompt:</span>
-                          <pre className="mt-1 text-[var(--text-secondary)] whitespace-pre-wrap font-mono">{selectedElement.config.prompt}</pre>
-                        </div>
+                    {selectedElement.config.type === 'Memory' && (
+                      <div className="space-y-1">
+                        <div><span className="text-muted">Mode:</span> <span className="font-mono">{selectedElement.config.mode}</span></div>
+                        <div><span className="text-muted">Key:</span> <span className={`font-mono ${selectedElement.config.mode === 'Store' ? 'text-[var(--accent-success)]' : 'text-[var(--accent-info)]'}`}>{selectedElement.config.key}</span></div>
                       </div>
+                    )}
+                    {selectedElement.config.type === 'Loop' && (
+                      <div><span className="text-muted">Max Iterations:</span> <span className="font-mono text-[var(--accent-warning)]">{selectedElement.config.max_iterations}</span></div>
+                    )}
+                    {selectedElement.config.type === 'Termination' && (
+                      <span className="text-muted">Termination (End)</span>
                     )}
                   </div>
                 </div>
@@ -722,8 +737,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain }:
 
               {/*
               //
-              // Element Output/Error - shown first for Operations and
-              // SemanticOutput.
+              // Element Output/Error - shown first for Operations.
               //
               */}
               {selectedOutput && (
@@ -780,6 +794,7 @@ interface ChainExecutionViewerProps {
   chain: ChainDefinitionFull | null;
   isLoading?: boolean;
   onEditChain?: (chainId: string) => void;
+  operationDefs?: OperationDefinitionInfo[];
 }
 
 export function ChainExecutionViewer(props: ChainExecutionViewerProps) {

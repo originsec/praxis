@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Server, Save, Check, List, Loader2, X, Cpu, Plus, Trash2, Edit2, Key, Info, ExternalLink, Download, Monitor, ToggleLeft, ToggleRight, FileCode, Upload, RotateCcw, AlertTriangle } from 'lucide-react';
+import { Server, Save, Check, List, Loader2, X, Cpu, Plus, Trash2, Edit2, Key, Info, ExternalLink, Download, Monitor, Circle, CircleCheck, FileCode, Upload, RotateCcw, AlertTriangle } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { getFeatureFlags } from '../utils/featureFlags';
 import { Modal } from '../components/common/Modal';
@@ -1160,7 +1160,7 @@ export function SettingsPage() {
                             }`}
                             title={script.disabled ? 'Enable' : 'Disable'}
                           >
-                            {script.disabled ? <ToggleLeft size={14} /> : <ToggleRight size={14} />}
+                            {script.disabled ? <Circle size={14} /> : <CircleCheck size={14} />}
                           </button>
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDeleteScript(script.id); }}
@@ -1442,9 +1442,9 @@ export function SettingsPage() {
                     className="flex items-center gap-2 text-sm text-muted hover:text-highlight transition-colors"
                   >
                     {eventLoggingEnabled ? (
-                      <ToggleRight size={20} className="text-muted" />
+                      <CircleCheck size={16} className="text-[var(--accent-success)]" />
                     ) : (
-                      <ToggleLeft size={20} className="text-muted" />
+                      <Circle size={16} className="text-[var(--text-secondary)]" />
                     )}
                     <span className="tracking-wider">
                       {eventLoggingEnabled ? 'Enabled' : 'Disabled'}
@@ -1516,9 +1516,9 @@ export function SettingsPage() {
                     className="flex items-center gap-2 text-sm text-muted hover:text-highlight transition-colors"
                   >
                     {mcpServerEnabled ? (
-                      <ToggleRight size={20} className="text-muted" />
+                      <CircleCheck size={16} className="text-[var(--accent-success)]" />
                     ) : (
-                      <ToggleLeft size={20} className="text-muted" />
+                      <Circle size={16} className="text-[var(--text-secondary)]" />
                     )}
                     <span className="tracking-wider">
                       {mcpServerEnabled ? 'Enabled' : 'Disabled'}

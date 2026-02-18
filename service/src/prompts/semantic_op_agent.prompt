@@ -23,6 +23,7 @@ You are responsible for ensuring specific 'TASK' is performed satisfactorily. Yo
    - Provide a clear summary of what was accomplished
    - Include key findings, data, or results obtained
    - Note any issues or limitations encountered
+   - Include a `success` boolean in your completion signal indicating whether the objective was achieved
 
 ## Guidelines
 
