@@ -12,6 +12,7 @@ pub enum Provider {
     Cerebras,
     Nvidia,
     MiniMax,
+    Moonshot,
 }
 
 impl Provider {
@@ -27,6 +28,7 @@ impl Provider {
             Provider::Cerebras => "cerebras",
             Provider::Nvidia => "nvidia",
             Provider::MiniMax => "minimax",
+            Provider::Moonshot => "moonshot",
         }
     }
 
@@ -42,6 +44,7 @@ impl Provider {
             "cerebras" => Some(Provider::Cerebras),
             "nvidia" => Some(Provider::Nvidia),
             "minimax" => Some(Provider::MiniMax),
+            "moonshot" => Some(Provider::Moonshot),
             _ => None,
         }
     }
@@ -58,6 +61,7 @@ impl Provider {
             Provider::Cerebras,
             Provider::Nvidia,
             Provider::MiniMax,
+            Provider::Moonshot,
         ]
     }
 
@@ -73,6 +77,7 @@ impl Provider {
             Provider::Cerebras => "Cerebras",
             Provider::Nvidia => "NVIDIA",
             Provider::MiniMax => "MiniMax",
+            Provider::Moonshot => "Moonshot AI",
         }
     }
 
@@ -88,6 +93,7 @@ impl Provider {
             Provider::Cerebras => "https://api.cerebras.ai/v1",
             Provider::Nvidia => "https://integrate.api.nvidia.com/v1",
             Provider::MiniMax => "https://api.minimax.io/v1",
+            Provider::Moonshot => "https://api.moonshot.ai/v1",
         }
     }
 
@@ -102,6 +108,7 @@ impl Provider {
                 | Provider::Cerebras
                 | Provider::Nvidia
                 | Provider::MiniMax
+                | Provider::Moonshot
         )
     }
 }
