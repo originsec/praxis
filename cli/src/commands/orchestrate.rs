@@ -138,6 +138,7 @@ async fn process_events_until_done(
 ) {
     let mut spinner: Option<Spinner> = None;
     let mut accumulated_content = String::new();
+    let mut pending_thinking = String::new();
     let mut tool_calls: Vec<(String, bool)> = Vec::new();
     let mut total_prompt_tokens: u32 = 0;
     let mut total_completion_tokens: u32 = 0;
@@ -184,6 +185,54 @@ async fn process_events_until_done(
                         }
                         current_tool = None;
                         accumulated_content.push_str(&content);
+
+                        // Accumulate thinking across chunks and display when complete
+                        let start_tag = "<think>";
+                        let end_tag = "</think>";
+
+                        // Build the string to process: pending_thinking + new content
+                        let to_process = if !pending_thinking.is_empty() {
+                            let combined = format!("{}{}", pending_thinking, content);
+                            pending_thinking.clear();
+                            combined
+                        } else {
+                            content.clone()
+                        };
+
+                        let mut remaining: String = to_process;
+
+                        loop {
+                            // Find the first opening tag
+                            let start_match = remaining.find(start_tag);
+                            // Find the first closing tag
+                            let end_match = remaining.find(end_tag);
+
+                            match (start_match, end_match) {
+                                // Both tags found - check if opening comes first
+                                (Some(start), Some(end)) if start < end => {
+                                    // Get content between tags and display
+                                    let thinking_block = remaining[start + start_tag.len()..end].trim();
+                                    if !thinking_block.is_empty() {
+                                        rprintln!();
+                                        rprintln!("  {} {}", "\u{00B7}".bold(), "Thinking:".bold().dimmed());
+                                        for line in thinking_block.lines() {
+                                            rprintln!("    {}", line.dimmed());
+                                        }
+                                        rprintln!();
+                                    }
+                                    remaining = remaining[end + end_tag.len()..].to_string();
+                                }
+                                // Opening tag found but no closing yet - accumulate
+                                (Some(_), None) => {
+                                    pending_thinking = remaining;
+                                    break;
+                                }
+                                // No opening tag or closing comes first - done
+                                _ => {
+                                    break;
+                                }
+                            }
+                        }
                     }
                     ClientDirectMessage::OrchestratorToolExecuting { name, input: _ } => {
                         //
@@ -312,7 +361,26 @@ async fn process_events_until_done(
 
                         if !accumulated_content.trim().is_empty() {
                             rprintln!();
-                            render_markdown(&accumulated_content);
+
+                            // Flush any pending thinking
+                            if !pending_thinking.is_empty() {
+                                let thinking = pending_thinking.trim();
+                                if !thinking.is_empty() {
+                                    rprintln!();
+                                    rprintln!("  {} {}", "\u{00B7}".bold(), "Thinking:".bold().dimmed());
+                                    for line in thinking.lines() {
+                                        rprintln!("    {}", line.dimmed());
+                                    }
+                                    rprintln!();
+                                }
+                                pending_thinking.clear();
+                            }
+
+                            let response = strip_thinking(&accumulated_content);
+
+                            if !response.trim().is_empty() {
+                                render_markdown(&response);
+                            }
                             rprintln!();
                         }
 
@@ -323,6 +391,21 @@ async fn process_events_until_done(
                         if let Some(s) = spinner.take() {
                             s.finish().await;
                         }
+
+                        // Flush any pending thinking
+                        if !pending_thinking.is_empty() {
+                            let thinking = pending_thinking.trim();
+                            if !thinking.is_empty() {
+                                rprintln!();
+                                rprintln!("  {} {}", "\u{00B7}".bold(), "Thinking:".bold().dimmed());
+                                for line in thinking.lines() {
+                                    rprintln!("    {}", line.dimmed());
+                                }
+                                rprintln!();
+                            }
+                            pending_thinking.clear();
+                        }
+
                         break;
                     }
                     _ => {}
@@ -521,4 +604,20 @@ fn render_markdown(content: &str) {
     for line in rendered.to_string().lines() {
         rprintln!("  {}", line);
     }
+}
+
+fn strip_thinking(content: &str) -> String {
+    let start_tag = "<think>";
+    let end_tag = "</think>";
+    let mut result = content.to_string();
+
+    while let Some(start) = result.find(start_tag) {
+        if let Some(end) = result[start..].find(end_tag) {
+            result = format!("{}{}", &result[..start], &result[start + end + end_tag.len()..]);
+        } else {
+            break;
+        }
+    }
+
+    result.trim().to_string()
 }

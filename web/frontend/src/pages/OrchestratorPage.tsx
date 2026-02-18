@@ -17,8 +17,10 @@ import {
   AlertCircle,
   ChevronRight,
   ChevronDown,
+  ChevronUp,
   Download,
   Activity,
+  Brain,
 } from 'lucide-react';
 import { exportOrchestratorSession, downloadTextFile } from '../utils/export';
 import { useApp, type OrchestratorMessage, type OrchestratorToolExecution } from '../context/AppContext';
@@ -39,6 +41,58 @@ function PlanStepIcon({ status }: { status: PlanStep['status'] }) {
     default:
       return <Circle size={10} className="text-muted" />;
   }
+}
+
+//
+// Extract thinking content from <think> tags (supports multiple).
+//
+function parseThinkingContent(content: string): { thinking: string[]; response: string } {
+  const startTag = '<think>';
+  const endTag = '</think>';
+  const thinking: string[] = [];
+  let remaining = content;
+  
+  while (true) {
+    const startIdx = remaining.indexOf(startTag);
+    const endIdx = remaining.indexOf(endTag);
+    
+    if (startIdx === -1 || endIdx === -1 || startIdx > endIdx) {
+      break;
+    }
+    
+    const block = remaining.substring(startIdx + startTag.length, endIdx).trim();
+    if (block) {
+      thinking.push(block);
+    }
+    remaining = remaining.substring(0, startIdx) + remaining.substring(endIdx + endTag.length);
+  }
+  
+  return { thinking, response: remaining.trim() };
+}
+
+//
+// Individual thinking block component.
+//
+function ThinkingBlock({ content }: { content: string }) {
+  const [show, setShow] = useState(false);
+
+  return (
+    <div>
+      <button
+        onClick={() => setShow(!show)}
+        className="flex items-center gap-1.5 text-xs text-[var(--accent-purple)] hover:text-[var(--accent-purple)]/80 transition-colors"
+      >
+        {show ? <ChevronUp size={14} /> : <ChevronRight size={14} />}
+        <Brain size={14} />
+        <span className="font-medium">Thinking</span>
+      </button>
+      {show && (
+        <div className="mt-1 p-2 bg-[var(--bg-tertiary)] border border-subtle rounded text-xs text-muted whitespace-pre-wrap max-h-48 overflow-y-auto">
+          {content}
+        </div>
+      )}
+    </div>
+  );
 }
 
 //
@@ -262,6 +316,7 @@ function ToolExecutionDisplay({
 function ChatMessage({ message }: { message: OrchestratorMessage }) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
+  const { thinking, response } = parseThinkingContent(message.content);
 
   return (
     <div
@@ -294,6 +349,19 @@ function ChatMessage({ message }: { message: OrchestratorMessage }) {
 
         {/*
         //
+        // Thinking content - collapsible.
+        //
+        */}
+        {thinking.length > 0 && (
+          <div className="mb-3 space-y-2">
+            {thinking.map((t, i) => (
+              <ThinkingBlock key={i} content={t} />
+            ))}
+          </div>
+        )}
+
+        {/*
+        //
         // Content.
         //
         */}
@@ -301,7 +369,7 @@ function ChatMessage({ message }: { message: OrchestratorMessage }) {
           <div className="whitespace-pre-wrap break-words">{message.content}</div>
         ) : (
           <div className="prose prose-invert prose-sm max-w-none break-words prose-table:border-collapse prose-th:border prose-th:border-subtle prose-th:px-3 prose-th:py-2 prose-th:bg-[var(--bg-tertiary)] prose-td:border prose-td:border-subtle prose-td:px-3 prose-td:py-2">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{response || message.content}</ReactMarkdown>
           </div>
         )}
 
@@ -321,6 +389,8 @@ function StreamingMessage({
   content: string;
   toolExecutions: OrchestratorToolExecution[];
 }) {
+  const { thinking, response } = parseThinkingContent(content);
+
   return (
     <div className="flex justify-start">
       <div className="w-full md:max-w-[85%] ascii-box px-3 md:px-4 py-3 bg-[var(--bg-secondary)] text-[var(--text-highlight)]/80">
@@ -332,9 +402,17 @@ function StreamingMessage({
 
         <ToolExecutionDisplay executions={toolExecutions} />
 
-        {content && (
+        {thinking.length > 0 && (
+          <div className="mb-3 space-y-2">
+            {thinking.map((t, i) => (
+              <ThinkingBlock key={i} content={t} />
+            ))}
+          </div>
+        )}
+
+        {(content || response) && (
           <div className="prose prose-invert prose-sm max-w-none break-words prose-table:border-collapse prose-th:border prose-th:border-subtle prose-th:px-3 prose-th:py-2 prose-th:bg-[var(--bg-tertiary)] prose-td:border prose-td:border-subtle prose-td:px-3 prose-td:py-2">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{response || content}</ReactMarkdown>
           </div>
         )}
 
