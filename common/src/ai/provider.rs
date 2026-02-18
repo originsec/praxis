@@ -11,6 +11,7 @@ pub enum Provider {
     Gemini,
     Cerebras,
     Nvidia,
+    MiniMax,
 }
 
 impl Provider {
@@ -25,6 +26,7 @@ impl Provider {
             Provider::Gemini => "gemini",
             Provider::Cerebras => "cerebras",
             Provider::Nvidia => "nvidia",
+            Provider::MiniMax => "minimax",
         }
     }
 
@@ -39,6 +41,7 @@ impl Provider {
             "gemini" => Some(Provider::Gemini),
             "cerebras" => Some(Provider::Cerebras),
             "nvidia" => Some(Provider::Nvidia),
+            "minimax" => Some(Provider::MiniMax),
             _ => None,
         }
     }
@@ -54,6 +57,7 @@ impl Provider {
             Provider::Gemini,
             Provider::Cerebras,
             Provider::Nvidia,
+            Provider::MiniMax,
         ]
     }
 
@@ -68,6 +72,7 @@ impl Provider {
             Provider::Gemini => "Google Gemini",
             Provider::Cerebras => "Cerebras",
             Provider::Nvidia => "NVIDIA",
+            Provider::MiniMax => "MiniMax",
         }
     }
 
@@ -82,6 +87,7 @@ impl Provider {
             Provider::Gemini => "https://generativelanguage.googleapis.com/v1beta",
             Provider::Cerebras => "https://api.cerebras.ai/v1",
             Provider::Nvidia => "https://integrate.api.nvidia.com/v1",
+            Provider::MiniMax => "https://api.minimax.io/v1",
         }
     }
 
@@ -95,6 +101,7 @@ impl Provider {
                 | Provider::XAI
                 | Provider::Cerebras
                 | Provider::Nvidia
+                | Provider::MiniMax
         )
     }
 }
