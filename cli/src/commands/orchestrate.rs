@@ -55,6 +55,8 @@ pub async fn execute(client: &mut CliClient) -> Result<()> {
         return Ok(());
     }
 
+    let mut expanded = false;
+
     println!(
         "  {}",
         "Type your prompt, Ctrl+C to cancel, Ctrl+O to toggle tool details, Ctrl+D to exit"
@@ -64,7 +66,7 @@ pub async fn execute(client: &mut CliClient) -> Result<()> {
 
     let config = Config::builder().build();
     let mut rl: Editor<(), DefaultHistory> = Editor::with_config(config)?;
-    let mut expanded = false;
+    let mut prompt_seq: u64 = 0;
 
     loop {
         let line = rl.readline(&format!("  {} ", "▸".bold()));
@@ -77,9 +79,11 @@ pub async fn execute(client: &mut CliClient) -> Result<()> {
                 }
                 let _ = rl.add_history_entry(trimmed);
 
-                client.send_orchestrator_prompt(trimmed.to_string()).await?;
+                prompt_seq += 1;
+                let prompt_id = format!("{}", prompt_seq);
+                client.send_orchestrator_prompt(prompt_id.clone(), trimmed.to_string()).await?;
 
-                process_events_until_done(client, &mut event_rx, &mut expanded).await;
+                process_events_until_done(client, &mut event_rx, &mut expanded, &prompt_id).await;
             }
             Err(ReadlineError::Interrupted) => {
                 break;
@@ -115,7 +119,7 @@ async fn wait_for_started(event_rx: &mut mpsc::UnboundedReceiver<ClientDirectMes
             );
             true
         }
-        Ok(Some(ClientDirectMessage::OrchestratorError { message })) => {
+        Ok(Some(ClientDirectMessage::OrchestratorError { message, .. })) => {
             eprintln!("  {} {}", "✗".red(), message);
             false
         }
@@ -135,6 +139,7 @@ async fn process_events_until_done(
     client: &CliClient,
     event_rx: &mut mpsc::UnboundedReceiver<ClientDirectMessage>,
     expanded: &mut bool,
+    expected_prompt_id: &str,
 ) {
     let mut spinner: Option<Spinner> = None;
     let mut accumulated_content = String::new();
@@ -178,8 +183,24 @@ async fn process_events_until_done(
             event = event_rx.recv() => {
                 let Some(event) = event else { break };
 
+                //
+                // Discard events from a different prompt (stale/cancelled).
+                //
+
+                match &event {
+                    ClientDirectMessage::OrchestratorContent { prompt_id, .. }
+                    | ClientDirectMessage::OrchestratorToolExecuting { prompt_id, .. }
+                    | ClientDirectMessage::OrchestratorToolExecuted { prompt_id, .. }
+                    | ClientDirectMessage::OrchestratorPlanUpdated { prompt_id, .. }
+                    | ClientDirectMessage::OrchestratorDone { prompt_id }
+                    | ClientDirectMessage::OrchestratorError { prompt_id, .. }
+                    | ClientDirectMessage::OrchestratorTokenUsage { prompt_id, .. }
+                        if prompt_id != expected_prompt_id => continue,
+                    _ => {}
+                }
+
                 match event {
-                    ClientDirectMessage::OrchestratorContent { content } => {
+                    ClientDirectMessage::OrchestratorContent { content, .. } => {
                         if let Some(s) = spinner.take() {
                             s.finish().await;
                         }
@@ -213,12 +234,7 @@ async fn process_events_until_done(
                                     // Get content between tags and display
                                     let thinking_block = remaining[start + start_tag.len()..end].trim();
                                     if !thinking_block.is_empty() {
-                                        rprintln!();
-                                        rprintln!("  {} {}", "\u{00B7}".bold(), "Thinking:".bold().dimmed());
-                                        for line in thinking_block.lines() {
-                                            rprintln!("    {}", line.dimmed());
-                                        }
-                                        rprintln!();
+                                        render_thinking(thinking_block);
                                     }
                                     remaining = remaining[end + end_tag.len()..].to_string();
                                 }
@@ -234,7 +250,7 @@ async fn process_events_until_done(
                             }
                         }
                     }
-                    ClientDirectMessage::OrchestratorToolExecuting { name, input: _ } => {
+                    ClientDirectMessage::OrchestratorToolExecuting { name, input: _, .. } => {
                         //
                         // Hide report_plan — the plan is shown via
                         // OrchestratorPlanUpdated.
@@ -268,7 +284,7 @@ async fn process_events_until_done(
                             tool_calls.push((name, success));
                         }
                     }
-                    ClientDirectMessage::OrchestratorPlanUpdated { plan } => {
+                    ClientDirectMessage::OrchestratorPlanUpdated { plan, .. } => {
                         if let Some(s) = spinner.take() {
                             s.finish().await;
                         }
@@ -300,7 +316,7 @@ async fn process_events_until_done(
                             spinner = Some(Spinner::start_with_elapsed(&label));
                         }
                     }
-                    ClientDirectMessage::OrchestratorTokenUsage { prompt_tokens, completion_tokens, total_tokens: batch_total } => {
+                    ClientDirectMessage::OrchestratorTokenUsage { prompt_tokens, completion_tokens, total_tokens: batch_total, .. } => {
                         total_prompt_tokens += prompt_tokens;
                         total_completion_tokens += completion_tokens;
                         total_tokens += batch_total;
@@ -336,14 +352,14 @@ async fn process_events_until_done(
                             spinner = Some(Spinner::start_with_elapsed(&label));
                         }
                     }
-                    ClientDirectMessage::OrchestratorError { message } => {
+                    ClientDirectMessage::OrchestratorError { message, .. } => {
                         if let Some(s) = spinner.take() {
                             s.finish().await;
                         }
                         rprintln!("  {} {}", "\u{2717}".red(), message);
                         output_lines += 1;
                     }
-                    ClientDirectMessage::OrchestratorDone => {
+                    ClientDirectMessage::OrchestratorDone { .. } => {
                         if let Some(s) = spinner.take() {
                             s.finish().await;
                         }
@@ -362,16 +378,10 @@ async fn process_events_until_done(
                         if !accumulated_content.trim().is_empty() {
                             rprintln!();
 
-                            // Flush any pending thinking
                             if !pending_thinking.is_empty() {
-                                let thinking = pending_thinking.trim();
-                                if !thinking.is_empty() {
-                                    rprintln!();
-                                    rprintln!("  {} {}", "\u{00B7}".bold(), "Thinking:".bold().dimmed());
-                                    for line in thinking.lines() {
-                                        rprintln!("    {}", line.dimmed());
-                                    }
-                                    rprintln!();
+                                let trimmed = pending_thinking.trim();
+                                if !trimmed.is_empty() {
+                                    render_thinking(trimmed);
                                 }
                                 pending_thinking.clear();
                             }
@@ -392,16 +402,10 @@ async fn process_events_until_done(
                             s.finish().await;
                         }
 
-                        // Flush any pending thinking
                         if !pending_thinking.is_empty() {
-                            let thinking = pending_thinking.trim();
-                            if !thinking.is_empty() {
-                                rprintln!();
-                                rprintln!("  {} {}", "\u{00B7}".bold(), "Thinking:".bold().dimmed());
-                                for line in thinking.lines() {
-                                    rprintln!("    {}", line.dimmed());
-                                }
-                                rprintln!();
+                            let trimmed = pending_thinking.trim();
+                            if !trimmed.is_empty() {
+                                render_thinking(trimmed);
                             }
                             pending_thinking.clear();
                         }
@@ -427,7 +431,7 @@ async fn process_events_until_done(
                             while let Some(event) = event_rx.recv().await {
                                 if matches!(
                                     event,
-                                    ClientDirectMessage::OrchestratorDone
+                                    ClientDirectMessage::OrchestratorDone { .. }
                                         | ClientDirectMessage::OrchestratorStopped
                                 ) {
                                     break;
@@ -482,7 +486,7 @@ async fn process_events_until_done(
                 while let Some(event) = event_rx.recv().await {
                     if matches!(
                         event,
-                        ClientDirectMessage::OrchestratorDone
+                        ClientDirectMessage::OrchestratorDone { .. }
                             | ClientDirectMessage::OrchestratorStopped
                     ) {
                         break;
@@ -604,6 +608,15 @@ fn render_markdown(content: &str) {
     for line in rendered.to_string().lines() {
         rprintln!("  {}", line);
     }
+}
+
+fn render_thinking(text: &str) {
+    rprintln!();
+    rprintln!("  {} {}", "\u{00B7}".bold(), "Thinking:".bold().dimmed());
+    for line in text.lines() {
+        rprintln!("    {}", line.dimmed());
+    }
+    rprintln!();
 }
 
 fn strip_thinking(content: &str) -> String {

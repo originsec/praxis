@@ -61,6 +61,7 @@ const initialOrchestratorState: OrchestratorState = {
   streamingContent: '',
   currentToolExecutions: [],
   tokenUsage: null,
+  currentPromptId: null,
 };
 
 const MAX_RECENT_NODES = 3;
@@ -242,7 +243,7 @@ type Action =
   | { type: 'ORCHESTRATOR_STARTING' }
   | { type: 'ORCHESTRATOR_STARTED'; provider: string; model: string }
   | { type: 'ORCHESTRATOR_STOPPED' }
-  | { type: 'ORCHESTRATOR_ADD_USER_MESSAGE'; message: string }
+  | { type: 'ORCHESTRATOR_ADD_USER_MESSAGE'; message: string; promptId: string }
   | { type: 'ORCHESTRATOR_ADD_CONTENT'; content: string }
   | { type: 'ORCHESTRATOR_TOOL_EXECUTING'; name: string; input?: string }
   | { type: 'ORCHESTRATOR_TOOL_EXECUTED'; name: string; display: string; success: boolean; result: string }
@@ -414,6 +415,7 @@ function reduceOrchestrator(state: AppState, action: Action): AppState | null {
           isLoading: true,
           streamingContent: '',
           currentToolExecutions: [],
+          currentPromptId: action.promptId,
         },
       };
     case 'ORCHESTRATOR_ADD_CONTENT': {
@@ -1223,7 +1225,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'SET_OP_DEF_SUCCESS', fullName: message.full_name });
           break;
         //
-        // Orchestrator messages.
+        // Orchestrator messages. Events carry a prompt_id; discard stale
+        // events that don't match the current prompt.
         //
         case 'orchestrator_started':
           dispatch({ type: 'ORCHESTRATOR_STARTED', provider: message.provider, model: message.model });
@@ -1232,34 +1235,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'ORCHESTRATOR_STOPPED' });
           break;
         case 'orchestrator_content':
-          dispatch({ type: 'ORCHESTRATOR_ADD_CONTENT', content: message.content });
+          if (message.prompt_id === String(orchestratorPromptSeq.current)) {
+            dispatch({ type: 'ORCHESTRATOR_ADD_CONTENT', content: message.content });
+          }
           break;
         case 'orchestrator_tool_executing':
-          if (message.name !== 'report_plan') {
+          if (message.prompt_id === String(orchestratorPromptSeq.current) && message.name !== 'report_plan') {
             dispatch({ type: 'ORCHESTRATOR_TOOL_EXECUTING', name: message.name, input: message.input });
           }
           break;
         case 'orchestrator_tool_executed':
-          if (message.name !== 'report_plan') {
+          if (message.prompt_id === String(orchestratorPromptSeq.current) && message.name !== 'report_plan') {
             dispatch({ type: 'ORCHESTRATOR_TOOL_EXECUTED', name: message.name, display: message.display, success: message.success, result: message.result });
           }
           break;
         case 'orchestrator_plan_updated':
-          dispatch({ type: 'ORCHESTRATOR_PLAN_UPDATED', plan: message.plan });
+          if (message.prompt_id === String(orchestratorPromptSeq.current)) {
+            dispatch({ type: 'ORCHESTRATOR_PLAN_UPDATED', plan: message.plan });
+          }
           break;
         case 'orchestrator_done':
-          dispatch({ type: 'ORCHESTRATOR_DONE' });
+          if (message.prompt_id === String(orchestratorPromptSeq.current)) {
+            dispatch({ type: 'ORCHESTRATOR_DONE' });
+          }
           break;
         case 'orchestrator_error':
-          dispatch({ type: 'ORCHESTRATOR_ERROR', message: message.message });
+          if (message.prompt_id === String(orchestratorPromptSeq.current)) {
+            dispatch({ type: 'ORCHESTRATOR_ERROR', message: message.message });
+          }
           break;
         case 'orchestrator_token_usage':
-          dispatch({
-            type: 'ORCHESTRATOR_TOKEN_USAGE',
-            promptTokens: message.prompt_tokens,
-            completionTokens: message.completion_tokens,
-            totalTokens: message.total_tokens,
-          });
+          if (message.prompt_id === String(orchestratorPromptSeq.current)) {
+            dispatch({
+              type: 'ORCHESTRATOR_TOKEN_USAGE',
+              promptTokens: message.prompt_tokens,
+              completionTokens: message.completion_tokens,
+              totalTokens: message.total_tokens,
+            });
+          }
           break;
         //
         // Traffic interception messages.
@@ -1574,9 +1587,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'ORCHESTRATOR_DONE' });
   }, []);
 
+  const orchestratorPromptSeq = useRef(0);
+
   const orchestratorPrompt = useCallback((message: string) => {
-    dispatch({ type: 'ORCHESTRATOR_ADD_USER_MESSAGE', message });
-    wsClient.send({ type: 'orchestrator_prompt', message });
+    orchestratorPromptSeq.current += 1;
+    const promptId = String(orchestratorPromptSeq.current);
+    dispatch({ type: 'ORCHESTRATOR_ADD_USER_MESSAGE', message, promptId });
+    wsClient.send({ type: 'orchestrator_prompt', prompt_id: promptId, message });
   }, []);
 
   const orchestratorClearMessages = useCallback(() => {

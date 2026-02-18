@@ -92,8 +92,8 @@ pub async fn handle_browser_message(
         BrowserMessage::OrchestratorStart => {
             state.rabbitmq.start_orchestrator().await?;
         }
-        BrowserMessage::OrchestratorPrompt { message } => {
-            state.rabbitmq.send_orchestrator_prompt(message).await?;
+        BrowserMessage::OrchestratorPrompt { prompt_id, message } => {
+            state.rabbitmq.send_orchestrator_prompt(prompt_id, message).await?;
         }
         BrowserMessage::OrchestratorStop => {
             state.rabbitmq.stop_orchestrator().await?;

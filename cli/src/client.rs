@@ -280,7 +280,7 @@ impl CliClient {
                 | ClientDirectMessage::OrchestratorToolExecuting { .. }
                 | ClientDirectMessage::OrchestratorToolExecuted { .. }
                 | ClientDirectMessage::OrchestratorPlanUpdated { .. }
-                | ClientDirectMessage::OrchestratorDone
+                | ClientDirectMessage::OrchestratorDone { .. }
                 | ClientDirectMessage::OrchestratorStopped
                 | ClientDirectMessage::OrchestratorError { .. }
                 | ClientDirectMessage::OrchestratorTokenUsage { .. }) => {
@@ -654,9 +654,10 @@ impl CliClient {
         self.publish_signal(message).await
     }
 
-    pub async fn send_orchestrator_prompt(&self, prompt: String) -> Result<()> {
+    pub async fn send_orchestrator_prompt(&self, prompt_id: String, prompt: String) -> Result<()> {
         let message = ClientSignalMessage::OrchestratorPrompt {
             client_id: self.client_id.clone(),
+            prompt_id,
             message: prompt,
         };
         self.publish_signal(message).await

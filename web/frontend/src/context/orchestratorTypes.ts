@@ -36,4 +36,5 @@ export interface OrchestratorState {
   streamingContent: string;
   currentToolExecutions: OrchestratorToolExecution[];
   tokenUsage: OrchestratorTokenUsage | null;
+  currentPromptId: string | null;
 }

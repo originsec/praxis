@@ -1532,7 +1532,7 @@ pub enum ClientSignalMessage {
     /// Start an orchestrator session for this client
     OrchestratorStart { client_id: String },
     /// Send a prompt to the orchestrator session
-    OrchestratorPrompt { client_id: String, message: String },
+    OrchestratorPrompt { client_id: String, prompt_id: String, message: String },
     /// Stop the orchestrator session (ends entirely)
     OrchestratorStop { client_id: String },
     /// Cancel current orchestrator inference (keeps session alive)
@@ -1843,21 +1843,21 @@ pub enum ClientDirectMessage {
         model: String,
     },
     /// Orchestrator streaming text content
-    OrchestratorContent { content: String },
+    OrchestratorContent { prompt_id: String, content: String },
     /// Orchestrator started executing a tool
-    OrchestratorToolExecuting { name: String, input: Option<String> },
+    OrchestratorToolExecuting { prompt_id: String, name: String, input: Option<String> },
     /// Orchestrator finished executing a tool
-    OrchestratorToolExecuted { name: String, display: String, success: bool, result: String },
+    OrchestratorToolExecuted { prompt_id: String, name: String, display: String, success: bool, result: String },
     /// Orchestrator plan updated
-    OrchestratorPlanUpdated { plan: OrchestratorPlan },
+    OrchestratorPlanUpdated { prompt_id: String, plan: OrchestratorPlan },
     /// Orchestrator response complete
-    OrchestratorDone,
+    OrchestratorDone { prompt_id: String },
     /// Orchestrator session stopped
     OrchestratorStopped,
     /// Orchestrator error
-    OrchestratorError { message: String },
+    OrchestratorError { prompt_id: String, message: String },
     /// Orchestrator token usage update
-    OrchestratorTokenUsage { prompt_tokens: u32, completion_tokens: u32, total_tokens: u32 },
+    OrchestratorTokenUsage { prompt_id: String, prompt_tokens: u32, completion_tokens: u32, total_tokens: u32 },
 
     //
     // AgentChat responses.
