@@ -211,8 +211,10 @@ recon session-read                              # omit path to read all
 # Grep config/session content with regex (pattern first, then optional path)
 recon config-grep "model|profile" /home/user/.codex/config.toml
 recon session-grep "error|warning" /home/user/.codex/sessions/2026-02-13.jsonl
-recon config-grep "model|profile"               # omit path to grep all (interactive picker)
+recon config-grep "model|profile"               # omit path to grep all
 recon session-grep "error|warning"              # omit path to grep all
+# Glob patterns are supported for config files
+recon config-grep "api_key" "/home/user/.config/**/*.toml"
 ```
 
 ### Sessions
@@ -387,8 +389,8 @@ The MCP server exposes the following tools:
 - `recon_list` - List stored recon data (section: all/sessions/tools/projects/configs)
 - `recon_config_read` - Read config file content (omit path to read all)
 - `recon_session_read` - Read session file content (omit path to read all)
-- `recon_config_grep` - Grep config files with regex (omit path to grep all)
-- `recon_session_grep` - Grep session files with regex (omit path to grep all)
+- `recon_config_grep` - Grep config files with regex. Supports glob patterns and multiple paths. Omit paths to grep all.
+- `recon_session_grep` - Grep session files with regex. Supports multiple paths. Omit paths to grep all.
 - `write_file` - Write file content
 
 **Sessions:**

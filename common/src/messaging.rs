@@ -474,10 +474,12 @@ pub enum AgentCommand {
         path: String,
         contents: String,
     },
-    /// Search file content using a regex pattern and return matching lines
-    GrepFile {
+    /// Search file content using a regex pattern and return matching lines.
+    /// Accepts multiple paths (including globs) for batch grep in a single
+    /// round-trip.
+    GrepFiles {
         file_type: AgentFileType,
-        path: String,
+        paths: Vec<String>,
         pattern: String,
     },
 }
@@ -492,6 +494,13 @@ pub enum AgentFileType {
 pub struct GrepMatch {
     pub line_number: usize,
     pub line_content: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GrepFileEntry {
+    pub path: String,
+    pub matches: Vec<GrepMatch>,
+    pub error: Option<String>,
 }
 
 /// Unique identifier for tracking session transactions
@@ -664,13 +673,12 @@ pub enum AgentCommandResult {
         line_end: Option<usize>,
         error: Option<String>,
     },
-    /// File grep response
-    GrepFileResult {
+    /// Batch file grep response
+    GrepFilesResult {
         file_type: AgentFileType,
-        path: String,
         pattern: String,
-        matches: Vec<GrepMatch>,
-        error: Option<String>,
+        results: Vec<GrepFileEntry>,
+        errors: Vec<String>,
     },
 }
 

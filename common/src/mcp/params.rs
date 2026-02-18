@@ -86,8 +86,8 @@ pub struct ReconGrepParams {
     #[schemars(description = "Regex pattern to search for")]
     pub pattern: String,
 
-    #[schemars(description = "Path to the file (omit to grep all from recon)")]
-    pub path: Option<String>,
+    #[schemars(description = "File path(s) to grep. Supports glob patterns (e.g. '/etc/*.conf'). Omit to grep all files from recon.")]
+    pub paths: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

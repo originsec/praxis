@@ -366,23 +366,30 @@ async fn grep_file(
     let node_id = find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
-    let cmd = NodeCmd::Agent(NodeAgentCommand::GrepFile {
+    let cmd = NodeCmd::Agent(NodeAgentCommand::GrepFiles {
         file_type,
-        path: path.to_string(),
+        paths: vec![path.to_string()],
         pattern: pattern.to_string(),
     });
     let response = client.send_command(&node_id, cmd).await?;
 
     match response.result {
-        NodeCommandResult::Agent(AgentCommandResult::GrepFileResult {
+        NodeCommandResult::Agent(AgentCommandResult::GrepFilesResult {
             file_type: result_file_type,
-            path,
             pattern,
-            matches,
-            error,
+            results,
+            ..
         }) => {
+            let entry = results.first();
             match output {
                 OutputFormat::Json => {
+                    let (matches, error) = match entry {
+                        Some(r) => (&r.matches, &r.error),
+                        None => {
+                            static EMPTY: Vec<common::GrepMatch> = Vec::new();
+                            (&EMPTY, &None)
+                        }
+                    };
                     print_json(&json!({
                         "file_type": format!("{:?}", result_file_type),
                         "path": path,
@@ -393,8 +400,10 @@ async fn grep_file(
                     }));
                 }
                 OutputFormat::Text => {
-                    if let Some(error) = error {
-                        return Err(anyhow!(error));
+                    if let Some(r) = entry {
+                        if let Some(error) = &r.error {
+                            return Err(anyhow!("{}", error));
+                        }
                     }
                     let title = match result_file_type {
                         NodeFileType::Config => "Config Grep Results",
@@ -404,10 +413,14 @@ async fn grep_file(
                     println!();
                     println!("  Path: {}", path);
                     println!("  Pattern: {}", pattern);
-                    println!("  Matches: {}", matches.len());
-                    println!();
-                    for m in matches {
-                        println!("  {:>6}: {}", m.line_number, m.line_content);
+                    if let Some(r) = entry {
+                        println!("  Matches: {}", r.matches.len());
+                        println!();
+                        for m in &r.matches {
+                            println!("  {:>6}: {}", m.line_number, m.line_content);
+                        }
+                    } else {
+                        println!("  Matches: 0");
                     }
                     println!();
                     print_success("Grep complete");

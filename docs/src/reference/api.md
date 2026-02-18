@@ -319,7 +319,7 @@ pub enum AgentCommand {
     ReconSemantic,                             // Semantic reconnaissance
     ReadFile { file_type, path, line_start, line_end }, // Read file content
     WriteFile { file_type, path, contents },            // Write file content
-    GrepFile { file_type, path, pattern },              // Search file with regex
+    GrepFiles { file_type, paths, pattern },             // Search files with regex (batch, glob support)
 }
 ```
 
@@ -328,8 +328,9 @@ pub enum AgentCommand {
 `ReadFile` uses 1-based inclusive line bounds (`line_start` and `line_end`).
 If no bounds are provided, the entire file is returned.
 
-`GrepFile` returns matching lines with 1-based line numbers.
-If no lines match, it returns success with an empty `matches` list.
+`GrepFiles` accepts multiple paths (including glob patterns like `/etc/*.conf`)
+and returns per-file results with 1-based line numbers in a single round-trip.
+If no lines match for a file, it returns an entry with an empty `matches` list.
 
 `WriteFile` is only allowed for `file_type=Config`. Session writes are rejected.
 
