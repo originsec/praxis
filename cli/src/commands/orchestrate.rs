@@ -142,6 +142,7 @@ async fn process_events_until_done(
     expected_prompt_id: &str,
 ) {
     let mut spinner: Option<Spinner> = None;
+    let mut cursor: Option<Spinner> = Some(Spinner::start_cursor());
     let mut accumulated_content = String::new();
     let mut pending_thinking = String::new();
     let mut tool_calls: Vec<(String, bool)> = Vec::new();
@@ -197,6 +198,10 @@ async fn process_events_until_done(
                     | ClientDirectMessage::OrchestratorTokenUsage { prompt_id, .. }
                         if prompt_id != expected_prompt_id => continue,
                     _ => {}
+                }
+
+                if let Some(c) = cursor.take() {
+                    c.finish().await;
                 }
 
                 match event {
@@ -422,6 +427,9 @@ async fn process_events_until_done(
                 }) = term_event {
                     match (code, modifiers) {
                         (KeyCode::Char('c'), m) if m.contains(KeyModifiers::CONTROL) => {
+                            if let Some(c) = cursor.take() {
+                                c.finish().await;
+                            }
                             if let Some(s) = spinner.take() {
                                 s.finish().await;
                             }
@@ -477,6 +485,9 @@ async fn process_events_until_done(
             }
 
             _ = tokio::signal::ctrl_c(), if !interactive => {
+                if let Some(c) = cursor.take() {
+                    c.finish().await;
+                }
                 if let Some(s) = spinner.take() {
                     s.finish().await;
                 }
