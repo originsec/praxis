@@ -24,3 +24,16 @@ pub use ai::{
 pub use config::{FileConfig, find_config_file, load_from_paths};
 
 pub use mcp::{McpClient, PraxisServer, run_stdio_server};
+
+/// Truncate a string to at most `max_bytes` without panicking on multibyte
+/// character boundaries. Rounds down to the nearest char boundary.
+pub fn truncate_str(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}

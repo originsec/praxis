@@ -690,7 +690,7 @@ async fn handle_opdef_add(ctx: &ServiceContext, client_id: String, content: Stri
         "Received OpDefAdd from client {}",
         &client_id[..8.min(client_id.len())]
     );
-    common::log_debug!("OpDefAdd: content={}", &content[..content.len().min(2000)]);
+    common::log_debug!("OpDefAdd: content={}", common::truncate_str(&content, 2000));
 
     //
     // Auto-detect format: if content starts with '{', parse as JSON,

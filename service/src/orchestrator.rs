@@ -263,7 +263,7 @@ impl OrchestratorManager {
                     common::log_info!(
                         "Orchestrator received prompt for {}: {}...",
                         &client_id_owned[..8.min(client_id_owned.len())],
-                        &prompt[..prompt.len().min(50)]
+                        common::truncate_str(&prompt, 50)
                     );
 
                     conversation_history.push(Message::user(&prompt));
@@ -358,7 +358,7 @@ impl OrchestratorManager {
                                 .and_then(|v| v.get("display").and_then(|d| d.as_str()).map(String::from))
                                 .unwrap_or_else(|| if success { "Done".to_string() } else { "Error".to_string() });
 
-                            common::log_info!("Tool {} result: {}", tool_name, &result[..result.len().min(100)]);
+                            common::log_info!("Tool {} result: {}", tool_name, common::truncate_str(&result, 100));
 
                             if tool_name == "report_plan" {
                                 if let Ok(result_json) = serde_json::from_str::<Value>(&result) {

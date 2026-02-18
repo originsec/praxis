@@ -101,7 +101,7 @@ pub async fn summarize_traffic(
         Ok(response) => {
             let summary = response.trim().to_string();
             common::log_info!("=== Traffic Summarization Response ===");
-            common::log_info!("Summary: {}", &summary[..summary.len().min(200)]);
+            common::log_info!("Summary: {}", common::truncate_str(&summary, 200));
             common::log_info!("=== End Response ===");
 
             SummarizationResult {
