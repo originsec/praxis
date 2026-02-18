@@ -494,7 +494,6 @@ pub async fn recon_grep_file(
     pattern: &str,
 ) -> Result<GrepFilesResult> {
     let resolved = resolve_recon(client, node_prefix, file_type).await?;
-    validate_paths(&resolved.paths, paths, file_type)?;
     grep_files_inner(client, &resolved.node_id, file_type, paths, pattern).await
 }
 
