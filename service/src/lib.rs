@@ -285,6 +285,12 @@ async fn run_main_loop() -> Result<()> {
         response_tracker.clone(),
     ));
 
+    if let Ok(count) = semantic_ops_manager.cancel_stale_operations().await {
+        if count > 0 {
+            common::log_info!("Cancelled {} stale operations from previous run", count);
+        }
+    }
+
     common::log_info!("Initialized semantic operations manager");
 
     //

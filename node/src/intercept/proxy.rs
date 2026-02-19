@@ -80,7 +80,7 @@ fn extract_api_key_from_headers(headers: &IndexMap<String, String>, host: &str) 
                 common::log_debug!(
                     "Found Authorization header for {} but not Bearer format: {}",
                     host,
-                    &value[..value.len().min(20)]
+                    common::truncate_str(&value, 20)
                 );
             }
         }
