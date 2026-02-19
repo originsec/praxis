@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Play, Trash2, Clock, Edit2 } from 'lucide-react';
+import { Play, Trash2, Clock, Edit2, Zap } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ChainBuilder } from './ChainBuilder';
 import { Modal } from '../common/Modal';
@@ -179,6 +179,17 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
     runChain(chainId, nodeId, agentName);
   };
 
+  const handleRunAdvanced = (chainId: string, targetSpec: import('../../api/types').TargetSpec) => {
+    //
+    // Use the first available node/agent as the primary executor, but pass
+    // the target spec for multi-node targeting.
+    //
+    const primaryNode = nodes[0];
+    if (!primaryNode) return;
+    const agentName = primaryNode.selected_agent?.short_name || primaryNode.discovered_agents?.[0]?.short_name || '';
+    runChain(chainId, primaryNode.node_id, agentName, undefined, targetSpec);
+  };
+
   const handleSave = (definition: ChainDefinitionInput) => {
     if (editingChainId) {
       updateChain(editingChainId, definition);
@@ -222,6 +233,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
           onCancel={handleCancel}
           operationDefs={operationDefs}
           modelDefs={modelDefs}
+          nodes={nodes}
           saveStatus={chainSuccess}
           saveError={chainError}
         />
@@ -278,7 +290,15 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
                       onClick={() => handleEdit(chain)}
                       className="text-left hover:text-[var(--accent-info)] transition-colors"
                     >
-                      <p className="font-medium text-highlight">{chain.name}</p>
+                      <p className="font-medium text-highlight">
+                        {chain.name}
+                        {(chain.trigger_count ?? 0) > 0 && (
+                          <span className="ml-2 inline-flex items-center gap-0.5 text-[10px] text-[var(--accent-warning)]">
+                            <Zap size={10} />
+                            {chain.trigger_count}
+                          </span>
+                        )}
+                      </p>
                       {chain.description && (
                         <p className="text-muted text-xs">{chain.description}</p>
                       )}
@@ -336,6 +356,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
           setPreSelectedChain(null);
         }}
         onRun={handleRunFromModal}
+        onRunAdvanced={handleRunAdvanced}
         title="Run Chain"
         items={chains.filter(c => !c.disabled).map(chain => ({
           id: chain.id,

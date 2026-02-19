@@ -49,6 +49,7 @@ struct ClientState {
     operation_definitions: Vec<OperationDefinitionInfo>,
     chain_definitions: Vec<ChainDefinitionInfo>,
     chain_executions: Vec<ChainExecutionUpdate>,
+    chain_triggers: Vec<common::ChainTriggerInfo>,
 }
 
 impl ServiceMcpClient {
@@ -256,6 +257,20 @@ impl ServiceMcpClient {
             }
             ClientDirectMessage::ReconGetResponse { recon_result, .. } => {
                 state.pending_recon_get = Some(recon_result);
+            }
+            ClientDirectMessage::ChainTriggerListResponse { triggers } => {
+                state.chain_triggers = triggers;
+            }
+            ClientDirectMessage::ChainTriggerCreated { trigger } => {
+                state.chain_triggers.push(trigger);
+            }
+            ClientDirectMessage::ChainTriggerUpdated { trigger } => {
+                if let Some(idx) = state.chain_triggers.iter().position(|t| t.id == trigger.id) {
+                    state.chain_triggers[idx] = trigger;
+                }
+            }
+            ClientDirectMessage::ChainTriggerDeleted { trigger_id } => {
+                state.chain_triggers.retain(|t| t.id != trigger_id);
             }
             _ => {}
         }
@@ -503,6 +518,7 @@ impl McpClient for ServiceMcpClient {
             node_id,
             agent_short_name,
             working_dir,
+            target_spec: None,
         };
         self.publish_signal(message).await
     }
@@ -555,6 +571,52 @@ impl McpClient for ServiceMcpClient {
         }
 
         Err(anyhow!("Timeout waiting for stored recon result"))
+    }
+
+    async fn request_chain_trigger_list(&self, chain_id: Option<String>) -> Result<()> {
+        let message = ClientSignalMessage::ChainTriggerList {
+            client_id: self.client_id.clone(),
+            chain_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    async fn get_chain_triggers(&self) -> Vec<common::ChainTriggerInfo> {
+        self.state.lock().await.chain_triggers.clone()
+    }
+
+    async fn create_chain_trigger(
+        &self,
+        chain_id: String,
+        trigger_config: common::TriggerConfig,
+        target_spec: common::TargetSpec,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::ChainTriggerCreate {
+            client_id: self.client_id.clone(),
+            chain_id,
+            trigger_config,
+            target_spec,
+        };
+        self.publish_signal(message).await
+    }
+
+    async fn delete_chain_trigger(&self, trigger_id: String) -> Result<()> {
+        let message = ClientSignalMessage::ChainTriggerDelete {
+            client_id: self.client_id.clone(),
+            trigger_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    async fn toggle_chain_trigger(&self, trigger_id: String, enabled: bool) -> Result<()> {
+        let message = ClientSignalMessage::ChainTriggerUpdate {
+            client_id: self.client_id.clone(),
+            trigger_id,
+            enabled: Some(enabled),
+            trigger_config: None,
+            target_spec: None,
+        };
+        self.publish_signal(message).await
     }
 }
 

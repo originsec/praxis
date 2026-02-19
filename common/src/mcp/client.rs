@@ -2,9 +2,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use crate::{
-    ChainDefinitionInfo, ChainExecutionUpdate, CommandResponse, InterceptedTrafficEntry,
-    NodeCommand, OperationDefinitionInfo, ReconResult, SemanticOpUpdate, SystemState,
-    TrafficSearchFilters,
+    ChainDefinitionInfo, ChainExecutionUpdate, ChainTriggerInfo, CommandResponse,
+    InterceptedTrafficEntry, NodeCommand, OperationDefinitionInfo, ReconResult,
+    SemanticOpUpdate, SystemState, TargetSpec, TrafficSearchFilters, TriggerConfig,
 };
 
 //
@@ -80,4 +80,24 @@ pub trait McpClient: Send + Sync {
         node_id: &str,
         agent_short_name: &str,
     ) -> Result<Option<ReconResult>>;
+
+    /// Request chain triggers list (triggers refresh).
+    async fn request_chain_trigger_list(&self, chain_id: Option<String>) -> Result<()>;
+
+    /// Get cached chain triggers.
+    async fn get_chain_triggers(&self) -> Vec<ChainTriggerInfo>;
+
+    /// Create a chain trigger.
+    async fn create_chain_trigger(
+        &self,
+        chain_id: String,
+        trigger_config: TriggerConfig,
+        target_spec: TargetSpec,
+    ) -> Result<()>;
+
+    /// Delete a chain trigger.
+    async fn delete_chain_trigger(&self, trigger_id: String) -> Result<()>;
+
+    /// Toggle a chain trigger's enabled state.
+    async fn toggle_chain_trigger(&self, trigger_id: String, enabled: bool) -> Result<()>;
 }

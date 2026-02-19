@@ -47,12 +47,25 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                 config.get_bool(APPLICATION_LOGS_ENABLED, false)
             };
 
+            let reg_node_id = registration.node_id.clone();
             if let Err(e) = ctx
                 .node_handler
                 .handle_node_registration(registration, lua_scripts, event_logging_enabled)
                 .await
             {
                 common::log_error!("Failed to handle NodeRegistration: {}", e);
+            }
+
+            //
+            // Fire new-node triggers (delayed to allow agent discovery).
+            //
+            if let Some(ref trigger_engine) = ctx.trigger_engine {
+                let te = trigger_engine.clone();
+                let node_id = reg_node_id;
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                    te.fire_new_node_triggers(&node_id).await;
+                });
             }
 
             //
@@ -293,6 +306,29 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                         .await
                     {
                         Ok(matches) => {
+                            //
+                            // Fire intercept-match triggers for matched rules.
+                            //
+                            if !matches.is_empty() {
+                                if let Some(ref trigger_engine) = ctx.trigger_engine {
+                                    let matched_rule_ids: Vec<i64> = matches.iter().map(|(_, r)| r.id).collect();
+                                    let te = trigger_engine.clone();
+                                    let trigger_node_id = entry.node_id.clone();
+                                    let match_context = format!(
+                                        "Intercept match on URL: {}\nMatched rules: {}",
+                                        entry.url,
+                                        matches.iter().map(|(_, r)| r.name.as_str()).collect::<Vec<_>>().join(", ")
+                                    );
+                                    tokio::spawn(async move {
+                                        te.fire_intercept_match_triggers(
+                                            &matched_rule_ids,
+                                            &trigger_node_id,
+                                            &match_context,
+                                        ).await;
+                                    });
+                                }
+                            }
+
                             //
                             // Process summarization for matches with
                             // summarization_prompt.

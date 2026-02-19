@@ -14,6 +14,7 @@ mod orchestrator;
 mod semantic_helpers;
 mod semantic_ops;
 mod state;
+pub mod trigger_engine;
 
 use anyhow::Result;
 pub use common::rabbitmq_url;
@@ -565,6 +566,21 @@ async fn run_main_loop() -> Result<()> {
     }
 
     //
+    // Initialize and start the trigger engine.
+    //
+    let trigger_engine = Arc::new(trigger_engine::TriggerEngine::new(
+        database.clone(),
+        chain_executor.clone(),
+        node_registry.clone(),
+        service_config.clone(),
+        response_tracker.clone(),
+        semantic_ops_channel.clone(),
+        broadcast_channel.clone(),
+    ));
+    trigger_engine.start_scheduler();
+    common::log_info!("Initialized trigger engine");
+
+    //
     // Create the service context for message dispatch.
     //
     let ctx = ServiceContext {
@@ -581,6 +597,7 @@ async fn run_main_loop() -> Result<()> {
         agent_chat_manager,
         orchestrator_manager,
         mcp_manager,
+        trigger_engine: Some(trigger_engine.clone()),
         publish_channel,
         client_publish_channel,
         broadcast_channel,

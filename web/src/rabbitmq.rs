@@ -245,6 +245,7 @@ impl RabbitMqClient {
         node_id: String,
         agent_short_name: String,
         working_dir: Option<String>,
+        target_spec: Option<common::TargetSpec>,
     ) -> Result<()> {
         let message = ClientSignalMessage::ChainRun {
             client_id: self.state.client_id.clone(),
@@ -252,6 +253,7 @@ impl RabbitMqClient {
             node_id,
             agent_short_name,
             working_dir,
+            target_spec,
         };
         self.publish_signal(message).await
     }
@@ -282,6 +284,58 @@ impl RabbitMqClient {
     /// Clear all finished chain executions
     pub async fn clear_chain_executions(&self) -> Result<()> {
         let message = ClientSignalMessage::ChainExecutionClear;
+        self.publish_signal(message).await
+    }
+
+    //
+    // Chain trigger methods.
+    //
+
+    pub async fn create_chain_trigger(
+        &self,
+        chain_id: String,
+        trigger_config: common::TriggerConfig,
+        target_spec: common::TargetSpec,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::ChainTriggerCreate {
+            client_id: self.state.client_id.clone(),
+            chain_id,
+            trigger_config,
+            target_spec,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn update_chain_trigger(
+        &self,
+        trigger_id: String,
+        enabled: Option<bool>,
+        trigger_config: Option<common::TriggerConfig>,
+        target_spec: Option<common::TargetSpec>,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::ChainTriggerUpdate {
+            client_id: self.state.client_id.clone(),
+            trigger_id,
+            enabled,
+            trigger_config,
+            target_spec,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn delete_chain_trigger(&self, trigger_id: String) -> Result<()> {
+        let message = ClientSignalMessage::ChainTriggerDelete {
+            client_id: self.state.client_id.clone(),
+            trigger_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn list_chain_triggers(&self, chain_id: Option<String>) -> Result<()> {
+        let message = ClientSignalMessage::ChainTriggerList {
+            client_id: self.state.client_id.clone(),
+            chain_id,
+        };
         self.publish_signal(message).await
     }
 
@@ -1009,6 +1063,22 @@ impl RabbitMqClient {
                     self.state.update_chain_execution(exec.clone()).await;
                 }
                 self.state.broadcast(ServerMessage::ChainExecutionList { executions });
+            }
+
+            //
+            // Chain trigger responses.
+            //
+            ClientDirectMessage::ChainTriggerCreated { trigger } => {
+                self.state.broadcast(ServerMessage::ChainTriggerCreated { trigger });
+            }
+            ClientDirectMessage::ChainTriggerUpdated { trigger } => {
+                self.state.broadcast(ServerMessage::ChainTriggerUpdated { trigger });
+            }
+            ClientDirectMessage::ChainTriggerDeleted { trigger_id } => {
+                self.state.broadcast(ServerMessage::ChainTriggerDeleted { trigger_id });
+            }
+            ClientDirectMessage::ChainTriggerListResponse { triggers } => {
+                self.state.broadcast(ServerMessage::ChainTriggerListResponse { triggers });
             }
 
             //

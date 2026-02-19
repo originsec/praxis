@@ -32,6 +32,9 @@ import type {
   ChainDefinitionFull,
   ChainDefinitionInput,
   ChainExecutionUpdate,
+  ChainTriggerInfo,
+  TriggerConfig,
+  TargetSpec,
   DiscoveredLlmEndpoint,
   AgentChatAgentInfo,
   AgentChatAgentStatus,
@@ -98,6 +101,7 @@ interface ChainState {
   chainDefinitionsCache: Record<string, ChainDefinitionFull>;
   loadingChains: Set<string>;
   executions: ChainExecutionUpdate[];
+  triggers: ChainTriggerInfo[];
   chainError: string | null;
   chainSuccess: string | null;
   lastCreatedChainId: string | null;
@@ -109,6 +113,7 @@ const initialChainState: ChainState = {
   chainDefinitionsCache: {},
   loadingChains: new Set(),
   executions: [],
+  triggers: [],
   chainError: null,
   chainSuccess: null,
   lastCreatedChainId: null,
@@ -290,6 +295,10 @@ type Action =
   | { type: 'DELETE_CHAIN'; chain_id: string }
   | { type: 'SET_CHAIN_EXECUTIONS'; executions: ChainExecutionUpdate[] }
   | { type: 'UPDATE_CHAIN_EXECUTION'; execution: ChainExecutionUpdate }
+  | { type: 'SET_CHAIN_TRIGGERS'; triggers: ChainTriggerInfo[] }
+  | { type: 'ADD_CHAIN_TRIGGER'; trigger: ChainTriggerInfo }
+  | { type: 'UPDATE_CHAIN_TRIGGER'; trigger: ChainTriggerInfo }
+  | { type: 'DELETE_CHAIN_TRIGGER'; trigger_id: string }
   | { type: 'SET_CHAIN_ERROR'; error: string | null }
   | { type: 'SET_CHAIN_SUCCESS'; message: string | null }
   | { type: 'SET_LAST_CREATED_CHAIN_ID'; chainId: string | null }
@@ -759,6 +768,21 @@ function reduceChains(state: AppState, action: Action): AppState | null {
       }
       return { ...state, chains: { ...state.chains, executions: [...state.chains.executions, action.execution] } };
     }
+    case 'SET_CHAIN_TRIGGERS':
+      return { ...state, chains: { ...state.chains, triggers: action.triggers } };
+    case 'ADD_CHAIN_TRIGGER':
+      return { ...state, chains: { ...state.chains, triggers: [...state.chains.triggers, action.trigger] } };
+    case 'UPDATE_CHAIN_TRIGGER': {
+      const triggerIndex = state.chains.triggers.findIndex(t => t.id === action.trigger.id);
+      if (triggerIndex >= 0) {
+        const newTriggers = [...state.chains.triggers];
+        newTriggers[triggerIndex] = action.trigger;
+        return { ...state, chains: { ...state.chains, triggers: newTriggers } };
+      }
+      return { ...state, chains: { ...state.chains, triggers: [...state.chains.triggers, action.trigger] } };
+    }
+    case 'DELETE_CHAIN_TRIGGER':
+      return { ...state, chains: { ...state.chains, triggers: state.chains.triggers.filter(t => t.id !== action.trigger_id) } };
     case 'SET_CHAIN_ERROR':
       return { ...state, chains: { ...state.chains, chainError: action.error, chainSuccess: null } };
     case 'SET_CHAIN_SUCCESS':
@@ -1103,7 +1127,7 @@ interface AppContextValue {
   createChain: (definition: ChainDefinitionInput) => void;
   updateChain: (chainId: string, definition: ChainDefinitionInput) => void;
   deleteChain: (chainId: string) => void;
-  runChain: (chainId: string, nodeId: string, agentShortName: string, workingDir?: string) => void;
+  runChain: (chainId: string, nodeId: string, agentShortName: string, workingDir?: string, targetSpec?: TargetSpec) => void;
   cancelChainExecution: (executionId: string) => void;
   removeChainExecution: (executionId: string) => void;
   //
@@ -1114,6 +1138,13 @@ interface AppContextValue {
   requestChainExecutions: () => void;
   clearChainStatus: () => void;
   clearLastCreatedChain: () => void;
+  //
+  // Chain triggers.
+  //
+  requestChainTriggers: (chainId?: string) => void;
+  createChainTrigger: (chainId: string, triggerConfig: TriggerConfig, targetSpec: TargetSpec) => void;
+  updateChainTrigger: (triggerId: string, updates: { enabled?: boolean; trigger_config?: TriggerConfig; target_spec?: TargetSpec }) => void;
+  deleteChainTrigger: (triggerId: string) => void;
   //
   // Agent discovery.
   //
@@ -1355,6 +1386,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
           break;
         case 'chain_execution_list':
           dispatch({ type: 'SET_CHAIN_EXECUTIONS', executions: message.executions });
+          break;
+
+        //
+        // Chain trigger messages.
+        //
+        case 'chain_trigger_created':
+          dispatch({ type: 'ADD_CHAIN_TRIGGER', trigger: message.trigger });
+          break;
+        case 'chain_trigger_updated':
+          dispatch({ type: 'UPDATE_CHAIN_TRIGGER', trigger: message.trigger });
+          break;
+        case 'chain_trigger_deleted':
+          dispatch({ type: 'DELETE_CHAIN_TRIGGER', trigger_id: message.trigger_id });
+          break;
+        case 'chain_trigger_list_response':
+          dispatch({ type: 'SET_CHAIN_TRIGGERS', triggers: message.triggers });
           break;
 
         //
@@ -1720,13 +1767,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     wsClient.send({ type: 'chain_delete', chain_id: chainId });
   }, []);
 
-  const runChain = useCallback((chainId: string, nodeId: string, agentShortName: string, workingDir?: string) => {
+  const runChain = useCallback((chainId: string, nodeId: string, agentShortName: string, workingDir?: string, targetSpec?: TargetSpec) => {
     wsClient.send({
       type: 'chain_run',
       chain_id: chainId,
       node_id: nodeId,
       agent_short_name: agentShortName,
       working_dir: workingDir ?? null,
+      target_spec: targetSpec ?? null,
     });
   }, []);
 
@@ -1769,6 +1817,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const clearLastCreatedChain = useCallback(() => {
     dispatch({ type: 'SET_LAST_CREATED_CHAIN_ID', chainId: null });
+  }, []);
+
+  //
+  // Chain trigger methods.
+  //
+
+  const requestChainTriggers = useCallback((chainId?: string) => {
+    wsClient.send({ type: 'chain_trigger_list', chain_id: chainId ?? null });
+  }, []);
+
+  const createChainTrigger = useCallback((chainId: string, triggerConfig: TriggerConfig, targetSpec: TargetSpec) => {
+    wsClient.send({ type: 'chain_trigger_create', chain_id: chainId, trigger_config: triggerConfig, target_spec: targetSpec });
+  }, []);
+
+  const updateChainTrigger = useCallback((triggerId: string, updates: { enabled?: boolean; trigger_config?: TriggerConfig; target_spec?: TargetSpec }) => {
+    wsClient.send({ type: 'chain_trigger_update', trigger_id: triggerId, ...updates });
+  }, []);
+
+  const deleteChainTrigger = useCallback((triggerId: string) => {
+    wsClient.send({ type: 'chain_trigger_delete', trigger_id: triggerId });
   }, []);
 
   const trackNodeAccess = useCallback((nodeId: string) => {
@@ -1976,6 +2044,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     requestChainExecutions,
     clearChainStatus,
     clearLastCreatedChain,
+    //
+    // Chain triggers.
+    //
+    requestChainTriggers,
+    createChainTrigger,
+    updateChainTrigger,
+    deleteChainTrigger,
     trackNodeAccess,
     //
     // Agent discovery.

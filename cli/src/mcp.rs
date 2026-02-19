@@ -1,9 +1,10 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use common::{
-    mcp::McpClient, ChainDefinitionInfo, ChainExecutionUpdate, CommandResponse,
+    mcp::McpClient, ChainDefinitionInfo, ChainExecutionUpdate, ChainTriggerInfo, CommandResponse,
     InterceptedTrafficEntry, NodeCommand, OperationDefinitionInfo, PraxisServer, ReconResult,
-    SemanticOpUpdate, SystemState, TrafficSearchFilters, run_stdio_server,
+    SemanticOpUpdate, SystemState, TargetSpec, TrafficSearchFilters, TriggerConfig,
+    run_stdio_server,
 };
 
 use crate::client::CliClient;
@@ -125,6 +126,31 @@ impl McpClient for CliMcpClient {
         agent_short_name: &str,
     ) -> Result<Option<ReconResult>> {
         self.inner.lock().await.get_stored_recon(node_id, agent_short_name).await
+    }
+
+    async fn request_chain_trigger_list(&self, chain_id: Option<String>) -> Result<()> {
+        self.inner.lock().await.request_chain_trigger_list(chain_id).await
+    }
+
+    async fn get_chain_triggers(&self) -> Vec<ChainTriggerInfo> {
+        self.inner.lock().await.get_chain_triggers().await
+    }
+
+    async fn create_chain_trigger(
+        &self,
+        chain_id: String,
+        trigger_config: TriggerConfig,
+        target_spec: TargetSpec,
+    ) -> Result<()> {
+        self.inner.lock().await.create_chain_trigger(chain_id, trigger_config, target_spec).await
+    }
+
+    async fn delete_chain_trigger(&self, trigger_id: String) -> Result<()> {
+        self.inner.lock().await.delete_chain_trigger(trigger_id).await
+    }
+
+    async fn toggle_chain_trigger(&self, trigger_id: String, enabled: bool) -> Result<()> {
+        self.inner.lock().await.toggle_chain_trigger(trigger_id, enabled).await
     }
 }
 

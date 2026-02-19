@@ -166,6 +166,9 @@ pub enum BrowserMessage {
         agent_short_name: String,
         /// Working directory for the chain session
         working_dir: Option<String>,
+        /// Optional target spec for multi-target fan-out
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_spec: Option<common::TargetSpec>,
     },
     /// Cancel a chain execution
     ChainCancel {
@@ -179,6 +182,35 @@ pub enum BrowserMessage {
     },
     /// Clear all finished chain executions
     ChainExecutionClear,
+
+    //
+    // Chain trigger messages.
+    //
+    /// Create a chain trigger
+    ChainTriggerCreate {
+        chain_id: String,
+        trigger_config: common::TriggerConfig,
+        target_spec: common::TargetSpec,
+    },
+    /// Update a chain trigger
+    ChainTriggerUpdate {
+        trigger_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        enabled: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trigger_config: Option<common::TriggerConfig>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_spec: Option<common::TargetSpec>,
+    },
+    /// Delete a chain trigger
+    ChainTriggerDelete {
+        trigger_id: String,
+    },
+    /// List chain triggers
+    ChainTriggerList {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chain_id: Option<String>,
+    },
 
     //
     // Agent discovery messages.
@@ -511,6 +543,26 @@ pub enum ServerMessage {
     /// List of chain executions
     ChainExecutionList {
         executions: Vec<ChainExecutionUpdate>,
+    },
+
+    //
+    // Chain trigger messages.
+    //
+    /// Chain trigger created
+    ChainTriggerCreated {
+        trigger: common::ChainTriggerInfo,
+    },
+    /// Chain trigger updated
+    ChainTriggerUpdated {
+        trigger: common::ChainTriggerInfo,
+    },
+    /// Chain trigger deleted
+    ChainTriggerDeleted {
+        trigger_id: String,
+    },
+    /// Chain trigger list response
+    ChainTriggerListResponse {
+        triggers: Vec<common::ChainTriggerInfo>,
     },
 
     //

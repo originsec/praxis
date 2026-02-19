@@ -94,7 +94,6 @@ impl NodeRegistry {
         agents.get(id).cloned()
     }
 
-    #[allow(dead_code)]
     pub async fn list(&self) -> Vec<RegisteredNode> {
         let agents = self.agents.read().await;
         agents.values().cloned().collect()
