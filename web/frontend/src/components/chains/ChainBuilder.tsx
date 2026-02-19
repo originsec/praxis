@@ -1862,7 +1862,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       //
       */}
       {chain?.id && (
-        <ChainTriggerPanel chainId={chain.id} nodes={systemNodes} />
+        <ChainTriggerPanel chainId={chain.id} />
       )}
 
       {/*

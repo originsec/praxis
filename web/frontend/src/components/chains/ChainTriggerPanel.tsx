@@ -2,11 +2,10 @@ import { useState, useEffect, useCallback } from 'react';
 import { Zap, Clock, Wifi, MonitorSmartphone, Plus, Trash2, ChevronDown, ChevronRight, Save } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { TargetSpecEditor } from '../common/TargetSpecEditor';
-import type { ChainTriggerInfo, TriggerConfig, TargetSpec, ScheduleSpec, NodeState } from '../../api/types';
+import type { ChainTriggerInfo, TriggerConfig, TargetSpec, ScheduleSpec } from '../../api/types';
 
 interface ChainTriggerPanelProps {
   chainId: string;
-  nodes: NodeState[];
 }
 
 //
@@ -49,7 +48,7 @@ const defaultTargetSpec: TargetSpec = {
   include_triggering_node: false,
 };
 
-export function ChainTriggerPanel({ chainId, nodes }: ChainTriggerPanelProps) {
+export function ChainTriggerPanel({ chainId }: ChainTriggerPanelProps) {
   const {
     state,
     requestChainTriggers,
@@ -57,6 +56,8 @@ export function ChainTriggerPanel({ chainId, nodes }: ChainTriggerPanelProps) {
     updateChainTrigger,
     deleteChainTrigger,
   } = useApp();
+
+  const nodes = state.systemState?.nodes ?? [];
 
   const triggers = state.chains.triggers.filter(t => t.chain_id === chainId);
   const [collapsed, setCollapsed] = useState(true);
