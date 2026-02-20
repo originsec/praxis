@@ -148,6 +148,13 @@ function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionH
     setToolError(null);
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!loadingRun) return;
+    if (execution || state.toolkit.error) {
+      setLoadingRun(false);
+    }
+  }, [loadingRun, execution, state.toolkit.error]);
+
   const runRecon = async () => {
     if (!selectedNodeId || !selectedAgent) return;
     setLoadingRecon(true);
@@ -207,7 +214,6 @@ function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionH
       });
     } catch (error) {
       setToolError(String(error));
-    } finally {
       setLoadingRun(false);
     }
   };
@@ -311,7 +317,7 @@ function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionH
             disabled={!selectedNodeId || !selectedAgent || !selectedSession || !selectedModelRef || loadingRun}
             onClick={runPreview}
           >
-            {loadingRun ? 'Generating...' : 'Run Tool'}
+            {loadingRun ? 'Running remote model...' : 'Run Tool'}
           </button>
 
           <button

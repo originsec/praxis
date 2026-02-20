@@ -134,6 +134,11 @@ impl ToolkitManager {
         }
 
         let execution_id = Uuid::new_v4().to_string();
+        common::log_info!(
+            "[toolkit] execute start id={} tool={}",
+            &execution_id,
+            tool_name
+        );
         let mut execution = ToolkitExecution {
             execution_id: execution_id.clone(),
             tool_name: tool_name.to_string(),
@@ -178,6 +183,13 @@ impl ToolkitManager {
                 .to_string();
 
             for target in selected_targets {
+                common::log_info!(
+                    "[toolkit] preview target execution_id={} node={} agent={} session={}",
+                    &execution_id,
+                    &target.node_id,
+                    &target.agent_short_name,
+                    &target.session_id
+                );
                 let preview = match self.build_preview_for_target(&target, &model_ref).await {
                     Ok(content) => ToolkitTargetPreview {
                         target,
@@ -216,6 +228,13 @@ impl ToolkitManager {
             &serde_json::to_value(&execution).unwrap_or(Value::Null),
         )
         .await?;
+
+        common::log_info!(
+            "[toolkit] execute complete id={} tool={} previews={}",
+            &execution_id,
+            tool_name,
+            execution.previews.len()
+        );
 
         Ok(execution)
     }
