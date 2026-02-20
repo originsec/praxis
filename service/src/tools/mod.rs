@@ -88,9 +88,21 @@ impl ToolkitManager {
         }
 
         let targets = resolve_targets(target_spec, &self.node_registry).await;
+        if targets.is_empty() {
+            return Err(anyhow!(
+                "Toolkit recon resolved no targets (node_ids={:?}, agent_short_names={:?})",
+                target_spec.node_ids,
+                target_spec.agent_short_names
+            ));
+        }
         let mut out = Vec::new();
 
         for t in targets {
+            common::log_info!(
+                "[toolkit] recon target node={} agent={}",
+                t.node_id,
+                t.agent_short_name
+            );
             self.select_agent(&t.node_id, &t.agent_short_name).await?;
             let response = self
                 .send_agent_command(&t.node_id, NodeCommand::Agent(AgentCommand::Recon))
@@ -398,6 +410,7 @@ impl ToolkitManager {
 
     async fn send_agent_command(&self, node_id: &str, command: NodeCommand) -> Result<CommandResponse> {
         let command_id = Uuid::new_v4().to_string();
+        let command_debug = format!("{:?}", &command);
         let rx = self.response_tracker.register(command_id.clone());
         let request = CommandRequest {
             command_id: command_id.clone(),
@@ -407,6 +420,12 @@ impl ToolkitManager {
         };
 
         let message = NodeDirectMessage::Command(request);
+        common::log_info!(
+            "[toolkit] dispatch command_id={} node={} command={}",
+            command_id,
+            node_id,
+            command_debug
+        );
         publish_json(&self.publish_channel, &node_queue_name(node_id), &message).await?;
 
         match timeout(Duration::from_secs(60), rx).await {
@@ -547,6 +566,26 @@ struct ResolvedTarget {
 async fn resolve_targets(spec: &TargetSpec, node_registry: &NodeRegistry) -> Vec<ResolvedTarget> {
     let all_nodes = node_registry.list().await;
     let mut out = Vec::new();
+
+    //
+    // If caller provided explicit node_ids + agent_short_names (UI selection),
+    // honor them directly and do not depend on discovered-agent cache.
+    //
+    if !spec.node_ids.is_empty() && !spec.agent_short_names.is_empty() {
+        for node_id in &spec.node_ids {
+            if !all_nodes.iter().any(|n| &n.id == node_id) {
+                continue;
+            }
+            for agent_short_name in &spec.agent_short_names {
+                out.push(ResolvedTarget {
+                    node_id: node_id.clone(),
+                    agent_short_name: agent_short_name.clone(),
+                });
+            }
+        }
+        return out;
+    }
+
     for node in all_nodes {
         if !spec.node_ids.is_empty() && !spec.node_ids.contains(&node.id) {
             continue;

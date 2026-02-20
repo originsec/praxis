@@ -1544,26 +1544,30 @@ async fn handle_toolkit_recon(
     tool_name: String,
     target_spec: common::TargetSpec,
 ) {
-    match ctx.toolkit_manager.recon(&tool_name, &target_spec).await {
-        Ok(targets) => {
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::ToolkitReconResponse { tool_name, targets },
-            )
-            .await;
+    let toolkit_manager = ctx.toolkit_manager.clone();
+    let client_publish_channel = ctx.client_publish_channel.clone();
+    tokio::spawn(async move {
+        match toolkit_manager.recon(&tool_name, &target_spec).await {
+            Ok(targets) => {
+                let _ = send_to_client(
+                    &client_publish_channel,
+                    &client_id,
+                    ClientDirectMessage::ToolkitReconResponse { tool_name, targets },
+                )
+                .await;
+            }
+            Err(e) => {
+                let _ = send_to_client(
+                    &client_publish_channel,
+                    &client_id,
+                    ClientDirectMessage::ToolkitError {
+                        message: e.to_string(),
+                    },
+                )
+                .await;
+            }
         }
-        Err(e) => {
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::ToolkitError {
-                    message: e.to_string(),
-                },
-            )
-            .await;
-        }
-    }
+    });
 }
 
 async fn handle_toolkit_execute(
@@ -1573,30 +1577,30 @@ async fn handle_toolkit_execute(
     target_spec: common::TargetSpec,
     params: serde_json::Value,
 ) {
-    match ctx
-        .toolkit_manager
-        .execute(&tool_name, target_spec, params)
-        .await
-    {
-        Ok(execution) => {
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::ToolkitExecutionResult { execution },
-            )
-            .await;
+    let toolkit_manager = ctx.toolkit_manager.clone();
+    let client_publish_channel = ctx.client_publish_channel.clone();
+    tokio::spawn(async move {
+        match toolkit_manager.execute(&tool_name, target_spec, params).await {
+            Ok(execution) => {
+                let _ = send_to_client(
+                    &client_publish_channel,
+                    &client_id,
+                    ClientDirectMessage::ToolkitExecutionResult { execution },
+                )
+                .await;
+            }
+            Err(e) => {
+                let _ = send_to_client(
+                    &client_publish_channel,
+                    &client_id,
+                    ClientDirectMessage::ToolkitError {
+                        message: e.to_string(),
+                    },
+                )
+                .await;
+            }
         }
-        Err(e) => {
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::ToolkitError {
-                    message: e.to_string(),
-                },
-            )
-            .await;
-        }
-    }
+    });
 }
 
 async fn handle_toolkit_apply(
@@ -1606,30 +1610,33 @@ async fn handle_toolkit_apply(
     apply_all: Option<bool>,
     decisions: Option<Vec<common::ToolkitApplyDecision>>,
 ) {
-    match ctx
-        .toolkit_manager
-        .apply(&execution_id, apply_all, decisions)
-        .await
-    {
-        Ok(execution) => {
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::ToolkitApplyResult { execution },
-            )
-            .await;
+    let toolkit_manager = ctx.toolkit_manager.clone();
+    let client_publish_channel = ctx.client_publish_channel.clone();
+    tokio::spawn(async move {
+        match toolkit_manager
+            .apply(&execution_id, apply_all, decisions)
+            .await
+        {
+            Ok(execution) => {
+                let _ = send_to_client(
+                    &client_publish_channel,
+                    &client_id,
+                    ClientDirectMessage::ToolkitApplyResult { execution },
+                )
+                .await;
+            }
+            Err(e) => {
+                let _ = send_to_client(
+                    &client_publish_channel,
+                    &client_id,
+                    ClientDirectMessage::ToolkitError {
+                        message: e.to_string(),
+                    },
+                )
+                .await;
+            }
         }
-        Err(e) => {
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::ToolkitError {
-                    message: e.to_string(),
-                },
-            )
-            .await;
-        }
-    }
+    });
 }
 
 async fn handle_toolkit_execution_get(
