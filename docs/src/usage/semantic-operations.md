@@ -209,7 +209,7 @@ Every chain starts with a **Trigger** element. Elements with no outgoing connect
 
 Chains support several element types:
 
-**Trigger** - Every chain must start with a trigger. Currently supports manual triggering (click "Run" to start the chain).
+**Trigger** - Every chain must start with a trigger. The in-canvas trigger element represents the manual trigger (click "Run" to start the chain). For automated triggers, see [Chain Triggers](#chain-triggers) below.
 
 **Operation** - Executes a semantic operation from your library. Select an existing operation by name. The operation runs against the target agent and its output flows to the next element.
 
@@ -347,6 +347,97 @@ You can cancel a running chain from the Runs tab. Cancellation stops queuing new
 - Handle failures - if an operation fails, the chain stops
 - Test incrementally - run individual operations first, then combine
 - Keep chains focused - one chain, one goal
+
+### Chain Triggers
+
+Chains can be executed automatically via triggers. While the in-canvas Trigger element represents manual execution, chain triggers are separate configurations that automate when and how a chain fires. Triggers are managed from two places: the **Triggers** panel at the bottom of the chain builder, and the **Triggers** tab on the Operations page.
+
+#### Trigger Types
+
+**Scheduled** - Fires on a time-based schedule. Two schedule modes are available:
+
+- **Interval** - Fires every N minutes (e.g., every 60 minutes). The next fire time is computed from the last fire time.
+- **Daily At** - Fires once per day at a specific hour and minute (UTC). If the time has already passed today, the next fire is scheduled for tomorrow.
+
+Scheduled triggers can be **recurring** (fire repeatedly) or **one-shot** (fire once and then auto-disable).
+
+**Intercept Match** - Fires when intercepted traffic matches a specific intercept rule. You specify the rule ID, and whenever traffic triggers that rule, the chain executes. Intercept-match triggers have a 60-second debounce window to prevent rapid repeated firings.
+
+**New Node** - Fires whenever a new node registers with the service. There is a 10-second delay after registration to allow agent discovery to complete before the chain executes.
+
+#### Creating Triggers
+
+From the chain builder:
+
+1. Open a saved chain in the chain editor
+2. Expand the **Triggers** panel at the bottom of the editor
+3. Click **Add Trigger**
+4. Select the trigger type and configure its settings
+5. Configure the **Target Spec** (see [Flexible Targeting](#flexible-targeting) below)
+6. Click **Save**
+
+The trigger is immediately active once saved. Each chain can have multiple triggers.
+
+#### Managing Triggers
+
+The **Triggers** tab on the Operations page shows all configured triggers across all chains. From here you can:
+
+- See the chain name, trigger type, configuration summary, and target spec for each trigger
+- Toggle triggers on/off with the **ON/OFF** button
+- View when a trigger last fired and when it will next fire
+- Delete triggers
+
+#### Trigger Engine
+
+The service runs a trigger engine that polls for due scheduled triggers every 30 seconds. When a trigger fires:
+
+1. The engine loads the chain definition
+2. Resolves the target spec into concrete node/agent pairs
+3. Executes the chain against each resolved target (fan-out)
+4. Updates the trigger's `last_fired_at` timestamp
+5. For scheduled triggers, computes the next fire time (or disables if non-recurring)
+
+Event-based triggers (Intercept Match, New Node) fire immediately in response to the event rather than on a polling schedule.
+
+### Flexible Targeting
+
+By default, chains run against a single node and agent. The **TargetSpec** system allows chains to target multiple nodes and agents simultaneously using filters.
+
+#### Target Spec Fields
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| **Node IDs** | Specific node IDs to target | Empty (all nodes) |
+| **OS Filter** | Case-insensitive substring match on the node's OS details | None |
+| **Agent Short Names** | Specific agent types to target | Empty (all available agents) |
+| **Include Triggering Node** | For event triggers: ensure the node that caused the event is included | Off |
+
+When a trigger fires, the target spec is resolved against the current set of registered nodes:
+
+1. Start with all registered nodes
+2. Filter by specific node IDs (if any specified)
+3. Filter by OS substring (if specified)
+4. For each remaining node, select agents matching the agent filter
+5. Skip agents that are not currently available
+
+If no targets match, the trigger logs a warning and the chain does not execute.
+
+#### Target Spec Editor
+
+The target spec editor appears when creating triggers in the chain builder and when using advanced targeting in the run modal. It provides:
+
+- **Node multi-select** - Pick specific nodes from the connected nodes list, or leave empty for all nodes
+- **OS filter** - Free text field for OS substring matching (e.g., "Windows", "Linux", "Ubuntu")
+- **Agent multi-select** - Pick specific agent types, or leave empty for all available agents
+- **Include triggering node** - Checkbox shown for event triggers (New Node, Intercept Match) to ensure the triggering node is always included even if it would otherwise be filtered out
+
+#### Fan-Out Execution
+
+When a chain targets multiple node/agent pairs, the executor performs a fan-out: it creates a separate chain execution for each resolved target. Each execution runs independently and appears as its own entry in the Runs tab.
+
+#### Advanced Targeting in Run Modal
+
+The run modal for chains includes an **Advanced Targeting** toggle. When enabled, instead of selecting a single node and agent, you configure a full target spec. This allows manual one-off fan-out runs without needing to set up a trigger.
 
 ## Troubleshooting
 

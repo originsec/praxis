@@ -6,6 +6,7 @@ mod transactions;
 mod chains;
 mod chain_executions;
 mod chain_memories;
+mod chain_triggers;
 mod discovered_endpoints;
 mod event_log;
 mod lua_agent_scripts;
@@ -293,6 +294,48 @@ impl Database {
                 let _ = sqlx::query("ALTER TABLE lua_agent_scripts ADD COLUMN IF NOT EXISTS version TEXT")
                     .execute(pool)
                     .await;
+            }
+        }
+
+        //
+        // Migration: Create chain_triggers table for existing databases.
+        //
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let _ = sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS chain_triggers (
+                        id TEXT PRIMARY KEY,
+                        chain_id TEXT NOT NULL,
+                        trigger_config TEXT NOT NULL,
+                        target_spec TEXT NOT NULL,
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        last_fired_at TEXT,
+                        next_fire_at TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )"
+                ).execute(pool).await;
+                let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_chain_triggers_chain_id ON chain_triggers(chain_id)").execute(pool).await;
+                let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_chain_triggers_enabled ON chain_triggers(enabled)").execute(pool).await;
+                let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_chain_triggers_next_fire ON chain_triggers(next_fire_at)").execute(pool).await;
+            }
+            DatabasePool::Postgres(pool) => {
+                let _ = sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS chain_triggers (
+                        id TEXT PRIMARY KEY,
+                        chain_id TEXT NOT NULL,
+                        trigger_config TEXT NOT NULL,
+                        target_spec TEXT NOT NULL,
+                        enabled SMALLINT NOT NULL DEFAULT 1,
+                        last_fired_at TEXT,
+                        next_fire_at TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )"
+                ).execute(pool).await;
+                let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_chain_triggers_chain_id ON chain_triggers(chain_id)").execute(pool).await;
+                let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_chain_triggers_enabled ON chain_triggers(enabled)").execute(pool).await;
+                let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_chain_triggers_next_fire ON chain_triggers(next_fire_at)").execute(pool).await;
             }
         }
 

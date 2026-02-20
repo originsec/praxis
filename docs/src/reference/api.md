@@ -149,11 +149,17 @@ pub enum ClientSignalMessage {
     ChainCreate { client_id, definition: ChainDefinitionInput },
     ChainUpdate { client_id, chain_id, definition: ChainDefinitionInput },
     ChainDelete { client_id, chain_id },
-    ChainRun { client_id, chain_id, node_id, agent_short_name },
+    ChainRun { client_id, chain_id, node_id, agent_short_name, working_dir, target_spec },
     ChainCancel { client_id, execution_id },
     ChainExecutionList { client_id },
     ChainExecutionRemove { execution_id },
     ChainExecutionClear,
+
+    // Chain Triggers
+    ChainTriggerCreate { client_id, chain_id, trigger_config: TriggerConfig, target_spec: TargetSpec },
+    ChainTriggerUpdate { client_id, trigger_id, enabled, trigger_config, target_spec },
+    ChainTriggerDelete { client_id, trigger_id },
+    ChainTriggerList { client_id, chain_id: Option<String> },
 
     // Traffic Interception
     TrafficLogRequest { client_id, filters: TrafficLogFilters },
@@ -230,6 +236,12 @@ pub enum ClientDirectMessage {
     ChainExecutionStarted { execution_id, chain_id },
     ChainExecutionUpdate(ChainExecutionUpdate),
     ChainExecutionListResponse { executions: Vec<ChainExecutionUpdate> },
+
+    // Chain Triggers
+    ChainTriggerCreated { trigger: ChainTriggerInfo },
+    ChainTriggerUpdated { trigger: ChainTriggerInfo },
+    ChainTriggerDeleted { trigger_id: String },
+    ChainTriggerListResponse { triggers: Vec<ChainTriggerInfo> },
 
     // Traffic Interception
     TrafficLogResponse { entries: Vec<InterceptedTrafficEntry>, total_count },
@@ -453,6 +465,55 @@ pub struct ChainDefinitionInput {
 }
 ```
 
+### TriggerConfig
+
+```rust
+pub enum TriggerConfig {
+    // Time-based trigger
+    Scheduled { schedule: ScheduleSpec, recurring: bool },
+    // Fires when intercepted traffic matches a rule
+    InterceptMatch { rule_id: i64 },
+    // Fires when a new node registers
+    NewNode,
+}
+
+pub enum ScheduleSpec {
+    // Fire once per day at hour:minute (UTC)
+    DailyAt { hour: u8, minute: u8 },
+    // Fire every N minutes
+    Interval { minutes: u32 },
+}
+```
+
+### TargetSpec
+
+```rust
+pub struct TargetSpec {
+    // Specific node IDs (empty = all registered nodes)
+    pub node_ids: Vec<String>,
+    // Case-insensitive substring filter on node os_details
+    pub os_filter: Option<String>,
+    // Specific agent short names (empty = all available agents)
+    pub agent_short_names: Vec<String>,
+    // For event triggers: include the node that triggered the event
+    pub include_triggering_node: bool,
+}
+```
+
+### ChainTriggerInfo
+
+```rust
+pub struct ChainTriggerInfo {
+    pub id: String,
+    pub chain_id: String,
+    pub trigger_config: TriggerConfig,
+    pub target_spec: TargetSpec,
+    pub enabled: bool,
+    pub last_fired_at: Option<DateTime<Utc>>,
+    pub next_fire_at: Option<DateTime<Utc>>,
+}
+```
+
 ### InterceptMethod
 
 ```rust
@@ -496,6 +557,10 @@ All messages are JSON-encoded `ClientDirectMessage` or `ClientBroadcastMessage` 
 | `TerminalOutput` | Direct | PTY output data |
 | `SemanticOpUpdate` | Direct | Operation progress |
 | `ChainExecutionUpdate` | Both | Chain progress |
+| `ChainTriggerCreated` | Direct | Trigger created |
+| `ChainTriggerUpdated` | Direct | Trigger updated |
+| `ChainTriggerDeleted` | Direct | Trigger deleted |
+| `ChainTriggerListResponse` | Direct | Trigger list response |
 
 ## HTTP API
 

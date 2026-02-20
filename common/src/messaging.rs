@@ -1044,6 +1044,8 @@ pub struct ChainDefinitionInfo {
     pub timeout: Option<u64>,
     pub element_count: usize,
     pub operation_count: usize,
+    #[serde(default)]
+    pub trigger_count: usize,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -1168,6 +1170,58 @@ pub struct ChainExecutionUpdate {
     pub ended_at: Option<DateTime<Utc>>,
     /// Final outputs from termination elements
     pub outputs: HashMap<String, String>,
+}
+
+//
+// Chain triggers and targeting.
+//
+
+/// Schedule specification for scheduled triggers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ScheduleSpec {
+    DailyAt { hour: u8, minute: u8 },
+    Interval { minutes: u32 },
+}
+
+/// Trigger configuration for automated chain execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum TriggerConfig {
+    Scheduled { schedule: ScheduleSpec, recurring: bool },
+    InterceptMatch { rule_id: i64 },
+    NewNode,
+}
+
+/// Target specification - which nodes and agents to run against
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TargetSpec {
+    /// Specific node IDs (empty = all registered nodes)
+    #[serde(default)]
+    pub node_ids: Vec<String>,
+    /// Case-insensitive substring filter on node os_details
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub os_filter: Option<String>,
+    /// Specific agent short names (empty = all available agents)
+    #[serde(default)]
+    pub agent_short_names: Vec<String>,
+    /// For event triggers: include the node that triggered the event
+    #[serde(default)]
+    pub include_triggering_node: bool,
+}
+
+/// Chain trigger info (shared DTO for API/UI)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChainTriggerInfo {
+    pub id: String,
+    pub chain_id: String,
+    pub trigger_config: TriggerConfig,
+    pub target_spec: TargetSpec,
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_fired_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_fire_at: Option<DateTime<Utc>>,
 }
 
 /// Operation status update broadcast to all clients
@@ -1420,6 +1474,9 @@ pub enum ClientSignalMessage {
         agent_short_name: String,
         /// Working directory for the chain session
         working_dir: Option<String>,
+        /// Optional target spec for multi-target fan-out (overrides node_id/agent_short_name)
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_spec: Option<TargetSpec>,
     },
     /// Cancel a running chain execution
     ChainCancel {
@@ -1436,6 +1493,40 @@ pub enum ClientSignalMessage {
     },
     /// Clear all finished chain executions
     ChainExecutionClear,
+
+    //
+    // Chain triggers.
+    //
+    /// Create a chain trigger
+    ChainTriggerCreate {
+        client_id: String,
+        chain_id: String,
+        trigger_config: TriggerConfig,
+        target_spec: TargetSpec,
+    },
+    /// Update a chain trigger
+    ChainTriggerUpdate {
+        client_id: String,
+        trigger_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        enabled: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trigger_config: Option<TriggerConfig>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_spec: Option<TargetSpec>,
+    },
+    /// Delete a chain trigger
+    ChainTriggerDelete {
+        client_id: String,
+        trigger_id: String,
+    },
+    /// List chain triggers
+    ChainTriggerList {
+        client_id: String,
+        /// If provided, list triggers for this chain only
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chain_id: Option<String>,
+    },
 
     //
     // Traffic interception.
@@ -1771,6 +1862,26 @@ pub enum ClientDirectMessage {
     /// List of chain executions
     ChainExecutionListResponse {
         executions: Vec<ChainExecutionUpdate>,
+    },
+
+    //
+    // Chain trigger responses.
+    //
+    /// Chain trigger created
+    ChainTriggerCreated {
+        trigger: ChainTriggerInfo,
+    },
+    /// Chain trigger updated
+    ChainTriggerUpdated {
+        trigger: ChainTriggerInfo,
+    },
+    /// Chain trigger deleted
+    ChainTriggerDeleted {
+        trigger_id: String,
+    },
+    /// Chain trigger list response
+    ChainTriggerListResponse {
+        triggers: Vec<ChainTriggerInfo>,
     },
 
     //

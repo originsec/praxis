@@ -45,13 +45,14 @@ impl ChainExecutor {
         }
     }
 
-    /// Execute a chain
+    /// Execute a chain with optional initial input for trigger context
     pub async fn execute(
         &self,
         chain: ChainDefinition,
         node_id: String,
         agent_short_name: String,
         working_dir: Option<String>,
+        initial_input: Option<String>,
         config: Arc<TokioRwLock<ServiceConfig>>,
         rabbitmq_channel: Channel,
         broadcast_channel: Channel,
@@ -95,19 +96,21 @@ impl ChainExecutor {
         // Persist initial state to database (skip for implicit chains).
         //
         if !is_implicit {
-            let s = state_arc.read().unwrap();
-            let record = ChainExecutionRecord {
-                execution_id: s.execution_id.clone(),
-                chain_id: s.chain_id.clone(),
-                chain_name: s.chain_name.clone(),
-                node_id: s.node_id.clone(),
-                agent_short_name: s.agent_short_name.clone(),
-                status: s.status.clone(),
-                elements: s.elements.clone(),
-                outputs: s.outputs.clone(),
-                started_at: s.started_at,
-                ended_at: s.ended_at,
-                created_at: Utc::now(),
+            let record = {
+                let s = state_arc.read().unwrap();
+                ChainExecutionRecord {
+                    execution_id: s.execution_id.clone(),
+                    chain_id: s.chain_id.clone(),
+                    chain_name: s.chain_name.clone(),
+                    node_id: s.node_id.clone(),
+                    agent_short_name: s.agent_short_name.clone(),
+                    status: s.status.clone(),
+                    elements: s.elements.clone(),
+                    outputs: s.outputs.clone(),
+                    started_at: s.started_at,
+                    ended_at: s.ended_at,
+                    created_at: Utc::now(),
+                }
             };
             if let Err(e) = database.insert_chain_execution(&record).await {
                 common::log_error!("Failed to persist chain execution to database: {}", e);
@@ -149,6 +152,7 @@ impl ChainExecutor {
         let cancel_handles = self.cancel_handles.clone();
         let database_clone = database.clone();
         let working_dir_clone = working_dir.clone();
+        let initial_input_clone = initial_input;
 
         //
         // Spawn the execution task - runs entirely in background.
@@ -194,6 +198,7 @@ impl ChainExecutor {
                         node_id,
                         agent_short_name,
                         working_dir_clone,
+                        initial_input_clone,
                         config,
                         rabbitmq_channel,
                         broadcast_channel.clone(),
@@ -285,6 +290,115 @@ impl ChainExecutor {
         }
     }
 
+    /// Execute a chain against multiple resolved targets (fan-out).
+    ///
+    /// Targets on different nodes run in parallel. Targets on the same node
+    /// run sequentially (each execution must complete before the next starts)
+    /// to avoid session conflicts on a shared node.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execute_fan_out(
+        &self,
+        chain: ChainDefinition,
+        targets: Vec<super::targeting::ResolvedTarget>,
+        initial_input: Option<String>,
+        working_dir: Option<String>,
+        config: Arc<TokioRwLock<ServiceConfig>>,
+        rabbitmq_channel: Channel,
+        broadcast_channel: Channel,
+        response_tracker: Arc<ResponseTracker>,
+        database: Arc<Database>,
+    ) -> Vec<Result<String>> {
+        use std::collections::HashMap;
+
+        //
+        // Group targets by node_id so same-node targets run sequentially.
+        //
+        let mut by_node: HashMap<String, Vec<super::targeting::ResolvedTarget>> = HashMap::new();
+        for target in targets {
+            by_node.entry(target.node_id.clone()).or_default().push(target);
+        }
+
+        let mut handles = Vec::new();
+
+        for (_node_id, node_targets) in by_node {
+            let executor = self.registry.clone();
+            let cancel_handles = self.cancel_handles.clone();
+            let chain = chain.clone();
+            let initial_input = initial_input.clone();
+            let working_dir = working_dir.clone();
+            let config = config.clone();
+            let rabbitmq_channel = rabbitmq_channel.clone();
+            let broadcast_channel = broadcast_channel.clone();
+            let response_tracker = response_tracker.clone();
+            let database = database.clone();
+
+            //
+            // Each node gets its own spawn — targets within the node run
+            // sequentially inside that spawn.
+            //
+            let self_clone = Self {
+                registry: executor,
+                cancel_handles,
+            };
+            let handle = tokio::spawn(async move {
+                let mut node_results = Vec::new();
+                for target in node_targets {
+                    let exec_id = self_clone
+                        .execute(
+                            chain.clone(),
+                            target.node_id,
+                            target.agent_short_name,
+                            working_dir.clone(),
+                            initial_input.clone(),
+                            config.clone(),
+                            rabbitmq_channel.clone(),
+                            broadcast_channel.clone(),
+                            response_tracker.clone(),
+                            database.clone(),
+                        )
+                        .await;
+
+                    //
+                    // Wait for this execution to finish before starting the
+                    // next one on the same node.
+                    //
+                    if let Ok(ref id) = exec_id {
+                        let poll_interval = std::time::Duration::from_secs(2);
+                        let max_polls = 1800; // 1 hour max wait
+                        for _ in 0..max_polls {
+                            tokio::time::sleep(poll_interval).await;
+                            let executions = self_clone.registry.list();
+                            let still_running = executions.iter().any(|e| {
+                                &e.execution_id == id
+                                    && (e.status == common::ChainExecutionStatus::Running
+                                        || e.status == common::ChainExecutionStatus::Queued)
+                            });
+                            if !still_running {
+                                break;
+                            }
+                        }
+                    }
+
+                    node_results.push(exec_id);
+                }
+                node_results
+            });
+            handles.push(handle);
+        }
+
+        //
+        // Collect results from all node spawns.
+        //
+        let mut all_results = Vec::new();
+        for handle in handles {
+            match handle.await {
+                Ok(node_results) => all_results.extend(node_results),
+                Err(e) => all_results.push(Err(anyhow::anyhow!("Fan-out task failed: {}", e))),
+            }
+        }
+        all_results
+    }
+
     /// Broadcast an update to all clients via RabbitMQ
     async fn broadcast_update(channel: &Channel, message: ClientBroadcastMessage) {
         let _ = publish_json_exchange(channel, CLIENT_BROADCAST_EXCHANGE, &message).await;
@@ -298,6 +412,7 @@ impl ChainExecutor {
         node_id: String,
         agent_short_name: String,
         working_dir: Option<String>,
+        initial_input: Option<String>,
         config: Arc<TokioRwLock<ServiceConfig>>,
         rabbitmq_channel: Channel,
         broadcast_channel: Channel,
@@ -572,7 +687,8 @@ impl ChainExecutor {
             //
             let (result, active_port, semantic_success): (Result<String>, Option<u32>, Option<bool>) = match &node.element {
                 ChainElement::Trigger { .. } => {
-                    (Ok(String::new()), None, None)
+                    let trigger_output = initial_input.clone().unwrap_or_default();
+                    (Ok(trigger_output), None, None)
                 }
                 ChainElement::Loop { max_iterations, .. } => {
                     let counter = loop_counters.entry(element_id.clone()).or_insert(0);

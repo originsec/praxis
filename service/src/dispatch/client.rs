@@ -152,8 +152,8 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
         //
 
         ClientSignalMessage::ChainRun {
-            client_id, chain_id, node_id, agent_short_name, working_dir,
-        } => handle_chain_run(ctx, client_id, chain_id, node_id, agent_short_name, working_dir).await,
+            client_id, chain_id, node_id, agent_short_name, working_dir, target_spec,
+        } => handle_chain_run(ctx, client_id, chain_id, node_id, agent_short_name, working_dir, target_spec).await,
         ClientSignalMessage::ChainCancel { client_id, execution_id } =>
             handle_chain_cancel(ctx, client_id, execution_id).await,
         ClientSignalMessage::ChainExecutionList { client_id } =>
@@ -162,6 +162,21 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             handle_chain_execution_remove(ctx, execution_id).await,
         ClientSignalMessage::ChainExecutionClear =>
             handle_chain_execution_clear(ctx).await,
+
+        //
+        // Chain triggers.
+        //
+
+        ClientSignalMessage::ChainTriggerCreate {
+            client_id, chain_id, trigger_config, target_spec,
+        } => handle_chain_trigger_create(ctx, client_id, chain_id, trigger_config, target_spec).await,
+        ClientSignalMessage::ChainTriggerUpdate {
+            client_id, trigger_id, enabled, trigger_config, target_spec,
+        } => handle_chain_trigger_update(ctx, client_id, trigger_id, enabled, trigger_config, target_spec).await,
+        ClientSignalMessage::ChainTriggerDelete { client_id, trigger_id } =>
+            handle_chain_trigger_delete(ctx, client_id, trigger_id).await,
+        ClientSignalMessage::ChainTriggerList { client_id, chain_id } =>
+            handle_chain_trigger_list(ctx, client_id, chain_id).await,
 
         //
         // Lua agent scripts.
@@ -421,6 +436,16 @@ async fn handle_semantic_op_cancel(ctx: &ServiceContext, operation_id: String) {
         operation_id.get(..8).unwrap_or(&operation_id)
     );
 
+    //
+    // Always check if this operation belongs to a chain execution and cancel
+    // the parent chain too. This ensures that cancelling an op from the
+    // Semantic Operations list also cancels the chain it's part of.
+    //
+    let chain_exec_id = ctx.database.get_operation(&operation_id).await
+        .ok()
+        .flatten()
+        .and_then(|op| op.chain_execution_id);
+
     match ctx.semantic_ops_manager.cancel_operation(&operation_id).await {
         Ok(()) => {
             common::log_info!(
@@ -439,25 +464,25 @@ async fn handle_semantic_op_cancel(ctx: &ServiceContext, operation_id: String) {
             }
         }
         Err(_) => {
-            //
-            // Operation not found in manager — check if it's a
-            // chain-spawned operation and cancel the parent chain instead.
-            //
-            if let Ok(Some(op)) = ctx.database.get_operation(&operation_id).await {
-                if let Some(chain_exec_id) = op.chain_execution_id {
-                    common::log_info!(
-                        "Operation {} belongs to chain execution {}, cancelling chain",
-                        operation_id.get(..8).unwrap_or(&operation_id),
-                        chain_exec_id.get(..8).unwrap_or(&chain_exec_id)
-                    );
-                    let cancelled = ctx.chain_executor.cancel(&chain_exec_id).await;
-                    if !cancelled {
-                        common::log_error!("Failed to cancel parent chain execution {}", chain_exec_id.get(..8).unwrap_or(&chain_exec_id));
-                    }
-                    return;
-                }
-            }
-            common::log_error!("Failed to cancel operation: not found in manager or chain");
+            common::log_warn!(
+                "Operation {} not found in manager, may be chain-spawned",
+                operation_id.get(..8).unwrap_or(&operation_id)
+            );
+        }
+    }
+
+    //
+    // If the operation belongs to a chain, cancel the parent chain execution.
+    //
+    if let Some(chain_exec_id) = chain_exec_id {
+        common::log_info!(
+            "Operation {} belongs to chain execution {}, cancelling chain",
+            operation_id.get(..8).unwrap_or(&operation_id),
+            chain_exec_id.get(..8).unwrap_or(&chain_exec_id)
+        );
+        let cancelled = ctx.chain_executor.cancel(&chain_exec_id).await;
+        if !cancelled {
+            common::log_error!("Failed to cancel parent chain execution {}", chain_exec_id.get(..8).unwrap_or(&chain_exec_id));
         }
     }
 }
@@ -1514,6 +1539,7 @@ async fn handle_chain_list(ctx: &ServiceContext, client_id: String) {
             timeout: c.timeout,
             element_count: c.element_count,
             operation_count: c.operation_count,
+            trigger_count: c.trigger_count,
             created_at: c.created_at,
             updated_at: c.updated_at,
         })
@@ -1644,6 +1670,7 @@ async fn handle_chain_create(
                     timeout: db_chain.timeout,
                     element_count: db_chain.elements.len(),
                     operation_count,
+                    trigger_count: 0,
                     created_at: db_chain.created_at,
                     updated_at: db_chain.updated_at,
                 };
@@ -1748,6 +1775,7 @@ async fn handle_chain_update(
                     timeout: db_chain.timeout,
                     element_count: db_chain.elements.len(),
                     operation_count,
+                    trigger_count: 0,
                     created_at: db_chain.created_at,
                     updated_at: db_chain.updated_at,
                 };
@@ -1798,45 +1826,83 @@ async fn handle_chain_run(
     node_id: String,
     agent_short_name: String,
     working_dir: Option<String>,
+    target_spec: Option<common::TargetSpec>,
 ) {
     common::log_info!(
-        "Received ChainRun from client {} for chain {} on node {} (working_dir: {:?})",
+        "Received ChainRun from client {} for chain {} on node {} (working_dir: {:?}, targeting: {})",
         &client_id[..8.min(client_id.len())],
         chain_id,
         &node_id[..8.min(node_id.len())],
-        working_dir
+        working_dir,
+        target_spec.is_some()
     );
 
     //
     // Get the chain definition.
     //
-    match ctx.database.get_chain(&chain_id).await {
-        Ok(Some(chain)) => {
-            //
-            // Execute the chain.
-            //
-            match ctx
-                .chain_executor
-                .execute(
-                    chain,
-                    node_id,
-                    agent_short_name,
-                    working_dir,
-                    ctx.service_config.clone(),
-                    ctx.semantic_ops_channel.clone(),
-                    ctx.broadcast_channel.clone(),
-                    ctx.response_tracker.clone(),
-                    ctx.database.clone(),
-                )
-                .await
-            {
+    let chain = match ctx.database.get_chain(&chain_id).await {
+        Ok(Some(chain)) => chain,
+        Ok(None) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ChainError {
+                    message: format!("Chain not found: {}", chain_id),
+                },
+            )
+            .await;
+            return;
+        }
+        Err(e) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ChainError {
+                    message: e.to_string(),
+                },
+            )
+            .await;
+            return;
+        }
+    };
+
+    //
+    // If target_spec is provided, resolve targets and fan out.
+    //
+    if let Some(spec) = target_spec {
+        use crate::semantic_ops::chain_execution::resolve_targets;
+        let targets = resolve_targets(&spec, &ctx.node_registry, None).await;
+        if targets.is_empty() {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ChainError {
+                    message: "No targets matched the target spec".to_string(),
+                },
+            )
+            .await;
+            return;
+        }
+        let results = ctx.chain_executor.execute_fan_out(
+            chain,
+            targets,
+            None,
+            working_dir,
+            ctx.service_config.clone(),
+            ctx.semantic_ops_channel.clone(),
+            ctx.broadcast_channel.clone(),
+            ctx.response_tracker.clone(),
+            ctx.database.clone(),
+        ).await;
+        for result in results {
+            match result {
                 Ok(execution_id) => {
                     let _ = send_to_client(
                         &ctx.client_publish_channel,
                         &client_id,
                         ClientDirectMessage::ChainExecutionStarted {
                             execution_id,
-                            chain_id,
+                            chain_id: chain_id.clone(),
                         },
                     )
                     .await;
@@ -1853,12 +1919,35 @@ async fn handle_chain_run(
                 }
             }
         }
-        Ok(None) => {
+        return;
+    }
+
+    //
+    // Standard single-target execution.
+    //
+    match ctx
+        .chain_executor
+        .execute(
+            chain,
+            node_id,
+            agent_short_name,
+            working_dir,
+            None,
+            ctx.service_config.clone(),
+            ctx.semantic_ops_channel.clone(),
+            ctx.broadcast_channel.clone(),
+            ctx.response_tracker.clone(),
+            ctx.database.clone(),
+        )
+        .await
+    {
+        Ok(execution_id) => {
             let _ = send_to_client(
                 &ctx.client_publish_channel,
                 &client_id,
-                ClientDirectMessage::ChainError {
-                    message: format!("Chain not found: {}", chain_id),
+                ClientDirectMessage::ChainExecutionStarted {
+                    execution_id,
+                    chain_id,
                 },
             )
             .await;
@@ -1947,6 +2036,182 @@ async fn handle_chain_execution_clear(ctx: &ServiceContext) {
         }
         Err(e) => {
             common::log_error!("Failed to clear chain executions: {}", e);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Chain triggers
+// ---------------------------------------------------------------------------
+
+async fn handle_chain_trigger_create(
+    ctx: &ServiceContext,
+    client_id: String,
+    chain_id: String,
+    trigger_config: common::TriggerConfig,
+    target_spec: common::TargetSpec,
+) {
+    common::log_info!(
+        "Received ChainTriggerCreate from client {} for chain {}",
+        &client_id[..8.min(client_id.len())],
+        chain_id
+    );
+
+    match ctx.database.create_chain_trigger(&chain_id, &trigger_config, &target_spec).await {
+        Ok(trigger) => {
+            if let Some(ref engine) = ctx.trigger_engine {
+                engine.refresh().await;
+            }
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ChainTriggerCreated { trigger },
+            )
+            .await;
+        }
+        Err(e) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ChainError {
+                    message: format!("Failed to create trigger: {}", e),
+                },
+            )
+            .await;
+        }
+    }
+}
+
+async fn handle_chain_trigger_update(
+    ctx: &ServiceContext,
+    client_id: String,
+    trigger_id: String,
+    enabled: Option<bool>,
+    trigger_config: Option<common::TriggerConfig>,
+    target_spec: Option<common::TargetSpec>,
+) {
+    common::log_info!(
+        "Received ChainTriggerUpdate from client {} for trigger {}",
+        &client_id[..8.min(client_id.len())],
+        trigger_id
+    );
+
+    match ctx.database.update_chain_trigger(&trigger_id, enabled, trigger_config.as_ref(), target_spec.as_ref()).await {
+        Ok(Some(trigger)) => {
+            if let Some(ref engine) = ctx.trigger_engine {
+                engine.refresh().await;
+            }
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ChainTriggerUpdated { trigger },
+            )
+            .await;
+        }
+        Ok(None) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ChainError {
+                    message: format!("Trigger not found: {}", trigger_id),
+                },
+            )
+            .await;
+        }
+        Err(e) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ChainError {
+                    message: format!("Failed to update trigger: {}", e),
+                },
+            )
+            .await;
+        }
+    }
+}
+
+async fn handle_chain_trigger_delete(
+    ctx: &ServiceContext,
+    client_id: String,
+    trigger_id: String,
+) {
+    common::log_info!(
+        "Received ChainTriggerDelete from client {} for trigger {}",
+        &client_id[..8.min(client_id.len())],
+        trigger_id
+    );
+
+    match ctx.database.delete_chain_trigger(&trigger_id).await {
+        Ok(true) => {
+            if let Some(ref engine) = ctx.trigger_engine {
+                engine.refresh().await;
+            }
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ChainTriggerDeleted { trigger_id },
+            )
+            .await;
+        }
+        Ok(false) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ChainError {
+                    message: format!("Trigger not found: {}", trigger_id),
+                },
+            )
+            .await;
+        }
+        Err(e) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ChainError {
+                    message: format!("Failed to delete trigger: {}", e),
+                },
+            )
+            .await;
+        }
+    }
+}
+
+async fn handle_chain_trigger_list(
+    ctx: &ServiceContext,
+    client_id: String,
+    chain_id: Option<String>,
+) {
+    common::log_info!(
+        "Received ChainTriggerList from client {} (chain_id: {:?})",
+        &client_id[..8.min(client_id.len())],
+        chain_id
+    );
+
+    let result = if let Some(ref cid) = chain_id {
+        ctx.database.list_chain_triggers_for_chain(cid).await
+    } else {
+        ctx.database.list_all_chain_triggers().await
+    };
+
+    match result {
+        Ok(triggers) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ChainTriggerListResponse { triggers },
+            )
+            .await;
+        }
+        Err(e) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ChainError {
+                    message: format!("Failed to list triggers: {}", e),
+                },
+            )
+            .await;
         }
     }
 }

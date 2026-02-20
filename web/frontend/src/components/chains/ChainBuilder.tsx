@@ -17,12 +17,14 @@ import type { Node, Edge, Connection, OnSelectionChangeParams } from '@xyflow/re
 import '@xyflow/react/dist/style.css';
 import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings, Check, AlertTriangle } from 'lucide-react';
 import { ConfigModal } from '../common/ConfigModal';
+import { ChainTriggerPanel } from './ChainTriggerPanel';
 import type {
   BlockConfig,
   ChainDefinitionFull,
   ChainDefinitionInput,
   ChainElement,
   ChainConnection as ChainConnectionType,
+  NodeState,
   OperationDefinitionInfo,
   SessionGroup,
 } from '../../api/types';
@@ -390,11 +392,12 @@ interface ChainBuilderInnerProps {
   onCancel: () => void;
   operationDefs: OperationDefinitionInfo[];
   modelDefs: ModelDefinition[];
+  nodes: NodeState[];
   saveStatus?: string | null;
   saveError?: string | null;
 }
 
-function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs, modelDefs, saveStatus, saveError }: ChainBuilderInnerProps) {
+function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs, modelDefs, nodes: systemNodes, saveStatus, saveError }: ChainBuilderInnerProps) {
   const [name, setName] = useState(chain?.name || '');
   const [description, setDescription] = useState(chain?.description || '');
   const [timeout, setTimeout] = useState(chain?.timeout || 1800);
@@ -1855,6 +1858,15 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
 
       {/*
       //
+      // Trigger Panel (only for saved chains).
+      //
+      */}
+      {chain?.id && (
+        <ChainTriggerPanel chainId={chain.id} />
+      )}
+
+      {/*
+      //
       // Operation Selection Modal.
       //
       */}
@@ -2180,14 +2192,15 @@ interface ChainBuilderProps {
   onCancel: () => void;
   operationDefs: OperationDefinitionInfo[];
   modelDefs?: ModelDefinition[];
+  nodes?: NodeState[];
   saveStatus?: string | null;
   saveError?: string | null;
 }
 
-export function ChainBuilder({ modelDefs = [], saveStatus, saveError, ...props }: ChainBuilderProps) {
+export function ChainBuilder({ modelDefs = [], nodes = [], saveStatus, saveError, ...props }: ChainBuilderProps) {
   return (
     <ReactFlowProvider>
-      <ChainBuilderInner {...props} modelDefs={modelDefs} saveStatus={saveStatus} saveError={saveError} />
+      <ChainBuilderInner {...props} modelDefs={modelDefs} nodes={nodes} saveStatus={saveStatus} saveError={saveError} />
     </ReactFlowProvider>
   );
 }

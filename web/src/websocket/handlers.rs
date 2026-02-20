@@ -193,10 +193,11 @@ pub async fn handle_browser_message(
             node_id,
             agent_short_name,
             working_dir,
+            target_spec,
         } => {
             state
                 .rabbitmq
-                .run_chain(chain_id, node_id, agent_short_name, working_dir)
+                .run_chain(chain_id, node_id, agent_short_name, working_dir, target_spec)
                 .await?;
         }
         BrowserMessage::ChainCancel { execution_id } => {
@@ -210,6 +211,22 @@ pub async fn handle_browser_message(
         }
         BrowserMessage::ChainExecutionClear => {
             state.rabbitmq.clear_chain_executions().await?;
+        }
+
+        //
+        // Chain trigger messages.
+        //
+        BrowserMessage::ChainTriggerCreate { chain_id, trigger_config, target_spec } => {
+            state.rabbitmq.create_chain_trigger(chain_id, trigger_config, target_spec).await?;
+        }
+        BrowserMessage::ChainTriggerUpdate { trigger_id, enabled, trigger_config, target_spec } => {
+            state.rabbitmq.update_chain_trigger(trigger_id, enabled, trigger_config, target_spec).await?;
+        }
+        BrowserMessage::ChainTriggerDelete { trigger_id } => {
+            state.rabbitmq.delete_chain_trigger(trigger_id).await?;
+        }
+        BrowserMessage::ChainTriggerList { chain_id } => {
+            state.rabbitmq.list_chain_triggers(chain_id).await?;
         }
 
         //

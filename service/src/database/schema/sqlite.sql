@@ -141,6 +141,22 @@ CREATE INDEX IF NOT EXISTS idx_chain_exec_status ON chain_executions(status);
 CREATE INDEX IF NOT EXISTS idx_chain_exec_chain_id ON chain_executions(chain_id);
 CREATE INDEX IF NOT EXISTS idx_chain_exec_created_at ON chain_executions(created_at);
 
+-- Chain triggers table
+CREATE TABLE IF NOT EXISTS chain_triggers (
+    id TEXT PRIMARY KEY,
+    chain_id TEXT NOT NULL,
+    trigger_config TEXT NOT NULL,
+    target_spec TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_fired_at TEXT,
+    next_fire_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chain_triggers_chain_id ON chain_triggers(chain_id);
+CREATE INDEX IF NOT EXISTS idx_chain_triggers_enabled ON chain_triggers(enabled);
+CREATE INDEX IF NOT EXISTS idx_chain_triggers_next_fire ON chain_triggers(next_fire_at);
+
 -- Discovered endpoints table
 CREATE TABLE IF NOT EXISTS discovered_endpoints (
     id TEXT PRIMARY KEY,

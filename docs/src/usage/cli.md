@@ -291,6 +291,39 @@ Prerequisites:
 - MCP server must be enabled in Settings
 - An LLM model must be configured for the Orchestrator feature in Settings > LLM Providers > Feature Selection
 
+### Chain Triggers
+
+Triggers automate chain execution based on schedules or events. The trigger commands are available through the shared operations layer.
+
+```bash
+# List all triggers
+trigger list
+
+# List triggers for a specific chain
+trigger list --chain my_recon_chain
+
+# Create a scheduled trigger (interval)
+trigger create my_recon_chain --type scheduled --interval 60
+
+# Create a scheduled trigger (daily at specific time, UTC)
+trigger create my_recon_chain --type scheduled --daily-at 14:30
+
+# Create an intercept match trigger
+trigger create my_recon_chain --type intercept-match --rule-id 3
+
+# Create a new-node trigger
+trigger create my_recon_chain --type new-node
+
+# Toggle a trigger on/off
+trigger toggle abc123 --enable
+trigger toggle abc123 --disable
+
+# Delete a trigger
+trigger delete abc123
+```
+
+Trigger IDs support prefix matching - you only need to type enough characters to uniquely identify the trigger.
+
 ### Traffic Search
 
 ```bash
@@ -405,6 +438,12 @@ The MCP server exposes the following tools:
 - `op_cancel` - Cancel a running operation or chain execution
 - `op_list` - List tracked operations and chain executions
 
+**Chain Triggers:**
+- `trigger_list` - List all chain triggers (optionally filter by chain name or ID)
+- `trigger_create` - Create a trigger for a chain (scheduled, intercept match, or new node)
+- `trigger_delete` - Delete a trigger by ID prefix
+- `trigger_toggle` - Enable or disable a trigger by ID prefix
+
 **Traffic:**
 - `traffic_search` - Search intercepted traffic
 
@@ -453,6 +492,7 @@ The CLI currently supports a subset of Praxis features focused on orchestration:
 - Node and agent management
 - Sessions and prompts
 - Semantic operations and chains
+- Chain trigger management
 - Interactive LLM orchestrator
 - Traffic search
 - MCP server mode for AI assistant integration

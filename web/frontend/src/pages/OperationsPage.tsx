@@ -1,19 +1,169 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Zap, X, Trash2, Clock, Square, Loader2, Play, GitBranch, ChevronDown, ChevronRight } from 'lucide-react';
+import { Zap, X, Trash2, Clock, Square, Loader2, Play, GitBranch, ChevronDown, ChevronRight, Wifi, MonitorSmartphone } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { StatusBadge, getOperationStatusColor } from '../components/common/StatusBadge';
 import { RunModal } from '../components/common/RunModal';
 import { OperationDetailModal } from '../components/common/OperationDetailModal';
 import { ChainExecutionModal } from '../components/common/ChainExecutionModal';
 import { LibraryTab } from '../components/library/LibraryTab';
-import type { OperationDefinitionInfo, ChainDefinitionFull } from '../api/types';
+import type { OperationDefinitionInfo, ChainDefinitionFull, ChainTriggerInfo, TriggerConfig } from '../api/types';
 
 type FilterStatus = 'all' | 'Running' | 'Completed' | 'Failed' | 'Cancelled' | 'Queued';
-type MainTab = 'runs' | 'library';
+type MainTab = 'runs' | 'library' | 'triggers';
+
+//
+// Helpers for trigger display.
+//
+
+function triggerConfigSummary(config: TriggerConfig): string {
+  switch (config.type) {
+    case 'Scheduled': {
+      const sched = config.schedule;
+      const schedText = sched.type === 'DailyAt'
+        ? `Daily at ${String(sched.hour).padStart(2, '0')}:${String(sched.minute).padStart(2, '0')}`
+        : `Every ${sched.minutes}m`;
+      return `${schedText}${config.recurring ? '' : ' (once)'}`;
+    }
+    case 'InterceptMatch':
+      return `Rule #${config.rule_id}`;
+    case 'NewNode':
+      return 'New node';
+  }
+}
+
+function targetSpecSummary(spec: import('../api/types').TargetSpec): string {
+  const parts: string[] = [];
+  if (spec.node_ids.length > 0) {
+    parts.push(`${spec.node_ids.length} node${spec.node_ids.length > 1 ? 's' : ''}`);
+  } else {
+    parts.push('All nodes');
+  }
+  if (spec.agent_short_names.length > 0) {
+    parts.push(spec.agent_short_names.join(', '));
+  }
+  if (spec.os_filter) {
+    parts.push(`OS: ${spec.os_filter}`);
+  }
+  return parts.join(' / ');
+}
+
+function TriggerTypeIcon({ config }: { config: TriggerConfig }) {
+  switch (config.type) {
+    case 'Scheduled':
+      return <Clock size={12} className="text-[var(--accent-warning)]" />;
+    case 'InterceptMatch':
+      return <Wifi size={12} className="text-[var(--accent-info)]" />;
+    case 'NewNode':
+      return <MonitorSmartphone size={12} className="text-[var(--accent-success)]" />;
+  }
+}
+
+interface TriggersTabProps {
+  triggers: ChainTriggerInfo[];
+  chains: import('../api/types').ChainDefinitionInfo[];
+  onToggleEnabled: (trigger: ChainTriggerInfo) => void;
+  onDelete: (triggerId: string) => void;
+}
+
+function TriggersTab({ triggers, chains, onToggleEnabled, onDelete }: TriggersTabProps) {
+  const getChainName = (chainId: string) => {
+    const chain = chains.find(c => c.id === chainId);
+    return chain?.name || chainId.slice(0, 8) + '...';
+  };
+
+  if (triggers.length === 0) {
+    return (
+      <div className="bg-card ascii-box border border-subtle p-8 text-center">
+        <Zap size={32} className="mx-auto mb-3 text-muted opacity-50" />
+        <p className="text-muted text-sm">No triggers configured</p>
+        <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+          Add triggers from the chain editor
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border border-subtle ascii-box overflow-x-auto">
+      <table className="w-full min-w-[900px] text-xs">
+        <thead>
+          <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
+            <th className="text-left px-4 py-2 text-muted tracking-wider">CHAIN</th>
+            <th className="text-left px-4 py-2 text-muted tracking-wider">TYPE</th>
+            <th className="text-left px-4 py-2 text-muted tracking-wider">CONFIG</th>
+            <th className="text-left px-4 py-2 text-muted tracking-wider">TARGET</th>
+            <th className="text-left px-4 py-2 text-muted tracking-wider">ENABLED</th>
+            <th className="text-left px-4 py-2 text-muted tracking-wider">LAST FIRED</th>
+            <th className="text-left px-4 py-2 text-muted tracking-wider">NEXT FIRE</th>
+            <th className="px-4 py-2"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {triggers.map(trigger => (
+            <tr
+              key={trigger.id}
+              className="border-b border-dim last:border-0 hover:bg-[var(--highlight)] transition-colors"
+            >
+              <td className="px-4 py-2">
+                <div className="flex items-center gap-2">
+                  <GitBranch size={12} className="text-muted" />
+                  <span className="font-medium text-highlight">{getChainName(trigger.chain_id)}</span>
+                </div>
+              </td>
+              <td className="px-4 py-2">
+                <div className="flex items-center gap-1.5">
+                  <TriggerTypeIcon config={trigger.trigger_config} />
+                  <span>{trigger.trigger_config.type}</span>
+                </div>
+              </td>
+              <td className="px-4 py-2 text-muted">
+                {triggerConfigSummary(trigger.trigger_config)}
+              </td>
+              <td className="px-4 py-2 text-muted">
+                {targetSpecSummary(trigger.target_spec)}
+              </td>
+              <td className="px-4 py-2">
+                <button
+                  onClick={() => onToggleEnabled(trigger)}
+                  className={`px-2 py-0.5 text-[10px] tracking-wider border transition-colors ${
+                    trigger.enabled
+                      ? 'border-[var(--accent-success)]/40 text-[var(--accent-success)] bg-[var(--accent-success)]/10'
+                      : 'border-dim text-muted'
+                  }`}
+                >
+                  {trigger.enabled ? 'ON' : 'OFF'}
+                </button>
+              </td>
+              <td className="px-4 py-2 text-muted">
+                {trigger.last_fired_at
+                  ? new Date(trigger.last_fired_at).toLocaleString()
+                  : '-'}
+              </td>
+              <td className="px-4 py-2 text-muted">
+                {trigger.next_fire_at
+                  ? new Date(trigger.next_fire_at).toLocaleString()
+                  : '-'}
+              </td>
+              <td className="px-4 py-2">
+                <button
+                  onClick={() => onDelete(trigger.id)}
+                  className="p-2 hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
+                  title="Delete trigger"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export function OperationsPage() {
-  const { state, send, cancelOperation, removeOperation, clearOperations, runChain, cancelChainExecution, removeChainExecution, clearChainExecutions, requestChainExecutions, requestChainDefList, requestChain, requestOperations } = useApp();
+  const { state, send, cancelOperation, removeOperation, clearOperations, runChain, cancelChainExecution, removeChainExecution, clearChainExecutions, requestChainExecutions, requestChainDefList, requestChain, requestOperations, requestChainTriggers, updateChainTrigger, deleteChainTrigger } = useApp();
   const operations = state.operations;
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -21,7 +171,7 @@ export function OperationsPage() {
   // Tab from URL or default.
   //
   const tabParam = searchParams.get('tab');
-  const mainTab: MainTab = tabParam === 'library' ? 'library' : 'runs';
+  const mainTab: MainTab = tabParam === 'library' ? 'library' : tabParam === 'triggers' ? 'triggers' : 'runs';
   const setMainTab = (tab: MainTab) => {
     setSearchParams({ tab }, { replace: true });
   };
@@ -100,6 +250,15 @@ export function OperationsPage() {
     }
   }, [mainTab, isConnected, requestChainExecutions, requestOperations]);
 
+  //
+  // Fetch all triggers when on triggers tab.
+  //
+  useEffect(() => {
+    if (isConnected && mainTab === 'triggers') {
+      requestChainTriggers();
+    }
+  }, [mainTab, isConnected, requestChainTriggers]);
+
   const handleRunOperation = (opFullName: string, nodeId: string, agentName: string) => {
     send({
       type: 'semantic_op_run',
@@ -113,6 +272,15 @@ export function OperationsPage() {
 
   const handleRunChainFromModal = (chainId: string, nodeId: string, agentName: string) => {
     runChain(chainId, nodeId, agentName);
+    setMainTab('runs');
+  };
+
+  const handleRunChainAdvanced = (chainId: string, targetSpec: import('../api/types').TargetSpec) => {
+    const allNodes = state.systemState?.nodes || [];
+    const primaryNode = allNodes[0];
+    if (!primaryNode) return;
+    const agentName = primaryNode.selected_agent?.short_name || primaryNode.discovered_agents?.[0]?.short_name || '';
+    runChain(chainId, primaryNode.node_id, agentName, undefined, targetSpec);
     setMainTab('runs');
   };
 
@@ -257,6 +425,16 @@ export function OperationsPage() {
           }`}
         >
           Library
+        </button>
+        <button
+          onClick={() => setMainTab('triggers')}
+          className={`pb-3 px-1 text-sm font-medium transition-colors border-b-2 ${
+            mainTab === 'triggers'
+              ? 'text-title border-[var(--accent-info)]'
+              : 'text-muted hover:text-[var(--text-primary)] border-transparent'
+          }`}
+        >
+          Triggers
         </button>
       </div>
 
@@ -515,6 +693,20 @@ export function OperationsPage() {
 
       {/*
       //
+      // Triggers tab content.
+      //
+      */}
+      {mainTab === 'triggers' && (
+        <TriggersTab
+          triggers={state.chains.triggers}
+          chains={chains}
+          onToggleEnabled={(trigger) => updateChainTrigger(trigger.id, { enabled: !trigger.enabled })}
+          onDelete={(triggerId) => deleteChainTrigger(triggerId)}
+        />
+      )}
+
+      {/*
+      //
       // Operation detail modal.
       //
       */}
@@ -561,6 +753,7 @@ export function OperationsPage() {
         isOpen={showRunChainModal}
         onClose={() => setShowRunChainModal(false)}
         onRun={handleRunChainFromModal}
+        onRunAdvanced={handleRunChainAdvanced}
         title="Run Chain"
         items={chains.filter(c => !c.disabled).map(chain => ({
           id: chain.id,

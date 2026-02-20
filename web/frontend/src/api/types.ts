@@ -421,8 +421,39 @@ export interface ChainDefinitionInfo {
   timeout?: number;
   element_count: number;
   operation_count: number;
+  trigger_count?: number;
   created_at: string;
   updated_at: string;
+}
+
+//
+// Chain triggers and targeting.
+//
+
+export type ScheduleSpec =
+  | { type: 'DailyAt'; hour: number; minute: number }
+  | { type: 'Interval'; minutes: number };
+
+export type TriggerConfig =
+  | { type: 'Scheduled'; schedule: ScheduleSpec; recurring: boolean }
+  | { type: 'InterceptMatch'; rule_id: number }
+  | { type: 'NewNode' };
+
+export interface TargetSpec {
+  node_ids: string[];
+  os_filter?: string | null;
+  agent_short_names: string[];
+  include_triggering_node: boolean;
+}
+
+export interface ChainTriggerInfo {
+  id: string;
+  chain_id: string;
+  trigger_config: TriggerConfig;
+  target_spec: TargetSpec;
+  enabled: boolean;
+  last_fired_at?: string | null;
+  next_fire_at?: string | null;
 }
 
 export type ChainExecutionStatus = 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled';
@@ -671,11 +702,18 @@ export type BrowserMessage =
   | { type: 'chain_create'; definition: ChainDefinitionInput }
   | { type: 'chain_update'; chain_id: string; definition: ChainDefinitionInput }
   | { type: 'chain_delete'; chain_id: string }
-  | { type: 'chain_run'; chain_id: string; node_id: string; agent_short_name: string; working_dir: string | null }
+  | { type: 'chain_run'; chain_id: string; node_id: string; agent_short_name: string; working_dir: string | null; target_spec?: TargetSpec | null }
   | { type: 'chain_cancel'; execution_id: string }
   | { type: 'chain_execution_list' }
   | { type: 'chain_execution_remove'; execution_id: string }
   | { type: 'chain_execution_clear' }
+  //
+  // Chain trigger messages.
+  //
+  | { type: 'chain_trigger_create'; chain_id: string; trigger_config: TriggerConfig; target_spec: TargetSpec }
+  | { type: 'chain_trigger_update'; trigger_id: string; enabled?: boolean | null; trigger_config?: TriggerConfig | null; target_spec?: TargetSpec | null }
+  | { type: 'chain_trigger_delete'; trigger_id: string }
+  | { type: 'chain_trigger_list'; chain_id?: string | null }
   //
   // Agent discovery messages.
   //
@@ -765,6 +803,13 @@ export type ServerMessage =
   | { type: 'chain_execution_started'; execution_id: string; chain_id: string }
   | { type: 'chain_execution_update'; execution: ChainExecutionUpdate }
   | { type: 'chain_execution_list'; executions: ChainExecutionUpdate[] }
+  //
+  // Chain trigger messages.
+  //
+  | { type: 'chain_trigger_created'; trigger: ChainTriggerInfo }
+  | { type: 'chain_trigger_updated'; trigger: ChainTriggerInfo }
+  | { type: 'chain_trigger_deleted'; trigger_id: string }
+  | { type: 'chain_trigger_list_response'; triggers: ChainTriggerInfo[] }
   //
   // Agent discovery messages.
   //

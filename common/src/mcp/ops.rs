@@ -4,8 +4,9 @@ use std::time::Duration;
 use crate::mcp::McpClient;
 use crate::{
     AgentCommand, AgentCommandResult, AgentFileType, AgentTool, ChainDefinitionInfo,
-    ChainExecutionUpdate, ConfigItem, GrepFileEntry, McpServer, NodeCommand, NodeCommandResult,
-    OperationDefinitionInfo, SemanticOpUpdate, SessionItem, SystemState,
+    ChainExecutionUpdate, ChainTriggerInfo, ConfigItem, GrepFileEntry, McpServer, NodeCommand,
+    NodeCommandResult, OperationDefinitionInfo, SemanticOpUpdate, SessionItem, SystemState,
+    TargetSpec, TriggerConfig,
 };
 
 //
@@ -543,4 +544,71 @@ pub async fn recon_grep_all(
     // Filter to only files with matches
     result.results.retain(|r| r.error.is_some() || !r.matches.is_empty());
     Ok(result)
+}
+
+//
+// Chain trigger operations.
+//
+
+pub async fn trigger_list(
+    client: &(impl McpClient + Sync),
+    chain_id: Option<String>,
+) -> Result<Vec<ChainTriggerInfo>> {
+    client.request_chain_trigger_list(chain_id).await?;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    Ok(client.get_chain_triggers().await)
+}
+
+pub async fn trigger_create(
+    client: &(impl McpClient + Sync),
+    chain_name: &str,
+    trigger_config: TriggerConfig,
+    target_spec: TargetSpec,
+) -> Result<String> {
+    //
+    // Resolve chain by name or ID prefix.
+    //
+    client.request_chain_list().await?;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let chains = client.get_chain_definitions().await;
+    let chain = chains
+        .iter()
+        .find(|c| {
+            c.id.to_lowercase().starts_with(&chain_name.to_lowercase())
+                || c.name.to_lowercase() == chain_name.to_lowercase()
+        })
+        .ok_or_else(|| anyhow!("No chain found matching '{}'", chain_name))?;
+    let chain_id = chain.id.clone();
+
+    client.create_chain_trigger(chain_id.clone(), trigger_config, target_spec).await?;
+    Ok(chain_id)
+}
+
+pub async fn trigger_delete(
+    client: &(impl McpClient + Sync),
+    trigger_id_prefix: &str,
+) -> Result<String> {
+    let triggers = trigger_list(client, None).await?;
+    let trigger = triggers
+        .iter()
+        .find(|t| t.id.starts_with(trigger_id_prefix))
+        .ok_or_else(|| anyhow!("No trigger found matching '{}'", trigger_id_prefix))?;
+    let id = trigger.id.clone();
+    client.delete_chain_trigger(id.clone()).await?;
+    Ok(id)
+}
+
+pub async fn trigger_toggle(
+    client: &(impl McpClient + Sync),
+    trigger_id_prefix: &str,
+    enabled: bool,
+) -> Result<(String, bool)> {
+    let triggers = trigger_list(client, None).await?;
+    let trigger = triggers
+        .iter()
+        .find(|t| t.id.starts_with(trigger_id_prefix))
+        .ok_or_else(|| anyhow!("No trigger found matching '{}'", trigger_id_prefix))?;
+    let id = trigger.id.clone();
+    client.toggle_chain_trigger(id.clone(), enabled).await?;
+    Ok((id, enabled))
 }

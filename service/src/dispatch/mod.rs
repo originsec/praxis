@@ -18,6 +18,7 @@ use crate::mcp::McpServerManager;
 use crate::orchestrator::OrchestratorManager;
 use crate::semantic_ops::{ChainExecutor, ResponseTracker, SemanticOpsManager};
 use crate::state::{ClientRegistry, NodeRegistry, PendingCommands};
+use crate::trigger_engine::TriggerEngine;
 
 //
 // ServiceContext holds all the shared state needed by message handlers.
@@ -36,6 +37,7 @@ pub struct ServiceContext {
     pub agent_chat_manager: Arc<AgentChatManager>,
     pub orchestrator_manager: Arc<OrchestratorManager>,
     pub mcp_manager: Arc<McpServerManager>,
+    pub trigger_engine: Option<Arc<TriggerEngine>>,
 
     //
     // Channels for publishing messages.

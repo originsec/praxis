@@ -236,6 +236,8 @@ pub struct ChainDefinitionInfo {
     pub timeout: Option<u64>,
     pub element_count: usize,
     pub operation_count: usize,
+    #[serde(default)]
+    pub trigger_count: usize,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -266,6 +268,7 @@ impl ChainDefinition {
             timeout: self.timeout,
             element_count: self.elements.len(),
             operation_count,
+            trigger_count: 0,
             created_at: self.created_at,
             updated_at: self.updated_at,
         }
@@ -1025,8 +1028,13 @@ impl Database {
         Ok(chains)
     }
 
-    /// Delete a chain definition by ID
+    /// Delete a chain definition by ID (cascade-deletes associated triggers)
     pub async fn delete_chain(&self, id: &str) -> Result<bool> {
+        //
+        // Cascade delete associated triggers first.
+        //
+        let _ = self.delete_chain_triggers_for_chain(id).await;
+
         let sql = "DELETE FROM operation_chains WHERE id = $1";
 
         let count = match &self.pool {

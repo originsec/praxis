@@ -17,10 +17,15 @@ The service is the central backend that coordinates nodes, manages data, and orc
 │  └────────────────┘  └────────────────┘  └────────────────┘  │
 │                                                              │
 │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐  │
-│  │    Database    │  │   LLM Client   │  │    Message     │  │
-│  │                │  │                │  │   Processor    │  │
-│  │  SQLite/PG ────│  │  providers ────│  │                │  │
+│  │   Trigger      │  │   LLM Client   │  │    Message     │  │
+│  │   Engine       │  │                │  │   Processor    │  │
+│  │  scheduler ────│  │  providers ────│  │                │  │
 │  └────────────────┘  └────────────────┘  └────────────────┘  │
+│                                                              │
+│  ┌────────────────┐                                          │
+│  │    Database    │                                          │
+│  │  SQLite/PG ────│                                          │
+│  └────────────────┘                                          │
 │                                                              │
 │                         RabbitMQ                             │
 └─────────────────────────────┬────────────────────────────────┘
@@ -118,11 +123,13 @@ Trigger → Element → Element → ... → Termination
 
 ### Execution Flow
 
-1. Chain triggered (manual or scheduled)
-2. Elements executed in order following connections
-3. Output from each element passed to next
-4. Session groups maintain shared context
-5. Termination collects final output
+1. Chain triggered (manual, scheduled, or event-driven)
+2. Target spec resolved into concrete node/agent pairs
+3. For multi-target specs, the executor performs a fan-out (one execution per target)
+4. Elements executed in order following connections
+5. Output from each element passed to next
+6. Session groups maintain shared context
+7. Termination collects final output
 
 ### Session Groups
 
@@ -130,6 +137,62 @@ Elements in the same session group share an agent session:
 - Maintains conversation context
 - Allows multi-turn interactions
 - YOLO mode can be set per group
+
+### Target Resolution
+
+When a chain runs with a `TargetSpec` (from a trigger or advanced targeting), the targeting module resolves it into concrete `(node_id, agent_short_name)` pairs:
+
+1. List all registered nodes
+2. Filter by `node_ids` if non-empty
+3. Filter by `os_filter` (case-insensitive substring on OS details)
+4. If `include_triggering_node` is set, ensure the triggering node passes the filter
+5. For each surviving node, filter discovered agents by `agent_short_names`
+6. Skip agents that are not currently available
+7. Return the flattened list of resolved targets
+
+Each resolved target gets its own independent chain execution.
+
+## Trigger Engine
+
+The trigger engine automates chain execution based on configured triggers. It is initialized at service startup and runs for the lifetime of the service.
+
+### Trigger Types
+
+```rust
+enum TriggerConfig {
+    Scheduled { schedule: ScheduleSpec, recurring: bool },
+    InterceptMatch { rule_id: i64 },
+    NewNode,
+}
+
+enum ScheduleSpec {
+    DailyAt { hour: u8, minute: u8 },
+    Interval { minutes: u32 },
+}
+```
+
+### Scheduler Loop
+
+The engine runs a polling loop that checks for due scheduled triggers every 30 seconds. It also accepts refresh signals (via `Notify`) so that CRUD operations on triggers cause an immediate re-check.
+
+For each due trigger:
+1. Load the associated chain definition
+2. Resolve the target spec against the current node registry
+3. Execute the chain via `execute_fan_out` for each resolved target
+4. Mark the trigger as fired (update `last_fired_at`, recompute `next_fire_at`)
+5. If the trigger is non-recurring, disable it after firing
+
+### Event-Driven Triggers
+
+Event triggers fire outside the polling loop, in direct response to events:
+
+**InterceptMatch** - When intercepted traffic matches an intercept rule, the node dispatch handler calls `fire_intercept_match_triggers()`. The engine looks up all enabled InterceptMatch triggers whose `rule_id` matches, applies a 60-second debounce per trigger, and fires matching chains.
+
+**NewNode** - When a node registers, the node dispatch handler spawns a delayed task (10 seconds to allow agent discovery) that calls `fire_new_node_triggers()`. The engine fires all enabled NewNode triggers with the registering node ID as the triggering node.
+
+### Trigger Storage
+
+Triggers are stored in the `chain_triggers` database table with JSON-serialized `trigger_config` and `target_spec` columns. The engine queries this table for due triggers and event-based triggers, and updates it after firing.
 
 ## Database
 
@@ -187,7 +250,20 @@ CREATE TABLE lua_agent_scripts (
     updated_at TEXT
 );
 
--- Chain definitions, executions, rules, etc.
+-- Chain triggers
+CREATE TABLE chain_triggers (
+    id TEXT PRIMARY KEY,
+    chain_id TEXT NOT NULL,
+    trigger_config TEXT NOT NULL,    -- JSON: TriggerConfig
+    target_spec TEXT NOT NULL,       -- JSON: TargetSpec
+    enabled INTEGER DEFAULT 1,
+    last_fired_at TEXT,
+    next_fire_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+-- Chain definitions, executions, etc.
 ```
 
 ### Connection
@@ -277,8 +353,9 @@ Agent version information (extracted during fingerprinting) is included in the `
 5. Start message consumers
 6. Initialize semantic ops manager
 7. Initialize chain executor
-8. Request node re-registration (broadcast)
-9. Begin processing messages
+8. Initialize trigger engine and start scheduler
+9. Request node re-registration (broadcast)
+10. Begin processing messages
 
 ## Error Handling
 
