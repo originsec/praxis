@@ -45,6 +45,10 @@ type DiffRow = {
   kind: 'same' | 'changed' | 'added' | 'removed';
 };
 
+type DiffDisplayRow =
+  | { type: 'row'; row: DiffRow }
+  | { type: 'separator'; key: string };
+
 function buildLineDiff(originalText: string, updatedText: string): DiffRow[] {
   const left = prettyPrintSession(originalText).split('\n');
   const right = prettyPrintSession(updatedText).split('\n');
@@ -70,6 +74,36 @@ function buildLineDiff(originalText: string, updatedText: string): DiffRow[] {
   }
 
   return rows;
+}
+
+function buildGitStyleDiffRows(rows: DiffRow[], contextLines = 3): DiffDisplayRow[] {
+  const changedIndexes = rows
+    .map((row, idx) => (row.kind === 'same' ? -1 : idx))
+    .filter((idx) => idx >= 0);
+
+  if (changedIndexes.length === 0) {
+    return rows.map((row) => ({ type: 'row', row }));
+  }
+
+  const include = new Set<number>();
+  for (const idx of changedIndexes) {
+    const start = Math.max(0, idx - contextLines);
+    const end = Math.min(rows.length - 1, idx + contextLines);
+    for (let i = start; i <= end; i += 1) include.add(i);
+  }
+
+  const result: DiffDisplayRow[] = [];
+  let prevIncluded: number | null = null;
+  for (let i = 0; i < rows.length; i += 1) {
+    if (!include.has(i)) continue;
+    if (prevIncluded !== null && i - prevIncluded > 1) {
+      result.push({ type: 'separator', key: `sep-${prevIncluded}-${i}` });
+    }
+    result.push({ type: 'row', row: rows[i] });
+    prevIncluded = i;
+  }
+
+  return result;
 }
 
 interface SessionHistoryPoisoningModalProps {
@@ -107,6 +141,7 @@ function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionH
     () => (preview?.preview_content ? buildLineDiff(originalContent, preview.preview_content) : []),
     [originalContent, preview?.preview_content]
   );
+  const visibleDiffRows = useMemo(() => buildGitStyleDiffRows(diffRows, 3), [diffRows]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -311,21 +346,36 @@ function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionH
                 <div className="px-3 py-2 text-muted border-l border-subtle">Proposed</div>
               </div>
               <div className="max-h-[62vh] overflow-auto">
-                {diffRows.map((row, idx) => {
+                {visibleDiffRows.map((entry, idx) => {
+                  if (entry.type === 'separator') {
+                    return (
+                      <div
+                        key={entry.key}
+                        className="grid grid-cols-2 bg-[var(--bg-tertiary)]/70 border-y border-subtle"
+                      >
+                        <div className="px-3 py-1 text-muted">...</div>
+                        <div className="px-3 py-1 text-muted border-l border-subtle">...</div>
+                      </div>
+                    );
+                  }
+                  const row = entry.row;
                   const bg = row.kind === 'same'
                     ? 'bg-transparent'
                     : row.kind === 'added'
-                      ? 'bg-[var(--accent-success)]/10'
+                      ? 'bg-[var(--accent-success)]/12'
                       : row.kind === 'removed'
-                        ? 'bg-[var(--accent-error)]/10'
-                        : 'bg-[var(--accent-warning)]/10';
+                        ? 'bg-[var(--accent-error)]/12'
+                        : 'bg-[var(--accent-warning)]/12';
+                  const marker = row.kind === 'added' ? '+' : row.kind === 'removed' ? '-' : row.kind === 'changed' ? '~' : ' ';
                   return (
-                    <div key={`${idx}-${row.leftLineNo}-${row.rightLineNo}`} className={`grid grid-cols-2 ${bg} border-b border-subtle/40`}>
-                      <div className="px-2 py-1 pr-3 whitespace-pre-wrap break-words">
+                    <div key={`${idx}-${row.leftLineNo}-${row.rightLineNo}`} className={`grid grid-cols-2 ${bg}`}>
+                      <div className="px-2 py-1.5 pr-3 whitespace-pre-wrap break-words">
+                        <span className="text-muted mr-2 inline-block w-4 text-center">{marker}</span>
                         <span className="text-muted mr-2 inline-block w-8 text-right">{row.leftLineNo ?? ''}</span>
                         {row.left}
                       </div>
-                      <div className="px-2 py-1 pl-3 whitespace-pre-wrap break-words border-l border-subtle">
+                      <div className="px-2 py-1.5 pl-3 whitespace-pre-wrap break-words border-l border-subtle/70">
+                        <span className="text-muted mr-2 inline-block w-4 text-center">{marker}</span>
                         <span className="text-muted mr-2 inline-block w-8 text-right">{row.rightLineNo ?? ''}</span>
                         {row.right}
                       </div>
