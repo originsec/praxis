@@ -1,25 +1,99 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Code2, Copy, Eye, FileDiff, ShieldAlert } from 'lucide-react';
+import { Modal } from '../components/common/Modal';
 import { useApp } from '../context/AppContext';
-import type { SessionItem, ToolkitApplyDecision, ToolkitTargetRef } from '../api/types';
+import type { SessionItem, ToolkitToolInfo } from '../api/types';
 
-export function ToolkitPage() {
-  const { state, send } = useApp();
-  const [selectedTool, setSelectedTool] = useState<string>('session_history_poisoning');
-  const [selectedNodeId, setSelectedNodeId] = useState<string>('');
-  const [selectedAgent, setSelectedAgent] = useState<string>('');
-  const [selectedSessionFile, setSelectedSessionFile] = useState<string>('');
-  const [selectedModelRef, setSelectedModelRef] = useState<string>('');
-  const [encoderInput, setEncoderInput] = useState<string>('');
-  const [encoderType, setEncoderType] = useState<string>('braille_us_type2');
-  const [acceptMap, setAcceptMap] = useState<Record<string, boolean>>({});
+function toolIcon(toolName: string) {
+  if (toolName === 'session_history_poisoning') return ShieldAlert;
+  if (toolName === 'message_encoder') return Code2;
+  return Eye;
+}
 
-  useEffect(() => {
-    send({ type: 'toolkit_list' });
-  }, [send]);
+function prettyPrintSession(content: string): string {
+  const trimmed = content.trim();
+  if (!trimmed) return content;
+
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    // Continue to line-level JSONL pretty-print fallback.
+  }
+
+  const lines = content.split('\n');
+  let hasJsonLine = false;
+  const formatted = lines.map((line) => {
+    const t = line.trim();
+    if (!t) return line;
+    try {
+      const parsed = JSON.parse(t);
+      hasJsonLine = true;
+      return JSON.stringify(parsed, null, 2);
+    } catch {
+      return line;
+    }
+  });
+
+  return hasJsonLine ? formatted.join('\n') : content;
+}
+
+type DiffRow = {
+  leftLineNo: number | null;
+  rightLineNo: number | null;
+  left: string;
+  right: string;
+  kind: 'same' | 'changed' | 'added' | 'removed';
+};
+
+function buildLineDiff(originalText: string, updatedText: string): DiffRow[] {
+  const left = prettyPrintSession(originalText).split('\n');
+  const right = prettyPrintSession(updatedText).split('\n');
+  const max = Math.max(left.length, right.length);
+  const rows: DiffRow[] = [];
+
+  for (let i = 0; i < max; i += 1) {
+    const l = left[i];
+    const r = right[i];
+    if (l === r) {
+      rows.push({ leftLineNo: i + 1, rightLineNo: i + 1, left: l ?? '', right: r ?? '', kind: 'same' });
+      continue;
+    }
+    if (l === undefined) {
+      rows.push({ leftLineNo: null, rightLineNo: i + 1, left: '', right: r ?? '', kind: 'added' });
+      continue;
+    }
+    if (r === undefined) {
+      rows.push({ leftLineNo: i + 1, rightLineNo: null, left: l, right: '', kind: 'removed' });
+      continue;
+    }
+    rows.push({ leftLineNo: i + 1, rightLineNo: i + 1, left: l, right: r, kind: 'changed' });
+  }
+
+  return rows;
+}
+
+interface SessionHistoryPoisoningModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  description: string;
+}
+
+function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionHistoryPoisoningModalProps) {
+  const { state, send, sendCommand } = useApp();
+
+  const [selectedNodeId, setSelectedNodeId] = useState('');
+  const [selectedAgent, setSelectedAgent] = useState('');
+  const [selectedSessionFile, setSelectedSessionFile] = useState('');
+  const [selectedModelRef, setSelectedModelRef] = useState('');
+  const [loadingRecon, setLoadingRecon] = useState(false);
+  const [loadingRun, setLoadingRun] = useState(false);
+  const [loadingApply, setLoadingApply] = useState(false);
+  const [originalContent, setOriginalContent] = useState('');
+  const [toolError, setToolError] = useState<string | null>(null);
 
   const nodes = state.systemState?.nodes ?? [];
   const selectedNode = nodes.find((n) => n.node_id === selectedNodeId);
-  const availableAgents = selectedNode?.discovered_agents.filter((a) => a.available) ?? [];
+  const agents = selectedNode?.discovered_agents.filter((a) => a.available) ?? [];
 
   const reconTarget = state.toolkit.reconTargets.find(
     (t) => t.node_id === selectedNodeId && t.agent_short_name === selectedAgent
@@ -27,35 +101,25 @@ export function ToolkitPage() {
   const sessions: SessionItem[] = reconTarget?.sessions ?? [];
   const selectedSession = sessions.find((s) => s.session_file === selectedSessionFile) ?? null;
 
-  const canRecon = selectedNodeId.length > 0 && selectedAgent.length > 0;
-  const poisoningMode = selectedTool === 'session_history_poisoning';
-  const encoderMode = selectedTool === 'message_encoder';
-  const canRun = poisoningMode
-    ? canRecon && selectedSession !== null && selectedModelRef.length > 0
-    : encoderMode && encoderInput.trim().length > 0;
-  const execution = state.toolkit.execution;
-
-  const previewKeys = useMemo(
-    () =>
-      (execution?.previews ?? []).map((p) => `${p.target.node_id}|${p.target.agent_short_name}|${p.target.session_file}`),
-    [execution?.previews]
+  const execution = state.toolkit.execution?.tool_name === 'session_history_poisoning' ? state.toolkit.execution : null;
+  const preview = execution?.previews[0];
+  const diffRows = useMemo(
+    () => (preview?.preview_content ? buildLineDiff(originalContent, preview.preview_content) : []),
+    [originalContent, preview?.preview_content]
   );
 
   useEffect(() => {
-    const next: Record<string, boolean> = {};
-    for (const key of previewKeys) {
-      next[key] = acceptMap[key] ?? true;
-    }
-    setAcceptMap(next);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewKeys.join(',')]);
+    if (!isOpen) return;
+    setToolError(null);
+  }, [isOpen]);
 
-  const runRecon = () => {
-    if (!poisoningMode) return;
-    if (!canRecon) return;
+  const runRecon = async () => {
+    if (!selectedNodeId || !selectedAgent) return;
+    setLoadingRecon(true);
+    setToolError(null);
     send({
       type: 'toolkit_recon',
-      tool_name: selectedTool,
+      tool_name: 'session_history_poisoning',
       target_spec: {
         node_ids: [selectedNodeId],
         os_filter: null,
@@ -63,21 +127,33 @@ export function ToolkitPage() {
         include_triggering_node: false,
       },
     });
+    setTimeout(() => setLoadingRecon(false), 400);
   };
 
-  const runPreview = () => {
-    if (!canRun) return;
-    if (poisoningMode) {
-      if (!selectedSession) return;
-      const target: ToolkitTargetRef = {
-        node_id: selectedNodeId,
-        agent_short_name: selectedAgent,
-        session_id: selectedSession.session_id,
-        session_file: selectedSession.session_file,
-      };
+  const runPreview = async () => {
+    if (!selectedNodeId || !selectedAgent || !selectedSession || !selectedModelRef) return;
+
+    setLoadingRun(true);
+    setToolError(null);
+    try {
+      await sendCommand(selectedNodeId, { Agent: { Select: { short_name: selectedAgent } } });
+      const readResp = await sendCommand(selectedNodeId, {
+        Agent: { ReadFile: { file_type: 'Session', path: selectedSession.session_file } },
+      });
+
+      if ('Agent' in readResp.result && typeof readResp.result.Agent === 'object' && readResp.result.Agent !== null
+        && 'ReadFileResult' in readResp.result.Agent) {
+        const result = readResp.result.Agent.ReadFileResult;
+        if (result.content) {
+          setOriginalContent(result.content);
+        } else {
+          throw new Error(result.error || 'Failed to read session content');
+        }
+      }
+
       send({
         type: 'toolkit_execute',
-        tool_name: selectedTool,
+        tool_name: 'session_history_poisoning',
         target_spec: {
           node_ids: [selectedNodeId],
           os_filter: null,
@@ -86,15 +162,205 @@ export function ToolkitPage() {
         },
         params: {
           model_ref: selectedModelRef,
-          targets: [target],
+          targets: [{
+            node_id: selectedNodeId,
+            agent_short_name: selectedAgent,
+            session_id: selectedSession.session_id,
+            session_file: selectedSession.session_file,
+          }],
         },
       });
-      return;
+    } catch (error) {
+      setToolError(String(error));
+    } finally {
+      setLoadingRun(false);
     }
+  };
 
+  const applyChanges = () => {
+    if (!execution) return;
+    setLoadingApply(true);
+    send({
+      type: 'toolkit_apply',
+      execution_id: execution.execution_id,
+      decisions: preview ? [{ target: preview.target, accepted: true }] : [],
+    });
+    setTimeout(() => setLoadingApply(false), 400);
+  };
+
+  const changedCount = diffRows.filter((r) => r.kind !== 'same').length;
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Session History Poisoning" size="full" noPadding>
+      <div className="p-4 border-b border-subtle bg-[var(--bg-tertiary)]">
+        <p className="text-sm text-muted">{description}</p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[360px,1fr] h-[80vh]">
+        <div className="border-r border-subtle p-4 space-y-3 overflow-auto">
+          <h3 className="text-xs font-semibold text-title">Targeting</h3>
+
+          <div>
+            <label className="text-xs text-muted">Node</label>
+            <select
+              className="w-full mt-1 bg-[var(--surface-2)] border border-subtle rounded px-2 py-1"
+              value={selectedNodeId}
+              onChange={(e) => {
+                setSelectedNodeId(e.target.value);
+                setSelectedAgent('');
+                setSelectedSessionFile('');
+              }}
+            >
+              <option value="">Select node</option>
+              {nodes.map((n) => (
+                <option key={n.node_id} value={n.node_id}>{n.machine_name} ({n.node_id.slice(0, 8)})</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs text-muted">Agent</label>
+            <select
+              className="w-full mt-1 bg-[var(--surface-2)] border border-subtle rounded px-2 py-1"
+              value={selectedAgent}
+              onChange={(e) => {
+                setSelectedAgent(e.target.value);
+                setSelectedSessionFile('');
+              }}
+            >
+              <option value="">Select agent</option>
+              {agents.map((a) => (
+                <option key={a.short_name} value={a.short_name}>{a.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            className="w-full px-3 py-2 rounded bg-[var(--accent-info)] text-black text-sm disabled:opacity-50"
+            disabled={!selectedNodeId || !selectedAgent || loadingRecon}
+            onClick={runRecon}
+          >
+            {loadingRecon ? 'Running Recon...' : 'Static Recon'}
+          </button>
+
+          <div>
+            <label className="text-xs text-muted">Session</label>
+            <select
+              className="w-full mt-1 bg-[var(--surface-2)] border border-subtle rounded px-2 py-1"
+              value={selectedSessionFile}
+              onChange={(e) => setSelectedSessionFile(e.target.value)}
+            >
+              <option value="">Select session</option>
+              {sessions.map((s) => (
+                <option key={s.session_file} value={s.session_file}>{s.session_id} ({s.message_count} msgs)</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs text-muted">Model Definition</label>
+            <select
+              className="w-full mt-1 bg-[var(--surface-2)] border border-subtle rounded px-2 py-1"
+              value={selectedModelRef}
+              onChange={(e) => setSelectedModelRef(e.target.value)}
+            >
+              <option value="">Select model</option>
+              {state.toolkit.models.map((m) => (
+                <option key={m.name} value={m.name}>{m.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            className="w-full px-3 py-2 rounded bg-[var(--accent-warning)] text-black text-sm disabled:opacity-50"
+            disabled={!selectedNodeId || !selectedAgent || !selectedSession || !selectedModelRef || loadingRun}
+            onClick={runPreview}
+          >
+            {loadingRun ? 'Generating...' : 'Run Tool'}
+          </button>
+
+          <button
+            className="w-full px-3 py-2 rounded bg-[var(--accent-success)] text-black text-sm disabled:opacity-50"
+            disabled={!execution || !preview?.preview_content || loadingApply}
+            onClick={applyChanges}
+          >
+            {loadingApply ? 'Applying...' : 'Accept and Overwrite'}
+          </button>
+
+          {(toolError || state.toolkit.error) && (
+            <p className="text-xs text-[var(--accent-error)]">{toolError || state.toolkit.error}</p>
+          )}
+        </div>
+
+        <div className="p-4 overflow-auto space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold text-title flex items-center gap-2">
+              <FileDiff size={14} /> Preview Diff
+            </h3>
+            <span className="text-xs text-muted">Changed lines: {changedCount}</span>
+          </div>
+
+          {!preview?.preview_content && (
+            <div className="text-sm text-muted border border-subtle rounded p-4">Run the tool to generate a preview.</div>
+          )}
+
+          {preview?.preview_content && (
+            <div className="border border-subtle rounded overflow-hidden font-mono text-xs">
+              <div className="grid grid-cols-2 bg-[var(--bg-tertiary)] border-b border-subtle">
+                <div className="px-3 py-2 text-muted">Original</div>
+                <div className="px-3 py-2 text-muted border-l border-subtle">Proposed</div>
+              </div>
+              <div className="max-h-[62vh] overflow-auto">
+                {diffRows.map((row, idx) => {
+                  const bg = row.kind === 'same'
+                    ? 'bg-transparent'
+                    : row.kind === 'added'
+                      ? 'bg-[var(--accent-success)]/10'
+                      : row.kind === 'removed'
+                        ? 'bg-[var(--accent-error)]/10'
+                        : 'bg-[var(--accent-warning)]/10';
+                  return (
+                    <div key={`${idx}-${row.leftLineNo}-${row.rightLineNo}`} className={`grid grid-cols-2 ${bg} border-b border-subtle/40`}>
+                      <div className="px-2 py-1 pr-3 whitespace-pre-wrap break-words">
+                        <span className="text-muted mr-2 inline-block w-8 text-right">{row.leftLineNo ?? ''}</span>
+                        {row.left}
+                      </div>
+                      <div className="px-2 py-1 pl-3 whitespace-pre-wrap break-words border-l border-subtle">
+                        <span className="text-muted mr-2 inline-block w-8 text-right">{row.rightLineNo ?? ''}</span>
+                        {row.right}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+interface MessageEncoderModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  description: string;
+}
+
+function MessageEncoderModal({ isOpen, onClose, description }: MessageEncoderModalProps) {
+  const { state, send } = useApp();
+  const [input, setInput] = useState('');
+  const [encoding, setEncoding] = useState('braille_us_type2');
+  const [copied, setCopied] = useState(false);
+
+  const execution = state.toolkit.execution?.tool_name === 'message_encoder' ? state.toolkit.execution : null;
+  const output = execution?.previews[0]?.preview_content ?? '';
+
+  const runEncode = () => {
+    if (!input.trim()) return;
     send({
       type: 'toolkit_execute',
-      tool_name: selectedTool,
+      tool_name: 'message_encoder',
       target_spec: {
         node_ids: [],
         os_filter: null,
@@ -102,206 +368,132 @@ export function ToolkitPage() {
         include_triggering_node: false,
       },
       params: {
-        input_text: encoderInput,
-        encoding: encoderType,
+        input_text: input,
+        encoding,
       },
     });
   };
 
-  const applyResults = () => {
-    if (!execution) return;
-    const decisions: ToolkitApplyDecision[] = execution.previews.map((p) => {
-      const key = `${p.target.node_id}|${p.target.agent_short_name}|${p.target.session_file}`;
-      return {
-        target: p.target,
-        accepted: !!acceptMap[key],
-      };
-    });
-    send({
-      type: 'toolkit_apply',
-      execution_id: execution.execution_id,
-      decisions,
-    });
+  const copyOutput = async () => {
+    if (!output) return;
+    await navigator.clipboard.writeText(output);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1000);
   };
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="Message Encoder" size="lg">
+      <p className="text-sm text-muted mb-4">{description}</p>
+
+      <div className="space-y-4">
+        <div>
+          <label className="text-xs text-muted">Encoding</label>
+          <select
+            className="w-full mt-1 bg-[var(--surface-2)] border border-subtle rounded px-2 py-1"
+            value={encoding}
+            onChange={(e) => setEncoding(e.target.value)}
+          >
+            <option value="braille_us_type2">Braille (US Type 2)</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="text-xs text-muted">Input</label>
+          <textarea
+            className="w-full h-36 mt-1 bg-[var(--surface-2)] border border-subtle rounded p-2 text-sm"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Type text to encode..."
+          />
+        </div>
+
+        <button
+          className="px-3 py-2 rounded bg-[var(--accent-warning)] text-black text-sm disabled:opacity-50"
+          disabled={!input.trim()}
+          onClick={runEncode}
+        >
+          Encode Message
+        </button>
+
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs text-muted">Encoded Output</label>
+            <button
+              className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-subtle hover:bg-[var(--bg-secondary)]"
+              onClick={copyOutput}
+              disabled={!output}
+            >
+              <Copy size={12} /> {copied ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+          <textarea
+            className="w-full h-36 bg-[var(--surface-2)] border border-subtle rounded p-2 text-sm font-mono"
+            readOnly
+            value={output}
+          />
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+export function ToolkitPage() {
+  const { state, send } = useApp();
+  const [activeTool, setActiveTool] = useState<string | null>(null);
+
+  useEffect(() => {
+    send({ type: 'toolkit_list' });
+  }, [send]);
+
+  const tools = state.toolkit.tools;
+
+  const openTool = (toolName: string) => setActiveTool(toolName);
+  const closeTool = () => setActiveTool(null);
+
+  const descriptionFor = (toolName: string) =>
+    tools.find((t) => t.tool_name === toolName)?.description ?? '';
 
   return (
     <div className="space-y-6 h-full overflow-auto pb-8">
       <div>
         <h1 className="text-2xl font-bold text-highlight">Toolkit</h1>
-        <p className="text-muted mt-1">Run offensive toolkit workflows against selected sessions</p>
+        <p className="text-muted mt-1">Specialized offensive tools</p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded border border-subtle p-4 space-y-3">
-          <h2 className="text-sm font-semibold text-title">Selection</h2>
-
-          <div>
-            <label className="text-xs text-muted">Tool</label>
-            <select className="w-full mt-1 bg-[var(--surface-2)] border border-subtle rounded px-2 py-1"
-              value={selectedTool}
-              onChange={(e) => setSelectedTool(e.target.value)}>
-              {state.toolkit.tools.map((t) => (
-                <option key={t.tool_name} value={t.tool_name}>{t.display_name}</option>
-              ))}
-            </select>
-          </div>
-
-          {poisoningMode && (
-            <div>
-              <label className="text-xs text-muted">Node</label>
-              <select className="w-full mt-1 bg-[var(--surface-2)] border border-subtle rounded px-2 py-1"
-                value={selectedNodeId}
-                onChange={(e) => {
-                  setSelectedNodeId(e.target.value);
-                  setSelectedAgent('');
-                  setSelectedSessionFile('');
-                }}>
-                <option value="">Select node</option>
-                {nodes.map((n) => (
-                  <option key={n.node_id} value={n.node_id}>{n.machine_name} ({n.node_id.slice(0, 8)})</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {poisoningMode && (
-            <div>
-              <label className="text-xs text-muted">Agent</label>
-              <select className="w-full mt-1 bg-[var(--surface-2)] border border-subtle rounded px-2 py-1"
-                value={selectedAgent}
-                onChange={(e) => {
-                  setSelectedAgent(e.target.value);
-                  setSelectedSessionFile('');
-                }}>
-                <option value="">Select agent</option>
-                {availableAgents.map((a) => (
-                  <option key={a.short_name} value={a.short_name}>{a.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {poisoningMode && (
-            <button className="px-3 py-1 rounded bg-[var(--accent-info)] text-black text-sm disabled:opacity-50"
-              disabled={!canRecon}
-              onClick={runRecon}>
-              Static Recon (Sessions)
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {tools.map((tool: ToolkitToolInfo) => {
+          const Icon = toolIcon(tool.tool_name);
+          return (
+            <button
+              key={tool.tool_name}
+              onClick={() => openTool(tool.tool_name)}
+              className="text-left rounded border border-subtle bg-[var(--surface-1)] hover:bg-[var(--surface-2)] transition-colors p-4 ascii-box"
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <Icon size={18} className="text-[var(--accent-info)]" />
+                <h2 className="text-sm font-semibold text-title">{tool.display_name}</h2>
+              </div>
+              <p className="text-xs text-muted leading-relaxed">{tool.description}</p>
             </button>
-          )}
-
-          {poisoningMode && (
-            <div>
-              <label className="text-xs text-muted">Session</label>
-              <select className="w-full mt-1 bg-[var(--surface-2)] border border-subtle rounded px-2 py-1"
-                value={selectedSessionFile}
-                onChange={(e) => setSelectedSessionFile(e.target.value)}>
-                <option value="">Select session</option>
-                {sessions.map((s) => (
-                  <option key={s.session_file} value={s.session_file}>
-                    {s.session_id} ({s.message_count} msgs)
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {poisoningMode && (
-            <div>
-              <label className="text-xs text-muted">Model Definition</label>
-              <select className="w-full mt-1 bg-[var(--surface-2)] border border-subtle rounded px-2 py-1"
-                value={selectedModelRef}
-                onChange={(e) => setSelectedModelRef(e.target.value)}>
-                <option value="">Select model</option>
-                {state.toolkit.models.map((m) => (
-                  <option key={m.name} value={m.name}>{m.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {encoderMode && (
-            <>
-              <div>
-                <label className="text-xs text-muted">Encoding</label>
-                <select
-                  className="w-full mt-1 bg-[var(--surface-2)] border border-subtle rounded px-2 py-1"
-                  value={encoderType}
-                  onChange={(e) => setEncoderType(e.target.value)}
-                >
-                  <option value="braille_us_type2">Braille (US Type 2)</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-muted">Input Text</label>
-                <textarea
-                  value={encoderInput}
-                  onChange={(e) => setEncoderInput(e.target.value)}
-                  className="w-full h-28 mt-1 bg-[var(--surface-2)] border border-subtle rounded p-2 text-xs font-mono"
-                />
-              </div>
-            </>
-          )}
-
-          <button className="px-3 py-1 rounded bg-[var(--accent-warning)] text-black text-sm disabled:opacity-50"
-            disabled={!canRun}
-            onClick={runPreview}>
-            Run Preview
-          </button>
-        </div>
-
-        <div className="rounded border border-subtle p-4 space-y-3">
-          <h2 className="text-sm font-semibold text-title">Execution</h2>
-          {!execution && <p className="text-sm text-muted">No execution yet.</p>}
-          {execution && (
-            <>
-              <p className="text-xs text-muted">Execution ID: {execution.execution_id}</p>
-              <p className="text-xs text-muted">Status: {execution.status}</p>
-
-              {execution.previews.map((p) => {
-                const key = `${p.target.node_id}|${p.target.agent_short_name}|${p.target.session_file}`;
-                return (
-                  <div key={key} className="border border-subtle rounded p-2 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-muted">
-                        {p.target.agent_short_name} · {p.target.session_id}
-                      </span>
-                      <label className="text-xs flex items-center gap-1">
-                        <input
-                          type="checkbox"
-                          checked={!!acceptMap[key]}
-                          onChange={(e) => setAcceptMap((prev) => ({ ...prev, [key]: e.target.checked }))}
-                        />
-                        Accept
-                      </label>
-                    </div>
-                    {p.error && <p className="text-xs text-[var(--accent-error)]">{p.error}</p>}
-                    {p.preview_content && (
-                      <textarea
-                        readOnly
-                        value={p.preview_content}
-                        className="w-full h-40 bg-[var(--surface-2)] border border-subtle rounded p-2 text-xs font-mono"
-                      />
-                    )}
-                  </div>
-                );
-              })}
-
-              {poisoningMode && (
-                <button
-                  className="px-3 py-1 rounded bg-[var(--accent-success)] text-black text-sm"
-                  onClick={applyResults}
-                >
-                  Apply Accepted
-                </button>
-              )}
-            </>
-          )}
-
-          {state.toolkit.error && (
-            <p className="text-xs text-[var(--accent-error)]">{state.toolkit.error}</p>
-          )}
-        </div>
+          );
+        })}
       </div>
+
+      {activeTool === 'session_history_poisoning' && (
+        <SessionHistoryPoisoningModal
+          isOpen
+          onClose={closeTool}
+          description={descriptionFor('session_history_poisoning')}
+        />
+      )}
+
+      {activeTool === 'message_encoder' && (
+        <MessageEncoderModal
+          isOpen
+          onClose={closeTool}
+          description={descriptionFor('message_encoder')}
+        />
+      )}
     </div>
   );
 }
