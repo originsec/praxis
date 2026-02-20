@@ -131,6 +131,16 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
 
         ClientSignalMessage::ReconGet { client_id, node_id, agent_short_name } =>
             handle_recon_get(ctx, client_id, node_id, agent_short_name).await,
+        ClientSignalMessage::ToolkitList { client_id } =>
+            handle_toolkit_list(ctx, client_id).await,
+        ClientSignalMessage::ToolkitRecon { client_id, tool_name, target_spec } =>
+            handle_toolkit_recon(ctx, client_id, tool_name, target_spec).await,
+        ClientSignalMessage::ToolkitExecute { client_id, tool_name, target_spec, params } =>
+            handle_toolkit_execute(ctx, client_id, tool_name, target_spec, params).await,
+        ClientSignalMessage::ToolkitApply { client_id, execution_id, apply_all, decisions } =>
+            handle_toolkit_apply(ctx, client_id, execution_id, apply_all, decisions).await,
+        ClientSignalMessage::ToolkitExecutionGet { client_id, execution_id } =>
+            handle_toolkit_execution_get(ctx, client_id, execution_id).await,
 
         //
         // Chain definitions.
@@ -1511,6 +1521,137 @@ async fn handle_recon_get(
                     recon_result: None,
                     performed_at: None,
                     is_semantic: None,
+                },
+            )
+            .await;
+        }
+    }
+}
+
+async fn handle_toolkit_list(ctx: &ServiceContext, client_id: String) {
+    let (tools, models) = ctx.toolkit_manager.list_tools_and_models().await;
+    let _ = send_to_client(
+        &ctx.client_publish_channel,
+        &client_id,
+        ClientDirectMessage::ToolkitListResponse { tools, models },
+    )
+    .await;
+}
+
+async fn handle_toolkit_recon(
+    ctx: &ServiceContext,
+    client_id: String,
+    tool_name: String,
+    target_spec: common::TargetSpec,
+) {
+    match ctx.toolkit_manager.recon(&tool_name, &target_spec).await {
+        Ok(targets) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ToolkitReconResponse { tool_name, targets },
+            )
+            .await;
+        }
+        Err(e) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ToolkitError {
+                    message: e.to_string(),
+                },
+            )
+            .await;
+        }
+    }
+}
+
+async fn handle_toolkit_execute(
+    ctx: &ServiceContext,
+    client_id: String,
+    tool_name: String,
+    target_spec: common::TargetSpec,
+    params: serde_json::Value,
+) {
+    match ctx
+        .toolkit_manager
+        .execute(&tool_name, target_spec, params)
+        .await
+    {
+        Ok(execution) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ToolkitExecutionResult { execution },
+            )
+            .await;
+        }
+        Err(e) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ToolkitError {
+                    message: e.to_string(),
+                },
+            )
+            .await;
+        }
+    }
+}
+
+async fn handle_toolkit_apply(
+    ctx: &ServiceContext,
+    client_id: String,
+    execution_id: String,
+    apply_all: Option<bool>,
+    decisions: Option<Vec<common::ToolkitApplyDecision>>,
+) {
+    match ctx
+        .toolkit_manager
+        .apply(&execution_id, apply_all, decisions)
+        .await
+    {
+        Ok(execution) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ToolkitApplyResult { execution },
+            )
+            .await;
+        }
+        Err(e) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ToolkitError {
+                    message: e.to_string(),
+                },
+            )
+            .await;
+        }
+    }
+}
+
+async fn handle_toolkit_execution_get(
+    ctx: &ServiceContext,
+    client_id: String,
+    execution_id: String,
+) {
+    match ctx.toolkit_manager.get_execution(&execution_id).await {
+        Some(execution) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ToolkitExecutionUpdate { execution },
+            )
+            .await;
+        }
+        None => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::ToolkitError {
+                    message: "Toolkit execution not found".to_string(),
                 },
             )
             .await;

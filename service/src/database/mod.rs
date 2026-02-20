@@ -12,6 +12,7 @@ mod event_log;
 mod lua_agent_scripts;
 mod recon;
 mod service_config;
+mod toolkit_actions;
 pub mod config;
 mod queries;
 
@@ -37,6 +38,7 @@ pub use chains::{
 pub use chain_executions::ChainExecutionRecord;
 #[allow(unused_imports)]
 pub use recon::StoredReconResult;
+pub use toolkit_actions::ToolkitActionRecord;
 
 //
 // Constants.

@@ -42,6 +42,10 @@ import type {
   AgentChatMessageInfo,
   AgentChatSessionState,
   LuaAgentScriptInfo,
+  ToolkitExecution,
+  ToolkitModelOption,
+  ToolkitReconTarget,
+  ToolkitToolInfo,
 } from '../api/types';
 
 //
@@ -145,6 +149,14 @@ interface AgentChatState {
   error: string | null;
 }
 
+interface ToolkitState {
+  tools: ToolkitToolInfo[];
+  models: ToolkitModelOption[];
+  reconTargets: ToolkitReconTarget[];
+  execution: ToolkitExecution | null;
+  error: string | null;
+}
+
 //
 // Hunting state.
 //
@@ -174,6 +186,14 @@ const initialAgentChatState: AgentChatState = {
   error: null,
 };
 
+const initialToolkitState: ToolkitState = {
+  tools: [],
+  models: [],
+  reconTargets: [],
+  execution: null,
+  error: null,
+};
+
 //
 // State.
 //
@@ -194,6 +214,7 @@ interface AppState {
   chains: ChainState;
   discovery: DiscoveryState;
   agentChat: AgentChatState;
+  toolkit: ToolkitState;
   luaAgentScripts: LuaAgentScriptInfo[];
   //
   // Agent session messages keyed by session_id.
@@ -227,6 +248,7 @@ function createInitialState(): AppState {
     chains: initialChainState,
     discovery: initialDiscoveryState,
     agentChat: initialAgentChatState,
+    toolkit: initialToolkitState,
     luaAgentScripts: [],
     agentSessionMessages: {},
     recentlyAccessedNodeIds: loadRecentNodes(MAX_RECENT_NODES),
@@ -332,6 +354,13 @@ type Action =
   | { type: 'AGENT_CHAT_SET_CURRENT_CHANNEL'; channelId: string | null }
   | { type: 'AGENT_CHAT_CLEAR_ERROR' }
   | { type: 'AGENT_CHAT_SET_LOADING'; loading: boolean }
+  //
+  // Toolkit actions.
+  //
+  | { type: 'TOOLKIT_LIST_RESPONSE'; tools: ToolkitToolInfo[]; models: ToolkitModelOption[] }
+  | { type: 'TOOLKIT_RECON_RESPONSE'; targets: ToolkitReconTarget[] }
+  | { type: 'TOOLKIT_SET_EXECUTION'; execution: ToolkitExecution }
+  | { type: 'TOOLKIT_ERROR'; message: string }
   //
   // Lua agent script actions.
   //
@@ -1034,6 +1063,33 @@ function reduceAgentChat(state: AppState, action: Action): AppState | null {
   }
 }
 
+function reduceToolkit(state: AppState, action: Action): AppState | null {
+  switch (action.type) {
+    case 'TOOLKIT_LIST_RESPONSE':
+      return {
+        ...state,
+        toolkit: { ...state.toolkit, tools: action.tools, models: action.models, error: null },
+      };
+    case 'TOOLKIT_RECON_RESPONSE':
+      return {
+        ...state,
+        toolkit: { ...state.toolkit, reconTargets: action.targets, error: null },
+      };
+    case 'TOOLKIT_SET_EXECUTION':
+      return {
+        ...state,
+        toolkit: { ...state.toolkit, execution: action.execution, error: null },
+      };
+    case 'TOOLKIT_ERROR':
+      return {
+        ...state,
+        toolkit: { ...state.toolkit, error: action.message },
+      };
+    default:
+      return null;
+  }
+}
+
 function reducer(state: AppState, action: Action): AppState {
   return (
     reduceCore(state, action)
@@ -1045,6 +1101,7 @@ function reducer(state: AppState, action: Action): AppState {
     ?? reduceRecentNodes(state, action)
     ?? reduceDiscovery(state, action)
     ?? reduceAgentChat(state, action)
+    ?? reduceToolkit(state, action)
     ?? state
   );
 }
@@ -1432,6 +1489,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // Dispatch as custom event for AgentDetailPage to catch.
           //
           window.dispatchEvent(new CustomEvent('ws-message', { detail: message }));
+          break;
+        case 'toolkit_list_response':
+          dispatch({ type: 'TOOLKIT_LIST_RESPONSE', tools: message.tools, models: message.models });
+          break;
+        case 'toolkit_recon_response':
+          dispatch({ type: 'TOOLKIT_RECON_RESPONSE', targets: message.targets });
+          break;
+        case 'toolkit_execution_update':
+        case 'toolkit_execution_result':
+        case 'toolkit_apply_result':
+          dispatch({ type: 'TOOLKIT_SET_EXECUTION', execution: message.execution });
+          break;
+        case 'toolkit_error':
+          dispatch({ type: 'TOOLKIT_ERROR', message: message.message });
           break;
 
         //

@@ -456,6 +456,65 @@ export interface ChainTriggerInfo {
   next_fire_at?: string | null;
 }
 
+export interface ToolkitModelOption {
+  name: string;
+  provider: string;
+  model: string;
+}
+
+export interface ToolkitToolInfo {
+  tool_name: string;
+  display_name: string;
+  description: string;
+}
+
+export interface ToolkitTargetRef {
+  node_id: string;
+  agent_short_name: string;
+  session_id: string;
+  session_file: string;
+}
+
+export interface ToolkitReconTarget {
+  node_id: string;
+  agent_short_name: string;
+  sessions: SessionItem[];
+}
+
+export type ToolkitExecutionStatus =
+  | 'Queued'
+  | 'Running'
+  | 'AwaitingDecision'
+  | 'Applying'
+  | 'Completed'
+  | 'Failed';
+
+export interface ToolkitTargetPreview {
+  target: ToolkitTargetRef;
+  success: boolean;
+  preview_content?: string | null;
+  error?: string | null;
+  accepted?: boolean | null;
+  applied?: boolean | null;
+}
+
+export interface ToolkitExecution {
+  execution_id: string;
+  tool_name: string;
+  status: ToolkitExecutionStatus;
+  target_spec: TargetSpec;
+  params: unknown;
+  previews: ToolkitTargetPreview[];
+  requested_at: string;
+  completed_at?: string | null;
+  error?: string | null;
+}
+
+export interface ToolkitApplyDecision {
+  target: ToolkitTargetRef;
+  accepted: boolean;
+}
+
 export type ChainExecutionStatus = 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled';
 
 export type ElementExecutionStatus =
@@ -725,6 +784,14 @@ export type BrowserMessage =
   //
   | { type: 'recon_get'; node_id: string; agent_short_name: string }
   //
+  // Toolkit messages.
+  //
+  | { type: 'toolkit_list' }
+  | { type: 'toolkit_recon'; tool_name: string; target_spec: TargetSpec }
+  | { type: 'toolkit_execute'; tool_name: string; target_spec: TargetSpec; params: unknown }
+  | { type: 'toolkit_apply'; execution_id: string; apply_all?: boolean | null; decisions?: ToolkitApplyDecision[] | null }
+  | { type: 'toolkit_execution_get'; execution_id: string }
+  //
   // Lua agent script messages.
   //
   | { type: 'lua_agent_script_add'; name: string; script: string }
@@ -819,6 +886,15 @@ export type ServerMessage =
   // Recon messages.
   //
   | { type: 'recon_get_response'; node_id: string; agent_short_name: string; recon_result: ReconResult | null; performed_at: string | null; is_semantic: boolean | null }
+  //
+  // Toolkit messages.
+  //
+  | { type: 'toolkit_list_response'; tools: ToolkitToolInfo[]; models: ToolkitModelOption[] }
+  | { type: 'toolkit_recon_response'; tool_name: string; targets: ToolkitReconTarget[] }
+  | { type: 'toolkit_execution_update'; execution: ToolkitExecution }
+  | { type: 'toolkit_execution_result'; execution: ToolkitExecution }
+  | { type: 'toolkit_apply_result'; execution: ToolkitExecution }
+  | { type: 'toolkit_error'; message: string }
   //
   // Lua agent script messages.
   //

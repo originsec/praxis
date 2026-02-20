@@ -283,4 +283,20 @@ CREATE TABLE IF NOT EXISTS lua_agent_scripts (
     version TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
-)
+);
+
+-- Toolkit actions log (generic, tool-agnostic)
+CREATE TABLE IF NOT EXISTS toolkit_actions (
+    id TEXT PRIMARY KEY,
+    execution_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    action TEXT NOT NULL,
+    status TEXT NOT NULL,
+    node_id TEXT,
+    agent_short_name TEXT,
+    session_id TEXT,
+    details_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_toolkit_actions_execution ON toolkit_actions(execution_id);
+CREATE INDEX IF NOT EXISTS idx_toolkit_actions_created_at ON toolkit_actions(created_at DESC);

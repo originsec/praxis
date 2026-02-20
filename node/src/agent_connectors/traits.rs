@@ -115,4 +115,13 @@ pub trait Agent: Send + Sync {
     fn read_session_content(&self, session_file: &str) -> Option<String> {
         std::fs::read_to_string(session_file).ok()
     }
+
+    //
+    // Write session content for a given session_file path. Agents can
+    // override this to support virtual/session-store backends.
+    //
+    fn write_session_content(&self, session_file: &str, contents: &str) -> Result<()> {
+        std::fs::write(session_file, contents)?;
+        Ok(())
+    }
 }

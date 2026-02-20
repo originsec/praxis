@@ -6,7 +6,8 @@ use common::{
     InterceptMethod, InterceptRule, InterceptStatus, InterceptedTrafficEntry,
     ApplicationLogEntry, OrchestratorPlan, OperationDefinitionInfo, SemanticOpUpdate,
     SystemState, TerminalOutput, TrafficLogFilters, TrafficMatchWithDetails, RuleScope,
-    TargetDirection, TrafficSearchFilters,
+    TargetDirection, TrafficSearchFilters, TargetSpec, ToolkitApplyDecision,
+    ToolkitExecution, ToolkitModelOption, ToolkitReconTarget, ToolkitToolInfo,
 };
 
 /// Messages sent from browser to web server
@@ -251,6 +252,30 @@ pub enum BrowserMessage {
     ReconGet {
         node_id: String,
         agent_short_name: String,
+    },
+
+    //
+    // Toolkit messages.
+    //
+    ToolkitList,
+    ToolkitRecon {
+        tool_name: String,
+        target_spec: TargetSpec,
+    },
+    ToolkitExecute {
+        tool_name: String,
+        target_spec: TargetSpec,
+        params: serde_json::Value,
+    },
+    ToolkitApply {
+        execution_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        apply_all: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        decisions: Option<Vec<ToolkitApplyDecision>>,
+    },
+    ToolkitExecutionGet {
+        execution_id: String,
     },
 
     //
@@ -601,6 +626,30 @@ pub enum ServerMessage {
         recon_result: Option<common::ReconResult>,
         performed_at: Option<String>,
         is_semantic: Option<bool>,
+    },
+
+    //
+    // Toolkit messages.
+    //
+    ToolkitListResponse {
+        tools: Vec<ToolkitToolInfo>,
+        models: Vec<ToolkitModelOption>,
+    },
+    ToolkitReconResponse {
+        tool_name: String,
+        targets: Vec<ToolkitReconTarget>,
+    },
+    ToolkitExecutionUpdate {
+        execution: ToolkitExecution,
+    },
+    ToolkitExecutionResult {
+        execution: ToolkitExecution,
+    },
+    ToolkitApplyResult {
+        execution: ToolkitExecution,
+    },
+    ToolkitError {
+        message: String,
     },
 
     //

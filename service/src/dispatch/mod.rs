@@ -18,6 +18,7 @@ use crate::mcp::McpServerManager;
 use crate::orchestrator::OrchestratorManager;
 use crate::semantic_ops::{ChainExecutor, ResponseTracker, SemanticOpsManager};
 use crate::state::{ClientRegistry, NodeRegistry, PendingCommands};
+use crate::tools::ToolkitManager;
 use crate::trigger_engine::TriggerEngine;
 
 //
@@ -36,6 +37,7 @@ pub struct ServiceContext {
     pub chain_executor: Arc<ChainExecutor>,
     pub agent_chat_manager: Arc<AgentChatManager>,
     pub orchestrator_manager: Arc<OrchestratorManager>,
+    pub toolkit_manager: Arc<ToolkitManager>,
     pub mcp_manager: Arc<McpServerManager>,
     pub trigger_engine: Option<Arc<TriggerEngine>>,
 

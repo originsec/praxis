@@ -482,6 +482,13 @@ pub enum AgentCommand {
         paths: Vec<String>,
         pattern: String,
     },
+    /// Write session content for a specific session path.
+    /// This is separate from WriteFile to allow agents with virtual/DB-backed
+    /// session stores to implement custom write behavior.
+    WriteSessionContent {
+        path: String,
+        contents: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -679,6 +686,12 @@ pub enum AgentCommandResult {
         pattern: String,
         results: Vec<GrepFileEntry>,
         errors: Vec<String>,
+    },
+    /// Session content write result
+    WriteSessionContentResult {
+        path: String,
+        success: bool,
+        error: Option<String>,
     },
 }
 
@@ -1210,6 +1223,83 @@ pub struct TargetSpec {
     pub include_triggering_node: bool,
 }
 
+/// Toolkit model option exposed to clients (from service model definitions)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitModelOption {
+    pub name: String,
+    pub provider: String,
+    pub model: String,
+}
+
+/// Toolkit tool metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitToolInfo {
+    pub tool_name: String,
+    pub display_name: String,
+    pub description: String,
+}
+
+/// A concrete target/session selection for toolkit execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitTargetRef {
+    pub node_id: String,
+    pub agent_short_name: String,
+    pub session_id: String,
+    pub session_file: String,
+}
+
+/// Recon output for a specific (node, agent) pair
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitReconTarget {
+    pub node_id: String,
+    pub agent_short_name: String,
+    pub sessions: Vec<SessionItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ToolkitExecutionStatus {
+    Queued,
+    Running,
+    AwaitingDecision,
+    Applying,
+    Completed,
+    Failed,
+}
+
+/// Per-target preview/result state for toolkit execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitTargetPreview {
+    pub target: ToolkitTargetRef,
+    pub success: bool,
+    pub preview_content: Option<String>,
+    pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied: Option<bool>,
+}
+
+/// Full execution record for toolkit runs
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitExecution {
+    pub execution_id: String,
+    pub tool_name: String,
+    pub status: ToolkitExecutionStatus,
+    pub target_spec: TargetSpec,
+    pub params: serde_json::Value,
+    pub previews: Vec<ToolkitTargetPreview>,
+    pub requested_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub error: Option<String>,
+}
+
+/// Apply decision for a specific target in hybrid apply mode
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitApplyDecision {
+    pub target: ToolkitTargetRef,
+    pub accepted: bool,
+}
+
 /// Chain trigger info (shared DTO for API/UI)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainTriggerInfo {
@@ -1644,6 +1734,41 @@ pub enum ClientSignalMessage {
     },
 
     //
+    // Toolkit.
+    //
+    /// List available toolkit tools and model options
+    ToolkitList {
+        client_id: String,
+    },
+    /// Run static recon for a toolkit tool and target scope
+    ToolkitRecon {
+        client_id: String,
+        tool_name: String,
+        target_spec: TargetSpec,
+    },
+    /// Execute a toolkit tool (preview stage)
+    ToolkitExecute {
+        client_id: String,
+        tool_name: String,
+        target_spec: TargetSpec,
+        params: serde_json::Value,
+    },
+    /// Apply accepted previews for an execution
+    ToolkitApply {
+        client_id: String,
+        execution_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        apply_all: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        decisions: Option<Vec<ToolkitApplyDecision>>,
+    },
+    /// Get current state of a toolkit execution
+    ToolkitExecutionGet {
+        client_id: String,
+        execution_id: String,
+    },
+
+    //
     // Lua agent scripts (stored in service database).
     //
     LuaAgentScriptAdd {
@@ -1969,6 +2094,30 @@ pub enum ClientDirectMessage {
         performed_at: Option<String>,
         /// Whether this was a semantic recon
         is_semantic: Option<bool>,
+    },
+
+    //
+    // Toolkit responses.
+    //
+    ToolkitListResponse {
+        tools: Vec<ToolkitToolInfo>,
+        models: Vec<ToolkitModelOption>,
+    },
+    ToolkitReconResponse {
+        tool_name: String,
+        targets: Vec<ToolkitReconTarget>,
+    },
+    ToolkitExecutionUpdate {
+        execution: ToolkitExecution,
+    },
+    ToolkitExecutionResult {
+        execution: ToolkitExecution,
+    },
+    ToolkitApplyResult {
+        execution: ToolkitExecution,
+    },
+    ToolkitError {
+        message: String,
     },
 
     //

@@ -14,6 +14,7 @@ mod orchestrator;
 mod semantic_helpers;
 mod semantic_ops;
 mod state;
+mod tools;
 pub mod trigger_engine;
 
 use anyhow::Result;
@@ -51,6 +52,7 @@ use orchestrator::OrchestratorManager;
 use config::service_config::APPLICATION_LOGS_ENABLED;
 use semantic_ops::{SemanticOpsManager, ResponseTracker, ChainExecutor};
 use state::{NodeRegistry, ClientRegistry, PendingCommands};
+use tools::ToolkitManager;
 use messaging::broadcast_state_to_clients;
 
 const RABBITMQ_RETRY_SECS: u64 = 5;
@@ -317,6 +319,18 @@ async fn run_main_loop() -> Result<()> {
     //
     let orchestrator_manager = Arc::new(OrchestratorManager::new());
     common::log_info!("Initialized Orchestrator manager");
+
+    //
+    // Initialize Toolkit manager.
+    //
+    let toolkit_manager = Arc::new(ToolkitManager::new(
+        database.clone(),
+        service_config.clone(),
+        node_registry.clone(),
+        response_tracker.clone(),
+        publish_channel.clone(),
+    ));
+    common::log_info!("Initialized Toolkit manager");
 
     //
     // Initialize event logging system.
@@ -596,6 +610,7 @@ async fn run_main_loop() -> Result<()> {
         chain_executor,
         agent_chat_manager,
         orchestrator_manager,
+        toolkit_manager,
         mcp_manager,
         trigger_engine: Some(trigger_engine.clone()),
         publish_channel,

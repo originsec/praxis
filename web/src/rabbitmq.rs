@@ -4,7 +4,7 @@ use common::{
     CLIENT_SIGNAL_QUEUE, CLIENT_BROADCAST_EXCHANGE, WEB_EVENT_LOG_QUEUE,
     ClientSignalMessage, ClientDirectMessage, ClientBroadcastMessage,
     ClientRegistration, CommandRequest, InterceptMethod,
-    TrafficLogFilters, TrafficSearchFilters,
+    TrafficLogFilters, TrafficSearchFilters, TargetSpec, ToolkitApplyDecision,
 };
 use futures_util::StreamExt;
 use lapin::{
@@ -531,6 +531,64 @@ impl RabbitMqClient {
             client_id: self.state.client_id.clone(),
             node_id,
             agent_short_name,
+        };
+        self.publish_signal(message).await
+    }
+
+    //
+    // Toolkit methods.
+    //
+
+    pub async fn toolkit_list(&self) -> Result<()> {
+        let message = ClientSignalMessage::ToolkitList {
+            client_id: self.state.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn toolkit_recon(&self, tool_name: String, target_spec: TargetSpec) -> Result<()> {
+        let message = ClientSignalMessage::ToolkitRecon {
+            client_id: self.state.client_id.clone(),
+            tool_name,
+            target_spec,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn toolkit_execute(
+        &self,
+        tool_name: String,
+        target_spec: TargetSpec,
+        params: serde_json::Value,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::ToolkitExecute {
+            client_id: self.state.client_id.clone(),
+            tool_name,
+            target_spec,
+            params,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn toolkit_apply(
+        &self,
+        execution_id: String,
+        apply_all: Option<bool>,
+        decisions: Option<Vec<ToolkitApplyDecision>>,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::ToolkitApply {
+            client_id: self.state.client_id.clone(),
+            execution_id,
+            apply_all,
+            decisions,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn toolkit_execution_get(&self, execution_id: String) -> Result<()> {
+        let message = ClientSignalMessage::ToolkitExecutionGet {
+            client_id: self.state.client_id.clone(),
+            execution_id,
         };
         self.publish_signal(message).await
     }
@@ -1106,6 +1164,24 @@ impl RabbitMqClient {
             //
             ClientDirectMessage::ReconGetResponse { node_id, agent_short_name, recon_result, performed_at, is_semantic } => {
                 self.state.broadcast(ServerMessage::ReconGetResponse { node_id, agent_short_name, recon_result, performed_at, is_semantic });
+            }
+            ClientDirectMessage::ToolkitListResponse { tools, models } => {
+                self.state.broadcast(ServerMessage::ToolkitListResponse { tools, models });
+            }
+            ClientDirectMessage::ToolkitReconResponse { tool_name, targets } => {
+                self.state.broadcast(ServerMessage::ToolkitReconResponse { tool_name, targets });
+            }
+            ClientDirectMessage::ToolkitExecutionUpdate { execution } => {
+                self.state.broadcast(ServerMessage::ToolkitExecutionUpdate { execution });
+            }
+            ClientDirectMessage::ToolkitExecutionResult { execution } => {
+                self.state.broadcast(ServerMessage::ToolkitExecutionResult { execution });
+            }
+            ClientDirectMessage::ToolkitApplyResult { execution } => {
+                self.state.broadcast(ServerMessage::ToolkitApplyResult { execution });
+            }
+            ClientDirectMessage::ToolkitError { message } => {
+                self.state.broadcast(ServerMessage::ToolkitError { message });
             }
 
             //
