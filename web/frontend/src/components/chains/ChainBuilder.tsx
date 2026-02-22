@@ -1740,7 +1740,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
             className="flex items-center gap-2 px-4 py-2 text-xs tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
           >
             <X size={14} />
-            Cancel
+            Close
           </button>
           {onDuplicate && (
             <button
