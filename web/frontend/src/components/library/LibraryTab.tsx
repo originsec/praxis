@@ -667,7 +667,6 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
           <table className="w-full min-w-[760px] text-xs">
             <thead>
               <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
-                <th className="text-left px-4 py-2 text-muted tracking-wider w-8">TYPE</th>
                 <th className="text-left px-4 py-2 text-muted tracking-wider">NAME</th>
                 <th className="text-left px-4 py-2 text-muted tracking-wider">CATEGORY</th>
                 <th className="text-left px-4 py-2 text-muted tracking-wider">DETAILS</th>
@@ -682,16 +681,15 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
                   onClick={() => handleEditItem(item)}
                 >
                   <td className="px-4 py-3">
-                    <span title={item.type === 'operation' ? 'Operation' : 'Chain'}>
-                      {item.type === 'operation' ? (
-                        <Zap size={14} className="text-[var(--accent-purple)]" />
-                      ) : (
-                        <GitBranch size={14} className="text-[var(--accent-info)]" />
-                      )}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className={item.disabled ? 'opacity-50' : ''}>
+                    <div className={`flex items-start gap-2.5 ${item.disabled ? 'opacity-50' : ''}`}>
+                      <span className="mt-0.5 shrink-0" title={item.type === 'operation' ? 'Operation' : 'Chain'}>
+                        {item.type === 'operation' ? (
+                          <Zap size={14} className="text-[var(--accent-purple)]" />
+                        ) : (
+                          <GitBranch size={14} className="text-[var(--accent-info)]" />
+                        )}
+                      </span>
+                      <div>
                       <p className="font-medium text-highlight flex items-center gap-2">
                         {item.name}
                         {item.disabled && (
@@ -703,6 +701,7 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
                       {item.description && (
                         <p className="text-muted text-xs truncate max-w-md">{item.description}</p>
                       )}
+                      </div>
                     </div>
                   </td>
                   <td className={`px-4 py-3 ${item.disabled ? 'opacity-50' : ''}`}>

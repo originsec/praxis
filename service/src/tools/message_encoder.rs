@@ -10,7 +10,6 @@ pub fn encode_text(input: &str, encoding: &str) -> Result<String> {
         "rot13" => Ok(encode_rot13(input)),
         "base64" => Ok(encode_base64(input)),
         "hex" => Ok(encode_hex(input)),
-        "zwsp_binary" => Ok(encode_zwsp_binary(input)),
         "upside_down" => Ok(encode_upside_down(input)),
         _ => Err(anyhow!("Unsupported encoding '{}'", encoding)),
     }
@@ -145,34 +144,6 @@ fn encode_hex(input: &str) -> String {
         .map(|b| format!("{:02x}", b))
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-//
-// Zero-Width Space Binary — encodes each byte as 8 invisible characters using
-// zero-width space (U+200B = 1) and zero-width non-joiner (U+200C = 0).
-// Bytes are separated by zero-width joiner (U+200D). Completely invisible in
-// most renderers.
-//
-
-fn encode_zwsp_binary(input: &str) -> String {
-    let zero = '\u{200C}';
-    let one = '\u{200B}';
-    let sep = '\u{200D}';
-
-    let mut out = String::new();
-    for (i, byte) in input.as_bytes().iter().enumerate() {
-        if i > 0 {
-            out.push(sep);
-        }
-        for bit in (0..8).rev() {
-            if byte & (1 << bit) != 0 {
-                out.push(one);
-            } else {
-                out.push(zero);
-            }
-        }
-    }
-    out
 }
 
 //
