@@ -61,7 +61,7 @@ pub async fn execute_hunting_query(
 
     let table = resolve_table(&table_name)
         .ok_or_else(|| anyhow!(
-            "Unknown table '{}'. Available tables: TrafficLogs, TrafficMatchLogs, NodeLogs, AgentLogs, ReconLogs, ReconToolLogs, ReconSessionLogs, ReconMetadataLogs, EventLogs, ToolkitActionsLog",
+            "Unknown table '{}'. Available tables: TrafficLogs, TrafficMatchLogs, NodeLogs, AgentLogs, ReconLogs, ReconToolLogs, ReconSessionLogs, ReconMetadataLogs, EventLogs, ToolkitActionsLog, OperationLogs, ChainExecutionLogs",
             table_name
         ))?;
 

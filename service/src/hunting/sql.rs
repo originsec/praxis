@@ -106,6 +106,42 @@ impl VirtualTable {
                 order_by: "tm.matched_at DESC",
             }),
 
+            VirtualTable::OperationLogs => Some(SqlTableConfig {
+                from_clause: "operations",
+                columns: vec![
+                    SqlColumn { kql_name: "timestamp", sql_expr: "created_at", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "operation_id", sql_expr: "operation_id", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "node_id", sql_expr: "node_id", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "agent_short_name", sql_expr: "agent_short_name", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "status", sql_expr: "status", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "operation_spec", sql_expr: "operation_spec", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "start_time", sql_expr: "start_time", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "end_time", sql_expr: "end_time", col_type: SqlColumnType::Text, nullable: true },
+                    SqlColumn { kql_name: "summary", sql_expr: "summary", col_type: SqlColumnType::Text, nullable: true },
+                    SqlColumn { kql_name: "result", sql_expr: "result", col_type: SqlColumnType::Text, nullable: true },
+                    SqlColumn { kql_name: "chain_execution_id", sql_expr: "chain_execution_id", col_type: SqlColumnType::Text, nullable: true },
+                ],
+                order_by: "created_at DESC",
+            }),
+
+            VirtualTable::ChainExecutionLogs => Some(SqlTableConfig {
+                from_clause: "chain_executions",
+                columns: vec![
+                    SqlColumn { kql_name: "timestamp", sql_expr: "created_at", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "execution_id", sql_expr: "execution_id", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "chain_id", sql_expr: "chain_id", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "chain_name", sql_expr: "chain_name", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "node_id", sql_expr: "node_id", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "agent_short_name", sql_expr: "agent_short_name", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "status", sql_expr: "status", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "elements", sql_expr: "elements", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "outputs", sql_expr: "outputs", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "started_at", sql_expr: "started_at", col_type: SqlColumnType::Text, nullable: false },
+                    SqlColumn { kql_name: "ended_at", sql_expr: "ended_at", col_type: SqlColumnType::Text, nullable: true },
+                ],
+                order_by: "created_at DESC",
+            }),
+
             _ => None,
         }
     }

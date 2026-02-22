@@ -4,6 +4,7 @@ import { useApp } from '../../context/AppContext';
 import { ChainBuilder } from './ChainBuilder';
 import { Modal } from '../common/Modal';
 import { RunModal } from '../common/RunModal';
+import { DataTable, type ColumnDef, type RowAction } from '../common/DataTable';
 import type { ChainDefinitionInfo, ChainDefinitionInput, NodeState } from '../../api/types';
 
 //
@@ -225,6 +226,68 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
     setEditingChainId(null);
   };
 
+  const chainColumns: ColumnDef<ChainDefinitionInfo>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      sortable: false,
+      render: (_: unknown, chain: ChainDefinitionInfo) => (
+        <div>
+          <p className="font-medium text-highlight">
+            {chain.name}
+            {(chain.trigger_count ?? 0) > 0 && (
+              <span className="ml-2 inline-flex items-center gap-0.5 text-[10px] text-[var(--accent-warning)]">
+                <Zap size={10} />
+                {chain.trigger_count}
+              </span>
+            )}
+          </p>
+          {chain.description && (
+            <p className="text-muted text-xs">{chain.description}</p>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'operation_count',
+      header: 'Operations',
+      sortable: false,
+    },
+    {
+      key: 'timeout',
+      header: 'Timeout',
+      sortable: false,
+      render: (_: unknown, chain: ChainDefinitionInfo) => (
+        <div className="flex items-center gap-1 text-muted">
+          <Clock size={12} />
+          {chain.timeout || 300}s
+        </div>
+      ),
+    },
+  ];
+
+  const chainActions: RowAction<ChainDefinitionInfo>[] = [
+    {
+      icon: <Play size={14} />,
+      label: 'Run chain',
+      onClick: (chain) => handleRun(chain),
+      disabled: (chain) => !!chain.disabled,
+      hoverColor: 'var(--accent-success)',
+    },
+    {
+      icon: <Edit2 size={14} />,
+      label: 'Edit chain',
+      onClick: (chain) => handleEdit(chain),
+      hoverColor: 'var(--accent-info)',
+    },
+    {
+      icon: <Trash2 size={14} />,
+      label: 'Delete chain',
+      onClick: (chain) => handleDeleteClick(chain),
+      hoverColor: 'var(--accent-error)',
+    },
+  ];
+
   if (showBuilder) {
     return (
       <div className="flex-1 min-h-[400px] border border-subtle" style={{ height: 'calc(100vh - 160px)' }}>
@@ -269,85 +332,16 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
       // Chains list.
       //
       */}
-      {chains.length === 0 ? (
-        <div className="text-center text-muted py-8">
-          No chains defined. Create your first chain to get started.
-        </div>
-      ) : (
-        <div className="border border-subtle ascii-box">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
-                <th className="text-left px-4 py-2 text-muted tracking-wider">NAME</th>
-                <th className="text-left px-4 py-2 text-muted tracking-wider">OPERATIONS</th>
-                <th className="text-left px-4 py-2 text-muted tracking-wider">TIMEOUT</th>
-                <th className="px-4 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {chains.map((chain) => (
-                <tr
-                  key={chain.id}
-                  className="border-b border-dim last:border-0 hover:bg-[var(--highlight)] transition-colors"
-                >
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => handleEdit(chain)}
-                      className="text-left hover:text-[var(--accent-info)] transition-colors"
-                    >
-                      <p className="font-medium text-highlight">
-                        {chain.name}
-                        {(chain.trigger_count ?? 0) > 0 && (
-                          <span className="ml-2 inline-flex items-center gap-0.5 text-[10px] text-[var(--accent-warning)]">
-                            <Zap size={10} />
-                            {chain.trigger_count}
-                          </span>
-                        )}
-                      </p>
-                      {chain.description && (
-                        <p className="text-muted text-xs">{chain.description}</p>
-                      )}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3">{chain.operation_count}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1 text-muted">
-                      <Clock size={12} />
-                      {chain.timeout || 300}s
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => handleRun(chain)}
-                        className="p-2 hover:bg-[var(--accent-success)]/10 text-muted hover:text-[var(--accent-success)] transition-colors"
-                        title="Run chain"
-                        disabled={chain.disabled}
-                      >
-                        <Play size={14} />
-                      </button>
-                      <button
-                        onClick={() => handleEdit(chain)}
-                        className="p-2 hover:bg-[var(--accent-info)]/10 text-muted hover:text-[var(--accent-info)] transition-colors"
-                        title="Edit chain"
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteClick(chain)}
-                        className="p-2 hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
-                        title="Delete chain"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <div className="border border-subtle ascii-box">
+        <DataTable
+          data={chains}
+          columns={chainColumns}
+          getRowKey={c => c.id}
+          actions={chainActions}
+          pinnedActions
+          emptyMessage="No chains defined. Create your first chain to get started."
+        />
+      </div>
 
       {/*
       //

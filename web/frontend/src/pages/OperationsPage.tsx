@@ -3,11 +3,12 @@ import { useSearchParams } from 'react-router-dom';
 import { Zap, X, Trash2, Clock, Square, Loader2, Play, GitBranch, ChevronDown, ChevronRight, Wifi, MonitorSmartphone } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { StatusBadge, getOperationStatusColor } from '../components/common/StatusBadge';
+import { DataTable, type ColumnDef, type RowAction } from '../components/common/DataTable';
 import { RunModal } from '../components/common/RunModal';
 import { OperationDetailModal } from '../components/common/OperationDetailModal';
 import { ChainExecutionModal } from '../components/common/ChainExecutionModal';
 import { LibraryTab } from '../components/library/LibraryTab';
-import type { OperationDefinitionInfo, ChainDefinitionFull, ChainTriggerInfo, TriggerConfig } from '../api/types';
+import type { OperationDefinitionInfo, ChainDefinitionFull, ChainTriggerInfo, TriggerConfig, SemanticOpUpdate, ChainExecutionUpdate } from '../api/types';
 
 type FilterStatus = 'all' | 'Running' | 'Completed' | 'Failed' | 'Cancelled' | 'Queued';
 type MainTab = 'runs' | 'library' | 'triggers';
@@ -84,80 +85,98 @@ function TriggersTab({ triggers, chains, onToggleEnabled, onDelete }: TriggersTa
     );
   }
 
+  const triggerColumns: ColumnDef<ChainTriggerInfo>[] = [
+    {
+      key: 'chain_id',
+      header: 'Chain',
+      sortable: false,
+      render: (_: unknown, t: ChainTriggerInfo) => (
+        <div className="flex items-center gap-2">
+          <GitBranch size={12} className="text-muted" />
+          <span className="font-medium text-highlight">{getChainName(t.chain_id)}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'type',
+      header: 'Type',
+      sortable: false,
+      render: (_: unknown, t: ChainTriggerInfo) => (
+        <div className="flex items-center gap-1.5">
+          <TriggerTypeIcon config={t.trigger_config} />
+          <span>{t.trigger_config.type}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'config',
+      header: 'Config',
+      sortable: false,
+      render: (_: unknown, t: ChainTriggerInfo) => (
+        <span className="text-muted">{triggerConfigSummary(t.trigger_config)}</span>
+      ),
+    },
+    {
+      key: 'target',
+      header: 'Target',
+      sortable: false,
+      render: (_: unknown, t: ChainTriggerInfo) => (
+        <span className="text-muted">{targetSpecSummary(t.target_spec)}</span>
+      ),
+    },
+    {
+      key: 'enabled',
+      header: 'Enabled',
+      sortable: false,
+      render: (_: unknown, t: ChainTriggerInfo) => (
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggleEnabled(t); }}
+          className={`px-2 py-0.5 text-[10px] tracking-wider border transition-colors ${
+            t.enabled
+              ? 'border-[var(--accent-success)]/40 text-[var(--accent-success)] bg-[var(--accent-success)]/10'
+              : 'border-dim text-muted'
+          }`}
+        >
+          {t.enabled ? 'ON' : 'OFF'}
+        </button>
+      ),
+    },
+    {
+      key: 'last_fired_at',
+      header: 'Last Fired',
+      sortable: false,
+      render: (_: unknown, t: ChainTriggerInfo) => (
+        <span className="text-muted">{t.last_fired_at ? new Date(t.last_fired_at).toLocaleString() : '-'}</span>
+      ),
+    },
+    {
+      key: 'next_fire_at',
+      header: 'Next Fire',
+      sortable: false,
+      render: (_: unknown, t: ChainTriggerInfo) => (
+        <span className="text-muted">{t.next_fire_at ? new Date(t.next_fire_at).toLocaleString() : '-'}</span>
+      ),
+    },
+  ];
+
+  const triggerActions: RowAction<ChainTriggerInfo>[] = [
+    {
+      icon: <Trash2 size={14} />,
+      label: 'Delete trigger',
+      onClick: (t) => onDelete(t.id),
+      hoverColor: 'var(--accent-error)',
+    },
+  ];
+
   return (
     <div className="border border-subtle ascii-box overflow-x-auto">
-      <table className="w-full min-w-[900px] text-xs">
-        <thead>
-          <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
-            <th className="text-left px-4 py-2 text-muted tracking-wider">CHAIN</th>
-            <th className="text-left px-4 py-2 text-muted tracking-wider">TYPE</th>
-            <th className="text-left px-4 py-2 text-muted tracking-wider">CONFIG</th>
-            <th className="text-left px-4 py-2 text-muted tracking-wider">TARGET</th>
-            <th className="text-left px-4 py-2 text-muted tracking-wider">ENABLED</th>
-            <th className="text-left px-4 py-2 text-muted tracking-wider">LAST FIRED</th>
-            <th className="text-left px-4 py-2 text-muted tracking-wider">NEXT FIRE</th>
-            <th className="px-4 py-2"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {triggers.map(trigger => (
-            <tr
-              key={trigger.id}
-              className="border-b border-dim last:border-0 hover:bg-[var(--highlight)] transition-colors"
-            >
-              <td className="px-4 py-2">
-                <div className="flex items-center gap-2">
-                  <GitBranch size={12} className="text-muted" />
-                  <span className="font-medium text-highlight">{getChainName(trigger.chain_id)}</span>
-                </div>
-              </td>
-              <td className="px-4 py-2">
-                <div className="flex items-center gap-1.5">
-                  <TriggerTypeIcon config={trigger.trigger_config} />
-                  <span>{trigger.trigger_config.type}</span>
-                </div>
-              </td>
-              <td className="px-4 py-2 text-muted">
-                {triggerConfigSummary(trigger.trigger_config)}
-              </td>
-              <td className="px-4 py-2 text-muted">
-                {targetSpecSummary(trigger.target_spec)}
-              </td>
-              <td className="px-4 py-2">
-                <button
-                  onClick={() => onToggleEnabled(trigger)}
-                  className={`px-2 py-0.5 text-[10px] tracking-wider border transition-colors ${
-                    trigger.enabled
-                      ? 'border-[var(--accent-success)]/40 text-[var(--accent-success)] bg-[var(--accent-success)]/10'
-                      : 'border-dim text-muted'
-                  }`}
-                >
-                  {trigger.enabled ? 'ON' : 'OFF'}
-                </button>
-              </td>
-              <td className="px-4 py-2 text-muted">
-                {trigger.last_fired_at
-                  ? new Date(trigger.last_fired_at).toLocaleString()
-                  : '-'}
-              </td>
-              <td className="px-4 py-2 text-muted">
-                {trigger.next_fire_at
-                  ? new Date(trigger.next_fire_at).toLocaleString()
-                  : '-'}
-              </td>
-              <td className="px-4 py-2">
-                <button
-                  onClick={() => onDelete(trigger.id)}
-                  className="p-2 hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
-                  title="Delete trigger"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable
+        data={triggers}
+        columns={triggerColumns}
+        getRowKey={t => t.id}
+        actions={triggerActions}
+        pinnedActions
+      />
     </div>
   );
 }
@@ -378,6 +397,159 @@ export function OperationsPage() {
     return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
   };
 
+  //
+  // Column definitions for operations and chain executions tables.
+  //
+
+  const chainExecColumns: ColumnDef<ChainExecutionUpdate>[] = [
+    {
+      key: 'chain_name',
+      header: 'Chain',
+      sortable: false,
+      render: (_: unknown, exec: ChainExecutionUpdate) => (
+        <div className="flex items-center gap-3">
+          {exec.status === 'Running' || exec.status === 'Queued'
+            ? <Loader2 size={14} className="flex-shrink-0 animate-spin text-[var(--accent-info)]" />
+            : <GitBranch size={14} className="flex-shrink-0 text-muted" />}
+          <span className="font-medium text-highlight truncate">{exec.chain_name}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'execution_id',
+      header: 'ID',
+      sortable: false,
+      cellClassName: 'text-muted font-mono',
+    },
+    { key: 'agent_short_name', header: 'Agent', sortable: false },
+    {
+      key: 'node_id',
+      header: 'Node',
+      sortable: false,
+      cellClassName: 'text-muted font-mono',
+    },
+    {
+      key: 'started_at',
+      header: 'Started',
+      sortable: false,
+      render: (_: unknown, exec: ChainExecutionUpdate) => (
+        <span className="text-muted">{new Date(exec.started_at).toLocaleString()}</span>
+      ),
+    },
+    {
+      key: 'duration',
+      header: 'Duration',
+      sortable: false,
+      render: (_: unknown, exec: ChainExecutionUpdate) => (
+        <div className="flex items-center gap-1 text-muted">
+          <Clock size={12} />
+          {formatDuration(exec.started_at, exec.ended_at, exec.status)}
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: false,
+      render: (_: unknown, exec: ChainExecutionUpdate) => (
+        <StatusBadge
+          status={exec.status === 'Running' || exec.status === 'Queued' ? 'info' : exec.status === 'Completed' ? 'online' : exec.status === 'Failed' ? 'offline' : 'warning'}
+          label={exec.status}
+        />
+      ),
+    },
+  ];
+
+  const chainExecActions: RowAction<ChainExecutionUpdate>[] = [
+    {
+      icon: <Square size={14} />,
+      label: 'Cancel',
+      onClick: (exec) => cancelChainExecution(exec.execution_id),
+      visible: (exec) => exec.status === 'Running' || exec.status === 'Queued',
+      hoverColor: 'var(--accent-error)',
+    },
+    {
+      icon: <X size={14} />,
+      label: 'Remove',
+      onClick: (exec) => removeChainExecution(exec.execution_id),
+      visible: (exec) => exec.status !== 'Running' && exec.status !== 'Queued',
+      hoverColor: 'var(--accent-error)',
+    },
+  ];
+
+  const opColumns: ColumnDef<SemanticOpUpdate>[] = [
+    {
+      key: 'name',
+      header: 'Operation',
+      sortable: false,
+      render: (_: unknown, op: SemanticOpUpdate) => (
+        <div className="flex items-center gap-3">
+          {op.status === 'Running'
+            ? <Loader2 size={14} className="flex-shrink-0 animate-spin text-[var(--accent-info)]" />
+            : <Zap size={14} className="flex-shrink-0 text-muted" />}
+          <span className="font-medium text-highlight truncate">{op.spec.name}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'operation_id',
+      header: 'ID',
+      sortable: false,
+      cellClassName: 'text-muted font-mono',
+    },
+    { key: 'agent_short_name', header: 'Agent', sortable: false },
+    {
+      key: 'node_id',
+      header: 'Node',
+      sortable: false,
+      cellClassName: 'text-muted font-mono',
+    },
+    {
+      key: 'start_time',
+      header: 'Started',
+      sortable: false,
+      render: (_: unknown, op: SemanticOpUpdate) => (
+        <span className="text-muted">{new Date(op.start_time).toLocaleString()}</span>
+      ),
+    },
+    {
+      key: 'duration',
+      header: 'Duration',
+      sortable: false,
+      render: (_: unknown, op: SemanticOpUpdate) => (
+        <div className="flex items-center gap-1 text-muted">
+          <Clock size={12} />
+          {formatDuration(op.start_time, op.end_time, op.status)}
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: false,
+      render: (_: unknown, op: SemanticOpUpdate) => (
+        <StatusBadge status={getOperationStatusColor(op.status)} label={op.status} />
+      ),
+    },
+  ];
+
+  const opActions: RowAction<SemanticOpUpdate>[] = [
+    {
+      icon: <Square size={14} />,
+      label: 'Cancel',
+      onClick: (op) => cancelOperation(op.operation_id),
+      visible: (op) => op.status === 'Running' || op.status === 'Queued',
+      hoverColor: 'var(--accent-error)',
+    },
+    {
+      icon: <X size={14} />,
+      label: 'Remove',
+      onClick: (op) => removeOperation(op.operation_id),
+      visible: (op) => op.status === 'Completed' || op.status === 'Failed' || op.status === 'Cancelled',
+      hoverColor: 'var(--accent-error)',
+    },
+  ];
+
   const filters: { value: FilterStatus; label: string }[] = [
     { value: 'all', label: 'All' },
     { value: 'Running', label: 'Running' },
@@ -530,75 +702,15 @@ export function OperationsPage() {
             </div>
           ) : (
             <div className="border border-subtle ascii-box overflow-x-auto">
-              <table className="w-full min-w-[980px] text-xs">
-                <thead>
-                  <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
-                    <th className="text-left px-4 py-2 text-muted tracking-wider">CHAIN</th>
-                    <th className="text-left px-4 py-2 text-muted tracking-wider">ID</th>
-                    <th className="text-left px-4 py-2 text-muted tracking-wider">AGENT</th>
-                    <th className="text-left px-4 py-2 text-muted tracking-wider">NODE</th>
-                    <th className="text-left px-4 py-2 text-muted tracking-wider">STARTED</th>
-                    <th className="text-left px-4 py-2 text-muted tracking-wider">STATUS</th>
-                    <th className="px-4 py-2"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredChainExecutions.map((exec) => (
-                    <tr
-                      key={exec.execution_id}
-                      className="border-b border-dim last:border-0 hover:bg-[var(--highlight)] transition-colors cursor-pointer"
-                      onClick={() => setSelectedChainExecId(exec.execution_id)}
-                    >
-                      <td className="px-4 py-2">
-                        <div className="flex items-center gap-3">
-                          {exec.status === 'Running' || exec.status === 'Queued' ? (
-                            <Loader2 size={14} className="animate-spin text-[var(--accent-info)]" />
-                          ) : (
-                            <GitBranch size={14} className="text-muted" />
-                          )}
-                          <span className="font-medium text-highlight">{exec.chain_name}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-2 text-muted font-mono">{exec.execution_id.slice(0, 8)}...</td>
-                      <td className="px-4 py-2">{exec.agent_short_name}</td>
-                      <td className="px-4 py-2 text-muted">
-                        {exec.node_id.slice(0, 8)}...
-                      </td>
-                      <td className="px-4 py-2 text-muted">
-                        {new Date(exec.started_at).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-2">
-                        <StatusBadge
-                          status={exec.status === 'Running' || exec.status === 'Queued' ? 'info' : exec.status === 'Completed' ? 'online' : exec.status === 'Failed' ? 'offline' : 'warning'}
-                          label={exec.status}
-                        />
-                      </td>
-                      <td className="px-4 py-2">
-                        <div className="flex items-center gap-2 justify-end" onClick={(e) => e.stopPropagation()}>
-                          {(exec.status === 'Running' || exec.status === 'Queued') && (
-                            <button
-                              onClick={() => cancelChainExecution(exec.execution_id)}
-                              className="p-2 hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
-                              title="Cancel"
-                            >
-                              <Square size={14} />
-                            </button>
-                          )}
-                          {exec.status !== 'Running' && exec.status !== 'Queued' && (
-                            <button
-                              onClick={() => removeChainExecution(exec.execution_id)}
-                              className="p-2 hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
-                              title="Remove"
-                            >
-                              <X size={14} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <DataTable
+                data={filteredChainExecutions}
+                columns={chainExecColumns}
+                getRowKey={e => e.execution_id}
+                actions={chainExecActions}
+                onRowClick={(exec) => setSelectedChainExecId(exec.execution_id)}
+                resizable
+                pinnedActions
+              />
             </div>
           )
         )}
@@ -630,84 +742,15 @@ export function OperationsPage() {
             </div>
           ) : (
             <div className="border border-subtle ascii-box overflow-x-auto">
-              <table className="w-full min-w-[1080px] text-xs">
-                <thead>
-                  <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
-                    <th className="text-left px-4 py-2 text-muted tracking-wider">OPERATION</th>
-                    <th className="text-left px-4 py-2 text-muted tracking-wider">ID</th>
-                    <th className="text-left px-4 py-2 text-muted tracking-wider">AGENT</th>
-                    <th className="text-left px-4 py-2 text-muted tracking-wider">NODE</th>
-                    <th className="text-left px-4 py-2 text-muted tracking-wider">STARTED</th>
-                    <th className="text-left px-4 py-2 text-muted tracking-wider">DURATION</th>
-                    <th className="text-left px-4 py-2 text-muted tracking-wider">STATUS</th>
-                    <th className="px-4 py-2"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredOperations.map((op) => (
-                    <tr
-                      key={op.operation_id}
-                      className="border-b border-dim last:border-0 hover:bg-[var(--highlight)] transition-colors cursor-pointer"
-                      onClick={() => setSelectedOpId(op.operation_id)}
-                    >
-                      <td className="px-4 py-2">
-                        <div className="flex items-center gap-3">
-                          {op.status === 'Running' ? (
-                            <Loader2 size={14} className="animate-spin text-[var(--accent-info)]" />
-                          ) : (
-                            <Zap size={14} className="text-muted" />
-                          )}
-                          <span className="font-medium text-highlight">{op.spec.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-2 text-muted font-mono">{op.operation_id.slice(0, 8)}...</td>
-                      <td className="px-4 py-2">{op.agent_short_name}</td>
-                      <td className="px-4 py-2 text-muted">
-                        {op.node_id.slice(0, 8)}...
-                      </td>
-                      <td className="px-4 py-2 text-muted">
-                        {new Date(op.start_time).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-2">
-                        <div className="flex items-center gap-1 text-muted">
-                          <Clock size={12} />
-                          {formatDuration(op.start_time, op.end_time, op.status)}
-                        </div>
-                      </td>
-                      <td className="px-4 py-2">
-                        <StatusBadge
-                          status={getOperationStatusColor(op.status)}
-                          label={op.status}
-                        />
-                      </td>
-                      <td className="px-4 py-2">
-                        <div className="flex items-center gap-2 justify-end" onClick={(e) => e.stopPropagation()}>
-                          {(op.status === 'Running' || op.status === 'Queued') && (
-                            <button
-                              onClick={() => cancelOperation(op.operation_id)}
-                              className="p-2  hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
-                              title="Cancel"
-                            >
-                              <Square size={14} />
-                            </button>
-                          )}
-                          {(op.status === 'Completed' ||
-                            op.status === 'Failed' ||
-                            op.status === 'Cancelled') && (
-                            <button
-                              onClick={() => removeOperation(op.operation_id)}
-                              className="p-2  hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
-                              title="Remove"
-                            >
-                              <X size={14} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <DataTable
+                data={filteredOperations}
+                columns={opColumns}
+                getRowKey={op => op.operation_id}
+                actions={opActions}
+                onRowClick={(op) => setSelectedOpId(op.operation_id)}
+                resizable
+                pinnedActions
+              />
             </div>
           )
         )}

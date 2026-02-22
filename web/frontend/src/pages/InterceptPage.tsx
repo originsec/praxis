@@ -18,6 +18,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { ConfigModal, type ConfigItem } from '../components/common/ConfigModal';
+import { DataTable, type ColumnDef, type RowAction } from '../components/common/DataTable';
 import type {
   InterceptRule,
   TrafficLogFilters,
@@ -153,7 +154,6 @@ function TrafficLogTab() {
     limit: FETCH_LIMIT,
     offset: 0,
   });
-  const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [protocolFilter, setProtocolFilter] = useState<ProtocolFilter>('all');
   const [searchFilter, setSearchFilter] = useState('');
@@ -238,9 +238,9 @@ function TrafficLogTab() {
         entries={state.intercept.trafficLog}
         protocolFilter={protocolFilter}
         searchFilter={searchFilter}
-        expandedRow={expandedRow}
-        setExpandedRow={setExpandedRow}
-        showNodeColumn={true}
+        expandedRow={null}
+        setExpandedRow={() => {}}
+        showNodeColumn
         displayLimit={DISPLAY_LIMIT}
         heightMode="fixed"
         maxHeight="70vh"
@@ -314,7 +314,6 @@ function TrafficLogTab() {
 function MatchesTab() {
   const { state, requestTrafficMatches } = useApp();
   const [selectedRuleId, setSelectedRuleId] = useState<number | null>(null);
-  const [expandedMatchId, setExpandedMatchId] = useState<number | null>(null);
 
   useEffect(() => {
     requestTrafficMatches(selectedRuleId, 100, 0);
@@ -323,6 +322,56 @@ function MatchesTab() {
   const handleRefresh = () => {
     requestTrafficMatches(selectedRuleId, 100, 0);
   };
+
+  const matchColumns: ColumnDef<import('../api/types').TrafficMatchWithDetails>[] = [
+    {
+      key: 'matched_at',
+      header: 'Matched At',
+      sortable: false,
+      render: (_: unknown, m) => (
+        <span className="text-muted font-mono">{new Date(m.match_info.matched_at).toLocaleString()}</span>
+      ),
+    },
+    {
+      key: 'rule_name',
+      header: 'Rule',
+      sortable: false,
+      render: (_: unknown, m) => (
+        <span className="text-[var(--accent-success)]">{m.match_info.rule_name}</span>
+      ),
+    },
+    {
+      key: 'node_id',
+      header: 'Node',
+      sortable: false,
+      render: (_: unknown, m) => (
+        <span className="text-title">{m.traffic.node_id.slice(0, 8)}</span>
+      ),
+    },
+    {
+      key: 'agent',
+      header: 'Agent',
+      sortable: false,
+      render: (_: unknown, m) => (
+        <span className="text-highlight">{m.traffic.agent_short_name}</span>
+      ),
+    },
+    {
+      key: 'method',
+      header: 'Method',
+      sortable: false,
+      render: (_: unknown, m) => (
+        <span className="text-title font-mono">{m.traffic.method ?? '-'}</span>
+      ),
+    },
+    {
+      key: 'url',
+      header: 'URL',
+      sortable: false,
+      cellClassName: 'text-title font-mono truncate max-w-md',
+      render: (_: unknown, m) => <>{m.traffic.url}</>,
+    },
+  ];
 
   return (
     <div className="space-y-4">
@@ -360,160 +409,15 @@ function MatchesTab() {
       //
       */}
       <div className="border border-subtle ascii-box overflow-x-auto">
-        <table className="w-full min-w-[920px] text-xs">
-          <thead>
-            <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
-              <th className="text-left px-4 py-2 text-muted tracking-wider w-8"></th>
-              <th className="text-left px-4 py-2 text-muted tracking-wider">MATCHED AT</th>
-              <th className="text-left px-4 py-2 text-muted tracking-wider">RULE</th>
-              <th className="text-left px-4 py-2 text-muted tracking-wider">NODE</th>
-              <th className="text-left px-4 py-2 text-muted tracking-wider">AGENT</th>
-              <th className="text-left px-4 py-2 text-muted tracking-wider">METHOD</th>
-              <th className="text-left px-4 py-2 text-muted tracking-wider">URL</th>
-            </tr>
-          </thead>
-          <tbody>
-            {state.intercept.trafficMatches.map((match) => {
-              const isExpanded = expandedMatchId === match.match_info.id;
-              const entry = match.traffic;
-              return (
-                <>
-                  <tr
-                    key={match.match_info.id}
-                    className="border-b border-dim hover:bg-[var(--highlight)] cursor-pointer"
-                    onClick={() => setExpandedMatchId(isExpanded ? null : match.match_info.id)}
-                  >
-                    <td className="px-4 py-2">
-                      {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                    </td>
-                    <td className="px-4 py-2 text-muted font-mono">
-                      {new Date(match.match_info.matched_at).toLocaleString()}
-                    </td>
-                    <td className="px-4 py-2 text-[var(--accent-success)]">{match.match_info.rule_name}</td>
-                    <td className="px-4 py-2 text-title">{entry.node_id.slice(0, 8)}</td>
-                    <td className="px-4 py-2 text-highlight">{entry.agent_short_name}</td>
-                    <td className="px-4 py-2 text-title font-mono">{entry.method ?? '-'}</td>
-                    <td className="px-4 py-2 text-title font-mono truncate max-w-md">{entry.url}</td>
-                  </tr>
-                  {isExpanded && (
-                    <tr key={`${match.match_info.id}-details`} className="bg-[var(--bg-tertiary)]">
-                      <td colSpan={7} className="px-4 py-4">
-                        <div className="space-y-4">
-                          {/*
-                          //
-                          // LLM Summary.
-                          //
-                          */}
-                          {match.match_info.summary && match.match_info.summary.trim().toUpperCase() !== 'NONE' && (
-                            <div>
-                              <div className="text-[var(--accent-info)] mb-2 tracking-wider">AI SUMMARY</div>
-                              <div className="text-xs bg-[var(--bg-primary)] p-3 border border-[var(--accent-info)]/30 prose prose-invert prose-xs max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-code:text-[var(--accent-info)] prose-code:bg-[var(--bg-tertiary)] prose-code:px-1 prose-code:rounded prose-pre:bg-[var(--bg-tertiary)] prose-pre:border prose-pre:border-subtle prose-strong:text-[var(--text-primary)] prose-table:text-xs prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1 prose-th:border prose-td:border prose-th:border-subtle prose-td:border-subtle">
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                  {match.match_info.summary}
-                                </ReactMarkdown>
-                              </div>
-                            </div>
-                          )}
-
-                          {/*
-                          //
-                          // Match Info.
-                          //
-                          */}
-                          <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 text-xs">
-                            <div>
-                              <span className="text-muted">Traffic Timestamp:</span>{' '}
-                              <span className="text-title font-mono">
-                                {new Date(entry.timestamp).toLocaleString()}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-muted">Direction:</span>{' '}
-                              <span className="text-title">{entry.direction}</span>
-                            </div>
-                            {entry.response_status && (
-                              <div>
-                                <span className="text-muted">Status:</span>{' '}
-                                <span className={`font-mono ${
-                                  entry.response_status >= 400
-                                    ? 'text-[var(--accent-alert)]'
-                                    : entry.response_status >= 300
-                                    ? 'text-[var(--accent-warning)]'
-                                    : 'text-[var(--accent-success)]'
-                                }`}>
-                                  {entry.response_status}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-
-                          {/*
-                          //
-                          // Full URL.
-                          //
-                          */}
-                          <div>
-                            <div className="text-muted mb-2 tracking-wider">FULL URL</div>
-                            <pre className="text-[10px] font-mono bg-[var(--bg-primary)] p-2 border border-subtle overflow-auto break-all whitespace-pre-wrap">
-                              {entry.method ?? 'GET'} {entry.url}
-                            </pre>
-                          </div>
-
-                          {/*
-                          //
-                          // HTTP request/response content.
-                          //
-                          */}
-                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                            {entry.request_headers && (
-                              <div>
-                                <div className="text-muted mb-2 tracking-wider">REQUEST HEADERS</div>
-                                <pre className="text-[10px] font-mono bg-[var(--bg-primary)] p-2 border border-subtle overflow-auto max-h-64">
-                                  {JSON.stringify(entry.request_headers, null, 2)}
-                                </pre>
-                              </div>
-                            )}
-                            {entry.request_body && (
-                              <div>
-                                <div className="text-muted mb-2 tracking-wider">REQUEST BODY</div>
-                                <pre className="text-[10px] font-mono bg-[var(--bg-primary)] p-2 border border-subtle overflow-auto max-h-64 whitespace-pre-wrap">
-                                  {tryPrettyPrintJson(entry.request_body)}
-                                </pre>
-                              </div>
-                            )}
-                            {entry.response_headers && (
-                              <div>
-                                <div className="text-muted mb-2 tracking-wider">RESPONSE HEADERS</div>
-                                <pre className="text-[10px] font-mono bg-[var(--bg-primary)] p-2 border border-subtle overflow-auto max-h-64">
-                                  {JSON.stringify(entry.response_headers, null, 2)}
-                                </pre>
-                              </div>
-                            )}
-                            {entry.response_body && (
-                              <div>
-                                <div className="text-muted mb-2 tracking-wider">RESPONSE BODY</div>
-                                <pre className="text-[10px] font-mono bg-[var(--bg-primary)] p-2 border border-subtle overflow-auto max-h-64 whitespace-pre-wrap">
-                                  {tryPrettyPrintJson(entry.response_body)}
-                                </pre>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </>
-              );
-            })}
-            {state.intercept.trafficMatches.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-muted">
-                  No matches found
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        <DataTable
+          data={state.intercept.trafficMatches}
+          columns={matchColumns}
+          getRowKey={m => m.match_info.id}
+          expandable={{
+            render: (match) => <MatchExpandedContent match={match} />,
+          }}
+          emptyMessage="No matches found"
+        />
       </div>
 
       {/*
@@ -523,6 +427,91 @@ function MatchesTab() {
       */}
       <div className="text-xs text-muted text-right">
         Showing {state.intercept.trafficMatches.length} of {state.intercept.matchesTotalCount} matches
+      </div>
+    </div>
+  );
+}
+
+function MatchExpandedContent({ match }: { match: import('../api/types').TrafficMatchWithDetails }) {
+  const entry = match.traffic;
+  return (
+    <div className="space-y-4">
+      {match.match_info.summary && match.match_info.summary.trim().toUpperCase() !== 'NONE' && (
+        <div>
+          <div className="text-[var(--accent-info)] mb-2 tracking-wider">AI SUMMARY</div>
+          <div className="text-xs bg-[var(--bg-primary)] p-3 border border-[var(--accent-info)]/30 prose prose-invert prose-xs max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-code:text-[var(--accent-info)] prose-code:bg-[var(--bg-tertiary)] prose-code:px-1 prose-code:rounded prose-pre:bg-[var(--bg-tertiary)] prose-pre:border prose-pre:border-subtle prose-strong:text-[var(--text-primary)] prose-table:text-xs prose-th:px-2 prose-th:py-1 prose-td:px-2 prose-td:py-1 prose-th:border prose-td:border prose-th:border-subtle prose-td:border-subtle">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {match.match_info.summary}
+            </ReactMarkdown>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 text-xs">
+        <div>
+          <span className="text-muted">Traffic Timestamp:</span>{' '}
+          <span className="text-title font-mono">{new Date(entry.timestamp).toLocaleString()}</span>
+        </div>
+        <div>
+          <span className="text-muted">Direction:</span>{' '}
+          <span className="text-title">{entry.direction}</span>
+        </div>
+        {entry.response_status && (
+          <div>
+            <span className="text-muted">Status:</span>{' '}
+            <span className={`font-mono ${
+              entry.response_status >= 400
+                ? 'text-[var(--accent-alert)]'
+                : entry.response_status >= 300
+                ? 'text-[var(--accent-warning)]'
+                : 'text-[var(--accent-success)]'
+            }`}>
+              {entry.response_status}
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div className="text-muted mb-2 tracking-wider">FULL URL</div>
+        <pre className="text-[10px] font-mono bg-[var(--bg-primary)] p-2 border border-subtle overflow-auto break-all whitespace-pre-wrap">
+          {entry.method ?? 'GET'} {entry.url}
+        </pre>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {entry.request_headers && (
+          <div>
+            <div className="text-muted mb-2 tracking-wider">REQUEST HEADERS</div>
+            <pre className="text-[10px] font-mono bg-[var(--bg-primary)] p-2 border border-subtle overflow-auto max-h-64">
+              {JSON.stringify(entry.request_headers, null, 2)}
+            </pre>
+          </div>
+        )}
+        {entry.request_body && (
+          <div>
+            <div className="text-muted mb-2 tracking-wider">REQUEST BODY</div>
+            <pre className="text-[10px] font-mono bg-[var(--bg-primary)] p-2 border border-subtle overflow-auto max-h-64 whitespace-pre-wrap">
+              {tryPrettyPrintJson(entry.request_body)}
+            </pre>
+          </div>
+        )}
+        {entry.response_headers && (
+          <div>
+            <div className="text-muted mb-2 tracking-wider">RESPONSE HEADERS</div>
+            <pre className="text-[10px] font-mono bg-[var(--bg-primary)] p-2 border border-subtle overflow-auto max-h-64">
+              {JSON.stringify(entry.response_headers, null, 2)}
+            </pre>
+          </div>
+        )}
+        {entry.response_body && (
+          <div>
+            <div className="text-muted mb-2 tracking-wider">RESPONSE BODY</div>
+            <pre className="text-[10px] font-mono bg-[var(--bg-primary)] p-2 border border-subtle overflow-auto max-h-64 whitespace-pre-wrap">
+              {tryPrettyPrintJson(entry.response_body)}
+            </pre>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -550,6 +539,62 @@ function RulesTab() {
     }
     setRuleToDelete(null);
   };
+
+  const rulesColumns: ColumnDef<InterceptRule>[] = [
+    {
+      key: 'enabled',
+      header: 'Status',
+      sortable: false,
+      render: (_: unknown, rule: InterceptRule) => (
+        <button onClick={(e) => { e.stopPropagation(); handleToggleRule(rule); }} className="flex items-center gap-1">
+          {rule.enabled
+            ? <CircleCheck size={16} className="text-[var(--accent-success)]" />
+            : <Circle size={16} className="text-[var(--text-secondary)]" />}
+        </button>
+      ),
+    },
+    {
+      key: 'name',
+      header: 'Name',
+      sortable: false,
+      cellClassName: 'text-title',
+    },
+    {
+      key: 'regex_pattern',
+      header: 'Pattern',
+      sortable: false,
+      cellClassName: 'text-highlight font-mono',
+    },
+    {
+      key: 'target_direction',
+      header: 'Direction',
+      sortable: false,
+      cellClassName: 'text-muted uppercase',
+    },
+    {
+      key: 'scope',
+      header: 'Scope',
+      sortable: false,
+      render: (_: unknown, rule: InterceptRule) => (
+        <span className="text-muted">{formatScope(rule.scope)}</span>
+      ),
+    },
+  ];
+
+  const rulesActions: RowAction<InterceptRule>[] = [
+    {
+      icon: <Edit size={12} />,
+      label: 'Edit',
+      onClick: (rule) => setEditingRule(rule),
+      hoverColor: 'var(--text-primary)',
+    },
+    {
+      icon: <Trash2 size={12} />,
+      label: 'Delete',
+      onClick: (rule) => handleDeleteRule(rule),
+      hoverColor: 'var(--accent-alert)',
+    },
+  ];
 
   return (
     <div className="space-y-4">
@@ -585,63 +630,14 @@ function RulesTab() {
       //
       */}
       <div className="border border-subtle ascii-box overflow-x-auto">
-        <table className="w-full min-w-[860px] text-xs">
-          <thead>
-            <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
-              <th className="text-left px-4 py-2 text-muted tracking-wider">STATUS</th>
-              <th className="text-left px-4 py-2 text-muted tracking-wider">NAME</th>
-              <th className="text-left px-4 py-2 text-muted tracking-wider">PATTERN</th>
-              <th className="text-left px-4 py-2 text-muted tracking-wider">DIRECTION</th>
-              <th className="text-left px-4 py-2 text-muted tracking-wider">SCOPE</th>
-              <th className="text-left px-4 py-2 text-muted tracking-wider">ACTIONS</th>
-            </tr>
-          </thead>
-          <tbody>
-            {state.intercept.rules.map((rule) => (
-              <tr key={rule.id} className="border-b border-dim hover:bg-[var(--highlight)]">
-                <td className="px-4 py-2">
-                  <button
-                    onClick={() => handleToggleRule(rule)}
-                    className="flex items-center gap-1"
-                  >
-                    {rule.enabled ? (
-                      <CircleCheck size={16} className="text-[var(--accent-success)]" />
-                    ) : (
-                      <Circle size={16} className="text-[var(--text-secondary)]" />
-                    )}
-                  </button>
-                </td>
-                <td className="px-4 py-2 text-title">{rule.name}</td>
-                <td className="px-4 py-2 text-highlight font-mono">{rule.regex_pattern}</td>
-                <td className="px-4 py-2 text-muted uppercase">{rule.target_direction}</td>
-                <td className="px-4 py-2 text-muted">{formatScope(rule.scope)}</td>
-                <td className="px-4 py-2">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setEditingRule(rule)}
-                      className="text-muted hover:text-title"
-                    >
-                      <Edit size={12} />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteRule(rule)}
-                      className="text-muted hover:text-[var(--accent-alert)]"
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {state.intercept.rules.length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-muted">
-                  No rules configured
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        <DataTable
+          data={state.intercept.rules}
+          columns={rulesColumns}
+          getRowKey={rule => rule.id ?? 0}
+          actions={rulesActions}
+          pinnedActions
+          emptyMessage="No rules configured"
+        />
       </div>
 
       {/*

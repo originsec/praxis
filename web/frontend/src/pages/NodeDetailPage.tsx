@@ -20,9 +20,10 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { StatusBadge, getNodeStatus } from '../components/common/StatusBadge';
+import { DataTable, type ColumnDef } from '../components/common/DataTable';
 import { Terminal } from '../components/terminal/Terminal';
 import { Modal } from '../components/common/Modal';
-import type { InterceptedTrafficEntry, TrafficLogFilters, InterceptMethod } from '../api/types';
+import type { InterceptedTrafficEntry, TrafficLogFilters, InterceptMethod, DiscoveredAgent } from '../api/types';
 import {
   ScrollableTrafficTable,
   TrafficFilterBar,
@@ -104,7 +105,6 @@ export function NodeDetailPage() {
     limit: FETCH_LIMIT,
     offset: 0,
   });
-  const [expandedTrafficRow, setExpandedTrafficRow] = useState<number | null>(null);
   const [showMethodSelector, setShowMethodSelector] = useState(false);
 
   //
@@ -251,6 +251,81 @@ export function NodeDetailPage() {
     setShowMethodSelector(false);
   };
 
+  const agentColumns: ColumnDef<DiscoveredAgent>[] = [
+    {
+      key: 'name',
+      header: 'Agent',
+      sortable: false,
+      render: (_: unknown, agent: DiscoveredAgent) => (
+        <div className="flex items-center gap-3">
+          <Bot size={14} className="text-muted group-hover:text-[var(--accent-info)]" />
+          <span className="font-medium text-highlight group-hover:text-[var(--accent-info)]">{agent.name}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'short_name',
+      header: 'Short Name',
+      sortable: false,
+      cellClassName: 'font-mono text-muted',
+    },
+    {
+      key: 'version',
+      header: 'Version',
+      sortable: false,
+      render: (_: unknown, agent: DiscoveredAgent) => (
+        <span className="font-mono text-muted">{agent.version || '-'}</span>
+      ),
+    },
+    {
+      key: 'session',
+      header: 'Session',
+      sortable: false,
+      render: (_: unknown, agent: DiscoveredAgent) => {
+        const isSelected = node.selected_agent?.short_name === agent.short_name;
+        const hasSession = isSelected && node.selected_agent?.session_id;
+        return hasSession
+          ? <span className="text-[var(--accent-success)]">Active</span>
+          : <span className="text-muted">-</span>;
+      },
+    },
+    {
+      key: 'actions',
+      header: '',
+      sortable: false,
+      render: (_: unknown, agent: DiscoveredAgent) => {
+        const isSelected = node.selected_agent?.short_name === agent.short_name;
+        const hasSession = isSelected && node.selected_agent?.session_id;
+        return (
+          <div className="flex items-center gap-2 justify-end" onClick={e => e.stopPropagation()}>
+            {hasSession ? (
+              <button
+                onClick={() => handleCloseSession(agent.short_name)}
+                disabled={closingSessionFor === agent.short_name}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors disabled:opacity-50"
+              >
+                {closingSessionFor === agent.short_name
+                  ? <><Loader2 size={14} className="animate-spin" /> Closing...</>
+                  : <><Square size={14} /> Close Session</>}
+              </button>
+            ) : (
+              <button
+                onClick={() => handleCreateSession(agent.short_name)}
+                disabled={!agent.available || creatingSessionFor === agent.short_name}
+                style={{ cursor: agent.available && creatingSessionFor !== agent.short_name ? 'pointer' : 'not-allowed' }}
+                className="inline-flex items-center gap-2 px-3 py-1.5 bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors disabled:opacity-50"
+              >
+                {creatingSessionFor === agent.short_name
+                  ? <><Loader2 size={14} className="animate-spin" /> Starting...</>
+                  : <><Play size={14} /> Start Session</>}
+              </button>
+            )}
+          </div>
+        );
+      },
+    },
+  ];
+
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'agents', label: 'Agents', icon: <Bot size={18} /> },
     { id: 'terminal', label: 'Terminal', icon: <TerminalIcon size={18} /> },
@@ -335,98 +410,28 @@ export function NodeDetailPage() {
       */}
       {activeTab === 'agents' && (
         <div className="bg-card ascii-box border border-subtle overflow-hidden">
-          {node.discovered_agents.length === 0 ? (
-            <div className="p-12 text-center">
-              <Bot size={48} className="mx-auto mb-4 text-muted opacity-50" />
-              <h2 className="text-title font-semibold text-lg mb-2">No Agents Discovered</h2>
-              <p className="text-muted">This node hasn't reported any available agents</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-xs">
-              <thead>
-                <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
-                  <th className="text-left px-4 py-2 text-muted tracking-wider">AGENT</th>
-                  <th className="text-left px-4 py-2 text-muted tracking-wider">SHORT NAME</th>
-                  <th className="text-left px-4 py-2 text-muted tracking-wider">VERSION</th>
-                  <th className="text-left px-4 py-2 text-muted tracking-wider">SESSION</th>
-                  <th className="px-4 py-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {node.discovered_agents.map((agent) => {
-                  const isSelected = node.selected_agent?.short_name === agent.short_name;
-                  const hasSession = isSelected && node.selected_agent?.session_id;
-
-                  const handleRowClick = async () => {
-                    if (!isSelected) {
-                      await handleSelectAgent(agent.short_name);
-                    }
-                    navigate(`/nodes/${node.node_id}/agents/${agent.short_name}`);
-                  };
-
-                  return (
-                    <tr
-                      key={agent.short_name}
-                      onClick={handleRowClick}
-                      className="border-b border-dim last:border-0 hover:bg-[var(--highlight)] transition-colors cursor-pointer group"
-                    >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <Bot size={14} className="text-muted group-hover:text-[var(--accent-info)]" />
-                          <span className="font-medium text-highlight group-hover:text-[var(--accent-info)]">{agent.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 font-mono text-muted">
-                        {agent.short_name}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-muted">
-                        {agent.version || '-'}
-                      </td>
-                      <td className="px-4 py-3">
-                        {hasSession ? (
-                          <span className="text-[var(--accent-success)]">Active</span>
-                        ) : (
-                          <span className="text-muted">-</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2 justify-end" onClick={(e) => e.stopPropagation()}>
-                          {hasSession ? (
-                            <button
-                              onClick={() => handleCloseSession(agent.short_name)}
-                              disabled={closingSessionFor === agent.short_name}
-                              className="inline-flex items-center gap-2 px-3 py-1.5 bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors disabled:opacity-50"
-                            >
-                              {closingSessionFor === agent.short_name ? (
-                                <><Loader2 size={14} className="animate-spin" /> Closing...</>
-                              ) : (
-                                <><Square size={14} /> Close Session</>
-                              )}
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => handleCreateSession(agent.short_name)}
-                              disabled={!agent.available || creatingSessionFor === agent.short_name}
-                              style={{ cursor: agent.available && creatingSessionFor !== agent.short_name ? 'pointer' : 'not-allowed' }}
-                              className="inline-flex items-center gap-2 px-3 py-1.5  bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors disabled:opacity-50"
-                            >
-                              {creatingSessionFor === agent.short_name ? (
-                                <><Loader2 size={14} className="animate-spin" /> Starting...</>
-                              ) : (
-                                <><Play size={14} /> Start Session</>
-                              )}
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            </div>
-          )}
+          <div className="overflow-x-auto">
+            <DataTable
+              data={node.discovered_agents}
+              columns={agentColumns}
+              getRowKey={a => a.short_name}
+              onRowClick={async (agent) => {
+                const isSelected = node.selected_agent?.short_name === agent.short_name;
+                if (!isSelected) {
+                  await handleSelectAgent(agent.short_name);
+                }
+                navigate(`/nodes/${node.node_id}/agents/${agent.short_name}`);
+              }}
+              rowClassName="group"
+              emptyMessage={
+                <div className="py-8">
+                  <Bot size={48} className="mx-auto mb-4 text-muted opacity-50" />
+                  <h2 className="text-title font-semibold text-lg mb-2">No Agents Discovered</h2>
+                  <p className="text-muted">This node hasn&apos;t reported any available agents</p>
+                </div>
+              }
+            />
+          </div>
         </div>
       )}
 
@@ -472,8 +477,6 @@ export function NodeDetailPage() {
           trafficTotalCount={state.intercept.trafficTotalCount}
           filters={trafficFilters}
           setFilters={setTrafficFilters}
-          expandedRow={expandedTrafficRow}
-          setExpandedRow={setExpandedTrafficRow}
           requestTrafficLog={requestTrafficLog}
         />
       )}
@@ -645,8 +648,6 @@ function NodeInterceptTab({
   trafficTotalCount,
   filters,
   setFilters,
-  expandedRow,
-  setExpandedRow,
   requestTrafficLog,
 }: {
   node: { node_id: string; intercept_active: boolean; discovered_agents: { short_name: string }[] };
@@ -655,8 +656,6 @@ function NodeInterceptTab({
   trafficTotalCount: number;
   filters: TrafficLogFilters;
   setFilters: (filters: TrafficLogFilters) => void;
-  expandedRow: number | null;
-  setExpandedRow: (id: number | null) => void;
   requestTrafficLog: (filters: TrafficLogFilters) => void;
 }) {
   const [protocolFilter, setProtocolFilter] = useState<ProtocolFilter>('all');
@@ -763,8 +762,8 @@ function NodeInterceptTab({
         entries={trafficLog}
         protocolFilter={protocolFilter}
         searchFilter={searchFilter}
-        expandedRow={expandedRow}
-        setExpandedRow={setExpandedRow}
+        expandedRow={null}
+        setExpandedRow={() => {}}
         showNodeColumn={false}
         displayLimit={DISPLAY_LIMIT}
         heightMode="flex"
