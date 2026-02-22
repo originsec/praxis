@@ -12,12 +12,13 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, Clock, CheckCircle2, XCircle, AlertCircle, Loader2, Maximize2, Cpu, Sparkles, MessageSquare, ExternalLink, ChevronDown, ChevronRight, Database, RefreshCw, Square } from 'lucide-react';
+import { Play, Clock, CheckCircle2, XCircle, AlertCircle, Loader2, Maximize2, Cpu, Sparkles, MessageSquare, ExternalLink, ChevronDown, ChevronRight, Database, RefreshCw, Square, Wrench, FileText } from 'lucide-react';
 import type {
   ChainExecutionUpdate,
   ChainDefinitionFull,
   ElementExecution,
   OperationDefinitionInfo,
+  PayloadInfo,
 } from '../../api/types';
 import { StyledOutput } from '../common/StyledOutput';
 import { computeLayout } from '../../utils/dagreLayout';
@@ -52,6 +53,7 @@ function chainToFlowWithStatus(
   chain: ChainDefinitionFull | null,
   elements: Record<string, ElementExecution>,
   operationDefs?: OperationDefinitionInfo[],
+  payloads?: PayloadInfo[],
 ): { nodes: Node[]; edges: Edge[] } {
   if (!chain) return { nodes: [], edges: [] };
 
@@ -155,13 +157,15 @@ function chainToFlowWithStatus(
           position,
           data: { label: 'Tool', toolName: elem.tool_name, status },
         };
-      case 'Payload':
+      case 'Payload': {
+        const plInfo = (payloads || []).find(p => p.id === elem.payload_id);
         return {
           id: elem.id,
           type: 'payload',
           position,
-          data: { label: 'Payload', shortname: elem.payload_id, status },
+          data: { label: 'Payload', shortname: plInfo?.shortname || elem.payload_id.slice(0, 8), status },
         };
+      }
       case 'Termination':
         return {
           id: elem.id,
@@ -210,9 +214,10 @@ interface ChainExecutionViewerInnerProps {
   isLoading?: boolean;
   onEditChain?: (chainId: string) => void;
   operationDefs?: OperationDefinitionInfo[];
+  payloads?: PayloadInfo[];
 }
 
-function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, operationDefs }: ChainExecutionViewerInnerProps) {
+function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, operationDefs, payloads = [] }: ChainExecutionViewerInnerProps) {
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [outputExpanded, setOutputExpanded] = useState(true);
   const [graphExpanded, setGraphExpanded] = useState(true);
@@ -232,9 +237,9 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
   //
   const elementsKey = JSON.stringify(execution.elements);
   const computedFlow = useMemo(
-    () => chainToFlowWithStatus(stableChain, execution.elements, operationDefs),
+    () => chainToFlowWithStatus(stableChain, execution.elements, operationDefs, payloads),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [stableChain, elementsKey, operationDefs]
+    [stableChain, elementsKey, operationDefs, payloads]
   );
 
   //
@@ -350,8 +355,10 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
         };
       case 'Loop':
         return { name: `Loop (max ${element.max_iterations})`, type: 'loop' };
+      case 'Tool':
+        return { name: 'Tool', type: 'tool' };
       case 'Payload':
-        return { name: `Payload`, type: 'payload' };
+        return { name: 'Payload', type: 'payload' };
       case 'Termination':
         return { name: 'End', type: 'termination' };
       default:
@@ -633,6 +640,8 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
                         {stepInfo.type === 'genericPrompt' && <MessageSquare size={12} className="text-[var(--accent-purple)] flex-shrink-0" />}
                         {stepInfo.type === 'memory' && <Database size={12} className="text-[var(--accent-success)] flex-shrink-0" />}
                         {stepInfo.type === 'loop' && <RefreshCw size={12} className="text-[var(--accent-warning)] flex-shrink-0" />}
+                        {stepInfo.type === 'tool' && <Wrench size={12} className="text-[var(--accent-info)] flex-shrink-0" />}
+                        {stepInfo.type === 'payload' && <FileText size={12} className="text-[var(--accent-warning)] flex-shrink-0" />}
                         {stepInfo.type === 'termination' && <Square size={12} className="text-[var(--accent-error)] flex-shrink-0" />}
                         {stepInfo.type === 'unknown' && <Clock size={12} className="text-[var(--text-secondary)] flex-shrink-0" />}
                         <span className="text-xs font-mono truncate">{stepInfo.name}</span>
@@ -668,8 +677,17 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
                     {stepInfo.type === 'genericPrompt' && <MessageSquare size={18} className="text-[var(--accent-purple)] self-center" />}
                     {stepInfo.type === 'memory' && <Database size={18} className="text-[var(--accent-success)] self-center" />}
                     {stepInfo.type === 'loop' && <RefreshCw size={18} className="text-[var(--accent-warning)] self-center" />}
+                    {stepInfo.type === 'tool' && <Wrench size={18} className="text-[var(--accent-info)] self-center" />}
+                    {stepInfo.type === 'payload' && <FileText size={18} className="text-[var(--accent-warning)] self-center" />}
                     {stepInfo.type === 'termination' && <Square size={18} className="text-[var(--accent-error)] self-center" />}
-                    <span className="text-lg font-medium text-[var(--text-highlight)]">{stepInfo.name}</span>
+                    <span className="text-lg font-medium text-[var(--text-highlight)]">
+                      {stepInfo.name}
+                      {stepInfo.type === 'payload' && selectedElement?.config && selectedElement.config.type === 'Payload' && (() => {
+                        const cfg = selectedElement.config as { type: 'Payload'; payload_id: string };
+                        const plRec = payloads.find(p => p.id === cfg.payload_id);
+                        return plRec ? `: ${plRec.shortname}` : '';
+                      })()}
+                    </span>
                     <span className="text-xs text-[var(--text-secondary)] font-mono">{selectedElementId.slice(0, 8)}</span>
                   </div>
                 );
@@ -752,9 +770,13 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
                         ))}
                       </div>
                     )}
-                    {selectedElement.config.type === 'Payload' && (
-                      <div><span className="text-muted">Payload:</span> <span className="font-mono text-[var(--accent-warning)]">{selectedElement.config.payload_id}</span></div>
-                    )}
+                    {selectedElement.config.type === 'Payload' && (() => {
+                      const cfg = selectedElement.config as { type: 'Payload'; payload_id: string };
+                      const plRec = payloads.find(p => p.id === cfg.payload_id);
+                      return (
+                        <div><span className="text-muted">Payload:</span> <span className="font-mono text-[var(--accent-warning)]">{plRec ? plRec.shortname : cfg.payload_id.slice(0, 8)}</span></div>
+                      );
+                    })()}
                     {selectedElement.config.type === 'Termination' && (
                       <span className="text-muted">Termination (End)</span>
                     )}
@@ -822,6 +844,7 @@ interface ChainExecutionViewerProps {
   isLoading?: boolean;
   onEditChain?: (chainId: string) => void;
   operationDefs?: OperationDefinitionInfo[];
+  payloads?: PayloadInfo[];
 }
 
 export function ChainExecutionViewer(props: ChainExecutionViewerProps) {

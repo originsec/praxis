@@ -2445,6 +2445,7 @@ export function AgentDetailPage() {
         chain={selectedChainDef}
         isLoading={isChainLoading}
         onClose={() => setSelectedChainExecId(null)}
+        payloads={state.payloads}
       />
 
       {/*

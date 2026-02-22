@@ -780,6 +780,7 @@ export function OperationsPage() {
           setMainTab('library');
         }}
         operationDefs={definitions}
+        payloads={state.payloads}
       />
     </div>
   );

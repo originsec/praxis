@@ -80,7 +80,7 @@ interface ChainExtraData {
 // Convert chain definition to React Flow nodes and edges (positions computed
 // via dagre).
 //
-function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: OperationDefinitionInfo[]): { nodes: Node[]; edges: Edge[]; extraData: ChainExtraData } {
+function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: OperationDefinitionInfo[], payloadList?: PayloadInfo[]): { nodes: Node[]; edges: Edge[]; extraData: ChainExtraData } {
   const emptyExtraData: ChainExtraData = {
     transformPrompts: new Map(),
     transformModels: new Map(),
@@ -221,17 +221,19 @@ function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: Operatio
           position,
           data: { label: 'Tool', toolName: elem.tool_name, maxRuntime: elem.block_config?.max_runtime },
         };
-      case 'Payload':
+      case 'Payload': {
         extraData.payloadConfigs.set(elem.id, elem.payload_id);
         if (elem.block_config) {
           extraData.blockConfigs.set(elem.id, elem.block_config);
         }
+        const plMatch = (payloadList || []).find(p => p.id === elem.payload_id);
         return {
           id: elem.id,
           type: 'payload',
           position,
-          data: { label: 'Payload', shortname: elem.payload_id },
+          data: { label: 'Payload', shortname: plMatch?.shortname || elem.payload_id.slice(0, 8), content: plMatch?.content },
         };
+      }
       case 'Termination':
         if (elem.block_config) {
           extraData.blockConfigs.set(elem.id, elem.block_config);
@@ -458,7 +460,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
   const [timeout, setChainTimeout] = useState(chain?.timeout || 1800);
   const category = 'default';
 
-  const initialFlow = chainToFlow(chain || null, operationDefs);
+  const initialFlow = chainToFlow(chain || null, operationDefs, payloads);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialFlow.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialFlow.edges);
 
@@ -1084,11 +1086,12 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       case 'payload': {
         const payloadId = (nodeExtraData?.payloadId as string) || '';
         const shortname = (nodeExtraData?.shortname as string) || '';
+        const payloadContent = (nodeExtraData?.content as string) || '';
         newNode = {
           id: newId,
           type: 'payload',
           position,
-          data: { label: 'Payload', shortname },
+          data: { label: 'Payload', shortname, content: payloadContent },
         };
         if (payloadId) {
           setExtraData(prev => {
@@ -1443,6 +1446,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
     if (!payloadModalSelectedId) return;
     const payload = payloads.find(p => p.id === payloadModalSelectedId);
     const shortname = payload?.shortname || '';
+    const content = payload?.content || '';
 
     if (editingNodeId) {
       setExtraData(prev => {
@@ -1452,14 +1456,14 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       });
       setNodes(nds => nds.map(n =>
         n.id === editingNodeId
-          ? { ...n, data: { ...n.data, shortname } }
+          ? { ...n, data: { ...n.data, shortname, content } }
           : n
       ));
       setShowPayloadModal(false);
       setEditingNodeId(null);
     } else {
       const position = pendingPosition || { x: 100, y: 100 + nodes.length * 100 };
-      addNodeAtPosition('payload', position, { payloadId: payloadModalSelectedId, shortname });
+      addNodeAtPosition('payload', position, { payloadId: payloadModalSelectedId, shortname, content });
       setShowPayloadModal(false);
       setPendingPosition(null);
     }
@@ -2497,11 +2501,12 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
 
           <div className="flex justify-end">
             <button
-              className="px-4 py-2 text-sm border border-[var(--accent-warning)] text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/10 disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs tracking-wider border border-dim transition-colors disabled:opacity-50 bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] hover:border-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/30"
               disabled={!payloadModalSelectedId}
               onClick={handlePayloadConfirm}
             >
-              Select
+              <FileText size={14} />
+              {editingNodeId ? 'Update' : 'Add'}
             </button>
           </div>
         </div>

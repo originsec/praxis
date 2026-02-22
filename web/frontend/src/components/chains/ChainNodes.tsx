@@ -381,6 +381,7 @@ function ToolNode({ data, selected }: { data: ToolNodeData; selected?: boolean }
 interface PayloadNodeData {
   label: string;
   shortname: string;
+  content?: string;
   status?: string;
 }
 
@@ -389,16 +390,24 @@ function PayloadNode({ data, selected }: { data: PayloadNodeData; selected?: boo
   const style = selected ? { borderColor: accent } : undefined;
   return (
     <div
-      className="ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative"
+      className={`ascii-box bg-[var(--bg-secondary)] px-4 py-3 min-w-[180px] max-w-[260px] relative transition-all ${!selected ? hoverStyle : ''}`}
       style={style}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
       <Handle type="source" position={Position.Right} style={handleStyle} />
       {data.status && <StatusOverlay status={data.status} />}
-      <div className="flex items-center gap-2">
-        <FileText size={14} style={{ color: accent }} />
-        <span className="text-sm font-mono leading-none">{data.shortname || 'Payload'}</span>
+      <div className="flex items-center gap-2 mb-1">
+        <FileText size={14} style={{ color: accent }} className="shrink-0" />
+        <span className="text-sm font-mono text-highlight leading-none">{data.shortname || 'Payload'}</span>
       </div>
+      {data.content && (
+        <div>
+          <span className="text-[9px] tracking-wider text-[var(--text-secondary)] uppercase">Content</span>
+          <div className="text-[11px] text-muted truncate" title={data.content}>
+            {data.content.length > 50 ? data.content.substring(0, 50) + '...' : data.content}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
