@@ -53,6 +53,7 @@ impl ExecutionGraph {
                 ChainElement::Memory { .. }
                 | ChainElement::Loop { .. }
                 | ChainElement::Tool { .. }
+                | ChainElement::Payload { .. }
                 | ChainElement::Termination { .. } => {}
                 ChainElement::Operation { session_group, .. }
                 | ChainElement::Transform { session_group, .. }

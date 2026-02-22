@@ -125,6 +125,13 @@ pub enum ChainElement {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         block_config: Option<BlockConfig>,
     },
+    /// Payload element - outputs static content from a stored payload
+    Payload {
+        id: ElementId,
+        payload_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
+    },
     /// Termination element - explicit end of chain (exactly one per chain)
     Termination {
         id: ElementId,
@@ -144,6 +151,7 @@ impl ChainElement {
             ChainElement::Memory { id, .. } => id,
             ChainElement::Loop { id, .. } => id,
             ChainElement::Tool { id, .. } => id,
+            ChainElement::Payload { id, .. } => id,
             ChainElement::Termination { id, .. } => id,
         }
     }
@@ -155,6 +163,7 @@ impl ChainElement {
             ChainElement::Transform { block_config, .. } => block_config.as_ref(),
             ChainElement::GenericPrompt { block_config, .. } => block_config.as_ref(),
             ChainElement::Tool { block_config, .. } => block_config.as_ref(),
+            ChainElement::Payload { block_config, .. } => block_config.as_ref(),
             ChainElement::Termination { block_config, .. } => block_config.as_ref(),
             ChainElement::Trigger { .. }
             | ChainElement::Memory { .. }
@@ -173,6 +182,7 @@ impl ChainElement {
             | ChainElement::Memory { .. }
             | ChainElement::Loop { .. }
             | ChainElement::Tool { .. }
+            | ChainElement::Payload { .. }
             | ChainElement::Termination { .. } => None,
         }
     }

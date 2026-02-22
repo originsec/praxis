@@ -375,6 +375,7 @@ export type ChainElement =
   | { element_type: 'Memory'; id: string; key: string; mode: 'Store' | 'Retrieve' }
   | { element_type: 'Loop'; id: string; max_iterations: number }
   | { element_type: 'Tool'; id: string; tool_name: string; tool_params: Record<string, unknown>; block_config?: BlockConfig | null }
+  | { element_type: 'Payload'; id: string; payload_id: string; block_config?: BlockConfig | null }
   | { element_type: 'Termination'; id: string; block_config?: BlockConfig | null };
 
 export type ConnectionCondition = 'OnSuccess' | 'OnFailure';
@@ -455,6 +456,14 @@ export interface ChainTriggerInfo {
   enabled: boolean;
   last_fired_at?: string | null;
   next_fire_at?: string | null;
+}
+
+export interface PayloadInfo {
+  id: string;
+  shortname: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ToolkitModelOption {
@@ -560,6 +569,7 @@ export type ElementConfig =
   | { type: 'Memory'; key: string; mode: 'Store' | 'Retrieve' }
   | { type: 'Loop'; max_iterations: number }
   | { type: 'Tool'; tool_name: string; tool_params: Record<string, unknown> }
+  | { type: 'Payload'; payload_id: string }
   | { type: 'Termination' };
 
 //
@@ -816,6 +826,12 @@ export type BrowserMessage =
   | { type: 'toolkit_execute'; tool_name: string; target_spec: TargetSpec; params: unknown }
   | { type: 'toolkit_apply'; tool_name: string; execution_id: string; targets: ToolkitApplyItem[] }
   //
+  // Payload messages.
+  //
+  | { type: 'payload_list' }
+  | { type: 'payload_upsert'; id?: string; shortname: string; content: string }
+  | { type: 'payload_delete'; id: string }
+  //
   // Lua agent script messages.
   //
   | { type: 'lua_agent_script_add'; name: string; script: string }
@@ -919,6 +935,13 @@ export type ServerMessage =
   | { type: 'toolkit_apply_result'; execution_id: string; results: ToolkitApplyOutcome[] }
   | { type: 'toolkit_execution_progress'; execution_id: string; current: number; total: number }
   | { type: 'toolkit_error'; message: string }
+  //
+  // Payload messages.
+  //
+  | { type: 'payload_list_response'; payloads: PayloadInfo[] }
+  | { type: 'payload_upserted'; payload: PayloadInfo }
+  | { type: 'payload_deleted'; id: string; success: boolean }
+  | { type: 'payload_error'; message: string }
   //
   // Lua agent script messages.
   //

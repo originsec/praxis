@@ -95,6 +95,18 @@ pub fn to_common(e: database::ChainElement) -> common::ChainElement {
                 }),
             }
         }
+        database::ChainElement::Payload { id, payload_id, block_config } => {
+            common::ChainElement::Payload {
+                id,
+                payload_id,
+                block_config: block_config.map(|bc| common::BlockConfig {
+                    max_runtime: bc.max_runtime,
+                    yolo_mode: bc.yolo_mode,
+                    working_dir: bc.working_dir,
+                    require_all_inputs: bc.require_all_inputs,
+                }),
+            }
+        }
         database::ChainElement::Termination { id, block_config } => {
             common::ChainElement::Termination {
                 id,
@@ -194,6 +206,18 @@ pub fn to_database(e: common::ChainElement) -> database::ChainElement {
                 id,
                 tool_name,
                 tool_params,
+                block_config: block_config.map(|bc| database::BlockConfig {
+                    max_runtime: bc.max_runtime,
+                    yolo_mode: bc.yolo_mode,
+                    working_dir: bc.working_dir,
+                    require_all_inputs: bc.require_all_inputs,
+                }),
+            }
+        }
+        common::ChainElement::Payload { id, payload_id, block_config } => {
+            database::ChainElement::Payload {
+                id,
+                payload_id,
                 block_config: block_config.map(|bc| database::BlockConfig {
                     max_runtime: bc.max_runtime,
                     yolo_mode: bc.yolo_mode,

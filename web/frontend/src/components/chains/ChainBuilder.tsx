@@ -15,8 +15,9 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge, Connection, OnSelectionChangeParams } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings, Check, AlertTriangle, Wrench } from 'lucide-react';
+import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings, Check, AlertTriangle, Wrench, FileText } from 'lucide-react';
 import { ConfigModal } from '../common/ConfigModal';
+import { Modal } from '../common/Modal';
 import { ChainTriggerPanel } from './ChainTriggerPanel';
 import type {
   BlockConfig,
@@ -28,6 +29,8 @@ import type {
   OperationDefinitionInfo,
   SessionGroup,
   ToolkitToolInfo,
+  PayloadInfo,
+  BrowserMessage,
 } from '../../api/types';
 import { computeLayout } from '../../utils/dagreLayout';
 import { getNextSessionColor, getUsedColors } from '../../utils/sessionColors';
@@ -70,6 +73,7 @@ interface ChainExtraData {
   memoryConfigs: Map<string, MemoryConfig>;
   loopMaxIterations: Map<string, number>;
   toolConfigs: Map<string, ToolConfig>;
+  payloadConfigs: Map<string, string>;
 }
 
 //
@@ -86,6 +90,7 @@ function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: Operatio
     memoryConfigs: new Map(),
     loopMaxIterations: new Map(),
     toolConfigs: new Map(),
+    payloadConfigs: new Map(),
   };
 
   if (!chain) return { nodes: [], edges: [], extraData: emptyExtraData };
@@ -216,6 +221,17 @@ function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: Operatio
           position,
           data: { label: 'Tool', toolName: elem.tool_name, maxRuntime: elem.block_config?.max_runtime },
         };
+      case 'Payload':
+        extraData.payloadConfigs.set(elem.id, elem.payload_id);
+        if (elem.block_config) {
+          extraData.blockConfigs.set(elem.id, elem.block_config);
+        }
+        return {
+          id: elem.id,
+          type: 'payload',
+          position,
+          data: { label: 'Payload', shortname: elem.payload_id },
+        };
       case 'Termination':
         if (elem.block_config) {
           extraData.blockConfigs.set(elem.id, elem.block_config);
@@ -341,6 +357,13 @@ function flowToChain(
           block_config: extraData.blockConfigs.get(node.id) || null,
         };
       }
+      case 'payload':
+        return {
+          element_type: 'Payload' as const,
+          id: node.id,
+          payload_id: extraData.payloadConfigs.get(node.id) || '',
+          block_config: extraData.blockConfigs.get(node.id) || null,
+        };
       case 'termination':
         return {
           element_type: 'Termination' as const,
@@ -423,11 +446,13 @@ interface ChainBuilderInnerProps {
   modelDefs: ModelDefinition[];
   nodes: NodeState[];
   toolkitTools: ToolkitToolInfo[];
+  payloads: PayloadInfo[];
+  send: (msg: BrowserMessage) => void;
   saveStatus?: string | null;
   saveError?: string | null;
 }
 
-function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs, modelDefs, nodes: _systemNodes, toolkitTools, saveStatus, saveError }: ChainBuilderInnerProps) {
+function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs, modelDefs, nodes: _systemNodes, toolkitTools, payloads, send, saveStatus, saveError }: ChainBuilderInnerProps) {
   const [name, setName] = useState(chain?.name || '');
   const [description, setDescription] = useState(chain?.description || '');
   const [timeout, setChainTimeout] = useState(chain?.timeout || 1800);
@@ -495,6 +520,11 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
   const [showToolModal, setShowToolModal] = useState(false);
   const [toolModalToolName, setToolModalToolName] = useState('');
   const [toolModalParams, setToolModalParams] = useState<Record<string, unknown>>({});
+  const [showPayloadModal, setShowPayloadModal] = useState(false);
+  const [payloadModalSelectedId, setPayloadModalSelectedId] = useState<string | null>(null);
+  const [payloadEditName, setPayloadEditName] = useState('');
+  const [payloadEditContent, setPayloadEditContent] = useState('');
+  const [payloadEditId, setPayloadEditId] = useState<string | null>(null);
 
   //
   // Modal state for session group configuration.
@@ -1050,6 +1080,24 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
         }
         break;
       }
+      case 'payload': {
+        const payloadId = (nodeExtraData?.payloadId as string) || '';
+        const shortname = (nodeExtraData?.shortname as string) || '';
+        newNode = {
+          id: newId,
+          type: 'payload',
+          position,
+          data: { label: 'Payload', shortname },
+        };
+        if (payloadId) {
+          setExtraData(prev => {
+            const newConfigs = new Map(prev.payloadConfigs);
+            newConfigs.set(newId, payloadId);
+            return { ...prev, payloadConfigs: newConfigs };
+          });
+        }
+        break;
+      }
       case 'termination':
         newNode = {
           id: newId,
@@ -1146,8 +1194,19 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       return;
     }
 
+    if (type === 'payload') {
+      setPendingPosition(position);
+      setPayloadModalSelectedId(null);
+      setPayloadEditName('');
+      setPayloadEditContent('');
+      setPayloadEditId(null);
+      send({ type: 'payload_list' });
+      setShowPayloadModal(true);
+      return;
+    }
+
     addNodeAtPosition(type, position);
-  }, [addNodeAtPosition, hasTrigger, hasTermination, screenToFlowPosition, toolkitTools]);
+  }, [addNodeAtPosition, hasTrigger, hasTermination, screenToFlowPosition, toolkitTools, send]);
 
   const handleOperationSelect = useCallback(() => {
     if (!selectedOperation) return;
@@ -1377,6 +1436,32 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
     setToolModalToolName('');
     setToolModalParams({});
   }, [pendingPosition, editingNodeId, toolModalToolName, toolModalParams, toolkitTools, addNodeAtPosition, setNodes, nodes.length]);
+
+  const handlePayloadConfirm = useCallback(() => {
+    if (!payloadModalSelectedId) return;
+    const payload = payloads.find(p => p.id === payloadModalSelectedId);
+    const shortname = payload?.shortname || '';
+
+    if (editingNodeId) {
+      setExtraData(prev => {
+        const newConfigs = new Map(prev.payloadConfigs);
+        newConfigs.set(editingNodeId, payloadModalSelectedId);
+        return { ...prev, payloadConfigs: newConfigs };
+      });
+      setNodes(nds => nds.map(n =>
+        n.id === editingNodeId
+          ? { ...n, data: { ...n.data, shortname } }
+          : n
+      ));
+      setShowPayloadModal(false);
+      setEditingNodeId(null);
+    } else {
+      const position = pendingPosition || { x: 100, y: 100 + nodes.length * 100 };
+      addNodeAtPosition('payload', position, { payloadId: payloadModalSelectedId, shortname });
+      setShowPayloadModal(false);
+      setPendingPosition(null);
+    }
+  }, [pendingPosition, editingNodeId, payloadModalSelectedId, payloads, addNodeAtPosition, setNodes, nodes.length]);
 
   //
   // Brief "Saved" flash when save succeeds.
@@ -1694,8 +1779,16 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       setToolModalToolName(cfg?.tool_name || '');
       setToolModalParams({ ...(cfg?.tool_params || {}) });
       setShowToolModal(true);
+    } else if (node.type === 'payload') {
+      setEditingNodeId(node.id);
+      setPayloadModalSelectedId(extraData.payloadConfigs.get(node.id) || null);
+      setPayloadEditName('');
+      setPayloadEditContent('');
+      setPayloadEditId(null);
+      send({ type: 'payload_list' });
+      setShowPayloadModal(true);
     }
-  }, [extraData]);
+  }, [extraData, send]);
 
   return (
     <div className="flex flex-col h-full">
@@ -1904,6 +1997,12 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
                   label="Tool"
                   disabled={toolkitTools.length === 0}
                   onClick={() => handleQuickAdd('tool')}
+                />
+                <PaletteItem
+                  type="payload"
+                  icon={<FileText size={16} className="text-[var(--accent-warning)]" />}
+                  label="Payload"
+                  onClick={() => handleQuickAdd('payload')}
                 />
               </div>
             </div>
@@ -2309,6 +2408,92 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
         submitDisabled={!toolModalToolName}
       />
 
+      <Modal
+        isOpen={showPayloadModal}
+        onClose={() => { setShowPayloadModal(false); setEditingNodeId(null); }}
+        title="Payload"
+        size="lg"
+      >
+        <div className="space-y-4">
+          <div className="max-h-48 overflow-y-auto border border-[var(--border-color)] rounded">
+            {payloads.length === 0 ? (
+              <div className="p-3 text-sm text-muted text-center">No payloads yet. Create one below.</div>
+            ) : payloads.map(p => (
+              <div
+                key={p.id}
+                className={`flex items-center justify-between px-3 py-2 cursor-pointer border-b border-[var(--border-color)] last:border-b-0 hover:bg-[var(--bg-tertiary)] transition-colors ${payloadModalSelectedId === p.id ? 'bg-[var(--accent-warning)]/10' : ''}`}
+                onClick={() => setPayloadModalSelectedId(p.id)}
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-mono text-highlight">{p.shortname}</div>
+                  <div className="text-xs text-muted truncate">{p.content.substring(0, 60)}{p.content.length > 60 ? '...' : ''}</div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0 ml-2">
+                  <button
+                    className="p-1 text-muted hover:text-highlight"
+                    title="Edit"
+                    onClick={(e) => { e.stopPropagation(); setPayloadEditId(p.id); setPayloadEditName(p.shortname); setPayloadEditContent(p.content); }}
+                  >✎</button>
+                  <button
+                    className="p-1 text-muted hover:text-[var(--accent-error)]"
+                    title="Delete"
+                    onClick={(e) => { e.stopPropagation(); send({ type: 'payload_delete', id: p.id }); if (payloadModalSelectedId === p.id) setPayloadModalSelectedId(null); }}
+                  >✕</button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="border border-[var(--border-color)] rounded p-3 space-y-2">
+            <div className="text-xs text-muted font-medium">{payloadEditId ? 'Edit Payload' : 'New Payload'}</div>
+            <input
+              type="text"
+              value={payloadEditName}
+              onChange={(e) => setPayloadEditName(e.target.value)}
+              placeholder="Shortname (one word)"
+              className="w-full bg-[var(--bg-primary)] text-sm px-2 py-1.5 border border-[var(--border-color)] font-mono focus:outline-none focus:border-[var(--accent-warning)]"
+            />
+            <textarea
+              value={payloadEditContent}
+              onChange={(e) => setPayloadEditContent(e.target.value)}
+              placeholder="Payload content (markdown)"
+              rows={10}
+              className="w-full bg-[var(--bg-primary)] text-sm px-2 py-1.5 border border-[var(--border-color)] font-mono focus:outline-none focus:border-[var(--accent-warning)] resize-y"
+            />
+            <button
+              className="px-3 py-1.5 text-xs border border-[var(--accent-warning)] text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/10 disabled:opacity-50"
+              disabled={!payloadEditName.trim() || !payloadEditContent.trim()}
+              onClick={() => {
+                send({ type: 'payload_upsert', id: payloadEditId || undefined, shortname: payloadEditName.trim(), content: payloadEditContent });
+                setPayloadEditId(null);
+                setPayloadEditName('');
+                setPayloadEditContent('');
+              }}
+            >
+              {payloadEditId ? 'Update' : 'Save Payload'}
+            </button>
+            {payloadEditId && (
+              <button
+                className="px-3 py-1.5 text-xs border border-dim text-muted hover:text-highlight ml-2"
+                onClick={() => { setPayloadEditId(null); setPayloadEditName(''); setPayloadEditContent(''); }}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              className="px-4 py-2 text-sm border border-[var(--accent-warning)] text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/10 disabled:opacity-50"
+              disabled={!payloadModalSelectedId}
+              onClick={handlePayloadConfirm}
+            >
+              Select
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       <ConfigModal
         isOpen={showDuplicateModal}
         onClose={() => setShowDuplicateModal(false)}
@@ -2390,14 +2575,17 @@ interface ChainBuilderProps {
   modelDefs?: ModelDefinition[];
   nodes?: NodeState[];
   toolkitTools?: ToolkitToolInfo[];
+  payloads?: PayloadInfo[];
+  send?: (msg: BrowserMessage) => void;
   saveStatus?: string | null;
   saveError?: string | null;
 }
 
-export function ChainBuilder({ modelDefs = [], nodes = [], toolkitTools = [], saveStatus, saveError, ...props }: ChainBuilderProps) {
+const noopSend = () => {};
+export function ChainBuilder({ modelDefs = [], nodes = [], toolkitTools = [], payloads = [], send = noopSend, saveStatus, saveError, ...props }: ChainBuilderProps) {
   return (
     <ReactFlowProvider>
-      <ChainBuilderInner {...props} modelDefs={modelDefs} nodes={nodes} toolkitTools={toolkitTools} saveStatus={saveStatus} saveError={saveError} />
+      <ChainBuilderInner {...props} modelDefs={modelDefs} nodes={nodes} toolkitTools={toolkitTools} payloads={payloads} send={send} saveStatus={saveStatus} saveError={saveError} />
     </ReactFlowProvider>
   );
 }

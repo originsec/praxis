@@ -2,7 +2,7 @@ import { Handle, Position } from '@xyflow/react';
 import type { NodeTypes } from '@xyflow/react';
 import {
   Play, Cpu, Sparkles, MessageSquare, Database, HardDriveDownload,
-  RefreshCw, Clock, BrainCircuit, FolderOpen, Square, Wrench,
+  RefreshCw, Clock, BrainCircuit, FolderOpen, Square, Wrench, FileText,
   CheckCircle2, XCircle, AlertCircle, Loader2,
 } from 'lucide-react';
 
@@ -378,6 +378,31 @@ function ToolNode({ data, selected }: { data: ToolNodeData; selected?: boolean }
   );
 }
 
+interface PayloadNodeData {
+  label: string;
+  shortname: string;
+  status?: string;
+}
+
+function PayloadNode({ data, selected }: { data: PayloadNodeData; selected?: boolean }) {
+  const accent = 'var(--accent-warning)';
+  const style = selected ? { borderColor: accent } : undefined;
+  return (
+    <div
+      className="ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative"
+      style={style}
+    >
+      <Handle type="target" position={Position.Left} style={handleStyle} />
+      <Handle type="source" position={Position.Right} style={handleStyle} />
+      {data.status && <StatusOverlay status={data.status} />}
+      <div className="flex items-center gap-2">
+        <FileText size={14} style={{ color: accent }} />
+        <span className="text-sm font-mono leading-none">{data.shortname || 'Payload'}</span>
+      </div>
+    </div>
+  );
+}
+
 interface TerminationNodeData {
   label: string;
   requireAllInputs?: boolean;
@@ -409,5 +434,6 @@ export const nodeTypes: NodeTypes = {
   memory: MemoryNode,
   loop: LoopNode,
   tool: ToolNode,
+  payload: PayloadNode,
   termination: TerminationNode,
 };

@@ -656,6 +656,17 @@ impl ChainExecutor {
                         is_first_in_session: false,
                     },
                 ),
+                ChainElement::Payload { payload_id, .. } => (
+                    ElementConfig::Payload {
+                        payload_id: payload_id.clone(),
+                    },
+                    ElementContext {
+                        input: merged_input.clone(),
+                        session_id: None,
+                        yolo_mode: false,
+                        is_first_in_session: false,
+                    },
+                ),
                 ChainElement::Termination { .. } => (
                     ElementConfig::Termination,
                     ElementContext {
@@ -678,6 +689,7 @@ impl ChainExecutor {
                 ChainElement::Memory { key, .. } => key.as_str(),
                 ChainElement::Loop { .. } => "Loop",
                 ChainElement::Tool { tool_name, .. } => tool_name.as_str(),
+                ChainElement::Payload { .. } => "Payload",
                 ChainElement::Termination { .. } => "Termination",
             };
             let eid_short = &element_id[..8.min(element_id.len())];
@@ -802,6 +814,14 @@ impl ChainExecutor {
                         }
                     } else {
                         Err(anyhow::anyhow!("ToolkitManager not available"))
+                    };
+                    (result, None, None)
+                }
+                ChainElement::Payload { payload_id, .. } => {
+                    let result = match database.get_payload(payload_id).await {
+                        Ok(Some(record)) => Ok(record.content),
+                        Ok(None) => Err(anyhow::anyhow!("Payload '{}' not found", payload_id)),
+                        Err(e) => Err(anyhow::anyhow!("Failed to load payload: {}", e)),
                     };
                     (result, None, None)
                 }

@@ -4,11 +4,11 @@ use common::{
     ChainDefinitionFull, ChainDefinitionInfo, ChainExecutionUpdate,
     CommandRequest, CommandResponse, DiscoveredLlmEndpoint,
     InterceptMethod, InterceptRule, InterceptStatus, InterceptedTrafficEntry,
-    ApplicationLogEntry, OrchestratorPlan, OperationDefinitionInfo, SemanticOpUpdate,
-    SystemState, TerminalOutput, TrafficLogFilters, TrafficMatchWithDetails, RuleScope,
-    TargetDirection, TrafficSearchFilters, TargetSpec, ToolkitApplyItem,
-    ToolkitApplyOutcome, ToolkitExecuteResult, ToolkitModelOption, ToolkitReconTarget,
-    ToolkitToolInfo,
+    ApplicationLogEntry, OrchestratorPlan, OperationDefinitionInfo, PayloadInfo,
+    SemanticOpUpdate, SystemState, TerminalOutput, TrafficLogFilters,
+    TrafficMatchWithDetails, RuleScope, TargetDirection, TrafficSearchFilters,
+    TargetSpec, ToolkitApplyItem, ToolkitApplyOutcome, ToolkitExecuteResult,
+    ToolkitModelOption, ToolkitReconTarget, ToolkitToolInfo,
 };
 
 /// Messages sent from browser to web server
@@ -272,6 +272,19 @@ pub enum BrowserMessage {
         tool_name: String,
         execution_id: String,
         targets: Vec<ToolkitApplyItem>,
+    },
+
+    //
+    // Payload messages.
+    //
+    PayloadList,
+    PayloadUpsert {
+        id: Option<String>,
+        shortname: String,
+        content: String,
+    },
+    PayloadDelete {
+        id: String,
     },
 
     //
@@ -648,6 +661,23 @@ pub enum ServerMessage {
         total: usize,
     },
     ToolkitError {
+        message: String,
+    },
+
+    //
+    // Payload messages.
+    //
+    PayloadListResponse {
+        payloads: Vec<PayloadInfo>,
+    },
+    PayloadUpserted {
+        payload: PayloadInfo,
+    },
+    PayloadDeleted {
+        id: String,
+        success: bool,
+    },
+    PayloadError {
         message: String,
     },
 

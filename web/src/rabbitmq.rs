@@ -586,6 +586,40 @@ impl RabbitMqClient {
     }
 
     //
+    // Payload methods.
+    //
+
+    pub async fn payload_list(&self) -> Result<()> {
+        let message = ClientSignalMessage::PayloadList {
+            client_id: self.state.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn payload_upsert(
+        &self,
+        id: Option<String>,
+        shortname: String,
+        content: String,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::PayloadUpsert {
+            client_id: self.state.client_id.clone(),
+            id,
+            shortname,
+            content,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn payload_delete(&self, id: String) -> Result<()> {
+        let message = ClientSignalMessage::PayloadDelete {
+            client_id: self.state.client_id.clone(),
+            id,
+        };
+        self.publish_signal(message).await
+    }
+
+    //
     // Lua agent script methods.
     //
 
@@ -1174,6 +1208,22 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::ToolkitError { message } => {
                 self.state.broadcast(ServerMessage::ToolkitError { message });
+            }
+
+            //
+            // Payload responses.
+            //
+            ClientDirectMessage::PayloadListResponse { payloads } => {
+                self.state.broadcast(ServerMessage::PayloadListResponse { payloads });
+            }
+            ClientDirectMessage::PayloadUpserted { payload } => {
+                self.state.broadcast(ServerMessage::PayloadUpserted { payload });
+            }
+            ClientDirectMessage::PayloadDeleted { id, success } => {
+                self.state.broadcast(ServerMessage::PayloadDeleted { id, success });
+            }
+            ClientDirectMessage::PayloadError { message } => {
+                self.state.broadcast(ServerMessage::PayloadError { message });
             }
 
             //

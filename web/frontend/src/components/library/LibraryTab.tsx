@@ -114,6 +114,7 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
     if (showChainBuilder) {
       getConfig(['llm_model_definitions']);
       send({ type: 'toolkit_list' });
+      send({ type: 'payload_list' });
     }
   }, [showChainBuilder, send, getConfig]);
 
@@ -528,6 +529,8 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
           operationDefs={operationDefs}
           modelDefs={modelDefs}
           toolkitTools={state.toolkit.tools}
+          payloads={state.payloads}
+          send={send}
         />
       </div>
     );

@@ -36,6 +36,7 @@ import type {
   TriggerConfig,
   TargetSpec,
   DiscoveredLlmEndpoint,
+  PayloadInfo,
   AgentChatAgentInfo,
   AgentChatAgentStatus,
   AgentChatChannelInfo,
@@ -221,6 +222,7 @@ interface AppState {
   agentChat: AgentChatState;
   toolkit: ToolkitState;
   luaAgentScripts: LuaAgentScriptInfo[];
+  payloads: PayloadInfo[];
   //
   // Agent session messages keyed by session_id.
   //
@@ -255,6 +257,7 @@ function createInitialState(): AppState {
     agentChat: initialAgentChatState,
     toolkit: initialToolkitState,
     luaAgentScripts: [],
+    payloads: [],
     agentSessionMessages: {},
     recentlyAccessedNodeIds: loadRecentNodes(MAX_RECENT_NODES),
   };
@@ -371,7 +374,11 @@ type Action =
   //
   // Lua agent script actions.
   //
-  | { type: 'SET_LUA_AGENT_SCRIPTS'; scripts: LuaAgentScriptInfo[] };
+  | { type: 'SET_LUA_AGENT_SCRIPTS'; scripts: LuaAgentScriptInfo[] }
+  //
+  // Payload actions.
+  //
+  | { type: 'SET_PAYLOADS'; payloads: PayloadInfo[] };
 
 function reduceCore(state: AppState, action: Action): AppState | null {
   switch (action.type) {
@@ -407,6 +414,8 @@ function reduceCore(state: AppState, action: Action): AppState | null {
       return { ...state, opDefSuccess: action.fullName, opDefError: null };
     case 'SET_LUA_AGENT_SCRIPTS':
       return { ...state, luaAgentScripts: action.scripts };
+    case 'SET_PAYLOADS':
+      return { ...state, payloads: action.payloads };
     default:
       return null;
   }
@@ -1529,6 +1538,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         //
         // Lua agent script messages.
         //
+        //
+        // Payload messages.
+        //
+        case 'payload_list_response':
+          dispatch({ type: 'SET_PAYLOADS', payloads: message.payloads });
+          break;
+        case 'payload_upserted':
+        case 'payload_deleted':
+          wsClient.send({ type: 'payload_list' });
+          break;
+        case 'payload_error':
+          break;
+
         case 'lua_agent_script_added':
         case 'lua_agent_script_updated':
         case 'lua_agent_script_deleted':

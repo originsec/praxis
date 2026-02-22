@@ -983,6 +983,13 @@ pub enum ChainElement {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         block_config: Option<BlockConfig>,
     },
+    /// Payload element - outputs static content from a stored payload
+    Payload {
+        id: String,
+        payload_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
+    },
     /// Termination element - explicit end of chain (exactly one per chain)
     Termination {
         id: String,
@@ -1147,6 +1154,10 @@ pub enum ElementConfig {
     Tool {
         tool_name: String,
         tool_params: serde_json::Value,
+    },
+    /// Payload element config
+    Payload {
+        payload_id: String,
     },
     /// Termination element config
     Termination,
@@ -1350,6 +1361,16 @@ pub struct ToolkitApplyOutcome {
     pub target: ToolkitTargetRef,
     pub success: bool,
     pub error: Option<String>,
+}
+
+/// Payload info (shared DTO for API/UI)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PayloadInfo {
+    pub id: String,
+    pub shortname: String,
+    pub content: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 /// Chain trigger info (shared DTO for API/UI)
@@ -1814,6 +1835,23 @@ pub enum ClientSignalMessage {
     },
 
     //
+    // Payloads (static content for Payload chain elements).
+    //
+    PayloadList {
+        client_id: String,
+    },
+    PayloadUpsert {
+        client_id: String,
+        id: Option<String>,
+        shortname: String,
+        content: String,
+    },
+    PayloadDelete {
+        client_id: String,
+        id: String,
+    },
+
+    //
     // Lua agent scripts (stored in service database).
     //
     LuaAgentScriptAdd {
@@ -2165,6 +2203,23 @@ pub enum ClientDirectMessage {
         total: usize,
     },
     ToolkitError {
+        message: String,
+    },
+
+    //
+    // Payload responses.
+    //
+    PayloadListResponse {
+        payloads: Vec<PayloadInfo>,
+    },
+    PayloadUpserted {
+        payload: PayloadInfo,
+    },
+    PayloadDeleted {
+        id: String,
+        success: bool,
+    },
+    PayloadError {
         message: String,
     },
 

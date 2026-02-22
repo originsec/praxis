@@ -271,6 +271,19 @@ pub async fn handle_browser_message(
         }
 
         //
+        // Payload messages.
+        //
+        BrowserMessage::PayloadList => {
+            state.rabbitmq.payload_list().await?;
+        }
+        BrowserMessage::PayloadUpsert { id, shortname, content } => {
+            state.rabbitmq.payload_upsert(id, shortname, content).await?;
+        }
+        BrowserMessage::PayloadDelete { id } => {
+            state.rabbitmq.payload_delete(id).await?;
+        }
+
+        //
         // Lua agent script messages.
         //
         BrowserMessage::LuaAgentScriptAdd { name, script } => {

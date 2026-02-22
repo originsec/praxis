@@ -85,6 +85,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
     if (showBuilder) {
       send({ type: 'op_def_list' });
       send({ type: 'toolkit_list' });
+      send({ type: 'payload_list' });
       getConfig(['llm_model_definitions']);
     }
   }, [showBuilder, send, getConfig]);
@@ -236,6 +237,8 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
           modelDefs={modelDefs}
           nodes={nodes}
           toolkitTools={state.toolkit.tools}
+          payloads={state.payloads}
+          send={send}
           saveStatus={chainSuccess}
           saveError={chainError}
         />

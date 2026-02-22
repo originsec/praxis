@@ -290,6 +290,15 @@ CREATE TABLE IF NOT EXISTS lua_agent_scripts (
     updated_at TEXT NOT NULL
 );
 
+-- Chain payloads table (static content for Payload chain elements)
+CREATE TABLE IF NOT EXISTS chain_payloads (
+    id TEXT PRIMARY KEY,
+    shortname TEXT UNIQUE NOT NULL,
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- Toolkit actions log (generic, tool-agnostic)
 CREATE TABLE IF NOT EXISTS toolkit_actions (
     id TEXT PRIMARY KEY,

@@ -155,6 +155,13 @@ function chainToFlowWithStatus(
           position,
           data: { label: 'Tool', toolName: elem.tool_name, status },
         };
+      case 'Payload':
+        return {
+          id: elem.id,
+          type: 'payload',
+          position,
+          data: { label: 'Payload', shortname: elem.payload_id, status },
+        };
       case 'Termination':
         return {
           id: elem.id,
@@ -343,6 +350,8 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
         };
       case 'Loop':
         return { name: `Loop (max ${element.max_iterations})`, type: 'loop' };
+      case 'Payload':
+        return { name: `Payload`, type: 'payload' };
       case 'Termination':
         return { name: 'End', type: 'termination' };
       default:
@@ -742,6 +751,9 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
                           <div key={k}><span className="text-muted">{k}:</span> <span className="font-mono">{String(v)}</span></div>
                         ))}
                       </div>
+                    )}
+                    {selectedElement.config.type === 'Payload' && (
+                      <div><span className="text-muted">Payload:</span> <span className="font-mono text-[var(--accent-warning)]">{selectedElement.config.payload_id}</span></div>
                     )}
                     {selectedElement.config.type === 'Termination' && (
                       <span className="text-muted">Termination (End)</span>
