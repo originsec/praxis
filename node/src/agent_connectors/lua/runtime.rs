@@ -1003,7 +1003,9 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
 
                     if output.status.success() {
                         let preview = if stdout.len() > 2000 {
-                            format!("{}... ({} bytes total)", &stdout[..2000], stdout.len())
+                            let mut end = 2000;
+                            while end > 0 && !stdout.is_char_boundary(end) { end -= 1; }
+                            format!("{}... ({} bytes total)", &stdout[..end], stdout.len())
                         } else {
                             stdout.clone()
                         };
