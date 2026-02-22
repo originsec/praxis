@@ -235,6 +235,7 @@ function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionH
   const [selectedAgent, setSelectedAgent] = useState('');
   const [selectedSessionFile, setSelectedSessionFile] = useState('');
   const [selectedModelRef, setSelectedModelRef] = useState('');
+  const [maxTokens, setMaxTokens] = useState(50000);
   const [loadingRecon, setLoadingRecon] = useState(false);
   const [loadingRun, setLoadingRun] = useState(false);
   const [loadingApply, setLoadingApply] = useState(false);
@@ -316,6 +317,7 @@ function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionH
       },
       params: {
         model_ref: selectedModelRef,
+        max_tokens: maxTokens,
         targets: [{
           node_id: selectedNodeId,
           agent_short_name: selectedAgent,
@@ -418,6 +420,17 @@ function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionH
                 ))}
               </select>
             </div>
+
+            <div>
+              <label className={labelCls}>Max Tokens</label>
+              <input
+                type="number"
+                className={selectCls}
+                value={maxTokens}
+                onChange={(e) => setMaxTokens(Math.max(1, parseInt(e.target.value) || 50000))}
+                min={1}
+              />
+            </div>
           </div>
 
           <div className="p-3 space-y-2 border-t border-dim">
@@ -460,7 +473,12 @@ function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionH
 
           <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--bg-tertiary)] border-b border-dim shrink-0">
             <span className="text-[11px] tracking-wider text-[var(--text-secondary)] uppercase">Diff Preview</span>
-            {loadingRun && (
+            {loadingRun && state.toolkit.executionProgress && (
+              <span className="text-[10px] tracking-wider text-[var(--accent-warning)]">
+                Processing message {state.toolkit.executionProgress.current}/{state.toolkit.executionProgress.total}...
+              </span>
+            )}
+            {loadingRun && !state.toolkit.executionProgress && (
               <span className="text-[10px] tracking-wider text-[var(--accent-warning)]">running...</span>
             )}
             {applyResults && applyResults.every(r => r.success) && (
@@ -477,7 +495,9 @@ function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionH
 
             {loadingRun && !preview && (
               <div className="flex items-center justify-center h-full text-sm text-muted">
-                Running LLM transform...
+                {state.toolkit.executionProgress
+                  ? `Processing message ${state.toolkit.executionProgress.current}/${state.toolkit.executionProgress.total}...`
+                  : 'Running LLM transform...'}
               </div>
             )}
 

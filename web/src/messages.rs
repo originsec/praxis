@@ -642,6 +642,11 @@ pub enum ServerMessage {
         execution_id: String,
         results: Vec<ToolkitApplyOutcome>,
     },
+    ToolkitExecutionProgress {
+        execution_id: String,
+        current: usize,
+        total: usize,
+    },
     ToolkitError {
         message: String,
     },

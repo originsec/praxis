@@ -156,6 +156,7 @@ interface ToolkitState {
   reconTargets: ToolkitReconTarget[];
   executeResult: ToolkitExecuteResult | null;
   applyResults: ToolkitApplyOutcome[] | null;
+  executionProgress: { current: number; total: number } | null;
   error: string | null;
 }
 
@@ -194,6 +195,7 @@ const initialToolkitState: ToolkitState = {
   reconTargets: [],
   executeResult: null,
   applyResults: null,
+  executionProgress: null,
   error: null,
 };
 
@@ -363,6 +365,7 @@ type Action =
   | { type: 'TOOLKIT_LIST_RESPONSE'; tools: ToolkitToolInfo[]; models: ToolkitModelOption[] }
   | { type: 'TOOLKIT_RECON_RESPONSE'; targets: ToolkitReconTarget[] }
   | { type: 'TOOLKIT_EXECUTE_RESULT'; result: ToolkitExecuteResult }
+  | { type: 'TOOLKIT_EXECUTION_PROGRESS'; current: number; total: number }
   | { type: 'TOOLKIT_APPLY_RESULT'; results: ToolkitApplyOutcome[] }
   | { type: 'TOOLKIT_ERROR'; message: string }
   //
@@ -1082,7 +1085,12 @@ function reduceToolkit(state: AppState, action: Action): AppState | null {
     case 'TOOLKIT_EXECUTE_RESULT':
       return {
         ...state,
-        toolkit: { ...state.toolkit, executeResult: action.result, applyResults: null, error: null },
+        toolkit: { ...state.toolkit, executeResult: action.result, applyResults: null, executionProgress: null, error: null },
+      };
+    case 'TOOLKIT_EXECUTION_PROGRESS':
+      return {
+        ...state,
+        toolkit: { ...state.toolkit, executionProgress: { current: action.current, total: action.total } },
       };
     case 'TOOLKIT_APPLY_RESULT':
       return {
@@ -1092,7 +1100,7 @@ function reduceToolkit(state: AppState, action: Action): AppState | null {
     case 'TOOLKIT_ERROR':
       return {
         ...state,
-        toolkit: { ...state.toolkit, error: action.message },
+        toolkit: { ...state.toolkit, error: action.message, executionProgress: null },
       };
     default:
       return null;
@@ -1507,6 +1515,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           break;
         case 'toolkit_execution_result':
           dispatch({ type: 'TOOLKIT_EXECUTE_RESULT', result: message.result });
+          break;
+        case 'toolkit_execution_progress':
+          dispatch({ type: 'TOOLKIT_EXECUTION_PROGRESS', current: message.current, total: message.total });
           break;
         case 'toolkit_apply_result':
           dispatch({ type: 'TOOLKIT_APPLY_RESULT', results: message.results });

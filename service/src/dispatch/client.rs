@@ -1578,7 +1578,32 @@ async fn handle_toolkit_execute(
     let toolkit_manager = ctx.toolkit_manager.clone();
     let client_publish_channel = ctx.client_publish_channel.clone();
     tokio::spawn(async move {
-        match toolkit_manager.execute(&tool_name, target_spec, params).await {
+        let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize)>();
+
+        //
+        // Spawn a task that drains progress updates and forwards them to
+        // the client as ToolkitExecutionProgress messages.
+        //
+
+        let progress_channel = client_publish_channel.clone();
+        let progress_client_id = client_id.clone();
+
+        let forwarder = tokio::spawn(async move {
+            while let Some((current, total)) = progress_rx.recv().await {
+                let _ = send_to_client(
+                    &progress_channel,
+                    &progress_client_id,
+                    ClientDirectMessage::ToolkitExecutionProgress {
+                        execution_id: String::new(),
+                        current,
+                        total,
+                    },
+                )
+                .await;
+            }
+        });
+
+        match toolkit_manager.execute(&tool_name, target_spec, params, Some(progress_tx)).await {
             Ok(result) => {
                 let _ = send_to_client(
                     &client_publish_channel,
@@ -1598,6 +1623,8 @@ async fn handle_toolkit_execute(
                 .await;
             }
         }
+
+        forwarder.abort();
     });
 }
 

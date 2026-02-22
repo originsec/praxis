@@ -900,6 +900,7 @@ export type ServerMessage =
   | { type: 'toolkit_recon_response'; tool_name: string; targets: ToolkitReconTarget[] }
   | { type: 'toolkit_execution_result'; result: ToolkitExecuteResult }
   | { type: 'toolkit_apply_result'; execution_id: string; results: ToolkitApplyOutcome[] }
+  | { type: 'toolkit_execution_progress'; execution_id: string; current: number; total: number }
   | { type: 'toolkit_error'; message: string }
   //
   // Lua agent script messages.

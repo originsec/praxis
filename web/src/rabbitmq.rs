@@ -1169,6 +1169,9 @@ impl RabbitMqClient {
             ClientDirectMessage::ToolkitApplyResult { execution_id, results } => {
                 self.state.broadcast(ServerMessage::ToolkitApplyResult { execution_id, results });
             }
+            ClientDirectMessage::ToolkitExecutionProgress { execution_id, current, total } => {
+                self.state.broadcast(ServerMessage::ToolkitExecutionProgress { execution_id, current, total });
+            }
             ClientDirectMessage::ToolkitError { message } => {
                 self.state.broadcast(ServerMessage::ToolkitError { message });
             }
