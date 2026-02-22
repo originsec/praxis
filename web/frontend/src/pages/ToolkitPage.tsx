@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Code2, Copy, Eye, FileDiff, ShieldAlert } from 'lucide-react';
+import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
+import { Code2, Copy, Eye, ShieldAlert } from 'lucide-react';
 import { Modal } from '../components/common/Modal';
 import { useApp } from '../context/AppContext';
-import type { SessionItem, ToolkitToolInfo } from '../api/types';
+import type { SessionItem, ToolkitToolInfo, ToolkitDiffHunk, ToolkitDiffLine, ToolkitTargetPreview } from '../api/types';
 
 function toolIcon(toolName: string) {
   if (toolName === 'session_history_poisoning') return ShieldAlert;
@@ -10,100 +10,216 @@ function toolIcon(toolName: string) {
   return Eye;
 }
 
-function prettyPrintSession(content: string): string {
-  const trimmed = content.trim();
-  if (!trimmed) return content;
+//
+// Word-level inline diff. Splits two strings into words (preserving whitespace
+// tokens) and runs a simple LCS diff to find which segments actually changed.
+// Returns ReactNode fragments with changed words wrapped in a highlight span.
+//
 
-  try {
-    return JSON.stringify(JSON.parse(trimmed), null, 2);
-  } catch {
-    // Continue to line-level JSONL pretty-print fallback.
+type WordSpan = { text: string; changed: boolean };
+
+function diffWords(oldStr: string, newStr: string): { oldSpans: WordSpan[]; newSpans: WordSpan[] } {
+  const tokenize = (s: string) => s.match(/\S+|\s+/g) || [];
+  const oldToks = tokenize(oldStr);
+  const newToks = tokenize(newStr);
+
+  //
+  // LCS table to find common subsequence.
+  //
+
+  const m = oldToks.length;
+  const n = newToks.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = oldToks[i - 1] === newToks[j - 1]
+        ? dp[i - 1][j - 1] + 1
+        : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
   }
 
-  const lines = content.split('\n');
-  let hasJsonLine = false;
-  const formatted = lines.map((line) => {
-    const t = line.trim();
-    if (!t) return line;
-    try {
-      const parsed = JSON.parse(t);
-      hasJsonLine = true;
-      return JSON.stringify(parsed, null, 2);
-    } catch {
-      return line;
-    }
-  });
+  //
+  // Backtrack to mark which tokens are common.
+  //
 
-  return hasJsonLine ? formatted.join('\n') : content;
+  const oldChanged = new Array(m).fill(true);
+  const newChanged = new Array(n).fill(true);
+  let i = m, j = n;
+  while (i > 0 && j > 0) {
+    if (oldToks[i - 1] === newToks[j - 1]) {
+      oldChanged[i - 1] = false;
+      newChanged[j - 1] = false;
+      i--; j--;
+    } else if (dp[i - 1][j] >= dp[i][j - 1]) {
+      i--;
+    } else {
+      j--;
+    }
+  }
+
+  const oldSpans = oldToks.map((text, idx) => ({ text, changed: oldChanged[idx] }));
+  const newSpans = newToks.map((text, idx) => ({ text, changed: newChanged[idx] }));
+  return { oldSpans, newSpans };
 }
 
-type DiffRow = {
-  leftLineNo: number | null;
-  rightLineNo: number | null;
-  left: string;
-  right: string;
-  kind: 'same' | 'changed' | 'added' | 'removed';
-};
+function renderSpans(spans: WordSpan[], highlightClass: string): ReactNode {
+  return spans.map((span, i) =>
+    span.changed
+      ? <span key={i} className={highlightClass}>{span.text}</span>
+      : <span key={i}>{span.text}</span>
+  );
+}
 
-type DiffDisplayRow =
-  | { type: 'row'; row: DiffRow }
-  | { type: 'separator'; key: string };
+//
+// Side-by-side diff view rendered from server-computed diff_hunks. Pairs
+// removed/added lines into change rows with word-level highlights.
+//
 
-function buildLineDiff(originalText: string, updatedText: string): DiffRow[] {
-  const left = prettyPrintSession(originalText).split('\n');
-  const right = prettyPrintSession(updatedText).split('\n');
-  const max = Math.max(left.length, right.length);
-  const rows: DiffRow[] = [];
+type SideBySideRow =
+  | { type: 'context'; lineNo: number; content: string }
+  | { type: 'change'; oldLineNo: number | null; oldContent: string; newLineNo: number | null; newContent: string }
+  | { type: 'separator' };
 
-  for (let i = 0; i < max; i += 1) {
-    const l = left[i];
-    const r = right[i];
-    if (l === r) {
-      rows.push({ leftLineNo: i + 1, rightLineNo: i + 1, left: l ?? '', right: r ?? '', kind: 'same' });
+function hunkToRows(hunk: ToolkitDiffHunk): SideBySideRow[] {
+  const rows: SideBySideRow[] = [];
+  const lines = hunk.lines;
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (line.kind === 'Context') {
+      rows.push({ type: 'context', lineNo: line.old_line_no ?? line.new_line_no ?? 0, content: line.content });
+      i++;
       continue;
     }
-    if (l === undefined) {
-      rows.push({ leftLineNo: null, rightLineNo: i + 1, left: '', right: r ?? '', kind: 'added' });
-      continue;
+
+    //
+    // Collect a contiguous block of Removed then Added lines and pair them.
+    //
+
+    const removed: ToolkitDiffLine[] = [];
+    const added: ToolkitDiffLine[] = [];
+
+    while (i < lines.length && lines[i].kind === 'Removed') {
+      removed.push(lines[i]);
+      i++;
     }
-    if (r === undefined) {
-      rows.push({ leftLineNo: i + 1, rightLineNo: null, left: l, right: '', kind: 'removed' });
-      continue;
+    while (i < lines.length && lines[i].kind === 'Added') {
+      added.push(lines[i]);
+      i++;
     }
-    rows.push({ leftLineNo: i + 1, rightLineNo: i + 1, left: l, right: r, kind: 'changed' });
+
+    const maxLen = Math.max(removed.length, added.length);
+    for (let k = 0; k < maxLen; k++) {
+      const r = removed[k];
+      const a = added[k];
+      rows.push({
+        type: 'change',
+        oldLineNo: r?.old_line_no ?? null,
+        oldContent: r?.content ?? '',
+        newLineNo: a?.new_line_no ?? null,
+        newContent: a?.content ?? '',
+      });
+    }
   }
 
   return rows;
 }
 
-function buildGitStyleDiffRows(rows: DiffRow[], contextLines = 3): DiffDisplayRow[] {
-  const changedIndexes = rows
-    .map((row, idx) => (row.kind === 'same' ? -1 : idx))
-    .filter((idx) => idx >= 0);
+const GUTTER = 'text-muted/40 w-8 text-right pr-1 select-none shrink-0 border-r border-dim';
 
-  if (changedIndexes.length === 0) {
-    return rows.map((row) => ({ type: 'row', row }));
+function DiffHunkView({ hunks }: { hunks: ToolkitDiffHunk[] }) {
+  if (hunks.length === 0) {
+    return <div className="p-6 text-center text-sm text-muted">No differences found.</div>;
   }
 
-  const include = new Set<number>();
-  for (const idx of changedIndexes) {
-    const start = Math.max(0, idx - contextLines);
-    const end = Math.min(rows.length - 1, idx + contextLines);
-    for (let i = start; i <= end; i += 1) include.add(i);
-  }
+  return (
+    <div className="font-mono text-xs leading-[1.6]">
+      {hunks.map((hunk, hunkIdx) => {
+        const rows = hunkToRows(hunk);
 
-  const result: DiffDisplayRow[] = [];
-  let prevIncluded: number | null = null;
-  for (let i = 0; i < rows.length; i += 1) {
-    if (!include.has(i)) continue;
-    if (prevIncluded !== null && i - prevIncluded > 1) {
-      result.push({ type: 'separator', key: `sep-${prevIncluded}-${i}` });
-    }
-    result.push({ type: 'row', row: rows[i] });
-    prevIncluded = i;
-  }
+        return (
+          <div key={hunkIdx}>
+            {hunkIdx > 0 && (
+              <div className="bg-[var(--bg-primary)] px-3 py-0.5 text-muted text-center select-none">
+                &#8942;
+              </div>
+            )}
 
-  return result;
+            <div className="grid grid-cols-2 bg-[var(--bg-tertiary)] border-y border-dim select-none">
+              <div className="px-3 py-1 text-muted">
+                @@ -{hunk.old_start},{hunk.old_len} @@
+              </div>
+              <div className="px-3 py-1 text-muted border-l border-dim">
+                @@ +{hunk.new_start},{hunk.new_len} @@
+              </div>
+            </div>
+
+            {rows.map((row, rowIdx) => {
+              if (row.type === 'separator') {
+                return (
+                  <div key={rowIdx} className="grid grid-cols-2 border-y border-dim">
+                    <div className="px-3 py-0.5 text-muted text-center">...</div>
+                    <div className="px-3 py-0.5 text-muted text-center border-l border-dim">...</div>
+                  </div>
+                );
+              }
+
+              if (row.type === 'context') {
+                return (
+                  <div key={rowIdx} className="grid grid-cols-2">
+                    <div className="flex">
+                      <span className={GUTTER}>{row.lineNo}</span>
+                      <span className="flex-1 whitespace-pre-wrap break-all px-1.5 text-highlight">{row.content}</span>
+                    </div>
+                    <div className="flex border-l border-dim">
+                      <span className={GUTTER}>{row.lineNo}</span>
+                      <span className="flex-1 whitespace-pre-wrap break-all px-1.5 text-highlight">{row.content}</span>
+                    </div>
+                  </div>
+                );
+              }
+
+              //
+              // Change row — do word-level diff if both sides have content.
+              //
+
+              const hasOld = row.oldContent !== '';
+              const hasNew = row.newContent !== '';
+              const hasBoth = hasOld && hasNew;
+
+              let oldNode: ReactNode = row.oldContent;
+              let newNode: ReactNode = row.newContent;
+
+              if (hasBoth) {
+                const { oldSpans, newSpans } = diffWords(row.oldContent, row.newContent);
+                oldNode = renderSpans(oldSpans, 'bg-[var(--accent-error)]/30 text-[var(--accent-error)]');
+                newNode = renderSpans(newSpans, 'bg-[var(--accent-success)]/30 text-[var(--accent-success)]');
+              }
+
+              return (
+                <div key={rowIdx} className="grid grid-cols-2">
+                  <div className={`flex ${hasOld ? 'bg-[var(--accent-error)]/8' : ''}`}>
+                    <span className={GUTTER}>{row.oldLineNo ?? ''}</span>
+                    <span className={`flex-1 whitespace-pre-wrap break-all px-1.5 ${hasOld ? 'text-[var(--accent-error)]' : ''}`}>
+                      {oldNode}
+                    </span>
+                  </div>
+                  <div className={`flex border-l border-dim ${hasNew ? 'bg-[var(--accent-success)]/8' : ''}`}>
+                    <span className={GUTTER}>{row.newLineNo ?? ''}</span>
+                    <span className={`flex-1 whitespace-pre-wrap break-all px-1.5 ${hasNew ? 'text-[var(--accent-success)]' : ''}`}>
+                      {newNode}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 interface SessionHistoryPoisoningModalProps {
@@ -113,7 +229,7 @@ interface SessionHistoryPoisoningModalProps {
 }
 
 function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionHistoryPoisoningModalProps) {
-  const { state, send, sendCommand } = useApp();
+  const { state, send } = useApp();
 
   const [selectedNodeId, setSelectedNodeId] = useState('');
   const [selectedAgent, setSelectedAgent] = useState('');
@@ -122,8 +238,6 @@ function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionH
   const [loadingRecon, setLoadingRecon] = useState(false);
   const [loadingRun, setLoadingRun] = useState(false);
   const [loadingApply, setLoadingApply] = useState(false);
-  const [originalContent, setOriginalContent] = useState('');
-  const [toolError, setToolError] = useState<string | null>(null);
 
   const nodes = state.systemState?.nodes ?? [];
   const selectedNode = nodes.find((n) => n.node_id === selectedNodeId);
@@ -135,30 +249,21 @@ function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionH
   const sessions: SessionItem[] = reconTarget?.sessions ?? [];
   const selectedSession = sessions.find((s) => s.session_file === selectedSessionFile) ?? null;
 
-  const execution = state.toolkit.execution?.tool_name === 'session_history_poisoning' ? state.toolkit.execution : null;
-  const preview = execution?.previews[0];
-  const diffRows = useMemo(
-    () => (preview?.preview_content ? buildLineDiff(originalContent, preview.preview_content) : []),
-    [originalContent, preview?.preview_content]
-  );
-  const visibleDiffRows = useMemo(() => buildGitStyleDiffRows(diffRows, 3), [diffRows]);
+  const execResult = state.toolkit.executeResult?.tool_name === 'session_history_poisoning'
+    ? state.toolkit.executeResult : null;
+  const preview: ToolkitTargetPreview | undefined = execResult?.previews[0];
+  const diffHunks: ToolkitDiffHunk[] = preview?.diff_hunks ?? [];
+  const applyResults = state.toolkit.applyResults;
 
-  useEffect(() => {
-    if (!isOpen) return;
-    setToolError(null);
-  }, [isOpen]);
+  //
+  // Auto-trigger recon when both node and agent are selected.
+  //
 
-  useEffect(() => {
-    if (!loadingRun) return;
-    if (execution || state.toolkit.error) {
-      setLoadingRun(false);
-    }
-  }, [loadingRun, execution, state.toolkit.error]);
+  const reconTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const runRecon = async () => {
+  const triggerRecon = useCallback(() => {
     if (!selectedNodeId || !selectedAgent) return;
     setLoadingRecon(true);
-    setToolError(null);
     send({
       type: 'toolkit_recon',
       tool_name: 'session_history_poisoning',
@@ -169,228 +274,229 @@ function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionH
         include_triggering_node: false,
       },
     });
-    setTimeout(() => setLoadingRecon(false), 400);
-  };
+  }, [selectedNodeId, selectedAgent, send]);
 
-  const runPreview = async () => {
-    if (!selectedNodeId || !selectedAgent || !selectedSession || !selectedModelRef) return;
+  useEffect(() => {
+    if (!selectedNodeId || !selectedAgent) return;
+    if (reconTimerRef.current) clearTimeout(reconTimerRef.current);
+    reconTimerRef.current = setTimeout(triggerRecon, 300);
+    return () => { if (reconTimerRef.current) clearTimeout(reconTimerRef.current); };
+  }, [selectedNodeId, selectedAgent, triggerRecon]);
 
+  //
+  // Clear loading states on actual responses.
+  //
+
+  useEffect(() => {
+    if (reconTarget || state.toolkit.error) setLoadingRecon(false);
+  }, [reconTarget, state.toolkit.error]);
+
+  useEffect(() => {
+    if (execResult || state.toolkit.error) setLoadingRun(false);
+  }, [execResult, state.toolkit.error]);
+
+  useEffect(() => {
+    if (applyResults || state.toolkit.error) setLoadingApply(false);
+  }, [applyResults, state.toolkit.error]);
+
+  const canExecute = selectedNodeId && selectedAgent && selectedSession && selectedModelRef && !loadingRun;
+  const canApply = execResult && preview?.preview_content && !loadingApply;
+
+  const runPreview = () => {
+    if (!canExecute) return;
     setLoadingRun(true);
-    setToolError(null);
-    try {
-      await sendCommand(selectedNodeId, { Agent: { Select: { short_name: selectedAgent } } });
-      const readResp = await sendCommand(selectedNodeId, {
-        Agent: { ReadFile: { file_type: 'Session', path: selectedSession.session_file } },
-      });
-
-      if ('Agent' in readResp.result && typeof readResp.result.Agent === 'object' && readResp.result.Agent !== null
-        && 'ReadFileResult' in readResp.result.Agent) {
-        const result = readResp.result.Agent.ReadFileResult;
-        if (result.content) {
-          setOriginalContent(result.content);
-        } else {
-          throw new Error(result.error || 'Failed to read session content');
-        }
-      }
-
-      send({
-        type: 'toolkit_execute',
-        tool_name: 'session_history_poisoning',
-        target_spec: {
-          node_ids: [selectedNodeId],
-          os_filter: null,
-          agent_short_names: [selectedAgent],
-          include_triggering_node: false,
-        },
-        params: {
-          model_ref: selectedModelRef,
-          targets: [{
-            node_id: selectedNodeId,
-            agent_short_name: selectedAgent,
-            session_id: selectedSession.session_id,
-            session_file: selectedSession.session_file,
-          }],
-        },
-      });
-    } catch (error) {
-      setToolError(String(error));
-      setLoadingRun(false);
-    }
+    send({
+      type: 'toolkit_execute',
+      tool_name: 'session_history_poisoning',
+      target_spec: {
+        node_ids: [selectedNodeId],
+        os_filter: null,
+        agent_short_names: [selectedAgent],
+        include_triggering_node: false,
+      },
+      params: {
+        model_ref: selectedModelRef,
+        targets: [{
+          node_id: selectedNodeId,
+          agent_short_name: selectedAgent,
+          session_id: selectedSession!.session_id,
+          session_file: selectedSession!.session_file,
+        }],
+      },
+    });
   };
 
   const applyChanges = () => {
-    if (!execution) return;
+    if (!canApply || !preview) return;
     setLoadingApply(true);
     send({
       type: 'toolkit_apply',
-      execution_id: execution.execution_id,
-      decisions: preview ? [{ target: preview.target, accepted: true }] : [],
+      tool_name: 'session_history_poisoning',
+      execution_id: execResult!.execution_id,
+      targets: [{
+        target: preview.target,
+        content: preview.preview_content!,
+      }],
     });
-    setTimeout(() => setLoadingApply(false), 400);
   };
 
-  const changedCount = diffRows.filter((r) => r.kind !== 'same').length;
+  const selectCls = 'w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-sm text-highlight focus:outline-none focus:border-subtle';
+  const labelCls = 'block text-[11px] tracking-wider text-[var(--text-secondary)] uppercase mb-1';
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Session History Poisoning" size="full" noPadding>
-      <div className="p-4 border-b border-subtle bg-[var(--bg-tertiary)]">
-        <p className="text-sm text-muted">{description}</p>
-      </div>
+      <div className="flex h-[80vh]">
 
-      <div className="grid grid-cols-1 lg:grid-cols-[360px,1fr] h-[80vh]">
-        <div className="border-r border-subtle p-4 space-y-3 overflow-auto">
-          <h3 className="text-xs font-semibold text-title">Targeting</h3>
+        {/* Left sidebar */}
+        <div className="w-[300px] shrink-0 border-r border-subtle flex flex-col overflow-auto">
 
-          <div>
-            <label className="text-xs text-muted">Node</label>
-            <select
-              className="w-full mt-1 bg-[var(--surface-2)] border border-subtle rounded px-2 py-1"
-              value={selectedNodeId}
-              onChange={(e) => {
-                setSelectedNodeId(e.target.value);
-                setSelectedAgent('');
-                setSelectedSessionFile('');
-              }}
-            >
-              <option value="">Select node</option>
-              {nodes.map((n) => (
-                <option key={n.node_id} value={n.node_id}>{n.machine_name} ({n.node_id.slice(0, 8)})</option>
-              ))}
-            </select>
+          <div className="p-3 text-xs text-muted leading-relaxed border-b border-dim">
+            {description}
           </div>
 
-          <div>
-            <label className="text-xs text-muted">Agent</label>
-            <select
-              className="w-full mt-1 bg-[var(--surface-2)] border border-subtle rounded px-2 py-1"
-              value={selectedAgent}
-              onChange={(e) => {
-                setSelectedAgent(e.target.value);
-                setSelectedSessionFile('');
-              }}
-            >
-              <option value="">Select agent</option>
-              {agents.map((a) => (
-                <option key={a.short_name} value={a.short_name}>{a.name}</option>
-              ))}
-            </select>
+          <div className="p-3 space-y-2.5 flex-1">
+            <div>
+              <label className={labelCls}>Node</label>
+              <select
+                className={selectCls}
+                value={selectedNodeId}
+                onChange={(e) => {
+                  setSelectedNodeId(e.target.value);
+                  setSelectedAgent('');
+                  setSelectedSessionFile('');
+                }}
+              >
+                <option value="">-</option>
+                {nodes.map((n) => (
+                  <option key={n.node_id} value={n.node_id}>{n.machine_name} ({n.node_id.slice(0, 8)})</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className={labelCls}>Agent</label>
+              <select
+                className={selectCls}
+                value={selectedAgent}
+                onChange={(e) => {
+                  setSelectedAgent(e.target.value);
+                  setSelectedSessionFile('');
+                }}
+              >
+                <option value="">-</option>
+                {agents.map((a) => (
+                  <option key={a.short_name} value={a.short_name}>{a.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className={labelCls}>Session</label>
+              <select
+                className={selectCls}
+                value={selectedSessionFile}
+                onChange={(e) => setSelectedSessionFile(e.target.value)}
+                disabled={sessions.length === 0 && !loadingRecon}
+              >
+                <option value="">{loadingRecon ? 'Scanning...' : sessions.length === 0 ? (selectedAgent ? 'No sessions' : '-') : 'Select session'}</option>
+                {sessions.map((s) => (
+                  <option key={s.session_file} value={s.session_file}>{s.session_id.slice(0, 12)}... ({s.message_count} msgs)</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className={labelCls}>Model</label>
+              <select
+                className={selectCls}
+                value={selectedModelRef}
+                onChange={(e) => setSelectedModelRef(e.target.value)}
+              >
+                <option value="">-</option>
+                {state.toolkit.models.map((m) => (
+                  <option key={m.name} value={m.name}>{m.name}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          <button
-            className="w-full px-3 py-2 rounded bg-[var(--accent-info)] text-black text-sm disabled:opacity-50"
-            disabled={!selectedNodeId || !selectedAgent || loadingRecon}
-            onClick={runRecon}
-          >
-            {loadingRecon ? 'Running Recon...' : 'Static Recon'}
-          </button>
-
-          <div>
-            <label className="text-xs text-muted">Session</label>
-            <select
-              className="w-full mt-1 bg-[var(--surface-2)] border border-subtle rounded px-2 py-1"
-              value={selectedSessionFile}
-              onChange={(e) => setSelectedSessionFile(e.target.value)}
+          <div className="p-3 space-y-2 border-t border-dim">
+            <button
+              className="w-full px-3 py-1.5 text-xs tracking-wider border border-dim bg-[var(--accent-warning)]/15 text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/25 hover:border-[var(--accent-warning)]/50 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+              disabled={!canExecute}
+              onClick={runPreview}
             >
-              <option value="">Select session</option>
-              {sessions.map((s) => (
-                <option key={s.session_file} value={s.session_file}>{s.session_id} ({s.message_count} msgs)</option>
-              ))}
-            </select>
+              {loadingRun ? 'Executing...' : 'Execute'}
+            </button>
+
+            <button
+              className="w-full px-3 py-1.5 text-xs tracking-wider border border-dim bg-[var(--accent-success)]/15 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/25 hover:border-[var(--accent-success)]/50 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+              disabled={!canApply}
+              onClick={applyChanges}
+            >
+              {loadingApply ? 'Applying...' : 'Apply'}
+            </button>
           </div>
 
-          <div>
-            <label className="text-xs text-muted">Model Definition</label>
-            <select
-              className="w-full mt-1 bg-[var(--surface-2)] border border-subtle rounded px-2 py-1"
-              value={selectedModelRef}
-              onChange={(e) => setSelectedModelRef(e.target.value)}
-            >
-              <option value="">Select model</option>
-              {state.toolkit.models.map((m) => (
-                <option key={m.name} value={m.name}>{m.name}</option>
+          {state.toolkit.error && (
+            <div className="px-3 py-2 bg-[var(--accent-error)]/10 border-t border-[var(--accent-error)]/30 text-[var(--accent-error)] text-xs">
+              {state.toolkit.error}
+            </div>
+          )}
+
+          {applyResults && (
+            <div className="px-3 py-2 border-t border-dim">
+              {applyResults.map((r, i) => (
+                <div key={i} className={`text-xs ${r.success ? 'text-[var(--accent-success)]' : 'text-[var(--accent-error)]'}`}>
+                  {r.success ? 'Applied successfully' : `Failed: ${r.error}`}
+                </div>
               ))}
-            </select>
-          </div>
-
-          <button
-            className="w-full px-3 py-2 rounded bg-[var(--accent-warning)] text-black text-sm disabled:opacity-50"
-            disabled={!selectedNodeId || !selectedAgent || !selectedSession || !selectedModelRef || loadingRun}
-            onClick={runPreview}
-          >
-            {loadingRun ? 'Running remote model...' : 'Run Tool'}
-          </button>
-
-          <button
-            className="w-full px-3 py-2 rounded bg-[var(--accent-success)] text-black text-sm disabled:opacity-50"
-            disabled={!execution || !preview?.preview_content || loadingApply}
-            onClick={applyChanges}
-          >
-            {loadingApply ? 'Applying...' : 'Accept and Overwrite'}
-          </button>
-
-          {(toolError || state.toolkit.error) && (
-            <p className="text-xs text-[var(--accent-error)]">{toolError || state.toolkit.error}</p>
+            </div>
           )}
         </div>
 
-        <div className="p-4 overflow-auto space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold text-title flex items-center gap-2">
-              <FileDiff size={14} /> Preview Diff
-            </h3>
-            <span className="text-xs text-muted">Changed lines: {changedCount}</span>
+        {/* Right panel - diff view */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--bg-tertiary)] border-b border-dim shrink-0">
+            <span className="text-[11px] tracking-wider text-[var(--text-secondary)] uppercase">Diff Preview</span>
+            {loadingRun && (
+              <span className="text-[10px] tracking-wider text-[var(--accent-warning)]">running...</span>
+            )}
+            {applyResults && applyResults.every(r => r.success) && (
+              <span className="text-[10px] tracking-wider text-[var(--accent-success)]">applied</span>
+            )}
           </div>
 
-          {!preview?.preview_content && (
-            <div className="text-sm text-muted border border-subtle rounded p-4">Run the tool to generate a preview.</div>
-          )}
+          <div className="flex-1 overflow-auto">
+            {!preview && !loadingRun && (
+              <div className="flex items-center justify-center h-full text-sm text-muted">
+                Select targets and execute to preview changes.
+              </div>
+            )}
 
-          {preview?.preview_content && (
-            <div className="border border-subtle rounded overflow-hidden font-mono text-xs">
-              <div className="grid grid-cols-2 bg-[var(--bg-tertiary)] border-b border-subtle">
-                <div className="px-3 py-2 text-muted">Original</div>
-                <div className="px-3 py-2 text-muted border-l border-subtle">Proposed</div>
+            {loadingRun && !preview && (
+              <div className="flex items-center justify-center h-full text-sm text-muted">
+                Running LLM transform...
               </div>
-              <div className="max-h-[62vh] overflow-auto">
-                {visibleDiffRows.map((entry, idx) => {
-                  if (entry.type === 'separator') {
-                    return (
-                      <div
-                        key={entry.key}
-                        className="grid grid-cols-2 bg-[var(--bg-tertiary)]/70 border-y border-subtle"
-                      >
-                        <div className="px-3 py-1 text-muted">...</div>
-                        <div className="px-3 py-1 text-muted border-l border-subtle">...</div>
-                      </div>
-                    );
-                  }
-                  const row = entry.row;
-                  const bg = row.kind === 'same'
-                    ? 'bg-transparent'
-                    : row.kind === 'added'
-                      ? 'bg-[var(--accent-success)]/12'
-                      : row.kind === 'removed'
-                        ? 'bg-[var(--accent-error)]/12'
-                        : 'bg-[var(--accent-warning)]/12';
-                  const marker = row.kind === 'added' ? '+' : row.kind === 'removed' ? '-' : row.kind === 'changed' ? '~' : ' ';
-                  return (
-                    <div key={`${idx}-${row.leftLineNo}-${row.rightLineNo}`} className={`grid grid-cols-2 ${bg}`}>
-                      <div className="px-2 py-1.5 pr-3 whitespace-pre-wrap break-words">
-                        <span className="text-muted mr-2 inline-block w-4 text-center">{marker}</span>
-                        <span className="text-muted mr-2 inline-block w-8 text-right">{row.leftLineNo ?? ''}</span>
-                        {row.left}
-                      </div>
-                      <div className="px-2 py-1.5 pl-3 whitespace-pre-wrap break-words border-l border-subtle/70">
-                        <span className="text-muted mr-2 inline-block w-4 text-center">{marker}</span>
-                        <span className="text-muted mr-2 inline-block w-8 text-right">{row.rightLineNo ?? ''}</span>
-                        {row.right}
-                      </div>
-                    </div>
-                  );
-                })}
+            )}
+
+            {preview?.error && (
+              <div className="m-3 p-2.5 bg-[var(--accent-error)]/10 border border-[var(--accent-error)]/30 text-[var(--accent-error)] text-xs">
+                {preview.error}
               </div>
-            </div>
-          )}
+            )}
+
+            {preview?.preview_content && diffHunks.length > 0 && (
+              <DiffHunkView hunks={diffHunks} />
+            )}
+
+            {preview?.preview_content && diffHunks.length === 0 && (
+              <div className="flex items-center justify-center h-full text-sm text-muted">
+                No changes detected.
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </Modal>
@@ -406,29 +512,36 @@ interface MessageEncoderModalProps {
 function MessageEncoderModal({ isOpen, onClose, description }: MessageEncoderModalProps) {
   const { state, send } = useApp();
   const [input, setInput] = useState('');
-  const [encoding, setEncoding] = useState('braille_us_type2');
+  const [encoding, setEncoding] = useState('unicode_tags');
   const [copied, setCopied] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const execution = state.toolkit.execution?.tool_name === 'message_encoder' ? state.toolkit.execution : null;
-  const output = execution?.previews[0]?.preview_content ?? '';
+  const execResult = state.toolkit.executeResult?.tool_name === 'message_encoder'
+    ? state.toolkit.executeResult : null;
+  const output = execResult?.previews[0]?.preview_content ?? '';
 
-  const runEncode = () => {
+  //
+  // Auto-encode on input or encoding change (debounced).
+  //
+
+  useEffect(() => {
     if (!input.trim()) return;
-    send({
-      type: 'toolkit_execute',
-      tool_name: 'message_encoder',
-      target_spec: {
-        node_ids: [],
-        os_filter: null,
-        agent_short_names: [],
-        include_triggering_node: false,
-      },
-      params: {
-        input_text: input,
-        encoding,
-      },
-    });
-  };
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      send({
+        type: 'toolkit_execute',
+        tool_name: 'message_encoder',
+        target_spec: {
+          node_ids: [],
+          os_filter: null,
+          agent_short_names: [],
+          include_triggering_node: false,
+        },
+        params: { input_text: input, encoding },
+      });
+    }, 150);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [input, encoding, send]);
 
   const copyOutput = async () => {
     if (!output) return;
@@ -437,57 +550,62 @@ function MessageEncoderModal({ isOpen, onClose, description }: MessageEncoderMod
     setTimeout(() => setCopied(false), 1000);
   };
 
+  const labelCls = 'block text-[11px] tracking-wider text-[var(--text-secondary)] uppercase mb-1';
+  const inputCls = 'w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-sm text-highlight focus:outline-none focus:border-subtle';
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Message Encoder" size="lg">
-      <p className="text-sm text-muted mb-4">{description}</p>
+      <p className="text-xs text-muted mb-4 leading-relaxed">{description}</p>
 
-      <div className="space-y-4">
+      <div className="space-y-3">
         <div>
-          <label className="text-xs text-muted">Encoding</label>
-          <select
-            className="w-full mt-1 bg-[var(--surface-2)] border border-subtle rounded px-2 py-1"
-            value={encoding}
-            onChange={(e) => setEncoding(e.target.value)}
-          >
+          <label className={labelCls}>Encoding</label>
+          <select className={inputCls} value={encoding} onChange={(e) => setEncoding(e.target.value)}>
+            <option value="unicode_tags">Unicode Tags (ASCII Smuggling)</option>
+            <option value="zwsp_binary">Zero-Width Binary</option>
             <option value="braille_us_type2">Braille (US Type 2)</option>
+            <option value="fullwidth">Fullwidth Unicode</option>
+            <option value="upside_down">Upside Down</option>
+            <option value="rot13">ROT13</option>
+            <option value="base64">Base64</option>
+            <option value="hex">Hex</option>
+            <option value="morse">Morse Code</option>
           </select>
         </div>
 
         <div>
-          <label className="text-xs text-muted">Input</label>
+          <label className={labelCls}>Input</label>
           <textarea
-            className="w-full h-36 mt-1 bg-[var(--surface-2)] border border-subtle rounded p-2 text-sm"
+            className={`${inputCls} h-32 resize-none`}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Type text to encode..."
           />
         </div>
 
-        <button
-          className="px-3 py-2 rounded bg-[var(--accent-warning)] text-black text-sm disabled:opacity-50"
-          disabled={!input.trim()}
-          onClick={runEncode}
-        >
-          Encode Message
-        </button>
-
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className="text-xs text-muted">Encoded Output</label>
+            <label className={labelCls}>Output</label>
             <button
-              className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-subtle hover:bg-[var(--bg-secondary)]"
+              className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] tracking-wider border border-dim text-muted hover:text-highlight hover:border-subtle transition-colors disabled:opacity-40"
               onClick={copyOutput}
               disabled={!output}
             >
-              <Copy size={12} /> {copied ? 'Copied' : 'Copy'}
+              <Copy size={11} /> {copied ? 'Copied' : 'Copy'}
             </button>
           </div>
           <textarea
-            className="w-full h-36 bg-[var(--surface-2)] border border-subtle rounded p-2 text-sm font-mono"
+            className={`${inputCls} h-32 font-mono resize-none`}
             readOnly
             value={output}
           />
         </div>
+
+        {output && (
+          <p className="text-[11px] text-muted/60 leading-relaxed">
+            Some encodings produce invisible or non-printable characters. The output may appear empty but is present — use Copy to transfer it.
+          </p>
+        )}
       </div>
     </Modal>
   );
@@ -502,8 +620,6 @@ export function ToolkitPage() {
   }, [send]);
 
   const tools = state.toolkit.tools;
-
-  const openTool = (toolName: string) => setActiveTool(toolName);
   const closeTool = () => setActiveTool(null);
 
   const descriptionFor = (toolName: string) =>
@@ -522,12 +638,12 @@ export function ToolkitPage() {
           return (
             <button
               key={tool.tool_name}
-              onClick={() => openTool(tool.tool_name)}
-              className="text-left rounded border border-subtle bg-[var(--surface-1)] hover:bg-[var(--surface-2)] transition-colors p-4 ascii-box"
+              onClick={() => setActiveTool(tool.tool_name)}
+              className="text-left border border-subtle bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors p-4 ascii-box"
             >
               <div className="flex items-center gap-2 mb-2">
                 <Icon size={18} className="text-[var(--accent-info)]" />
-                <h2 className="text-sm font-semibold text-title">{tool.display_name}</h2>
+                <h2 className="text-sm font-semibold text-highlight">{tool.display_name}</h2>
               </div>
               <p className="text-xs text-muted leading-relaxed">{tool.description}</p>
             </button>

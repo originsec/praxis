@@ -481,38 +481,46 @@ export interface ToolkitReconTarget {
   sessions: SessionItem[];
 }
 
-export type ToolkitExecutionStatus =
-  | 'Queued'
-  | 'Running'
-  | 'AwaitingDecision'
-  | 'Applying'
-  | 'Completed'
-  | 'Failed';
-
 export interface ToolkitTargetPreview {
   target: ToolkitTargetRef;
   success: boolean;
   preview_content?: string | null;
+  original_content?: string | null;
+  diff_hunks?: ToolkitDiffHunk[] | null;
   error?: string | null;
-  accepted?: boolean | null;
-  applied?: boolean | null;
 }
 
-export interface ToolkitExecution {
+export interface ToolkitDiffHunk {
+  old_start: number;
+  old_len: number;
+  new_start: number;
+  new_len: number;
+  lines: ToolkitDiffLine[];
+}
+
+export interface ToolkitDiffLine {
+  kind: 'Context' | 'Added' | 'Removed';
+  old_line_no?: number | null;
+  new_line_no?: number | null;
+  content: string;
+}
+
+export interface ToolkitExecuteResult {
   execution_id: string;
   tool_name: string;
-  status: ToolkitExecutionStatus;
-  target_spec: TargetSpec;
-  params: unknown;
   previews: ToolkitTargetPreview[];
-  requested_at: string;
-  completed_at?: string | null;
   error?: string | null;
 }
 
-export interface ToolkitApplyDecision {
+export interface ToolkitApplyItem {
   target: ToolkitTargetRef;
-  accepted: boolean;
+  content: string;
+}
+
+export interface ToolkitApplyOutcome {
+  target: ToolkitTargetRef;
+  success: boolean;
+  error?: string | null;
 }
 
 export type ChainExecutionStatus = 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled';
@@ -738,7 +746,7 @@ export type BrowserMessage =
   | { type: 'op_def_delete'; full_name: string }
   | { type: 'op_def_get'; full_name: string }
   | { type: 'orchestrator_start' }
-  | { type: 'orchestrator_prompt'; message: string }
+  | { type: 'orchestrator_prompt'; prompt_id: string; message: string }
   | { type: 'orchestrator_stop' }
   | { type: 'orchestrator_cancel' }
   //
@@ -789,8 +797,7 @@ export type BrowserMessage =
   | { type: 'toolkit_list' }
   | { type: 'toolkit_recon'; tool_name: string; target_spec: TargetSpec }
   | { type: 'toolkit_execute'; tool_name: string; target_spec: TargetSpec; params: unknown }
-  | { type: 'toolkit_apply'; execution_id: string; apply_all?: boolean | null; decisions?: ToolkitApplyDecision[] | null }
-  | { type: 'toolkit_execution_get'; execution_id: string }
+  | { type: 'toolkit_apply'; tool_name: string; execution_id: string; targets: ToolkitApplyItem[] }
   //
   // Lua agent script messages.
   //
@@ -838,14 +845,14 @@ export type ServerMessage =
   | { type: 'op_def_deleted'; full_name: string; success: boolean }
   | { type: 'op_def_error'; message: string }
   | { type: 'orchestrator_started'; provider: string; model: string }
-  | { type: 'orchestrator_content'; content: string }
-  | { type: 'orchestrator_tool_executing'; name: string; input?: string }
-  | { type: 'orchestrator_tool_executed'; name: string; display: string; success: boolean; result: string }
-  | { type: 'orchestrator_plan_updated'; plan: OrchestratorPlan }
-  | { type: 'orchestrator_done' }
+  | { type: 'orchestrator_content'; prompt_id: string; content: string }
+  | { type: 'orchestrator_tool_executing'; prompt_id: string; name: string; input?: string }
+  | { type: 'orchestrator_tool_executed'; prompt_id: string; name: string; display: string; success: boolean; result: string }
+  | { type: 'orchestrator_plan_updated'; prompt_id: string; plan: OrchestratorPlan }
+  | { type: 'orchestrator_done'; prompt_id: string }
   | { type: 'orchestrator_stopped' }
-  | { type: 'orchestrator_error'; message: string }
-  | { type: 'orchestrator_token_usage'; prompt_tokens: number; completion_tokens: number; total_tokens: number }
+  | { type: 'orchestrator_error'; prompt_id: string; message: string }
+  | { type: 'orchestrator_token_usage'; prompt_id: string; prompt_tokens: number; completion_tokens: number; total_tokens: number }
   //
   // Traffic interception messages.
   //
@@ -891,9 +898,8 @@ export type ServerMessage =
   //
   | { type: 'toolkit_list_response'; tools: ToolkitToolInfo[]; models: ToolkitModelOption[] }
   | { type: 'toolkit_recon_response'; tool_name: string; targets: ToolkitReconTarget[] }
-  | { type: 'toolkit_execution_update'; execution: ToolkitExecution }
-  | { type: 'toolkit_execution_result'; execution: ToolkitExecution }
-  | { type: 'toolkit_apply_result'; execution: ToolkitExecution }
+  | { type: 'toolkit_execution_result'; result: ToolkitExecuteResult }
+  | { type: 'toolkit_apply_result'; execution_id: string; results: ToolkitApplyOutcome[] }
   | { type: 'toolkit_error'; message: string }
   //
   // Lua agent script messages.

@@ -4,7 +4,7 @@ use common::{
     CLIENT_SIGNAL_QUEUE, CLIENT_BROADCAST_EXCHANGE, WEB_EVENT_LOG_QUEUE,
     ClientSignalMessage, ClientDirectMessage, ClientBroadcastMessage,
     ClientRegistration, CommandRequest, InterceptMethod,
-    TrafficLogFilters, TrafficSearchFilters, TargetSpec, ToolkitApplyDecision,
+    TrafficLogFilters, TrafficSearchFilters, TargetSpec, ToolkitApplyItem,
 };
 use futures_util::StreamExt;
 use lapin::{
@@ -572,23 +572,15 @@ impl RabbitMqClient {
 
     pub async fn toolkit_apply(
         &self,
+        tool_name: String,
         execution_id: String,
-        apply_all: Option<bool>,
-        decisions: Option<Vec<ToolkitApplyDecision>>,
+        targets: Vec<ToolkitApplyItem>,
     ) -> Result<()> {
         let message = ClientSignalMessage::ToolkitApply {
             client_id: self.state.client_id.clone(),
+            tool_name,
             execution_id,
-            apply_all,
-            decisions,
-        };
-        self.publish_signal(message).await
-    }
-
-    pub async fn toolkit_execution_get(&self, execution_id: String) -> Result<()> {
-        let message = ClientSignalMessage::ToolkitExecutionGet {
-            client_id: self.state.client_id.clone(),
-            execution_id,
+            targets,
         };
         self.publish_signal(message).await
     }
@@ -1171,14 +1163,11 @@ impl RabbitMqClient {
             ClientDirectMessage::ToolkitReconResponse { tool_name, targets } => {
                 self.state.broadcast(ServerMessage::ToolkitReconResponse { tool_name, targets });
             }
-            ClientDirectMessage::ToolkitExecutionUpdate { execution } => {
-                self.state.broadcast(ServerMessage::ToolkitExecutionUpdate { execution });
+            ClientDirectMessage::ToolkitExecutionResult { result } => {
+                self.state.broadcast(ServerMessage::ToolkitExecutionResult { result });
             }
-            ClientDirectMessage::ToolkitExecutionResult { execution } => {
-                self.state.broadcast(ServerMessage::ToolkitExecutionResult { execution });
-            }
-            ClientDirectMessage::ToolkitApplyResult { execution } => {
-                self.state.broadcast(ServerMessage::ToolkitApplyResult { execution });
+            ClientDirectMessage::ToolkitApplyResult { execution_id, results } => {
+                self.state.broadcast(ServerMessage::ToolkitApplyResult { execution_id, results });
             }
             ClientDirectMessage::ToolkitError { message } => {
                 self.state.broadcast(ServerMessage::ToolkitError { message });

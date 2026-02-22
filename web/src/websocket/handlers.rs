@@ -266,11 +266,8 @@ pub async fn handle_browser_message(
         BrowserMessage::ToolkitExecute { tool_name, target_spec, params } => {
             state.rabbitmq.toolkit_execute(tool_name, target_spec, params).await?;
         }
-        BrowserMessage::ToolkitApply { execution_id, apply_all, decisions } => {
-            state.rabbitmq.toolkit_apply(execution_id, apply_all, decisions).await?;
-        }
-        BrowserMessage::ToolkitExecutionGet { execution_id } => {
-            state.rabbitmq.toolkit_execution_get(execution_id).await?;
+        BrowserMessage::ToolkitApply { tool_name, execution_id, targets } => {
+            state.rabbitmq.toolkit_apply(tool_name, execution_id, targets).await?;
         }
 
         //

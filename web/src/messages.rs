@@ -6,8 +6,9 @@ use common::{
     InterceptMethod, InterceptRule, InterceptStatus, InterceptedTrafficEntry,
     ApplicationLogEntry, OrchestratorPlan, OperationDefinitionInfo, SemanticOpUpdate,
     SystemState, TerminalOutput, TrafficLogFilters, TrafficMatchWithDetails, RuleScope,
-    TargetDirection, TrafficSearchFilters, TargetSpec, ToolkitApplyDecision,
-    ToolkitExecution, ToolkitModelOption, ToolkitReconTarget, ToolkitToolInfo,
+    TargetDirection, TrafficSearchFilters, TargetSpec, ToolkitApplyItem,
+    ToolkitApplyOutcome, ToolkitExecuteResult, ToolkitModelOption, ToolkitReconTarget,
+    ToolkitToolInfo,
 };
 
 /// Messages sent from browser to web server
@@ -268,14 +269,9 @@ pub enum BrowserMessage {
         params: serde_json::Value,
     },
     ToolkitApply {
+        tool_name: String,
         execution_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        apply_all: Option<bool>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        decisions: Option<Vec<ToolkitApplyDecision>>,
-    },
-    ToolkitExecutionGet {
-        execution_id: String,
+        targets: Vec<ToolkitApplyItem>,
     },
 
     //
@@ -639,14 +635,12 @@ pub enum ServerMessage {
         tool_name: String,
         targets: Vec<ToolkitReconTarget>,
     },
-    ToolkitExecutionUpdate {
-        execution: ToolkitExecution,
-    },
     ToolkitExecutionResult {
-        execution: ToolkitExecution,
+        result: ToolkitExecuteResult,
     },
     ToolkitApplyResult {
-        execution: ToolkitExecution,
+        execution_id: String,
+        results: Vec<ToolkitApplyOutcome>,
     },
     ToolkitError {
         message: String,

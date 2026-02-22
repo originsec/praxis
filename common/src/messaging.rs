@@ -1257,16 +1257,6 @@ pub struct ToolkitReconTarget {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ToolkitExecutionStatus {
-    Queued,
-    Running,
-    AwaitingDecision,
-    Applying,
-    Completed,
-    Failed,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ToolkitDiffLineKind {
     Context,
     Added,
@@ -1297,33 +1287,34 @@ pub struct ToolkitTargetPreview {
     pub success: bool,
     pub preview_content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diff_hunks: Option<Vec<ToolkitDiffHunk>>,
     pub error: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub accepted: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub applied: Option<bool>,
 }
 
-/// Full execution record for toolkit runs
+/// Result of a toolkit execute (preview stage)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolkitExecution {
+pub struct ToolkitExecuteResult {
     pub execution_id: String,
     pub tool_name: String,
-    pub status: ToolkitExecutionStatus,
-    pub target_spec: TargetSpec,
-    pub params: serde_json::Value,
     pub previews: Vec<ToolkitTargetPreview>,
-    pub requested_at: DateTime<Utc>,
-    pub completed_at: Option<DateTime<Utc>>,
     pub error: Option<String>,
 }
 
-/// Apply decision for a specific target in hybrid apply mode
+/// Item sent from frontend to apply a specific target's content
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolkitApplyDecision {
+pub struct ToolkitApplyItem {
     pub target: ToolkitTargetRef,
-    pub accepted: bool,
+    pub content: String,
+}
+
+/// Per-target outcome from the apply operation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitApplyOutcome {
+    pub target: ToolkitTargetRef,
+    pub success: bool,
+    pub error: Option<String>,
 }
 
 /// Chain trigger info (shared DTO for API/UI)
@@ -1779,19 +1770,12 @@ pub enum ClientSignalMessage {
         target_spec: TargetSpec,
         params: serde_json::Value,
     },
-    /// Apply accepted previews for an execution
+    /// Apply targets for an execution
     ToolkitApply {
         client_id: String,
+        tool_name: String,
         execution_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        apply_all: Option<bool>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        decisions: Option<Vec<ToolkitApplyDecision>>,
-    },
-    /// Get current state of a toolkit execution
-    ToolkitExecutionGet {
-        client_id: String,
-        execution_id: String,
+        targets: Vec<ToolkitApplyItem>,
     },
 
     //
@@ -2133,14 +2117,12 @@ pub enum ClientDirectMessage {
         tool_name: String,
         targets: Vec<ToolkitReconTarget>,
     },
-    ToolkitExecutionUpdate {
-        execution: ToolkitExecution,
-    },
     ToolkitExecutionResult {
-        execution: ToolkitExecution,
+        result: ToolkitExecuteResult,
     },
     ToolkitApplyResult {
-        execution: ToolkitExecution,
+        execution_id: String,
+        results: Vec<ToolkitApplyOutcome>,
     },
     ToolkitError {
         message: String,

@@ -137,10 +137,8 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             handle_toolkit_recon(ctx, client_id, tool_name, target_spec).await,
         ClientSignalMessage::ToolkitExecute { client_id, tool_name, target_spec, params } =>
             handle_toolkit_execute(ctx, client_id, tool_name, target_spec, params).await,
-        ClientSignalMessage::ToolkitApply { client_id, execution_id, apply_all, decisions } =>
-            handle_toolkit_apply(ctx, client_id, execution_id, apply_all, decisions).await,
-        ClientSignalMessage::ToolkitExecutionGet { client_id, execution_id } =>
-            handle_toolkit_execution_get(ctx, client_id, execution_id).await,
+        ClientSignalMessage::ToolkitApply { client_id, tool_name, execution_id, targets } =>
+            handle_toolkit_apply(ctx, client_id, tool_name, execution_id, targets).await,
 
         //
         // Chain definitions.
@@ -1581,11 +1579,11 @@ async fn handle_toolkit_execute(
     let client_publish_channel = ctx.client_publish_channel.clone();
     tokio::spawn(async move {
         match toolkit_manager.execute(&tool_name, target_spec, params).await {
-            Ok(execution) => {
+            Ok(result) => {
                 let _ = send_to_client(
                     &client_publish_channel,
                     &client_id,
-                    ClientDirectMessage::ToolkitExecutionResult { execution },
+                    ClientDirectMessage::ToolkitExecutionResult { result },
                 )
                 .await;
             }
@@ -1606,22 +1604,25 @@ async fn handle_toolkit_execute(
 async fn handle_toolkit_apply(
     ctx: &ServiceContext,
     client_id: String,
+    tool_name: String,
     execution_id: String,
-    apply_all: Option<bool>,
-    decisions: Option<Vec<common::ToolkitApplyDecision>>,
+    targets: Vec<common::ToolkitApplyItem>,
 ) {
     let toolkit_manager = ctx.toolkit_manager.clone();
     let client_publish_channel = ctx.client_publish_channel.clone();
     tokio::spawn(async move {
         match toolkit_manager
-            .apply(&execution_id, apply_all, decisions)
+            .apply(&tool_name, &execution_id, targets)
             .await
         {
-            Ok(execution) => {
+            Ok(results) => {
                 let _ = send_to_client(
                     &client_publish_channel,
                     &client_id,
-                    ClientDirectMessage::ToolkitApplyResult { execution },
+                    ClientDirectMessage::ToolkitApplyResult {
+                        execution_id,
+                        results,
+                    },
                 )
                 .await;
             }
@@ -1637,33 +1638,6 @@ async fn handle_toolkit_apply(
             }
         }
     });
-}
-
-async fn handle_toolkit_execution_get(
-    ctx: &ServiceContext,
-    client_id: String,
-    execution_id: String,
-) {
-    match ctx.toolkit_manager.get_execution(&execution_id).await {
-        Some(execution) => {
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::ToolkitExecutionUpdate { execution },
-            )
-            .await;
-        }
-        None => {
-            let _ = send_to_client(
-                &ctx.client_publish_channel,
-                &client_id,
-                ClientDirectMessage::ToolkitError {
-                    message: "Toolkit execution not found".to_string(),
-                },
-            )
-            .await;
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------

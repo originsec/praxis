@@ -42,7 +42,8 @@ import type {
   AgentChatMessageInfo,
   AgentChatSessionState,
   LuaAgentScriptInfo,
-  ToolkitExecution,
+  ToolkitExecuteResult,
+  ToolkitApplyOutcome,
   ToolkitModelOption,
   ToolkitReconTarget,
   ToolkitToolInfo,
@@ -153,7 +154,8 @@ interface ToolkitState {
   tools: ToolkitToolInfo[];
   models: ToolkitModelOption[];
   reconTargets: ToolkitReconTarget[];
-  execution: ToolkitExecution | null;
+  executeResult: ToolkitExecuteResult | null;
+  applyResults: ToolkitApplyOutcome[] | null;
   error: string | null;
 }
 
@@ -190,7 +192,8 @@ const initialToolkitState: ToolkitState = {
   tools: [],
   models: [],
   reconTargets: [],
-  execution: null,
+  executeResult: null,
+  applyResults: null,
   error: null,
 };
 
@@ -359,7 +362,8 @@ type Action =
   //
   | { type: 'TOOLKIT_LIST_RESPONSE'; tools: ToolkitToolInfo[]; models: ToolkitModelOption[] }
   | { type: 'TOOLKIT_RECON_RESPONSE'; targets: ToolkitReconTarget[] }
-  | { type: 'TOOLKIT_SET_EXECUTION'; execution: ToolkitExecution }
+  | { type: 'TOOLKIT_EXECUTE_RESULT'; result: ToolkitExecuteResult }
+  | { type: 'TOOLKIT_APPLY_RESULT'; results: ToolkitApplyOutcome[] }
   | { type: 'TOOLKIT_ERROR'; message: string }
   //
   // Lua agent script actions.
@@ -1075,10 +1079,15 @@ function reduceToolkit(state: AppState, action: Action): AppState | null {
         ...state,
         toolkit: { ...state.toolkit, reconTargets: action.targets, error: null },
       };
-    case 'TOOLKIT_SET_EXECUTION':
+    case 'TOOLKIT_EXECUTE_RESULT':
       return {
         ...state,
-        toolkit: { ...state.toolkit, execution: action.execution, error: null },
+        toolkit: { ...state.toolkit, executeResult: action.result, applyResults: null, error: null },
+      };
+    case 'TOOLKIT_APPLY_RESULT':
+      return {
+        ...state,
+        toolkit: { ...state.toolkit, applyResults: action.results, error: null },
       };
     case 'TOOLKIT_ERROR':
       return {
@@ -1496,10 +1505,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         case 'toolkit_recon_response':
           dispatch({ type: 'TOOLKIT_RECON_RESPONSE', targets: message.targets });
           break;
-        case 'toolkit_execution_update':
         case 'toolkit_execution_result':
+          dispatch({ type: 'TOOLKIT_EXECUTE_RESULT', result: message.result });
+          break;
         case 'toolkit_apply_result':
-          dispatch({ type: 'TOOLKIT_SET_EXECUTION', execution: message.execution });
+          dispatch({ type: 'TOOLKIT_APPLY_RESULT', results: message.results });
           break;
         case 'toolkit_error':
           dispatch({ type: 'TOOLKIT_ERROR', message: message.message });

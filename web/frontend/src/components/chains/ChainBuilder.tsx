@@ -397,10 +397,10 @@ interface ChainBuilderInnerProps {
   saveError?: string | null;
 }
 
-function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs, modelDefs, nodes: systemNodes, saveStatus, saveError }: ChainBuilderInnerProps) {
+function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs, modelDefs, nodes: _systemNodes, saveStatus, saveError }: ChainBuilderInnerProps) {
   const [name, setName] = useState(chain?.name || '');
   const [description, setDescription] = useState(chain?.description || '');
-  const [timeout, setTimeout] = useState(chain?.timeout || 1800);
+  const [timeout, setChainTimeout] = useState(chain?.timeout || 1800);
   const category = 'default';
 
   const initialFlow = chainToFlow(chain || null, operationDefs);
@@ -1479,7 +1479,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
     //
     const sourceNode = nodes.find(n => n.id === edge.source);
     const isAgentOp = sourceNode?.type === 'operation'
-      && (sourceNode.data as OperationNodeData)?.mode === 'agent';
+      && (sourceNode.data as unknown as OperationNodeData)?.mode === 'agent';
     if (!isAgentOp) return;
 
     setEdges(eds => eds.map(e => {
@@ -1609,7 +1609,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
             <input
               type="number"
               value={timeout}
-              onChange={(e) => setTimeout(parseInt(e.target.value) || 1800)}
+              onChange={(e) => setChainTimeout(parseInt(e.target.value) || 1800)}
               min={1}
               className="bg-[var(--bg-primary)] border border-dim px-2 py-1.5 text-sm text-highlight w-20 text-center focus:outline-none focus:border-subtle transition-colors"
             />
@@ -2126,6 +2126,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
         onChange={(key, val) => setDuplicateValues(prev => ({ ...prev, [key]: val }))}
         config={[
           {
+            type: 'section' as const,
             fields: [
               { name: 'name', label: 'Name', type: 'text' as const, required: true, span: 'full' as const },
               { name: 'description', label: 'Description', type: 'text' as const, span: 'full' as const },
