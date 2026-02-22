@@ -38,3 +38,4 @@ async-trait = "0.1"
 tokio-util = { version = "0.7", features = ["rt"] }
 base64 = "0.22"
 nom = "7"
+similar = "2.6"

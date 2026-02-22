@@ -1266,12 +1266,38 @@ pub enum ToolkitExecutionStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ToolkitDiffLineKind {
+    Context,
+    Added,
+    Removed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitDiffLine {
+    pub kind: ToolkitDiffLineKind,
+    pub old_line_no: Option<usize>,
+    pub new_line_no: Option<usize>,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitDiffHunk {
+    pub old_start: usize,
+    pub old_len: usize,
+    pub new_start: usize,
+    pub new_len: usize,
+    pub lines: Vec<ToolkitDiffLine>,
+}
+
 /// Per-target preview/result state for toolkit execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolkitTargetPreview {
     pub target: ToolkitTargetRef,
     pub success: bool,
     pub preview_content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_hunks: Option<Vec<ToolkitDiffHunk>>,
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accepted: Option<bool>,
