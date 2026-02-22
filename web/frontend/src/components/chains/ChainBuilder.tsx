@@ -525,6 +525,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
   const [payloadEditName, setPayloadEditName] = useState('');
   const [payloadEditContent, setPayloadEditContent] = useState('');
   const [payloadEditId, setPayloadEditId] = useState<string | null>(null);
+  const [showPayloadForm, setShowPayloadForm] = useState(false);
 
   //
   // Modal state for session group configuration.
@@ -1200,6 +1201,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       setPayloadEditName('');
       setPayloadEditContent('');
       setPayloadEditId(null);
+      setShowPayloadForm(false);
       send({ type: 'payload_list' });
       setShowPayloadModal(true);
       return;
@@ -1785,6 +1787,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       setPayloadEditName('');
       setPayloadEditContent('');
       setPayloadEditId(null);
+      setShowPayloadForm(false);
       send({ type: 'payload_list' });
       setShowPayloadModal(true);
     }
@@ -2432,7 +2435,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
                   <button
                     className="p-1 text-muted hover:text-highlight"
                     title="Edit"
-                    onClick={(e) => { e.stopPropagation(); setPayloadEditId(p.id); setPayloadEditName(p.shortname); setPayloadEditContent(p.content); }}
+                    onClick={(e) => { e.stopPropagation(); setPayloadEditId(p.id); setPayloadEditName(p.shortname); setPayloadEditContent(p.content); setShowPayloadForm(true); }}
                   >✎</button>
                   <button
                     className="p-1 text-muted hover:text-[var(--accent-error)]"
@@ -2444,43 +2447,53 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
             ))}
           </div>
 
-          <div className="border border-[var(--border-color)] rounded p-3 space-y-2">
-            <div className="text-xs text-muted font-medium">{payloadEditId ? 'Edit Payload' : 'New Payload'}</div>
-            <input
-              type="text"
-              value={payloadEditName}
-              onChange={(e) => setPayloadEditName(e.target.value)}
-              placeholder="Shortname (one word)"
-              className="w-full bg-[var(--bg-primary)] text-sm px-2 py-1.5 border border-[var(--border-color)] font-mono focus:outline-none focus:border-[var(--accent-warning)]"
-            />
-            <textarea
-              value={payloadEditContent}
-              onChange={(e) => setPayloadEditContent(e.target.value)}
-              placeholder="Payload content (markdown)"
-              rows={10}
-              className="w-full bg-[var(--bg-primary)] text-sm px-2 py-1.5 border border-[var(--border-color)] font-mono focus:outline-none focus:border-[var(--accent-warning)] resize-y"
-            />
+          {showPayloadForm ? (
+            <div className="border border-[var(--border-color)] rounded p-3 space-y-2">
+              <div className="text-xs text-muted font-medium">{payloadEditId ? 'Edit Payload' : 'New Payload'}</div>
+              <input
+                type="text"
+                value={payloadEditName}
+                onChange={(e) => setPayloadEditName(e.target.value)}
+                placeholder="Shortname (one word)"
+                className="w-full bg-[var(--bg-primary)] text-sm px-2 py-1.5 border border-[var(--border-color)] font-mono focus:outline-none focus:border-[var(--accent-warning)]"
+              />
+              <textarea
+                value={payloadEditContent}
+                onChange={(e) => setPayloadEditContent(e.target.value)}
+                placeholder="Payload content (markdown)"
+                rows={10}
+                className="w-full bg-[var(--bg-primary)] text-sm px-2 py-1.5 border border-[var(--border-color)] font-mono focus:outline-none focus:border-[var(--accent-warning)] resize-y"
+              />
+              <div className="flex gap-2">
+                <button
+                  className="px-3 py-1.5 text-xs border border-[var(--accent-warning)] text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/10 disabled:opacity-50"
+                  disabled={!payloadEditName.trim() || !payloadEditContent.trim()}
+                  onClick={() => {
+                    send({ type: 'payload_upsert', id: payloadEditId || undefined, shortname: payloadEditName.trim(), content: payloadEditContent });
+                    setPayloadEditId(null);
+                    setPayloadEditName('');
+                    setPayloadEditContent('');
+                    setShowPayloadForm(false);
+                  }}
+                >
+                  {payloadEditId ? 'Update' : 'Save Payload'}
+                </button>
+                <button
+                  className="px-3 py-1.5 text-xs border border-dim text-muted hover:text-highlight"
+                  onClick={() => { setPayloadEditId(null); setPayloadEditName(''); setPayloadEditContent(''); setShowPayloadForm(false); }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
             <button
-              className="px-3 py-1.5 text-xs border border-[var(--accent-warning)] text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/10 disabled:opacity-50"
-              disabled={!payloadEditName.trim() || !payloadEditContent.trim()}
-              onClick={() => {
-                send({ type: 'payload_upsert', id: payloadEditId || undefined, shortname: payloadEditName.trim(), content: payloadEditContent });
-                setPayloadEditId(null);
-                setPayloadEditName('');
-                setPayloadEditContent('');
-              }}
+              className="px-3 py-1.5 text-xs border border-dim text-muted hover:text-highlight hover:border-[var(--accent-warning)]"
+              onClick={() => { setPayloadEditId(null); setPayloadEditName(''); setPayloadEditContent(''); setShowPayloadForm(true); }}
             >
-              {payloadEditId ? 'Update' : 'Save Payload'}
+              + New Payload
             </button>
-            {payloadEditId && (
-              <button
-                className="px-3 py-1.5 text-xs border border-dim text-muted hover:text-highlight ml-2"
-                onClick={() => { setPayloadEditId(null); setPayloadEditName(''); setPayloadEditContent(''); }}
-              >
-                Cancel
-              </button>
-            )}
-          </div>
+          )}
 
           <div className="flex justify-end">
             <button
