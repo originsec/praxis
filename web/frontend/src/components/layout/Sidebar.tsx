@@ -12,6 +12,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { getFeatureFlags } from '../../utils/featureFlags';
 
 interface SidebarProps {
   onNavigate?: () => void;
@@ -21,6 +22,8 @@ export function Sidebar({ onNavigate }: SidebarProps) {
   const { state } = useApp();
   const nodes = state.systemState?.nodes ?? [];
 
+  const flags = getFeatureFlags();
+
   const navItems = [
     { to: '/', icon: LayoutDashboard, label: 'DASHBOARD', end: true },
     { to: '/nodes', icon: Server, label: 'NODES', end: false },
@@ -29,7 +32,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
     { to: '/hunting', icon: Crosshair, label: 'HUNTING', end: false },
     // { to: '/discovery', icon: Radar, label: 'DISCOVERY', end: false },  // Hidden - feature not ready
     { to: '/orchestrator', icon: Bot, label: 'ORCHESTRATOR', end: false },
-    { to: '/agent-chat', icon: MessageSquare, label: 'AGENT CHAT', end: false },
+    ...(flags.agentChat ? [{ to: '/agent-chat', icon: MessageSquare, label: 'AGENT CHAT', end: false }] : []),
     { to: '/toolkit', icon: Wrench, label: 'TOOLKIT', end: false },
     { to: '/settings', icon: Settings, label: 'SETTINGS', end: false },
   ];
