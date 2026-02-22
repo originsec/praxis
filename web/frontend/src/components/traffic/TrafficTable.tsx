@@ -660,7 +660,7 @@ function WebSocketGroupRow({
         className="border-b border-dim hover:bg-[var(--highlight)] cursor-pointer bg-[var(--bg-tertiary)]/50"
         onClick={onToggle}
       >
-        <td className="px-4 py-2">
+        <td className="px-2 py-2 w-10">
           {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </td>
         <td className="px-4 py-2 text-muted font-mono">{timestamp}</td>
@@ -822,7 +822,7 @@ function H2GroupRow({
         className="border-b border-dim hover:bg-[var(--highlight)] cursor-pointer bg-[var(--bg-tertiary)]/50"
         onClick={onToggle}
       >
-        <td className="px-4 py-2">
+        <td className="px-2 py-2 w-10">
           {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </td>
         <td className="px-4 py-2 text-muted font-mono">{timestamp}</td>
@@ -989,7 +989,7 @@ function TrafficRow({
         className="border-b border-dim hover:bg-[var(--highlight)] cursor-pointer"
         onClick={onToggle}
       >
-        <td className="px-4 py-2">
+        <td className="px-2 py-2 w-10">
           {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </td>
         <td className="px-4 py-2 text-muted font-mono">{timestamp}</td>
@@ -1091,7 +1091,7 @@ function TrafficRow({
 export function TrafficTableHeader({ showNodeColumn = true }: { showNodeColumn?: boolean }) {
   return (
     <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
-      <th className="text-left px-4 py-2 text-muted tracking-wider"></th>
+      <th className="text-left px-2 py-2 text-muted tracking-wider w-10"></th>
       <th className="text-left px-4 py-2 text-muted tracking-wider">TIMESTAMP</th>
       {showNodeColumn && (
         <th className="text-left px-4 py-2 text-muted tracking-wider">NODE</th>

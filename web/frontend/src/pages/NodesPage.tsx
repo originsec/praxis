@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { Server, Trash2, Bot, Shield, Clock } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { StatusBadge, getNodeStatus } from '../components/common/StatusBadge';
+import { DataTable, type ColumnDef, type RowAction } from '../components/common/DataTable';
+import type { NodeState } from '../api/types';
 
 export function NodesPage() {
   const navigate = useNavigate();
@@ -55,6 +57,90 @@ export function NodesPage() {
     if (diffMins < 60) return `${diffMins}m ago`;
     return date.toLocaleTimeString();
   };
+
+  const nodeColumns: ColumnDef<NodeState>[] = [
+    {
+      key: 'machine_name',
+      header: 'Node',
+      sortable: false,
+      render: (_: unknown, node: NodeState) => (
+        <div className="flex items-center gap-3">
+          <Server size={14} className="text-muted group-hover:text-[var(--accent-info)]" />
+          <div>
+            <p className="font-medium text-highlight group-hover:text-[var(--accent-info)]">
+              {node.machine_name || 'Unknown'}
+            </p>
+            <p className="text-muted font-mono">{node.node_id.slice(0, 12)}...</p>
+          </div>
+        </div>
+      ),
+    },
+    {
+      key: 'os_details',
+      header: 'OS',
+      sortable: false,
+      cellClassName: 'text-muted',
+    },
+    {
+      key: 'agents',
+      header: 'Agents',
+      sortable: false,
+      render: (_: unknown, node: NodeState) => (
+        <div className="flex items-center gap-2">
+          <Bot size={12} className="text-muted" />
+          <span>{node.discovered_agents.filter(a => a.available).length}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'session',
+      header: 'Session',
+      sortable: false,
+      render: (_: unknown, node: NodeState) =>
+        node.selected_agent?.session_id
+          ? <span className="text-[var(--accent-success)]">{node.selected_agent.short_name}</span>
+          : <span className="text-muted">-</span>,
+    },
+    {
+      key: 'intercept',
+      header: 'Intercept',
+      sortable: false,
+      render: (_: unknown, node: NodeState) =>
+        !node.intercept_supported
+          ? <span className="text-muted opacity-50">UNSUPPORTED</span>
+          : node.intercept_active
+            ? <span className="flex items-center gap-1 text-[var(--accent-warning)]"><Shield size={12} /> Active</span>
+            : <span className="text-muted">-</span>,
+    },
+    {
+      key: 'last_update',
+      header: 'Last Seen',
+      sortable: false,
+      render: (_: unknown, node: NodeState) => (
+        <div className="flex items-center gap-1 text-muted">
+          <Clock size={12} />
+          {formatLastSeen(node.last_update)}
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortable: false,
+      render: (_: unknown, node: NodeState) => (
+        <StatusBadge status={getNodeStatus(node.last_update)} />
+      ),
+    },
+  ];
+
+  const nodeActions: RowAction<NodeState>[] = [
+    {
+      icon: <Trash2 size={14} />,
+      label: 'Remove node',
+      onClick: (node) => removeNode(node.node_id),
+      hoverColor: 'var(--accent-error)',
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -159,89 +245,15 @@ export function NodesPage() {
         </div>
 
         <div className="hidden md:block border border-subtle ascii-box overflow-x-auto">
-          <table className="w-full min-w-[820px] text-xs">
-            <thead>
-              <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
-                <th className="text-left px-4 py-2 text-muted tracking-wider">NODE</th>
-                <th className="text-left px-4 py-2 text-muted tracking-wider">OS</th>
-                <th className="text-left px-4 py-2 text-muted tracking-wider">AGENTS</th>
-                <th className="text-left px-4 py-2 text-muted tracking-wider">SESSION</th>
-                <th className="text-left px-4 py-2 text-muted tracking-wider">INTERCEPT</th>
-                <th className="text-left px-4 py-2 text-muted tracking-wider">LAST SEEN</th>
-                <th className="text-left px-4 py-2 text-muted tracking-wider">STATUS</th>
-                <th className="px-4 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {nodes.map((node) => (
-                <tr
-                  key={node.node_id}
-                  onClick={() => navigate(`/nodes/${node.node_id}`)}
-                  className="border-b border-dim last:border-0 hover:bg-[var(--highlight)] transition-colors cursor-pointer group"
-                >
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <Server size={14} className="text-muted group-hover:text-[var(--accent-info)]" />
-                      <div>
-                        <p className="font-medium text-highlight group-hover:text-[var(--accent-info)]">
-                          {node.machine_name || 'Unknown'}
-                        </p>
-                        <p className="text-muted font-mono">{node.node_id.slice(0, 12)}...</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-muted">{node.os_details}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <Bot size={12} className="text-muted" />
-                      <span>
-                        {node.discovered_agents.filter((a) => a.available).length}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    {node.selected_agent?.session_id ? (
-                      <span className="text-[var(--accent-success)]">
-                        {node.selected_agent.short_name}
-                      </span>
-                    ) : (
-                      <span className="text-muted">-</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {!node.intercept_supported ? (
-                      <span className="text-muted opacity-50">UNSUPPORTED</span>
-                    ) : node.intercept_active ? (
-                      <span className="flex items-center gap-1 text-[var(--accent-warning)]">
-                        <Shield size={12} /> Active
-                      </span>
-                    ) : (
-                      <span className="text-muted">-</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1 text-muted">
-                      <Clock size={12} />
-                      {formatLastSeen(node.last_update)}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={getNodeStatus(node.last_update)} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => removeNode(node.node_id)}
-                        className="p-1 hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            data={nodes}
+            columns={nodeColumns}
+            getRowKey={n => n.node_id}
+            actions={nodeActions}
+            pinnedActions
+            onRowClick={(node) => navigate(`/nodes/${node.node_id}`)}
+            rowClassName="group"
+          />
         </div>
         </>
       )}

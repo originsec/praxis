@@ -4,6 +4,7 @@ import { useApp } from '../../context/AppContext';
 import { ChainBuilder } from '../chains/ChainBuilder';
 import { Modal } from '../common/Modal';
 import { RunModal } from '../common/RunModal';
+import { DataTable, type ColumnDef, type RowAction } from '../common/DataTable';
 import { ImportModal } from './ImportModal';
 import type { LibraryItem, LibraryItemType, OperationDefinitionInfo, ChainDefinitionInput, NodeState } from '../../api/types';
 
@@ -514,6 +515,87 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
     }
   }, [showChainBuilder, updateChainBuilderHeight]);
 
+  const libraryColumns: ColumnDef<LibraryItem>[] = [
+    {
+      key: 'type',
+      header: 'Type',
+      sortable: false,
+      render: (_: unknown, item: LibraryItem) => (
+        <span title={item.type === 'operation' ? 'Operation' : 'Chain'}>
+          {item.type === 'operation'
+            ? <Zap size={14} className="text-[var(--accent-purple)]" />
+            : <GitBranch size={14} className="text-[var(--accent-info)]" />}
+        </span>
+      ),
+    },
+    {
+      key: 'name',
+      header: 'Name',
+      sortable: false,
+      render: (_: unknown, item: LibraryItem) => (
+        <div className={item.disabled ? 'opacity-50' : ''}>
+          <p className="font-medium text-highlight flex items-center gap-2">
+            {item.name}
+            {item.disabled && (
+              <span className="px-1.5 py-0.5 bg-[var(--bg-tertiary)] text-muted text-xs">Disabled</span>
+            )}
+          </p>
+          {item.description && (
+            <p className="text-muted text-xs truncate max-w-md">{item.description}</p>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'category',
+      header: 'Category',
+      sortable: false,
+      render: (_: unknown, item: LibraryItem) => (
+        <span className={item.disabled ? 'opacity-50' : ''}>{item.category}</span>
+      ),
+    },
+    {
+      key: 'details',
+      header: 'Details',
+      sortable: false,
+      render: (_: unknown, item: LibraryItem) => (
+        <span className={`text-muted ${item.disabled ? 'opacity-50' : ''}`}>
+          {item.type === 'operation'
+            ? `${item.mode} | ${item.timeout}s`
+            : `${item.elementCount} elements | ${item.operationCount} ops`}
+        </span>
+      ),
+    },
+  ];
+
+  const libraryActions: RowAction<LibraryItem>[] = [
+    {
+      icon: <Play size={14} />,
+      label: 'Run',
+      onClick: (item) => handleRunItem(item),
+      disabled: (item) => !!item.disabled,
+      hoverColor: 'var(--accent-success)',
+    },
+    {
+      icon: <Edit2 size={14} />,
+      label: 'Edit',
+      onClick: (item) => handleEditItem(item),
+      hoverColor: 'var(--accent-info)',
+    },
+    {
+      icon: <Download size={14} />,
+      label: 'Export JSON',
+      onClick: (item) => handleExportItem(item),
+      hoverColor: 'var(--accent-purple)',
+    },
+    {
+      icon: <Trash2 size={14} />,
+      label: 'Delete',
+      onClick: (item) => handleDeleteClick(item),
+      hoverColor: 'var(--accent-error)',
+    },
+  ];
+
   if (showChainBuilder) {
     return (
       <div
@@ -652,111 +734,25 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
       // Library table.
       //
       */}
-      {filteredItems.length === 0 ? (
-        <div className="text-center text-muted py-8 border border-subtle ascii-box">
-          {searchQuery
-            ? 'No items match your search.'
-            : filter === 'all'
-            ? 'No operations or chains defined. Click "Add" to create one.'
-            : filter === 'operation'
-            ? 'No operations defined.'
-            : 'No chains defined.'}
-        </div>
-      ) : (
-        <div className="border border-subtle ascii-box overflow-x-auto">
-          <table className="w-full min-w-[760px] text-xs">
-            <thead>
-              <tr className="border-b border-subtle bg-[var(--bg-tertiary)]">
-                <th className="text-left px-4 py-2 text-muted tracking-wider">NAME</th>
-                <th className="text-left px-4 py-2 text-muted tracking-wider">CATEGORY</th>
-                <th className="text-left px-4 py-2 text-muted tracking-wider">DETAILS</th>
-                <th className="px-4 py-2"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredItems.map((item) => (
-                <tr
-                  key={`${item.type}-${item.id}`}
-                  className="border-b border-dim last:border-0 hover:bg-[var(--highlight)] transition-colors cursor-pointer"
-                  onClick={() => handleEditItem(item)}
-                >
-                  <td className="px-4 py-3">
-                    <div className={`flex items-start gap-2.5 ${item.disabled ? 'opacity-50' : ''}`}>
-                      <span className="mt-0.5 shrink-0" title={item.type === 'operation' ? 'Operation' : 'Chain'}>
-                        {item.type === 'operation' ? (
-                          <Zap size={14} className="text-[var(--accent-purple)]" />
-                        ) : (
-                          <GitBranch size={14} className="text-[var(--accent-info)]" />
-                        )}
-                      </span>
-                      <div>
-                      <p className="font-medium text-highlight flex items-center gap-2">
-                        {item.name}
-                        {item.disabled && (
-                          <span className="px-1.5 py-0.5 bg-[var(--bg-tertiary)] text-muted text-xs">
-                            Disabled
-                          </span>
-                        )}
-                      </p>
-                      {item.description && (
-                        <p className="text-muted text-xs truncate max-w-md">{item.description}</p>
-                      )}
-                      </div>
-                    </div>
-                  </td>
-                  <td className={`px-4 py-3 ${item.disabled ? 'opacity-50' : ''}`}>
-                    {item.category}
-                  </td>
-                  <td className={`px-4 py-3 text-muted ${item.disabled ? 'opacity-50' : ''}`}>
-                    {item.type === 'operation' ? (
-                      <span>{item.mode} | {item.timeout}s</span>
-                    ) : (
-                      <span>{item.elementCount} elements | {item.operationCount} ops</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() => handleRunItem(item)}
-                        disabled={item.disabled}
-                        className={`p-2 transition-colors ${
-                          item.disabled
-                            ? 'opacity-30 cursor-not-allowed text-muted'
-                            : 'hover:bg-[var(--accent-success)]/10 text-muted hover:text-[var(--accent-success)]'
-                        }`}
-                        title="Run"
-                      >
-                        <Play size={14} />
-                      </button>
-                      <button
-                        onClick={() => handleEditItem(item)}
-                        className="p-2 hover:bg-[var(--accent-info)]/10 text-muted hover:text-[var(--accent-info)] transition-colors"
-                        title="Edit"
-                      >
-                        <Edit2 size={14} />
-                      </button>
-                      <button
-                        onClick={() => handleExportItem(item)}
-                        className="p-2 hover:bg-[var(--accent-purple)]/10 text-muted hover:text-[var(--accent-purple)] transition-colors"
-                        title="Export JSON"
-                      >
-                        <Download size={14} />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteClick(item)}
-                        className="p-2 hover:bg-[var(--accent-error)]/10 text-muted hover:text-[var(--accent-error)] transition-colors"
-                        title="Delete"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <div className="border border-subtle ascii-box overflow-x-auto">
+        <DataTable
+          data={filteredItems}
+          columns={libraryColumns}
+          getRowKey={item => `${item.type}-${item.id}`}
+          actions={libraryActions}
+          pinnedActions
+          onRowClick={(item) => handleEditItem(item)}
+          emptyMessage={
+            searchQuery
+              ? 'No items match your search.'
+              : filter === 'all'
+              ? 'No operations or chains defined. Click "Add" to create one.'
+              : filter === 'operation'
+              ? 'No operations defined.'
+              : 'No chains defined.'
+          }
+        />
+      </div>
 
       {/*
       //
