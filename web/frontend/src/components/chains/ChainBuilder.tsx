@@ -470,6 +470,28 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
   const [extraData, setExtraData] = useState<ChainExtraData>(() => initialFlow.extraData);
 
   //
+  // Re-resolve payload node data when payloads list arrives after initial load.
+  //
+  useEffect(() => {
+    if (payloads.length === 0) return;
+    setNodes(nds => {
+      let changed = false;
+      const updated = nds.map(n => {
+        if (n.type !== 'payload') return n;
+        const payloadId = extraData.payloadConfigs.get(n.id);
+        if (!payloadId) return n;
+        const pl = payloads.find(p => p.id === payloadId);
+        if (!pl) return n;
+        const data = n.data as Record<string, unknown>;
+        if (data.shortname === pl.shortname && data.content === pl.content) return n;
+        changed = true;
+        return { ...n, data: { ...data, shortname: pl.shortname, content: pl.content } };
+      });
+      return changed ? updated : nds;
+    });
+  }, [payloads, extraData.payloadConfigs, setNodes]);
+
+  //
   // Track hovered node for delete-on-hover.
   //
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
