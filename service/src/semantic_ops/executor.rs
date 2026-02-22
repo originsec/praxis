@@ -317,11 +317,18 @@ pub async fn execute_one_shot(
                     common::log_error!("SemanticResponseError: op={} error=timeout", &operation_id[..8]);
 
                     //
-                    // Cancel the in-flight prompt on the node, then close session.
+                    // Cancel the in-flight prompt on the node, then close
+                    // session. The node's Close handler force-cancels all
+                    // pending transactions.
                     //
 
-                    let _ = cancel_transaction(node_id, &transaction_id, rabbitmq_channel).await;
-                    let _ = close_session(node_id, rabbitmq_channel).await;
+                    common::log_info!("Timeout cleanup: cancelling transaction {} and closing session on node {}", &transaction_id, &node_id[..8]);
+                    if let Err(e) = cancel_transaction(node_id, &transaction_id, rabbitmq_channel).await {
+                        common::log_error!("Failed to cancel transaction on timeout: {}", e);
+                    }
+                    if let Err(e) = close_session(node_id, rabbitmq_channel).await {
+                        common::log_error!("Failed to close session on timeout: {}", e);
+                    }
 
                     Err(anyhow::anyhow!("Operation timed out after {} seconds", spec.timeout))
                 }
@@ -335,8 +342,13 @@ pub async fn execute_one_shot(
             // Cancel the in-flight prompt on the node, then close session.
             //
 
-            let _ = cancel_transaction(node_id, &transaction_id, rabbitmq_channel).await;
-            let _ = close_session(node_id, rabbitmq_channel).await;
+            common::log_info!("Cancel cleanup: cancelling transaction {} and closing session on node {}", &transaction_id, &node_id[..8]);
+            if let Err(e) = cancel_transaction(node_id, &transaction_id, rabbitmq_channel).await {
+                common::log_error!("Failed to cancel transaction: {}", e);
+            }
+            if let Err(e) = close_session(node_id, rabbitmq_channel).await {
+                common::log_error!("Failed to close session: {}", e);
+            }
 
             Err(anyhow::anyhow!("Operation cancelled"))
         }
@@ -774,8 +786,13 @@ async fn send_remote_prompt(
         Err(_) => {
             common::log_error!("SemanticToolError: op={} error=timeout", &operation_id[..8]);
 
-            let _ = cancel_transaction(node_id, &transaction_id, rabbitmq_channel).await;
-            let _ = close_session(node_id, rabbitmq_channel).await;
+            common::log_info!("Timeout cleanup: cancelling transaction {} and closing session on node {}", &transaction_id, &node_id[..8]);
+            if let Err(e) = cancel_transaction(node_id, &transaction_id, rabbitmq_channel).await {
+                common::log_error!("Failed to cancel transaction on timeout: {}", e);
+            }
+            if let Err(e) = close_session(node_id, rabbitmq_channel).await {
+                common::log_error!("Failed to close session on timeout: {}", e);
+            }
 
             Err(anyhow::anyhow!(
                 "Prompt timed out after {} seconds",
