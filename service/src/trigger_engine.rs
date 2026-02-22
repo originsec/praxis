@@ -7,6 +7,7 @@ use crate::database::Database;
 use crate::semantic_ops::{ChainExecutor, ResponseTracker};
 use crate::semantic_ops::chain_execution::resolve_targets;
 use crate::state::NodeRegistry;
+use crate::tools::ToolkitManager;
 
 /// Debounce window for intercept-match triggers (seconds)
 const INTERCEPT_DEBOUNCE_SECS: i64 = 60;
@@ -20,6 +21,7 @@ pub struct TriggerEngine {
     response_tracker: Arc<ResponseTracker>,
     semantic_ops_channel: Channel,
     broadcast_channel: Channel,
+    toolkit_manager: Arc<ToolkitManager>,
     refresh_notify: Notify,
 }
 
@@ -32,6 +34,7 @@ impl TriggerEngine {
         response_tracker: Arc<ResponseTracker>,
         semantic_ops_channel: Channel,
         broadcast_channel: Channel,
+        toolkit_manager: Arc<ToolkitManager>,
     ) -> Self {
         Self {
             database,
@@ -41,6 +44,7 @@ impl TriggerEngine {
             response_tracker,
             semantic_ops_channel,
             broadcast_channel,
+            toolkit_manager,
             refresh_notify: Notify::new(),
         }
     }
@@ -115,6 +119,7 @@ impl TriggerEngine {
                     self.broadcast_channel.clone(),
                     self.response_tracker.clone(),
                     self.database.clone(),
+                    Some(self.toolkit_manager.clone()),
                 ).await;
             }
 
@@ -197,6 +202,7 @@ impl TriggerEngine {
                     self.broadcast_channel.clone(),
                     self.response_tracker.clone(),
                     self.database.clone(),
+                    Some(self.toolkit_manager.clone()),
                 ).await;
             }
 
@@ -244,6 +250,7 @@ impl TriggerEngine {
                     self.broadcast_channel.clone(),
                     self.response_tracker.clone(),
                     self.database.clone(),
+                    Some(self.toolkit_manager.clone()),
                 ).await;
             }
 

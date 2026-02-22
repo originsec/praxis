@@ -15,7 +15,7 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge, Connection, OnSelectionChangeParams } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings, Check, AlertTriangle } from 'lucide-react';
+import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings, Check, AlertTriangle, Wrench } from 'lucide-react';
 import { ConfigModal } from '../common/ConfigModal';
 import { ChainTriggerPanel } from './ChainTriggerPanel';
 import type {
@@ -27,6 +27,7 @@ import type {
   NodeState,
   OperationDefinitionInfo,
   SessionGroup,
+  ToolkitToolInfo,
 } from '../../api/types';
 import { computeLayout } from '../../utils/dagreLayout';
 import { getNextSessionColor, getUsedColors } from '../../utils/sessionColors';
@@ -55,6 +56,11 @@ interface MemoryConfig {
   mode: 'Store' | 'Retrieve';
 }
 
+interface ToolConfig {
+  tool_name: string;
+  tool_params: Record<string, unknown>;
+}
+
 interface ChainExtraData {
   transformPrompts: Map<string, string>;
   transformModels: Map<string, string>;
@@ -63,6 +69,7 @@ interface ChainExtraData {
   blockConfigs: Map<string, BlockConfig>;
   memoryConfigs: Map<string, MemoryConfig>;
   loopMaxIterations: Map<string, number>;
+  toolConfigs: Map<string, ToolConfig>;
 }
 
 //
@@ -78,6 +85,7 @@ function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: Operatio
     blockConfigs: new Map(),
     memoryConfigs: new Map(),
     loopMaxIterations: new Map(),
+    toolConfigs: new Map(),
   };
 
   if (!chain) return { nodes: [], edges: [], extraData: emptyExtraData };
@@ -197,6 +205,17 @@ function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: Operatio
           position,
           data: { label: 'Loop', maxIterations: elem.max_iterations },
         };
+      case 'Tool':
+        extraData.toolConfigs.set(elem.id, { tool_name: elem.tool_name, tool_params: elem.tool_params });
+        if (elem.block_config) {
+          extraData.blockConfigs.set(elem.id, elem.block_config);
+        }
+        return {
+          id: elem.id,
+          type: 'tool',
+          position,
+          data: { label: 'Tool', toolName: elem.tool_name, maxRuntime: elem.block_config?.max_runtime },
+        };
       case 'Termination':
         if (elem.block_config) {
           extraData.blockConfigs.set(elem.id, elem.block_config);
@@ -312,6 +331,16 @@ function flowToChain(
           id: node.id,
           max_iterations: extraData.loopMaxIterations.get(node.id) || 3,
         };
+      case 'tool': {
+        const toolCfg = extraData.toolConfigs.get(node.id);
+        return {
+          element_type: 'Tool' as const,
+          id: node.id,
+          tool_name: toolCfg?.tool_name || '',
+          tool_params: toolCfg?.tool_params || {},
+          block_config: extraData.blockConfigs.get(node.id) || null,
+        };
+      }
       case 'termination':
         return {
           element_type: 'Termination' as const,
@@ -393,11 +422,12 @@ interface ChainBuilderInnerProps {
   operationDefs: OperationDefinitionInfo[];
   modelDefs: ModelDefinition[];
   nodes: NodeState[];
+  toolkitTools: ToolkitToolInfo[];
   saveStatus?: string | null;
   saveError?: string | null;
 }
 
-function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs, modelDefs, nodes: _systemNodes, saveStatus, saveError }: ChainBuilderInnerProps) {
+function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs, modelDefs, nodes: _systemNodes, toolkitTools, saveStatus, saveError }: ChainBuilderInnerProps) {
   const [name, setName] = useState(chain?.name || '');
   const [description, setDescription] = useState(chain?.description || '');
   const [timeout, setChainTimeout] = useState(chain?.timeout || 1800);
@@ -461,6 +491,10 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
 
   const [showLoopModal, setShowLoopModal] = useState(false);
   const [loopMaxIterations, setLoopMaxIterations] = useState<number>(3);
+
+  const [showToolModal, setShowToolModal] = useState(false);
+  const [toolModalToolName, setToolModalToolName] = useState('');
+  const [toolModalParams, setToolModalParams] = useState<Record<string, unknown>>({});
 
   //
   // Modal state for session group configuration.
@@ -856,12 +890,28 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
         return;
       }
 
+      if (type === 'tool') {
+        setPendingPosition(position);
+        setToolModalToolName(toolkitTools.length > 0 ? toolkitTools[0].tool_name : '');
+        if (toolkitTools.length > 0) {
+          const defaults: Record<string, unknown> = {};
+          for (const field of toolkitTools[0].config_schema) {
+            if (field.default_value != null) defaults[field.name] = field.default_value;
+          }
+          setToolModalParams(defaults);
+        } else {
+          setToolModalParams({});
+        }
+        setShowToolModal(true);
+        return;
+      }
+
       //
       // For other types, create directly.
       //
       addNodeAtPosition(type, position);
     },
-    [screenToFlowPosition, hasTrigger, hasTermination]
+    [screenToFlowPosition, hasTrigger, hasTermination, toolkitTools]
   );
 
   const addNodeAtPosition = useCallback((type: string, position: { x: number; y: number }, nodeExtraData?: Record<string, unknown>) => {
@@ -982,6 +1032,24 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
           return { ...prev, loopMaxIterations: newMap };
         });
         break;
+      case 'tool': {
+        const toolName = (nodeExtraData?.toolName as string) || '';
+        const toolParams = (nodeExtraData?.toolParams as Record<string, unknown>) || {};
+        newNode = {
+          id: newId,
+          type: 'tool',
+          position,
+          data: { label: 'Tool', toolName, toolDisplayName: nodeExtraData?.toolDisplayName || toolName },
+        };
+        if (toolName) {
+          setExtraData(prev => {
+            const newConfigs = new Map(prev.toolConfigs);
+            newConfigs.set(newId, { tool_name: toolName, tool_params: toolParams });
+            return { ...prev, toolConfigs: newConfigs };
+          });
+        }
+        break;
+      }
       case 'termination':
         newNode = {
           id: newId,
@@ -1062,8 +1130,24 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       return;
     }
 
+    if (type === 'tool') {
+      setPendingPosition(position);
+      setToolModalToolName(toolkitTools.length > 0 ? toolkitTools[0].tool_name : '');
+      if (toolkitTools.length > 0) {
+        const defaults: Record<string, unknown> = {};
+        for (const field of toolkitTools[0].config_schema) {
+          if (field.default_value != null) defaults[field.name] = field.default_value;
+        }
+        setToolModalParams(defaults);
+      } else {
+        setToolModalParams({});
+      }
+      setShowToolModal(true);
+      return;
+    }
+
     addNodeAtPosition(type, position);
-  }, [addNodeAtPosition, hasTrigger, hasTermination, screenToFlowPosition]);
+  }, [addNodeAtPosition, hasTrigger, hasTermination, screenToFlowPosition, toolkitTools]);
 
   const handleOperationSelect = useCallback(() => {
     if (!selectedOperation) return;
@@ -1265,6 +1349,34 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       setPendingPosition(null);
     }
   }, [pendingPosition, editingNodeId, loopMaxIterations, addNodeAtPosition, setNodes, nodes.length]);
+
+  const handleToolConfirm = useCallback(() => {
+    const params: Record<string, unknown> = { ...toolModalParams };
+    const selectedTool = toolkitTools.find(t => t.tool_name === toolModalToolName);
+    const displayName = selectedTool?.display_name || toolModalToolName;
+
+    if (editingNodeId) {
+      setExtraData(prev => {
+        const newConfigs = new Map(prev.toolConfigs);
+        newConfigs.set(editingNodeId, { tool_name: toolModalToolName, tool_params: params });
+        return { ...prev, toolConfigs: newConfigs };
+      });
+      setNodes(nds => nds.map(n =>
+        n.id === editingNodeId
+          ? { ...n, data: { ...n.data, toolName: toolModalToolName, toolDisplayName: displayName } }
+          : n
+      ));
+      setShowToolModal(false);
+      setEditingNodeId(null);
+    } else {
+      const position = pendingPosition || { x: 100, y: 100 + nodes.length * 100 };
+      addNodeAtPosition('tool', position, { toolName: toolModalToolName, toolDisplayName: displayName, toolParams: params });
+      setShowToolModal(false);
+      setPendingPosition(null);
+    }
+    setToolModalToolName('');
+    setToolModalParams({});
+  }, [pendingPosition, editingNodeId, toolModalToolName, toolModalParams, toolkitTools, addNodeAtPosition, setNodes, nodes.length]);
 
   //
   // Brief "Saved" flash when save succeeds.
@@ -1576,6 +1688,12 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       setEditingNodeId(node.id);
       setLoopMaxIterations(extraData.loopMaxIterations.get(node.id) || 3);
       setShowLoopModal(true);
+    } else if (node.type === 'tool') {
+      setEditingNodeId(node.id);
+      const cfg = extraData.toolConfigs.get(node.id);
+      setToolModalToolName(cfg?.tool_name || '');
+      setToolModalParams({ ...(cfg?.tool_params || {}) });
+      setShowToolModal(true);
     }
   }, [extraData]);
 
@@ -1779,6 +1897,13 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
                   icon={<RefreshCw size={16} className="text-[var(--accent-warning)]" />}
                   label="Loop"
                   onClick={() => handleQuickAdd('loop')}
+                />
+                <PaletteItem
+                  type="tool"
+                  icon={<Wrench size={16} className="text-[var(--accent-info)]" />}
+                  label="Tool"
+                  disabled={toolkitTools.length === 0}
+                  onClick={() => handleQuickAdd('tool')}
                 />
               </div>
             </div>
@@ -2115,6 +2240,76 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       />
 
       <ConfigModal
+        isOpen={showToolModal}
+        onClose={() => {
+          setShowToolModal(false);
+          setPendingPosition(null);
+          setEditingNodeId(null);
+          setToolModalToolName('');
+          setToolModalParams({});
+        }}
+        size="sm"
+        title="Configure Tool"
+        config={(() => {
+          const selectedTool = toolkitTools.find(t => t.tool_name === toolModalToolName);
+          const items: Array<{ type: 'section'; fields: Array<{ name: string; label: string; type: 'text' | 'textarea' | 'select' | 'number'; span?: 'full' | 'half'; options?: Array<{ value: string; label: string }>; placeholder?: string }> }> = [];
+
+          items.push({
+            type: 'section',
+            fields: [{
+              name: '_tool_select',
+              label: 'Tool',
+              type: 'select' as const,
+              span: 'full' as const,
+              options: toolkitTools.map(t => ({ value: t.tool_name, label: t.display_name })),
+            }],
+          });
+
+          if (selectedTool && selectedTool.config_schema.length > 0) {
+            items.push({
+              type: 'section',
+              fields: selectedTool.config_schema.map(field => ({
+                name: field.name,
+                label: field.label,
+                type: (field.field_type === 'select' ? 'select' : field.field_type === 'textarea' ? 'textarea' : field.field_type === 'number' ? 'number' : 'text') as 'text' | 'textarea' | 'select' | 'number',
+                span: 'full' as const,
+                options: field.options?.map(o => ({ value: o.value, label: o.label })) || undefined,
+                placeholder: field.default_value || undefined,
+              })),
+            });
+          }
+
+          return items;
+        })()}
+        values={{
+          _tool_select: toolModalToolName,
+          ...Object.fromEntries(Object.entries(toolModalParams).map(([k, v]) => [k, String(v ?? '')])),
+        }}
+        onChange={(name, value) => {
+          if (name === '_tool_select') {
+            setToolModalToolName(value);
+            const newTool = toolkitTools.find(t => t.tool_name === value);
+            if (newTool) {
+              const defaults: Record<string, unknown> = {};
+              for (const field of newTool.config_schema) {
+                if (field.default_value != null) defaults[field.name] = field.default_value;
+              }
+              setToolModalParams(defaults);
+            } else {
+              setToolModalParams({});
+            }
+          } else {
+            setToolModalParams(prev => ({ ...prev, [name]: value }));
+          }
+        }}
+        onSubmit={handleToolConfirm}
+        submitLabel={editingNodeId ? 'Update' : 'Add'}
+        submitIcon={<Wrench size={14} />}
+        submitVariant="info"
+        submitDisabled={!toolModalToolName}
+      />
+
+      <ConfigModal
         isOpen={showDuplicateModal}
         onClose={() => setShowDuplicateModal(false)}
         onSubmit={handleDuplicateConfirm}
@@ -2194,14 +2389,15 @@ interface ChainBuilderProps {
   operationDefs: OperationDefinitionInfo[];
   modelDefs?: ModelDefinition[];
   nodes?: NodeState[];
+  toolkitTools?: ToolkitToolInfo[];
   saveStatus?: string | null;
   saveError?: string | null;
 }
 
-export function ChainBuilder({ modelDefs = [], nodes = [], saveStatus, saveError, ...props }: ChainBuilderProps) {
+export function ChainBuilder({ modelDefs = [], nodes = [], toolkitTools = [], saveStatus, saveError, ...props }: ChainBuilderProps) {
   return (
     <ReactFlowProvider>
-      <ChainBuilderInner {...props} modelDefs={modelDefs} nodes={nodes} saveStatus={saveStatus} saveError={saveError} />
+      <ChainBuilderInner {...props} modelDefs={modelDefs} nodes={nodes} toolkitTools={toolkitTools} saveStatus={saveStatus} saveError={saveError} />
     </ReactFlowProvider>
   );
 }

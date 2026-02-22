@@ -148,6 +148,13 @@ function chainToFlowWithStatus(
           position,
           data: { label: 'Loop', maxIterations: elem.max_iterations, status },
         };
+      case 'Tool':
+        return {
+          id: elem.id,
+          type: 'tool',
+          position,
+          data: { label: 'Tool', toolName: elem.tool_name, status },
+        };
       case 'Termination':
         return {
           id: elem.id,
@@ -727,6 +734,14 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
                     )}
                     {selectedElement.config.type === 'Loop' && (
                       <div><span className="text-muted">Max Iterations:</span> <span className="font-mono text-[var(--accent-warning)]">{selectedElement.config.max_iterations}</span></div>
+                    )}
+                    {selectedElement.config.type === 'Tool' && (
+                      <div className="space-y-1">
+                        <div><span className="text-muted">Tool:</span> <span className="font-mono text-[var(--accent-info)]">{selectedElement.config.tool_name}</span></div>
+                        {Object.entries(selectedElement.config.tool_params).filter(([k]) => k !== 'input').map(([k, v]) => (
+                          <div key={k}><span className="text-muted">{k}:</span> <span className="font-mono">{String(v)}</span></div>
+                        ))}
+                      </div>
                     )}
                     {selectedElement.config.type === 'Termination' && (
                       <span className="text-muted">Termination (End)</span>

@@ -234,6 +234,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
           operationDefs={operationDefs}
           modelDefs={modelDefs}
           nodes={nodes}
+          toolkitTools={state.toolkit.tools}
           saveStatus={chainSuccess}
           saveError={chainError}
         />

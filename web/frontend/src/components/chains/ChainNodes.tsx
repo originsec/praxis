@@ -2,7 +2,7 @@ import { Handle, Position } from '@xyflow/react';
 import type { NodeTypes } from '@xyflow/react';
 import {
   Play, Cpu, Sparkles, MessageSquare, Database, HardDriveDownload,
-  RefreshCw, Clock, BrainCircuit, FolderOpen, Square,
+  RefreshCw, Clock, BrainCircuit, FolderOpen, Square, Wrench,
   CheckCircle2, XCircle, AlertCircle, Loader2,
 } from 'lucide-react';
 
@@ -348,6 +348,36 @@ function LoopNode({ data, selected }: { data: LoopNodeData; selected?: boolean }
   );
 }
 
+interface ToolNodeData {
+  label: string;
+  toolName: string;
+  toolDisplayName?: string;
+  maxRuntime?: number;
+  status?: string;
+}
+
+function ToolNode({ data, selected }: { data: ToolNodeData; selected?: boolean }) {
+  const accent = 'var(--accent-info)';
+  const style = selected ? { borderColor: accent } : undefined;
+  return (
+    <div
+      className="ascii-box bg-[var(--bg-secondary)] px-4 py-2 min-w-[150px] relative"
+      style={style}
+    >
+      <Handle type="target" position={Position.Left} style={handleStyle} />
+      <Handle type="source" position={Position.Right} style={handleStyle} />
+      {data.status && <StatusOverlay status={data.status} />}
+      <div className="flex items-center gap-2">
+        <Wrench size={14} style={{ color: accent }} />
+        <span className="text-sm font-mono leading-none">{data.toolDisplayName || data.toolName || 'Tool'}</span>
+        {data.maxRuntime && (
+          <span className="text-[10px] px-1.5 py-0.5 font-mono" style={{ backgroundColor: `color-mix(in srgb, ${accent} 20%, transparent)`, color: accent }}>{data.maxRuntime}s</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 interface TerminationNodeData {
   label: string;
   requireAllInputs?: boolean;
@@ -378,5 +408,6 @@ export const nodeTypes: NodeTypes = {
   genericPrompt: GenericPromptNode,
   memory: MemoryNode,
   loop: LoopNode,
+  tool: ToolNode,
   termination: TerminationNode,
 };

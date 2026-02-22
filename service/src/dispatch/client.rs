@@ -2042,6 +2042,7 @@ async fn handle_chain_run(
             ctx.broadcast_channel.clone(),
             ctx.response_tracker.clone(),
             ctx.database.clone(),
+            Some(ctx.toolkit_manager.clone()),
         ).await;
         for result in results {
             match result {
@@ -2087,6 +2088,7 @@ async fn handle_chain_run(
             ctx.broadcast_channel.clone(),
             ctx.response_tracker.clone(),
             ctx.database.clone(),
+            Some(ctx.toolkit_manager.clone()),
         )
         .await
     {

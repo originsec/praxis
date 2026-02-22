@@ -975,6 +975,14 @@ pub enum ChainElement {
         id: String,
         max_iterations: u32,
     },
+    /// Tool element - invokes a registered toolkit tool
+    Tool {
+        id: String,
+        tool_name: String,
+        tool_params: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
+    },
     /// Termination element - explicit end of chain (exactly one per chain)
     Termination {
         id: String,
@@ -1135,6 +1143,11 @@ pub enum ElementConfig {
     Loop {
         max_iterations: u32,
     },
+    /// Tool element config
+    Tool {
+        tool_name: String,
+        tool_params: serde_json::Value,
+    },
     /// Termination element config
     Termination,
 }
@@ -1231,12 +1244,34 @@ pub struct ToolkitModelOption {
     pub model: String,
 }
 
+/// Toolkit tool config field schema (drives dynamic UI)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolConfigField {
+    pub name: String,
+    pub label: String,
+    pub field_type: String,
+    pub required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_value: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<ToolConfigOption>>,
+}
+
+/// Option for a select-type config field
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolConfigOption {
+    pub value: String,
+    pub label: String,
+}
+
 /// Toolkit tool metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolkitToolInfo {
     pub tool_name: String,
     pub display_name: String,
     pub description: String,
+    #[serde(default)]
+    pub config_schema: Vec<ToolConfigField>,
 }
 
 /// A concrete target/session selection for toolkit execution

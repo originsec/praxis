@@ -6,9 +6,9 @@ use chrono::Utc;
 use common::{
     node_queue_name, publish_json, AgentCommand, AgentCommandResult, CommandRequest,
     CommandResponse, NodeCommand, NodeCommandResult, NodeDirectMessage, TargetSpec,
-    ToolkitApplyItem, ToolkitApplyOutcome, ToolkitDiffHunk, ToolkitDiffLine,
-    ToolkitDiffLineKind, ToolkitExecuteResult, ToolkitModelOption, ToolkitReconTarget,
-    ToolkitTargetPreview, ToolkitTargetRef, ToolkitToolInfo,
+    ToolConfigField, ToolConfigOption, ToolkitApplyItem, ToolkitApplyOutcome, ToolkitDiffHunk,
+    ToolkitDiffLine, ToolkitDiffLineKind, ToolkitExecuteResult, ToolkitModelOption,
+    ToolkitReconTarget, ToolkitTargetPreview, ToolkitTargetRef, ToolkitToolInfo,
 };
 use lapin::Channel;
 use serde_json::Value;
@@ -26,12 +26,63 @@ use crate::state::NodeRegistry;
 const SESSION_HISTORY_POISONING_TOOL: &str = "session_history_poisoning";
 const MESSAGE_ENCODER_TOOL: &str = "message_encoder";
 
+//
+// Trait for toolkit tools that can be invoked from chain execution.
+//
+
+#[async_trait::async_trait]
+pub trait ToolkitTool: Send + Sync {
+    fn name(&self) -> &str;
+    fn display_name(&self) -> &str;
+    fn description(&self) -> &str;
+    fn config_schema(&self) -> Vec<ToolConfigField>;
+    async fn execute_chain(&self, input: &str, params: &serde_json::Value) -> Result<String>;
+}
+
+struct MessageEncoderTool;
+
+#[async_trait::async_trait]
+impl ToolkitTool for MessageEncoderTool {
+    fn name(&self) -> &str { MESSAGE_ENCODER_TOOL }
+    fn display_name(&self) -> &str { "Message Encoder" }
+    fn description(&self) -> &str { "Encode text payloads using selected encoding profile." }
+
+    fn config_schema(&self) -> Vec<ToolConfigField> {
+        vec![ToolConfigField {
+            name: "encoding".to_string(),
+            label: "Encoding".to_string(),
+            field_type: "select".to_string(),
+            required: true,
+            default_value: Some("base64".to_string()),
+            options: Some(vec![
+                ToolConfigOption { value: "base64".to_string(), label: "Base64".to_string() },
+                ToolConfigOption { value: "hex".to_string(), label: "Hex".to_string() },
+                ToolConfigOption { value: "rot13".to_string(), label: "ROT13".to_string() },
+                ToolConfigOption { value: "morse".to_string(), label: "Morse Code".to_string() },
+                ToolConfigOption { value: "fullwidth".to_string(), label: "Fullwidth".to_string() },
+                ToolConfigOption { value: "unicode_tags".to_string(), label: "Unicode Tags".to_string() },
+                ToolConfigOption { value: "braille_us_type2".to_string(), label: "Braille US Type 2".to_string() },
+                ToolConfigOption { value: "zwsp_binary".to_string(), label: "ZWSP Binary".to_string() },
+                ToolConfigOption { value: "upside_down".to_string(), label: "Upside Down".to_string() },
+            ]),
+        }]
+    }
+
+    async fn execute_chain(&self, input: &str, params: &serde_json::Value) -> Result<String> {
+        let encoding = params.get("encoding")
+            .and_then(|v| v.as_str())
+            .unwrap_or("base64");
+        message_encoder::encode_text(input, encoding)
+    }
+}
+
 pub struct ToolkitManager {
     pub database: Arc<Database>,
     pub service_config: Arc<RwLock<ServiceConfig>>,
     pub node_registry: Arc<NodeRegistry>,
     pub response_tracker: Arc<ResponseTracker>,
     pub publish_channel: Channel,
+    chain_tools: Vec<Box<dyn ToolkitTool>>,
 }
 
 impl ToolkitManager {
@@ -42,28 +93,32 @@ impl ToolkitManager {
         response_tracker: Arc<ResponseTracker>,
         publish_channel: Channel,
     ) -> Self {
+        let chain_tools: Vec<Box<dyn ToolkitTool>> = vec![
+            Box::new(MessageEncoderTool),
+        ];
         Self {
             database,
             service_config,
             node_registry,
             response_tracker,
             publish_channel,
+            chain_tools,
         }
     }
 
+    pub fn get_chain_tool(&self, name: &str) -> Option<&dyn ToolkitTool> {
+        self.chain_tools.iter().find(|t| t.name() == name).map(|t| t.as_ref())
+    }
+
     pub async fn list_tools_and_models(&self) -> (Vec<ToolkitToolInfo>, Vec<ToolkitModelOption>) {
-        let tools = vec![
+        let tools: Vec<ToolkitToolInfo> = self.chain_tools.iter().map(|t| {
             ToolkitToolInfo {
-                tool_name: SESSION_HISTORY_POISONING_TOOL.to_string(),
-                display_name: "Session History Poisoning".to_string(),
-                description: "Rewrite refusals into acceptances in selected session history.".to_string(),
-            },
-            ToolkitToolInfo {
-                tool_name: MESSAGE_ENCODER_TOOL.to_string(),
-                display_name: "Message Encoder".to_string(),
-                description: "Encode text payloads using selected encoding profile.".to_string(),
-            },
-        ];
+                tool_name: t.name().to_string(),
+                display_name: t.display_name().to_string(),
+                description: t.description().to_string(),
+                config_schema: t.config_schema(),
+            }
+        }).collect();
 
         let models = {
             let cfg = self.service_config.read().await;

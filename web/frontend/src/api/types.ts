@@ -374,6 +374,7 @@ export type ChainElement =
   | { element_type: 'GenericPrompt'; id: string; prompt: string; session_group?: SessionGroup | null; block_config?: BlockConfig | null }
   | { element_type: 'Memory'; id: string; key: string; mode: 'Store' | 'Retrieve' }
   | { element_type: 'Loop'; id: string; max_iterations: number }
+  | { element_type: 'Tool'; id: string; tool_name: string; tool_params: Record<string, unknown>; block_config?: BlockConfig | null }
   | { element_type: 'Termination'; id: string; block_config?: BlockConfig | null };
 
 export type ConnectionCondition = 'OnSuccess' | 'OnFailure';
@@ -462,10 +463,25 @@ export interface ToolkitModelOption {
   model: string;
 }
 
+export interface ToolConfigOption {
+  value: string;
+  label: string;
+}
+
+export interface ToolConfigField {
+  name: string;
+  label: string;
+  field_type: string;
+  required: boolean;
+  default_value?: string | null;
+  options?: ToolConfigOption[] | null;
+}
+
 export interface ToolkitToolInfo {
   tool_name: string;
   display_name: string;
   description: string;
+  config_schema: ToolConfigField[];
 }
 
 export interface ToolkitTargetRef {
@@ -543,6 +559,7 @@ export type ElementConfig =
   | { type: 'GenericPrompt'; prompt: string }
   | { type: 'Memory'; key: string; mode: 'Store' | 'Retrieve' }
   | { type: 'Loop'; max_iterations: number }
+  | { type: 'Tool'; tool_name: string; tool_params: Record<string, unknown> }
   | { type: 'Termination' };
 
 //

@@ -590,6 +590,7 @@ async fn run_main_loop() -> Result<()> {
         response_tracker.clone(),
         semantic_ops_channel.clone(),
         broadcast_channel.clone(),
+        toolkit_manager.clone(),
     ));
     trigger_engine.start_scheduler();
     common::log_info!("Initialized trigger engine");

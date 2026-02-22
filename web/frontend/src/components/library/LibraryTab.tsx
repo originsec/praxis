@@ -526,6 +526,7 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
           onCancel={handleCancelChain}
           operationDefs={operationDefs}
           modelDefs={modelDefs}
+          toolkitTools={state.toolkit.tools}
         />
       </div>
     );
