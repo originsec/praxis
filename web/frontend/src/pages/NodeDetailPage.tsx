@@ -105,7 +105,6 @@ export function NodeDetailPage() {
     limit: FETCH_LIMIT,
     offset: 0,
   });
-  const [expandedTrafficRow, setExpandedTrafficRow] = useState<number | null>(null);
   const [showMethodSelector, setShowMethodSelector] = useState(false);
 
   //
@@ -478,8 +477,6 @@ export function NodeDetailPage() {
           trafficTotalCount={state.intercept.trafficTotalCount}
           filters={trafficFilters}
           setFilters={setTrafficFilters}
-          expandedRow={expandedTrafficRow}
-          setExpandedRow={setExpandedTrafficRow}
           requestTrafficLog={requestTrafficLog}
         />
       )}
@@ -651,8 +648,6 @@ function NodeInterceptTab({
   trafficTotalCount,
   filters,
   setFilters,
-  expandedRow,
-  setExpandedRow,
   requestTrafficLog,
 }: {
   node: { node_id: string; intercept_active: boolean; discovered_agents: { short_name: string }[] };
@@ -661,8 +656,6 @@ function NodeInterceptTab({
   trafficTotalCount: number;
   filters: TrafficLogFilters;
   setFilters: (filters: TrafficLogFilters) => void;
-  expandedRow: number | null;
-  setExpandedRow: (id: number | null) => void;
   requestTrafficLog: (filters: TrafficLogFilters) => void;
 }) {
   const [protocolFilter, setProtocolFilter] = useState<ProtocolFilter>('all');
@@ -769,8 +762,8 @@ function NodeInterceptTab({
         entries={trafficLog}
         protocolFilter={protocolFilter}
         searchFilter={searchFilter}
-        expandedRow={expandedRow}
-        setExpandedRow={setExpandedRow}
+        expandedRow={null}
+        setExpandedRow={() => {}}
         showNodeColumn={false}
         displayLimit={DISPLAY_LIMIT}
         heightMode="flex"

@@ -2516,7 +2516,6 @@ function AgentInterceptTab({
   agentTraffic: ReturnType<typeof useApp>['state']['intercept']['trafficLog'];
   send: ReturnType<typeof useApp>['send'];
 }) {
-  const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [protocolFilter, setProtocolFilter] = useState<ProtocolFilter>('all');
   const [searchFilter, setSearchFilter] = useState('');
   const [filters, setFilters] = useState<TrafficLogFilters>({
@@ -2593,8 +2592,8 @@ function AgentInterceptTab({
           entries={agentTraffic}
           protocolFilter={protocolFilter}
           searchFilter={searchFilter}
-          expandedRow={expandedRow}
-          setExpandedRow={setExpandedRow}
+          expandedRow={null}
+          setExpandedRow={() => {}}
           showNodeColumn={false}
           displayLimit={100}
           heightMode="fixed"

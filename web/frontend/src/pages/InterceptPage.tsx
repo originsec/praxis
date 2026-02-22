@@ -154,7 +154,6 @@ function TrafficLogTab() {
     limit: FETCH_LIMIT,
     offset: 0,
   });
-  const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [protocolFilter, setProtocolFilter] = useState<ProtocolFilter>('all');
   const [searchFilter, setSearchFilter] = useState('');
@@ -239,9 +238,9 @@ function TrafficLogTab() {
         entries={state.intercept.trafficLog}
         protocolFilter={protocolFilter}
         searchFilter={searchFilter}
-        expandedRow={expandedRow}
-        setExpandedRow={setExpandedRow}
-        showNodeColumn={true}
+        expandedRow={null}
+        setExpandedRow={() => {}}
+        showNodeColumn
         displayLimit={DISPLAY_LIMIT}
         heightMode="fixed"
         maxHeight="70vh"
