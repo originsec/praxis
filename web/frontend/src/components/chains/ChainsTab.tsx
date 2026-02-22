@@ -84,6 +84,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
   useEffect(() => {
     if (showBuilder) {
       send({ type: 'op_def_list' });
+      send({ type: 'toolkit_list' });
       getConfig(['llm_model_definitions']);
     }
   }, [showBuilder, send, getConfig]);

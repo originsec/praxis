@@ -113,8 +113,9 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
   useEffect(() => {
     if (showChainBuilder) {
       getConfig(['llm_model_definitions']);
+      send({ type: 'toolkit_list' });
     }
-  }, [showChainBuilder, getConfig]);
+  }, [showChainBuilder, send, getConfig]);
 
   //
   // Load chain for editing.
