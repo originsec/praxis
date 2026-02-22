@@ -517,32 +517,27 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
 
   const libraryColumns: ColumnDef<LibraryItem>[] = [
     {
-      key: 'type',
-      header: 'Type',
-      sortable: false,
-      render: (_: unknown, item: LibraryItem) => (
-        <span title={item.type === 'operation' ? 'Operation' : 'Chain'}>
-          {item.type === 'operation'
-            ? <Zap size={14} className="text-[var(--accent-purple)]" />
-            : <GitBranch size={14} className="text-[var(--accent-info)]" />}
-        </span>
-      ),
-    },
-    {
       key: 'name',
       header: 'Name',
       sortable: false,
       render: (_: unknown, item: LibraryItem) => (
-        <div className={item.disabled ? 'opacity-50' : ''}>
-          <p className="font-medium text-highlight flex items-center gap-2">
-            {item.name}
-            {item.disabled && (
-              <span className="px-1.5 py-0.5 bg-[var(--bg-tertiary)] text-muted text-xs">Disabled</span>
+        <div className={`flex items-start gap-3 ${item.disabled ? 'opacity-50' : ''}`}>
+          <span className="flex-shrink-0 mt-0.5" title={item.type === 'operation' ? 'Operation' : 'Chain'}>
+            {item.type === 'operation'
+              ? <Zap size={14} className="text-[var(--accent-purple)]" />
+              : <GitBranch size={14} className="text-[var(--accent-info)]" />}
+          </span>
+          <div>
+            <p className="font-medium text-highlight flex items-center gap-2">
+              {item.name}
+              {item.disabled && (
+                <span className="px-1.5 py-0.5 bg-[var(--bg-tertiary)] text-muted text-xs">Disabled</span>
+              )}
+            </p>
+            {item.description && (
+              <p className="text-muted text-xs truncate max-w-md">{item.description}</p>
             )}
-          </p>
-          {item.description && (
-            <p className="text-muted text-xs truncate max-w-md">{item.description}</p>
-          )}
+          </div>
         </div>
       ),
     },
