@@ -62,7 +62,6 @@ impl ToolkitTool for MessageEncoderTool {
                 ToolConfigOption { value: "fullwidth".to_string(), label: "Fullwidth".to_string() },
                 ToolConfigOption { value: "unicode_tags".to_string(), label: "Unicode Tags".to_string() },
                 ToolConfigOption { value: "braille_us_type2".to_string(), label: "Braille US Type 2".to_string() },
-                ToolConfigOption { value: "zwsp_binary".to_string(), label: "ZWSP Binary".to_string() },
                 ToolConfigOption { value: "upside_down".to_string(), label: "Upside Down".to_string() },
             ]),
         }]

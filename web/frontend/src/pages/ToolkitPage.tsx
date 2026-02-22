@@ -582,7 +582,6 @@ function MessageEncoderModal({ isOpen, onClose, description }: MessageEncoderMod
           <label className={labelCls}>Encoding</label>
           <select className={inputCls} value={encoding} onChange={(e) => setEncoding(e.target.value)}>
             <option value="unicode_tags">Unicode Tags (ASCII Smuggling)</option>
-            <option value="zwsp_binary">Zero-Width Binary</option>
             <option value="braille_us_type2">Braille (US Type 2)</option>
             <option value="fullwidth">Fullwidth Unicode</option>
             <option value="upside_down">Upside Down</option>
