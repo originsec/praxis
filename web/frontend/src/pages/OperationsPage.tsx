@@ -367,7 +367,8 @@ export function OperationsPage() {
     return state.chains.loadingChains.has(selectedChainExec.chain_id);
   }, [selectedChainExec, state.chains.loadingChains]);
 
-  const formatDuration = (start: string, end: string | null) => {
+  const formatDuration = (start: string, end: string | null, status: string) => {
+    if (status === 'Queued') return '—';
     const startTime = new Date(start).getTime();
     const endTime = end ? new Date(end).getTime() : Date.now();
     const diffMs = endTime - startTime;
@@ -670,7 +671,7 @@ export function OperationsPage() {
                       <td className="px-4 py-2">
                         <div className="flex items-center gap-1 text-muted">
                           <Clock size={12} />
-                          {formatDuration(op.start_time, op.end_time)}
+                          {formatDuration(op.start_time, op.end_time, op.status)}
                         </div>
                       </td>
                       <td className="px-4 py-2">
