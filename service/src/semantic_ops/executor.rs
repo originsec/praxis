@@ -486,6 +486,7 @@ pub async fn execute_agent_mode(
         // Check timeout.
         //
         if start_time.elapsed() > timeout_duration {
+            let _ = database.append_output(operation_id, &fmt_error(&format!("Operation timed out after {} seconds", spec.timeout))).await;
             let _ = close_session(node_id, rabbitmq_channel).await;
             return Err(anyhow::anyhow!(
                 "Operation timed out after {} seconds",
@@ -737,7 +738,7 @@ async fn send_remote_prompt(
         node_id: node_id.to_string(),
         command: NodeCommand::Session(SessionCommand::Prompt {
             text: prompt.to_string(),
-            transaction_id,
+            transaction_id: transaction_id.clone(),
         }),
     };
 
@@ -772,6 +773,10 @@ async fn send_remote_prompt(
         Ok(Err(_)) => Err(anyhow::anyhow!("Response channel closed")),
         Err(_) => {
             common::log_error!("SemanticToolError: op={} error=timeout", &operation_id[..8]);
+
+            let _ = cancel_transaction(node_id, &transaction_id, rabbitmq_channel).await;
+            let _ = close_session(node_id, rabbitmq_channel).await;
+
             Err(anyhow::anyhow!(
                 "Prompt timed out after {} seconds",
                 timeout_secs
