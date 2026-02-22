@@ -482,6 +482,13 @@ pub enum AgentCommand {
         paths: Vec<String>,
         pattern: String,
     },
+    /// Write session content for a specific session path.
+    /// This is separate from WriteFile to allow agents with virtual/DB-backed
+    /// session stores to implement custom write behavior.
+    WriteSessionContent {
+        path: String,
+        contents: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -679,6 +686,12 @@ pub enum AgentCommandResult {
         pattern: String,
         results: Vec<GrepFileEntry>,
         errors: Vec<String>,
+    },
+    /// Session content write result
+    WriteSessionContentResult {
+        path: String,
+        success: bool,
+        error: Option<String>,
     },
 }
 
@@ -962,6 +975,21 @@ pub enum ChainElement {
         id: String,
         max_iterations: u32,
     },
+    /// Tool element - invokes a registered toolkit tool
+    Tool {
+        id: String,
+        tool_name: String,
+        tool_params: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
+    },
+    /// Payload element - outputs static content from a stored payload
+    Payload {
+        id: String,
+        payload_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
+    },
     /// Termination element - explicit end of chain (exactly one per chain)
     Termination {
         id: String,
@@ -1122,6 +1150,15 @@ pub enum ElementConfig {
     Loop {
         max_iterations: u32,
     },
+    /// Tool element config
+    Tool {
+        tool_name: String,
+        tool_params: serde_json::Value,
+    },
+    /// Payload element config
+    Payload {
+        payload_id: String,
+    },
     /// Termination element config
     Termination,
 }
@@ -1208,6 +1245,132 @@ pub struct TargetSpec {
     /// For event triggers: include the node that triggered the event
     #[serde(default)]
     pub include_triggering_node: bool,
+}
+
+/// Toolkit model option exposed to clients (from service model definitions)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitModelOption {
+    pub name: String,
+    pub provider: String,
+    pub model: String,
+}
+
+/// Toolkit tool config field schema (drives dynamic UI)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolConfigField {
+    pub name: String,
+    pub label: String,
+    pub field_type: String,
+    pub required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_value: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<ToolConfigOption>>,
+}
+
+/// Option for a select-type config field
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolConfigOption {
+    pub value: String,
+    pub label: String,
+}
+
+/// Toolkit tool metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitToolInfo {
+    pub tool_name: String,
+    pub display_name: String,
+    pub description: String,
+    #[serde(default)]
+    pub config_schema: Vec<ToolConfigField>,
+}
+
+/// A concrete target/session selection for toolkit execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitTargetRef {
+    pub node_id: String,
+    pub agent_short_name: String,
+    pub session_id: String,
+    pub session_file: String,
+}
+
+/// Recon output for a specific (node, agent) pair
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitReconTarget {
+    pub node_id: String,
+    pub agent_short_name: String,
+    pub sessions: Vec<SessionItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ToolkitDiffLineKind {
+    Context,
+    Added,
+    Removed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitDiffLine {
+    pub kind: ToolkitDiffLineKind,
+    pub old_line_no: Option<usize>,
+    pub new_line_no: Option<usize>,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitDiffHunk {
+    pub old_start: usize,
+    pub old_len: usize,
+    pub new_start: usize,
+    pub new_len: usize,
+    pub lines: Vec<ToolkitDiffLine>,
+}
+
+/// Per-target preview/result state for toolkit execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitTargetPreview {
+    pub target: ToolkitTargetRef,
+    pub success: bool,
+    pub preview_content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diff_hunks: Option<Vec<ToolkitDiffHunk>>,
+    pub error: Option<String>,
+}
+
+/// Result of a toolkit execute (preview stage)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitExecuteResult {
+    pub execution_id: String,
+    pub tool_name: String,
+    pub previews: Vec<ToolkitTargetPreview>,
+    pub error: Option<String>,
+}
+
+/// Item sent from frontend to apply a specific target's content
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitApplyItem {
+    pub target: ToolkitTargetRef,
+    pub content: String,
+}
+
+/// Per-target outcome from the apply operation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolkitApplyOutcome {
+    pub target: ToolkitTargetRef,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+/// Payload info (shared DTO for API/UI)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PayloadInfo {
+    pub id: String,
+    pub shortname: String,
+    pub content: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 /// Chain trigger info (shared DTO for API/UI)
@@ -1644,6 +1807,51 @@ pub enum ClientSignalMessage {
     },
 
     //
+    // Toolkit.
+    //
+    /// List available toolkit tools and model options
+    ToolkitList {
+        client_id: String,
+    },
+    /// Run static recon for a toolkit tool and target scope
+    ToolkitRecon {
+        client_id: String,
+        tool_name: String,
+        target_spec: TargetSpec,
+    },
+    /// Execute a toolkit tool (preview stage)
+    ToolkitExecute {
+        client_id: String,
+        tool_name: String,
+        target_spec: TargetSpec,
+        params: serde_json::Value,
+    },
+    /// Apply targets for an execution
+    ToolkitApply {
+        client_id: String,
+        tool_name: String,
+        execution_id: String,
+        targets: Vec<ToolkitApplyItem>,
+    },
+
+    //
+    // Payloads (static content for Payload chain elements).
+    //
+    PayloadList {
+        client_id: String,
+    },
+    PayloadUpsert {
+        client_id: String,
+        id: Option<String>,
+        shortname: String,
+        content: String,
+    },
+    PayloadDelete {
+        client_id: String,
+        id: String,
+    },
+
+    //
     // Lua agent scripts (stored in service database).
     //
     LuaAgentScriptAdd {
@@ -1969,6 +2177,50 @@ pub enum ClientDirectMessage {
         performed_at: Option<String>,
         /// Whether this was a semantic recon
         is_semantic: Option<bool>,
+    },
+
+    //
+    // Toolkit responses.
+    //
+    ToolkitListResponse {
+        tools: Vec<ToolkitToolInfo>,
+        models: Vec<ToolkitModelOption>,
+    },
+    ToolkitReconResponse {
+        tool_name: String,
+        targets: Vec<ToolkitReconTarget>,
+    },
+    ToolkitExecutionResult {
+        result: ToolkitExecuteResult,
+    },
+    ToolkitApplyResult {
+        execution_id: String,
+        results: Vec<ToolkitApplyOutcome>,
+    },
+    ToolkitExecutionProgress {
+        execution_id: String,
+        current: usize,
+        total: usize,
+    },
+    ToolkitError {
+        message: String,
+    },
+
+    //
+    // Payload responses.
+    //
+    PayloadListResponse {
+        payloads: Vec<PayloadInfo>,
+    },
+    PayloadUpserted {
+        payload: PayloadInfo,
+    },
+    PayloadDeleted {
+        id: String,
+        success: bool,
+    },
+    PayloadError {
+        message: String,
     },
 
     //

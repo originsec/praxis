@@ -131,6 +131,14 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
 
         ClientSignalMessage::ReconGet { client_id, node_id, agent_short_name } =>
             handle_recon_get(ctx, client_id, node_id, agent_short_name).await,
+        ClientSignalMessage::ToolkitList { client_id } =>
+            handle_toolkit_list(ctx, client_id).await,
+        ClientSignalMessage::ToolkitRecon { client_id, tool_name, target_spec } =>
+            handle_toolkit_recon(ctx, client_id, tool_name, target_spec).await,
+        ClientSignalMessage::ToolkitExecute { client_id, tool_name, target_spec, params } =>
+            handle_toolkit_execute(ctx, client_id, tool_name, target_spec, params).await,
+        ClientSignalMessage::ToolkitApply { client_id, tool_name, execution_id, targets } =>
+            handle_toolkit_apply(ctx, client_id, tool_name, execution_id, targets).await,
 
         //
         // Chain definitions.
@@ -177,6 +185,17 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             handle_chain_trigger_delete(ctx, client_id, trigger_id).await,
         ClientSignalMessage::ChainTriggerList { client_id, chain_id } =>
             handle_chain_trigger_list(ctx, client_id, chain_id).await,
+
+        //
+        // Payloads.
+        //
+
+        ClientSignalMessage::PayloadList { client_id } =>
+            handle_payload_list(ctx, client_id).await,
+        ClientSignalMessage::PayloadUpsert { client_id, id, shortname, content } =>
+            handle_payload_upsert(ctx, client_id, id, shortname, content).await,
+        ClientSignalMessage::PayloadDelete { client_id, id } =>
+            handle_payload_delete(ctx, client_id, id).await,
 
         //
         // Lua agent scripts.
@@ -1518,6 +1537,147 @@ async fn handle_recon_get(
     }
 }
 
+async fn handle_toolkit_list(ctx: &ServiceContext, client_id: String) {
+    let (tools, models) = ctx.toolkit_manager.list_tools_and_models().await;
+    let _ = send_to_client(
+        &ctx.client_publish_channel,
+        &client_id,
+        ClientDirectMessage::ToolkitListResponse { tools, models },
+    )
+    .await;
+}
+
+async fn handle_toolkit_recon(
+    ctx: &ServiceContext,
+    client_id: String,
+    tool_name: String,
+    target_spec: common::TargetSpec,
+) {
+    let toolkit_manager = ctx.toolkit_manager.clone();
+    let client_publish_channel = ctx.client_publish_channel.clone();
+    tokio::spawn(async move {
+        match toolkit_manager.recon(&tool_name, &target_spec).await {
+            Ok(targets) => {
+                let _ = send_to_client(
+                    &client_publish_channel,
+                    &client_id,
+                    ClientDirectMessage::ToolkitReconResponse { tool_name, targets },
+                )
+                .await;
+            }
+            Err(e) => {
+                let _ = send_to_client(
+                    &client_publish_channel,
+                    &client_id,
+                    ClientDirectMessage::ToolkitError {
+                        message: e.to_string(),
+                    },
+                )
+                .await;
+            }
+        }
+    });
+}
+
+async fn handle_toolkit_execute(
+    ctx: &ServiceContext,
+    client_id: String,
+    tool_name: String,
+    target_spec: common::TargetSpec,
+    params: serde_json::Value,
+) {
+    let toolkit_manager = ctx.toolkit_manager.clone();
+    let client_publish_channel = ctx.client_publish_channel.clone();
+    tokio::spawn(async move {
+        let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize)>();
+
+        //
+        // Spawn a task that drains progress updates and forwards them to
+        // the client as ToolkitExecutionProgress messages.
+        //
+
+        let progress_channel = client_publish_channel.clone();
+        let progress_client_id = client_id.clone();
+
+        let forwarder = tokio::spawn(async move {
+            while let Some((current, total)) = progress_rx.recv().await {
+                let _ = send_to_client(
+                    &progress_channel,
+                    &progress_client_id,
+                    ClientDirectMessage::ToolkitExecutionProgress {
+                        execution_id: String::new(),
+                        current,
+                        total,
+                    },
+                )
+                .await;
+            }
+        });
+
+        match toolkit_manager.execute(&tool_name, target_spec, params, Some(progress_tx)).await {
+            Ok(result) => {
+                let _ = send_to_client(
+                    &client_publish_channel,
+                    &client_id,
+                    ClientDirectMessage::ToolkitExecutionResult { result },
+                )
+                .await;
+            }
+            Err(e) => {
+                let _ = send_to_client(
+                    &client_publish_channel,
+                    &client_id,
+                    ClientDirectMessage::ToolkitError {
+                        message: e.to_string(),
+                    },
+                )
+                .await;
+            }
+        }
+
+        forwarder.abort();
+    });
+}
+
+async fn handle_toolkit_apply(
+    ctx: &ServiceContext,
+    client_id: String,
+    tool_name: String,
+    execution_id: String,
+    targets: Vec<common::ToolkitApplyItem>,
+) {
+    let toolkit_manager = ctx.toolkit_manager.clone();
+    let client_publish_channel = ctx.client_publish_channel.clone();
+    tokio::spawn(async move {
+        match toolkit_manager
+            .apply(&tool_name, &execution_id, targets)
+            .await
+        {
+            Ok(results) => {
+                let _ = send_to_client(
+                    &client_publish_channel,
+                    &client_id,
+                    ClientDirectMessage::ToolkitApplyResult {
+                        execution_id,
+                        results,
+                    },
+                )
+                .await;
+            }
+            Err(e) => {
+                let _ = send_to_client(
+                    &client_publish_channel,
+                    &client_id,
+                    ClientDirectMessage::ToolkitError {
+                        message: e.to_string(),
+                    },
+                )
+                .await;
+            }
+        }
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Chain definitions
 // ---------------------------------------------------------------------------
@@ -1893,6 +2053,7 @@ async fn handle_chain_run(
             ctx.broadcast_channel.clone(),
             ctx.response_tracker.clone(),
             ctx.database.clone(),
+            Some(ctx.toolkit_manager.clone()),
         ).await;
         for result in results {
             match result {
@@ -1938,6 +2099,7 @@ async fn handle_chain_run(
             ctx.broadcast_channel.clone(),
             ctx.response_tracker.clone(),
             ctx.database.clone(),
+            Some(ctx.toolkit_manager.clone()),
         )
         .await
     {
@@ -2722,5 +2884,110 @@ async fn handle_agent_chat_get_state(
             },
         )
         .await;
+    }
+}
+
+//
+// Payload handlers.
+//
+
+async fn handle_payload_list(ctx: &ServiceContext, client_id: String) {
+    match ctx.database.list_payloads().await {
+        Ok(records) => {
+            let payloads: Vec<common::PayloadInfo> = records
+                .into_iter()
+                .map(|r| common::PayloadInfo {
+                    id: r.id,
+                    shortname: r.shortname,
+                    content: r.content,
+                    created_at: r.created_at,
+                    updated_at: r.updated_at,
+                })
+                .collect();
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::PayloadListResponse { payloads },
+            )
+            .await;
+        }
+        Err(e) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::PayloadError {
+                    message: e.to_string(),
+                },
+            )
+            .await;
+        }
+    }
+}
+
+async fn handle_payload_upsert(
+    ctx: &ServiceContext,
+    client_id: String,
+    id: Option<String>,
+    shortname: String,
+    content: String,
+) {
+    let now = chrono::Utc::now();
+    let record = database::PayloadRecord {
+        id: id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        shortname,
+        content,
+        created_at: now,
+        updated_at: now,
+    };
+
+    match ctx.database.upsert_payload(&record).await {
+        Ok(()) => {
+            let payload = common::PayloadInfo {
+                id: record.id,
+                shortname: record.shortname,
+                content: record.content,
+                created_at: record.created_at,
+                updated_at: record.updated_at,
+            };
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::PayloadUpserted { payload },
+            )
+            .await;
+        }
+        Err(e) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::PayloadError {
+                    message: e.to_string(),
+                },
+            )
+            .await;
+        }
+    }
+}
+
+async fn handle_payload_delete(ctx: &ServiceContext, client_id: String, id: String) {
+    match ctx.database.delete_payload(&id).await {
+        Ok(success) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::PayloadDeleted { id, success },
+            )
+            .await;
+        }
+        Err(e) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::PayloadError {
+                    message: e.to_string(),
+                },
+            )
+            .await;
+        }
     }
 }

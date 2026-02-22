@@ -13,7 +13,8 @@ interface OperationDetailModalProps {
   onClose: () => void;
 }
 
-function formatDuration(start: string, end: string | null): string {
+function formatDuration(start: string, end: string | null, status: string): string {
+  if (status === 'Queued') return '—';
   const startTime = new Date(start).getTime();
   const endTime = end ? new Date(end).getTime() : Date.now();
   const diffMs = endTime - startTime;
@@ -90,7 +91,7 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
             </div>
             <div>
               <span className="text-muted">Duration:</span>{' '}
-              <span>{formatDuration(operation.start_time, operation.end_time)}</span>
+              <span>{formatDuration(operation.start_time, operation.end_time, operation.status)}</span>
             </div>
             {operation.spec.description && (
               <div className="col-span-4 mt-1">

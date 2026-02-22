@@ -4,7 +4,7 @@ use common::{
     CLIENT_SIGNAL_QUEUE, CLIENT_BROADCAST_EXCHANGE, WEB_EVENT_LOG_QUEUE,
     ClientSignalMessage, ClientDirectMessage, ClientBroadcastMessage,
     ClientRegistration, CommandRequest, InterceptMethod,
-    TrafficLogFilters, TrafficSearchFilters,
+    TrafficLogFilters, TrafficSearchFilters, TargetSpec, ToolkitApplyItem,
 };
 use futures_util::StreamExt;
 use lapin::{
@@ -531,6 +531,90 @@ impl RabbitMqClient {
             client_id: self.state.client_id.clone(),
             node_id,
             agent_short_name,
+        };
+        self.publish_signal(message).await
+    }
+
+    //
+    // Toolkit methods.
+    //
+
+    pub async fn toolkit_list(&self) -> Result<()> {
+        let message = ClientSignalMessage::ToolkitList {
+            client_id: self.state.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn toolkit_recon(&self, tool_name: String, target_spec: TargetSpec) -> Result<()> {
+        let message = ClientSignalMessage::ToolkitRecon {
+            client_id: self.state.client_id.clone(),
+            tool_name,
+            target_spec,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn toolkit_execute(
+        &self,
+        tool_name: String,
+        target_spec: TargetSpec,
+        params: serde_json::Value,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::ToolkitExecute {
+            client_id: self.state.client_id.clone(),
+            tool_name,
+            target_spec,
+            params,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn toolkit_apply(
+        &self,
+        tool_name: String,
+        execution_id: String,
+        targets: Vec<ToolkitApplyItem>,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::ToolkitApply {
+            client_id: self.state.client_id.clone(),
+            tool_name,
+            execution_id,
+            targets,
+        };
+        self.publish_signal(message).await
+    }
+
+    //
+    // Payload methods.
+    //
+
+    pub async fn payload_list(&self) -> Result<()> {
+        let message = ClientSignalMessage::PayloadList {
+            client_id: self.state.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn payload_upsert(
+        &self,
+        id: Option<String>,
+        shortname: String,
+        content: String,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::PayloadUpsert {
+            client_id: self.state.client_id.clone(),
+            id,
+            shortname,
+            content,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn payload_delete(&self, id: String) -> Result<()> {
+        let message = ClientSignalMessage::PayloadDelete {
+            client_id: self.state.client_id.clone(),
+            id,
         };
         self.publish_signal(message).await
     }
@@ -1106,6 +1190,40 @@ impl RabbitMqClient {
             //
             ClientDirectMessage::ReconGetResponse { node_id, agent_short_name, recon_result, performed_at, is_semantic } => {
                 self.state.broadcast(ServerMessage::ReconGetResponse { node_id, agent_short_name, recon_result, performed_at, is_semantic });
+            }
+            ClientDirectMessage::ToolkitListResponse { tools, models } => {
+                self.state.broadcast(ServerMessage::ToolkitListResponse { tools, models });
+            }
+            ClientDirectMessage::ToolkitReconResponse { tool_name, targets } => {
+                self.state.broadcast(ServerMessage::ToolkitReconResponse { tool_name, targets });
+            }
+            ClientDirectMessage::ToolkitExecutionResult { result } => {
+                self.state.broadcast(ServerMessage::ToolkitExecutionResult { result });
+            }
+            ClientDirectMessage::ToolkitApplyResult { execution_id, results } => {
+                self.state.broadcast(ServerMessage::ToolkitApplyResult { execution_id, results });
+            }
+            ClientDirectMessage::ToolkitExecutionProgress { execution_id, current, total } => {
+                self.state.broadcast(ServerMessage::ToolkitExecutionProgress { execution_id, current, total });
+            }
+            ClientDirectMessage::ToolkitError { message } => {
+                self.state.broadcast(ServerMessage::ToolkitError { message });
+            }
+
+            //
+            // Payload responses.
+            //
+            ClientDirectMessage::PayloadListResponse { payloads } => {
+                self.state.broadcast(ServerMessage::PayloadListResponse { payloads });
+            }
+            ClientDirectMessage::PayloadUpserted { payload } => {
+                self.state.broadcast(ServerMessage::PayloadUpserted { payload });
+            }
+            ClientDirectMessage::PayloadDeleted { id, success } => {
+                self.state.broadcast(ServerMessage::PayloadDeleted { id, success });
+            }
+            ClientDirectMessage::PayloadError { message } => {
+                self.state.broadcast(ServerMessage::PayloadError { message });
             }
 
             //

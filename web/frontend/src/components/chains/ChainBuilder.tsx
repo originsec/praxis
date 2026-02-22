@@ -15,8 +15,9 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge, Connection, OnSelectionChangeParams } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings, Check, AlertTriangle } from 'lucide-react';
+import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings, Check, AlertTriangle, Wrench, FileText } from 'lucide-react';
 import { ConfigModal } from '../common/ConfigModal';
+import { Modal } from '../common/Modal';
 import { ChainTriggerPanel } from './ChainTriggerPanel';
 import type {
   BlockConfig,
@@ -27,6 +28,9 @@ import type {
   NodeState,
   OperationDefinitionInfo,
   SessionGroup,
+  ToolkitToolInfo,
+  PayloadInfo,
+  BrowserMessage,
 } from '../../api/types';
 import { computeLayout } from '../../utils/dagreLayout';
 import { getNextSessionColor, getUsedColors } from '../../utils/sessionColors';
@@ -55,6 +59,11 @@ interface MemoryConfig {
   mode: 'Store' | 'Retrieve';
 }
 
+interface ToolConfig {
+  tool_name: string;
+  tool_params: Record<string, unknown>;
+}
+
 interface ChainExtraData {
   transformPrompts: Map<string, string>;
   transformModels: Map<string, string>;
@@ -63,13 +72,15 @@ interface ChainExtraData {
   blockConfigs: Map<string, BlockConfig>;
   memoryConfigs: Map<string, MemoryConfig>;
   loopMaxIterations: Map<string, number>;
+  toolConfigs: Map<string, ToolConfig>;
+  payloadConfigs: Map<string, string>;
 }
 
 //
 // Convert chain definition to React Flow nodes and edges (positions computed
 // via dagre).
 //
-function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: OperationDefinitionInfo[]): { nodes: Node[]; edges: Edge[]; extraData: ChainExtraData } {
+function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: OperationDefinitionInfo[], payloadList?: PayloadInfo[]): { nodes: Node[]; edges: Edge[]; extraData: ChainExtraData } {
   const emptyExtraData: ChainExtraData = {
     transformPrompts: new Map(),
     transformModels: new Map(),
@@ -78,6 +89,8 @@ function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: Operatio
     blockConfigs: new Map(),
     memoryConfigs: new Map(),
     loopMaxIterations: new Map(),
+    toolConfigs: new Map(),
+    payloadConfigs: new Map(),
   };
 
   if (!chain) return { nodes: [], edges: [], extraData: emptyExtraData };
@@ -197,6 +210,30 @@ function chainToFlow(chain: ChainDefinitionFull | null, operationDefs?: Operatio
           position,
           data: { label: 'Loop', maxIterations: elem.max_iterations },
         };
+      case 'Tool':
+        extraData.toolConfigs.set(elem.id, { tool_name: elem.tool_name, tool_params: elem.tool_params });
+        if (elem.block_config) {
+          extraData.blockConfigs.set(elem.id, elem.block_config);
+        }
+        return {
+          id: elem.id,
+          type: 'tool',
+          position,
+          data: { label: 'Tool', toolName: elem.tool_name, maxRuntime: elem.block_config?.max_runtime },
+        };
+      case 'Payload': {
+        extraData.payloadConfigs.set(elem.id, elem.payload_id);
+        if (elem.block_config) {
+          extraData.blockConfigs.set(elem.id, elem.block_config);
+        }
+        const plMatch = (payloadList || []).find(p => p.id === elem.payload_id);
+        return {
+          id: elem.id,
+          type: 'payload',
+          position,
+          data: { label: 'Payload', shortname: plMatch?.shortname || elem.payload_id.slice(0, 8), content: plMatch?.content },
+        };
+      }
       case 'Termination':
         if (elem.block_config) {
           extraData.blockConfigs.set(elem.id, elem.block_config);
@@ -312,6 +349,23 @@ function flowToChain(
           id: node.id,
           max_iterations: extraData.loopMaxIterations.get(node.id) || 3,
         };
+      case 'tool': {
+        const toolCfg = extraData.toolConfigs.get(node.id);
+        return {
+          element_type: 'Tool' as const,
+          id: node.id,
+          tool_name: toolCfg?.tool_name || '',
+          tool_params: toolCfg?.tool_params || {},
+          block_config: extraData.blockConfigs.get(node.id) || null,
+        };
+      }
+      case 'payload':
+        return {
+          element_type: 'Payload' as const,
+          id: node.id,
+          payload_id: extraData.payloadConfigs.get(node.id) || '',
+          block_config: extraData.blockConfigs.get(node.id) || null,
+        };
       case 'termination':
         return {
           element_type: 'Termination' as const,
@@ -393,17 +447,20 @@ interface ChainBuilderInnerProps {
   operationDefs: OperationDefinitionInfo[];
   modelDefs: ModelDefinition[];
   nodes: NodeState[];
+  toolkitTools: ToolkitToolInfo[];
+  payloads: PayloadInfo[];
+  send: (msg: BrowserMessage) => void;
   saveStatus?: string | null;
   saveError?: string | null;
 }
 
-function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs, modelDefs, nodes: systemNodes, saveStatus, saveError }: ChainBuilderInnerProps) {
+function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs, modelDefs, nodes: _systemNodes, toolkitTools, payloads, send, saveStatus, saveError }: ChainBuilderInnerProps) {
   const [name, setName] = useState(chain?.name || '');
   const [description, setDescription] = useState(chain?.description || '');
-  const [timeout, setTimeout] = useState(chain?.timeout || 1800);
+  const [timeout, setChainTimeout] = useState(chain?.timeout || 1800);
   const category = 'default';
 
-  const initialFlow = chainToFlow(chain || null, operationDefs);
+  const initialFlow = chainToFlow(chain || null, operationDefs, payloads);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialFlow.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialFlow.edges);
 
@@ -411,6 +468,28 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
   // Track extra data (prompts, models, session groups) separately.
   //
   const [extraData, setExtraData] = useState<ChainExtraData>(() => initialFlow.extraData);
+
+  //
+  // Re-resolve payload node data when payloads list arrives after initial load.
+  //
+  useEffect(() => {
+    if (payloads.length === 0) return;
+    setNodes(nds => {
+      let changed = false;
+      const updated = nds.map(n => {
+        if (n.type !== 'payload') return n;
+        const payloadId = extraData.payloadConfigs.get(n.id);
+        if (!payloadId) return n;
+        const pl = payloads.find(p => p.id === payloadId);
+        if (!pl) return n;
+        const data = n.data as Record<string, unknown>;
+        if (data.shortname === pl.shortname && data.content === pl.content) return n;
+        changed = true;
+        return { ...n, data: { ...data, shortname: pl.shortname, content: pl.content } };
+      });
+      return changed ? updated : nds;
+    });
+  }, [payloads, extraData.payloadConfigs, setNodes]);
 
   //
   // Track hovered node for delete-on-hover.
@@ -461,6 +540,16 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
 
   const [showLoopModal, setShowLoopModal] = useState(false);
   const [loopMaxIterations, setLoopMaxIterations] = useState<number>(3);
+
+  const [showToolModal, setShowToolModal] = useState(false);
+  const [toolModalToolName, setToolModalToolName] = useState('');
+  const [toolModalParams, setToolModalParams] = useState<Record<string, unknown>>({});
+  const [showPayloadModal, setShowPayloadModal] = useState(false);
+  const [payloadModalSelectedId, setPayloadModalSelectedId] = useState<string | null>(null);
+  const [payloadEditName, setPayloadEditName] = useState('');
+  const [payloadEditContent, setPayloadEditContent] = useState('');
+  const [payloadEditId, setPayloadEditId] = useState<string | null>(null);
+  const [showPayloadForm, setShowPayloadForm] = useState(false);
 
   //
   // Modal state for session group configuration.
@@ -856,12 +945,28 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
         return;
       }
 
+      if (type === 'tool') {
+        setPendingPosition(position);
+        setToolModalToolName(toolkitTools.length > 0 ? toolkitTools[0].tool_name : '');
+        if (toolkitTools.length > 0) {
+          const defaults: Record<string, unknown> = {};
+          for (const field of toolkitTools[0].config_schema) {
+            if (field.default_value != null) defaults[field.name] = field.default_value;
+          }
+          setToolModalParams(defaults);
+        } else {
+          setToolModalParams({});
+        }
+        setShowToolModal(true);
+        return;
+      }
+
       //
       // For other types, create directly.
       //
       addNodeAtPosition(type, position);
     },
-    [screenToFlowPosition, hasTrigger, hasTermination]
+    [screenToFlowPosition, hasTrigger, hasTermination, toolkitTools]
   );
 
   const addNodeAtPosition = useCallback((type: string, position: { x: number; y: number }, nodeExtraData?: Record<string, unknown>) => {
@@ -982,6 +1087,43 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
           return { ...prev, loopMaxIterations: newMap };
         });
         break;
+      case 'tool': {
+        const toolName = (nodeExtraData?.toolName as string) || '';
+        const toolParams = (nodeExtraData?.toolParams as Record<string, unknown>) || {};
+        newNode = {
+          id: newId,
+          type: 'tool',
+          position,
+          data: { label: 'Tool', toolName, toolDisplayName: nodeExtraData?.toolDisplayName || toolName },
+        };
+        if (toolName) {
+          setExtraData(prev => {
+            const newConfigs = new Map(prev.toolConfigs);
+            newConfigs.set(newId, { tool_name: toolName, tool_params: toolParams });
+            return { ...prev, toolConfigs: newConfigs };
+          });
+        }
+        break;
+      }
+      case 'payload': {
+        const payloadId = (nodeExtraData?.payloadId as string) || '';
+        const shortname = (nodeExtraData?.shortname as string) || '';
+        const payloadContent = (nodeExtraData?.content as string) || '';
+        newNode = {
+          id: newId,
+          type: 'payload',
+          position,
+          data: { label: 'Payload', shortname, content: payloadContent },
+        };
+        if (payloadId) {
+          setExtraData(prev => {
+            const newConfigs = new Map(prev.payloadConfigs);
+            newConfigs.set(newId, payloadId);
+            return { ...prev, payloadConfigs: newConfigs };
+          });
+        }
+        break;
+      }
       case 'termination':
         newNode = {
           id: newId,
@@ -1062,8 +1204,36 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       return;
     }
 
+    if (type === 'tool') {
+      setPendingPosition(position);
+      setToolModalToolName(toolkitTools.length > 0 ? toolkitTools[0].tool_name : '');
+      if (toolkitTools.length > 0) {
+        const defaults: Record<string, unknown> = {};
+        for (const field of toolkitTools[0].config_schema) {
+          if (field.default_value != null) defaults[field.name] = field.default_value;
+        }
+        setToolModalParams(defaults);
+      } else {
+        setToolModalParams({});
+      }
+      setShowToolModal(true);
+      return;
+    }
+
+    if (type === 'payload') {
+      setPendingPosition(position);
+      setPayloadModalSelectedId(null);
+      setPayloadEditName('');
+      setPayloadEditContent('');
+      setPayloadEditId(null);
+      setShowPayloadForm(false);
+      send({ type: 'payload_list' });
+      setShowPayloadModal(true);
+      return;
+    }
+
     addNodeAtPosition(type, position);
-  }, [addNodeAtPosition, hasTrigger, hasTermination, screenToFlowPosition]);
+  }, [addNodeAtPosition, hasTrigger, hasTermination, screenToFlowPosition, toolkitTools, send]);
 
   const handleOperationSelect = useCallback(() => {
     if (!selectedOperation) return;
@@ -1265,6 +1435,61 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       setPendingPosition(null);
     }
   }, [pendingPosition, editingNodeId, loopMaxIterations, addNodeAtPosition, setNodes, nodes.length]);
+
+  const handleToolConfirm = useCallback(() => {
+    const params: Record<string, unknown> = { ...toolModalParams };
+    const selectedTool = toolkitTools.find(t => t.tool_name === toolModalToolName);
+    const displayName = selectedTool?.display_name || toolModalToolName;
+
+    if (editingNodeId) {
+      setExtraData(prev => {
+        const newConfigs = new Map(prev.toolConfigs);
+        newConfigs.set(editingNodeId, { tool_name: toolModalToolName, tool_params: params });
+        return { ...prev, toolConfigs: newConfigs };
+      });
+      setNodes(nds => nds.map(n =>
+        n.id === editingNodeId
+          ? { ...n, data: { ...n.data, toolName: toolModalToolName, toolDisplayName: displayName } }
+          : n
+      ));
+      setShowToolModal(false);
+      setEditingNodeId(null);
+    } else {
+      const position = pendingPosition || { x: 100, y: 100 + nodes.length * 100 };
+      addNodeAtPosition('tool', position, { toolName: toolModalToolName, toolDisplayName: displayName, toolParams: params });
+      setShowToolModal(false);
+      setPendingPosition(null);
+    }
+    setToolModalToolName('');
+    setToolModalParams({});
+  }, [pendingPosition, editingNodeId, toolModalToolName, toolModalParams, toolkitTools, addNodeAtPosition, setNodes, nodes.length]);
+
+  const handlePayloadConfirm = useCallback(() => {
+    if (!payloadModalSelectedId) return;
+    const payload = payloads.find(p => p.id === payloadModalSelectedId);
+    const shortname = payload?.shortname || '';
+    const content = payload?.content || '';
+
+    if (editingNodeId) {
+      setExtraData(prev => {
+        const newConfigs = new Map(prev.payloadConfigs);
+        newConfigs.set(editingNodeId, payloadModalSelectedId);
+        return { ...prev, payloadConfigs: newConfigs };
+      });
+      setNodes(nds => nds.map(n =>
+        n.id === editingNodeId
+          ? { ...n, data: { ...n.data, shortname, content } }
+          : n
+      ));
+      setShowPayloadModal(false);
+      setEditingNodeId(null);
+    } else {
+      const position = pendingPosition || { x: 100, y: 100 + nodes.length * 100 };
+      addNodeAtPosition('payload', position, { payloadId: payloadModalSelectedId, shortname, content });
+      setShowPayloadModal(false);
+      setPendingPosition(null);
+    }
+  }, [pendingPosition, editingNodeId, payloadModalSelectedId, payloads, addNodeAtPosition, setNodes, nodes.length]);
 
   //
   // Brief "Saved" flash when save succeeds.
@@ -1479,7 +1704,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
     //
     const sourceNode = nodes.find(n => n.id === edge.source);
     const isAgentOp = sourceNode?.type === 'operation'
-      && (sourceNode.data as OperationNodeData)?.mode === 'agent';
+      && (sourceNode.data as unknown as OperationNodeData)?.mode === 'agent';
     if (!isAgentOp) return;
 
     setEdges(eds => eds.map(e => {
@@ -1576,8 +1801,23 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       setEditingNodeId(node.id);
       setLoopMaxIterations(extraData.loopMaxIterations.get(node.id) || 3);
       setShowLoopModal(true);
+    } else if (node.type === 'tool') {
+      setEditingNodeId(node.id);
+      const cfg = extraData.toolConfigs.get(node.id);
+      setToolModalToolName(cfg?.tool_name || '');
+      setToolModalParams({ ...(cfg?.tool_params || {}) });
+      setShowToolModal(true);
+    } else if (node.type === 'payload') {
+      setEditingNodeId(node.id);
+      setPayloadModalSelectedId(extraData.payloadConfigs.get(node.id) || null);
+      setPayloadEditName('');
+      setPayloadEditContent('');
+      setPayloadEditId(null);
+      setShowPayloadForm(false);
+      send({ type: 'payload_list' });
+      setShowPayloadModal(true);
     }
-  }, [extraData]);
+  }, [extraData, send]);
 
   return (
     <div className="flex flex-col h-full">
@@ -1609,7 +1849,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
             <input
               type="number"
               value={timeout}
-              onChange={(e) => setTimeout(parseInt(e.target.value) || 1800)}
+              onChange={(e) => setChainTimeout(parseInt(e.target.value) || 1800)}
               min={1}
               className="bg-[var(--bg-primary)] border border-dim px-2 py-1.5 text-sm text-highlight w-20 text-center focus:outline-none focus:border-subtle transition-colors"
             />
@@ -1622,7 +1862,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
             className="flex items-center gap-2 px-4 py-2 text-xs tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
           >
             <X size={14} />
-            Cancel
+            Close
           </button>
           {onDuplicate && (
             <button
@@ -1779,6 +2019,19 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
                   icon={<RefreshCw size={16} className="text-[var(--accent-warning)]" />}
                   label="Loop"
                   onClick={() => handleQuickAdd('loop')}
+                />
+                <PaletteItem
+                  type="tool"
+                  icon={<Wrench size={16} className="text-[var(--accent-info)]" />}
+                  label="Tool"
+                  disabled={toolkitTools.length === 0}
+                  onClick={() => handleQuickAdd('tool')}
+                />
+                <PaletteItem
+                  type="payload"
+                  icon={<FileText size={16} className="text-[var(--accent-warning)]" />}
+                  label="Payload"
+                  onClick={() => handleQuickAdd('payload')}
                 />
               </div>
             </div>
@@ -2115,6 +2368,173 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       />
 
       <ConfigModal
+        isOpen={showToolModal}
+        onClose={() => {
+          setShowToolModal(false);
+          setPendingPosition(null);
+          setEditingNodeId(null);
+          setToolModalToolName('');
+          setToolModalParams({});
+        }}
+        size="sm"
+        title="Configure Tool"
+        config={(() => {
+          const selectedTool = toolkitTools.find(t => t.tool_name === toolModalToolName);
+          const items: Array<{ type: 'section'; fields: Array<{ name: string; label: string; type: 'text' | 'textarea' | 'select' | 'number'; span?: 'full' | 'half'; options?: Array<{ value: string; label: string }>; placeholder?: string }> }> = [];
+
+          items.push({
+            type: 'section',
+            fields: [{
+              name: '_tool_select',
+              label: 'Tool',
+              type: 'select' as const,
+              span: 'full' as const,
+              options: toolkitTools.map(t => ({ value: t.tool_name, label: t.display_name })),
+            }],
+          });
+
+          if (selectedTool && selectedTool.config_schema.length > 0) {
+            items.push({
+              type: 'section',
+              fields: selectedTool.config_schema.map(field => ({
+                name: field.name,
+                label: field.label,
+                type: (field.field_type === 'select' ? 'select' : field.field_type === 'textarea' ? 'textarea' : field.field_type === 'number' ? 'number' : 'text') as 'text' | 'textarea' | 'select' | 'number',
+                span: 'full' as const,
+                options: field.options?.map(o => ({ value: o.value, label: o.label })) || undefined,
+                placeholder: field.default_value || undefined,
+              })),
+            });
+          }
+
+          return items;
+        })()}
+        values={{
+          _tool_select: toolModalToolName,
+          ...Object.fromEntries(Object.entries(toolModalParams).map(([k, v]) => [k, String(v ?? '')])),
+        }}
+        onChange={(name, value) => {
+          if (name === '_tool_select') {
+            setToolModalToolName(value);
+            const newTool = toolkitTools.find(t => t.tool_name === value);
+            if (newTool) {
+              const defaults: Record<string, unknown> = {};
+              for (const field of newTool.config_schema) {
+                if (field.default_value != null) defaults[field.name] = field.default_value;
+              }
+              setToolModalParams(defaults);
+            } else {
+              setToolModalParams({});
+            }
+          } else {
+            setToolModalParams(prev => ({ ...prev, [name]: value }));
+          }
+        }}
+        onSubmit={handleToolConfirm}
+        submitLabel={editingNodeId ? 'Update' : 'Add'}
+        submitIcon={<Wrench size={14} />}
+        submitVariant="info"
+        submitDisabled={!toolModalToolName}
+      />
+
+      <Modal
+        isOpen={showPayloadModal}
+        onClose={() => { setShowPayloadModal(false); setEditingNodeId(null); }}
+        title="Payload"
+        size="lg"
+      >
+        <div className="space-y-4">
+          <div className="max-h-48 overflow-y-auto border border-[var(--border-color)] rounded">
+            {payloads.length === 0 ? (
+              <div className="p-3 text-sm text-muted text-center">No payloads yet. Create one below.</div>
+            ) : payloads.map(p => (
+              <div
+                key={p.id}
+                className={`flex items-center justify-between px-3 py-2 cursor-pointer border-b border-[var(--border-color)] last:border-b-0 hover:bg-[var(--bg-tertiary)] transition-colors ${payloadModalSelectedId === p.id ? 'bg-[var(--accent-warning)]/10' : ''}`}
+                onClick={() => setPayloadModalSelectedId(p.id)}
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-mono text-highlight">{p.shortname}</div>
+                  <div className="text-xs text-muted truncate">{p.content.substring(0, 60)}{p.content.length > 60 ? '...' : ''}</div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0 ml-2">
+                  <button
+                    className="p-1 text-muted hover:text-highlight"
+                    title="Edit"
+                    onClick={(e) => { e.stopPropagation(); setPayloadEditId(p.id); setPayloadEditName(p.shortname); setPayloadEditContent(p.content); setShowPayloadForm(true); }}
+                  >✎</button>
+                  <button
+                    className="p-1 text-muted hover:text-[var(--accent-error)]"
+                    title="Delete"
+                    onClick={(e) => { e.stopPropagation(); send({ type: 'payload_delete', id: p.id }); if (payloadModalSelectedId === p.id) setPayloadModalSelectedId(null); }}
+                  >✕</button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {showPayloadForm ? (
+            <div className="border border-[var(--border-color)] rounded p-3 space-y-2">
+              <div className="text-xs text-muted font-medium">{payloadEditId ? 'Edit Payload' : 'New Payload'}</div>
+              <input
+                type="text"
+                value={payloadEditName}
+                onChange={(e) => setPayloadEditName(e.target.value)}
+                placeholder="Shortname (one word)"
+                className="w-full bg-[var(--bg-primary)] text-sm px-2 py-1.5 border border-[var(--border-color)] font-mono focus:outline-none focus:border-[var(--accent-warning)]"
+              />
+              <textarea
+                value={payloadEditContent}
+                onChange={(e) => setPayloadEditContent(e.target.value)}
+                placeholder="Payload content (markdown)"
+                rows={10}
+                className="w-full bg-[var(--bg-primary)] text-sm px-2 py-1.5 border border-[var(--border-color)] font-mono focus:outline-none focus:border-[var(--accent-warning)] resize-y"
+              />
+              <div className="flex gap-2">
+                <button
+                  className="px-3 py-1.5 text-xs border border-[var(--accent-warning)] text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/10 disabled:opacity-50"
+                  disabled={!payloadEditName.trim() || !payloadEditContent.trim()}
+                  onClick={() => {
+                    send({ type: 'payload_upsert', id: payloadEditId || undefined, shortname: payloadEditName.trim(), content: payloadEditContent });
+                    setPayloadEditId(null);
+                    setPayloadEditName('');
+                    setPayloadEditContent('');
+                    setShowPayloadForm(false);
+                  }}
+                >
+                  {payloadEditId ? 'Update' : 'Save Payload'}
+                </button>
+                <button
+                  className="px-3 py-1.5 text-xs border border-dim text-muted hover:text-highlight"
+                  onClick={() => { setPayloadEditId(null); setPayloadEditName(''); setPayloadEditContent(''); setShowPayloadForm(false); }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              className="px-3 py-1.5 text-xs border border-dim text-muted hover:text-highlight hover:border-[var(--accent-warning)]"
+              onClick={() => { setPayloadEditId(null); setPayloadEditName(''); setPayloadEditContent(''); setShowPayloadForm(true); }}
+            >
+              + New Payload
+            </button>
+          )}
+
+          <div className="flex justify-end">
+            <button
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs tracking-wider border border-dim transition-colors disabled:opacity-50 bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] hover:border-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/30"
+              disabled={!payloadModalSelectedId}
+              onClick={handlePayloadConfirm}
+            >
+              <FileText size={14} />
+              {editingNodeId ? 'Update' : 'Add'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <ConfigModal
         isOpen={showDuplicateModal}
         onClose={() => setShowDuplicateModal(false)}
         onSubmit={handleDuplicateConfirm}
@@ -2126,6 +2546,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
         onChange={(key, val) => setDuplicateValues(prev => ({ ...prev, [key]: val }))}
         config={[
           {
+            type: 'section' as const,
             fields: [
               { name: 'name', label: 'Name', type: 'text' as const, required: true, span: 'full' as const },
               { name: 'description', label: 'Description', type: 'text' as const, span: 'full' as const },
@@ -2193,14 +2614,18 @@ interface ChainBuilderProps {
   operationDefs: OperationDefinitionInfo[];
   modelDefs?: ModelDefinition[];
   nodes?: NodeState[];
+  toolkitTools?: ToolkitToolInfo[];
+  payloads?: PayloadInfo[];
+  send?: (msg: BrowserMessage) => void;
   saveStatus?: string | null;
   saveError?: string | null;
 }
 
-export function ChainBuilder({ modelDefs = [], nodes = [], saveStatus, saveError, ...props }: ChainBuilderProps) {
+const noopSend = () => {};
+export function ChainBuilder({ modelDefs = [], nodes = [], toolkitTools = [], payloads = [], send = noopSend, saveStatus, saveError, ...props }: ChainBuilderProps) {
   return (
     <ReactFlowProvider>
-      <ChainBuilderInner {...props} modelDefs={modelDefs} nodes={nodes} saveStatus={saveStatus} saveError={saveError} />
+      <ChainBuilderInner {...props} modelDefs={modelDefs} nodes={nodes} toolkitTools={toolkitTools} payloads={payloads} send={send} saveStatus={saveStatus} saveError={saveError} />
     </ReactFlowProvider>
   );
 }

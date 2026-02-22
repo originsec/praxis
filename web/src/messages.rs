@@ -4,9 +4,11 @@ use common::{
     ChainDefinitionFull, ChainDefinitionInfo, ChainExecutionUpdate,
     CommandRequest, CommandResponse, DiscoveredLlmEndpoint,
     InterceptMethod, InterceptRule, InterceptStatus, InterceptedTrafficEntry,
-    ApplicationLogEntry, OrchestratorPlan, OperationDefinitionInfo, SemanticOpUpdate,
-    SystemState, TerminalOutput, TrafficLogFilters, TrafficMatchWithDetails, RuleScope,
-    TargetDirection, TrafficSearchFilters,
+    ApplicationLogEntry, OrchestratorPlan, OperationDefinitionInfo, PayloadInfo,
+    SemanticOpUpdate, SystemState, TerminalOutput, TrafficLogFilters,
+    TrafficMatchWithDetails, RuleScope, TargetDirection, TrafficSearchFilters,
+    TargetSpec, ToolkitApplyItem, ToolkitApplyOutcome, ToolkitExecuteResult,
+    ToolkitModelOption, ToolkitReconTarget, ToolkitToolInfo,
 };
 
 /// Messages sent from browser to web server
@@ -251,6 +253,38 @@ pub enum BrowserMessage {
     ReconGet {
         node_id: String,
         agent_short_name: String,
+    },
+
+    //
+    // Toolkit messages.
+    //
+    ToolkitList,
+    ToolkitRecon {
+        tool_name: String,
+        target_spec: TargetSpec,
+    },
+    ToolkitExecute {
+        tool_name: String,
+        target_spec: TargetSpec,
+        params: serde_json::Value,
+    },
+    ToolkitApply {
+        tool_name: String,
+        execution_id: String,
+        targets: Vec<ToolkitApplyItem>,
+    },
+
+    //
+    // Payload messages.
+    //
+    PayloadList,
+    PayloadUpsert {
+        id: Option<String>,
+        shortname: String,
+        content: String,
+    },
+    PayloadDelete {
+        id: String,
     },
 
     //
@@ -601,6 +635,50 @@ pub enum ServerMessage {
         recon_result: Option<common::ReconResult>,
         performed_at: Option<String>,
         is_semantic: Option<bool>,
+    },
+
+    //
+    // Toolkit messages.
+    //
+    ToolkitListResponse {
+        tools: Vec<ToolkitToolInfo>,
+        models: Vec<ToolkitModelOption>,
+    },
+    ToolkitReconResponse {
+        tool_name: String,
+        targets: Vec<ToolkitReconTarget>,
+    },
+    ToolkitExecutionResult {
+        result: ToolkitExecuteResult,
+    },
+    ToolkitApplyResult {
+        execution_id: String,
+        results: Vec<ToolkitApplyOutcome>,
+    },
+    ToolkitExecutionProgress {
+        execution_id: String,
+        current: usize,
+        total: usize,
+    },
+    ToolkitError {
+        message: String,
+    },
+
+    //
+    // Payload messages.
+    //
+    PayloadListResponse {
+        payloads: Vec<PayloadInfo>,
+    },
+    PayloadUpserted {
+        payload: PayloadInfo,
+    },
+    PayloadDeleted {
+        id: String,
+        success: bool,
+    },
+    PayloadError {
+        message: String,
     },
 
     //

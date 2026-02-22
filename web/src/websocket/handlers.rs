@@ -257,6 +257,31 @@ pub async fn handle_browser_message(
         BrowserMessage::ReconGet { node_id, agent_short_name } => {
             state.rabbitmq.get_recon(node_id, agent_short_name).await?;
         }
+        BrowserMessage::ToolkitList => {
+            state.rabbitmq.toolkit_list().await?;
+        }
+        BrowserMessage::ToolkitRecon { tool_name, target_spec } => {
+            state.rabbitmq.toolkit_recon(tool_name, target_spec).await?;
+        }
+        BrowserMessage::ToolkitExecute { tool_name, target_spec, params } => {
+            state.rabbitmq.toolkit_execute(tool_name, target_spec, params).await?;
+        }
+        BrowserMessage::ToolkitApply { tool_name, execution_id, targets } => {
+            state.rabbitmq.toolkit_apply(tool_name, execution_id, targets).await?;
+        }
+
+        //
+        // Payload messages.
+        //
+        BrowserMessage::PayloadList => {
+            state.rabbitmq.payload_list().await?;
+        }
+        BrowserMessage::PayloadUpsert { id, shortname, content } => {
+            state.rabbitmq.payload_upsert(id, shortname, content).await?;
+        }
+        BrowserMessage::PayloadDelete { id } => {
+            state.rabbitmq.payload_delete(id).await?;
+        }
 
         //
         // Lua agent script messages.

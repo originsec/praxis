@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Play, Trash2, Clock, Edit2, Zap } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ChainBuilder } from './ChainBuilder';
@@ -84,6 +84,8 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
   useEffect(() => {
     if (showBuilder) {
       send({ type: 'op_def_list' });
+      send({ type: 'toolkit_list' });
+      send({ type: 'payload_list' });
       getConfig(['llm_model_definitions']);
     }
   }, [showBuilder, send, getConfig]);
@@ -234,6 +236,9 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
           operationDefs={operationDefs}
           modelDefs={modelDefs}
           nodes={nodes}
+          toolkitTools={state.toolkit.tools}
+          payloads={state.payloads}
+          send={send}
           saveStatus={chainSuccess}
           saveError={chainError}
         />

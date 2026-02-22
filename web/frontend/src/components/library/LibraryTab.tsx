@@ -113,8 +113,10 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
   useEffect(() => {
     if (showChainBuilder) {
       getConfig(['llm_model_definitions']);
+      send({ type: 'toolkit_list' });
+      send({ type: 'payload_list' });
     }
-  }, [showChainBuilder, getConfig]);
+  }, [showChainBuilder, send, getConfig]);
 
   //
   // Load chain for editing.
@@ -526,6 +528,9 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
           onCancel={handleCancelChain}
           operationDefs={operationDefs}
           modelDefs={modelDefs}
+          toolkitTools={state.toolkit.tools}
+          payloads={state.payloads}
+          send={send}
         />
       </div>
     );

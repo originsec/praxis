@@ -1,4 +1,5 @@
 use crate::agent_connectors::{Agent, AgentRegistry};
+use anyhow::anyhow;
 use common::{AgentCommand, AgentCommandResult, AgentFileType, GrepFileEntry, GrepMatch, NodeCommandResult, ReconResult};
 use regex::Regex;
 use std::path::{Path, PathBuf};
@@ -570,6 +571,33 @@ pub async fn handle_agent_command(
                 results,
                 errors,
             })
+        }
+        AgentCommand::WriteSessionContent { path, contents } => {
+            let locked = selected_agent.lock().unwrap();
+            let agent = locked.as_ref();
+            let result = match agent {
+                Some(a) => a.write_session_content(&path, &contents),
+                None => Err(anyhow!("No selected agent")),
+            };
+
+            match result {
+                Ok(()) => {
+                    common::log_info!("Wrote session content: {}", path);
+                    NodeCommandResult::Agent(AgentCommandResult::WriteSessionContentResult {
+                        path,
+                        success: true,
+                        error: None,
+                    })
+                }
+                Err(e) => {
+                    common::log_warn!("Failed to write session content {}: {}", path, e);
+                    NodeCommandResult::Agent(AgentCommandResult::WriteSessionContentResult {
+                        path,
+                        success: false,
+                        error: Some(e.to_string()),
+                    })
+                }
+            }
         }
     }
 }

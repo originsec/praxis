@@ -275,6 +275,38 @@ export function OperationsPage() {
     setMainTab('runs');
   };
 
+  const handleRunOperationAdvanced = (opFullName: string, targetSpec: import('../api/types').TargetSpec) => {
+    const allNodes = state.systemState?.nodes || [];
+
+    //
+    // Resolve targets from spec: filter nodes, then agents per node.
+    //
+    const filteredNodes = targetSpec.node_ids.length > 0
+      ? allNodes.filter(n => targetSpec.node_ids.includes(n.node_id))
+      : targetSpec.os_filter
+        ? allNodes.filter(n => n.os_details.toLowerCase().includes(targetSpec.os_filter!.toLowerCase()))
+        : allNodes;
+
+    for (const node of filteredNodes) {
+      const agents = targetSpec.agent_short_names.length > 0
+        ? node.discovered_agents.filter(a => targetSpec.agent_short_names.includes(a.short_name))
+        : node.selected_agent
+          ? [{ short_name: node.selected_agent.short_name }]
+          : node.discovered_agents.slice(0, 1);
+
+      for (const agent of agents) {
+        send({
+          type: 'semantic_op_run',
+          node_id: node.node_id,
+          agent_short_name: agent.short_name,
+          operation_name: opFullName,
+          working_dir: null,
+        });
+      }
+    }
+    setMainTab('runs');
+  };
+
   const handleRunChainAdvanced = (chainId: string, targetSpec: import('../api/types').TargetSpec) => {
     const allNodes = state.systemState?.nodes || [];
     const primaryNode = allNodes[0];
@@ -335,7 +367,8 @@ export function OperationsPage() {
     return state.chains.loadingChains.has(selectedChainExec.chain_id);
   }, [selectedChainExec, state.chains.loadingChains]);
 
-  const formatDuration = (start: string, end: string | null) => {
+  const formatDuration = (start: string, end: string | null, status: string) => {
+    if (status === 'Queued') return '—';
     const startTime = new Date(start).getTime();
     const endTime = end ? new Date(end).getTime() : Date.now();
     const diffMs = endTime - startTime;
@@ -638,7 +671,7 @@ export function OperationsPage() {
                       <td className="px-4 py-2">
                         <div className="flex items-center gap-1 text-muted">
                           <Clock size={12} />
-                          {formatDuration(op.start_time, op.end_time)}
+                          {formatDuration(op.start_time, op.end_time, op.status)}
                         </div>
                       </td>
                       <td className="px-4 py-2">
@@ -727,6 +760,7 @@ export function OperationsPage() {
           setPreSelectedOpDef(null);
         }}
         onRun={handleRunOperation}
+        onRunAdvanced={handleRunOperationAdvanced}
         title="Run Operation"
         items={definitions.filter(d => !d.disabled).map(def => ({
           id: def.full_name,
@@ -780,6 +814,7 @@ export function OperationsPage() {
           setMainTab('library');
         }}
         operationDefs={definitions}
+        payloads={state.payloads}
       />
     </div>
   );

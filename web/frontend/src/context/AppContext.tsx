@@ -36,12 +36,18 @@ import type {
   TriggerConfig,
   TargetSpec,
   DiscoveredLlmEndpoint,
+  PayloadInfo,
   AgentChatAgentInfo,
   AgentChatAgentStatus,
   AgentChatChannelInfo,
   AgentChatMessageInfo,
   AgentChatSessionState,
   LuaAgentScriptInfo,
+  ToolkitExecuteResult,
+  ToolkitApplyOutcome,
+  ToolkitModelOption,
+  ToolkitReconTarget,
+  ToolkitToolInfo,
 } from '../api/types';
 
 //
@@ -145,6 +151,16 @@ interface AgentChatState {
   error: string | null;
 }
 
+interface ToolkitState {
+  tools: ToolkitToolInfo[];
+  models: ToolkitModelOption[];
+  reconTargets: ToolkitReconTarget[];
+  executeResult: ToolkitExecuteResult | null;
+  applyResults: ToolkitApplyOutcome[] | null;
+  executionProgress: { current: number; total: number } | null;
+  error: string | null;
+}
+
 //
 // Hunting state.
 //
@@ -174,6 +190,16 @@ const initialAgentChatState: AgentChatState = {
   error: null,
 };
 
+const initialToolkitState: ToolkitState = {
+  tools: [],
+  models: [],
+  reconTargets: [],
+  executeResult: null,
+  applyResults: null,
+  executionProgress: null,
+  error: null,
+};
+
 //
 // State.
 //
@@ -194,7 +220,9 @@ interface AppState {
   chains: ChainState;
   discovery: DiscoveryState;
   agentChat: AgentChatState;
+  toolkit: ToolkitState;
   luaAgentScripts: LuaAgentScriptInfo[];
+  payloads: PayloadInfo[];
   //
   // Agent session messages keyed by session_id.
   //
@@ -227,7 +255,9 @@ function createInitialState(): AppState {
     chains: initialChainState,
     discovery: initialDiscoveryState,
     agentChat: initialAgentChatState,
+    toolkit: initialToolkitState,
     luaAgentScripts: [],
+    payloads: [],
     agentSessionMessages: {},
     recentlyAccessedNodeIds: loadRecentNodes(MAX_RECENT_NODES),
   };
@@ -333,9 +363,22 @@ type Action =
   | { type: 'AGENT_CHAT_CLEAR_ERROR' }
   | { type: 'AGENT_CHAT_SET_LOADING'; loading: boolean }
   //
+  // Toolkit actions.
+  //
+  | { type: 'TOOLKIT_LIST_RESPONSE'; tools: ToolkitToolInfo[]; models: ToolkitModelOption[] }
+  | { type: 'TOOLKIT_RECON_RESPONSE'; targets: ToolkitReconTarget[] }
+  | { type: 'TOOLKIT_EXECUTE_RESULT'; result: ToolkitExecuteResult }
+  | { type: 'TOOLKIT_EXECUTION_PROGRESS'; current: number; total: number }
+  | { type: 'TOOLKIT_APPLY_RESULT'; results: ToolkitApplyOutcome[] }
+  | { type: 'TOOLKIT_ERROR'; message: string }
+  //
   // Lua agent script actions.
   //
-  | { type: 'SET_LUA_AGENT_SCRIPTS'; scripts: LuaAgentScriptInfo[] };
+  | { type: 'SET_LUA_AGENT_SCRIPTS'; scripts: LuaAgentScriptInfo[] }
+  //
+  // Payload actions.
+  //
+  | { type: 'SET_PAYLOADS'; payloads: PayloadInfo[] };
 
 function reduceCore(state: AppState, action: Action): AppState | null {
   switch (action.type) {
@@ -371,6 +414,8 @@ function reduceCore(state: AppState, action: Action): AppState | null {
       return { ...state, opDefSuccess: action.fullName, opDefError: null };
     case 'SET_LUA_AGENT_SCRIPTS':
       return { ...state, luaAgentScripts: action.scripts };
+    case 'SET_PAYLOADS':
+      return { ...state, payloads: action.payloads };
     default:
       return null;
   }
@@ -1034,6 +1079,43 @@ function reduceAgentChat(state: AppState, action: Action): AppState | null {
   }
 }
 
+function reduceToolkit(state: AppState, action: Action): AppState | null {
+  switch (action.type) {
+    case 'TOOLKIT_LIST_RESPONSE':
+      return {
+        ...state,
+        toolkit: { ...state.toolkit, tools: action.tools, models: action.models, error: null },
+      };
+    case 'TOOLKIT_RECON_RESPONSE':
+      return {
+        ...state,
+        toolkit: { ...state.toolkit, reconTargets: action.targets, error: null },
+      };
+    case 'TOOLKIT_EXECUTE_RESULT':
+      return {
+        ...state,
+        toolkit: { ...state.toolkit, executeResult: action.result, applyResults: null, executionProgress: null, error: null },
+      };
+    case 'TOOLKIT_EXECUTION_PROGRESS':
+      return {
+        ...state,
+        toolkit: { ...state.toolkit, executionProgress: { current: action.current, total: action.total } },
+      };
+    case 'TOOLKIT_APPLY_RESULT':
+      return {
+        ...state,
+        toolkit: { ...state.toolkit, applyResults: action.results, error: null },
+      };
+    case 'TOOLKIT_ERROR':
+      return {
+        ...state,
+        toolkit: { ...state.toolkit, error: action.message, executionProgress: null },
+      };
+    default:
+      return null;
+  }
+}
+
 function reducer(state: AppState, action: Action): AppState {
   return (
     reduceCore(state, action)
@@ -1045,6 +1127,7 @@ function reducer(state: AppState, action: Action): AppState {
     ?? reduceRecentNodes(state, action)
     ?? reduceDiscovery(state, action)
     ?? reduceAgentChat(state, action)
+    ?? reduceToolkit(state, action)
     ?? state
   );
 }
@@ -1433,10 +1516,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
           //
           window.dispatchEvent(new CustomEvent('ws-message', { detail: message }));
           break;
+        case 'toolkit_list_response':
+          dispatch({ type: 'TOOLKIT_LIST_RESPONSE', tools: message.tools, models: message.models });
+          break;
+        case 'toolkit_recon_response':
+          dispatch({ type: 'TOOLKIT_RECON_RESPONSE', targets: message.targets });
+          break;
+        case 'toolkit_execution_result':
+          dispatch({ type: 'TOOLKIT_EXECUTE_RESULT', result: message.result });
+          break;
+        case 'toolkit_execution_progress':
+          dispatch({ type: 'TOOLKIT_EXECUTION_PROGRESS', current: message.current, total: message.total });
+          break;
+        case 'toolkit_apply_result':
+          dispatch({ type: 'TOOLKIT_APPLY_RESULT', results: message.results });
+          break;
+        case 'toolkit_error':
+          dispatch({ type: 'TOOLKIT_ERROR', message: message.message });
+          break;
 
         //
         // Lua agent script messages.
         //
+        //
+        // Payload messages.
+        //
+        case 'payload_list_response':
+          dispatch({ type: 'SET_PAYLOADS', payloads: message.payloads });
+          break;
+        case 'payload_upserted':
+        case 'payload_deleted':
+          wsClient.send({ type: 'payload_list' });
+          break;
+        case 'payload_error':
+          break;
+
         case 'lua_agent_script_added':
         case 'lua_agent_script_updated':
         case 'lua_agent_script_deleted':

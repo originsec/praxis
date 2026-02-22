@@ -374,6 +374,8 @@ export type ChainElement =
   | { element_type: 'GenericPrompt'; id: string; prompt: string; session_group?: SessionGroup | null; block_config?: BlockConfig | null }
   | { element_type: 'Memory'; id: string; key: string; mode: 'Store' | 'Retrieve' }
   | { element_type: 'Loop'; id: string; max_iterations: number }
+  | { element_type: 'Tool'; id: string; tool_name: string; tool_params: Record<string, unknown>; block_config?: BlockConfig | null }
+  | { element_type: 'Payload'; id: string; payload_id: string; block_config?: BlockConfig | null }
   | { element_type: 'Termination'; id: string; block_config?: BlockConfig | null };
 
 export type ConnectionCondition = 'OnSuccess' | 'OnFailure';
@@ -456,6 +458,96 @@ export interface ChainTriggerInfo {
   next_fire_at?: string | null;
 }
 
+export interface PayloadInfo {
+  id: string;
+  shortname: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ToolkitModelOption {
+  name: string;
+  provider: string;
+  model: string;
+}
+
+export interface ToolConfigOption {
+  value: string;
+  label: string;
+}
+
+export interface ToolConfigField {
+  name: string;
+  label: string;
+  field_type: string;
+  required: boolean;
+  default_value?: string | null;
+  options?: ToolConfigOption[] | null;
+}
+
+export interface ToolkitToolInfo {
+  tool_name: string;
+  display_name: string;
+  description: string;
+  config_schema: ToolConfigField[];
+}
+
+export interface ToolkitTargetRef {
+  node_id: string;
+  agent_short_name: string;
+  session_id: string;
+  session_file: string;
+}
+
+export interface ToolkitReconTarget {
+  node_id: string;
+  agent_short_name: string;
+  sessions: SessionItem[];
+}
+
+export interface ToolkitTargetPreview {
+  target: ToolkitTargetRef;
+  success: boolean;
+  preview_content?: string | null;
+  original_content?: string | null;
+  diff_hunks?: ToolkitDiffHunk[] | null;
+  error?: string | null;
+}
+
+export interface ToolkitDiffHunk {
+  old_start: number;
+  old_len: number;
+  new_start: number;
+  new_len: number;
+  lines: ToolkitDiffLine[];
+}
+
+export interface ToolkitDiffLine {
+  kind: 'Context' | 'Added' | 'Removed';
+  old_line_no?: number | null;
+  new_line_no?: number | null;
+  content: string;
+}
+
+export interface ToolkitExecuteResult {
+  execution_id: string;
+  tool_name: string;
+  previews: ToolkitTargetPreview[];
+  error?: string | null;
+}
+
+export interface ToolkitApplyItem {
+  target: ToolkitTargetRef;
+  content: string;
+}
+
+export interface ToolkitApplyOutcome {
+  target: ToolkitTargetRef;
+  success: boolean;
+  error?: string | null;
+}
+
 export type ChainExecutionStatus = 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled';
 
 export type ElementExecutionStatus =
@@ -476,6 +568,8 @@ export type ElementConfig =
   | { type: 'GenericPrompt'; prompt: string }
   | { type: 'Memory'; key: string; mode: 'Store' | 'Retrieve' }
   | { type: 'Loop'; max_iterations: number }
+  | { type: 'Tool'; tool_name: string; tool_params: Record<string, unknown> }
+  | { type: 'Payload'; payload_id: string }
   | { type: 'Termination' };
 
 //
@@ -679,7 +773,7 @@ export type BrowserMessage =
   | { type: 'op_def_delete'; full_name: string }
   | { type: 'op_def_get'; full_name: string }
   | { type: 'orchestrator_start' }
-  | { type: 'orchestrator_prompt'; message: string }
+  | { type: 'orchestrator_prompt'; prompt_id: string; message: string }
   | { type: 'orchestrator_stop' }
   | { type: 'orchestrator_cancel' }
   //
@@ -724,6 +818,19 @@ export type BrowserMessage =
   // Recon messages.
   //
   | { type: 'recon_get'; node_id: string; agent_short_name: string }
+  //
+  // Toolkit messages.
+  //
+  | { type: 'toolkit_list' }
+  | { type: 'toolkit_recon'; tool_name: string; target_spec: TargetSpec }
+  | { type: 'toolkit_execute'; tool_name: string; target_spec: TargetSpec; params: unknown }
+  | { type: 'toolkit_apply'; tool_name: string; execution_id: string; targets: ToolkitApplyItem[] }
+  //
+  // Payload messages.
+  //
+  | { type: 'payload_list' }
+  | { type: 'payload_upsert'; id?: string; shortname: string; content: string }
+  | { type: 'payload_delete'; id: string }
   //
   // Lua agent script messages.
   //
@@ -771,14 +878,14 @@ export type ServerMessage =
   | { type: 'op_def_deleted'; full_name: string; success: boolean }
   | { type: 'op_def_error'; message: string }
   | { type: 'orchestrator_started'; provider: string; model: string }
-  | { type: 'orchestrator_content'; content: string }
-  | { type: 'orchestrator_tool_executing'; name: string; input?: string }
-  | { type: 'orchestrator_tool_executed'; name: string; display: string; success: boolean; result: string }
-  | { type: 'orchestrator_plan_updated'; plan: OrchestratorPlan }
-  | { type: 'orchestrator_done' }
+  | { type: 'orchestrator_content'; prompt_id: string; content: string }
+  | { type: 'orchestrator_tool_executing'; prompt_id: string; name: string; input?: string }
+  | { type: 'orchestrator_tool_executed'; prompt_id: string; name: string; display: string; success: boolean; result: string }
+  | { type: 'orchestrator_plan_updated'; prompt_id: string; plan: OrchestratorPlan }
+  | { type: 'orchestrator_done'; prompt_id: string }
   | { type: 'orchestrator_stopped' }
-  | { type: 'orchestrator_error'; message: string }
-  | { type: 'orchestrator_token_usage'; prompt_tokens: number; completion_tokens: number; total_tokens: number }
+  | { type: 'orchestrator_error'; prompt_id: string; message: string }
+  | { type: 'orchestrator_token_usage'; prompt_id: string; prompt_tokens: number; completion_tokens: number; total_tokens: number }
   //
   // Traffic interception messages.
   //
@@ -819,6 +926,22 @@ export type ServerMessage =
   // Recon messages.
   //
   | { type: 'recon_get_response'; node_id: string; agent_short_name: string; recon_result: ReconResult | null; performed_at: string | null; is_semantic: boolean | null }
+  //
+  // Toolkit messages.
+  //
+  | { type: 'toolkit_list_response'; tools: ToolkitToolInfo[]; models: ToolkitModelOption[] }
+  | { type: 'toolkit_recon_response'; tool_name: string; targets: ToolkitReconTarget[] }
+  | { type: 'toolkit_execution_result'; result: ToolkitExecuteResult }
+  | { type: 'toolkit_apply_result'; execution_id: string; results: ToolkitApplyOutcome[] }
+  | { type: 'toolkit_execution_progress'; execution_id: string; current: number; total: number }
+  | { type: 'toolkit_error'; message: string }
+  //
+  // Payload messages.
+  //
+  | { type: 'payload_list_response'; payloads: PayloadInfo[] }
+  | { type: 'payload_upserted'; payload: PayloadInfo }
+  | { type: 'payload_deleted'; id: string; success: boolean }
+  | { type: 'payload_error'; message: string }
   //
   // Lua agent script messages.
   //

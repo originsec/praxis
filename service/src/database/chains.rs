@@ -117,6 +117,21 @@ pub enum ChainElement {
         id: ElementId,
         max_iterations: u32,
     },
+    /// Tool element - invokes a registered toolkit tool
+    Tool {
+        id: ElementId,
+        tool_name: String,
+        tool_params: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
+    },
+    /// Payload element - outputs static content from a stored payload
+    Payload {
+        id: ElementId,
+        payload_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_config: Option<BlockConfig>,
+    },
     /// Termination element - explicit end of chain (exactly one per chain)
     Termination {
         id: ElementId,
@@ -135,6 +150,8 @@ impl ChainElement {
             ChainElement::GenericPrompt { id, .. } => id,
             ChainElement::Memory { id, .. } => id,
             ChainElement::Loop { id, .. } => id,
+            ChainElement::Tool { id, .. } => id,
+            ChainElement::Payload { id, .. } => id,
             ChainElement::Termination { id, .. } => id,
         }
     }
@@ -145,6 +162,8 @@ impl ChainElement {
             ChainElement::Operation { block_config, .. } => block_config.as_ref(),
             ChainElement::Transform { block_config, .. } => block_config.as_ref(),
             ChainElement::GenericPrompt { block_config, .. } => block_config.as_ref(),
+            ChainElement::Tool { block_config, .. } => block_config.as_ref(),
+            ChainElement::Payload { block_config, .. } => block_config.as_ref(),
             ChainElement::Termination { block_config, .. } => block_config.as_ref(),
             ChainElement::Trigger { .. }
             | ChainElement::Memory { .. }
@@ -162,6 +181,8 @@ impl ChainElement {
             ChainElement::Trigger { .. }
             | ChainElement::Memory { .. }
             | ChainElement::Loop { .. }
+            | ChainElement::Tool { .. }
+            | ChainElement::Payload { .. }
             | ChainElement::Termination { .. } => None,
         }
     }
@@ -353,8 +374,8 @@ impl ChainDefinition {
         }
 
         //
-        // Validate Loop elements: max_iterations >= 1, exactly one incoming
-        // and one outgoing connection.
+        // Validate Loop elements: max_iterations >= 1, at most one incoming
+        // connection, at most two outgoing (port 0 = retry, port 1 = exit).
         //
         for element in &self.elements {
             if let ChainElement::Loop { max_iterations, .. } = element {
@@ -368,9 +389,9 @@ impl ChainDefinition {
                         "Loop element can have at most one incoming connection (has {})", incoming
                     ));
                 }
-                if outgoing > 1 {
+                if outgoing > 2 {
                     return Err(format!(
-                        "Loop element can have at most one outgoing connection (has {})", outgoing
+                        "Loop element can have at most two outgoing connections (has {})", outgoing
                     ));
                 }
             }

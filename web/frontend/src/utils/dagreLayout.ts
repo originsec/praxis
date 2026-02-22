@@ -11,6 +11,8 @@ const NODE_SIZES: Record<string, { width: number; height: number }> = {
   GenericPrompt: { width: 280, height: 120 },
   Memory: { width: 220, height: 70 },
   Loop: { width: 200, height: 60 },
+  Tool: { width: 240, height: 80 },
+  Payload: { width: 260, height: 100 },
   Termination: { width: 180, height: 60 },
 };
 

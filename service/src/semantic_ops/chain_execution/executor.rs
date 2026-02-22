@@ -16,6 +16,7 @@ use common::{
 use crate::config::ServiceConfig;
 use crate::database::{ChainDefinition, ChainElement, ChainExecutionRecord, OperationRecord, SessionGroup};
 use crate::database::Database;
+use crate::tools::ToolkitManager;
 use crate::semantic_ops::{
     close_session, create_session, execute_agent_mode, execute_one_shot, select_agent,
     ResponseTracker,
@@ -58,6 +59,7 @@ impl ChainExecutor {
         broadcast_channel: Channel,
         response_tracker: Arc<ResponseTracker>,
         database: Arc<Database>,
+        toolkit_manager: Option<Arc<ToolkitManager>>,
     ) -> Result<String> {
         let execution_id = Uuid::new_v4().to_string();
 
@@ -206,6 +208,7 @@ impl ChainExecutor {
                         database,
                         state_clone.clone(),
                         cancel_token,
+                        toolkit_manager,
                     )
                     .await
                 }
@@ -307,6 +310,7 @@ impl ChainExecutor {
         broadcast_channel: Channel,
         response_tracker: Arc<ResponseTracker>,
         database: Arc<Database>,
+        toolkit_manager: Option<Arc<ToolkitManager>>,
     ) -> Vec<Result<String>> {
         use std::collections::HashMap;
 
@@ -331,6 +335,7 @@ impl ChainExecutor {
             let broadcast_channel = broadcast_channel.clone();
             let response_tracker = response_tracker.clone();
             let database = database.clone();
+            let toolkit_manager = toolkit_manager.clone();
 
             //
             // Each node gets its own spawn — targets within the node run
@@ -355,6 +360,7 @@ impl ChainExecutor {
                             broadcast_channel.clone(),
                             response_tracker.clone(),
                             database.clone(),
+                            toolkit_manager.clone(),
                         )
                         .await;
 
@@ -420,6 +426,7 @@ impl ChainExecutor {
         database: Arc<Database>,
         state: Arc<std::sync::RwLock<ChainExecutionState>>,
         cancel_token: CancellationToken,
+        toolkit_manager: Option<Arc<ToolkitManager>>,
     ) -> Result<()> {
         use std::collections::VecDeque;
 
@@ -637,6 +644,29 @@ impl ChainExecutor {
                         is_first_in_session: false,
                     },
                 ),
+                ChainElement::Tool { tool_name, tool_params, .. } => (
+                    ElementConfig::Tool {
+                        tool_name: tool_name.clone(),
+                        tool_params: tool_params.clone(),
+                    },
+                    ElementContext {
+                        input: merged_input.clone(),
+                        session_id: None,
+                        yolo_mode: false,
+                        is_first_in_session: false,
+                    },
+                ),
+                ChainElement::Payload { payload_id, .. } => (
+                    ElementConfig::Payload {
+                        payload_id: payload_id.clone(),
+                    },
+                    ElementContext {
+                        input: merged_input.clone(),
+                        session_id: None,
+                        yolo_mode: false,
+                        is_first_in_session: false,
+                    },
+                ),
                 ChainElement::Termination { .. } => (
                     ElementConfig::Termination,
                     ElementContext {
@@ -658,6 +688,8 @@ impl ChainExecutor {
                 ChainElement::GenericPrompt { .. } => "GenericPrompt",
                 ChainElement::Memory { key, .. } => key.as_str(),
                 ChainElement::Loop { .. } => "Loop",
+                ChainElement::Tool { tool_name, .. } => tool_name.as_str(),
+                ChainElement::Payload { .. } => "Payload",
                 ChainElement::Termination { .. } => "Termination",
             };
             let eid_short = &element_id[..8.min(element_id.len())];
@@ -772,6 +804,26 @@ impl ChainExecutor {
                         }
                     };
                     (mem_result, None, None)
+                }
+                ChainElement::Tool { tool_name, tool_params, .. } => {
+                    let result = if let Some(ref tm) = toolkit_manager {
+                        if let Some(tool) = tm.get_chain_tool(tool_name) {
+                            tool.execute_chain(&merged_input, tool_params).await
+                        } else {
+                            Err(anyhow::anyhow!("Tool '{}' not found", tool_name))
+                        }
+                    } else {
+                        Err(anyhow::anyhow!("ToolkitManager not available"))
+                    };
+                    (result, None, None)
+                }
+                ChainElement::Payload { payload_id, .. } => {
+                    let result = match database.get_payload(payload_id).await {
+                        Ok(Some(record)) => Ok(record.content),
+                        Ok(None) => Err(anyhow::anyhow!("Payload '{}' not found", payload_id)),
+                        Err(e) => Err(anyhow::anyhow!("Failed to load payload: {}", e)),
+                    };
+                    (result, None, None)
                 }
                 ChainElement::Termination { .. } => {
                     (Ok(merged_input.clone()), None, None)
