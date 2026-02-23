@@ -189,6 +189,16 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
+    /// Set the disabled flag on an operation definition
+    pub async fn set_op_def_disabled(&self, full_name: String, disabled: bool) -> Result<()> {
+        let message = ClientSignalMessage::OpDefSetDisabled {
+            client_id: self.state.client_id.clone(),
+            full_name,
+            disabled,
+        };
+        self.publish_signal(message).await
+    }
+
     //
     // Chain methods.
     //
@@ -234,6 +244,16 @@ impl RabbitMqClient {
         let message = ClientSignalMessage::ChainDelete {
             client_id: self.state.client_id.clone(),
             chain_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    /// Set the disabled flag on a chain
+    pub async fn set_chain_disabled(&self, chain_id: String, disabled: bool) -> Result<()> {
+        let message = ClientSignalMessage::ChainSetDisabled {
+            client_id: self.state.client_id.clone(),
+            chain_id,
+            disabled,
         };
         self.publish_signal(message).await
     }

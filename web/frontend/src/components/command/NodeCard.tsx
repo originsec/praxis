@@ -49,12 +49,13 @@ export function NodeCard({ node }: NodeCardProps) {
   const [closingSessionFor, setClosingSessionFor] = useState<string | null>(null);
 
   //
-  // Session creation with working directory picker.
+  // Session creation with working directory picker and YOLO toggle.
   //
   const [sessionCreateAgent, setSessionCreateAgent] = useState<string | null>(null);
   const [sessionProjectPaths, setSessionProjectPaths] = useState<string[]>([]);
   const [sessionSelectedPath, setSessionSelectedPath] = useState<string | null>(null);
   const [sessionPathsLoading, setSessionPathsLoading] = useState(false);
+  const [sessionYoloMode, setSessionYoloMode] = useState(false);
 
   //
   // Modal state.
@@ -94,6 +95,7 @@ export function NodeCard({ node }: NodeCardProps) {
     setSessionCreateAgent(shortName);
     setSessionProjectPaths([]);
     setSessionSelectedPath(null);
+    setSessionYoloMode(false);
     setSessionPathsLoading(true);
 
     let resolved = false;
@@ -147,14 +149,15 @@ export function NodeCard({ node }: NodeCardProps) {
     send({ type: 'recon_get', node_id: node.node_id, agent_short_name: shortName });
   };
 
-  const doCreateSession = async (shortName: string, workingDir: string | undefined) => {
+  const doCreateSession = async (shortName: string, workingDir: string | undefined, yoloMode: boolean = false) => {
     setSessionCreateAgent(null);
     setCreatingSessionFor(shortName);
     try {
       await handleSelectAgent(shortName);
       await sendCommand(node.node_id, {
-        Session: { Create: { context: { yolo_mode: false, working_dir: workingDir } } },
+        Session: { Create: { context: { yolo_mode: yoloMode, working_dir: workingDir } } },
       });
+      setShowSessionModal({ agentShortName: shortName });
     } finally {
       setCreatingSessionFor(null);
     }
@@ -162,7 +165,7 @@ export function NodeCard({ node }: NodeCardProps) {
 
   const handleConfirmCreateSession = () => {
     if (!sessionCreateAgent) return;
-    doCreateSession(sessionCreateAgent, sessionSelectedPath ?? undefined);
+    doCreateSession(sessionCreateAgent, sessionSelectedPath ?? undefined, sessionYoloMode);
   };
 
   const handleCloseSession = async (shortName: string) => {
@@ -516,51 +519,85 @@ export function NodeCard({ node }: NodeCardProps) {
       <Modal
         isOpen={sessionCreateAgent !== null && sessionProjectPaths.length > 0}
         onClose={() => setSessionCreateAgent(null)}
-        title={`Start Session: ${sessionCreateAgent}`}
+        title={`Start Session · ${sessionCreateAgent}`}
         size="sm"
+        noPadding
       >
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs text-muted tracking-wider mb-2">WORKING DIRECTORY</label>
-            <div className="space-y-1 max-h-48 overflow-auto">
+        <div className="space-y-0">
+          {/*
+          //
+          // Project directory selection.
+          //
+          */}
+          <div className="p-2 bg-[var(--bg-secondary)]">
+            <label className="block text-[10px] tracking-wider text-[var(--text-secondary)] mb-1">PROJECT DIRECTORY</label>
+            <div className="space-y-0.5 max-h-40 overflow-auto scrollbar-on-hover">
               {sessionProjectPaths.map(path => (
-                <button
+                <div
                   key={path}
                   onClick={() => setSessionSelectedPath(path)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
+                  className={`flex items-center gap-2 px-2.5 py-1.5 cursor-pointer transition-colors border ${
                     sessionSelectedPath === path
-                      ? 'bg-[var(--accent-info)]/20 border border-[var(--accent-info)]'
-                      : 'bg-[var(--bg-secondary)] border border-subtle hover:border-[var(--border-hover)]'
+                      ? 'bg-[var(--accent-info)]/10 border-[var(--accent-info)]/30'
+                      : 'bg-[var(--bg-primary)] border-dim hover:border-subtle'
                   }`}
                 >
-                  <FolderOpen size={12} className={sessionSelectedPath === path ? 'text-[var(--accent-info)]' : 'text-muted'} />
-                  <span className="font-mono truncate text-highlight">{path}</span>
-                </button>
+                  <FolderOpen size={10} className={sessionSelectedPath === path ? 'text-[var(--accent-info)]' : 'text-muted'} />
+                  <span className="font-mono text-[10px] truncate text-highlight">{path}</span>
+                </div>
               ))}
+              <div
+                onClick={() => setSessionSelectedPath(null)}
+                className={`flex items-center gap-2 px-2.5 py-1.5 cursor-pointer transition-colors border ${
+                  sessionSelectedPath === null
+                    ? 'bg-[var(--accent-info)]/10 border-[var(--accent-info)]/30'
+                    : 'bg-[var(--bg-primary)] border-dim hover:border-subtle'
+                }`}
+              >
+                <X size={10} className={sessionSelectedPath === null ? 'text-[var(--accent-info)]' : 'text-muted'} />
+                <span className="text-[10px] text-muted italic">No working directory</span>
+              </div>
             </div>
           </div>
 
-          <div className="flex justify-between items-center pt-2">
-            <button
-              onClick={() => {
-                if (sessionCreateAgent) doCreateSession(sessionCreateAgent, undefined);
-              }}
-              className="px-3 py-2 text-xs text-muted hover:text-[var(--text-primary)] transition-colors"
-            >
-              Skip (no directory)
-            </button>
-            <div className="flex gap-2">
+          {/*
+          //
+          // YOLO mode toggle.
+          //
+          */}
+          <div className="px-2 py-1.5 bg-[var(--bg-secondary)]">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={sessionYoloMode}
+                onChange={(e) => setSessionYoloMode(e.target.checked)}
+                className="accent-[var(--accent-warning)]"
+              />
+              <Zap size={10} className={sessionYoloMode ? 'text-[var(--accent-warning)]' : 'text-muted'} />
+              <span className={`text-[10px] ${sessionYoloMode ? 'text-[var(--accent-warning)]' : 'text-[var(--text-secondary)]'}`}>
+                YOLO mode
+              </span>
+            </label>
+          </div>
+
+          {/*
+          //
+          // Actions.
+          //
+          */}
+          <div className="p-2 bg-[var(--bg-secondary)]">
+            <div className="flex justify-end gap-1.5">
               <button
                 onClick={() => setSessionCreateAgent(null)}
-                className="px-4 py-2 text-xs text-muted border border-dim hover:border-subtle transition-colors"
+                className="px-3 py-1.5 text-[10px] tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleConfirmCreateSession}
-                className="inline-flex items-center gap-2 px-4 py-2 text-xs bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] tracking-wider bg-[var(--accent-success)]/20 text-[var(--accent-success)] border border-dim hover:border-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors"
               >
-                <Play size={12} /> Start
+                <Play size={11} /> Start
               </button>
             </div>
           </div>

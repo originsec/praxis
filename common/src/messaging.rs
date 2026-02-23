@@ -1599,6 +1599,12 @@ pub enum ClientSignalMessage {
         client_id: String,
         full_name: String,
     },
+    /// Set the disabled flag on an operation definition
+    OpDefSetDisabled {
+        client_id: String,
+        full_name: String,
+        disabled: bool,
+    },
     /// Get a specific operation definition
     OpDefGet {
         client_id: String,
@@ -1632,6 +1638,12 @@ pub enum ClientSignalMessage {
     ChainDelete {
         client_id: String,
         chain_id: String,
+    },
+    /// Set the disabled flag on a chain
+    ChainSetDisabled {
+        client_id: String,
+        chain_id: String,
+        disabled: bool,
     },
     /// Run a chain
     ChainRun {

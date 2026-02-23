@@ -1078,6 +1078,35 @@ impl Database {
         Ok(count > 0)
     }
 
+    /// Set the disabled flag on a chain definition
+    pub async fn set_chain_disabled(&self, id: &str, disabled: bool) -> Result<bool> {
+        let sql = "UPDATE operation_chains SET disabled = $1, updated_at = $2 WHERE id = $3";
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let count = match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query(sql)
+                    .bind(if disabled { 1i32 } else { 0i32 })
+                    .bind(&now)
+                    .bind(id)
+                    .execute(pool)
+                    .await?
+                    .rows_affected()
+            }
+            DatabasePool::Postgres(pool) => {
+                sqlx::query(sql)
+                    .bind(if disabled { 1i16 } else { 0i16 })
+                    .bind(&now)
+                    .bind(id)
+                    .execute(pool)
+                    .await?
+                    .rows_affected()
+            }
+        };
+
+        Ok(count > 0)
+    }
+
     /// Count chain definitions
     pub async fn count_chains(&self) -> Result<usize> {
         let sql = "SELECT COUNT(*) FROM operation_chains";

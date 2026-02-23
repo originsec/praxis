@@ -774,6 +774,7 @@ export type BrowserMessage =
   | { type: 'op_def_list' }
   | { type: 'op_def_delete'; full_name: string }
   | { type: 'op_def_get'; full_name: string }
+  | { type: 'op_def_set_disabled'; full_name: string; disabled: boolean }
   | { type: 'orchestrator_start' }
   | { type: 'orchestrator_prompt'; prompt_id: string; message: string }
   | { type: 'orchestrator_stop' }
@@ -798,6 +799,7 @@ export type BrowserMessage =
   | { type: 'chain_create'; definition: ChainDefinitionInput }
   | { type: 'chain_update'; chain_id: string; definition: ChainDefinitionInput }
   | { type: 'chain_delete'; chain_id: string }
+  | { type: 'chain_set_disabled'; chain_id: string; disabled: boolean }
   | { type: 'chain_run'; chain_id: string; node_id: string; agent_short_name: string; working_dir: string | null; target_spec?: TargetSpec | null }
   | { type: 'chain_cancel'; execution_id: string }
   | { type: 'chain_execution_list' }

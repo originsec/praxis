@@ -69,6 +69,11 @@ pub enum BrowserMessage {
     OpDefDelete {
         full_name: String,
     },
+    /// Set the disabled flag on an operation definition
+    OpDefSetDisabled {
+        full_name: String,
+        disabled: bool,
+    },
     /// Get a specific operation definition
     OpDefGet {
         full_name: String,
@@ -160,6 +165,11 @@ pub enum BrowserMessage {
     /// Delete a chain
     ChainDelete {
         chain_id: String,
+    },
+    /// Set the disabled flag on a chain
+    ChainSetDisabled {
+        chain_id: String,
+        disabled: bool,
     },
     /// Run a chain
     ChainRun {

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Send, Bot, Loader2, Download } from 'lucide-react';
+import { Send, Bot, Loader2, Download, Square } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { FloatingPanel } from './FloatingPanel';
@@ -77,6 +77,12 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
     }
   };
 
+  const handleCloseSession = async () => {
+    if (!hasSession) return;
+    await sendCommand(nodeId, { Session: 'Close' });
+    onClose();
+  };
+
   const handleExport = () => {
     if (messages.length === 0) return;
     const content = exportAgentSession(messages, agentShortName, nodeId);
@@ -91,14 +97,25 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
       defaultWidth={480}
       defaultHeight={400}
       headerActions={
-        <button
-          onClick={handleExport}
-          disabled={messages.length === 0}
-          className="p-1 text-muted hover:text-[var(--text-primary)] transition-colors disabled:opacity-30"
-          title="Export session"
-        >
-          <Download size={11} />
-        </button>
+        <>
+          <button
+            onClick={handleExport}
+            disabled={messages.length === 0}
+            className="p-1 text-muted hover:text-[var(--text-primary)] transition-colors disabled:opacity-30"
+            title="Export session"
+          >
+            <Download size={11} />
+          </button>
+          {hasSession && (
+            <button
+              onClick={handleCloseSession}
+              className="p-1 text-[var(--accent-error)] hover:text-[var(--accent-error)] transition-colors"
+              title="Close session"
+            >
+              <Square size={9} />
+            </button>
+          )}
+        </>
       }
     >
       {!hasSession ? (

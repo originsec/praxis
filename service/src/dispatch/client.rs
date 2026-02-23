@@ -66,6 +66,8 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             handle_opdef_delete(ctx, client_id, full_name).await,
         ClientSignalMessage::OpDefGet { client_id, full_name } =>
             handle_opdef_get(ctx, client_id, full_name).await,
+        ClientSignalMessage::OpDefSetDisabled { client_id, full_name, disabled } =>
+            handle_opdef_set_disabled(ctx, client_id, full_name, disabled).await,
 
         //
         // Traffic interception.
@@ -154,6 +156,8 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             handle_chain_update(ctx, client_id, chain_id, definition).await,
         ClientSignalMessage::ChainDelete { client_id, chain_id } =>
             handle_chain_delete(ctx, client_id, chain_id).await,
+        ClientSignalMessage::ChainSetDisabled { client_id, chain_id, disabled } =>
+            handle_chain_set_disabled(ctx, client_id, chain_id, disabled).await,
 
         //
         // Chain execution.
@@ -872,6 +876,38 @@ async fn handle_opdef_get(ctx: &ServiceContext, client_id: String, full_name: St
             };
             let _ =
                 send_to_client(&ctx.client_publish_channel, &client_id, message).await;
+        }
+    }
+}
+
+async fn handle_opdef_set_disabled(ctx: &ServiceContext, client_id: String, full_name: String, disabled: bool) {
+    common::log_info!(
+        "Received OpDefSetDisabled for {} (disabled={}) from client {}",
+        full_name, disabled, &client_id[..8.min(client_id.len())]
+    );
+
+    match ctx.database.set_operation_definition_disabled(&full_name, disabled).await {
+        Ok(found) => {
+            if !found {
+                common::log_warn!("OpDefSetDisabled: definition not found: {}", full_name);
+            }
+
+            //
+            // Send updated list so the client refreshes.
+            //
+
+            if let Ok(defs) = ctx.database.list_operation_definitions().await {
+                let infos = defs.iter().map(|d| d.to_info()).collect();
+                let message = ClientDirectMessage::OpDefListResponse { definitions: infos };
+                let _ = send_to_client(&ctx.client_publish_channel, &client_id, message).await;
+            }
+        }
+        Err(e) => {
+            common::log_error!("Failed to set disabled on operation definition: {}", e);
+            let message = ClientDirectMessage::OpDefError {
+                message: format!("Failed to set disabled: {}", e),
+            };
+            let _ = send_to_client(&ctx.client_publish_channel, &client_id, message).await;
         }
     }
 }
@@ -1973,6 +2009,53 @@ async fn handle_chain_delete(ctx: &ServiceContext, client_id: String, chain_id: 
         ClientDirectMessage::ChainDeleted { chain_id, success },
     )
     .await;
+}
+
+async fn handle_chain_set_disabled(ctx: &ServiceContext, client_id: String, chain_id: String, disabled: bool) {
+    common::log_info!(
+        "Received ChainSetDisabled for {} (disabled={}) from client {}",
+        chain_id, disabled, &client_id[..8.min(client_id.len())]
+    );
+
+    match ctx.database.set_chain_disabled(&chain_id, disabled).await {
+        Ok(found) => {
+            if !found {
+                common::log_warn!("ChainSetDisabled: chain not found: {}", chain_id);
+            }
+
+            //
+            // Send updated list so the client refreshes.
+            //
+
+            if let Ok(chains) = ctx.database.list_chains().await {
+                let chain_infos: Vec<common::ChainDefinitionInfo> = chains
+                    .into_iter()
+                    .map(|c| common::ChainDefinitionInfo {
+                        id: c.id,
+                        name: c.name,
+                        description: c.description,
+                        category: c.category,
+                        disabled: c.disabled,
+                        timeout: c.timeout,
+                        element_count: c.element_count,
+                        operation_count: c.operation_count,
+                        trigger_count: c.trigger_count,
+                        created_at: c.created_at,
+                        updated_at: c.updated_at,
+                    })
+                    .collect();
+                let message = ClientDirectMessage::ChainDefListResponse { chains: chain_infos };
+                let _ = send_to_client(&ctx.client_publish_channel, &client_id, message).await;
+            }
+        }
+        Err(e) => {
+            common::log_error!("Failed to set disabled on chain: {}", e);
+            let message = ClientDirectMessage::ChainError {
+                message: format!("Failed to set disabled: {}", e),
+            };
+            let _ = send_to_client(&ctx.client_publish_channel, &client_id, message).await;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

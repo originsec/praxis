@@ -23,9 +23,9 @@ const statusBgColors = {
 export function StatusBadge({ status, label, showDot = true }: StatusBadgeProps) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${statusColors[status]} ${statusBgColors[status]}`}
+      className={`inline-flex items-center gap-1 text-[9px] ${statusColors[status]}`}
     >
-      {showDot && <Circle size={8} fill="currentColor" />}
+      {showDot && <Circle size={5} fill="currentColor" />}
       {label}
     </span>
   );

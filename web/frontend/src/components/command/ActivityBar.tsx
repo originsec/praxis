@@ -5,6 +5,7 @@ import {
   ChevronUp,
   ChevronDown,
   BookOpen,
+  Timer,
   Crosshair,
   Shield,
   Loader2,
@@ -16,6 +17,7 @@ import { getOperationStatusColor, StatusBadge } from '../common/StatusBadge';
 import { OperationDetailFloating } from './OperationDetailFloating';
 import { ChainExecutionFloating } from './ChainExecutionFloating';
 import { LibraryModal } from './LibraryModal';
+import { TriggersModal } from './TriggersModal';
 import { TrafficModal } from './TrafficModal';
 import { HuntingModal } from './HuntingModal';
 import type { SemanticOpUpdate } from '../../api/types';
@@ -31,14 +33,21 @@ export function ActivityBar() {
   const [selectedOp, setSelectedOp] = useState<SemanticOpUpdate | null>(null);
   const [selectedChainExecId, setSelectedChainExecId] = useState<string | null>(null);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showTriggers, setShowTriggers] = useState(false);
   const [showTraffic, setShowTraffic] = useState(false);
   const [showHunting, setShowHunting] = useState(false);
 
   const runningOps = state.operations.filter(op => op.status === 'Running');
-  const allOps = state.operations;
   const runningChains = state.chains.executions.filter(e => e.status === 'Running' || e.status === 'Queued');
-  const allChains = state.chains.executions;
   const totalRunning = runningOps.length + runningChains.length;
+
+  //
+  // Merge ops and chains into a single time-sorted list (newest first).
+  //
+  const allItems: ({ kind: 'op'; op: typeof state.operations[0] } | { kind: 'chain'; exec: typeof state.chains.executions[0] })[] = [
+    ...state.operations.map(op => ({ kind: 'op' as const, op, time: new Date(op.start_time).getTime() })),
+    ...state.chains.executions.map(exec => ({ kind: 'chain' as const, exec, time: new Date(exec.started_at).getTime() })),
+  ].sort((a, b) => b.time - a.time);
 
   const selectedChainExec = selectedChainExecId
     ? state.chains.executions.find(e => e.execution_id === selectedChainExecId) ?? null
@@ -97,7 +106,7 @@ export function ActivityBar() {
                 onMouseDown={handleResizeStart}
                 className="absolute inset-x-0 top-0 h-1 cursor-row-resize bg-transparent hover:bg-[var(--accent-info)]/30 active:bg-[var(--accent-info)]/50 transition-colors z-10"
               />
-              {(allOps.length > 0 || allChains.length > 0) && (
+              {allItems.length > 0 && (
                 <button
                   onClick={() => { clearOperations(); clearChainExecutions(); }}
                   className="ml-auto px-2 py-0.5 text-[9px] text-muted/50 hover:text-[var(--accent-error)] transition-colors flex-shrink-0"
@@ -117,36 +126,36 @@ export function ActivityBar() {
               className="overflow-auto px-3 py-2 space-y-0.5"
               style={{ height: panelHeight }}
             >
-              {allOps.length === 0 && allChains.length === 0 ? (
+              {allItems.length === 0 ? (
                 <div className="text-[10px] text-muted text-center py-6">No operations or chain executions</div>
               ) : (
                 <>
-                  {allOps.map(op => (
+                  {allItems.map(item => item.kind === 'op' ? (
                     <div
-                      key={op.operation_id}
-                      onClick={() => setSelectedOp(op)}
+                      key={item.op.operation_id}
+                      onClick={() => setSelectedOp(item.op)}
                       className="flex items-center justify-between py-1 px-2 hover:bg-[var(--highlight)] transition-colors cursor-pointer text-[10px] group/row"
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <Zap size={10} className="text-[var(--accent-purple)] flex-shrink-0" />
-                        <span className="text-highlight truncate">{op.spec.name}</span>
-                        <span className="text-muted truncate">{op.agent_short_name}</span>
-                        <span className="text-[9px] text-muted/50">{new Date(op.start_time).toLocaleTimeString()}</span>
+                        <span className="text-highlight truncate">{item.op.spec.name}</span>
+                        <span className="text-muted truncate">{item.op.agent_short_name}</span>
+                        <span className="text-[9px] text-muted/50">{new Date(item.op.start_time).toLocaleTimeString()}</span>
                       </div>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <StatusBadge status={getOperationStatusColor(op.status)} label={op.status} />
-                        {op.status === 'Running' && (
+                        <StatusBadge status={getOperationStatusColor(item.op.status)} label={item.op.status} />
+                        {item.op.status === 'Running' && (
                           <button
-                            onClick={e => { e.stopPropagation(); cancelOperation(op.operation_id); }}
+                            onClick={e => { e.stopPropagation(); cancelOperation(item.op.operation_id); }}
                             className="p-0.5 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/20 transition-colors"
                             title="Cancel"
                           >
                             <X size={10} />
                           </button>
                         )}
-                        {op.status !== 'Running' && (
+                        {item.op.status !== 'Running' && (
                           <button
-                            onClick={e => { e.stopPropagation(); removeOperation(op.operation_id); }}
+                            onClick={e => { e.stopPropagation(); removeOperation(item.op.operation_id); }}
                             className="p-0.5 text-muted/30 hover:text-[var(--accent-error)] hover:bg-[var(--accent-error)]/20 transition-colors opacity-0 group-hover/row:opacity-100"
                             title="Remove"
                           >
@@ -155,33 +164,32 @@ export function ActivityBar() {
                         )}
                       </div>
                     </div>
-                  ))}
-                  {allChains.map(exec => (
+                  ) : (
                     <div
-                      key={exec.execution_id}
-                      onClick={() => setSelectedChainExecId(exec.execution_id)}
+                      key={item.exec.execution_id}
+                      onClick={() => setSelectedChainExecId(item.exec.execution_id)}
                       className="flex items-center justify-between py-1 px-2 hover:bg-[var(--highlight)] transition-colors cursor-pointer text-[10px] group/row"
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <GitBranch size={10} className="text-[var(--accent-info)] flex-shrink-0" />
-                        <span className="text-highlight truncate">{exec.chain_name}</span>
-                        <span className="text-muted truncate">{exec.agent_short_name}</span>
-                        <span className="text-[9px] text-muted/50">{new Date(exec.started_at).toLocaleTimeString()}</span>
+                        <span className="text-highlight truncate">{item.exec.chain_name}</span>
+                        <span className="text-muted truncate">{item.exec.agent_short_name}</span>
+                        <span className="text-[9px] text-muted/50">{new Date(item.exec.started_at).toLocaleTimeString()}</span>
                       </div>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <StatusBadge status={getOperationStatusColor(exec.status)} label={exec.status} />
-                        {(exec.status === 'Running' || exec.status === 'Queued') && (
+                        <StatusBadge status={getOperationStatusColor(item.exec.status)} label={item.exec.status} />
+                        {(item.exec.status === 'Running' || item.exec.status === 'Queued') && (
                           <button
-                            onClick={e => { e.stopPropagation(); cancelChainExecution(exec.execution_id); }}
+                            onClick={e => { e.stopPropagation(); cancelChainExecution(item.exec.execution_id); }}
                             className="p-0.5 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/20 transition-colors"
                             title="Cancel"
                           >
                             <X size={10} />
                           </button>
                         )}
-                        {exec.status !== 'Running' && exec.status !== 'Queued' && (
+                        {item.exec.status !== 'Running' && item.exec.status !== 'Queued' && (
                           <button
-                            onClick={e => { e.stopPropagation(); removeChainExecution(exec.execution_id); }}
+                            onClick={e => { e.stopPropagation(); removeChainExecution(item.exec.execution_id); }}
                             className="p-0.5 text-muted/30 hover:text-[var(--accent-error)] hover:bg-[var(--accent-error)]/20 transition-colors opacity-0 group-hover/row:opacity-100"
                             title="Remove"
                           >
@@ -245,7 +253,7 @@ export function ActivityBar() {
 
             {expanded && (
               <span className="text-[9px] text-muted ml-2">
-                {allOps.length + allChains.length} total
+                {allItems.length} total
               </span>
             )}
           </div>
@@ -258,16 +266,23 @@ export function ActivityBar() {
               <BookOpen size={10} /> Library
             </button>
             <button
-              onClick={() => setShowHunting(true)}
+              onClick={() => setShowTriggers(true)}
               className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-muted hover:text-[var(--text-primary)] transition-colors"
             >
-              <Crosshair size={10} /> Hunting
+              <Timer size={10} /> Triggers
             </button>
+            <div className="w-px h-3.5 bg-[var(--text-muted)]" />
             <button
               onClick={() => setShowTraffic(true)}
               className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-muted hover:text-[var(--text-primary)] transition-colors"
             >
               <Shield size={10} /> Traffic
+            </button>
+            <button
+              onClick={() => setShowHunting(true)}
+              className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-muted hover:text-[var(--text-primary)] transition-colors"
+            >
+              <Crosshair size={10} /> Hunting
             </button>
           </div>
         </div>
@@ -294,6 +309,10 @@ export function ActivityBar() {
 
       {showLibrary && (
         <LibraryModal onClose={() => setShowLibrary(false)} />
+      )}
+
+      {showTriggers && (
+        <TriggersModal onClose={() => setShowTriggers(false)} />
       )}
 
       {showTraffic && (

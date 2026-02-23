@@ -41,6 +41,7 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
     orchestratorStop,
     orchestratorCancel,
     orchestratorPrompt,
+    orchestratorClearMessages,
     getConfig,
     setConfig,
   } = useApp();
@@ -125,6 +126,11 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
 
   const handleSendMessage = () => {
     if (!input.trim() || orchestrator.isLoading) return;
+    if (input.trim() === '/clear') {
+      orchestratorClearMessages();
+      setInput('');
+      return;
+    }
     orchestratorPrompt(input.trim());
     setInput('');
   };
@@ -291,17 +297,6 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
 
             {/*
             //
-            // Plan display.
-            //
-            */}
-            {orchestrator.currentPlan && orchestrator.currentPlan.steps.length > 0 && (
-              <div className="px-2 pt-2 flex-shrink-0">
-                <PlanDisplay plan={orchestrator.currentPlan} compact />
-              </div>
-            )}
-
-            {/*
-            //
             // Messages area.
             //
             */}
@@ -320,6 +315,15 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
 
               <div ref={messagesEndRef} />
             </div>
+
+            {/*
+            //
+            // Plan display — compact bar above input.
+            //
+            */}
+            {orchestrator.currentPlan && orchestrator.currentPlan.steps.length > 0 && (
+              <PlanDisplay plan={orchestrator.currentPlan} compact />
+            )}
 
             {/*
             //

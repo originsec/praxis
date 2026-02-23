@@ -588,9 +588,10 @@ function reduceOrchestrator(state: AppState, action: Action): AppState | null {
       return {
         ...state,
         orchestrator: {
-          ...state.orchestrator,
-          messages: [],
-          currentPlan: null,
+          ...initialOrchestratorState,
+          sessionActive: state.orchestrator.sessionActive,
+          provider: state.orchestrator.provider,
+          model: state.orchestrator.model,
         },
       };
     case 'ORCHESTRATOR_SET_LOADING':

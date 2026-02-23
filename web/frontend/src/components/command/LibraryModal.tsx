@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Zap, GitBranch, Play, Pencil, Trash2, Search, Plus, ChevronDown,
-  Upload, Loader2, Circle, CircleCheck, Save,
+  Upload, Loader2, Circle, CircleCheck, Save, Ban,
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { RunModal, type RunItem } from '../common/RunModal';
@@ -245,6 +245,18 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
   }, [deleteTarget, send, deleteChain]);
 
   //
+  // Handlers: Toggle disable.
+  //
+
+  const handleToggleOpDisabled = useCallback((op: OperationDefinitionInfo) => {
+    send({ type: 'op_def_set_disabled', full_name: op.full_name, disabled: !op.disabled });
+  }, [send]);
+
+  const handleToggleChainDisabled = useCallback((chain: ChainDefinitionInfo) => {
+    send({ type: 'chain_set_disabled', chain_id: chain.id, disabled: !chain.disabled });
+  }, [send]);
+
+  //
   // Handlers: Edit operation.
   //
 
@@ -341,27 +353,27 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
         isOpen={true}
         onClose={onClose}
         title="Library"
-        size="xl"
+        size="lg"
         noPadding
       >
-        <div className="flex flex-col" style={{ height: '70vh' }}>
+        <div className="flex flex-col" style={{ height: '50vh' }}>
 
           {/*
           //
           // Top bar: filters + search + add button.
           //
           */}
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-subtle bg-[var(--bg-tertiary)]">
-            <div className="flex gap-1">
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-b border-subtle bg-[var(--bg-tertiary)]">
+            <div className="flex gap-0.5">
               {([
                 { value: 'all' as FilterType, label: 'All' },
-                { value: 'operation' as FilterType, label: 'Operations' },
+                { value: 'operation' as FilterType, label: 'Ops' },
                 { value: 'chain' as FilterType, label: 'Chains' },
               ]).map(f => (
                 <button
                   key={f.value}
                   onClick={() => setFilter(f.value)}
-                  className={`px-2.5 py-1 text-xs transition-colors ${
+                  className={`px-2 py-0.5 text-[10px] transition-colors ${
                     filter === f.value
                       ? 'bg-[var(--accent-info)]/20 text-[var(--accent-info)] border border-[var(--accent-info)]/50'
                       : 'text-muted hover:text-[var(--text-primary)] hover:bg-[var(--highlight)]'
@@ -372,49 +384,49 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
               ))}
             </div>
 
-            <div className="relative flex-1 max-w-xs">
-              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+            <div className="relative flex-1 max-w-[180px]">
+              <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted" />
               <input
                 type="text"
                 placeholder="Search..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-1 text-xs bg-[var(--bg-primary)] border border-dim focus:outline-none focus:border-subtle"
+                className="w-full pl-6 pr-2 py-0.5 text-[10px] bg-[var(--bg-primary)] border border-dim focus:outline-none focus:border-subtle"
               />
             </div>
 
             <div className="relative ml-auto" ref={addMenuRef}>
               <button
                 onClick={() => setShowAddMenu(!showAddMenu)}
-                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-[var(--accent-success)]/20 text-[var(--accent-success)] border border-dim hover:border-[var(--accent-success)] transition-colors"
+                className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] bg-[var(--accent-success)]/20 text-[var(--accent-success)] border border-dim hover:border-[var(--accent-success)] transition-colors"
               >
-                <Plus size={13} />
+                <Plus size={11} />
                 Add
-                <ChevronDown size={12} />
+                <ChevronDown size={10} />
               </button>
 
               {showAddMenu && (
-                <div className="absolute right-0 mt-1 w-44 bg-[var(--bg-secondary)] border border-dim z-50">
+                <div className="absolute right-0 mt-1 w-36 bg-[var(--bg-secondary)] border border-dim z-50">
                   <button
                     onClick={handleNewOp}
-                    className="flex items-center gap-2 w-full px-3 py-2 text-xs text-highlight hover:bg-[var(--highlight)] transition-colors text-left"
+                    className="flex items-center gap-1.5 w-full px-2.5 py-1.5 text-[10px] text-highlight hover:bg-[var(--highlight)] transition-colors text-left"
                   >
-                    <Zap size={13} className="text-[var(--accent-purple)]" />
+                    <Zap size={10} className="text-[var(--accent-purple)]" />
                     New Operation
                   </button>
                   <button
                     onClick={handleNewChain}
-                    className="flex items-center gap-2 w-full px-3 py-2 text-xs text-highlight hover:bg-[var(--highlight)] transition-colors text-left"
+                    className="flex items-center gap-1.5 w-full px-2.5 py-1.5 text-[10px] text-highlight hover:bg-[var(--highlight)] transition-colors text-left"
                   >
-                    <GitBranch size={13} className="text-[var(--accent-info)]" />
+                    <GitBranch size={10} className="text-[var(--accent-info)]" />
                     New Chain
                   </button>
                   <div className="border-t border-dim" />
                   <button
                     onClick={handleImport}
-                    className="flex items-center gap-2 w-full px-3 py-2 text-xs text-highlight hover:bg-[var(--highlight)] transition-colors text-left"
+                    className="flex items-center gap-1.5 w-full px-2.5 py-1.5 text-[10px] text-highlight hover:bg-[var(--highlight)] transition-colors text-left"
                   >
-                    <Upload size={13} className="text-muted" />
+                    <Upload size={10} className="text-muted" />
                     Import JSON
                   </button>
                 </div>
@@ -430,8 +442,8 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
           <div className="flex-1 overflow-y-auto">
             {totalCount === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-muted">
-                <Search size={28} className="mb-2 opacity-40" />
-                <p className="text-sm">
+                <Search size={18} className="mb-1.5 opacity-40" />
+                <p className="text-[10px]">
                   {searchQuery ? 'No items match your search.' : 'No operations or chains defined.'}
                 </p>
               </div>
@@ -443,6 +455,7 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
                     op={op}
                     onRun={() => handleRun(op.full_name, op.name, 'operation')}
                     onEdit={() => handleEditOp(op)}
+                    onToggleDisabled={() => handleToggleOpDisabled(op)}
                     onDelete={() => handleDeleteClick(op.full_name, op.name, 'operation')}
                   />
                 ))}
@@ -452,6 +465,7 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
                     chain={chain}
                     onRun={() => handleRun(chain.id, chain.name, 'chain')}
                     onEdit={() => handleEditChain(chain.id)}
+                    onToggleDisabled={() => handleToggleChainDisabled(chain)}
                     onDelete={() => handleDeleteClick(chain.id, chain.name, 'chain')}
                   />
                 ))}
@@ -497,24 +511,24 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
           onClose={() => setDeleteTarget(null)}
           title={`Delete ${deleteTarget.type === 'operation' ? 'Operation' : 'Chain'}`}
         >
-          <div className="space-y-4">
-            <p className="text-sm">
+          <div className="space-y-3">
+            <p className="text-xs">
               Are you sure you want to delete{' '}
               <span className="font-medium text-[var(--accent-error)]">"{deleteTarget.name}"</span>?
             </p>
-            <p className="text-xs text-muted">This action cannot be undone.</p>
-            <div className="flex justify-end gap-3 pt-2">
+            <p className="text-[10px] text-muted">This action cannot be undone.</p>
+            <div className="flex justify-end gap-2 pt-1">
               <button
                 onClick={() => setDeleteTarget(null)}
-                className="px-4 py-2 text-xs tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
+                className="px-3 py-1.5 text-[10px] tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleDeleteConfirm}
-                className="inline-flex items-center gap-2 px-4 py-2 text-xs tracking-wider bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] tracking-wider bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors"
               >
-                <Trash2 size={14} />
+                <Trash2 size={11} />
                 Delete
               </button>
             </div>
@@ -532,7 +546,7 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
           isOpen={true}
           onClose={closeEditOp}
           title={isNewOp ? 'New Operation' : `Edit: ${editDef.name || 'Operation'}`}
-          size="xl"
+          size="lg"
         >
           <EditOpForm
             editDef={editDef}
@@ -559,7 +573,7 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
           size="full"
           noPadding
         >
-          <div style={{ height: '80vh' }}>
+          <div style={{ height: '85vh' }}>
             <ChainBuilder
               chain={editingChainId ? currentChain : null}
               onSave={handleSaveChain}
@@ -593,58 +607,64 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
 // Operation row component.
 //
 
-function OpRow({ op, onRun, onEdit, onDelete }: {
+function OpRow({ op, onRun, onEdit, onToggleDisabled, onDelete }: {
   op: OperationDefinitionInfo;
   onRun: () => void;
   onEdit: () => void;
+  onToggleDisabled: () => void;
   onDelete: () => void;
 }) {
   return (
-    <div className={`group flex items-center gap-3 px-3 py-2.5 hover:bg-[var(--highlight)] transition-colors ${op.disabled ? 'opacity-50' : ''}`}>
-      <Zap size={14} className="text-[var(--accent-purple)] flex-shrink-0" />
+    <div className={`group flex items-center gap-2 px-2.5 py-1.5 hover:bg-[var(--highlight)] transition-colors ${op.disabled ? 'opacity-50' : ''}`}>
+      <Zap size={10} className="text-[var(--accent-purple)] flex-shrink-0" />
+      {op.disabled && <Ban size={9} className="text-[var(--accent-error)]/60 flex-shrink-0" />}
 
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-highlight truncate">{op.name}</span>
-          {op.disabled && (
-            <span className="px-1.5 py-0.5 bg-[var(--bg-tertiary)] text-muted text-[10px] leading-none">disabled</span>
-          )}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] font-medium text-highlight truncate">{op.name}</span>
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted">
+        <div className="flex items-center gap-1.5 text-[9px] text-muted">
           <span>{op.category}</span>
           <span className="text-[var(--border-subtle)]">·</span>
           <span>{op.mode}</span>
           {op.description && (
             <>
               <span className="text-[var(--border-subtle)]">·</span>
-              <span className="truncate max-w-[300px]">{op.description}</span>
+              <span className="truncate max-w-[220px]">{op.description}</span>
             </>
           )}
         </div>
       </div>
 
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
         <button
           onClick={e => { e.stopPropagation(); onRun(); }}
           disabled={op.disabled}
-          className="p-1.5 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/20 transition-colors disabled:opacity-30"
+          className="p-1 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/20 transition-colors disabled:opacity-30"
           title="Run"
         >
-          <Play size={13} />
+          <Play size={10} />
+        </button>
+        <button
+          onClick={e => { e.stopPropagation(); onToggleDisabled(); }}
+          className={`p-1 transition-colors ${op.disabled ? 'text-[var(--accent-success)] hover:bg-[var(--accent-success)]/20' : 'text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/20'}`}
+          title={op.disabled ? 'Enable' : 'Disable'}
+        >
+          {op.disabled ? <CircleCheck size={10} /> : <Ban size={10} />}
         </button>
         <button
           onClick={e => { e.stopPropagation(); onEdit(); }}
-          className="p-1.5 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/20 transition-colors"
+          className="p-1 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/20 transition-colors"
           title="Edit"
         >
-          <Pencil size={13} />
+          <Pencil size={10} />
         </button>
         <button
           onClick={e => { e.stopPropagation(); onDelete(); }}
-          className="p-1.5 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/20 transition-colors"
+          className="p-1 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/20 transition-colors"
           title="Delete"
         >
-          <Trash2 size={13} />
+          <Trash2 size={10} />
         </button>
       </div>
     </div>
@@ -655,58 +675,64 @@ function OpRow({ op, onRun, onEdit, onDelete }: {
 // Chain row component.
 //
 
-function ChainRow({ chain, onRun, onEdit, onDelete }: {
+function ChainRow({ chain, onRun, onEdit, onToggleDisabled, onDelete }: {
   chain: ChainDefinitionInfo;
   onRun: () => void;
   onEdit: () => void;
+  onToggleDisabled: () => void;
   onDelete: () => void;
 }) {
   return (
-    <div className={`group flex items-center gap-3 px-3 py-2.5 hover:bg-[var(--highlight)] transition-colors ${chain.disabled ? 'opacity-50' : ''}`}>
-      <GitBranch size={14} className="text-[var(--accent-info)] flex-shrink-0" />
+    <div className={`group flex items-center gap-2 px-2.5 py-1.5 hover:bg-[var(--highlight)] transition-colors ${chain.disabled ? 'opacity-50' : ''}`}>
+      <GitBranch size={10} className="text-[var(--accent-info)] flex-shrink-0" />
+      {chain.disabled && <Ban size={9} className="text-[var(--accent-error)]/60 flex-shrink-0" />}
 
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-highlight truncate">{chain.name}</span>
-          {chain.disabled && (
-            <span className="px-1.5 py-0.5 bg-[var(--bg-tertiary)] text-muted text-[10px] leading-none">disabled</span>
-          )}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] font-medium text-highlight truncate">{chain.name}</span>
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted">
+        <div className="flex items-center gap-1.5 text-[9px] text-muted">
           <span>{chain.category || 'uncategorized'}</span>
           <span className="text-[var(--border-subtle)]">·</span>
           <span>{chain.element_count} elements</span>
           {chain.description && (
             <>
               <span className="text-[var(--border-subtle)]">·</span>
-              <span className="truncate max-w-[300px]">{chain.description}</span>
+              <span className="truncate max-w-[220px]">{chain.description}</span>
             </>
           )}
         </div>
       </div>
 
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
         <button
           onClick={e => { e.stopPropagation(); onRun(); }}
           disabled={chain.disabled}
-          className="p-1.5 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/20 transition-colors disabled:opacity-30"
+          className="p-1 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/20 transition-colors disabled:opacity-30"
           title="Run"
         >
-          <Play size={13} />
+          <Play size={10} />
+        </button>
+        <button
+          onClick={e => { e.stopPropagation(); onToggleDisabled(); }}
+          className={`p-1 transition-colors ${chain.disabled ? 'text-[var(--accent-success)] hover:bg-[var(--accent-success)]/20' : 'text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/20'}`}
+          title={chain.disabled ? 'Enable' : 'Disable'}
+        >
+          {chain.disabled ? <CircleCheck size={10} /> : <Ban size={10} />}
         </button>
         <button
           onClick={e => { e.stopPropagation(); onEdit(); }}
-          className="p-1.5 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/20 transition-colors"
+          className="p-1 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/20 transition-colors"
           title="Edit"
         >
-          <Pencil size={13} />
+          <Pencil size={10} />
         </button>
         <button
           onClick={e => { e.stopPropagation(); onDelete(); }}
-          className="p-1.5 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/20 transition-colors"
+          className="p-1 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/20 transition-colors"
           title="Delete"
         >
-          <Trash2 size={13} />
+          <Trash2 size={10} />
         </button>
       </div>
     </div>
@@ -734,10 +760,10 @@ function EditOpForm({ editDef, isNewOp, isSaving, error, onUpdate, onSave, onCan
       // Basic information.
       //
       */}
-      <div className="space-y-3 p-4 bg-[var(--bg-secondary)]">
-        <div className="grid grid-cols-2 gap-3">
+      <div className="space-y-2 p-3 bg-[var(--bg-secondary)]">
+        <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">
+            <label className="block text-[10px] tracking-wider text-[var(--text-secondary)] mb-1">
               Name {isNewOp && <span className="text-[var(--accent-error)]/70">*</span>}
             </label>
             <input
@@ -745,12 +771,12 @@ function EditOpForm({ editDef, isNewOp, isSaving, error, onUpdate, onSave, onCan
               value={editDef.name}
               onChange={e => onUpdate('name', e.target.value)}
               disabled={isSaving}
-              className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+              className="w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
               placeholder="Display name for operation"
             />
           </div>
           <div>
-            <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">
+            <label className="block text-[10px] tracking-wider text-[var(--text-secondary)] mb-1">
               Short Name {isNewOp && <span className="text-[var(--accent-error)]/70">*</span>}
             </label>
             <input
@@ -758,18 +784,18 @@ function EditOpForm({ editDef, isNewOp, isSaving, error, onUpdate, onSave, onCan
               value={editDef.short_name}
               onChange={e => onUpdate('short_name', e.target.value)}
               disabled={!isNewOp || isSaving}
-              className={`w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle ${
+              className={`w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle ${
                 !isNewOp ? 'opacity-50 cursor-not-allowed' : ''
               } disabled:opacity-50 transition-colors`}
               placeholder="unique_identifier"
             />
-            {!isNewOp && <p className="text-xs text-muted mt-1.5">Cannot be changed</p>}
+            {!isNewOp && <p className="text-[9px] text-muted mt-1">Cannot be changed</p>}
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">
+            <label className="block text-[10px] tracking-wider text-[var(--text-secondary)] mb-1">
               Category {isNewOp && <span className="text-[var(--accent-error)]/70">*</span>}
             </label>
             <input
@@ -777,20 +803,20 @@ function EditOpForm({ editDef, isNewOp, isSaving, error, onUpdate, onSave, onCan
               value={editDef.category}
               onChange={e => onUpdate('category', e.target.value)}
               disabled={!isNewOp || isSaving}
-              className={`w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle ${
+              className={`w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle ${
                 !isNewOp ? 'opacity-50 cursor-not-allowed' : ''
               } disabled:opacity-50 transition-colors`}
               placeholder="recon, exfiltration, etc."
             />
-            {!isNewOp && <p className="text-xs text-muted mt-1.5">Cannot be changed</p>}
+            {!isNewOp && <p className="text-[9px] text-muted mt-1">Cannot be changed</p>}
           </div>
           <div>
-            <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Mode</label>
+            <label className="block text-[10px] tracking-wider text-[var(--text-secondary)] mb-1">Mode</label>
             <select
               value={editDef.mode}
               onChange={e => onUpdate('mode', e.target.value)}
               disabled={isSaving}
-              className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+              className="w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
             >
               <option value="one-shot">one-shot</option>
               <option value="agent">agent</option>
@@ -798,39 +824,39 @@ function EditOpForm({ editDef, isNewOp, isSaving, error, onUpdate, onSave, onCan
           </div>
         </div>
 
-        <div className={`grid ${editDef.mode === 'agent' ? 'grid-cols-2' : 'grid-cols-1'} gap-3`}>
+        <div className={`grid ${editDef.mode === 'agent' ? 'grid-cols-2' : 'grid-cols-1'} gap-2`}>
           <div>
-            <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Timeout (seconds)</label>
+            <label className="block text-[10px] tracking-wider text-[var(--text-secondary)] mb-1">Timeout (seconds)</label>
             <input
               type="number"
               value={editDef.timeout}
               onChange={e => onUpdate('timeout', parseInt(e.target.value) || 60)}
               disabled={isSaving}
-              className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+              className="w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
             />
           </div>
           {editDef.mode === 'agent' && (
             <div>
-              <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Agent Iterations</label>
+              <label className="block text-[10px] tracking-wider text-[var(--text-secondary)] mb-1">Agent Iterations</label>
               <input
                 type="number"
                 value={editDef.agent_iterations}
                 onChange={e => onUpdate('agent_iterations', parseInt(e.target.value) || 5)}
                 disabled={isSaving}
-                className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                className="w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
               />
             </div>
           )}
         </div>
 
         <div>
-          <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Description</label>
+          <label className="block text-[10px] tracking-wider text-[var(--text-secondary)] mb-1">Description</label>
           <input
             type="text"
             value={editDef.description}
             onChange={e => onUpdate('description', e.target.value)}
             disabled={isSaving}
-            className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+            className="w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
             placeholder="Brief description of what this operation does"
           />
         </div>
@@ -843,10 +869,10 @@ function EditOpForm({ editDef, isNewOp, isSaving, error, onUpdate, onSave, onCan
       // Prompt configuration.
       //
       */}
-      <div className="space-y-3 p-4 bg-[var(--bg-secondary)]">
+      <div className="space-y-2 p-3 bg-[var(--bg-secondary)]">
         <div>
-          <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Agent Info</label>
-          <p className="text-xs mb-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+          <label className="block text-[10px] tracking-wider text-[var(--text-secondary)] mb-1">Agent Info</label>
+          <p className="text-[9px] mb-1.5 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
             Optional. Technical context for AI agents to understand when and how to use this operation.
           </p>
           <textarea
@@ -854,13 +880,13 @@ function EditOpForm({ editDef, isNewOp, isSaving, error, onUpdate, onSave, onCan
             onChange={e => onUpdate('agent_info', e.target.value)}
             disabled={isSaving}
             rows={3}
-            className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm font-mono text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors resize-none"
+            className="w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs font-mono text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors resize-none"
             placeholder="e.g., Searches for emails through communication channels..."
           />
         </div>
 
         <div>
-          <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">
+          <label className="block text-[10px] tracking-wider text-[var(--text-secondary)] mb-1">
             Operation Prompt <span className="text-[var(--accent-error)]/70">*</span>
           </label>
           <textarea
@@ -868,7 +894,7 @@ function EditOpForm({ editDef, isNewOp, isSaving, error, onUpdate, onSave, onCan
             onChange={e => onUpdate('operation_prompt', e.target.value)}
             disabled={isSaving}
             rows={6}
-            className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm font-mono text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors resize-none"
+            className="w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs font-mono text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors resize-none"
             placeholder="The actual instructions given to the agent when executing this operation"
           />
         </div>
@@ -881,19 +907,19 @@ function EditOpForm({ editDef, isNewOp, isSaving, error, onUpdate, onSave, onCan
       // Toggles and actions.
       //
       */}
-      <div className="p-4 bg-[var(--bg-secondary)]">
-        <div className="flex items-center gap-6 mb-4">
+      <div className="p-3 bg-[var(--bg-secondary)]">
+        <div className="flex items-center gap-4 mb-3">
           <button
             onClick={() => onUpdate('yolo_mode', !editDef.yolo_mode)}
             disabled={isSaving}
-            className="flex items-center gap-2 disabled:opacity-50 hover:opacity-80 transition-opacity"
+            className="flex items-center gap-1.5 disabled:opacity-50 hover:opacity-80 transition-opacity"
             type="button"
           >
             {editDef.yolo_mode
-              ? <CircleCheck size={16} className="text-[var(--accent-error)]" />
-              : <Circle size={16} className="text-[var(--text-secondary)]" />
+              ? <CircleCheck size={12} className="text-[var(--accent-error)]" />
+              : <Circle size={12} className="text-[var(--text-secondary)]" />
             }
-            <span className={`text-xs tracking-wider ${editDef.yolo_mode ? 'text-[var(--accent-error)]' : 'text-[var(--text-secondary)]'}`}>
+            <span className={`text-[10px] tracking-wider ${editDef.yolo_mode ? 'text-[var(--accent-error)]' : 'text-[var(--text-secondary)]'}`}>
               YOLO Mode
             </span>
           </button>
@@ -901,21 +927,21 @@ function EditOpForm({ editDef, isNewOp, isSaving, error, onUpdate, onSave, onCan
           <button
             onClick={() => onUpdate('disabled', !editDef.disabled)}
             disabled={isSaving}
-            className="flex items-center gap-2 disabled:opacity-50 hover:opacity-80 transition-opacity"
+            className="flex items-center gap-1.5 disabled:opacity-50 hover:opacity-80 transition-opacity"
             type="button"
           >
             {editDef.disabled
-              ? <CircleCheck size={16} className="text-[var(--accent-error)]" />
-              : <Circle size={16} className="text-[var(--text-secondary)]" />
+              ? <CircleCheck size={12} className="text-[var(--accent-error)]" />
+              : <Circle size={12} className="text-[var(--text-secondary)]" />
             }
-            <span className={`text-xs tracking-wider ${editDef.disabled ? 'text-[var(--accent-error)]' : 'text-[var(--text-secondary)]'}`}>
+            <span className={`text-[10px] tracking-wider ${editDef.disabled ? 'text-[var(--accent-error)]' : 'text-[var(--text-secondary)]'}`}>
               Disabled
             </span>
           </button>
         </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-[var(--accent-error)]/10 border border-[var(--accent-error)]/30 text-[var(--accent-error)] text-xs">
+          <div className="mb-3 p-2 bg-[var(--accent-error)]/10 border border-[var(--accent-error)]/30 text-[var(--accent-error)] text-[10px]">
             {error}
           </div>
         )}
@@ -924,17 +950,17 @@ function EditOpForm({ editDef, isNewOp, isSaving, error, onUpdate, onSave, onCan
           <button
             onClick={onCancel}
             disabled={isSaving}
-            className="px-4 py-2 text-xs tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors disabled:opacity-50"
+            className="px-3 py-1.5 text-[10px] tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             onClick={onSave}
             disabled={isSaving || (isNewOp && (!editDef.short_name || !editDef.category))}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs tracking-wider bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] tracking-wider bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors disabled:opacity-50"
           >
-            {isSaving && <Loader2 size={14} className="animate-spin" />}
-            <Save size={14} />
+            {isSaving && <Loader2 size={11} className="animate-spin" />}
+            <Save size={11} />
             {isSaving ? 'Saving...' : isNewOp ? 'Create' : 'Save'}
           </button>
         </div>

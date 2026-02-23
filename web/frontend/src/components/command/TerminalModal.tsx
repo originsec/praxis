@@ -28,6 +28,7 @@ export function TerminalModal({ nodeId, node, onClose }: TerminalModalProps) {
 
   const handleClose = async () => {
     await sendCommand(nodeId, { Terminal: 'Close' });
+    onClose();
   };
 
   return (

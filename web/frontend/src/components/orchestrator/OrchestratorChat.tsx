@@ -249,59 +249,94 @@ function ToolExecutionDisplay({
 }
 
 //
-// Plan display component. Supports compact mode for the side panel.
+// Plan display component. Compact collapsible bar that shows current step
+// or final status, expanding to reveal full plan on click.
 //
 export function PlanDisplay({ plan, compact = false }: { plan: OrchestratorPlan; compact?: boolean }) {
+  const [expanded, setExpanded] = useState(false);
   const doneCount = plan.steps.filter(s => s.status === 'done').length;
   const totalCount = plan.steps.length;
+  const allDone = doneCount === totalCount;
   const progressPercent = totalCount > 0 ? (doneCount / totalCount) * 100 : 0;
 
+  //
+  // Determine the summary line: final status, current step, or progress.
+  //
+  const currentStep = plan.steps.find(s => s.status === 'in_progress');
+  const summaryText = allDone
+    ? (plan.summary || 'Complete')
+    : currentStep
+    ? currentStep.description
+    : plan.current_step_description || `${doneCount}/${totalCount} steps`;
+
+  const statusColor = allDone
+    ? 'text-[var(--accent-success)]'
+    : currentStep
+    ? 'text-[var(--accent-warning)]'
+    : 'text-muted';
+
   return (
-    <div className={`bg-[var(--bg-tertiary)] ${compact ? 'p-2' : 'p-3'} mb-3 border border-subtle`}>
-      <div className="flex items-center gap-2 mb-2">
-        <ListTodo size={compact ? 10 : 12} className="text-[var(--accent-purple)]" />
-        <span className={`font-medium ${compact ? 'text-[10px]' : 'text-xs'}`}>Plan</span>
-        <span className={`${compact ? 'text-[9px]' : 'text-[10px]'} text-muted ml-auto`}>
+    <div className="border-t border-subtle flex-shrink-0">
+      {/*
+      //
+      // Collapsed bar: clickable current step + progress.
+      //
+      */}
+      <div
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-[var(--highlight)] transition-colors"
+      >
+        <ListTodo size={10} className="text-[var(--accent-purple)] flex-shrink-0" />
+        <div className="flex-1 min-w-0 flex items-center gap-2">
+          <span className={`${compact ? 'text-[9px]' : 'text-[10px]'} ${statusColor} truncate`}>
+            {summaryText}
+          </span>
+        </div>
+        <span className={`${compact ? 'text-[8px]' : 'text-[9px]'} text-muted flex-shrink-0`}>
           {doneCount}/{totalCount}
         </span>
+        {expanded ? <ChevronDown size={10} className="text-muted flex-shrink-0" /> : <ChevronUp size={10} className="text-muted flex-shrink-0" />}
       </div>
 
-      <div className="h-0.5 bg-[var(--bg-secondary)] rounded-full mb-2 overflow-hidden">
-        <div
-          className="h-full bg-[var(--accent-purple)]/60 transition-all duration-300"
-          style={{ width: `${progressPercent}%` }}
-        />
-      </div>
-
-      {plan.current_step_description && (
-        <div className={`${compact ? 'text-[10px]' : 'text-xs'} text-[var(--accent-warning)] mb-2 font-medium`}>
-          {plan.current_step_description}
-        </div>
-      )}
-
-      <div className="space-y-1">
-        {plan.steps.map((step, idx) => (
-          <div
-            key={idx}
-            className={`flex items-start gap-1.5 ${compact ? 'text-[10px]' : 'text-xs'} ${
-              step.status === 'done'
-                ? 'text-muted line-through'
-                : step.status === 'in_progress'
-                ? 'text-[var(--text-primary)]'
-                : 'text-[var(--text-secondary)]'
-            }`}
-          >
-            <div className="mt-0.5">
-              <PlanStepIcon status={step.status} />
-            </div>
-            <span>{step.description}</span>
+      {/*
+      //
+      // Expanded: full step list with progress bar.
+      //
+      */}
+      {expanded && (
+        <div className="px-3 pb-2 space-y-1.5">
+          <div className="h-0.5 bg-[var(--bg-secondary)] overflow-hidden">
+            <div
+              className="h-full bg-[var(--accent-purple)]/60 transition-all duration-300"
+              style={{ width: `${progressPercent}%` }}
+            />
           </div>
-        ))}
-      </div>
 
-      {plan.summary && (
-        <div className={`mt-2 pt-2 border-t border-subtle ${compact ? 'text-[10px]' : 'text-xs'} text-[var(--text-highlight)]/50 italic`}>
-          {plan.summary}
+          <div className="space-y-0.5">
+            {plan.steps.map((step, idx) => (
+              <div
+                key={idx}
+                className={`flex items-start gap-1.5 ${compact ? 'text-[9px]' : 'text-[10px]'} ${
+                  step.status === 'done'
+                    ? 'text-muted line-through'
+                    : step.status === 'in_progress'
+                    ? 'text-[var(--text-primary)]'
+                    : 'text-[var(--text-secondary)]'
+                }`}
+              >
+                <div className="mt-0.5">
+                  <PlanStepIcon status={step.status} />
+                </div>
+                <span>{step.description}</span>
+              </div>
+            ))}
+          </div>
+
+          {plan.summary && (
+            <div className={`pt-1 border-t border-subtle ${compact ? 'text-[9px]' : 'text-[10px]'} text-[var(--text-highlight)]/50 italic`}>
+              {plan.summary}
+            </div>
+          )}
         </div>
       )}
     </div>
