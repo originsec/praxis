@@ -486,6 +486,7 @@ async fn listen_to_queues(
                     &selected_agent,
                     &node_state,
                     &transaction_manager,
+                    false,
                 )
                 .await
                 {
@@ -494,7 +495,7 @@ async fn listen_to_queues(
             }
             _ = info_update_notify.notified() => {
                 if let Err(e) = send_node_information_update(
-                    &channel, &node_id, &registry, &selected_agent, &node_state, &transaction_manager,
+                    &channel, &node_id, &registry, &selected_agent, &node_state, &transaction_manager, true,
                 ).await {
                     common::log_error!("Failed to send triggered info update: {}", e);
                 }
@@ -545,7 +546,7 @@ async fn listen_to_queues(
                                         )
                                         .await;
                                         if let Err(e) = send_node_information_update(
-                                            &channel, &node_id, &registry, &selected_agent, &node_state, &transaction_manager,
+                                            &channel, &node_id, &registry, &selected_agent, &node_state, &transaction_manager, false,
                                         ).await {
                                             common::log_error!("Failed to send info update after re-registration: {}", e);
                                         }
@@ -618,7 +619,7 @@ async fn handle_broadcast_message(
     match message {
         NodeBroadcastMessage::NodeInformationUpdateRequest => {
             if let Err(e) =
-                send_node_information_update(channel, node_id, registry, selected_agent, node_state, transaction_manager)
+                send_node_information_update(channel, node_id, registry, selected_agent, node_state, transaction_manager, false)
                     .await
             {
                 common::log_error!("Failed to send NodeInformationUpdate: {}", e);
@@ -655,7 +656,7 @@ async fn handle_broadcast_message(
                 )
                 .await;
                 if let Err(e) = send_node_information_update(
-                    channel, node_id, registry, selected_agent, node_state, transaction_manager,
+                    channel, node_id, registry, selected_agent, node_state, transaction_manager, false,
                 )
                 .await
                 {
@@ -901,7 +902,7 @@ async fn handle_command(
     // Send an information update after every command so the UI has fresh state.
     //
     if let Err(e) =
-        send_node_information_update(channel, node_id, registry, selected_agent, node_state, transaction_manager).await
+        send_node_information_update(channel, node_id, registry, selected_agent, node_state, transaction_manager, false).await
     {
         common::log_error!("Failed to send information update after command: {}", e);
     }
@@ -915,7 +916,7 @@ async fn handle_command(
             common::log_info!("Executing queued registry update after session close");
             handle_agent_registry_update(scripts, registry, selected_agent, factory).await;
             if let Err(e) = send_node_information_update(
-                channel, node_id, registry, selected_agent, node_state, transaction_manager,
+                channel, node_id, registry, selected_agent, node_state, transaction_manager, false,
             )
             .await
             {
@@ -932,20 +933,24 @@ async fn send_node_information_update(
     selected_agent: &Arc<Mutex<Option<Arc<dyn Agent>>>>,
     node_state: &Arc<RwLock<NodeState>>,
     transaction_manager: &Arc<TransactionManager>,
+    skip_fingerprint: bool,
 ) -> anyhow::Result<()> {
     //
-    // Get all supported agents from the registry and perform
-    // fingerprinting. Only include agents that pass fingerprinting.
+    // Get all supported agents from the registry. When skip_fingerprint is
+    // true, include all agents without running fingerprint checks (which
+    // can be slow and would block the message loop).
     //
 
     let agents = registry.read().await.get_all();
     let mut discovered_agents = Vec::new();
 
     for agent in &agents {
-        let available = agent.do_fingerprint().await;
-        //
-        // Only include agents that are available.
-        //
+        let available = if skip_fingerprint {
+            true
+        } else {
+            agent.do_fingerprint().await
+        };
+
         if available {
             discovered_agents.push(DiscoveredAgent {
                 name: agent.name().to_string(),
