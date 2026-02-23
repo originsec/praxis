@@ -104,10 +104,10 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
           //
           */}
           {(operation.summary || operation.result) && (
-            <div className="flex flex-col">
+            <div>
               <button
                 onClick={() => setSummaryCollapsed(!summaryCollapsed)}
-                className="flex items-center gap-2 text-xs text-muted mb-2 hover:text-[var(--text-primary)] transition-colors"
+                className="flex items-center gap-2 text-xs text-muted hover:text-[var(--text-primary)] transition-colors"
               >
                 {summaryCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
                 Summary
@@ -118,15 +118,11 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
                 )}
               </button>
               {!summaryCollapsed && operation.summary && (
-                /[\u2800-\u28FF]/.test(operation.summary) ? (
-                  <pre className="bg-[var(--bg-secondary)] p-3 max-h-64 overflow-auto text-xs text-[var(--text-secondary)] whitespace-pre font-mono">{operation.summary}</pre>
-                ) : (
-                  <div className="bg-[var(--bg-secondary)] p-3 max-h-64 overflow-auto prose prose-sm prose-invert max-w-none text-xs text-[var(--text-secondary)] [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0 [&_h2]:text-sm [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:mt-1 [&_h3]:mb-0.5">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {operation.summary}
-                    </ReactMarkdown>
-                  </div>
-                )
+                <div className="mt-2 w-full bg-[var(--bg-secondary)] p-3 max-h-64 overflow-auto prose prose-sm prose-invert max-w-none text-xs text-[var(--text-secondary)] [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0 [&_h2]:text-sm [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:mt-1 [&_h3]:mb-0.5 [&_pre]:whitespace-pre [&_pre]:font-mono">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {operation.summary}
+                  </ReactMarkdown>
+                </div>
               )}
             </div>
           )}

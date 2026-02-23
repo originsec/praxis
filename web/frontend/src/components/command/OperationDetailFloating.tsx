@@ -102,10 +102,10 @@ export function OperationDetailFloating({ operation, onClose }: Props) {
         //
         */}
         {(operation.summary || operation.result) && (
-          <div className="flex flex-col">
+          <div>
             <button
               onClick={() => setSummaryCollapsed(!summaryCollapsed)}
-              className="flex items-center gap-1.5 text-[10px] text-muted mb-2 hover:text-[var(--text-primary)] transition-colors"
+              className="flex items-center gap-1.5 text-[10px] text-muted hover:text-[var(--text-primary)] transition-colors"
             >
               {summaryCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
               Summary
@@ -116,13 +116,9 @@ export function OperationDetailFloating({ operation, onClose }: Props) {
               )}
             </button>
             {!summaryCollapsed && operation.summary && (
-              /[\u2800-\u28FF]/.test(operation.summary) ? (
-                <pre className="bg-[var(--bg-secondary)] p-2 max-h-48 overflow-auto text-[10px] text-[var(--text-secondary)] whitespace-pre font-mono">{operation.summary}</pre>
-              ) : (
-                <div className="bg-[var(--bg-secondary)] p-2 max-h-48 overflow-auto prose prose-invert max-w-none text-[10px] text-[var(--text-secondary)] leading-relaxed [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_h2]:text-[11px] [&_h3]:text-[10px]">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{operation.summary}</ReactMarkdown>
-                </div>
-              )
+              <div className="mt-2 w-full bg-[var(--bg-secondary)] p-2 max-h-48 overflow-auto prose prose-invert max-w-none text-[10px] text-[var(--text-secondary)] leading-relaxed [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_h2]:text-[11px] [&_h3]:text-[10px] [&_pre]:whitespace-pre [&_pre]:font-mono">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{operation.summary}</ReactMarkdown>
+              </div>
             )}
           </div>
         )}
