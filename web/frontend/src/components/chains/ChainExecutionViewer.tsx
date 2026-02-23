@@ -208,6 +208,8 @@ function chainToFlowWithStatus(
   return { nodes, edges };
 }
 
+const EMPTY_PAYLOADS: PayloadInfo[] = [];
+
 interface ChainExecutionViewerInnerProps {
   execution: ChainExecutionUpdate;
   chain: ChainDefinitionFull | null;
@@ -217,7 +219,7 @@ interface ChainExecutionViewerInnerProps {
   payloads?: PayloadInfo[];
 }
 
-function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, operationDefs, payloads = [] }: ChainExecutionViewerInnerProps) {
+function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, operationDefs, payloads = EMPTY_PAYLOADS }: ChainExecutionViewerInnerProps) {
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [outputExpanded, setOutputExpanded] = useState(true);
   const [graphExpanded, setGraphExpanded] = useState(true);
