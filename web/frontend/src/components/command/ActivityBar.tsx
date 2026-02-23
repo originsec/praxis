@@ -9,6 +9,7 @@ import {
   Shield,
   Loader2,
   X,
+  Trash2,
   GripHorizontal,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -25,7 +26,7 @@ const MIN_PANEL_HEIGHT = 80;
 const MAX_PANEL_HEIGHT = 600;
 
 export function ActivityBar() {
-  const { state, cancelOperation, cancelChainExecution } = useApp();
+  const { state, cancelOperation, cancelChainExecution, removeOperation, removeChainExecution, clearOperations, clearChainExecutions } = useApp();
   const [expanded, setExpanded] = useState(false);
   const [panelHeight, setPanelHeight] = useState(DEFAULT_PANEL_HEIGHT);
   const [selectedOp, setSelectedOp] = useState<SemanticOpUpdate | null>(null);
@@ -89,16 +90,27 @@ export function ActivityBar() {
           <>
             {/*
             //
-            // Resize handle.
+            // Resize handle + clear button.
             //
             */}
-            <div
-              onMouseDown={handleResizeStart}
-              className="flex-shrink-0 h-[5px] cursor-row-resize group relative bg-[var(--bg-secondary)] hover:bg-[var(--highlight)] transition-colors border-b border-subtle"
-            >
-              <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 flex justify-center">
-                <GripHorizontal size={10} className="text-[var(--border-subtle)] group-hover:text-[var(--text-muted)] transition-colors" />
+            <div className="flex items-center border-b border-subtle bg-[var(--bg-secondary)] flex-shrink-0">
+              <div
+                onMouseDown={handleResizeStart}
+                className="flex-1 h-[18px] cursor-row-resize group relative hover:bg-[var(--highlight)] transition-colors"
+              >
+                <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 flex justify-center">
+                  <GripHorizontal size={10} className="text-[var(--border-subtle)] group-hover:text-[var(--text-muted)] transition-colors" />
+                </div>
               </div>
+              {(allOps.length > 0 || allChains.length > 0) && (
+                <button
+                  onClick={() => { clearOperations(); clearChainExecutions(); }}
+                  className="px-2 py-0.5 text-[9px] text-muted/50 hover:text-[var(--accent-error)] transition-colors flex-shrink-0"
+                  title="Clear all finished"
+                >
+                  Clear
+                </button>
+              )}
             </div>
 
             {/*
@@ -118,7 +130,7 @@ export function ActivityBar() {
                     <div
                       key={op.operation_id}
                       onClick={() => setSelectedOp(op)}
-                      className="flex items-center justify-between py-1 px-2 hover:bg-[var(--highlight)] transition-colors cursor-pointer text-[10px]"
+                      className="flex items-center justify-between py-1 px-2 hover:bg-[var(--highlight)] transition-colors cursor-pointer text-[10px] group/row"
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <Zap size={10} className="text-[var(--accent-purple)] flex-shrink-0" />
@@ -126,7 +138,7 @@ export function ActivityBar() {
                         <span className="text-muted truncate">{op.agent_short_name}</span>
                         <span className="text-[9px] text-muted/50">{new Date(op.start_time).toLocaleTimeString()}</span>
                       </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
                         <StatusBadge status={getOperationStatusColor(op.status)} label={op.status} />
                         {op.status === 'Running' && (
                           <button
@@ -137,6 +149,15 @@ export function ActivityBar() {
                             <X size={10} />
                           </button>
                         )}
+                        {op.status !== 'Running' && (
+                          <button
+                            onClick={e => { e.stopPropagation(); removeOperation(op.operation_id); }}
+                            className="p-0.5 text-muted/30 hover:text-[var(--accent-error)] hover:bg-[var(--accent-error)]/20 transition-colors opacity-0 group-hover/row:opacity-100"
+                            title="Remove"
+                          >
+                            <Trash2 size={10} />
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -144,7 +165,7 @@ export function ActivityBar() {
                     <div
                       key={exec.execution_id}
                       onClick={() => setSelectedChainExecId(exec.execution_id)}
-                      className="flex items-center justify-between py-1 px-2 hover:bg-[var(--highlight)] transition-colors cursor-pointer text-[10px]"
+                      className="flex items-center justify-between py-1 px-2 hover:bg-[var(--highlight)] transition-colors cursor-pointer text-[10px] group/row"
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <GitBranch size={10} className="text-[var(--accent-info)] flex-shrink-0" />
@@ -152,7 +173,7 @@ export function ActivityBar() {
                         <span className="text-muted truncate">{exec.agent_short_name}</span>
                         <span className="text-[9px] text-muted/50">{new Date(exec.started_at).toLocaleTimeString()}</span>
                       </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
                         <StatusBadge status={getOperationStatusColor(exec.status)} label={exec.status} />
                         {(exec.status === 'Running' || exec.status === 'Queued') && (
                           <button
@@ -161,6 +182,15 @@ export function ActivityBar() {
                             title="Cancel"
                           >
                             <X size={10} />
+                          </button>
+                        )}
+                        {exec.status !== 'Running' && exec.status !== 'Queued' && (
+                          <button
+                            onClick={e => { e.stopPropagation(); removeChainExecution(exec.execution_id); }}
+                            className="p-0.5 text-muted/30 hover:text-[var(--accent-error)] hover:bg-[var(--accent-error)]/20 transition-colors opacity-0 group-hover/row:opacity-100"
+                            title="Remove"
+                          >
+                            <Trash2 size={10} />
                           </button>
                         )}
                       </div>

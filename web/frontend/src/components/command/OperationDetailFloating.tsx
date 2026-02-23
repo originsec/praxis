@@ -72,24 +72,26 @@ export function OperationDetailFloating({ operation, onClose }: Props) {
       // Info bar — matches chain execution header style.
       //
       */}
-      <div className="flex items-baseline gap-3 text-[10px] whitespace-nowrap flex-wrap px-3 py-1.5 border-b border-subtle bg-[var(--bg-secondary)] flex-shrink-0">
-        <div className="flex items-baseline">
-          <span className="text-muted">Status:</span>
-          <span className={`ml-2 font-mono ${statusColor(operation.status)}`}>{operation.status}</span>
+      <div className="px-3 py-1.5 border-b border-subtle bg-[var(--bg-secondary)] flex-shrink-0 overflow-hidden">
+        <div className="flex items-baseline gap-3 text-[10px] whitespace-nowrap">
+          <div className="flex items-baseline">
+            <span className="text-muted">Status:</span>
+            <span className={`ml-2 font-mono ${statusColor(operation.status)}`}>{operation.status}</span>
+          </div>
+          <div className="flex items-baseline">
+            <span className="text-muted">Agent:</span>
+            <span className="ml-2 font-mono">{operation.agent_short_name}</span>
+          </div>
+          <div className="flex items-baseline">
+            <span className="text-muted">Mode:</span>
+            <span className="ml-2">{operation.spec.mode}</span>
+          </div>
+          <div className="flex items-baseline">
+            <span className="text-muted">Duration:</span>
+            <span className="ml-2">{formatDuration(operation.start_time, operation.end_time, operation.status)}</span>
+          </div>
+          <span className="text-[9px] font-mono text-muted/30 ml-auto truncate min-w-0">{operation.operation_id}</span>
         </div>
-        <div className="flex items-baseline">
-          <span className="text-muted">Agent:</span>
-          <span className="ml-2 font-mono">{operation.agent_short_name}</span>
-        </div>
-        <div className="flex items-baseline">
-          <span className="text-muted">Mode:</span>
-          <span className="ml-2">{operation.spec.mode}</span>
-        </div>
-        <div className="flex items-baseline">
-          <span className="text-muted">Duration:</span>
-          <span className="ml-2">{formatDuration(operation.start_time, operation.end_time, operation.status)}</span>
-        </div>
-        <span className="text-[9px] font-mono text-muted/40 ml-auto">{operation.operation_id.slice(0, 12)}...</span>
       </div>
 
       <div className="flex-1 overflow-auto p-3 space-y-3">
