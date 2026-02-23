@@ -105,7 +105,7 @@ export function OperationDetailFloating({ operation, onClose }: Props) {
           <div>
             <button
               onClick={() => setSummaryCollapsed(!summaryCollapsed)}
-              className="flex items-center gap-1.5 text-[10px] text-muted mb-1 hover:text-[var(--text-primary)] transition-colors"
+              className="flex items-center gap-1.5 text-[10px] text-muted mb-2 hover:text-[var(--text-primary)] transition-colors"
             >
               {summaryCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
               Summary
