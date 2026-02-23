@@ -4,18 +4,11 @@
  */
 
 /*
- * Typography: Lora serif for a warm bookish feel,
- * Source Code Pro for technical content.
+ * Typography: Inter sans-serif (same as origin_light).
  */
 
 html[data-theme="sepia"] body {
-  font-family: "Lora", "Georgia", "Times New Roman", serif;
-}
-
-html[data-theme="sepia"] code,
-html[data-theme="sepia"] pre,
-html[data-theme="sepia"] kbd {
-  font-family: "Source Code Pro", "Cascadia Code", monospace;
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 /* Scrollbar colors */
