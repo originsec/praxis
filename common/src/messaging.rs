@@ -609,6 +609,8 @@ pub enum TerminalCommand {
     Resize { rows: u16, cols: u16 },
     /// Close the terminal session
     Close,
+    /// Request scrollback buffer replay (returns buffered output)
+    Replay,
 }
 
 /// Configuration-related commands (fire-and-forget node settings)
@@ -734,6 +736,8 @@ pub enum TerminalCommandResult {
     Resized,
     /// Terminal closed
     Closed,
+    /// Scrollback buffer replay
+    Replay { data: Vec<u8> },
 }
 
 /// Result of a config command

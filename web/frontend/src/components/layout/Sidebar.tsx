@@ -10,6 +10,7 @@ import {
   // Radar,  // Hidden - Discovery feature not ready
   Settings,
   Wrench,
+  Command,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { getFeatureFlags } from '../../utils/featureFlags';
@@ -25,7 +26,8 @@ export function Sidebar({ onNavigate }: SidebarProps) {
   const flags = getFeatureFlags();
 
   const navItems = [
-    { to: '/', icon: LayoutDashboard, label: 'DASHBOARD', end: true },
+    { to: '/', icon: Command, label: 'COMMAND CENTER', end: true },
+    { to: '/dashboard', icon: LayoutDashboard, label: 'DASHBOARD', end: false },
     { to: '/nodes', icon: Server, label: 'NODES', end: false },
     { to: '/operations', icon: Zap, label: 'OPERATIONS', end: false },
     { to: '/intercept', icon: Shield, label: 'INTERCEPT', end: false },

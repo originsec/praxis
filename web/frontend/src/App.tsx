@@ -4,6 +4,7 @@ import { AppProvider } from './context/AppContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { MainLayout } from './components/layout/MainLayout';
 import { SplashScreen } from './components/SplashScreen';
+import { CommandCenter } from './pages/CommandCenter';
 import { Dashboard } from './pages/Dashboard';
 import { NodesPage } from './pages/NodesPage';
 import { NodeDetailPage } from './pages/NodeDetailPage';
@@ -41,8 +42,20 @@ export default function App() {
       <BrowserRouter>
         <AppProvider>
           <Routes>
+            {/*
+            //
+            // Command Center — full-screen layout, no sidebar.
+            //
+            */}
+            <Route path="/" element={<CommandCenter />} />
+
+            {/*
+            //
+            // Classic pages with sidebar layout.
+            //
+            */}
             <Route element={<MainLayout />}>
-              <Route path="/" element={<Dashboard />} />
+              <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/nodes" element={<NodesPage />} />
               <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
               <Route path="/nodes/:nodeId/agents/:agentShortName" element={<AgentDetailPage />} />

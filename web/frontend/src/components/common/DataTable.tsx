@@ -316,7 +316,6 @@ export function DataTable<T>({
   const py = compact ? 'py-1.5' : 'py-2';
 
   const pinnedThCls = 'sticky right-0 z-[1] bg-[var(--bg-tertiary)] ';
-  const pinnedTdCls = 'sticky right-0 z-[1] bg-[var(--bg-secondary)] group-hover:bg-[var(--highlight)] ';
 
   //
   // Render the table using either sticky header (split tables) or simple

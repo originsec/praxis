@@ -15,7 +15,6 @@ import {
   CircleCheck,
   ChevronLeft,
   ChevronRight,
-  ChevronDown,
 } from 'lucide-react';
 import { ConfigModal, type ConfigItem } from '../components/common/ConfigModal';
 import { DataTable, type ColumnDef, type RowAction } from '../components/common/DataTable';

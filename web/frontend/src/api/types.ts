@@ -152,7 +152,8 @@ export type TerminalCommand =
   | 'Create'
   | { Write: { data: number[] } }
   | { Resize: { rows: number; cols: number } }
-  | 'Close';
+  | 'Close'
+  | 'Replay';
 
 export type ConfigCommand = { SetReportInterval: { interval_secs: number } };
 
@@ -232,7 +233,8 @@ export type TerminalCommandResult =
   | { Created: { terminal_id: string } }
   | 'Written'
   | 'Resized'
-  | 'Closed';
+  | 'Closed'
+  | { Replay: { data: number[] } };
 
 export type ConfigCommandResult = { ReportIntervalSet: { interval_secs: number } };
 

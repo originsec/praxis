@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { DataTable, type ColumnDef, type SortState } from '../common/DataTable';
+import { DataTable, type ColumnDef } from '../common/DataTable';
 
 const ROWS_PER_PAGE = 100;
 

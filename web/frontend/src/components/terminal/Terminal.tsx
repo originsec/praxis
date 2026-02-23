@@ -127,6 +127,14 @@ export function Terminal({ nodeId, terminalId }: TerminalProps) {
     window.addEventListener('resize', () => fitAddon.fit());
 
     //
+    // Observe container size changes (e.g. floating panel resize).
+    //
+    const resizeObserver = new ResizeObserver(() => {
+      fitAddon.fit();
+    });
+    resizeObserver.observe(termRef.current);
+
+    //
     // Register output handler.
     //
     const unregister = registerTerminalHandler(nodeId, terminalId, (output) => {
@@ -135,18 +143,36 @@ export function Terminal({ nodeId, terminalId }: TerminalProps) {
     });
 
     //
-    // Initial resize notification and focus.
+    // Initial resize notification, scrollback replay, and focus.
     //
-    setTimeout(() => {
+    setTimeout(async () => {
       fitAddon.fit();
       sendCommand(nodeId, {
         Terminal: { Resize: { rows: xterm.rows, cols: xterm.cols } },
       });
+
+      //
+      // Request scrollback replay to restore previous terminal content.
+      //
+      try {
+        const response = await sendCommand(nodeId, { Terminal: 'Replay' });
+        if (response?.result && 'Terminal' in response.result) {
+          const termResult = response.result.Terminal;
+          if (typeof termResult === 'object' && 'Replay' in termResult && termResult.Replay.data?.length > 0) {
+            const text = new TextDecoder().decode(new Uint8Array(termResult.Replay.data));
+            xterm.write(text);
+          }
+        }
+      } catch {
+        // Replay not critical — continue without it.
+      }
+
       xterm.focus();
     }, 100);
 
     return () => {
       unregister();
+      resizeObserver.disconnect();
       xterm.dispose();
       window.removeEventListener('resize', () => fitAddon.fit());
     };
