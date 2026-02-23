@@ -19,6 +19,7 @@ import {
   FileText,
   FolderOpen,
   X,
+  MessageSquare,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { StatusBadge, getNodeStatus } from '../common/StatusBadge';
@@ -79,9 +80,8 @@ function ActiveOpEntry({ op, onHoverChange }: { op: SemanticOpUpdate; onHoverCha
       onMouseLeave={() => setHoverState(false)}
     >
       <div className="flex items-center gap-1.5 text-[10px]">
-        {isRunning
-          ? <Loader2 size={10} className="animate-spin flex-shrink-0" style={{ color: statusColor }} />
-          : <Zap size={10} className="flex-shrink-0" style={{ color: statusColor }} />}
+        {isRunning && <Loader2 size={10} className="animate-spin flex-shrink-0" style={{ color: statusColor }} />}
+        <Zap size={10} className="flex-shrink-0" style={{ color: statusColor }} />
         <span className="text-highlight truncate">{op.spec.name}</span>
         <span className="text-muted">· {op.agent_short_name}</span>
         {!isRunning && (
@@ -355,7 +355,9 @@ export function NodeCard({ node }: NodeCardProps) {
     [state.chains.executions, node.node_id],
   );
 
-  const hasActiveWork = activeOps.length > 0 || activeChains.length > 0;
+  const hasActivePrompt = !!node.selected_agent?.active_transaction_id;
+
+  const hasActiveWork = activeOps.length > 0 || activeChains.length > 0 || hasActivePrompt;
 
   return (
     <>
@@ -520,7 +522,7 @@ export function NodeCard({ node }: NodeCardProps) {
         */}
         {hasActiveWork && (
           <div className="px-3 py-2 border-t border-subtle space-y-1.5">
-            <span className="text-[10px] text-[var(--accent-info)] tracking-wider">ACTIVE ({activeOps.length + activeChains.length})</span>
+            <span className="text-[10px] text-[var(--accent-info)] tracking-wider">ACTIVE ({activeOps.length + activeChains.length + (hasActivePrompt ? 1 : 0)})</span>
 
             {activeOps.map(op => (
               <ActiveOpEntry key={op.operation_id} op={op} onHoverChange={handleOpHover} />
@@ -534,6 +536,15 @@ export function NodeCard({ node }: NodeCardProps) {
                 <span className="text-muted">· {ex.agent_short_name}</span>
               </div>
             ))}
+
+            {hasActivePrompt && (
+              <div className="flex items-center gap-1.5 text-[10px]">
+                <Loader2 size={10} className="animate-spin text-[var(--accent-purple)] flex-shrink-0" />
+                <MessageSquare size={10} className="text-[var(--accent-purple)] flex-shrink-0" />
+                <span className="text-highlight">Prompt</span>
+                <span className="text-muted">· {node.selected_agent!.short_name}</span>
+              </div>
+            )}
           </div>
         )}
 

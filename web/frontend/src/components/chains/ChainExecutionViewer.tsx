@@ -666,23 +666,23 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
         // Element details panel.
         //
         */}
-        <div className="flex-1 p-4">
+        <div className="flex-1 p-3">
           {selectedElementId && selectedElement ? (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {(() => {
                 const stepInfo = getStepName(selectedElementId);
                 return (
                   <div className="flex items-baseline gap-2">
-                    {stepInfo.type === 'trigger' && <Play size={18} className="text-[var(--accent-success)] self-center" />}
-                    {stepInfo.type === 'operation' && <Cpu size={18} className="text-[var(--accent-info)] self-center" />}
-                    {stepInfo.type === 'transform' && <Sparkles size={18} className="text-[var(--accent-warning)] self-center" />}
-                    {stepInfo.type === 'genericPrompt' && <MessageSquare size={18} className="text-[var(--accent-purple)] self-center" />}
-                    {stepInfo.type === 'memory' && <Database size={18} className="text-[var(--accent-success)] self-center" />}
-                    {stepInfo.type === 'loop' && <RefreshCw size={18} className="text-[var(--accent-warning)] self-center" />}
-                    {stepInfo.type === 'tool' && <Wrench size={18} className="text-[var(--accent-info)] self-center" />}
-                    {stepInfo.type === 'payload' && <FileText size={18} className="text-[var(--accent-warning)] self-center" />}
-                    {stepInfo.type === 'termination' && <Square size={18} className="text-[var(--accent-error)] self-center" />}
-                    <span className="text-lg font-medium text-[var(--text-highlight)]">
+                    {stepInfo.type === 'trigger' && <Play size={14} className="text-[var(--accent-success)] self-center" />}
+                    {stepInfo.type === 'operation' && <Cpu size={14} className="text-[var(--accent-info)] self-center" />}
+                    {stepInfo.type === 'transform' && <Sparkles size={14} className="text-[var(--accent-warning)] self-center" />}
+                    {stepInfo.type === 'genericPrompt' && <MessageSquare size={14} className="text-[var(--accent-purple)] self-center" />}
+                    {stepInfo.type === 'memory' && <Database size={14} className="text-[var(--accent-success)] self-center" />}
+                    {stepInfo.type === 'loop' && <RefreshCw size={14} className="text-[var(--accent-warning)] self-center" />}
+                    {stepInfo.type === 'tool' && <Wrench size={14} className="text-[var(--accent-info)] self-center" />}
+                    {stepInfo.type === 'payload' && <FileText size={14} className="text-[var(--accent-warning)] self-center" />}
+                    {stepInfo.type === 'termination' && <Square size={14} className="text-[var(--accent-error)] self-center" />}
+                    <span className="text-sm font-medium text-[var(--text-highlight)]">
                       {stepInfo.name}
                       {stepInfo.type === 'payload' && selectedElement?.config && selectedElement.config.type === 'Payload' && (() => {
                         const cfg = selectedElement.config as { type: 'Payload'; payload_id: string };
@@ -690,12 +690,12 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
                         return plRec ? `: ${plRec.shortname}` : '';
                       })()}
                     </span>
-                    <span className="text-xs text-[var(--text-secondary)] font-mono">{selectedElementId.slice(0, 8)}</span>
+                    <span className="text-[10px] text-[var(--text-secondary)] font-mono">{selectedElementId.slice(0, 8)}</span>
                   </div>
                 );
               })()}
 
-              <div className="flex gap-4 text-[11px]">
+              <div className="flex gap-4 text-[10px]">
                 <div>
                   <span className="text-muted">Status:</span>{' '}
                   <span className="font-mono">
@@ -725,8 +725,8 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
               */}
               {selectedElement.config && (
                 <div>
-                  <span className="text-xs text-muted font-medium">Configuration:</span>
-                  <div className="mt-1 p-3 bg-[var(--bg-secondary)] rounded text-xs">
+                  <span className="text-[10px] text-muted font-medium">Configuration:</span>
+                  <div className="mt-1 p-2 bg-[var(--bg-secondary)] rounded text-[10px]">
                     {selectedElement.config.type === 'Trigger' && (
                       <span className="text-muted">Trigger (Manual)</span>
                     )}
@@ -793,12 +793,12 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
               */}
               {selectedOutput && (
                 <div>
-                  <span className="text-xs text-muted font-medium">
+                  <span className="text-[10px] text-muted font-medium">
                     {typeof selectedElement.status === 'object' && 'Failed' in selectedElement.status
                       ? 'Error:'
                       : 'Output:'}
                   </span>
-                  <div className="mt-1 p-3 bg-[var(--bg-secondary)] rounded text-sm max-h-64 overflow-auto text-[var(--text-secondary)]">
+                  <div className="mt-1 p-2 bg-[var(--bg-secondary)] rounded text-[10px] max-h-64 overflow-auto text-[var(--text-secondary)]">
                     <StyledOutput output={selectedOutput} />
                   </div>
                 </div>
@@ -811,9 +811,9 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
               */}
               {selectedElement.context && selectedElement.context.input && (
                 <div>
-                  <span className="text-xs text-muted font-medium">Input Data:</span>
-                  <div className="mt-1 p-3 bg-[var(--bg-secondary)] rounded text-sm max-h-48 overflow-auto">
-                    <pre className="whitespace-pre-wrap font-mono text-xs text-[var(--text-secondary)]">{selectedElement.context.input}</pre>
+                  <span className="text-[10px] text-muted font-medium">Input Data:</span>
+                  <div className="mt-1 p-2 bg-[var(--bg-secondary)] rounded text-[10px] max-h-48 overflow-auto">
+                    <pre className="whitespace-pre-wrap font-mono text-[10px] text-[var(--text-secondary)]">{selectedElement.context.input}</pre>
                   </div>
                 </div>
               )}
@@ -824,7 +824,7 @@ function ChainExecutionViewerInner({ execution, chain, isLoading, onEditChain, o
               //
               */}
               {selectedElement.context?.session_id && (
-                <div className="text-xs text-muted">
+                <div className="text-[10px] text-muted">
                   Session: <span className="font-mono">{selectedElement.context.session_id.slice(0, 8)}</span>
                 </div>
               )}

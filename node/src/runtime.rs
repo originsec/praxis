@@ -484,6 +484,7 @@ async fn listen_to_queues(
                     &registry,
                     &selected_agent,
                     &node_state,
+                    &transaction_manager,
                 )
                 .await
                 {
@@ -503,6 +504,7 @@ async fn listen_to_queues(
                                 &registry,
                                 &selected_agent,
                                 &node_state,
+                                &transaction_manager,
                                 &factory,
                                 &mut pending_registry_update,
                             )
@@ -535,7 +537,7 @@ async fn listen_to_queues(
                                         )
                                         .await;
                                         if let Err(e) = send_node_information_update(
-                                            &channel, &node_id, &registry, &selected_agent, &node_state,
+                                            &channel, &node_id, &registry, &selected_agent, &node_state, &transaction_manager,
                                         ).await {
                                             common::log_error!("Failed to send info update after re-registration: {}", e);
                                         }
@@ -600,13 +602,14 @@ async fn handle_broadcast_message(
     registry: &Arc<RwLock<AgentRegistry>>,
     selected_agent: &Arc<Mutex<Option<Arc<dyn Agent>>>>,
     node_state: &Arc<RwLock<NodeState>>,
+    transaction_manager: &Arc<TransactionManager>,
     factory: &AgentFactory,
     pending_registry_update: &mut Option<Vec<String>>,
 ) {
     match message {
         NodeBroadcastMessage::NodeInformationUpdateRequest => {
             if let Err(e) =
-                send_node_information_update(channel, node_id, registry, selected_agent, node_state)
+                send_node_information_update(channel, node_id, registry, selected_agent, node_state, transaction_manager)
                     .await
             {
                 common::log_error!("Failed to send NodeInformationUpdate: {}", e);
@@ -643,7 +646,7 @@ async fn handle_broadcast_message(
                 )
                 .await;
                 if let Err(e) = send_node_information_update(
-                    channel, node_id, registry, selected_agent, node_state,
+                    channel, node_id, registry, selected_agent, node_state, transaction_manager,
                 )
                 .await
                 {
@@ -828,7 +831,7 @@ async fn handle_command(
     // Send an information update after every command so the UI has fresh state.
     //
     if let Err(e) =
-        send_node_information_update(channel, node_id, registry, selected_agent, node_state).await
+        send_node_information_update(channel, node_id, registry, selected_agent, node_state, transaction_manager).await
     {
         common::log_error!("Failed to send information update after command: {}", e);
     }
@@ -842,7 +845,7 @@ async fn handle_command(
             common::log_info!("Executing queued registry update after session close");
             handle_agent_registry_update(scripts, registry, selected_agent, factory).await;
             if let Err(e) = send_node_information_update(
-                channel, node_id, registry, selected_agent, node_state,
+                channel, node_id, registry, selected_agent, node_state, transaction_manager,
             )
             .await
             {
@@ -858,6 +861,7 @@ async fn send_node_information_update(
     registry: &Arc<RwLock<AgentRegistry>>,
     selected_agent: &Arc<Mutex<Option<Arc<dyn Agent>>>>,
     node_state: &Arc<RwLock<NodeState>>,
+    transaction_manager: &Arc<TransactionManager>,
 ) -> anyhow::Result<()> {
     //
     // Get all supported agents from the registry and perform
@@ -910,6 +914,7 @@ async fn send_node_information_update(
                     process_name,
                     yolo_mode: false,
                     working_dir: session.as_ref().and_then(|s| s.working_dir()),
+                    active_transaction_id: transaction_manager.first_pending_id(),
                 })
             }
             None => None,

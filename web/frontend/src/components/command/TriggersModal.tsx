@@ -115,7 +115,7 @@ export function TriggersModal({ onClose }: TriggersModalProps) {
       size="lg"
       noPadding
     >
-      <div className="flex flex-col" style={{ height: '50vh' }}>
+      <div className="flex flex-col" style={{ height: '60vh' }}>
 
         {/*
         //

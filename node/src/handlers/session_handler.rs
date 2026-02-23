@@ -63,6 +63,14 @@ impl TransactionManager {
         self.pending.lock().unwrap().remove(transaction_id);
     }
 
+    pub fn has_pending(&self) -> bool {
+        !self.pending.lock().unwrap().is_empty()
+    }
+
+    pub fn first_pending_id(&self) -> Option<TransactionId> {
+        self.pending.lock().unwrap().keys().next().cloned()
+    }
+
     //
     // Cancel all pending transactions for a given session.
     // Used when closing a session to ensure no orphaned transactions.

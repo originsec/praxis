@@ -8,7 +8,7 @@ import { RunModal, type RunItem } from '../common/RunModal';
 import { ChainBuilder } from '../chains/ChainBuilder';
 import { ImportModal } from '../library/ImportModal';
 import { useApp } from '../../context/AppContext';
-import type { OperationDefinitionInfo, ChainDefinitionInput, ChainDefinitionInfo } from '../../api/types';
+import type { OperationDefinitionInfo, ChainDefinitionInput, ChainDefinitionInfo, TargetSpec } from '../../api/types';
 
 interface ModelDefinition {
   name: string;
@@ -224,6 +224,38 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
   const handleRun = useCallback((id: string, name: string, variant: 'operation' | 'chain') => {
     setRunModalItem({ item: { id, name }, variant });
   }, []);
+
+  const handleRunAdvanced = useCallback((itemId: string, targetSpec: TargetSpec) => {
+    if (!runModalItem) return;
+    const allNodes = nodes;
+
+    if (runModalItem.variant === 'operation') {
+      const filteredNodes = targetSpec.node_ids.length > 0
+        ? allNodes.filter(n => targetSpec.node_ids.includes(n.node_id))
+        : targetSpec.os_filter
+          ? allNodes.filter(n => n.os_details.toLowerCase().includes(targetSpec.os_filter!.toLowerCase()))
+          : allNodes;
+
+      for (const node of filteredNodes) {
+        const agents = targetSpec.agent_short_names.length > 0
+          ? node.discovered_agents.filter(a => targetSpec.agent_short_names.includes(a.short_name))
+          : node.selected_agent
+            ? [{ short_name: node.selected_agent.short_name }]
+            : node.discovered_agents.slice(0, 1);
+
+        for (const agent of agents) {
+          runOperation(node.node_id, agent.short_name, itemId);
+        }
+      }
+    } else {
+      const primaryNode = allNodes[0];
+      if (!primaryNode) return;
+      const agentName = primaryNode.selected_agent?.short_name || primaryNode.discovered_agents?.[0]?.short_name || '';
+      runChain(itemId, primaryNode.node_id, agentName, undefined, targetSpec);
+    }
+
+    setRunModalItem(null);
+  }, [runModalItem, nodes, runOperation, runChain]);
 
   //
   // Handlers: Delete.
@@ -497,6 +529,7 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
             }
             setRunModalItem(null);
           }}
+          onRunAdvanced={handleRunAdvanced}
         />
       )}
 

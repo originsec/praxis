@@ -365,10 +365,9 @@ pub struct SelectedAgent {
     pub yolo_mode: bool,
     /// Working directory context for the session
     pub working_dir: Option<String>,
-    //
-    // Note: Tools and config are now retrieved via Recon/ReconSemantic
-    // commands.
-    //
+    /// Transaction ID of the currently in-flight prompt (if any).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_transaction_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

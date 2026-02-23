@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Zap, GitBranch, Settings } from 'lucide-react';
+import { Zap, GitBranch } from 'lucide-react';
 import { Modal } from './Modal';
 import { TargetSpecEditor } from './TargetSpecEditor';
 import type { NodeState, TargetSpec } from '../../api/types';
@@ -39,8 +39,8 @@ interface RunModalProps {
   //
   warningMessage?: string;
   //
-  // Advanced targeting: when provided, shows a toggle for TargetSpec editor.
-  // When clicked with advanced targeting enabled, calls this instead of onRun.
+  // When provided, shows TargetSpec editor instead of simple node/agent
+  // dropdowns and calls this instead of onRun.
   //
   onRunAdvanced?: (itemId: string, targetSpec: TargetSpec) => void;
 }
@@ -62,7 +62,6 @@ export function RunModal({
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [nodeId, setNodeId] = useState<string>('');
   const [agentName, setAgentName] = useState<string>('');
-  const [advancedTargeting, setAdvancedTargeting] = useState(false);
   const [targetSpec, setTargetSpec] = useState<TargetSpec>({
     node_ids: [],
     os_filter: null,
@@ -90,7 +89,6 @@ export function RunModal({
 
     if (justOpened) {
       setSelectedItemId(preSelectedItem?.id ?? null);
-      setAdvancedTargeting(false);
       setTargetSpec({
         node_ids: [],
         os_filter: null,
@@ -127,11 +125,13 @@ export function RunModal({
     }
   };
 
+  const useTargetSpec = !!onRunAdvanced && !hasFixedTarget;
+
   const handleRun = () => {
     if (!selectedItemId) return;
 
-    if (advancedTargeting && onRunAdvanced) {
-      onRunAdvanced(selectedItemId, targetSpec);
+    if (useTargetSpec) {
+      onRunAdvanced!(selectedItemId, targetSpec);
       onClose();
       return;
     }
@@ -225,35 +225,22 @@ export function RunModal({
 
         {/*
         //
-        // Node/Agent selectors - only show if not using fixed target.
+        // Targeting section.
         //
         */}
         {!hasFixedTarget && (
           <div className="p-2 bg-[var(--bg-secondary)]">
-            {/*
-            //
-            // Advanced targeting toggle (only when onRunAdvanced is provided).
-            //
-            */}
-            {onRunAdvanced && (
-              <label className="flex items-center gap-1.5 mb-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={advancedTargeting}
-                  onChange={(e) => setAdvancedTargeting(e.target.checked)}
-                  className="accent-[var(--accent-info)]"
+            {useTargetSpec ? (
+              <>
+                <div className="text-[9px] tracking-widest text-[var(--text-secondary)] mb-1.5" style={{ letterSpacing: '0.08em' }}>
+                  TARGET SPEC
+                </div>
+                <TargetSpecEditor
+                  value={targetSpec}
+                  onChange={setTargetSpec}
+                  nodes={nodes}
                 />
-                <Settings size={10} className="text-[var(--text-secondary)]" />
-                <span className="text-[10px] text-[var(--text-secondary)]">Advanced targeting</span>
-              </label>
-            )}
-
-            {advancedTargeting && onRunAdvanced ? (
-              <TargetSpecEditor
-                value={targetSpec}
-                onChange={setTargetSpec}
-                nodes={nodes}
-              />
+              </>
             ) : (
               <div className="grid grid-cols-2 gap-2">
                 <div>
@@ -261,7 +248,7 @@ export function RunModal({
                   <select
                     value={nodeId}
                     onChange={(e) => handleNodeChange(e.target.value)}
-                    className="w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle transition-colors"
+                    className="w-full bg-[var(--bg-primary)] border border-dim px-2 py-1 text-[10px] text-highlight focus:outline-none focus:border-subtle transition-colors"
                   >
                     <option value="">Select node</option>
                     {nodes.map((node) => (
@@ -277,7 +264,7 @@ export function RunModal({
                   <select
                     value={agentName}
                     onChange={(e) => setAgentName(e.target.value)}
-                    className="w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle transition-colors"
+                    className="w-full bg-[var(--bg-primary)] border border-dim px-2 py-1 text-[10px] text-highlight focus:outline-none focus:border-subtle transition-colors"
                   >
                     <option value="">Select agent</option>
                     {nodeId && nodes.find(n => n.node_id === nodeId)?.discovered_agents?.map(agent => (
@@ -307,7 +294,7 @@ export function RunModal({
             </button>
             <button
               onClick={handleRun}
-              disabled={!selectedItemId || (advancedTargeting && onRunAdvanced ? false : (!effectiveNodeId || !effectiveAgentName))}
+              disabled={!selectedItemId || (useTargetSpec ? false : (!effectiveNodeId || !effectiveAgentName))}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] tracking-wider border border-dim transition-colors disabled:opacity-50 ${
                 isOperation
                   ? 'bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] hover:border-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/30'

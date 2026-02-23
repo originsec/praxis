@@ -32,6 +32,7 @@ export interface SelectedAgent {
   process_name: string | null;
   yolo_mode: boolean;
   working_dir: string | null;
+  active_transaction_id?: string | null;
 }
 
 //
