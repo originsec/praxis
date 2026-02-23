@@ -68,7 +68,7 @@ export function StyledOutput({ output }: { output: string }) {
           case 'outgoing':
             return (
               <div key={idx} className="border-l border-[var(--text-secondary)] pl-2">
-                <div className="text-[10px] text-[var(--text-secondary)] font-medium mb-0.5 flex items-center gap-1">
+                <div className="text-[10px] text-[var(--text-primary)] font-medium mb-0.5 flex items-center gap-1">
                   <span>→</span> {block.label}
                 </div>
                 <pre className="text-[11px] whitespace-pre-wrap font-mono text-muted">{block.content}</pre>
@@ -108,7 +108,7 @@ export function StyledOutput({ output }: { output: string }) {
 
             return (
               <div key={idx} className="border-l pl-2" style={{ borderColor }}>
-                <div className="text-[10px] font-medium mb-0.5 flex items-center gap-1 text-[var(--text-secondary)]">
+                <div className="text-[10px] font-medium mb-0.5 flex items-center gap-1 text-[var(--text-primary)]">
                   <span>←</span> {block.label}
                 </div>
                 {hasBrailleArt ? (

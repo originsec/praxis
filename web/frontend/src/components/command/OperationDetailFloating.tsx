@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Download, ChevronDown, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import { FloatingPanel } from './FloatingPanel';
 import { StyledOutput } from '../common/StyledOutput';
 import { exportOperationResult, downloadTextFile } from '../../utils/export';
@@ -109,15 +110,15 @@ export function OperationDetailFloating({ operation, onClose }: Props) {
             >
               {summaryCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
               Summary
-              {operation.result && (
+              {operation.result && operation.spec.mode !== 'one-shot' && (
                 <span className="px-1 py-0.5 text-[9px] font-mono bg-[var(--bg-tertiary)] border border-dim">
                   {operation.result}
                 </span>
               )}
             </button>
-            {!summaryCollapsed && operation.summary && (
-              <div className="mt-2 w-full bg-[var(--bg-secondary)] p-2 max-h-48 overflow-auto prose prose-invert max-w-none text-[10px] text-[var(--text-secondary)] leading-relaxed [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_h2]:text-[11px] [&_h3]:text-[10px] [&_pre]:whitespace-pre [&_pre]:font-mono">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{operation.summary}</ReactMarkdown>
+            {!summaryCollapsed && (operation.summary || operation.result) && (
+              <div className="mt-1.5 w-full bg-[var(--bg-secondary)] p-2 max-h-48 overflow-auto prose prose-invert max-w-none text-[10px] text-[var(--text-secondary)] leading-relaxed [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_h2]:text-[11px] [&_h3]:text-[10px] [&_pre]:whitespace-pre [&_pre]:font-mono">
+                <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{(operation.summary || operation.result)!}</ReactMarkdown>
               </div>
             )}
           </div>
@@ -137,7 +138,7 @@ export function OperationDetailFloating({ operation, onClose }: Props) {
             Prompt
           </button>
           {!promptCollapsed && (
-            <div className="bg-[var(--bg-secondary)] p-2">
+            <div className="bg-[var(--bg-secondary)] p-2 text-[var(--text-secondary)]">
               <pre className="text-[10px] whitespace-pre-wrap font-mono">{operation.spec.operation_prompt}</pre>
             </div>
           )}
@@ -158,7 +159,7 @@ export function OperationDetailFloating({ operation, onClose }: Props) {
               Output
             </button>
             {!outputCollapsed && (
-              <div ref={outputRef} className="bg-[var(--bg-secondary)] p-2 max-h-64 overflow-auto">
+              <div ref={outputRef} className="bg-[var(--bg-secondary)] p-2 max-h-64 overflow-auto text-[var(--text-secondary)]">
                 <StyledOutput output={operation.output} />
               </div>
             )}
