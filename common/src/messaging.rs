@@ -395,6 +395,9 @@ pub struct NodeInformationUpdate {
     /// Active terminal session ID (if any)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_terminal_id: Option<String>,
+    /// Whether the node is running with elevated privileges (root/admin)
+    #[serde(default)]
+    pub privileged: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -2668,6 +2671,9 @@ pub struct NodeState {
     /// Active terminal session ID (if any)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_terminal_id: Option<String>,
+    /// Whether the node is running with elevated privileges (root/admin)
+    #[serde(default)]
+    pub privileged: bool,
 }
 
 /// Complete system state broadcast to clients

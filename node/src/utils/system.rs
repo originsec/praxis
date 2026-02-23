@@ -2,6 +2,49 @@ use std::fs;
 use std::path::PathBuf;
 use sysinfo::System;
 
+//
+// Check whether the current process is running with elevated privileges
+// (root on Unix, elevated admin on Windows).
+//
+
+#[cfg(unix)]
+pub fn is_privileged() -> bool {
+    nix::unistd::geteuid().is_root()
+}
+
+#[cfg(windows)]
+pub fn is_privileged() -> bool {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Security::{
+        GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+    };
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    unsafe {
+        let mut token = HANDLE::default();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_err() {
+            return false;
+        }
+        let mut elevation = TOKEN_ELEVATION::default();
+        let mut ret_len = 0u32;
+        let size = std::mem::size_of::<TOKEN_ELEVATION>() as u32;
+        let ok = GetTokenInformation(
+            token,
+            TokenElevation,
+            Some(&mut elevation as *mut _ as *mut _),
+            size,
+            &mut ret_len,
+        );
+        let _ = windows::Win32::Foundation::CloseHandle(token);
+        ok.is_ok() && elevation.TokenIsElevated != 0
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+pub fn is_privileged() -> bool {
+    false
+}
+
 pub fn get_machine_name() -> String {
     System::host_name().unwrap_or_else(|| "unknown".to_string())
 }

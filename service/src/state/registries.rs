@@ -18,6 +18,7 @@ pub struct RegisteredNode {
     pub intercept_active: bool,
     /// Whether interception is supported on this node (Windows + has agent with intercept domain)
     pub intercept_supported: bool,
+    pub privileged: bool,
 }
 
 /// Registry of connected nodes
@@ -45,6 +46,7 @@ impl NodeRegistry {
             last_update_received: now,
             intercept_active: false,
             intercept_supported: false,
+            privileged: false,
         };
 
         let mut agents = self.agents.write().await;
@@ -61,6 +63,7 @@ impl NodeRegistry {
         let mut agents = self.agents.write().await;
         if let Some(node) = agents.get_mut(&update.node_id) {
             node.intercept_supported = update.intercept_supported;
+            node.privileged = update.privileged;
             //
             // Update intercept_active from the node's reported
             // intercept_enabled status.
@@ -125,6 +128,7 @@ impl NodeRegistry {
                 discovered_endpoints_count: update.map(|u| u.discovered_endpoints_count).unwrap_or(0),
                 last_update: node.last_update_received,
                 active_terminal_id: update.and_then(|u| u.active_terminal_id.clone()),
+                privileged: node.privileged,
             }
         }).collect();
 

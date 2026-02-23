@@ -164,7 +164,7 @@ The RabbitMQ URL can also be set via the `PRAXIS_RABBITMQ_URL` environment varia
 ### Node Management
 
 ```bash
-# List all connected nodes
+# List all connected nodes (shows [privileged] tag for root/admin nodes)
 node list
 
 # Select a node by ID prefix
@@ -408,7 +408,7 @@ For other MCP-compatible clients, use JSON configuration:
 The MCP server exposes the following tools:
 
 **Node Management:**
-- `node_list` - List all connected nodes
+- `node_list` - List all connected nodes (includes privileged status)
 - `node_select` - Get details for a specific node
 
 **Agent Management:**

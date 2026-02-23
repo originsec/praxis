@@ -132,10 +132,16 @@ Praxis supports four methods for routing traffic through the proxy. Each has tra
 
 **Best for:** Linux systems needing efficient kernel-level interception
 
+## Privilege Requirements
+
+Most interception methods (VPN, Hosts, TPROXY) require the node to be running with elevated privileges (root on Linux/macOS, administrator on Windows). The Proxy method can work without elevated privileges.
+
+Nodes report their privilege status automatically. In the web UI, the intercept Enable button is disabled on non-privileged nodes — you must restart the node with elevated privileges before enabling interception. The CLI `node list` command shows a `[privileged]` tag for nodes running as root/admin.
+
 ## Enabling Interception
 
 1. Go to **Intercept** in the web UI
-2. Select your node
+2. Select your node (must be running privileged for VPN/Hosts/TPROXY methods)
 3. Choose a method (Proxy, VPN, Hosts, or TPROXY)
 4. Click **Enable**
 

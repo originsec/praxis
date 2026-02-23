@@ -136,7 +136,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
                 "node_id_short": &n.node_id[..8.min(n.node_id.len())],
                 "hostname": n.machine_name,
                 "os": n.os_details,
-                "agent_count": n.discovered_agents.len()
+                "agent_count": n.discovered_agents.len(),
+                "privileged": n.privileged
             })
         }).collect();
 

@@ -16,6 +16,7 @@ export interface NodeState {
   // Active terminal session ID (if any).
   //
   active_terminal_id?: string | null;
+  privileged: boolean;
 }
 
 export interface DiscoveredAgent {

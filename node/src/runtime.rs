@@ -967,6 +967,7 @@ async fn send_node_information_update(
         agent_discovery_enabled,
         discovered_endpoints_count,
         active_terminal_id,
+        privileged: crate::utils::is_privileged(),
     };
 
     let message = NodeSignalMessage::InformationUpdate(update);

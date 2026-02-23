@@ -49,6 +49,7 @@ async fn list_nodes(client: &CliClient, output: &OutputFormat) -> Result<()> {
                     "os_details": n.os_details,
                     "agent_count": n.discovered_agents.len(),
                     "status": status,
+                    "privileged": n.privileged,
                     "last_seen_seconds": age_seconds
                 })
             }).collect();
@@ -67,13 +68,15 @@ async fn list_nodes(client: &CliClient, output: &OutputFormat) -> Result<()> {
                     format_status("inactive")
                 };
 
+                let priv_tag = if node.privileged { " [privileged]" } else { "" };
                 println!(
-                    "  {} {} ({}) - {} agents [{}]",
+                    "  {} {} ({}) - {} agents [{}]{}",
                     format_short_id(&node.node_id),
                     node.machine_name,
                     node.os_details,
                     node.discovered_agents.len(),
-                    status
+                    status,
+                    priv_tag
                 );
             }
             println!();

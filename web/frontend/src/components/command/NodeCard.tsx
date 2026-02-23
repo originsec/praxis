@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Server,
   Bot,
@@ -6,6 +6,7 @@ import {
   Square,
   Loader2,
   Shield,
+  ShieldCheck,
   Zap,
   GitBranch,
   Search,
@@ -25,6 +26,7 @@ import { Modal } from '../common/Modal';
 import { ReconModal } from './ReconModal';
 import { TerminalModal } from './TerminalModal';
 import { AgentSessionModal } from './AgentSessionModal';
+import { StyledOutput } from '../common/StyledOutput';
 import type { NodeState, InterceptMethod } from '../../api/types';
 
 interface NodeCardProps {
@@ -213,6 +215,18 @@ export function NodeCard({ node }: NodeCardProps) {
     badge: `${c.element_count} steps`,
   }));
 
+  const runningOps = useMemo(
+    () => state.operations.filter(op => op.node_id === node.node_id && op.status === 'Running'),
+    [state.operations, node.node_id],
+  );
+
+  const runningChains = useMemo(
+    () => state.chains.executions.filter(ex => ex.node_id === node.node_id && ex.status === 'Running'),
+    [state.chains.executions, node.node_id],
+  );
+
+  const hasActiveWork = runningOps.length > 0 || runningChains.length > 0;
+
   return (
     <>
       <div className="bg-card ascii-box border border-subtle flex flex-col">
@@ -245,6 +259,11 @@ export function NodeCard({ node }: NodeCardProps) {
         */}
         <div className="px-3 py-2 flex items-center gap-3 text-xs text-muted border-b border-subtle">
           <span className="truncate">{node.os_details}</span>
+          {node.privileged && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] tracking-wider bg-[var(--accent-warning)]/15 text-[var(--accent-warning)] flex-shrink-0">
+              <ShieldCheck size={9} /> ROOT
+            </span>
+          )}
           <span className="font-mono text-[10px] truncate ml-auto">{node.node_id.slice(0, 12)}...</span>
         </div>
 
@@ -263,10 +282,14 @@ export function NodeCard({ node }: NodeCardProps) {
             </div>
             <button
               onClick={handleToggleIntercept}
+              disabled={!node.intercept_active && !node.privileged}
+              title={!node.intercept_active && !node.privileged ? 'Node must be running as root/admin to enable interception' : undefined}
               className={`px-2 py-0.5 text-[10px] transition-colors ${
                 node.intercept_active
                   ? 'bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30'
-                  : 'bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30'
+                  : !node.privileged
+                    ? 'bg-[var(--bg-secondary)] text-muted cursor-not-allowed opacity-50'
+                    : 'bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30'
               }`}
             >
               {node.intercept_active ? 'Disable' : 'Enable'}
@@ -359,6 +382,30 @@ export function NodeCard({ node }: NodeCardProps) {
             )}
           </div>
         </div>
+
+        {/*
+        //
+        // Active operations / chain executions on this node.
+        //
+        */}
+        {hasActiveWork && (
+          <div className="px-3 py-2 border-t border-subtle space-y-1.5">
+            <span className="text-[10px] text-[var(--accent-info)] tracking-wider">ACTIVE ({runningOps.length + runningChains.length})</span>
+
+            {runningOps.map(op => (
+              <ActiveOpEntry key={op.operation_id} op={op} />
+            ))}
+
+            {runningChains.map(ex => (
+              <div key={ex.execution_id} className="flex items-center gap-1.5 text-[10px]">
+                <Loader2 size={10} className="animate-spin text-[var(--accent-info)] flex-shrink-0" />
+                <GitBranch size={10} className="text-[var(--accent-info)] flex-shrink-0" />
+                <span className="text-highlight truncate">{ex.chain_name}</span>
+                <span className="text-muted">· {ex.agent_short_name}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/*
         //
