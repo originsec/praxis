@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -253,10 +253,29 @@ function ToolExecutionDisplay({
 // or final status, expanding to reveal full plan on click.
 //
 export function PlanDisplay({ plan, compact = false }: { plan: OrchestratorPlan; compact?: boolean }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+  const prevStepsRef = useRef<string | null>(null);
   const doneCount = plan.steps.filter(s => s.status === 'done').length;
   const totalCount = plan.steps.length;
   const allDone = doneCount === totalCount;
+
+  //
+  // Auto-expand when a new plan arrives, auto-collapse when complete.
+  //
+
+  const planFingerprint = plan.steps.map(s => s.description).join('\0');
+  useEffect(() => {
+    if (prevStepsRef.current !== null && prevStepsRef.current !== planFingerprint) {
+      setExpanded(true);
+    }
+    prevStepsRef.current = planFingerprint;
+  }, [planFingerprint]);
+
+  useEffect(() => {
+    if (allDone && totalCount > 0) {
+      setExpanded(false);
+    }
+  }, [allDone, totalCount]);
   const progressPercent = totalCount > 0 ? (doneCount / totalCount) * 100 : 0;
 
   //

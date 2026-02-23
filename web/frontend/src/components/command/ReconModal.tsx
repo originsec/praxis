@@ -19,6 +19,7 @@ import {
   Search,
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
+import { CodeEditor, languageFromPath } from '../common/CodeEditor';
 import { useApp } from '../../context/AppContext';
 import type { ReconResult } from '../../api/types';
 
@@ -713,16 +714,16 @@ export function ReconModal({ nodeId, agentShortName, onClose }: ReconModalProps)
                           <div className="flex-1 overflow-auto bg-[var(--bg-secondary)]">
                             {editingConfigIdx === selectedConfigIdx ? (
                               <div className="h-full flex flex-col p-2">
-                                <textarea
+                                <CodeEditor
                                   value={editingConfigContent}
-                                  onChange={(e) => setEditingConfigContent(e.target.value)}
-                                  className="flex-1 w-full p-2 text-[10px] font-mono bg-[var(--bg-primary)] border border-subtle focus:outline-none focus:border-[var(--accent-info)] resize-none"
-                                  disabled={isSavingConfig}
+                                  onChange={setEditingConfigContent}
+                                  readOnly={isSavingConfig}
+                                  language={languageFromPath(reconResult.config[selectedConfigIdx].path)}
                                 />
                                 {configSaveError && (
                                   <div className="mt-1 text-[10px] text-[var(--accent-error)]">{configSaveError}</div>
                                 )}
-                                <div className="flex justify-end gap-1.5 mt-1.5 flex-shrink-0">
+                                <div className="flex justify-end gap-1.5 mt-2 flex-shrink-0">
                                   <button
                                     onClick={handleCancelConfigEdit}
                                     disabled={isSavingConfig}

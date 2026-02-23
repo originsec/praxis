@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { MainLayout } from './components/layout/MainLayout';
@@ -21,6 +21,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import AgentChatPage from './pages/AgentChatPage';
 import { getFeatureFlags } from './utils/featureFlags';
+import { getUiMode } from './utils/uiMode';
 
 export default function App() {
   //
@@ -37,6 +38,14 @@ export default function App() {
     return <SplashScreen onComplete={() => setShowSplash(false)} />;
   }
 
+  //
+  // Determine root route based on UI mode preference.
+  //
+  const uiMode = getUiMode();
+  const rootElement = uiMode === 'legacy'
+    ? <Navigate to="/dashboard" replace />
+    : <CommandCenter />;
+
   return (
     <ErrorBoundary>
       <BrowserRouter>
@@ -44,10 +53,10 @@ export default function App() {
           <Routes>
             {/*
             //
-            // Command Center — full-screen layout, no sidebar.
+            // Root route — depends on UI mode preference.
             //
             */}
-            <Route path="/" element={<CommandCenter />} />
+            <Route path="/" element={rootElement} />
 
             {/*
             //
