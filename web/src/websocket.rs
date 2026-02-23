@@ -179,4 +179,11 @@ async fn handle_incoming(
     if let Err(e) = state.rabbitmq.stop_orchestrator().await {
         common::log_warn!("Failed to send OrchestratorStop on disconnect: {}", e);
     }
+
+    //
+    // Stop chain orchestrator session when connection closes (via RabbitMQ).
+    //
+    if let Err(e) = state.rabbitmq.stop_chain_orchestrator().await {
+        common::log_warn!("Failed to send ChainOrchStop on disconnect: {}", e);
+    }
 }

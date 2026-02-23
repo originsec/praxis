@@ -1,6 +1,7 @@
 //! Praxis Service - Orchestration service for the Praxis framework
 
 mod banner;
+mod chain_orchestrator;
 mod config;
 mod conversions;
 mod database;
@@ -48,6 +49,7 @@ use database::{Database, DatabaseConfig};
 use dispatch::ServiceContext;
 use handlers::{ClientMessageHandler, NodeMessageHandler};
 use agent_chat::AgentChatManager;
+use chain_orchestrator::ChainOrchestratorManager;
 use orchestrator::OrchestratorManager;
 use config::service_config::APPLICATION_LOGS_ENABLED;
 use semantic_ops::{SemanticOpsManager, ResponseTracker, ChainExecutor};
@@ -319,6 +321,12 @@ async fn run_main_loop() -> Result<()> {
     //
     let orchestrator_manager = Arc::new(OrchestratorManager::new());
     common::log_info!("Initialized Orchestrator manager");
+
+    //
+    // Initialize Chain Orchestrator manager.
+    //
+    let chain_orchestrator_manager = Arc::new(ChainOrchestratorManager::new());
+    common::log_info!("Initialized Chain Orchestrator manager");
 
     //
     // Initialize Toolkit manager.
@@ -611,6 +619,7 @@ async fn run_main_loop() -> Result<()> {
         chain_executor,
         agent_chat_manager,
         orchestrator_manager,
+        chain_orchestrator_manager,
         toolkit_manager,
         mcp_manager,
         trigger_engine: Some(trigger_engine.clone()),

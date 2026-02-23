@@ -550,6 +550,35 @@ export interface ToolkitApplyOutcome {
 
 export type ChainExecutionStatus = 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled';
 
+//
+// Chain Orchestrator mode.
+//
+export type ChainOrchMode = 'build' | 'execute';
+
+//
+// Granular chain execution events for live tracking.
+//
+export interface ChainExecutionEvent {
+  execution_id: string;
+  timestamp: string;
+  kind: ChainExecutionEventKind;
+}
+
+export type ChainExecutionEventKind =
+  | { type: 'ElementStarted'; element_id: string; element_type: string; element_label: string }
+  | { type: 'ElementCompleted'; element_id: string; output_preview: string }
+  | { type: 'ElementFailed'; element_id: string; error: string }
+  | { type: 'PromptSent'; element_id: string; prompt_preview: string }
+  | { type: 'ResponseReceived'; element_id: string; response_preview: string }
+  | { type: 'ToolCallStarted'; element_id: string; tool_name: string; input_preview: string }
+  | { type: 'ToolCallCompleted'; element_id: string; tool_name: string; success: boolean; result_preview: string }
+  | { type: 'AgentIteration'; element_id: string; iteration: number; total: number }
+  | { type: 'LlmCallStarted'; element_id: string; model: string }
+  | { type: 'LlmCallCompleted'; element_id: string; tokens_used: number }
+  | { type: 'SessionCreated'; element_id: string; session_id: string }
+  | { type: 'SessionClosed'; session_id: string }
+  | { type: 'OutputChunk'; element_id: string; chunk: string };
+
 export type ElementExecutionStatus =
   | 'Pending'
   | 'WaitingForInputs'
@@ -855,7 +884,14 @@ export type BrowserMessage =
   | { type: 'agent_chat_send_message'; session_id: string; content: string; channel_id: string | null; recipient_nickname: string | null }
   | { type: 'agent_chat_join_channel'; session_id: string; channel_name: string }
   | { type: 'agent_chat_get_history'; session_id: string; channel_id: string | null; limit: number }
-  | { type: 'agent_chat_get_state'; session_id: string | null };
+  | { type: 'agent_chat_get_state'; session_id: string | null }
+  //
+  // Chain orchestrator messages.
+  //
+  | { type: 'chain_orch_start' }
+  | { type: 'chain_orch_prompt'; prompt_id: string; message: string; workspace_context: string }
+  | { type: 'chain_orch_stop' }
+  | { type: 'chain_orch_cancel' };
 
 //
 // WebSocket Messages (Server -> Browser).
@@ -971,4 +1007,22 @@ export type ServerMessage =
   | { type: 'agent_chat_message'; session_id: string; message: AgentChatMessageInfo }
   | { type: 'agent_chat_state_update'; session: AgentChatSessionState }
   | { type: 'agent_chat_history_response'; session_id: string; channel_id: string | null; messages: AgentChatMessageInfo[] }
-  | { type: 'agent_chat_error'; message: string };
+  | { type: 'agent_chat_error'; message: string }
+  //
+  // Chain execution events.
+  //
+  | { type: 'chain_execution_event'; event: ChainExecutionEvent }
+  //
+  // Chain orchestrator messages.
+  //
+  | { type: 'chain_orch_started'; provider: string; model: string }
+  | { type: 'chain_orch_content'; prompt_id: string; content: string }
+  | { type: 'chain_orch_tool_executing'; prompt_id: string; name: string; input?: string }
+  | { type: 'chain_orch_tool_executed'; prompt_id: string; name: string; display: string; success: boolean; result: string }
+  | { type: 'chain_orch_plan_updated'; prompt_id: string; plan: OrchestratorPlan }
+  | { type: 'chain_orch_done'; prompt_id: string }
+  | { type: 'chain_orch_stopped' }
+  | { type: 'chain_orch_error'; prompt_id: string; message: string }
+  | { type: 'chain_orch_token_usage'; prompt_id: string; prompt_tokens: number; completion_tokens: number; total_tokens: number }
+  | { type: 'chain_orch_workspace_update'; tab_id: string; chain_definition: ChainDefinitionInput }
+  | { type: 'chain_orch_mode_changed'; mode: ChainOrchMode };

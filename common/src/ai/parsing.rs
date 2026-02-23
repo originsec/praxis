@@ -55,58 +55,10 @@ fn find_matching_brace(text: &str, start: usize) -> Option<usize> {
 /// Supports both code-fenced and plain JSON formats
 pub fn parse_manual_tool_call(text: &str) -> Option<(String, Value, String)> {
     //
-    // Try to find a tool call pattern using brace-counting for robustness
-    // This handles nested braces inside JSON string values correctly.
-    //
-
-    //
-    // First, look for code-fenced JSON blocks.
-    //
-    let code_fence_re = Regex::new(r#"```(?:json)?\s*\n?"#).ok()?;
-
-    for fence_match in code_fence_re.find_iter(text) {
-        let after_fence = fence_match.end();
-
-        //
-        // Find the start of the JSON object.
-        //
-        let json_start = text[after_fence..].find('{').map(|i| after_fence + i)?;
-
-        //
-        // Use brace counting to find the end.
-        //
-        if let Some(json_end) = find_matching_brace(text, json_start) {
-            let json_str = &text[json_start..=json_end];
-
-            //
-            // Try to parse as tool call.
-            //
-            if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
-                if let (Some(tool_name), Some(args)) = (
-                    parsed.get("tool").and_then(|v| v.as_str()),
-                    parsed.get("args"),
-                ) {
-                    //
-                    // Find the closing fence.
-                    //
-                    let remaining_text_start = text[json_end + 1..]
-                        .find("```")
-                        .map(|i| json_end + 1 + i + 3)
-                        .unwrap_or(json_end + 1);
-
-                    let before = &text[..fence_match.start()];
-                    let after = &text[remaining_text_start..];
-                    let remaining_text = format!("{}{}", before, after).trim().to_string();
-
-                    return Some((tool_name.to_string(), args.clone(), remaining_text));
-                }
-            }
-        }
-    }
-
-    //
-    // Also try without code block markers (plain JSON)
-    // Look for {"tool": pattern.
+    // Find tool calls by looking for {"tool": patterns anywhere in the text.
+    // Uses brace-counting to extract the complete JSON object, handling nested
+    // braces inside string values. Works regardless of whether the tool call
+    // is wrapped in markdown code fences or not.
     //
     let tool_pattern = r#"\{\s*"tool"\s*:"#;
     let tool_re = Regex::new(tool_pattern).ok()?;
@@ -114,23 +66,46 @@ pub fn parse_manual_tool_call(text: &str) -> Option<(String, Value, String)> {
     for tool_match in tool_re.find_iter(text) {
         let json_start = tool_match.start();
 
-        //
-        // Use brace counting to find the end.
-        //
         if let Some(json_end) = find_matching_brace(text, json_start) {
             let json_str = &text[json_start..=json_end];
 
-            //
-            // Try to parse as tool call.
-            //
             if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
                 if let (Some(tool_name), Some(args)) = (
                     parsed.get("tool").and_then(|v| v.as_str()),
                     parsed.get("args"),
                 ) {
-                    let before = &text[..json_start];
-                    let after = &text[json_end + 1..];
-                    let remaining_text = format!("{}{}", before, after).trim().to_string();
+                    //
+                    // Build remaining text by stripping the tool call and any
+                    // surrounding markdown code fences.
+                    //
+                    let mut strip_start = json_start;
+                    let mut strip_end = json_end + 1;
+
+                    //
+                    // Check if the tool call is preceded by a code fence
+                    // opening and strip it.
+                    //
+                    let before = text[..json_start].trim_end();
+                    if before.ends_with("```json") || before.ends_with("```") {
+                        let fence_start = before.rfind("```").unwrap_or(json_start);
+                        strip_start = fence_start;
+                    }
+
+                    //
+                    // Check if followed by a closing code fence and strip it.
+                    //
+                    let after_json = &text[json_end + 1..];
+                    if let Some(fence_pos) = after_json.find("```") {
+                        let between = after_json[..fence_pos].trim();
+                        if between.is_empty() {
+                            strip_end = json_end + 1 + fence_pos + 3;
+                        }
+                    }
+
+                    let before_text = &text[..strip_start];
+                    let after_text = &text[strip_end..];
+                    let remaining_text =
+                        format!("{}{}", before_text, after_text).trim().to_string();
 
                     return Some((tool_name.to_string(), args.clone(), remaining_text));
                 }

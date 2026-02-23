@@ -2,6 +2,7 @@ import { createContext, useContext, useReducer, useEffect, useCallback, useRef, 
 import { wsClient } from '../api/websocket';
 import { generateUUID } from '../utils/uuid';
 import type { OrchestratorState } from './orchestratorTypes';
+import type { ChainOrchestratorState } from './executionTypes';
 
 //
 // Re-export Orchestrator types for consumers.
@@ -48,6 +49,8 @@ import type {
   ToolkitModelOption,
   ToolkitReconTarget,
   ToolkitToolInfo,
+  ChainExecutionEvent,
+  ChainOrchMode,
 } from '../api/types';
 
 //
@@ -64,6 +67,21 @@ const initialOrchestratorState: OrchestratorState = {
   isStarting: false,
   provider: null,
   model: null,
+  messages: [],
+  currentPlan: null,
+  isLoading: false,
+  streamingContent: '',
+  currentToolExecutions: [],
+  tokenUsage: null,
+  currentPromptId: null,
+};
+
+const initialChainOrchestratorState: ChainOrchestratorState = {
+  sessionActive: false,
+  isStarting: false,
+  provider: null,
+  model: null,
+  mode: 'build',
   messages: [],
   currentPlan: null,
   isLoading: false,
@@ -221,6 +239,8 @@ interface AppState {
   discovery: DiscoveryState;
   agentChat: AgentChatState;
   toolkit: ToolkitState;
+  chainOrchestrator: ChainOrchestratorState;
+  executionEvents: Record<string, ChainExecutionEvent[]>;
   luaAgentScripts: LuaAgentScriptInfo[];
   payloads: PayloadInfo[];
   //
@@ -256,6 +276,8 @@ function createInitialState(): AppState {
     discovery: initialDiscoveryState,
     agentChat: initialAgentChatState,
     toolkit: initialToolkitState,
+    chainOrchestrator: initialChainOrchestratorState,
+    executionEvents: {},
     luaAgentScripts: [],
     payloads: [],
     agentSessionMessages: {},
@@ -378,7 +400,28 @@ type Action =
   //
   // Payload actions.
   //
-  | { type: 'SET_PAYLOADS'; payloads: PayloadInfo[] };
+  | { type: 'SET_PAYLOADS'; payloads: PayloadInfo[] }
+  //
+  // Chain Orchestrator actions.
+  //
+  | { type: 'CHAIN_ORCH_STARTING' }
+  | { type: 'CHAIN_ORCH_STARTED'; provider: string; model: string }
+  | { type: 'CHAIN_ORCH_STOPPED' }
+  | { type: 'CHAIN_ORCH_ADD_USER_MESSAGE'; message: string; promptId: string }
+  | { type: 'CHAIN_ORCH_ADD_CONTENT'; content: string }
+  | { type: 'CHAIN_ORCH_TOOL_EXECUTING'; name: string; input?: string }
+  | { type: 'CHAIN_ORCH_TOOL_EXECUTED'; name: string; display: string; success: boolean; result: string }
+  | { type: 'CHAIN_ORCH_PLAN_UPDATED'; plan: OrchestratorPlan }
+  | { type: 'CHAIN_ORCH_DONE' }
+  | { type: 'CHAIN_ORCH_ERROR'; message: string }
+  | { type: 'CHAIN_ORCH_CLEAR_MESSAGES' }
+  | { type: 'CHAIN_ORCH_TOKEN_USAGE'; promptTokens: number; completionTokens: number; totalTokens: number }
+  | { type: 'CHAIN_ORCH_MODE_CHANGED'; mode: ChainOrchMode }
+  | { type: 'CHAIN_ORCH_WORKSPACE_UPDATE'; tabId: string; chainDefinition: ChainDefinitionInput }
+  //
+  // Chain execution event actions.
+  //
+  | { type: 'CHAIN_EXECUTION_EVENT'; event: ChainExecutionEvent };
 
 function reduceCore(state: AppState, action: Action): AppState | null {
   switch (action.type) {
@@ -1116,6 +1159,202 @@ function reduceToolkit(state: AppState, action: Action): AppState | null {
   }
 }
 
+function reduceChainOrchestrator(state: AppState, action: Action): AppState | null {
+  switch (action.type) {
+    case 'CHAIN_ORCH_STARTING':
+      return {
+        ...state,
+        chainOrchestrator: {
+          ...state.chainOrchestrator,
+          isStarting: true,
+        },
+      };
+    case 'CHAIN_ORCH_STARTED':
+      return {
+        ...state,
+        chainOrchestrator: {
+          ...initialChainOrchestratorState,
+          sessionActive: true,
+          isStarting: false,
+          provider: action.provider,
+          model: action.model,
+          messages: [{
+            id: generateUUID(),
+            role: 'system',
+            content: `Chain orchestrator session started (${action.provider}::${action.model}).`,
+            timestamp: new Date(),
+          }],
+        },
+      };
+    case 'CHAIN_ORCH_STOPPED':
+      return {
+        ...state,
+        chainOrchestrator: {
+          ...state.chainOrchestrator,
+          sessionActive: false,
+          isStarting: false,
+          isLoading: false,
+        },
+      };
+    case 'CHAIN_ORCH_ADD_USER_MESSAGE':
+      return {
+        ...state,
+        chainOrchestrator: {
+          ...state.chainOrchestrator,
+          messages: [...state.chainOrchestrator.messages, {
+            id: generateUUID(),
+            role: 'user',
+            content: action.message,
+            timestamp: new Date(),
+          }],
+          isLoading: true,
+          streamingContent: '',
+          currentToolExecutions: [],
+          currentPromptId: action.promptId,
+        },
+      };
+    case 'CHAIN_ORCH_ADD_CONTENT': {
+      const existing = state.chainOrchestrator.streamingContent;
+      const needsSeparator = existing.length > 0 && !existing.endsWith('\n') && !action.content.startsWith('\n');
+      const separator = needsSeparator ? '\n\n' : '';
+      return {
+        ...state,
+        chainOrchestrator: {
+          ...state.chainOrchestrator,
+          streamingContent: existing + separator + action.content,
+        },
+      };
+    }
+    case 'CHAIN_ORCH_TOOL_EXECUTING':
+      return {
+        ...state,
+        chainOrchestrator: {
+          ...state.chainOrchestrator,
+          currentToolExecutions: [...state.chainOrchestrator.currentToolExecutions, {
+            name: action.name,
+            display: 'Executing...',
+            success: true,
+            executing: true,
+            input: action.input,
+          }],
+        },
+      };
+    case 'CHAIN_ORCH_TOOL_EXECUTED': {
+      const executions = state.chainOrchestrator.currentToolExecutions.map((ex) =>
+        ex.name === action.name && ex.executing
+          ? { name: action.name, display: action.display, success: action.success, executing: false, input: ex.input, result: action.result }
+          : ex
+      );
+      return {
+        ...state,
+        chainOrchestrator: {
+          ...state.chainOrchestrator,
+          currentToolExecutions: executions,
+        },
+      };
+    }
+    case 'CHAIN_ORCH_PLAN_UPDATED':
+      return {
+        ...state,
+        chainOrchestrator: {
+          ...state.chainOrchestrator,
+          currentPlan: action.plan,
+        },
+      };
+    case 'CHAIN_ORCH_DONE': {
+      const newMessages = [...state.chainOrchestrator.messages];
+      if (state.chainOrchestrator.streamingContent || state.chainOrchestrator.currentToolExecutions.length > 0) {
+        newMessages.push({
+          id: generateUUID(),
+          role: 'assistant',
+          content: state.chainOrchestrator.streamingContent,
+          timestamp: new Date(),
+          toolExecutions: state.chainOrchestrator.currentToolExecutions.length > 0
+            ? [...state.chainOrchestrator.currentToolExecutions]
+            : undefined,
+        });
+      }
+      return {
+        ...state,
+        chainOrchestrator: {
+          ...state.chainOrchestrator,
+          messages: newMessages,
+          isLoading: false,
+          streamingContent: '',
+          currentToolExecutions: [],
+        },
+      };
+    }
+    case 'CHAIN_ORCH_ERROR': {
+      const newMessages = [...state.chainOrchestrator.messages, {
+        id: generateUUID(),
+        role: 'system' as const,
+        content: `Error: ${action.message}`,
+        timestamp: new Date(),
+      }];
+      return {
+        ...state,
+        chainOrchestrator: {
+          ...state.chainOrchestrator,
+          messages: newMessages,
+          isStarting: false,
+          isLoading: false,
+          streamingContent: '',
+          currentToolExecutions: [],
+        },
+      };
+    }
+    case 'CHAIN_ORCH_CLEAR_MESSAGES':
+      return {
+        ...state,
+        chainOrchestrator: {
+          ...state.chainOrchestrator,
+          messages: [],
+          currentPlan: null,
+        },
+      };
+    case 'CHAIN_ORCH_TOKEN_USAGE':
+      return {
+        ...state,
+        chainOrchestrator: {
+          ...state.chainOrchestrator,
+          tokenUsage: {
+            promptTokens: action.promptTokens,
+            completionTokens: action.completionTokens,
+            totalTokens: action.totalTokens,
+          },
+        },
+      };
+    case 'CHAIN_ORCH_MODE_CHANGED':
+      return {
+        ...state,
+        chainOrchestrator: {
+          ...state.chainOrchestrator,
+          mode: action.mode,
+        },
+      };
+    case 'CHAIN_ORCH_WORKSPACE_UPDATE': {
+      window.dispatchEvent(new CustomEvent('chain-orch-workspace-update', {
+        detail: { tabId: action.tabId, chainDefinition: action.chainDefinition },
+      }));
+      return state;
+    }
+    case 'CHAIN_EXECUTION_EVENT': {
+      const execId = action.event.execution_id;
+      const existing = state.executionEvents[execId] ?? [];
+      return {
+        ...state,
+        executionEvents: {
+          ...state.executionEvents,
+          [execId]: [...existing, action.event],
+        },
+      };
+    }
+    default:
+      return null;
+  }
+}
+
 function reducer(state: AppState, action: Action): AppState {
   return (
     reduceCore(state, action)
@@ -1128,6 +1367,7 @@ function reducer(state: AppState, action: Action): AppState {
     ?? reduceDiscovery(state, action)
     ?? reduceAgentChat(state, action)
     ?? reduceToolkit(state, action)
+    ?? reduceChainOrchestrator(state, action)
     ?? state
   );
 }
@@ -1249,6 +1489,15 @@ interface AppContextValue {
   agentChatGetState: () => void;
   agentChatSetCurrentChannel: (channelId: string | null) => void;
   agentChatClearError: () => void;
+  //
+  // Chain Orchestrator.
+  //
+  chainOrchStart: () => void;
+  chainOrchStop: () => void;
+  chainOrchCancel: () => void;
+  chainOrchPrompt: (message: string, workspaceContext?: string) => void;
+  chainOrchClearMessages: () => void;
+  chainOrchSetMode: (mode: ChainOrchMode) => void;
   //
   // Hunting.
   //
@@ -1604,6 +1853,70 @@ export function AppProvider({ children }: { children: ReactNode }) {
         case 'agent_chat_error':
           dispatch({ type: 'AGENT_CHAT_ERROR', message: message.message });
           break;
+
+        //
+        // Chain execution events.
+        //
+        case 'chain_execution_event':
+          dispatch({ type: 'CHAIN_EXECUTION_EVENT', event: message.event });
+          break;
+
+        //
+        // Chain orchestrator messages. Events carry a prompt_id; discard
+        // stale events that don't match the current prompt.
+        //
+        case 'chain_orch_started':
+          dispatch({ type: 'CHAIN_ORCH_STARTED', provider: message.provider, model: message.model });
+          break;
+        case 'chain_orch_stopped':
+          dispatch({ type: 'CHAIN_ORCH_STOPPED' });
+          break;
+        case 'chain_orch_content':
+          if (message.prompt_id === String(chainOrchPromptSeq.current)) {
+            dispatch({ type: 'CHAIN_ORCH_ADD_CONTENT', content: message.content });
+          }
+          break;
+        case 'chain_orch_tool_executing':
+          if (message.prompt_id === String(chainOrchPromptSeq.current) && message.name !== 'report_plan') {
+            dispatch({ type: 'CHAIN_ORCH_TOOL_EXECUTING', name: message.name, input: message.input });
+          }
+          break;
+        case 'chain_orch_tool_executed':
+          if (message.prompt_id === String(chainOrchPromptSeq.current) && message.name !== 'report_plan') {
+            dispatch({ type: 'CHAIN_ORCH_TOOL_EXECUTED', name: message.name, display: message.display, success: message.success, result: message.result });
+          }
+          break;
+        case 'chain_orch_plan_updated':
+          if (message.prompt_id === String(chainOrchPromptSeq.current)) {
+            dispatch({ type: 'CHAIN_ORCH_PLAN_UPDATED', plan: message.plan });
+          }
+          break;
+        case 'chain_orch_done':
+          if (message.prompt_id === String(chainOrchPromptSeq.current)) {
+            dispatch({ type: 'CHAIN_ORCH_DONE' });
+          }
+          break;
+        case 'chain_orch_error':
+          if (message.prompt_id === String(chainOrchPromptSeq.current)) {
+            dispatch({ type: 'CHAIN_ORCH_ERROR', message: message.message });
+          }
+          break;
+        case 'chain_orch_token_usage':
+          if (message.prompt_id === String(chainOrchPromptSeq.current)) {
+            dispatch({
+              type: 'CHAIN_ORCH_TOKEN_USAGE',
+              promptTokens: message.prompt_tokens,
+              completionTokens: message.completion_tokens,
+              totalTokens: message.total_tokens,
+            });
+          }
+          break;
+        case 'chain_orch_workspace_update':
+          dispatch({ type: 'CHAIN_ORCH_WORKSPACE_UPDATE', tabId: message.tab_id, chainDefinition: message.chain_definition });
+          break;
+        case 'chain_orch_mode_changed':
+          dispatch({ type: 'CHAIN_ORCH_MODE_CHANGED', mode: message.mode });
+          break;
       }
     };
 
@@ -1764,6 +2077,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const orchestratorPromptSeq = useRef(0);
+  const chainOrchPromptSeq = useRef(0);
 
   const orchestratorPrompt = useCallback((message: string) => {
     orchestratorPromptSeq.current += 1;
@@ -2071,6 +2385,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   //
+  // Chain Orchestrator functions.
+  //
+  const chainOrchStart = useCallback(() => {
+    dispatch({ type: 'CHAIN_ORCH_STARTING' });
+    wsClient.send({ type: 'chain_orch_start' });
+  }, []);
+
+  const chainOrchStop = useCallback(() => {
+    wsClient.send({ type: 'chain_orch_stop' });
+    dispatch({ type: 'CHAIN_ORCH_STOPPED' });
+  }, []);
+
+  const chainOrchCancel = useCallback(() => {
+    wsClient.send({ type: 'chain_orch_cancel' });
+    dispatch({ type: 'CHAIN_ORCH_DONE' });
+  }, []);
+
+  const chainOrchPrompt = useCallback((message: string, workspaceContext?: string) => {
+    chainOrchPromptSeq.current += 1;
+    const promptId = String(chainOrchPromptSeq.current);
+    dispatch({ type: 'CHAIN_ORCH_ADD_USER_MESSAGE', message, promptId });
+    wsClient.send({ type: 'chain_orch_prompt', prompt_id: promptId, message, workspace_context: workspaceContext ?? '' });
+  }, []);
+
+  const chainOrchClearMessages = useCallback(() => {
+    dispatch({ type: 'CHAIN_ORCH_CLEAR_MESSAGES' });
+  }, []);
+
+  const chainOrchSetMode = useCallback((mode: ChainOrchMode) => {
+    dispatch({ type: 'CHAIN_ORCH_MODE_CHANGED', mode });
+  }, []);
+
+  //
   // Hunting functions.
   //
   const huntingSetQuery = useCallback((query: string) => {
@@ -2187,6 +2534,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     agentChatGetState,
     agentChatSetCurrentChannel,
     agentChatClearError,
+    //
+    // Chain Orchestrator.
+    //
+    chainOrchStart,
+    chainOrchStop,
+    chainOrchCancel,
+    chainOrchPrompt,
+    chainOrchClearMessages,
+    chainOrchSetMode,
     //
     // Hunting.
     //

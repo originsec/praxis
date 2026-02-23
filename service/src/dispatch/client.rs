@@ -235,6 +235,19 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             handle_orchestrator_cancel(ctx, client_id).await,
 
         //
+        // Chain Orchestrator.
+        //
+
+        ClientSignalMessage::ChainOrchStart { client_id } =>
+            handle_chain_orch_start(ctx, client_id).await,
+        ClientSignalMessage::ChainOrchPrompt { client_id, prompt_id, message, workspace_context } =>
+            handle_chain_orch_prompt(ctx, client_id, prompt_id, message, workspace_context).await,
+        ClientSignalMessage::ChainOrchStop { client_id } =>
+            handle_chain_orch_stop(ctx, client_id).await,
+        ClientSignalMessage::ChainOrchCancel { client_id } =>
+            handle_chain_orch_cancel(ctx, client_id).await,
+
+        //
         // Agent chat.
         //
 
@@ -2643,6 +2656,56 @@ async fn handle_orchestrator_cancel(ctx: &ServiceContext, client_id: String) {
         &client_id[..8.min(client_id.len())]
     );
     ctx.orchestrator_manager
+        .cancel_inference(&client_id, &ctx.client_publish_channel)
+        .await;
+}
+
+// ---------------------------------------------------------------------------
+// Chain Orchestrator
+// ---------------------------------------------------------------------------
+
+async fn handle_chain_orch_start(ctx: &ServiceContext, client_id: String) {
+    common::log_info!(
+        "Received ChainOrchStart from client {}",
+        &client_id[..8.min(client_id.len())]
+    );
+    ctx.chain_orchestrator_manager
+        .start_session(&client_id, &ctx.service_config, &ctx.client_publish_channel)
+        .await;
+}
+
+async fn handle_chain_orch_prompt(
+    ctx: &ServiceContext,
+    client_id: String,
+    prompt_id: String,
+    message: String,
+    workspace_context: String,
+) {
+    common::log_info!(
+        "Received ChainOrchPrompt from client {}",
+        &client_id[..8.min(client_id.len())]
+    );
+    ctx.chain_orchestrator_manager
+        .send_prompt(&client_id, prompt_id, message, workspace_context, &ctx.client_publish_channel)
+        .await;
+}
+
+async fn handle_chain_orch_stop(ctx: &ServiceContext, client_id: String) {
+    common::log_info!(
+        "Received ChainOrchStop from client {}",
+        &client_id[..8.min(client_id.len())]
+    );
+    ctx.chain_orchestrator_manager
+        .stop_session(&client_id, &ctx.client_publish_channel)
+        .await;
+}
+
+async fn handle_chain_orch_cancel(ctx: &ServiceContext, client_id: String) {
+    common::log_info!(
+        "Received ChainOrchCancel from client {}",
+        &client_id[..8.min(client_id.len())]
+    );
+    ctx.chain_orchestrator_manager
         .cancel_inference(&client_id, &ctx.client_publish_channel)
         .await;
 }

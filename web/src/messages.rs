@@ -86,6 +86,22 @@ pub enum BrowserMessage {
     OrchestratorCancel,
 
     //
+    // Chain Orchestrator messages.
+    //
+    /// Start a new Chain Orchestrator session
+    ChainOrchStart,
+    /// Send a prompt to Chain Orchestrator
+    ChainOrchPrompt {
+        prompt_id: String,
+        message: String,
+        workspace_context: String,
+    },
+    /// Stop/interrupt Chain Orchestrator session
+    ChainOrchStop,
+    /// Cancel current Chain Orchestrator inference (keeps session active)
+    ChainOrchCancel,
+
+    //
     // Traffic interception messages.
     //
     /// Request traffic log
@@ -487,6 +503,70 @@ pub enum ServerMessage {
         prompt_tokens: u32,
         completion_tokens: u32,
         total_tokens: u32,
+    },
+
+    //
+    // Chain Orchestrator messages.
+    //
+    /// Chain orchestrator session started
+    ChainOrchStarted {
+        provider: String,
+        model: String,
+    },
+    /// Chain orchestrator streaming text content
+    ChainOrchContent {
+        prompt_id: String,
+        content: String,
+    },
+    /// Chain orchestrator started executing a tool
+    ChainOrchToolExecuting {
+        prompt_id: String,
+        name: String,
+        input: Option<String>,
+    },
+    /// Chain orchestrator finished executing a tool
+    ChainOrchToolExecuted {
+        prompt_id: String,
+        name: String,
+        display: String,
+        success: bool,
+        result: String,
+    },
+    /// Chain orchestrator plan updated
+    ChainOrchPlanUpdated {
+        prompt_id: String,
+        plan: OrchestratorPlan,
+    },
+    /// Chain orchestrator response complete
+    ChainOrchDone {
+        prompt_id: String,
+    },
+    /// Chain orchestrator session stopped
+    ChainOrchStopped,
+    /// Chain orchestrator error
+    ChainOrchError {
+        prompt_id: String,
+        message: String,
+    },
+    /// Chain orchestrator token usage update
+    ChainOrchTokenUsage {
+        prompt_id: String,
+        prompt_tokens: u64,
+        completion_tokens: u64,
+        total_tokens: u64,
+    },
+    /// Chain orchestrator workspace update
+    ChainOrchWorkspaceUpdate {
+        tab_id: String,
+        chain_definition: serde_json::Value,
+    },
+    /// Chain orchestrator mode changed
+    ChainOrchModeChanged {
+        mode: String,
+    },
+    /// Chain execution event (granular element-level progress)
+    ChainExecutionEvent {
+        event: common::ChainExecutionEvent,
     },
 
     //

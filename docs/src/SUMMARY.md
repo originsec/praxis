@@ -17,6 +17,7 @@
 - [Interception](./usage/interception.md)
 - [Hunting](./usage/hunting.md)
 - [Orchestrator](./usage/orchestrator.md)
+- [Execution](./usage/execution.md)
 - [Semantic Operations](./usage/semantic-operations.md)
 - [CLI](./usage/cli.md)
 

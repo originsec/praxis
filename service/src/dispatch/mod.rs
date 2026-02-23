@@ -11,6 +11,7 @@ use tokio::sync::RwLock;
 use lapin::Channel;
 
 use crate::agent_chat::AgentChatManager;
+use crate::chain_orchestrator::ChainOrchestratorManager;
 use crate::config::ServiceConfig;
 use crate::database::Database;
 use crate::handlers::{ClientMessageHandler, NodeMessageHandler};
@@ -37,6 +38,7 @@ pub struct ServiceContext {
     pub chain_executor: Arc<ChainExecutor>,
     pub agent_chat_manager: Arc<AgentChatManager>,
     pub orchestrator_manager: Arc<OrchestratorManager>,
+    pub chain_orchestrator_manager: Arc<ChainOrchestratorManager>,
     pub toolkit_manager: Arc<ToolkitManager>,
     pub mcp_manager: Arc<McpServerManager>,
     pub trigger_engine: Option<Arc<TriggerEngine>>,

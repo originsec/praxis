@@ -103,6 +103,22 @@ pub async fn handle_browser_message(
         }
 
         //
+        // Chain Orchestrator messages.
+        //
+        BrowserMessage::ChainOrchStart => {
+            state.rabbitmq.start_chain_orchestrator().await?;
+        }
+        BrowserMessage::ChainOrchPrompt { prompt_id, message, workspace_context } => {
+            state.rabbitmq.send_chain_orchestrator_prompt(prompt_id, message, workspace_context).await?;
+        }
+        BrowserMessage::ChainOrchStop => {
+            state.rabbitmq.stop_chain_orchestrator().await?;
+        }
+        BrowserMessage::ChainOrchCancel => {
+            state.rabbitmq.cancel_chain_orchestrator().await?;
+        }
+
+        //
         // Traffic interception messages.
         //
         BrowserMessage::TrafficLogRequest { filters } => {

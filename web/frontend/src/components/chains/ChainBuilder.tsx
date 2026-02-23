@@ -38,7 +38,7 @@ import { getNextSessionColor, getUsedColors } from '../../utils/sessionColors';
 //
 // Model definition type (matches SettingsPage).
 //
-interface ModelDefinition {
+export interface ModelDefinition {
   //
   // provider::model format.
   //
@@ -452,9 +452,14 @@ interface ChainBuilderInnerProps {
   send: (msg: BrowserMessage) => void;
   saveStatus?: string | null;
   saveError?: string | null;
+  readOnly?: boolean;
+  onRunChain?: () => void;
+  onCreateOp?: () => void;
+  externalChainUpdate?: ChainDefinitionInput | null;
+  onLocalChainChange?: (chain: ChainDefinitionInput | null) => void;
 }
 
-function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs, modelDefs, nodes: _systemNodes, toolkitTools, payloads, send, saveStatus, saveError }: ChainBuilderInnerProps) {
+function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs, modelDefs, nodes: _systemNodes, toolkitTools, payloads, send, saveStatus, saveError, readOnly, onRunChain, onCreateOp, externalChainUpdate, onLocalChainChange }: ChainBuilderInnerProps) {
   const [name, setName] = useState(chain?.name || '');
   const [description, setDescription] = useState(chain?.description || '');
   const [timeout, setChainTimeout] = useState(chain?.timeout || 1800);
@@ -490,6 +495,58 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       return changed ? updated : nds;
     });
   }, [payloads, extraData.payloadConfigs, setNodes]);
+
+  //
+  // Handle external chain updates from the orchestrator. Converts the input
+  // definition to a synthetic full definition and rebuilds the flow graph.
+  //
+  useEffect(() => {
+    if (!externalChainUpdate) return;
+
+    //
+    // Only rebuild the flow if we have actual chain content (elements). A
+    // workspace update may carry only metadata like a tab name.
+    //
+    if (externalChainUpdate.elements?.length) {
+      //
+      // Merge positions: keep existing node positions for elements that
+      // already exist, use incoming positions for new elements.
+      //
+      const currentPositions: Record<string, { x: number; y: number }> = {};
+      for (const n of nodes) {
+        currentPositions[n.id] = { x: n.position.x, y: n.position.y };
+      }
+      const mergedPositions: Record<string, { x: number; y: number }> = {
+        ...(externalChainUpdate.positions || {}),
+      };
+      for (const elem of externalChainUpdate.elements) {
+        if (currentPositions[elem.id] && !mergedPositions[elem.id]) {
+          mergedPositions[elem.id] = currentPositions[elem.id];
+        }
+      }
+
+      const syntheticChain: ChainDefinitionFull = {
+        id: '',
+        name: externalChainUpdate.name || '',
+        description: externalChainUpdate.description || '',
+        category: externalChainUpdate.category || 'default',
+        elements: externalChainUpdate.elements,
+        connections: externalChainUpdate.connections || [],
+        disabled: externalChainUpdate.disabled ?? false,
+        timeout: externalChainUpdate.timeout,
+        positions: Object.keys(mergedPositions).length > 0 ? mergedPositions : undefined,
+        created_at: '',
+        updated_at: '',
+      };
+      const flow = chainToFlow(syntheticChain, operationDefs, payloads);
+      setNodes(flow.nodes);
+      setEdges(flow.edges);
+      setExtraData(flow.extraData);
+    }
+    if (externalChainUpdate.name) setName(externalChainUpdate.name);
+    if (externalChainUpdate.description) setDescription(externalChainUpdate.description);
+    if (externalChainUpdate.timeout) setChainTimeout(externalChainUpdate.timeout);
+  }, [externalChainUpdate, operationDefs, payloads, setNodes, setEdges]);
 
   //
   // Track hovered node for delete-on-hover.
@@ -2619,13 +2676,18 @@ interface ChainBuilderProps {
   send?: (msg: BrowserMessage) => void;
   saveStatus?: string | null;
   saveError?: string | null;
+  readOnly?: boolean;
+  onRunChain?: () => void;
+  onCreateOp?: () => void;
+  externalChainUpdate?: ChainDefinitionInput | null;
+  onLocalChainChange?: (chain: ChainDefinitionInput | null) => void;
 }
 
 const noopSend = () => {};
-export function ChainBuilder({ modelDefs = [], nodes = [], toolkitTools = [], payloads = [], send = noopSend, saveStatus, saveError, ...props }: ChainBuilderProps) {
+export function ChainBuilder({ modelDefs = [], nodes = [], toolkitTools = [], payloads = [], send = noopSend, saveStatus, saveError, readOnly, onRunChain, onCreateOp, externalChainUpdate, onLocalChainChange, ...props }: ChainBuilderProps) {
   return (
     <ReactFlowProvider>
-      <ChainBuilderInner {...props} modelDefs={modelDefs} nodes={nodes} toolkitTools={toolkitTools} payloads={payloads} send={send} saveStatus={saveStatus} saveError={saveError} />
+      <ChainBuilderInner {...props} modelDefs={modelDefs} nodes={nodes} toolkitTools={toolkitTools} payloads={payloads} send={send} saveStatus={saveStatus} saveError={saveError} readOnly={readOnly} onRunChain={onRunChain} onCreateOp={onCreateOp} externalChainUpdate={externalChainUpdate} onLocalChainChange={onLocalChainChange} />
     </ReactFlowProvider>
   );
 }

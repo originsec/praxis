@@ -1193,6 +1193,32 @@ pub struct ElementExecution {
     pub completed_at: Option<DateTime<Utc>>,
 }
 
+/// Granular execution event for chain elements (streamed to clients)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChainExecutionEvent {
+    pub execution_id: String,
+    pub timestamp: String,
+    pub kind: ChainExecutionEventKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ChainExecutionEventKind {
+    ElementStarted { element_id: String, element_type: String, element_label: String },
+    ElementCompleted { element_id: String, output_preview: String },
+    ElementFailed { element_id: String, error: String },
+    PromptSent { element_id: String, prompt_preview: String },
+    ResponseReceived { element_id: String, response_preview: String },
+    ToolCallStarted { element_id: String, tool_name: String, input_preview: String },
+    ToolCallCompleted { element_id: String, tool_name: String, success: bool, result_preview: String },
+    AgentIteration { element_id: String, iteration: u32, total: u32 },
+    LlmCallStarted { element_id: String, model: String },
+    LlmCallCompleted { element_id: String, tokens_used: u64 },
+    SessionCreated { element_id: String, session_id: String },
+    SessionClosed { session_id: String },
+    OutputChunk { element_id: String, chunk: String },
+}
+
 /// Chain execution update (broadcast to clients)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainExecutionUpdate {
@@ -1902,6 +1928,18 @@ pub enum ClientSignalMessage {
     OrchestratorCancel { client_id: String },
 
     //
+    // Chain Orchestrator - LLM orchestration for chain building.
+    //
+    /// Start a chain orchestrator session for this client
+    ChainOrchStart { client_id: String },
+    /// Send a prompt to the chain orchestrator session
+    ChainOrchPrompt { client_id: String, prompt_id: String, message: String, workspace_context: String },
+    /// Stop the chain orchestrator session (ends entirely)
+    ChainOrchStop { client_id: String },
+    /// Cancel current chain orchestrator inference (keeps session alive)
+    ChainOrchCancel { client_id: String },
+
+    //
     // AgentChat - IRC-style multi-agent chat.
     //
     /// Start a new AgentChat session
@@ -1975,6 +2013,8 @@ pub enum ClientBroadcastMessage {
     SemanticOpUpdate(SemanticOpUpdate),
     /// Intercept status update for a node
     InterceptStatusUpdate(InterceptStatus),
+    /// Granular chain execution event (element-level progress)
+    ChainExecutionEvent(ChainExecutionEvent),
     /// Enable/disable centralized event logging for clients
     EventLoggingSet { enabled: bool },
 }
@@ -2285,6 +2325,32 @@ pub enum ClientDirectMessage {
     OrchestratorError { prompt_id: String, message: String },
     /// Orchestrator token usage update
     OrchestratorTokenUsage { prompt_id: String, prompt_tokens: u32, completion_tokens: u32, total_tokens: u32 },
+
+    //
+    // Chain Orchestrator responses.
+    //
+    /// Chain orchestrator session started
+    ChainOrchStarted { provider: String, model: String },
+    /// Chain orchestrator streaming text content
+    ChainOrchContent { prompt_id: String, content: String },
+    /// Chain orchestrator started executing a tool
+    ChainOrchToolExecuting { prompt_id: String, name: String, input: Option<String> },
+    /// Chain orchestrator finished executing a tool
+    ChainOrchToolExecuted { prompt_id: String, name: String, display: String, success: bool, result: String },
+    /// Chain orchestrator plan updated
+    ChainOrchPlanUpdated { prompt_id: String, plan: OrchestratorPlan },
+    /// Chain orchestrator response complete
+    ChainOrchDone { prompt_id: String },
+    /// Chain orchestrator session stopped
+    ChainOrchStopped,
+    /// Chain orchestrator error
+    ChainOrchError { prompt_id: String, message: String },
+    /// Chain orchestrator token usage update
+    ChainOrchTokenUsage { prompt_id: String, prompt_tokens: u64, completion_tokens: u64, total_tokens: u64 },
+    /// Chain orchestrator workspace update (chain definition changed)
+    ChainOrchWorkspaceUpdate { tab_id: String, chain_definition: serde_json::Value },
+    /// Chain orchestrator mode changed
+    ChainOrchModeChanged { mode: String },
 
     //
     // AgentChat responses.

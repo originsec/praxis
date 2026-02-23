@@ -720,6 +720,46 @@ impl RabbitMqClient {
     }
 
     //
+    // Chain Orchestrator methods.
+    //
+
+    pub async fn start_chain_orchestrator(&self) -> Result<()> {
+        let message = ClientSignalMessage::ChainOrchStart {
+            client_id: self.state.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn send_chain_orchestrator_prompt(
+        &self,
+        prompt_id: String,
+        prompt: String,
+        workspace_context: String,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::ChainOrchPrompt {
+            client_id: self.state.client_id.clone(),
+            prompt_id,
+            message: prompt,
+            workspace_context,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn stop_chain_orchestrator(&self) -> Result<()> {
+        let message = ClientSignalMessage::ChainOrchStop {
+            client_id: self.state.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn cancel_chain_orchestrator(&self) -> Result<()> {
+        let message = ClientSignalMessage::ChainOrchCancel {
+            client_id: self.state.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    //
     // AgentChat methods.
     //
 
@@ -1290,6 +1330,43 @@ impl RabbitMqClient {
             }
 
             //
+            // Chain Orchestrator responses.
+            //
+            ClientDirectMessage::ChainOrchStarted { provider, model } => {
+                self.state.broadcast(ServerMessage::ChainOrchStarted { provider, model });
+            }
+            ClientDirectMessage::ChainOrchContent { prompt_id, content } => {
+                self.state.broadcast(ServerMessage::ChainOrchContent { prompt_id, content });
+            }
+            ClientDirectMessage::ChainOrchToolExecuting { prompt_id, name, input } => {
+                self.state.broadcast(ServerMessage::ChainOrchToolExecuting { prompt_id, name, input });
+            }
+            ClientDirectMessage::ChainOrchToolExecuted { prompt_id, name, display, success, result } => {
+                self.state.broadcast(ServerMessage::ChainOrchToolExecuted { prompt_id, name, display, success, result });
+            }
+            ClientDirectMessage::ChainOrchPlanUpdated { prompt_id, plan } => {
+                self.state.broadcast(ServerMessage::ChainOrchPlanUpdated { prompt_id, plan });
+            }
+            ClientDirectMessage::ChainOrchDone { prompt_id } => {
+                self.state.broadcast(ServerMessage::ChainOrchDone { prompt_id });
+            }
+            ClientDirectMessage::ChainOrchStopped => {
+                self.state.broadcast(ServerMessage::ChainOrchStopped);
+            }
+            ClientDirectMessage::ChainOrchError { prompt_id, message } => {
+                self.state.broadcast(ServerMessage::ChainOrchError { prompt_id, message });
+            }
+            ClientDirectMessage::ChainOrchTokenUsage { prompt_id, prompt_tokens, completion_tokens, total_tokens } => {
+                self.state.broadcast(ServerMessage::ChainOrchTokenUsage { prompt_id, prompt_tokens, completion_tokens, total_tokens });
+            }
+            ClientDirectMessage::ChainOrchWorkspaceUpdate { tab_id, chain_definition } => {
+                self.state.broadcast(ServerMessage::ChainOrchWorkspaceUpdate { tab_id, chain_definition });
+            }
+            ClientDirectMessage::ChainOrchModeChanged { mode } => {
+                self.state.broadcast(ServerMessage::ChainOrchModeChanged { mode });
+            }
+
+            //
             // AgentChat responses.
             //
             ClientDirectMessage::AgentChatSessionStarted { session_id, goal } => {
@@ -1358,6 +1435,9 @@ impl RabbitMqClient {
             ClientBroadcastMessage::SemanticOpUpdate(update) => {
                 self.state.update_operation(update.clone()).await;
                 self.state.broadcast(ServerMessage::SemanticOpUpdate { update });
+            }
+            ClientBroadcastMessage::ChainExecutionEvent(event) => {
+                self.state.broadcast(ServerMessage::ChainExecutionEvent { event });
             }
             ClientBroadcastMessage::InterceptStatusUpdate(status) => {
                 self.state.broadcast(ServerMessage::InterceptStatusUpdate { status });

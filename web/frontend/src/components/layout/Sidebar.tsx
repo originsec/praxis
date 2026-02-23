@@ -6,6 +6,7 @@ import {
   Zap,
   Shield,
   Crosshair,
+  Play,
   MessageSquare,
   // Radar,  // Hidden - Discovery feature not ready
   Settings,
@@ -30,6 +31,7 @@ export function Sidebar({ onNavigate }: SidebarProps) {
     { to: '/operations', icon: Zap, label: 'OPERATIONS', end: false },
     { to: '/intercept', icon: Shield, label: 'INTERCEPT', end: false },
     { to: '/hunting', icon: Crosshair, label: 'HUNTING', end: false },
+    { to: '/execution', icon: Play, label: 'EXECUTION', end: false },
     // { to: '/discovery', icon: Radar, label: 'DISCOVERY', end: false },  // Hidden - feature not ready
     { to: '/orchestrator', icon: Bot, label: 'ORCHESTRATOR', end: false },
     ...(flags.agentChat ? [{ to: '/agent-chat', icon: MessageSquare, label: 'AGENT CHAT', end: false }] : []),
