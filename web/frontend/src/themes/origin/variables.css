@@ -1,0 +1,67 @@
+/*
+ * Origin Brand Theme - CSS Variables
+ * Brand-conformant light theme using Origin visual identity palette.
+ */
+
+html[data-theme="origin"] {
+  --theme-name: 'origin';
+  --theme-is-dark: 0;
+
+  /* Background palette - Origin brand neutrals */
+  --bg-primary: #EBE7DE;
+  --bg-secondary: #F5F3EF;
+  --bg-tertiary: #E3DED5;
+
+  /* Border palette */
+  --border-color: #D4CFC6;
+  --border-dim: #DFDBD3;
+  --border-hover: #A8A39A;
+  --border-active: #4B4B4B;
+
+  /* Text palette - Deep Carbon anchored */
+  --text-primary: #1A1A1A;
+  --text-secondary: #707070;
+  --text-title: #1A1A1A;
+  --text-highlight: #2D2D2D;
+  --text-muted: #A09B93;
+
+  /* Accent colors - Brand semantic spectrum */
+  --accent-success: #22C55E;
+  --accent-warning: #FACC15;
+  --accent-error: #F97316;
+  --accent-info: #3B82F6;
+  --accent-purple: #8B5CF6;
+
+  /* Agent nickname colors - Brand spectrum */
+  --agent-color-1: #8B5CF6;
+  --agent-color-2: #3B82F6;
+  --agent-color-3: #10B981;
+  --agent-color-4: #F97316;
+  --agent-color-5: #EC4899;
+  --agent-color-6: #14B8A6;
+  --agent-color-7: #FACC15;
+  --agent-color-8: #22C55E;
+
+  /* Highlight for selection/focus */
+  --highlight: #E0DBD2;
+
+  /* Subtle shadows */
+  --shadow-subtle: rgba(26, 26, 26, 0.06);
+  --shadow-medium: rgba(26, 26, 26, 0.12);
+
+  /* Splash screen colors */
+  --splash-bg: #DDD9D0;
+  --splash-logo: #4B4B4B;
+  --splash-logo-hover: #1A1A1A;
+  --splash-button-bg: #F5F3EF;
+  --splash-button-text: #1A1A1A;
+  --splash-button-border: #D4CFC6;
+  --splash-button-shadow: rgba(26, 26, 26, 0.15);
+
+  color-scheme: light;
+}
+
+html[data-theme="origin"] body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}

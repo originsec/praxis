@@ -11,6 +11,33 @@ import { useTheme } from '../../context/ThemeContext';
 
 const TERMINAL_THEMES: Record<string, ITheme> = {
   //
+  // Origin Brand - uses brand semantic spectrum for ANSI colors.
+  //
+  origin: {
+    background: '#EBE7DE',
+    foreground: '#1A1A1A',
+    cursor: '#4B4B4B',
+    cursorAccent: '#EBE7DE',
+    black: '#DFDBD3',
+    red: '#F97316',
+    green: '#22C55E',
+    yellow: '#FACC15',
+    blue: '#3B82F6',
+    magenta: '#8B5CF6',
+    cyan: '#10B981',
+    white: '#1A1A1A',
+    brightBlack: '#A09B93',
+    brightRed: '#FB923C',
+    brightGreen: '#4ADE80',
+    brightYellow: '#FDE047',
+    brightBlue: '#60A5FA',
+    brightMagenta: '#A78BFA',
+    brightCyan: '#34D399',
+    brightWhite: '#2D2D2D',
+    selectionBackground: '#D4CFC6',
+  },
+
+  //
   // Praxis Dark - green phosphor terminal aesthetic.
   //
   praxis_dark: {
