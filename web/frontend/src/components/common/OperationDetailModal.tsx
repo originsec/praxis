@@ -118,11 +118,15 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
                 )}
               </button>
               {!summaryCollapsed && operation.summary && (
-                <div className="bg-[var(--bg-secondary)] p-3 max-h-64 overflow-auto prose prose-sm prose-invert max-w-none text-xs text-[var(--text-secondary)] [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0 [&_h2]:text-sm [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:mt-1 [&_h3]:mb-0.5">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {operation.summary}
-                  </ReactMarkdown>
-                </div>
+                /[\u2800-\u28FF]/.test(operation.summary) ? (
+                  <pre className="bg-[var(--bg-secondary)] p-3 max-h-64 overflow-auto text-xs text-[var(--text-secondary)] whitespace-pre font-mono">{operation.summary}</pre>
+                ) : (
+                  <div className="bg-[var(--bg-secondary)] p-3 max-h-64 overflow-auto prose prose-sm prose-invert max-w-none text-xs text-[var(--text-secondary)] [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0 [&_h2]:text-sm [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:mt-1 [&_h3]:mb-0.5">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {operation.summary}
+                    </ReactMarkdown>
+                  </div>
+                )
               )}
             </div>
           )}
