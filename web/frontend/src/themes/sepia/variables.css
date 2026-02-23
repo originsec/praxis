@@ -1,0 +1,67 @@
+/*
+ * Sepia Theme - CSS Variables
+ * Warm parchment aesthetic evoking aged paper and lamplight.
+ */
+
+html[data-theme="sepia"] {
+  --theme-name: 'sepia';
+  --theme-is-dark: 0;
+
+  /* Background palette - aged parchment tones */
+  --bg-primary: #F1EBDF;
+  --bg-secondary: #F8F3EA;
+  --bg-tertiary: #E8E0D2;
+
+  /* Border palette - warm tan */
+  --border-color: #D5C9B8;
+  --border-dim: #E0D6C8;
+  --border-hover: #A89A88;
+  --border-active: #6B5D4E;
+
+  /* Text palette - walnut/espresso */
+  --text-primary: #33271C;
+  --text-secondary: #7B6B58;
+  --text-title: #33271C;
+  --text-highlight: #42352A;
+  --text-muted: #A89A88;
+
+  /* Accent colors - vintage tones */
+  --accent-success: #6E8F52;
+  --accent-warning: #C4983C;
+  --accent-error: #B55A3A;
+  --accent-info: #4A7E82;
+  --accent-purple: #7E5E8C;
+
+  /* Agent nickname colors - warm vintage palette */
+  --agent-color-1: #7E5E8C;
+  --agent-color-2: #4A7E82;
+  --agent-color-3: #6E8F52;
+  --agent-color-4: #B55A3A;
+  --agent-color-5: #5A7A9A;
+  --agent-color-6: #8C6E5E;
+  --agent-color-7: #C4983C;
+  --agent-color-8: #6B8A6A;
+
+  /* Highlight for selection/focus */
+  --highlight: #E4DAC8;
+
+  /* Warm shadows */
+  --shadow-subtle: rgba(51, 39, 28, 0.07);
+  --shadow-medium: rgba(51, 39, 28, 0.14);
+
+  /* Splash screen colors */
+  --splash-bg: #DDD3C2;
+  --splash-logo: #6B5D4E;
+  --splash-logo-hover: #33271C;
+  --splash-button-bg: #F8F3EA;
+  --splash-button-text: #33271C;
+  --splash-button-border: #D5C9B8;
+  --splash-button-shadow: rgba(51, 39, 28, 0.15);
+
+  color-scheme: light;
+}
+
+html[data-theme="sepia"] body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}

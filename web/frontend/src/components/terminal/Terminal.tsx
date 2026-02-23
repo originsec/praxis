@@ -65,6 +65,33 @@ const TERMINAL_THEMES: Record<string, ITheme> = {
   },
 
   //
+  // Sepia - vintage warm tones for parchment aesthetic.
+  //
+  sepia: {
+    background: '#F1EBDF',
+    foreground: '#33271C',
+    cursor: '#6B5D4E',
+    cursorAccent: '#F1EBDF',
+    black: '#E0D6C8',
+    red: '#B55A3A',
+    green: '#6E8F52',
+    yellow: '#C4983C',
+    blue: '#4A7E82',
+    magenta: '#7E5E8C',
+    cyan: '#6B8A6A',
+    white: '#33271C',
+    brightBlack: '#A89A88',
+    brightRed: '#C87050',
+    brightGreen: '#82A668',
+    brightYellow: '#D4A850',
+    brightBlue: '#5E9498',
+    brightMagenta: '#9474A2',
+    brightCyan: '#7E9E7E',
+    brightWhite: '#42352A',
+    selectionBackground: '#D5C9B8',
+  },
+
+  //
   // Origin Light - warm stone/bone tones.
   // Note: ANSI "white" must be dark and "black" light for visibility.
   //

@@ -2,12 +2,13 @@ import { createContext, useContext, useState, useEffect, useCallback, type React
 import { AVAILABLE_THEMES, DEFAULT_THEME, type ThemeName } from '../themes';
 
 //
-// Import both theme stylesheets so they're bundled. The active theme is
+// Import all theme stylesheets so they're bundled. The active theme is
 // controlled via the data-theme attribute on the html element.
 //
 import '../themes/origin/index.css';
 import '../themes/origin_light/index.css';
 import '../themes/praxis_dark/index.css';
+import '../themes/sepia/index.css';
 
 const THEME_STORAGE_KEY = 'praxis-theme';
 
