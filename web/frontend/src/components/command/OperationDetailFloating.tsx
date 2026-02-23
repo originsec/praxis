@@ -3,7 +3,6 @@ import { Download, ChevronDown, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { FloatingPanel } from './FloatingPanel';
-import { StatusBadge, getOperationStatusColor } from '../common/StatusBadge';
 import { StyledOutput } from '../common/StyledOutput';
 import { exportOperationResult, downloadTextFile } from '../../utils/export';
 import type { SemanticOpUpdate } from '../../api/types';
@@ -11,6 +10,16 @@ import type { SemanticOpUpdate } from '../../api/types';
 interface Props {
   operation: SemanticOpUpdate;
   onClose: () => void;
+}
+
+function statusColor(status: string): string {
+  switch (status) {
+    case 'Completed': return 'text-[var(--text-highlight)]';
+    case 'Failed': return 'text-[var(--accent-error)]';
+    case 'Cancelled': return 'text-[var(--accent-warning)]';
+    case 'Running': return 'text-[var(--accent-info)]';
+    default: return 'text-[var(--text-secondary)]';
+  }
 }
 
 function formatDuration(start: string, end: string | null, status: string): string {
@@ -58,39 +67,32 @@ export function OperationDetailFloating({ operation, onClose }: Props) {
         </button>
       }
     >
-      <div className="flex-1 overflow-auto p-3 space-y-3">
-        {/*
-        //
-        // Info grid.
-        //
-        */}
-        <div className="grid grid-cols-4 gap-x-3 gap-y-1 text-[10px]">
-          <div className="col-span-4">
-            <span className="text-muted">ID:</span>{' '}
-            <span className="font-mono text-[9px]">{operation.operation_id}</span>
-          </div>
-          <div>
-            <span className="text-muted">Status:</span>{' '}
-            <StatusBadge status={getOperationStatusColor(operation.status)} label={operation.status} />
-          </div>
-          <div>
-            <span className="text-muted">Agent:</span>{' '}
-            <span>{operation.agent_short_name}</span>
-          </div>
-          <div>
-            <span className="text-muted">Mode:</span>{' '}
-            <span>{operation.spec.mode}</span>
-          </div>
-          <div>
-            <span className="text-muted">Duration:</span>{' '}
-            <span>{formatDuration(operation.start_time, operation.end_time, operation.status)}</span>
-          </div>
-          {operation.spec.description && (
-            <div className="col-span-4 mt-1">
-              <span className="text-muted">{operation.spec.description}</span>
-            </div>
-          )}
+      {/*
+      //
+      // Info bar — matches chain execution header style.
+      //
+      */}
+      <div className="flex items-baseline gap-3 text-[10px] whitespace-nowrap flex-wrap px-3 py-1.5 border-b border-subtle bg-[var(--bg-secondary)] flex-shrink-0">
+        <div className="flex items-baseline">
+          <span className="text-muted">Status:</span>
+          <span className={`ml-2 font-mono ${statusColor(operation.status)}`}>{operation.status}</span>
         </div>
+        <div className="flex items-baseline">
+          <span className="text-muted">Agent:</span>
+          <span className="ml-2 font-mono">{operation.agent_short_name}</span>
+        </div>
+        <div className="flex items-baseline">
+          <span className="text-muted">Mode:</span>
+          <span className="ml-2">{operation.spec.mode}</span>
+        </div>
+        <div className="flex items-baseline">
+          <span className="text-muted">Duration:</span>
+          <span className="ml-2">{formatDuration(operation.start_time, operation.end_time, operation.status)}</span>
+        </div>
+        <span className="text-[9px] font-mono text-muted/40 ml-auto">{operation.operation_id.slice(0, 12)}...</span>
+      </div>
+
+      <div className="flex-1 overflow-auto p-3 space-y-3">
 
         {/*
         //
@@ -112,7 +114,7 @@ export function OperationDetailFloating({ operation, onClose }: Props) {
               )}
             </button>
             {!summaryCollapsed && operation.summary && (
-              <div className="bg-[var(--bg-secondary)] p-2 max-h-48 overflow-auto prose prose-invert max-w-none text-[10px] leading-relaxed [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_h2]:text-[11px] [&_h3]:text-[10px]">
+              <div className="bg-[var(--bg-secondary)] p-2 max-h-48 overflow-auto prose prose-invert max-w-none text-[10px] text-[var(--text-secondary)] leading-relaxed [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_h2]:text-[11px] [&_h3]:text-[10px]">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{operation.summary}</ReactMarkdown>
               </div>
             )}
