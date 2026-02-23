@@ -16,6 +16,7 @@ import {
   Wifi,
   FileText,
   FolderOpen,
+  X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { StatusBadge, getNodeStatus } from '../common/StatusBadge';
@@ -39,6 +40,7 @@ export function NodeCard({ node }: NodeCardProps) {
     enableIntercept,
     disableIntercept,
     requestChainDefList,
+    removeNode,
     send,
   } = useApp();
 
@@ -213,15 +215,24 @@ export function NodeCard({ node }: NodeCardProps) {
       <div className="bg-card ascii-box border border-subtle flex flex-col">
         {/*
         //
-        // Card header — machine name, OS, status.
+        // Card header — machine name, OS, status, delete.
         //
         */}
-        <div className="px-3 py-2 border-b border-subtle bg-[var(--bg-tertiary)] flex items-center justify-between">
+        <div className="px-3 py-2 border-b border-subtle bg-[var(--bg-tertiary)] flex items-center justify-between group/header">
           <div className="flex items-center gap-2 min-w-0">
             <Server size={14} className="text-muted flex-shrink-0" />
             <span className="font-medium text-highlight text-sm truncate">{node.machine_name || 'Unknown'}</span>
           </div>
-          <StatusBadge status={status} />
+          <div className="flex items-center gap-2">
+            <StatusBadge status={status} />
+            <button
+              onClick={() => removeNode(node.node_id)}
+              className="p-0.5 text-muted/30 hover:text-[var(--accent-error)] transition-colors opacity-0 group-hover/header:opacity-100"
+              title="Remove node"
+            >
+              <X size={12} />
+            </button>
+          </div>
         </div>
 
         {/*
@@ -233,32 +244,6 @@ export function NodeCard({ node }: NodeCardProps) {
           <span className="truncate">{node.os_details}</span>
           <span className="font-mono text-[10px] truncate ml-auto">{node.node_id.slice(0, 12)}...</span>
         </div>
-
-        {/*
-        //
-        // Intercept status.
-        //
-        */}
-        {node.intercept_supported && (
-          <div className="px-3 py-1.5 flex items-center justify-between border-b border-subtle">
-            <div className="flex items-center gap-1.5 text-xs">
-              <Shield size={12} className={node.intercept_active ? 'text-[var(--accent-warning)]' : 'text-muted'} />
-              <span className={node.intercept_active ? 'text-[var(--accent-warning)]' : 'text-muted'}>
-                Intercept {node.intercept_active ? 'ON' : 'OFF'}
-              </span>
-            </div>
-            <button
-              onClick={handleToggleIntercept}
-              className={`px-2 py-0.5 text-[10px] transition-colors ${
-                node.intercept_active
-                  ? 'bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30'
-                  : 'bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30'
-              }`}
-            >
-              {node.intercept_active ? 'Disable' : 'Enable'}
-            </button>
-          </div>
-        )}
 
         {/*
         //
@@ -374,6 +359,32 @@ export function NodeCard({ node }: NodeCardProps) {
             <TerminalIcon size={10} /> Term
           </button>
         </div>
+
+        {/*
+        //
+        // Intercept row — bottom of card, compact.
+        //
+        */}
+        {node.intercept_supported && (
+          <div className="px-3 py-1 flex items-center justify-between border-t border-subtle">
+            <div className="flex items-center gap-1 text-[9px]">
+              <Shield size={9} className={node.intercept_active ? 'text-[var(--accent-warning)]' : 'text-muted/50'} />
+              <span className={node.intercept_active ? 'text-[var(--accent-warning)]' : 'text-muted/50'}>
+                {node.intercept_active ? 'Intercept ON' : 'Intercept'}
+              </span>
+            </div>
+            <button
+              onClick={handleToggleIntercept}
+              className={`px-1.5 py-0.5 text-[9px] transition-colors ${
+                node.intercept_active
+                  ? 'text-[var(--accent-error)]/70 hover:text-[var(--accent-error)]'
+                  : 'text-muted/50 hover:text-[var(--accent-success)]'
+              }`}
+            >
+              {node.intercept_active ? 'Disable' : 'Enable'}
+            </button>
+          </div>
+        )}
       </div>
 
       {/*
