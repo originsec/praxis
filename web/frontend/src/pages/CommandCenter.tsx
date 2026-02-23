@@ -96,7 +96,7 @@ export function CommandCenter() {
                 </div>
               </div>
             ) : (
-              <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+              <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 380px))' }}>
                 {sortedNodes.map(node => (
                   <NodeCard key={node.node_id} node={node} />
                 ))}

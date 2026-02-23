@@ -13,8 +13,8 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { getOperationStatusColor, StatusBadge } from '../common/StatusBadge';
-import { OperationDetailModal } from '../common/OperationDetailModal';
-import { ChainExecutionModal } from '../common/ChainExecutionModal';
+import { OperationDetailFloating } from './OperationDetailFloating';
+import { ChainExecutionFloating } from './ChainExecutionFloating';
 import { LibraryModal } from './LibraryModal';
 import { TrafficModal } from './TrafficModal';
 import { HuntingModal } from './HuntingModal';
@@ -253,16 +253,19 @@ export function ActivityBar() {
       // Detail modals.
       //
       */}
-      <OperationDetailModal
-        operation={selectedOp}
-        onClose={() => setSelectedOp(null)}
-      />
+      {selectedOp && (
+        <OperationDetailFloating
+          operation={selectedOp}
+          onClose={() => setSelectedOp(null)}
+        />
+      )}
 
-      <ChainExecutionModal
-        execution={selectedChainExec}
-        chain={null}
-        onClose={() => setSelectedChainExecId(null)}
-      />
+      {selectedChainExec && (
+        <ChainExecutionFloating
+          execution={selectedChainExec}
+          onClose={() => setSelectedChainExecId(null)}
+        />
+      )}
 
       {showLibrary && (
         <LibraryModal onClose={() => setShowLibrary(false)} />
