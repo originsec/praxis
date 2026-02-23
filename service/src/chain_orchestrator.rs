@@ -30,7 +30,6 @@ struct ChainOrchSession {
     stop_flag: Arc<AtomicBool>,
     cancel_flag: Arc<AtomicBool>,
     current_prompt_id: RwLock<String>,
-    last_workspace_chain: Arc<RwLock<Option<Value>>>,
 }
 
 impl ChainOrchSession {
@@ -586,7 +585,6 @@ impl ChainOrchestratorManager {
             stop_flag,
             cancel_flag,
             current_prompt_id: RwLock::new(String::new()),
-            last_workspace_chain: Arc::new(RwLock::new(None)),
         };
 
         {
