@@ -247,6 +247,32 @@ export function NodeCard({ node }: NodeCardProps) {
 
         {/*
         //
+        // Intercept status.
+        //
+        */}
+        {node.intercept_supported && (
+          <div className="px-3 py-1.5 flex items-center justify-between border-b border-subtle">
+            <div className="flex items-center gap-1.5 text-xs">
+              <Shield size={12} className={node.intercept_active ? 'text-[var(--accent-warning)]' : 'text-muted'} />
+              <span className={node.intercept_active ? 'text-[var(--accent-warning)]' : 'text-muted'}>
+                Intercept {node.intercept_active ? 'ON' : 'OFF'}
+              </span>
+            </div>
+            <button
+              onClick={handleToggleIntercept}
+              className={`px-2 py-0.5 text-[10px] transition-colors ${
+                node.intercept_active
+                  ? 'bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30'
+                  : 'bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30'
+              }`}
+            >
+              {node.intercept_active ? 'Disable' : 'Enable'}
+            </button>
+          </div>
+        )}
+
+        {/*
+        //
         // Agents list.
         //
         */}
@@ -360,31 +386,6 @@ export function NodeCard({ node }: NodeCardProps) {
           </button>
         </div>
 
-        {/*
-        //
-        // Intercept row — bottom of card, compact.
-        //
-        */}
-        {node.intercept_supported && (
-          <div className="px-3 py-1 flex items-center justify-between border-t border-subtle">
-            <div className="flex items-center gap-1 text-[9px]">
-              <Shield size={9} className={node.intercept_active ? 'text-[var(--accent-warning)]' : 'text-muted/50'} />
-              <span className={node.intercept_active ? 'text-[var(--accent-warning)]' : 'text-muted/50'}>
-                {node.intercept_active ? 'Intercept ON' : 'Intercept'}
-              </span>
-            </div>
-            <button
-              onClick={handleToggleIntercept}
-              className={`px-1.5 py-0.5 text-[9px] transition-colors ${
-                node.intercept_active
-                  ? 'text-[var(--accent-error)]/70 hover:text-[var(--accent-error)]'
-                  : 'text-muted/50 hover:text-[var(--accent-success)]'
-              }`}
-            >
-              {node.intercept_active ? 'Disable' : 'Enable'}
-            </button>
-          </div>
-        )}
       </div>
 
       {/*
