@@ -91,7 +91,7 @@ function ActiveOpEntry({ op, onHoverChange }: { op: SemanticOpUpdate; onHoverCha
 
       {hovered && pos && createPortal(
         <div
-          className="fixed z-[9999] w-80 bg-[var(--bg-primary)] border border-subtle shadow-lg"
+          className="fixed z-[9999] w-80 max-h-[60vh] overflow-auto scrollbar-on-hover bg-[var(--bg-primary)] border border-subtle shadow-lg"
           style={{ left: pos.left, bottom: window.innerHeight - pos.top + 4 }}
           onMouseEnter={() => setHoverState(true)}
           onMouseLeave={() => setHoverState(false)}
@@ -139,6 +139,69 @@ function ActiveOpEntry({ op, onHoverChange }: { op: SemanticOpUpdate; onHoverCha
           <div className="px-2.5 py-1.5 flex items-center justify-end gap-3 text-[9px] text-muted font-mono">
             {op.spec.model_ref && <span>{op.spec.model_ref.toUpperCase()}</span>}
             <span>ITERATIONS: {op.spec.agent_iterations}</span>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
+function ActivePromptEntry({ promptText, agentName }: { promptText: string | null; agentName: string }) {
+  const [hovered, setHovered] = useState(false);
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  const display = promptText
+    ? promptText.length > 40 ? promptText.slice(0, 40) + '…' : promptText
+    : 'Prompt';
+
+  const updatePos = useCallback(() => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    setPos({ top: rect.top, left: rect.left });
+  }, []);
+
+  useEffect(() => {
+    if (!hovered) return;
+    updatePos();
+    window.addEventListener('scroll', updatePos, true);
+    return () => window.removeEventListener('scroll', updatePos, true);
+  }, [hovered, updatePos]);
+
+  return (
+    <div
+      ref={triggerRef}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <div className="flex items-center gap-1.5 text-[10px]">
+        <Loader2 size={10} className="animate-spin text-[var(--accent-purple)] flex-shrink-0" />
+        <MessageSquare size={10} className="text-[var(--accent-purple)] flex-shrink-0" />
+        <span className="text-highlight truncate">{display}</span>
+        <span className="text-muted flex-shrink-0">· {agentName}</span>
+      </div>
+
+      {hovered && pos && promptText && createPortal(
+        <div
+          className="fixed z-[9999] w-80 bg-[var(--bg-primary)] border border-subtle shadow-lg"
+          style={{ left: pos.left, bottom: window.innerHeight - pos.top + 4 }}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+        >
+          <div className="px-2.5 py-1.5 border-b border-subtle bg-[var(--bg-tertiary)]">
+            <div className="flex items-center gap-1.5 text-[10px]">
+              <Loader2 size={10} className="animate-spin text-[var(--accent-purple)] flex-shrink-0" />
+              <MessageSquare size={10} className="text-[var(--accent-purple)] flex-shrink-0" />
+              <span className="text-highlight font-medium">Session Prompt</span>
+              <span className="text-muted">· {agentName}</span>
+            </div>
+          </div>
+          <div className="px-2.5 py-1.5">
+            <div className="text-[9px] text-muted tracking-wider mb-0.5">PROMPT</div>
+            <div className="text-[10px] text-[var(--text-secondary)] font-mono whitespace-pre-wrap break-words max-h-40 overflow-auto scrollbar-on-hover">
+              {promptText}
+            </div>
           </div>
         </div>,
         document.body,
@@ -537,20 +600,12 @@ export function NodeCard({ node }: NodeCardProps) {
               </div>
             ))}
 
-            {hasActivePrompt && (() => {
-              const promptText = node.selected_agent!.active_prompt_text;
-              const display = promptText
-                ? promptText.length > 40 ? promptText.slice(0, 40) + '…' : promptText
-                : 'Prompt';
-              return (
-                <div className="flex items-center gap-1.5 text-[10px]">
-                  <Loader2 size={10} className="animate-spin text-[var(--accent-purple)] flex-shrink-0" />
-                  <MessageSquare size={10} className="text-[var(--accent-purple)] flex-shrink-0" />
-                  <span className="text-highlight truncate">{display}</span>
-                  <span className="text-muted flex-shrink-0">· {node.selected_agent!.short_name}</span>
-                </div>
-              );
-            })()}
+            {hasActivePrompt && (
+              <ActivePromptEntry
+                promptText={node.selected_agent!.active_prompt_text ?? null}
+                agentName={node.selected_agent!.short_name}
+              />
+            )}
           </div>
         )}
 

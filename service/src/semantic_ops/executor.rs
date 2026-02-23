@@ -80,9 +80,14 @@ pub async fn select_agent(
     };
 
     let message = NodeDirectMessage::Command(request);
-    publish_json(rabbitmq_channel, &node_queue_name(node_id), &message).await?;
+    let queue = node_queue_name(node_id);
+    let confirm = publish_json(rabbitmq_channel, &queue, &message).await?;
+    let confirmed = confirm.await;
 
-    common::log_info!("Sent agent select command, waiting for response...");
+    common::log_info!(
+        "Sent agent select command to queue '{}', confirm={:?}, waiting for response...",
+        queue, confirmed
+    );
 
     //
     // Wait for response with timeout (30 seconds).

@@ -553,6 +553,11 @@ async fn listen_to_queues(
                                     }
                                 }
                                 NodeDirectMessage::Command(cmd_request) => {
+                                    common::log_info!(
+                                        "Received command {} type={:?}",
+                                        cmd_request.command_id,
+                                        std::mem::discriminant(&cmd_request.command)
+                                    );
                                     handle_command(
                                         cmd_request,
                                         &channel,
