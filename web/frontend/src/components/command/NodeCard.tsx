@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Server,
   Bot,
@@ -27,10 +28,123 @@ import { ReconModal } from './ReconModal';
 import { TerminalModal } from './TerminalModal';
 import { AgentSessionModal } from './AgentSessionModal';
 import { StyledOutput } from '../common/StyledOutput';
-import type { NodeState, InterceptMethod } from '../../api/types';
+import type { NodeState, InterceptMethod, SemanticOpUpdate } from '../../api/types';
 
 interface NodeCardProps {
   node: NodeState;
+}
+
+function ActiveOpEntry({ op, onHoverChange }: { op: SemanticOpUpdate; onHoverChange?: (id: string, hovered: boolean) => void }) {
+  const [hovered, setHovered] = useState(false);
+  const triggerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  const isRunning = op.status === 'Running';
+
+  const setHoverState = useCallback((val: boolean) => {
+    setHovered(val);
+    onHoverChange?.(op.operation_id, val);
+  }, [op.operation_id, onHoverChange]);
+
+  const updatePos = useCallback(() => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    setPos({ top: rect.top, left: rect.left });
+  }, []);
+
+  useEffect(() => {
+    if (!hovered) return;
+    updatePos();
+    window.addEventListener('scroll', updatePos, true);
+    return () => window.removeEventListener('scroll', updatePos, true);
+  }, [hovered, updatePos]);
+
+  useEffect(() => {
+    if (hovered && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [hovered, op.output]);
+
+  const statusColor = isRunning
+    ? 'var(--accent-info)'
+    : op.status === 'Completed' ? 'var(--accent-success)'
+    : op.status === 'Failed' ? 'var(--accent-error)'
+    : 'var(--text-secondary)';
+
+  return (
+    <div
+      ref={triggerRef}
+      onMouseEnter={() => setHoverState(true)}
+      onMouseLeave={() => setHoverState(false)}
+    >
+      <div className="flex items-center gap-1.5 text-[10px]">
+        {isRunning
+          ? <Loader2 size={10} className="animate-spin flex-shrink-0" style={{ color: statusColor }} />
+          : <Zap size={10} className="flex-shrink-0" style={{ color: statusColor }} />}
+        <span className="text-highlight truncate">{op.spec.name}</span>
+        <span className="text-muted">· {op.agent_short_name}</span>
+        {!isRunning && (
+          <span className="text-[9px] tracking-wider" style={{ color: statusColor }}>{op.status.toUpperCase()}</span>
+        )}
+      </div>
+
+      {hovered && pos && createPortal(
+        <div
+          className="fixed z-[9999] w-80 bg-[var(--bg-primary)] border border-subtle shadow-lg"
+          style={{ left: pos.left, bottom: window.innerHeight - pos.top + 4 }}
+          onMouseEnter={() => setHoverState(true)}
+          onMouseLeave={() => setHoverState(false)}
+        >
+          <div className="px-2.5 py-1.5 border-b border-subtle bg-[var(--bg-tertiary)]">
+            <div className="flex items-center gap-1.5 text-[10px]">
+              {isRunning
+                ? <Loader2 size={10} className="animate-spin flex-shrink-0" style={{ color: statusColor }} />
+                : <Zap size={10} className="flex-shrink-0" style={{ color: statusColor }} />}
+              <span className="text-highlight font-medium">{op.spec.name}</span>
+              <span className="text-muted">· {op.agent_short_name}</span>
+              {!isRunning && (
+                <span className="ml-auto text-[9px] tracking-wider" style={{ color: statusColor }}>{op.status.toUpperCase()}</span>
+              )}
+            </div>
+          </div>
+
+          {op.spec.operation_prompt && (
+            <div className="px-2.5 py-1.5 border-b border-subtle">
+              <div className="text-[9px] text-muted tracking-wider mb-0.5">PROMPT</div>
+              <div className="text-[10px] text-[var(--text-secondary)] font-mono whitespace-pre-wrap break-words max-h-20 overflow-auto scrollbar-on-hover">
+                {op.spec.operation_prompt}
+              </div>
+            </div>
+          )}
+
+          {op.output && (
+            <div className="px-2.5 py-1.5 border-b border-subtle">
+              <div className="text-[9px] text-muted tracking-wider mb-0.5">OUTPUT</div>
+              <div ref={scrollRef} className="max-h-48 overflow-auto scrollbar-on-hover text-[10px]">
+                <StyledOutput output={op.output} />
+              </div>
+            </div>
+          )}
+
+          {(op.summary || op.result) && (
+            <div className="px-2.5 py-1.5 border-b border-subtle">
+              <div className="text-[9px] text-muted tracking-wider mb-0.5">RESULT</div>
+              <div className="text-[10px] text-[var(--text-secondary)] whitespace-pre-wrap break-words max-h-32 overflow-auto scrollbar-on-hover">
+                {op.result || op.summary}
+              </div>
+            </div>
+          )}
+
+          <div className="px-2.5 py-1.5 flex items-center justify-end gap-3 text-[9px] text-muted font-mono">
+            {op.spec.model_ref && <span>{op.spec.model_ref.toUpperCase()}</span>}
+            <span>ITERATIONS: {op.spec.agent_iterations}</span>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
 }
 
 export function NodeCard({ node }: NodeCardProps) {
@@ -215,17 +329,33 @@ export function NodeCard({ node }: NodeCardProps) {
     badge: `${c.element_count} steps`,
   }));
 
-  const runningOps = useMemo(
-    () => state.operations.filter(op => op.node_id === node.node_id && op.status === 'Running'),
-    [state.operations, node.node_id],
+  //
+  // Track which op popovers are open so they stay visible after completion.
+  //
+
+  const [hoveredOpIds, setHoveredOpIds] = useState<Set<string>>(new Set());
+
+  const handleOpHover = useCallback((id: string, hovered: boolean) => {
+    setHoveredOpIds(prev => {
+      const next = new Set(prev);
+      if (hovered) next.add(id); else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const activeOps = useMemo(
+    () => state.operations.filter(op =>
+      op.node_id === node.node_id && (op.status === 'Running' || hoveredOpIds.has(op.operation_id)),
+    ),
+    [state.operations, node.node_id, hoveredOpIds],
   );
 
-  const runningChains = useMemo(
+  const activeChains = useMemo(
     () => state.chains.executions.filter(ex => ex.node_id === node.node_id && ex.status === 'Running'),
     [state.chains.executions, node.node_id],
   );
 
-  const hasActiveWork = runningOps.length > 0 || runningChains.length > 0;
+  const hasActiveWork = activeOps.length > 0 || activeChains.length > 0;
 
   return (
     <>
@@ -390,13 +520,13 @@ export function NodeCard({ node }: NodeCardProps) {
         */}
         {hasActiveWork && (
           <div className="px-3 py-2 border-t border-subtle space-y-1.5">
-            <span className="text-[10px] text-[var(--accent-info)] tracking-wider">ACTIVE ({runningOps.length + runningChains.length})</span>
+            <span className="text-[10px] text-[var(--accent-info)] tracking-wider">ACTIVE ({activeOps.length + activeChains.length})</span>
 
-            {runningOps.map(op => (
-              <ActiveOpEntry key={op.operation_id} op={op} />
+            {activeOps.map(op => (
+              <ActiveOpEntry key={op.operation_id} op={op} onHoverChange={handleOpHover} />
             ))}
 
-            {runningChains.map(ex => (
+            {activeChains.map(ex => (
               <div key={ex.execution_id} className="flex items-center gap-1.5 text-[10px]">
                 <Loader2 size={10} className="animate-spin text-[var(--accent-info)] flex-shrink-0" />
                 <GitBranch size={10} className="text-[var(--accent-info)] flex-shrink-0" />

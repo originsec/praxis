@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 import {
   Zap,
   GitBranch,
@@ -20,7 +20,7 @@ import { LibraryModal } from './LibraryModal';
 import { TriggersModal } from './TriggersModal';
 import { TrafficModal } from './TrafficModal';
 import { HuntingModal } from './HuntingModal';
-import type { SemanticOpUpdate } from '../../api/types';
+
 
 const DEFAULT_PANEL_HEIGHT = 200;
 const MIN_PANEL_HEIGHT = 80;
@@ -30,7 +30,11 @@ export function ActivityBar() {
   const { state, cancelOperation, cancelChainExecution, removeOperation, removeChainExecution, clearOperations, clearChainExecutions } = useApp();
   const [expanded, setExpanded] = useState(false);
   const [panelHeight, setPanelHeight] = useState(DEFAULT_PANEL_HEIGHT);
-  const [selectedOp, setSelectedOp] = useState<SemanticOpUpdate | null>(null);
+  const [selectedOpId, setSelectedOpId] = useState<string | null>(null);
+  const selectedOp = useMemo(() => {
+    if (!selectedOpId) return null;
+    return state.operations.find(op => op.operation_id === selectedOpId) ?? null;
+  }, [selectedOpId, state.operations]);
   const [selectedChainExecId, setSelectedChainExecId] = useState<string | null>(null);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showTriggers, setShowTriggers] = useState(false);
@@ -133,7 +137,7 @@ export function ActivityBar() {
                   {allItems.map(item => item.kind === 'op' ? (
                     <div
                       key={item.op.operation_id}
-                      onClick={() => setSelectedOp(item.op)}
+                      onClick={() => setSelectedOpId(item.op.operation_id)}
                       className="flex items-center justify-between py-1 px-2 hover:bg-[var(--highlight)] transition-colors cursor-pointer text-[10px] group/row"
                     >
                       <div className="flex items-center gap-2 min-w-0">
@@ -226,7 +230,7 @@ export function ActivityBar() {
             {runningOps.slice(0, 3).map(op => (
               <span
                 key={op.operation_id}
-                onClick={e => { e.stopPropagation(); setSelectedOp(op); }}
+                onClick={e => { e.stopPropagation(); setSelectedOpId(op.operation_id); }}
                 className="flex items-center gap-1.5 text-[10px] text-[var(--accent-info)] hover:text-[var(--text-primary)] transition-colors truncate max-w-[200px] cursor-pointer"
               >
                 <Loader2 size={10} className="animate-spin flex-shrink-0" />
@@ -296,7 +300,7 @@ export function ActivityBar() {
       {selectedOp && (
         <OperationDetailFloating
           operation={selectedOp}
-          onClose={() => setSelectedOp(null)}
+          onClose={() => setSelectedOpId(null)}
         />
       )}
 

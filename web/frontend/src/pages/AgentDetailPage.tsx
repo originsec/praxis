@@ -223,9 +223,13 @@ export function AgentDetailPage() {
   const [expandedMcpContexts, setExpandedMcpContexts] = useState<Set<string>>(new Set(['Global']));
 
   //
-  // Selected operation for detail modal.
+  // Selected operation for detail modal — store ID, derive live from state.
   //
-  const [selectedOp, setSelectedOp] = useState<SemanticOpUpdate | null>(null);
+  const [selectedOpId, setSelectedOpId] = useState<string | null>(null);
+  const selectedOp = useMemo(() => {
+    if (!selectedOpId) return null;
+    return state.operations.find(op => op.operation_id === selectedOpId) ?? null;
+  }, [selectedOpId, state.operations]);
 
   //
   // Local YOLO mode state (used when creating sessions).
@@ -1389,7 +1393,7 @@ export function AgentDetailPage() {
                 if (item.type === 'chain') {
                   setSelectedChainExecId((item.data as ChainExecutionUpdate).execution_id);
                 } else {
-                  setSelectedOp(item.data as SemanticOpUpdate);
+                  setSelectedOpId((item.data as SemanticOpUpdate).operation_id);
                 }
               }}
               emptyMessage={
@@ -2357,7 +2361,7 @@ export function AgentDetailPage() {
       */}
       <OperationDetailModal
         operation={selectedOp}
-        onClose={() => setSelectedOp(null)}
+        onClose={() => setSelectedOpId(null)}
       />
 
       {/*
