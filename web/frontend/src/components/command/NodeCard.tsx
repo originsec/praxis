@@ -379,7 +379,11 @@ export function NodeCard({ node }: NodeCardProps) {
           </button>
           <button
             onClick={() => setShowTerminalModal(true)}
-            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] bg-[var(--bg-secondary)] text-muted hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+            className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] transition-colors ${
+              node.active_terminal_id
+                ? 'bg-[var(--accent-success)]/10 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/20'
+                : 'bg-[var(--bg-secondary)] text-muted hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
+            }`}
             title="Terminal"
           >
             <TerminalIcon size={10} /> Term

@@ -10,7 +10,6 @@ import {
   Loader2,
   X,
   Trash2,
-  GripHorizontal,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { getOperationStatusColor, StatusBadge } from '../common/StatusBadge';
@@ -93,19 +92,15 @@ export function ActivityBar() {
             // Resize handle + clear button.
             //
             */}
-            <div className="flex items-center border-b border-subtle bg-[var(--bg-secondary)] flex-shrink-0">
+            <div className="flex items-center flex-shrink-0 relative">
               <div
                 onMouseDown={handleResizeStart}
-                className="flex-1 h-[18px] cursor-row-resize group relative hover:bg-[var(--highlight)] transition-colors"
-              >
-                <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 flex justify-center">
-                  <GripHorizontal size={10} className="text-[var(--border-subtle)] group-hover:text-[var(--text-muted)] transition-colors" />
-                </div>
-              </div>
+                className="absolute inset-x-0 top-0 h-1 cursor-row-resize bg-transparent hover:bg-[var(--accent-info)]/30 active:bg-[var(--accent-info)]/50 transition-colors z-10"
+              />
               {(allOps.length > 0 || allChains.length > 0) && (
                 <button
                   onClick={() => { clearOperations(); clearChainExecutions(); }}
-                  className="px-2 py-0.5 text-[9px] text-muted/50 hover:text-[var(--accent-error)] transition-colors flex-shrink-0"
+                  className="ml-auto px-2 py-0.5 text-[9px] text-muted/50 hover:text-[var(--accent-error)] transition-colors flex-shrink-0"
                   title="Clear all finished"
                 >
                   Clear

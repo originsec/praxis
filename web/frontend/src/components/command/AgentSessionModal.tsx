@@ -138,7 +138,7 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
                     : 'bg-[var(--bg-secondary)] border-l-2 border-l-[var(--accent-success)]'
                 }`}>
                   {msg.role === 'assistant' ? (
-                    <div className="prose prose-invert max-w-none break-words text-[10px] leading-relaxed [&_p]:my-0.5 [&_pre]:text-[9px] [&_code]:text-[9px]">
+                    <div className="prose prose-invert max-w-none break-words text-[10px] leading-relaxed text-[var(--text-secondary)] [&_p]:my-0.5 [&_pre]:text-[9px] [&_code]:text-[9px]">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                     </div>
                   ) : (
