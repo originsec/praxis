@@ -91,8 +91,8 @@ function ActiveOpEntry({ op, onHoverChange }: { op: SemanticOpUpdate; onHoverCha
 
       {hovered && pos && createPortal(
         <div
-          className="fixed z-[9999] w-80 max-h-[60vh] overflow-auto scrollbar-on-hover bg-[var(--bg-primary)] border border-subtle shadow-lg"
-          style={{ left: pos.left, bottom: window.innerHeight - pos.top + 4 }}
+          className="fixed z-[9999] w-80 overflow-auto scrollbar-on-hover bg-[var(--bg-primary)] border border-subtle shadow-lg"
+          style={{ left: pos.left, bottom: window.innerHeight - pos.top + 4, maxHeight: pos.top - 12 }}
           onMouseEnter={() => setHoverState(true)}
           onMouseLeave={() => setHoverState(false)}
         >
@@ -184,8 +184,8 @@ function ActivePromptEntry({ promptText, agentName }: { promptText: string | nul
 
       {hovered && pos && promptText && createPortal(
         <div
-          className="fixed z-[9999] w-80 bg-[var(--bg-primary)] border border-subtle shadow-lg"
-          style={{ left: pos.left, bottom: window.innerHeight - pos.top + 4 }}
+          className="fixed z-[9999] w-80 overflow-auto scrollbar-on-hover bg-[var(--bg-primary)] border border-subtle shadow-lg"
+          style={{ left: pos.left, bottom: window.innerHeight - pos.top + 4, maxHeight: pos.top - 12 }}
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
         >
