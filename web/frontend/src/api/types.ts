@@ -33,6 +33,7 @@ export interface SelectedAgent {
   yolo_mode: boolean;
   working_dir: string | null;
   active_transaction_id?: string | null;
+  active_prompt_text?: string | null;
 }
 
 //

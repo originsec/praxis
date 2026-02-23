@@ -12,6 +12,7 @@ use uuid::Uuid;
 struct PendingTransaction {
     cancel_tx: oneshot::Sender<()>,
     session: Arc<dyn AgentSession>,
+    prompt_text: String,
 }
 
 /// Manages pending transactions for async operations
@@ -31,6 +32,7 @@ impl TransactionManager {
         &self,
         transaction_id: TransactionId,
         session: Arc<dyn AgentSession>,
+        prompt_text: String,
     ) -> oneshot::Receiver<()> {
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(
@@ -38,6 +40,7 @@ impl TransactionManager {
             PendingTransaction {
                 cancel_tx: tx,
                 session,
+                prompt_text,
             },
         );
         rx
@@ -63,12 +66,9 @@ impl TransactionManager {
         self.pending.lock().unwrap().remove(transaction_id);
     }
 
-    pub fn has_pending(&self) -> bool {
-        !self.pending.lock().unwrap().is_empty()
-    }
-
-    pub fn first_pending_id(&self) -> Option<TransactionId> {
-        self.pending.lock().unwrap().keys().next().cloned()
+    pub fn first_pending(&self) -> Option<(TransactionId, String)> {
+        self.pending.lock().unwrap().iter().next()
+            .map(|(id, p)| (id.clone(), p.prompt_text.clone()))
     }
 
     //
@@ -165,7 +165,7 @@ pub async fn handle_session_command(
                     //
                     // Register the transaction for potential cancellation.
                     //
-                    let cancel_rx = transaction_manager.register(transaction_id.clone(), session.clone());
+                    let cancel_rx = transaction_manager.register(transaction_id.clone(), session.clone(), text.clone());
 
                     //
                     // Execute the transaction with cancellation support.

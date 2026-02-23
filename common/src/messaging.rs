@@ -368,6 +368,9 @@ pub struct SelectedAgent {
     /// Transaction ID of the currently in-flight prompt (if any).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_transaction_id: Option<String>,
+    /// Prompt text of the currently in-flight prompt (if any).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_prompt_text: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

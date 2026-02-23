@@ -537,14 +537,20 @@ export function NodeCard({ node }: NodeCardProps) {
               </div>
             ))}
 
-            {hasActivePrompt && (
-              <div className="flex items-center gap-1.5 text-[10px]">
-                <Loader2 size={10} className="animate-spin text-[var(--accent-purple)] flex-shrink-0" />
-                <MessageSquare size={10} className="text-[var(--accent-purple)] flex-shrink-0" />
-                <span className="text-highlight">Prompt</span>
-                <span className="text-muted">· {node.selected_agent!.short_name}</span>
-              </div>
-            )}
+            {hasActivePrompt && (() => {
+              const promptText = node.selected_agent!.active_prompt_text;
+              const display = promptText
+                ? promptText.length > 40 ? promptText.slice(0, 40) + '…' : promptText
+                : 'Prompt';
+              return (
+                <div className="flex items-center gap-1.5 text-[10px]">
+                  <Loader2 size={10} className="animate-spin text-[var(--accent-purple)] flex-shrink-0" />
+                  <MessageSquare size={10} className="text-[var(--accent-purple)] flex-shrink-0" />
+                  <span className="text-highlight truncate">{display}</span>
+                  <span className="text-muted flex-shrink-0">· {node.selected_agent!.short_name}</span>
+                </div>
+              );
+            })()}
           </div>
         )}
 
