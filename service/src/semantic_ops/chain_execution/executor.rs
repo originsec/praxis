@@ -738,57 +738,80 @@ impl ChainExecutor {
                         (Ok(merged_input.clone()), Some(u32::MAX), None)
                     }
                 }
+                //
+                // Long-running elements wrapped in tokio::select! so
+                // cancellation takes effect immediately rather than waiting
+                // for LLM/agent responses to complete.
+                //
                 ChainElement::Operation {
                     operation_name,
                     model_ref,
                     ..
                 } => {
-                    let op_result = Self::execute_operation(
-                        &execution_id,
-                        &element_id,
-                        operation_name,
-                        model_ref,
-                        &merged_input,
-                        is_first_in_session,
-                        yolo_mode,
-                        &active_session,
-                        &working_dir,
-                        &node_id,
-                        &agent_short_name,
-                        &config,
-                        &rabbitmq_channel,
-                        response_tracker.clone(),
-                        database.clone(),
-                    ).await;
-                    match op_result {
-                        Ok((output, sem_success)) => (Ok(output), None, sem_success),
-                        Err(e) => (Err(e), None, None),
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
+                        }
+                        op_result = Self::execute_operation(
+                            &execution_id,
+                            &element_id,
+                            operation_name,
+                            model_ref,
+                            &merged_input,
+                            is_first_in_session,
+                            yolo_mode,
+                            &active_session,
+                            &working_dir,
+                            &node_id,
+                            &agent_short_name,
+                            &config,
+                            &rabbitmq_channel,
+                            response_tracker.clone(),
+                            database.clone(),
+                        ) => {
+                            match op_result {
+                                Ok((output, sem_success)) => (Ok(output), None, sem_success),
+                                Err(e) => (Err(e), None, None),
+                            }
+                        }
                     }
                 }
                 ChainElement::Transform { prompt, model_ref, .. } => {
-                    let transform_result = Self::execute_transform(
-                        prompt,
-                        model_ref,
-                        &merged_input,
-                        &config,
-                    ).await;
-                    (transform_result, None, None)
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
+                        }
+                        result = Self::execute_transform(
+                            prompt,
+                            model_ref,
+                            &merged_input,
+                            &config,
+                        ) => {
+                            (result, None, None)
+                        }
+                    }
                 }
                 ChainElement::GenericPrompt { prompt, session_group, .. } => {
-                    let gp_result = Self::execute_generic_prompt(
-                        prompt,
-                        session_group,
-                        &merged_input,
-                        is_first_in_session,
-                        &active_session,
-                        yolo_mode,
-                        &working_dir,
-                        &node_id,
-                        &rabbitmq_channel,
-                        response_tracker.clone(),
-                        database.clone(),
-                    ).await;
-                    (gp_result, None, None)
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
+                        }
+                        result = Self::execute_generic_prompt(
+                            prompt,
+                            session_group,
+                            &merged_input,
+                            is_first_in_session,
+                            &active_session,
+                            yolo_mode,
+                            &working_dir,
+                            &node_id,
+                            &rabbitmq_channel,
+                            response_tracker.clone(),
+                            database.clone(),
+                        ) => {
+                            (result, None, None)
+                        }
+                    }
                 }
                 ChainElement::Memory { key, mode, .. } => {
                     let mem_result = match mode {
@@ -806,16 +829,25 @@ impl ChainExecutor {
                     (mem_result, None, None)
                 }
                 ChainElement::Tool { tool_name, tool_params, .. } => {
-                    let result = if let Some(ref tm) = toolkit_manager {
-                        if let Some(tool) = tm.get_chain_tool(tool_name) {
-                            tool.execute_chain(&merged_input, tool_params).await
+                    let tool_future = async {
+                        if let Some(ref tm) = toolkit_manager {
+                            if let Some(tool) = tm.get_chain_tool(tool_name) {
+                                tool.execute_chain(&merged_input, tool_params).await
+                            } else {
+                                Err(anyhow::anyhow!("Tool '{}' not found", tool_name))
+                            }
                         } else {
-                            Err(anyhow::anyhow!("Tool '{}' not found", tool_name))
+                            Err(anyhow::anyhow!("ToolkitManager not available"))
                         }
-                    } else {
-                        Err(anyhow::anyhow!("ToolkitManager not available"))
                     };
-                    (result, None, None)
+                    tokio::select! {
+                        _ = cancel_token.cancelled() => {
+                            (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
+                        }
+                        result = tool_future => {
+                            (result, None, None)
+                        }
+                    }
                 }
                 ChainElement::Payload { payload_id, .. } => {
                     let result = match database.get_payload(payload_id).await {
