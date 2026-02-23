@@ -831,7 +831,7 @@ dependencies = [
 
 [[package]]
 name = "common"
-version = "0.9.4"
+version = "0.9.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3116,7 +3116,7 @@ dependencies = [
 
 [[package]]
 name = "praxis_cli"
-version = "0.9.4"
+version = "0.9.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3138,7 +3138,7 @@ dependencies = [
 
 [[package]]
 name = "praxis_node"
-version = "0.9.4"
+version = "0.9.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3204,7 +3204,7 @@ dependencies = [
 
 [[package]]
 name = "praxis_service"
-version = "0.9.4"
+version = "0.9.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3233,7 +3233,7 @@ dependencies = [
 
 [[package]]
 name = "praxis_web"
-version = "0.9.4"
+version = "0.9.5"
 dependencies = [
  "anyhow",
  "axum",
