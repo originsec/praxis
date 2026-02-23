@@ -104,7 +104,7 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
           //
           */}
           {(operation.summary || operation.result) && (
-            <div>
+            <div className="flex flex-col">
               <button
                 onClick={() => setSummaryCollapsed(!summaryCollapsed)}
                 className="flex items-center gap-2 text-xs text-muted mb-2 hover:text-[var(--text-primary)] transition-colors"

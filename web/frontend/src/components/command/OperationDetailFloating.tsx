@@ -102,7 +102,7 @@ export function OperationDetailFloating({ operation, onClose }: Props) {
         //
         */}
         {(operation.summary || operation.result) && (
-          <div>
+          <div className="flex flex-col">
             <button
               onClick={() => setSummaryCollapsed(!summaryCollapsed)}
               className="flex items-center gap-1.5 text-[10px] text-muted mb-2 hover:text-[var(--text-primary)] transition-colors"
