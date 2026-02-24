@@ -28,6 +28,8 @@ This matters for:
 | **Traffic Interception** | MITM proxy for agent-to-LLM traffic |
 | **Agent Dialog** | Create interactive sessions with agents |
 | **Semantic Operations** | Define and chain natural language tasks for multi-step automation |
+| **Chain Automation** | Trigger chains automatically on schedules, intercept matches, or new node events |
+| **Toolkit** | Library of built-in offensive operations with chain integration |
 | **Terminal Access** | PTY terminal on remote nodes |
 
 ## The Three Components

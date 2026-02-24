@@ -48,6 +48,12 @@ Plus two local tools:
 **Monitoring:**
 > Check the status of all running operations and cancel any that have been running for more than 5 minutes
 
+## Thinking Mode
+
+When using a model that supports extended thinking (e.g. Claude Sonnet/Opus with thinking enabled), the Orchestrator surfaces the model's reasoning steps inline. Thinking blocks appear in a collapsed section before the final response, showing the chain of reasoning the model used to arrive at its answer.
+
+Thinking mode is enabled automatically when the configured Orchestrator model supports it and has thinking enabled in its API parameters. No separate configuration is needed in Praxis.
+
 ## Plan Tracking
 
 The Orchestrator can break complex tasks into steps and show progress via the `report_plan` tool. When the AI calls this tool, you'll see a plan panel with step descriptions and their current status (not started, in progress, done).

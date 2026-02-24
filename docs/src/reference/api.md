@@ -185,16 +185,6 @@ pub enum ClientSignalMessage {
     // Recon
     ReconGet { client_id, node_id, agent_short_name },
 
-    // Agent Chat (Multi-Agent Chat)
-    AgentChatStart { client_id, goal, yolo_mode },
-    AgentChatStop { client_id, session_id },
-    AgentChatAddAgent { client_id, session_id, node_id, agent_short_name },
-    AgentChatRemoveAgent { client_id, session_id, agent_id },
-    AgentChatReorderAgents { client_id, session_id, agent_ids },
-    AgentChatSendMessage { client_id, session_id, content, channel_id, recipient_nickname },
-    AgentChatJoinChannel { client_id, session_id, channel_name },
-    AgentChatGetHistory { client_id, session_id, channel_id, limit },
-    AgentChatGetState { client_id, session_id },
 }
 ```
 
@@ -266,20 +256,6 @@ pub enum ClientDirectMessage {
     // Recon
     ReconGetResponse { node_id, agent_short_name, recon_result, performed_at, is_semantic },
 
-    // Agent Chat
-    AgentChatSessionStarted { session_id, goal },
-    AgentChatSessionStopped { session_id },
-    AgentChatAgentAdded { session_id, agent },
-    AgentChatAgentRemoved { session_id, agent_id },
-    AgentChatAgentStatusChanged { session_id, agent_id, status },
-    AgentChatChannelCreated { session_id, channel },
-    AgentChatChannelUpdated { session_id, channel },
-    AgentChatAgentJoinedChannel { session_id, agent_id, channel_id },
-    AgentChatAgentLeftChannel { session_id, agent_id, channel_id },
-    AgentChatMessage { session_id, message },
-    AgentChatStateUpdate { session },
-    AgentChatHistoryResponse { session_id, channel_id, messages },
-    AgentChatError { message },
 }
 ```
 

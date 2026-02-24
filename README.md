@@ -20,8 +20,9 @@ Built by [Origin](https://originhq.com) for security research and red team opera
 | **Traffic Interception** | MITM proxy for agent-to-LLM traffic |
 | **Agent Dialog** | Create interactive sessions with agents |
 | **Semantic Operations** | Define and chain natural language tasks for multi-step automation |
+| **Chain Automation** | Trigger chains automatically on schedules, intercept matches, or new node events |
+| **Toolkit** | Library of built-in offensive operations with chain integration |
 | **Terminal Access** | PTY terminal on remote nodes |
-| **Agent Chat** *(experimental)* | Multi-agent collaboration and orchestration workflows |
 | **Orchestrator** *(experimental)* | High-level assistant for coordinating tasks across agents |
 
 ### Supported Agents

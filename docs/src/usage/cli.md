@@ -498,7 +498,6 @@ The CLI currently supports a subset of Praxis features focused on orchestration:
 - MCP server mode for AI assistant integration
 
 Features **not** available in the CLI:
-- AgentChat (IRC-style multi-agent chat)
 - Visual chain editor
 - Real-time traffic monitoring
 - Terminal emulation

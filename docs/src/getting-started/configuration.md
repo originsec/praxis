@@ -16,7 +16,7 @@ Go to **Settings** → **LLM Providers** in the web UI.
 
 ### Supported Providers
 
-Anthropic, OpenAI, Google, Groq, Cerebras, Mistral, xAI, Ollama
+Anthropic, OpenAI, Google, Groq, Cerebras, Mistral, xAI, MiniMax, Ollama
 
 ### Feature Assignment
 

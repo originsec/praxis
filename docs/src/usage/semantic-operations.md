@@ -221,11 +221,7 @@ Chains support several element types:
 
 **Memory Retrieve** - Retrieves previously stored data by key. Useful for accessing earlier results later in the chain.
 
-**Loop** - Controls iteration in the chain. A Loop element has two output ports:
-- **Port 0 (Retry)** - Fires on each iteration until `max_iterations` is reached
-- **Port 1 (Exhausted)** - Fires after all iterations are complete
-
-Loops enable retry patterns and iterative workflows. Connections from port 0 typically go back to an earlier element in the chain, creating a cycle.
+**Loop** - Controls iteration in the chain. Configure `max_iterations` on the element. On each pass through the loop, if iterations remain, the output fires and routes back to an earlier element creating a cycle. When iterations are exhausted, no output fires — execution stops at that branch.
 
 ### Conditional Connections
 
@@ -243,6 +239,7 @@ Operation, Transform, and GenericPrompt elements support per-block configuration
 - **Max Runtime** - Timeout in seconds for this specific element
 - **YOLO Mode** - Enable auto-approve for this element's session
 - **Working Directory** - Override the working directory
+- **Require All Inputs** - When disabled, a merge-point element runs as soon as any upstream input arrives (instead of waiting for all branches). Useful in conditional chains where not all paths execute.
 
 ### Building a Chain
 

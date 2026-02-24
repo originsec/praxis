@@ -109,6 +109,7 @@ Then update the port in **Settings** > **MCP Server** to match. The SSE endpoint
 | `mistral` | Mistral | `MISTRAL_API_KEY` |
 | `xai` | xAI | `XAI_API_KEY` |
 | `nvidia` | NVIDIA | `NVIDIA_API_KEY` |
+| `minimax` | MiniMax | `MINIMAX_API_KEY` |
 | `ollama` | Ollama (local) | (none) |
 
 ### Model Reference Format
@@ -207,10 +208,21 @@ Chains are visual workflows stored in the service database.
 | Element Type | Properties |
 |-------------|------------|
 | `Trigger` | `id`, `trigger_type` |
-| `Operation` | `id`, `operation_name`, `model_ref`, `session_group` |
-| `Transform` | `id`, `prompt`, `model_ref`, `session_group` |
-| `GenericPrompt` | `id`, `prompt`, `session_group` |
-| `Termination` | `id`, `termination_type`, `label` |
+| `Operation` | `id`, `operation_name`, `model_ref`, `session_group`, `block_config` |
+| `Transform` | `id`, `prompt`, `model_ref`, `session_group`, `block_config` |
+| `GenericPrompt` | `id`, `prompt`, `session_group`, `block_config` |
+| `Memory` | `id`, `mode` (`store` or `retrieve`), `key` |
+| `Loop` | `id`, `max_iterations` |
+| `Termination` | `id`, `label` |
+
+`block_config` fields (all optional):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `max_runtime` | u64 | Per-element timeout in seconds |
+| `yolo_mode` | bool | Auto-approve for this element's session |
+| `working_dir` | string | Working directory override |
+| `require_all_inputs` | bool | Wait for all upstream inputs before executing (default: true) |
 
 ### Session Groups
 
@@ -232,9 +244,12 @@ Elements in the same session group share an agent session context.
   "from_element": "trigger-1",
   "to_element": "op-1",
   "from_port": 0,
-  "to_port": 0
+  "to_port": 0,
+  "condition": "Always"
 }
 ```
+
+`condition` values: `Always` (default), `OnSuccess`, `OnFailure`.
 
 ## Intercept Rules
 
