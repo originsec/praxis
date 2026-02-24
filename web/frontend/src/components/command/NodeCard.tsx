@@ -378,14 +378,14 @@ export function NodeCard({ node }: NodeCardProps) {
   const visibleAgents = agentsExpanded ? agents : agents.slice(0, 3);
   const hasHiddenAgents = agents.length > 3 && !agentsExpanded;
 
-  const opItems: RunItem[] = state.operationDefs.map(d => ({
+  const opItems: RunItem[] = state.operationDefs.filter(d => !d.disabled).map(d => ({
     id: d.full_name,
     name: d.name,
     description: d.description || undefined,
     badge: d.category || undefined,
   }));
 
-  const chainItems: RunItem[] = state.chains.chains.map(c => ({
+  const chainItems: RunItem[] = state.chains.chains.filter(c => !c.disabled).map(c => ({
     id: c.id,
     name: c.name,
     description: c.description || undefined,
