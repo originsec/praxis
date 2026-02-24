@@ -193,6 +193,15 @@ pub async fn handle_session_command(
                         }
                         _ = cancel_rx => {
                             common::log_info!("Transaction {} cancelled", transaction_id);
+
+                            //
+                            // Kill the underlying process. The spawn_blocking task
+                            // can't be cancelled by dropping its JoinHandle, so the
+                            // process would keep running without this.
+                            //
+
+                            session.abort_transaction();
+
                             NodeCommandResult::Session(SessionCommandResult::TransactionCancelled {
                                 transaction_id: transaction_id.clone(),
                             })
