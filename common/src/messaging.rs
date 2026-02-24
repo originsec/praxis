@@ -1588,9 +1588,7 @@ pub enum ClientSignalMessage {
     //
     // Operation definitions (stored in service database).
     //
-    /// Add/update an operation definition from YAML or JSON content.
-    /// Format is auto-detected: content starting with '{' is treated as JSON,
-    /// otherwise as YAML.
+    /// Add/update an operation definition from JSON content.
     OpDefAdd {
         client_id: String,
         content: String,

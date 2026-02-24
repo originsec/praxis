@@ -154,7 +154,7 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
-    /// Add/update an operation definition from YAML or JSON
+    /// Add/update an operation definition from JSON
     pub async fn add_op_def(&self, content: String) -> Result<()> {
         let message = ClientSignalMessage::OpDefAdd {
             client_id: self.state.client_id.clone(),

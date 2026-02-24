@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Zap, GitBranch, Play, Pencil, Trash2, Search, Plus, ChevronDown,
-  Upload, Loader2, Circle, CircleCheck, Save, Ban,
+  Upload, Download, Loader2, Circle, CircleCheck, Save, Ban,
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { RunModal, type RunItem } from '../common/RunModal';
@@ -588,6 +588,32 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
             error={opDefError}
             onUpdate={updateEditDef}
             onSave={handleSaveOp}
+            onExport={!isNewOp ? () => {
+              const exportData = {
+                item_type: 'operation',
+                name: editDef.name,
+                short_name: editDef.short_name,
+                category: editDef.category,
+                description: editDef.description,
+                agent_info: editDef.agent_info,
+                timeout: editDef.timeout,
+                operation_prompt: editDef.operation_prompt,
+                mode: editDef.mode,
+                agent_iterations: editDef.agent_iterations,
+                disabled: editDef.disabled,
+                yolo_mode: editDef.yolo_mode,
+                ...(editDef.model_ref && { model_ref: editDef.model_ref }),
+              };
+              const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `${editDef.category}_${editDef.short_name}.json`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            } : undefined}
             onCancel={closeEditOp}
           />
         </Modal>
@@ -610,6 +636,28 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
             <ChainBuilder
               chain={editingChainId ? currentChain : null}
               onSave={handleSaveChain}
+              onExport={editingChainId ? (definition) => {
+                const exportData = {
+                  item_type: 'chain',
+                  name: definition.name,
+                  description: definition.description,
+                  category: definition.category,
+                  elements: definition.elements,
+                  connections: definition.connections,
+                  disabled: definition.disabled,
+                  timeout: definition.timeout,
+                  positions: definition.positions,
+                };
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `chain_${definition.name.toLowerCase().replace(/\s+/g, '_')}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+              } : undefined}
               onCancel={handleCancelChain}
               operationDefs={ops}
               modelDefs={modelDefs}
@@ -776,13 +824,14 @@ function ChainRow({ chain, onRun, onEdit, onToggleDisabled, onDelete }: {
 // Operation edit form — same fields as LibraryTab's edit modal.
 //
 
-function EditOpForm({ editDef, isNewOp, isSaving, error, onUpdate, onSave, onCancel }: {
+function EditOpForm({ editDef, isNewOp, isSaving, error, onUpdate, onSave, onExport, onCancel }: {
   editDef: OperationDefinitionInfo;
   isNewOp: boolean;
   isSaving: boolean;
   error: string | null;
   onUpdate: (field: keyof OperationDefinitionInfo, value: string | number | boolean | string[]) => void;
   onSave: () => void;
+  onExport?: () => void;
   onCancel: () => void;
 }) {
   return (
@@ -980,6 +1029,15 @@ function EditOpForm({ editDef, isNewOp, isSaving, error, onUpdate, onSave, onCan
         )}
 
         <div className="flex justify-end gap-2">
+          {onExport && (
+            <button
+              onClick={onExport}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] tracking-wider text-muted border border-dim hover:border-[var(--accent-purple)] hover:text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/10 transition-colors"
+            >
+              <Download size={11} />
+              Export
+            </button>
+          )}
           <button
             onClick={onCancel}
             disabled={isSaving}

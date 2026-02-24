@@ -5,7 +5,7 @@ use sqlx::Row;
 
 use super::{Database, DatabasePool, MAX_OPERATION_DEFINITIONS};
 
-/// Database record for an operation definition (parsed from YAML)
+/// Database record for an operation definition
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OperationDefinition {
     /// Full name: category::short_name (primary key)
@@ -67,85 +67,6 @@ impl OperationDefinition {
             model_ref: self.model_ref.clone(),
         }
     }
-
-    /// Parse from YAML content
-    pub fn from_yaml(yaml_content: &str) -> Result<Self, String> {
-        #[derive(serde::Deserialize)]
-        struct YamlOp {
-            name: String,
-            #[serde(default)]
-            short_name: Option<String>,
-            #[serde(default)]
-            category: Option<String>,
-            description: String,
-            agent_info: String,
-            #[serde(default = "default_timeout")]
-            timeout: u64,
-            operation_prompt: String,
-            #[serde(default = "default_mode")]
-            mode: String,
-            #[serde(default = "default_agent_iterations")]
-            agent_iterations: u32,
-            /// DEPRECATED: ignored, use chains instead
-            #[serde(default)]
-            operation_chain: Vec<String>,
-            #[serde(default)]
-            disabled: bool,
-            #[serde(default)]
-            yolo: bool,
-            /// Optional model override (format: "provider::model")
-            #[serde(default)]
-            model_ref: Option<String>,
-        }
-
-        fn default_timeout() -> u64 { 60 }
-        fn default_mode() -> String { "one-shot".to_string() }
-        fn default_agent_iterations() -> u32 { 5 }
-
-        let parsed: YamlOp = serde_yaml::from_str(yaml_content)
-            .map_err(|e| format!("Failed to parse YAML: {}", e))?;
-
-        //
-        // Warn if deprecated operation_chain is used.
-        //
-        if !parsed.operation_chain.is_empty() {
-            eprintln!("Warning: 'operation_chain' is deprecated and will be ignored. Use chains instead.");
-        }
-
-        let category = parsed.category
-            .ok_or_else(|| "YAML must contain 'category' field".to_string())?;
-        let short_name = parsed.short_name
-            .ok_or_else(|| "YAML must contain 'short_name' field".to_string())?;
-
-        let full_name = format!("{}::{}", category, short_name);
-        let now = Utc::now();
-
-        Ok(OperationDefinition {
-            full_name,
-            category,
-            short_name,
-            name: parsed.name,
-            description: parsed.description,
-            agent_info: parsed.agent_info,
-            timeout: parsed.timeout,
-            operation_prompt: parsed.operation_prompt,
-            mode: parsed.mode,
-            agent_iterations: parsed.agent_iterations,
-            //
-            // DEPRECATED: always empty now, chains should be used instead.
-            //
-            operation_chain: vec![],
-            disabled: parsed.disabled,
-            yolo_mode: parsed.yolo,
-            model_ref: parsed.model_ref,
-            created_at: now,
-            updated_at: now,
-        })
-    }
-
-    //
-    // Parse from JSON content.
-    //
 
     pub fn from_json(json_content: &str) -> Result<Self, String> {
         #[derive(serde::Deserialize)]

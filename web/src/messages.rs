@@ -59,7 +59,7 @@ pub enum BrowserMessage {
     ConfigSet {
         values: HashMap<String, String>,
     },
-    /// Add/update an operation definition from YAML or JSON
+    /// Add/update an operation definition from JSON
     OpDefAdd {
         content: String,
     },

@@ -740,16 +740,7 @@ async fn handle_opdef_add(ctx: &ServiceContext, client_id: String, content: Stri
     );
     common::log_debug!("OpDefAdd: content={}", common::truncate_str(&content, 2000));
 
-    //
-    // Auto-detect format: if content starts with '{', parse as JSON,
-    // otherwise as YAML.
-    //
-    let trimmed = content.trim();
-    let parse_result = if trimmed.starts_with('{') {
-        OperationDefinition::from_json(&content)
-    } else {
-        OperationDefinition::from_yaml(&content)
-    };
+    let parse_result = OperationDefinition::from_json(&content);
 
     match parse_result {
         Ok(definition) => {

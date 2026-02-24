@@ -15,7 +15,7 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge, Connection, OnSelectionChangeParams } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings, Check, AlertTriangle, Wrench, FileText } from 'lucide-react';
+import { Play, X, Save, Copy, Download, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings, Check, AlertTriangle, Wrench, FileText } from 'lucide-react';
 import { ConfigModal } from '../common/ConfigModal';
 import { Modal } from '../common/Modal';
 import { ChainTriggerPanel } from './ChainTriggerPanel';
@@ -443,6 +443,7 @@ interface ChainBuilderInnerProps {
   chain?: ChainDefinitionFull | null;
   onSave: (definition: ChainDefinitionInput) => void;
   onDuplicate?: (definition: ChainDefinitionInput) => void;
+  onExport?: (definition: ChainDefinitionInput) => void;
   onCancel: () => void;
   operationDefs: OperationDefinitionInfo[];
   modelDefs: ModelDefinition[];
@@ -454,7 +455,7 @@ interface ChainBuilderInnerProps {
   saveError?: string | null;
 }
 
-function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs, modelDefs, nodes: _systemNodes, toolkitTools, payloads, send, saveStatus, saveError }: ChainBuilderInnerProps) {
+function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, operationDefs, modelDefs, nodes: _systemNodes, toolkitTools, payloads, send, saveStatus, saveError }: ChainBuilderInnerProps) {
   const [name, setName] = useState(chain?.name || '');
   const [description, setDescription] = useState(chain?.description || '');
   const [timeout, setChainTimeout] = useState(chain?.timeout || 1800);
@@ -1875,6 +1876,20 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
               Duplicate
             </button>
           )}
+          {onExport && chain && (
+            <button
+              onClick={() => {
+                const definition = flowToChain(nodes, edges, name.trim(), description, category, timeout, extraData);
+                onExport(definition);
+              }}
+              disabled={!canSave}
+              className="inline-flex items-center gap-1.5 px-3 py-1 text-[10px] tracking-wider border border-dim text-muted hover:border-[var(--accent-purple)] hover:text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Export as JSON"
+            >
+              <Download size={11} />
+              Export
+            </button>
+          )}
           <button
             onClick={handleSave}
             disabled={!canSave}
@@ -2610,6 +2625,7 @@ interface ChainBuilderProps {
   chain?: ChainDefinitionFull | null;
   onSave: (definition: ChainDefinitionInput) => void;
   onDuplicate?: (definition: ChainDefinitionInput) => void;
+  onExport?: (definition: ChainDefinitionInput) => void;
   onCancel: () => void;
   operationDefs: OperationDefinitionInfo[];
   modelDefs?: ModelDefinition[];
