@@ -133,7 +133,7 @@ Lua agent scripts live in `agents/` at the project root and are embedded into bi
 
 ### Adding Operations
 
-Operations are YAML definitions. Add to the library via the web UI or directly to the database.
+Operations are JSON definitions. Add to the library via the web UI or directly to the database.
 
 ### Frontend Development
 

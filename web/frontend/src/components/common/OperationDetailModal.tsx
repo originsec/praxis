@@ -2,8 +2,8 @@ import { useState, useRef, useEffect } from 'react';
 import { Download, ChevronDown, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import { Modal } from './Modal';
-import { StatusBadge, getOperationStatusColor } from './StatusBadge';
 import { StyledOutput } from './StyledOutput';
 import { exportOperationResult, downloadTextFile } from '../../utils/export';
 import type { SemanticOpUpdate } from '../../api/types';
@@ -11,6 +11,16 @@ import type { SemanticOpUpdate } from '../../api/types';
 interface OperationDetailModalProps {
   operation: SemanticOpUpdate | null;
   onClose: () => void;
+}
+
+function statusColor(status: string): string {
+  switch (status) {
+    case 'Completed': return 'text-[var(--text-highlight)]';
+    case 'Failed': return 'text-[var(--accent-error)]';
+    case 'Cancelled': return 'text-[var(--accent-warning)]';
+    case 'Running': return 'text-[var(--accent-info)]';
+    default: return 'text-[var(--text-secondary)]';
+  }
 }
 
 function formatDuration(start: string, end: string | null, status: string): string {
@@ -69,36 +79,25 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
           // Info.
           //
           */}
-          <div className="grid grid-cols-4 gap-x-4 gap-y-1 text-[11px]">
-            <div className="col-span-4">
-              <span className="text-muted">ID:</span>{' '}
-              <span className="font-mono">{operation.operation_id}</span>
+          <div className="flex items-baseline gap-4 text-[11px] whitespace-nowrap flex-wrap py-1.5">
+            <div className="flex items-baseline">
+              <span className="text-muted">Status:</span>
+              <span className={`ml-2 font-mono ${statusColor(operation.status)}`}>{operation.status}</span>
             </div>
-            <div>
-              <span className="text-muted">Status:</span>{' '}
-              <StatusBadge
-                status={getOperationStatusColor(operation.status)}
-                label={operation.status}
-              />
+            <div className="flex items-baseline">
+              <span className="text-muted">Agent:</span>
+              <span className="ml-2 font-mono">{operation.agent_short_name}</span>
             </div>
-            <div>
-              <span className="text-muted">Agent:</span>{' '}
-              <span>{operation.agent_short_name}</span>
+            <div className="flex items-baseline">
+              <span className="text-muted">Mode:</span>
+              <span className="ml-2">{operation.spec.mode}</span>
             </div>
-            <div>
-              <span className="text-muted">Mode:</span>{' '}
-              <span>{operation.spec.mode}</span>
+            <div className="flex items-baseline">
+              <span className="text-muted">Duration:</span>
+              <span className="ml-2">{formatDuration(operation.start_time, operation.end_time, operation.status)}</span>
             </div>
-            <div>
-              <span className="text-muted">Duration:</span>{' '}
-              <span>{formatDuration(operation.start_time, operation.end_time, operation.status)}</span>
-            </div>
-            {operation.spec.description && (
-              <div className="col-span-4 mt-1">
-                <span className="text-muted">{operation.spec.description}</span>
-              </div>
-            )}
           </div>
+          <div className="text-[10px] font-mono text-muted/50">{operation.operation_id}</div>
 
           {/*
           //
@@ -109,20 +108,20 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
             <div>
               <button
                 onClick={() => setSummaryCollapsed(!summaryCollapsed)}
-                className="flex items-center gap-2 text-xs text-muted mb-1 hover:text-[var(--text-primary)] transition-colors"
+                className="flex items-center gap-2 text-xs text-muted hover:text-[var(--text-primary)] transition-colors"
               >
                 {summaryCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
                 Summary
-                {operation.result && (
+                {operation.result && operation.spec.mode !== 'one-shot' && (
                   <span className="px-1.5 py-0.5 text-[10px] font-mono bg-[var(--bg-tertiary)] border border-dim">
                     {operation.result}
                   </span>
                 )}
               </button>
-              {!summaryCollapsed && operation.summary && (
-                <div className="bg-[var(--bg-secondary)] p-3 max-h-64 overflow-auto prose prose-sm prose-invert max-w-none text-xs [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0 [&_h2]:text-sm [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:mt-1 [&_h3]:mb-0.5">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {operation.summary}
+              {!summaryCollapsed && (operation.summary || operation.result) && (
+                <div className="mt-2 w-full bg-[var(--bg-secondary)] p-3 max-h-64 overflow-auto prose prose-sm prose-invert max-w-none text-xs text-[var(--text-secondary)] [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0 [&_h2]:text-sm [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-xs [&_h3]:mt-1 [&_h3]:mb-0.5 [&_pre]:whitespace-pre [&_pre]:font-mono">
+                  <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                    {(operation.summary || operation.result)!}
                   </ReactMarkdown>
                 </div>
               )}
@@ -143,7 +142,7 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
               Prompt
             </button>
             {!promptCollapsed && (
-              <div className="bg-[var(--bg-secondary)] p-3">
+              <div className="bg-[var(--bg-secondary)] p-3 text-[var(--text-secondary)]">
                 <pre className="text-xs whitespace-pre-wrap font-mono">
                   {operation.spec.operation_prompt}
                 </pre>
@@ -168,7 +167,7 @@ export function OperationDetailModal({ operation, onClose }: OperationDetailModa
               {!outputCollapsed && (
                 <div
                   ref={outputRef}
-                  className="bg-[var(--bg-secondary)] p-3 max-h-96 overflow-auto"
+                  className="bg-[var(--bg-secondary)] p-3 max-h-96 overflow-auto text-[var(--text-secondary)]"
                 >
                   <StyledOutput output={operation.output} />
                 </div>

@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { MainLayout } from './components/layout/MainLayout';
 import { SplashScreen } from './components/SplashScreen';
+import { CommandCenter } from './pages/CommandCenter';
 import { Dashboard } from './pages/Dashboard';
 import { NodesPage } from './pages/NodesPage';
 import { NodeDetailPage } from './pages/NodeDetailPage';
@@ -20,6 +21,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import AgentChatPage from './pages/AgentChatPage';
 import { getFeatureFlags } from './utils/featureFlags';
+import { getUiMode } from './utils/uiMode';
 
 export default function App() {
   //
@@ -36,13 +38,33 @@ export default function App() {
     return <SplashScreen onComplete={() => setShowSplash(false)} />;
   }
 
+  //
+  // Determine root route based on UI mode preference.
+  //
+  const uiMode = getUiMode();
+  const rootElement = uiMode === 'legacy'
+    ? <Navigate to="/dashboard" replace />
+    : <CommandCenter />;
+
   return (
     <ErrorBoundary>
       <BrowserRouter>
         <AppProvider>
           <Routes>
+            {/*
+            //
+            // Root route — depends on UI mode preference.
+            //
+            */}
+            <Route path="/" element={rootElement} />
+
+            {/*
+            //
+            // Classic pages with sidebar layout.
+            //
+            */}
             <Route element={<MainLayout />}>
-              <Route path="/" element={<Dashboard />} />
+              <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/nodes" element={<NodesPage />} />
               <Route path="/nodes/:nodeId" element={<NodeDetailPage />} />
               <Route path="/nodes/:nodeId/agents/:agentShortName" element={<AgentDetailPage />} />

@@ -12,7 +12,7 @@ use common::{
     publish_json, CommandRequest, CommandResponse, DiscoveredAgent, DiscoveredLlmEndpoint,
     InterceptedTrafficEntry, NODE_BROADCAST_EXCHANGE, NODE_EVENT_LOG_QUEUE, NODE_SIGNAL_QUEUE,
     NodeBroadcastMessage, NodeCommand, NodeCommandResult, NodeDirectMessage, NodeInformationUpdate,
-    NodeSignalMessage, SelectedAgent, TerminalCommand, TerminalOutput,
+    NodeSignalMessage, SelectedAgent, SessionCommandResult, TerminalCommand, TerminalOutput,
 };
 use futures::StreamExt;
 use lapin::{options::*, types::FieldTable, Channel};
@@ -411,6 +411,7 @@ async fn listen_to_queues(
     //
 
     let mut pending_registry_update: Option<Vec<String>> = None;
+    let info_update_notify = Arc::new(tokio::sync::Notify::new());
 
     //
     // Rebuild agent registry with Lua scripts received in the RegistrationAck.
@@ -484,10 +485,19 @@ async fn listen_to_queues(
                     &registry,
                     &selected_agent,
                     &node_state,
+                    &transaction_manager,
+                    false,
                 )
                 .await
                 {
                     common::log_error!("Failed to send periodic information update: {}", e);
+                }
+            }
+            _ = info_update_notify.notified() => {
+                if let Err(e) = send_node_information_update(
+                    &channel, &node_id, &registry, &selected_agent, &node_state, &transaction_manager, true,
+                ).await {
+                    common::log_error!("Failed to send triggered info update: {}", e);
                 }
             }
             Some(delivery_result) = broadcast_consumer.next() => {
@@ -503,6 +513,7 @@ async fn listen_to_queues(
                                 &registry,
                                 &selected_agent,
                                 &node_state,
+                                &transaction_manager,
                                 &factory,
                                 &mut pending_registry_update,
                             )
@@ -535,13 +546,18 @@ async fn listen_to_queues(
                                         )
                                         .await;
                                         if let Err(e) = send_node_information_update(
-                                            &channel, &node_id, &registry, &selected_agent, &node_state,
+                                            &channel, &node_id, &registry, &selected_agent, &node_state, &transaction_manager, false,
                                         ).await {
                                             common::log_error!("Failed to send info update after re-registration: {}", e);
                                         }
                                     }
                                 }
                                 NodeDirectMessage::Command(cmd_request) => {
+                                    common::log_info!(
+                                        "Received command {} type={:?}",
+                                        cmd_request.command_id,
+                                        std::mem::discriminant(&cmd_request.command)
+                                    );
                                     handle_command(
                                         cmd_request,
                                         &channel,
@@ -552,6 +568,7 @@ async fn listen_to_queues(
                                         &transaction_manager,
                                         &factory,
                                         &mut pending_registry_update,
+                                        &info_update_notify,
                                     )
                                     .await;
                                 }
@@ -600,13 +617,14 @@ async fn handle_broadcast_message(
     registry: &Arc<RwLock<AgentRegistry>>,
     selected_agent: &Arc<Mutex<Option<Arc<dyn Agent>>>>,
     node_state: &Arc<RwLock<NodeState>>,
+    transaction_manager: &Arc<TransactionManager>,
     factory: &AgentFactory,
     pending_registry_update: &mut Option<Vec<String>>,
 ) {
     match message {
         NodeBroadcastMessage::NodeInformationUpdateRequest => {
             if let Err(e) =
-                send_node_information_update(channel, node_id, registry, selected_agent, node_state)
+                send_node_information_update(channel, node_id, registry, selected_agent, node_state, transaction_manager, false)
                     .await
             {
                 common::log_error!("Failed to send NodeInformationUpdate: {}", e);
@@ -643,7 +661,7 @@ async fn handle_broadcast_message(
                 )
                 .await;
                 if let Err(e) = send_node_information_update(
-                    channel, node_id, registry, selected_agent, node_state,
+                    channel, node_id, registry, selected_agent, node_state, transaction_manager, false,
                 )
                 .await
                 {
@@ -665,6 +683,7 @@ async fn handle_command(
     transaction_manager: &Arc<TransactionManager>,
     factory: &Arc<AgentFactory>,
     pending_registry_update: &mut Option<Vec<String>>,
+    info_update_notify: &Arc<tokio::sync::Notify>,
 ) {
     //
     // Check if this is a fire-and-forget command (no response needed).
@@ -731,41 +750,101 @@ async fn handle_command(
             // This allows Cancel/Close commands to be processed while the prompt is running.
             //
 
-            if let common::SessionCommand::Prompt { .. } = &cmd {
+            if let common::SessionCommand::Prompt { ref text, ref transaction_id } = cmd {
                 //
-                // Spawn the prompt handling as a separate task so we don't block
-                // the message loop. This allows Cancel/Close commands to be
-                // processed while the transaction is running.
+                // Prompt handling: register the transaction on the main loop
+                // so an info update can be sent immediately, then spawn the
+                // blocking transact as a separate task. This allows
+                // Cancel/Close commands to be processed concurrently.
                 //
 
-                let selected_agent = selected_agent.clone();
-                let transaction_manager = transaction_manager.clone();
-                let channel = channel.clone();
-                let node_id = node_id.to_string();
-                let command_id = request.command_id.clone();
+                let session = selected_agent.lock().unwrap().as_ref()
+                    .and_then(|a: &Arc<dyn Agent>| a.get_session());
 
-                tokio::spawn(async move {
-                    let result = handle_session_command(cmd, &selected_agent, &transaction_manager).await;
+                if let Some(session) = session {
+                    let cancel_rx = transaction_manager.register(
+                        transaction_id.clone(), session.clone(), text.clone(),
+                    );
 
                     //
-                    // Send response back to the server.
+                    // Signal the main loop to broadcast state now that the
+                    // transaction is registered with the active prompt.
                     //
 
+                    info_update_notify.notify_one();
+
+                    let normalized_text = text.replace('\r', "").replace('\n', " | ");
+                    let transaction_id = transaction_id.clone();
+                    let transaction_manager = transaction_manager.clone();
+                    let channel = channel.clone();
+                    let node_id = node_id.to_string();
+                    let command_id = request.command_id.clone();
+                    let info_update_notify = info_update_notify.clone();
+
+                    tokio::spawn(async move {
+                        let result = tokio::select! {
+                            result = tokio::task::spawn_blocking({
+                                let session = session.clone();
+                                let normalized_text = normalized_text.clone();
+                                move || session.transact(&normalized_text)
+                            }) => {
+                                match result {
+                                    Ok(Ok(response)) => {
+                                        NodeCommandResult::Session(SessionCommandResult::PromptResponse {
+                                            transaction_id: transaction_id.clone(),
+                                            response,
+                                        })
+                                    }
+                                    Ok(Err(e)) => NodeCommandResult::Error {
+                                        message: format!("Transaction failed: {}", e),
+                                    },
+                                    Err(e) => NodeCommandResult::Error {
+                                        message: format!("Task panicked: {}", e),
+                                    },
+                                }
+                            }
+                            _ = cancel_rx => {
+                                common::log_info!("Transaction {} cancelled", transaction_id);
+                                NodeCommandResult::Session(SessionCommandResult::TransactionCancelled {
+                                    transaction_id: transaction_id.clone(),
+                                })
+                            }
+                        };
+
+                        transaction_manager.complete(&transaction_id);
+
+                        let response = CommandResponse {
+                            command_id,
+                            node_id: node_id.to_string(),
+                            result,
+                        };
+
+                        let message = NodeSignalMessage::CommandResponse(response);
+                        if let Err(e) = publish_json(&channel, NODE_SIGNAL_QUEUE, &message).await {
+                            common::log_error!("Failed to send prompt response: {}", e);
+                        }
+
+                        //
+                        // Signal the main loop to broadcast state now that
+                        // the transaction is complete.
+                        //
+
+                        info_update_notify.notify_one();
+                    });
+                } else {
+                    let result = NodeCommandResult::Error {
+                        message: "No active session".to_string(),
+                    };
                     let response = CommandResponse {
-                        command_id,
+                        command_id: request.command_id,
                         node_id: node_id.to_string(),
                         result,
                     };
-
                     let message = NodeSignalMessage::CommandResponse(response);
-                    if let Err(e) = publish_json(&channel, NODE_SIGNAL_QUEUE, &message).await {
-                        common::log_error!("Failed to send prompt response: {}", e);
+                    if let Err(e) = publish_json(channel, NODE_SIGNAL_QUEUE, &message).await {
+                        common::log_error!("Failed to send error response: {}", e);
                     }
-                });
-
-                //
-                // Return early - response will be sent by the spawned task.
-                //
+                }
 
                 return;
             }
@@ -828,7 +907,7 @@ async fn handle_command(
     // Send an information update after every command so the UI has fresh state.
     //
     if let Err(e) =
-        send_node_information_update(channel, node_id, registry, selected_agent, node_state).await
+        send_node_information_update(channel, node_id, registry, selected_agent, node_state, transaction_manager, false).await
     {
         common::log_error!("Failed to send information update after command: {}", e);
     }
@@ -842,7 +921,7 @@ async fn handle_command(
             common::log_info!("Executing queued registry update after session close");
             handle_agent_registry_update(scripts, registry, selected_agent, factory).await;
             if let Err(e) = send_node_information_update(
-                channel, node_id, registry, selected_agent, node_state,
+                channel, node_id, registry, selected_agent, node_state, transaction_manager, false,
             )
             .await
             {
@@ -858,20 +937,25 @@ async fn send_node_information_update(
     registry: &Arc<RwLock<AgentRegistry>>,
     selected_agent: &Arc<Mutex<Option<Arc<dyn Agent>>>>,
     node_state: &Arc<RwLock<NodeState>>,
+    transaction_manager: &Arc<TransactionManager>,
+    skip_fingerprint: bool,
 ) -> anyhow::Result<()> {
     //
-    // Get all supported agents from the registry and perform
-    // fingerprinting. Only include agents that pass fingerprinting.
+    // Get all supported agents from the registry. When skip_fingerprint is
+    // true, include all agents without running fingerprint checks (which
+    // can be slow and would block the message loop).
     //
 
     let agents = registry.read().await.get_all();
     let mut discovered_agents = Vec::new();
 
     for agent in &agents {
-        let available = agent.do_fingerprint().await;
-        //
-        // Only include agents that are available.
-        //
+        let available = if skip_fingerprint {
+            true
+        } else {
+            agent.do_fingerprint().await
+        };
+
         if available {
             discovered_agents.push(DiscoveredAgent {
                 name: agent.name().to_string(),
@@ -904,12 +988,16 @@ async fn send_node_information_update(
                     })
                 });
 
+                let pending = transaction_manager.first_pending();
+
                 Some(SelectedAgent {
                     short_name: a.short_name().to_string(),
                     session_id: session.as_ref().map(|s| s.session_id().to_string()),
                     process_name,
                     yolo_mode: false,
                     working_dir: session.as_ref().and_then(|s| s.working_dir()),
+                    active_transaction_id: pending.as_ref().map(|(id, _)| id.clone()),
+                    active_prompt_text: pending.map(|(_, text)| text),
                 })
             }
             None => None,
@@ -967,6 +1055,7 @@ async fn send_node_information_update(
         agent_discovery_enabled,
         discovered_endpoints_count,
         active_terminal_id,
+        privileged: crate::utils::is_privileged(),
     };
 
     let message = NodeSignalMessage::InformationUpdate(update);

@@ -19,12 +19,19 @@ The node also reports:
 - **Machine name** - hostname of the system
 - **OS details** - operating system and version
 - **Agent list** - discovered AI agents
+- **Privileged status** - whether the node is running as root/admin
 
 ### Superuser Mode
 
 When the node runs as root, it can operate as different users based on the selected working directory. Selecting a working directory owned by another user will cause agent sessions to run as that user (with the appropriate `HOME` environment variable set).
 
 **Note**: Full superuser support is still under development. Users may notice unexpected behaviour when running sessions as different users from a root node. If you encounter issues, try running the node as the target user directly instead.
+
+### Privileged Status
+
+Each node reports whether it is running with elevated privileges. On Linux/macOS this means running as root (UID 0); on Windows this means running as an elevated administrator.
+
+Privileged nodes display a **ROOT** badge in the web UI and a `[privileged]` tag in the CLI. Some features — particularly interception methods that modify system-level configuration (VPN, Hosts, TPROXY) — require elevated privileges. The web UI will disable the intercept Enable button on non-privileged nodes.
 
 ### Node List
 

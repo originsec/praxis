@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Server, Save, Check, List, Loader2, X, Cpu, Plus, Trash2, Edit2, Key, Info, ExternalLink, Download, Monitor, Circle, CircleCheck, FileCode, Upload, RotateCcw, AlertTriangle } from 'lucide-react';
+import { Server, Save, Check, List, Loader2, X, Cpu, Plus, Trash2, Edit2, Key, Info, ExternalLink, Download, Monitor, Circle, CircleCheck, FileCode, Upload, RotateCcw, AlertTriangle, LayoutGrid, Sun, Moon } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { useTheme } from '../context/ThemeContext';
 import { getFeatureFlags } from '../utils/featureFlags';
+import { getUiMode, setUiMode, type UiMode } from '../utils/uiMode';
 import { Modal } from '../components/common/Modal';
 import { LuaCodeEditor } from '../components/common/LuaCodeEditor';
 
-type Tab = 'llm_providers' | 'agents' | 'service' | 'about';
+type Tab = 'display' | 'llm_providers' | 'agents' | 'service' | 'about';
 type LLMTab = 'model_definitions' | 'feature_selection';
 
 //
@@ -59,13 +62,15 @@ interface NodeDownloadInfo {
 
 export function SettingsPage() {
   const { state, getConfig, setConfig, clearEventLog, listLuaAgentScripts, addLuaAgentScript, updateLuaAgentScript, deleteLuaAgentScript, resetLuaAgentScriptDefaults, toggleLuaAgentScriptDisabled } = useApp();
+  const { theme, setTheme } = useTheme();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   //
   // Tab from URL or default.
   //
   const tabParam = searchParams.get('tab');
-  const activeTab: Tab = tabParam === 'agents' || tabParam === 'service' || tabParam === 'about' ? tabParam : 'llm_providers';
+  const activeTab: Tab = tabParam === 'display' || tabParam === 'agents' || tabParam === 'service' || tabParam === 'about' ? tabParam : 'llm_providers';
   const setActiveTab = (tab: Tab) => {
     const newParams: Record<string, string> = { tab };
     if (tab === 'llm_providers') {
@@ -598,7 +603,15 @@ export function SettingsPage() {
     e.target.value = '';
   };
 
+  const handleUiModeChange = (mode: UiMode) => {
+    setUiMode(mode);
+    if (mode === 'command_center') {
+      navigate('/');
+    }
+  };
+
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+    { id: 'display', label: 'Display', icon: <Monitor size={18} /> },
     { id: 'llm_providers', label: 'LLM Providers', icon: <Cpu size={18} /> },
     { id: 'agents', label: 'Agents', icon: <FileCode size={18} /> },
     { id: 'service', label: 'Service', icon: <Server size={18} /> },
@@ -647,6 +660,109 @@ export function SettingsPage() {
         //
         */}
         <div className="flex-1 bg-card ascii-box border border-subtle p-4 md:p-6">
+          {activeTab === 'display' && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-lg font-semibold text-highlight mb-1">Display</h2>
+                <p className="text-sm text-muted">Interface mode and visual theme preferences</p>
+              </div>
+
+              {/*
+              //
+              // Interface mode selection.
+              //
+              */}
+
+              <div>
+                <h3 className="text-sm font-semibold text-highlight tracking-wider mb-1">INTERFACE MODE</h3>
+                <p className="text-xs text-muted mb-3">Choose your preferred interface layout</p>
+
+                <div className="space-y-2 max-w-lg">
+                  <button
+                    onClick={() => handleUiModeChange('command_center')}
+                    className={`w-full flex items-center gap-3 p-3 border transition-colors text-left ${
+                      getUiMode() === 'command_center'
+                        ? 'border-[var(--accent-info)]/50 bg-[var(--accent-info)]/5'
+                        : 'border-subtle hover:border-[var(--border-hover)] hover:bg-[var(--bg-secondary)]'
+                    }`}
+                  >
+                    <LayoutGrid size={20} className={getUiMode() === 'command_center' ? 'text-[var(--accent-info)]' : 'text-muted'} />
+                    <div className="flex-1">
+                      <p className={`text-sm font-medium ${getUiMode() === 'command_center' ? 'text-highlight' : 'text-[var(--text-primary)]'}`}>
+                        Command Center
+                      </p>
+                      <p className="text-xs text-muted">
+                        Full-screen grid with node cards, orchestrator panel, and activity bar
+                      </p>
+                    </div>
+                    {getUiMode() === 'command_center' && (
+                      <span className="text-[10px] tracking-wider text-[var(--accent-info)]">ACTIVE</span>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => handleUiModeChange('legacy')}
+                    className={`w-full flex items-center gap-3 p-3 border transition-colors text-left ${
+                      getUiMode() === 'legacy'
+                        ? 'border-[var(--accent-info)]/50 bg-[var(--accent-info)]/5'
+                        : 'border-subtle hover:border-[var(--border-hover)] hover:bg-[var(--bg-secondary)]'
+                    }`}
+                  >
+                    <Monitor size={20} className={getUiMode() === 'legacy' ? 'text-[var(--accent-info)]' : 'text-muted'} />
+                    <div className="flex-1">
+                      <p className={`text-sm font-medium ${getUiMode() === 'legacy' ? 'text-highlight' : 'text-[var(--text-primary)]'}`}>
+                        Classic
+                      </p>
+                      <p className="text-xs text-muted">
+                        Sidebar navigation with dedicated pages for each feature
+                      </p>
+                    </div>
+                    {getUiMode() === 'legacy' && (
+                      <span className="text-[10px] tracking-wider text-[var(--accent-info)]">ACTIVE</span>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/*
+              //
+              // Theme selection.
+              //
+              */}
+
+              <div className="pt-4 border-t border-subtle">
+                <h3 className="text-sm font-semibold text-highlight tracking-wider mb-1">THEME</h3>
+                <p className="text-xs text-muted mb-3">Choose your visual theme</p>
+
+                <div className="flex gap-2 max-w-lg">
+                  <button
+                    onClick={() => setTheme('origin_light')}
+                    className={`flex-1 flex items-center justify-center gap-2 p-3 border transition-colors ${
+                      theme === 'origin_light'
+                        ? 'border-[var(--accent-info)]/50 bg-[var(--accent-info)]/5'
+                        : 'border-subtle hover:border-[var(--border-hover)] hover:bg-[var(--bg-secondary)]'
+                    }`}
+                  >
+                    <Sun size={16} className={theme === 'origin_light' ? 'text-[var(--accent-info)]' : 'text-muted'} />
+                    <span className={`text-sm ${theme === 'origin_light' ? 'text-highlight' : 'text-muted'}`}>Light</span>
+                  </button>
+
+                  <button
+                    onClick={() => setTheme('praxis_dark')}
+                    className={`flex-1 flex items-center justify-center gap-2 p-3 border transition-colors ${
+                      theme === 'praxis_dark'
+                        ? 'border-[var(--accent-info)]/50 bg-[var(--accent-info)]/5'
+                        : 'border-subtle hover:border-[var(--border-hover)] hover:bg-[var(--bg-secondary)]'
+                    }`}
+                  >
+                    <Moon size={16} className={theme === 'praxis_dark' ? 'text-[var(--accent-info)]' : 'text-muted'} />
+                    <span className={`text-sm ${theme === 'praxis_dark' ? 'text-highlight' : 'text-muted'}`}>Dark</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'llm_providers' && (
             <div className="space-y-6">
               <div>

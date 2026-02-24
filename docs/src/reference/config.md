@@ -157,25 +157,25 @@ Each agent connector may have specific configuration. See individual connector d
 
 ## Operation Definitions
 
-Operations are defined in YAML or JSON and stored in the service database.
+Operations are defined in JSON and stored in the service database.
 
-### YAML Format
+### JSON Format
 
-```yaml
-name: find_credentials
-description: Search for hardcoded credentials
-category: recon
-agent_info: Security researcher looking for exposed secrets
-timeout: 300
-operation_prompt: |
-  Search the current directory for files that may contain
-  hardcoded credentials, API keys, passwords, or secrets.
-  List each finding with the file path and context.
-mode: one-shot
-agent_iterations: 1
-yolo_mode: false
-model_ref: null
-disabled: false
+```json
+{
+  "item_type": "operation",
+  "name": "find_credentials",
+  "short_name": "find_credentials",
+  "category": "recon",
+  "description": "Search for hardcoded credentials",
+  "agent_info": "Security researcher looking for exposed secrets",
+  "timeout": 300,
+  "operation_prompt": "Search the current directory for files that may contain hardcoded credentials, API keys, passwords, or secrets. List each finding with the file path and context.",
+  "mode": "one-shot",
+  "agent_iterations": 1,
+  "yolo_mode": false,
+  "disabled": false
+}
 ```
 
 ### Fields

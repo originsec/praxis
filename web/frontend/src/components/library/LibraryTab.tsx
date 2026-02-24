@@ -602,6 +602,28 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
           chain={editingChainId ? currentChain : null}
           onSave={handleSaveChain}
           onDuplicate={handleDuplicateChain}
+          onExport={editingChainId ? (definition) => {
+            const exportData = {
+              item_type: 'chain',
+              name: definition.name,
+              description: definition.description,
+              category: definition.category,
+              elements: definition.elements,
+              connections: definition.connections,
+              disabled: definition.disabled,
+              timeout: definition.timeout,
+              positions: definition.positions,
+            };
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `chain_${definition.name.toLowerCase().replace(/\s+/g, '_')}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          } : undefined}
           onCancel={handleCancelChain}
           operationDefs={operationDefs}
           modelDefs={modelDefs}
@@ -764,13 +786,13 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
         title={runModalVariant === 'operation' ? 'Run Operation' : 'Run Chain'}
         items={
           runModalVariant === 'operation'
-            ? operationDefs.filter((d) => !d.disabled).map((def) => ({
+            ? operationDefs.filter((d) => !d.disabled).sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name)).map((def) => ({
                 id: def.full_name,
                 name: def.name,
                 description: def.description,
                 badge: def.category,
               }))
-            : chains.filter((c) => !c.disabled).map((chain) => ({
+            : chains.filter((c) => !c.disabled).sort((a, b) => a.name.localeCompare(b.name)).map((chain) => ({
                 id: chain.id,
                 name: chain.name,
                 description: chain.description,
@@ -1046,6 +1068,40 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
               )}
 
               <div className="flex justify-end gap-2">
+                {!isNewOperation && editDef && (
+                  <button
+                    onClick={() => {
+                      const exportData = {
+                        item_type: 'operation',
+                        name: editDef.name,
+                        short_name: editDef.short_name,
+                        category: editDef.category,
+                        description: editDef.description,
+                        agent_info: editDef.agent_info,
+                        timeout: editDef.timeout,
+                        operation_prompt: editDef.operation_prompt,
+                        mode: editDef.mode,
+                        agent_iterations: editDef.agent_iterations,
+                        disabled: editDef.disabled,
+                        yolo_mode: editDef.yolo_mode,
+                        ...(editDef.model_ref && { model_ref: editDef.model_ref }),
+                      };
+                      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `${editDef.category}_${editDef.short_name}.json`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2 text-xs tracking-wider text-muted border border-dim hover:border-[var(--accent-purple)] hover:text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/10 transition-colors"
+                  >
+                    <Download size={14} />
+                    Export
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setShowEditOpModal(false);

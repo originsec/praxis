@@ -16,6 +16,7 @@ export interface NodeState {
   // Active terminal session ID (if any).
   //
   active_terminal_id?: string | null;
+  privileged: boolean;
 }
 
 export interface DiscoveredAgent {
@@ -31,6 +32,8 @@ export interface SelectedAgent {
   process_name: string | null;
   yolo_mode: boolean;
   working_dir: string | null;
+  active_transaction_id?: string | null;
+  active_prompt_text?: string | null;
 }
 
 //
@@ -152,7 +155,8 @@ export type TerminalCommand =
   | 'Create'
   | { Write: { data: number[] } }
   | { Resize: { rows: number; cols: number } }
-  | 'Close';
+  | 'Close'
+  | 'Replay';
 
 export type ConfigCommand = { SetReportInterval: { interval_secs: number } };
 
@@ -232,7 +236,8 @@ export type TerminalCommandResult =
   | { Created: { terminal_id: string } }
   | 'Written'
   | 'Resized'
-  | 'Closed';
+  | 'Closed'
+  | { Replay: { data: number[] } };
 
 export type ConfigCommandResult = { ReportIntervalSet: { interval_secs: number } };
 
@@ -772,6 +777,7 @@ export type BrowserMessage =
   | { type: 'op_def_list' }
   | { type: 'op_def_delete'; full_name: string }
   | { type: 'op_def_get'; full_name: string }
+  | { type: 'op_def_set_disabled'; full_name: string; disabled: boolean }
   | { type: 'orchestrator_start' }
   | { type: 'orchestrator_prompt'; prompt_id: string; message: string }
   | { type: 'orchestrator_stop' }
@@ -796,6 +802,7 @@ export type BrowserMessage =
   | { type: 'chain_create'; definition: ChainDefinitionInput }
   | { type: 'chain_update'; chain_id: string; definition: ChainDefinitionInput }
   | { type: 'chain_delete'; chain_id: string }
+  | { type: 'chain_set_disabled'; chain_id: string; disabled: boolean }
   | { type: 'chain_run'; chain_id: string; node_id: string; agent_short_name: string; working_dir: string | null; target_spec?: TargetSpec | null }
   | { type: 'chain_cancel'; execution_id: string }
   | { type: 'chain_execution_list' }

@@ -1,0 +1,380 @@
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import {
+  Bot,
+  Send,
+  Loader2,
+  PlayCircle,
+  StopCircle,
+  Square,
+  AlertCircle,
+  Download,
+  PanelRightClose,
+} from 'lucide-react';
+import { useApp } from '../../context/AppContext';
+import {
+  ChatMessage,
+  StreamingMessage,
+  PlanDisplay,
+} from '../orchestrator/OrchestratorChat';
+import { exportOrchestratorSession, downloadTextFile } from '../../utils/export';
+
+const MIN_WIDTH = 280;
+const MAX_WIDTH = 800;
+const DEFAULT_WIDTH = 380;
+const PANEL_WIDTH_KEY = 'commandCenter.orchestratorWidth';
+
+interface ModelDef {
+  name: string;
+  provider: string;
+  model: string;
+}
+
+interface OrchestratorPanelProps {
+  isOpen: boolean;
+  onToggle: () => void;
+}
+
+export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) {
+  const {
+    state,
+    orchestratorStart,
+    orchestratorStop,
+    orchestratorCancel,
+    orchestratorPrompt,
+    orchestratorClearMessages,
+    getConfig,
+    setConfig,
+  } = useApp();
+  const { orchestrator } = state;
+  const [input, setInput] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  //
+  // Panel width with drag-to-resize. Persisted in localStorage.
+  //
+  const [panelWidth, setPanelWidth] = useState(() => {
+    const stored = localStorage.getItem(PANEL_WIDTH_KEY);
+    return stored ? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, parseInt(stored, 10))) : DEFAULT_WIDTH;
+  });
+  const [isResizing, setIsResizing] = useState(false);
+  const dragStartX = useRef(0);
+  const dragStartWidth = useRef(0);
+
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+    dragStartX.current = e.clientX;
+    dragStartWidth.current = panelWidth;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [panelWidth]);
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const delta = dragStartX.current - e.clientX;
+      const newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, dragStartWidth.current + delta));
+      setPanelWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
+
+  //
+  // Persist width after drag ends.
+  //
+  useEffect(() => {
+    if (!isResizing) {
+      localStorage.setItem(PANEL_WIDTH_KEY, String(panelWidth));
+    }
+  }, [isResizing, panelWidth]);
+
+  //
+  // Fetch config on mount.
+  //
+  useEffect(() => {
+    if (!state.connected) return;
+    getConfig(['llm_feature_orchestrator', 'llm_model_definitions']);
+  }, [state.connected, getConfig]);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [orchestrator.messages, orchestrator.streamingContent, orchestrator.currentToolExecutions]);
+
+  useEffect(() => {
+    if (!orchestrator.isLoading && orchestrator.sessionActive && isOpen) {
+      inputRef.current?.focus();
+    }
+  }, [orchestrator.isLoading, orchestrator.sessionActive, isOpen]);
+
+  const handleSendMessage = () => {
+    if (!input.trim() || orchestrator.isLoading) return;
+    if (input.trim() === '/clear') {
+      orchestratorClearMessages();
+      setInput('');
+      return;
+    }
+    orchestratorPrompt(input.trim());
+    setInput('');
+  };
+
+  const handleExport = () => {
+    if (orchestrator.messages.length === 0) return;
+    const content = exportOrchestratorSession(orchestrator.messages, orchestrator.tokenUsage);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    downloadTextFile(content, `orchestrator-session-${timestamp}.md`);
+  };
+
+  //
+  // Parse model definitions from config.
+  //
+  const modelDefs: ModelDef[] = useMemo(() => {
+    const raw = state.config.llm_model_definitions;
+    if (!raw) return [];
+    try {
+      const defs = JSON.parse(raw);
+      return Array.isArray(defs) ? defs : [];
+    } catch {
+      return [];
+    }
+  }, [state.config.llm_model_definitions]);
+
+  const selectedModelName = state.config.llm_feature_orchestrator || '';
+  const isConfigured = modelDefs.some(d => d.name === selectedModelName);
+
+  const handleModelChange = (name: string) => {
+    setConfig({ llm_feature_orchestrator: name });
+  };
+
+  const handleStart = () => {
+    if (!isConfigured && modelDefs.length > 0) {
+      setConfig({ llm_feature_orchestrator: modelDefs[0].name });
+    }
+    orchestratorStart();
+  };
+
+  //
+  // Current model display info.
+  //
+  const currentModel = modelDefs.find(d => d.name === selectedModelName);
+
+  return (
+    <div
+      className={`flex-shrink-0 flex ${
+        isResizing ? '' : 'transition-all duration-200'
+      } ${
+        isOpen ? '' : 'w-0 overflow-hidden'
+      }`}
+      style={isOpen ? { width: panelWidth } : undefined}
+    >
+      {isOpen && (
+        <>
+          {/*
+          //
+          // Drag handle for resizing.
+          //
+          */}
+          <div
+            onMouseDown={handleDragStart}
+            className="w-1 cursor-col-resize bg-transparent hover:bg-[var(--accent-info)]/30 active:bg-[var(--accent-info)]/50 transition-colors flex-shrink-0 border-l border-subtle"
+          />
+
+          <div className="flex-1 flex flex-col min-w-0 bg-[var(--bg-secondary)]">
+            {/*
+            //
+            // Panel header.
+            //
+            */}
+            <div className="px-3 py-2 border-b border-subtle flex items-center justify-between flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <Bot size={14} className="text-[var(--accent-purple)]" />
+                <span className="text-xs font-medium text-highlight">Orchestrator</span>
+                {orchestrator.sessionActive && (
+                  <span className="text-[9px] px-1.5 py-0.5 bg-[var(--accent-success)]/20 text-[var(--accent-success)]">LIVE</span>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleExport}
+                  disabled={orchestrator.messages.length === 0}
+                  className="p-1 text-muted hover:text-[var(--text-primary)] transition-colors disabled:opacity-30"
+                  title="Export transcript"
+                >
+                  <Download size={12} />
+                </button>
+                {orchestrator.sessionActive ? (
+                  <button
+                    onClick={orchestratorStop}
+                    className="p-1 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/20 transition-colors"
+                    title="Stop session"
+                  >
+                    <StopCircle size={12} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleStart}
+                    disabled={!isConfigured || orchestrator.isStarting}
+                    className="p-1 text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/20 transition-colors disabled:opacity-30"
+                    title="Start session"
+                  >
+                    {orchestrator.isStarting
+                      ? <Loader2 size={12} className="animate-spin" />
+                      : <PlayCircle size={12} />}
+                  </button>
+                )}
+                <button
+                  onClick={onToggle}
+                  className="p-1 text-muted hover:text-[var(--text-primary)] transition-colors"
+                  title="Close panel"
+                >
+                  <PanelRightClose size={12} />
+                </button>
+              </div>
+            </div>
+
+            {/*
+            //
+            // Model selector — shown when no session is active.
+            //
+            */}
+            {!orchestrator.sessionActive && modelDefs.length > 0 && (
+              <div className="px-3 py-1.5 border-b border-subtle flex items-center gap-2 flex-shrink-0">
+                <span className="text-[9px] text-muted tracking-wider">MODEL</span>
+                <select
+                  value={selectedModelName}
+                  onChange={e => handleModelChange(e.target.value)}
+                  className="flex-1 bg-[var(--bg-primary)] border border-subtle px-1.5 py-0.5 text-[10px] text-highlight focus:outline-none focus:border-[var(--border-active)] truncate"
+                >
+                  {!selectedModelName && <option value="">Select model...</option>}
+                  {modelDefs.map(d => (
+                    <option key={d.name} value={d.name}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/*
+            //
+            // Active model indicator — shown during session.
+            //
+            */}
+            {orchestrator.sessionActive && currentModel && (
+              <div className="px-3 py-1 border-b border-subtle text-[9px] text-muted flex-shrink-0">
+                {currentModel.provider}/{currentModel.model}
+              </div>
+            )}
+
+            {/*
+            //
+            // Not configured warning.
+            //
+            */}
+            {!isConfigured && modelDefs.length === 0 && (
+              <div className="px-3 py-2 bg-[var(--accent-warning)]/10 border-b border-[var(--accent-warning)]/30 flex items-start gap-2">
+                <AlertCircle size={12} className="text-[var(--accent-warning)] mt-0.5 flex-shrink-0" />
+                <p className="text-[10px] text-[var(--accent-warning)]">
+                  No models configured. Go to Settings.
+                </p>
+              </div>
+            )}
+
+            {/*
+            //
+            // Messages area.
+            //
+            */}
+            <div className="flex-1 overflow-auto p-2 space-y-2">
+              {orchestrator.messages.map(msg => (
+                <ChatMessage key={msg.id} message={msg} compact />
+              ))}
+
+              {orchestrator.isLoading && (
+                <StreamingMessage
+                  content={orchestrator.streamingContent}
+                  toolExecutions={orchestrator.currentToolExecutions}
+                  compact
+                />
+              )}
+
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/*
+            //
+            // Plan display — compact bar above input.
+            //
+            */}
+            {orchestrator.currentPlan && orchestrator.currentPlan.steps.length > 0 && (
+              <PlanDisplay plan={orchestrator.currentPlan} compact />
+            )}
+
+            {/*
+            //
+            // Token usage footer.
+            //
+            */}
+            {orchestrator.tokenUsage && (
+              <div className="px-3 py-1 border-t border-subtle text-[9px] text-muted flex-shrink-0">
+                {orchestrator.tokenUsage.totalTokens.toLocaleString()} tokens
+              </div>
+            )}
+
+            {/*
+            //
+            // Input.
+            //
+            */}
+            <div className="px-2 py-2 border-t border-subtle flex-shrink-0">
+              <div className="flex gap-1">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
+                  placeholder={orchestrator.sessionActive ? 'Ask...' : 'Start a session first'}
+                  className="flex-1 bg-[var(--bg-primary)] border border-subtle px-2 py-1.5 text-xs text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:outline-none focus:border-[var(--border-active)]"
+                  disabled={!orchestrator.sessionActive || orchestrator.isLoading}
+                />
+                {orchestrator.isLoading ? (
+                  <button
+                    onClick={orchestratorCancel}
+                    className="px-2 py-1.5 bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors"
+                    title="Stop generation"
+                  >
+                    <Square size={14} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSendMessage}
+                    disabled={!input.trim() || !orchestrator.sessionActive}
+                    className="px-2 py-1.5 bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/30 transition-colors disabled:opacity-30"
+                  >
+                    <Send size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

@@ -19,7 +19,8 @@ export function Header({ onOpenMobileNav }: HeaderProps) {
   //
   const getPageTitle = () => {
     const path = location.pathname;
-    if (path === '/') return 'DASHBOARD';
+    if (path === '/') return 'COMMAND CENTER';
+    if (path === '/dashboard') return 'DASHBOARD';
     if (path.startsWith('/nodes/') && path.includes('/agents/')) return 'AGENT SESSION';
     if (path.startsWith('/nodes/')) return 'NODE DETAILS';
     if (path === '/nodes') return 'NODES';

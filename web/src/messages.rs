@@ -59,7 +59,7 @@ pub enum BrowserMessage {
     ConfigSet {
         values: HashMap<String, String>,
     },
-    /// Add/update an operation definition from YAML or JSON
+    /// Add/update an operation definition from JSON
     OpDefAdd {
         content: String,
     },
@@ -68,6 +68,11 @@ pub enum BrowserMessage {
     /// Delete an operation definition
     OpDefDelete {
         full_name: String,
+    },
+    /// Set the disabled flag on an operation definition
+    OpDefSetDisabled {
+        full_name: String,
+        disabled: bool,
     },
     /// Get a specific operation definition
     OpDefGet {
@@ -160,6 +165,11 @@ pub enum BrowserMessage {
     /// Delete a chain
     ChainDelete {
         chain_id: String,
+    },
+    /// Set the disabled flag on a chain
+    ChainSetDisabled {
+        chain_id: String,
+        disabled: bool,
     },
     /// Run a chain
     ChainRun {

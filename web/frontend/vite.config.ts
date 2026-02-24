@@ -19,10 +19,7 @@ export default defineConfig({
     },
   },
   build: {
-    //
-    // Internal tool, slightly larger chunks are acceptable.
-    //
-    chunkSizeWarningLimit: 600,
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       output: {
         manualChunks: {
@@ -30,9 +27,10 @@ export default defineConfig({
           // Split vendor libraries into separate chunks for better caching.
           //
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-flow': ['@xyflow/react'],
+          'vendor-flow': ['@xyflow/react', '@dagrejs/dagre'],
           'vendor-ui': ['lucide-react', '@xterm/xterm', '@xterm/addon-fit'],
           'vendor-markdown': ['react-markdown', 'remark-gfm'],
+          'vendor-code': ['prism-react-renderer'],
         },
       },
     },

@@ -89,6 +89,9 @@ pub async fn handle_browser_message(
         BrowserMessage::OpDefGet { full_name } => {
             state.rabbitmq.get_op_def(full_name).await?;
         }
+        BrowserMessage::OpDefSetDisabled { full_name, disabled } => {
+            state.rabbitmq.set_op_def_disabled(full_name, disabled).await?;
+        }
         BrowserMessage::OrchestratorStart => {
             state.rabbitmq.start_orchestrator().await?;
         }
@@ -187,6 +190,9 @@ pub async fn handle_browser_message(
         }
         BrowserMessage::ChainDelete { chain_id } => {
             state.rabbitmq.delete_chain(chain_id).await?;
+        }
+        BrowserMessage::ChainSetDisabled { chain_id, disabled } => {
+            state.rabbitmq.set_chain_disabled(chain_id, disabled).await?;
         }
         BrowserMessage::ChainRun {
             chain_id,

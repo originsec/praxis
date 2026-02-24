@@ -456,6 +456,17 @@ function reduceOrchestrator(state: AppState, action: Action): AppState | null {
           sessionActive: false,
           isStarting: false,
           isLoading: false,
+          messages: state.orchestrator.sessionActive
+            ? [
+                ...state.orchestrator.messages,
+                {
+                  id: generateUUID(),
+                  role: 'system',
+                  content: 'Orchestrator session stopped.',
+                  timestamp: new Date(),
+                },
+              ]
+            : state.orchestrator.messages,
         },
       };
     case 'ORCHESTRATOR_ADD_USER_MESSAGE':
@@ -577,9 +588,10 @@ function reduceOrchestrator(state: AppState, action: Action): AppState | null {
       return {
         ...state,
         orchestrator: {
-          ...state.orchestrator,
-          messages: [],
-          currentPlan: null,
+          ...initialOrchestratorState,
+          sessionActive: state.orchestrator.sessionActive,
+          provider: state.orchestrator.provider,
+          model: state.orchestrator.model,
         },
       };
     case 'ORCHESTRATOR_SET_LOADING':

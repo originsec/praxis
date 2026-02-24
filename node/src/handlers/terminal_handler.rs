@@ -99,6 +99,20 @@ pub async fn handle_terminal_command(
                 },
             }
         }
+        TerminalCommand::Replay => {
+            let state = node_state.read().await;
+            let terminal_id = match state.terminal_manager.get_session_for_client(client_id) {
+                Some(id) => id.clone(),
+                None => {
+                    return NodeCommandResult::Error {
+                        message: "No terminal session for client".to_string(),
+                    };
+                }
+            };
+
+            let data = state.terminal_manager.get_scrollback(&terminal_id).unwrap_or_default();
+            NodeCommandResult::Terminal(TerminalCommandResult::Replay { data })
+        }
         TerminalCommand::Close => {
             let mut state = node_state.write().await;
 

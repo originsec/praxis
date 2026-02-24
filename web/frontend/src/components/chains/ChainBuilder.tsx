@@ -15,7 +15,7 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge, Connection, OnSelectionChangeParams } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, X, Save, Copy, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings, Check, AlertTriangle, Wrench, FileText } from 'lucide-react';
+import { Play, X, Save, Copy, Download, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings, Check, AlertTriangle, Wrench, FileText } from 'lucide-react';
 import { ConfigModal } from '../common/ConfigModal';
 import { Modal } from '../common/Modal';
 import { ChainTriggerPanel } from './ChainTriggerPanel';
@@ -443,6 +443,7 @@ interface ChainBuilderInnerProps {
   chain?: ChainDefinitionFull | null;
   onSave: (definition: ChainDefinitionInput) => void;
   onDuplicate?: (definition: ChainDefinitionInput) => void;
+  onExport?: (definition: ChainDefinitionInput) => void;
   onCancel: () => void;
   operationDefs: OperationDefinitionInfo[];
   modelDefs: ModelDefinition[];
@@ -454,7 +455,7 @@ interface ChainBuilderInnerProps {
   saveError?: string | null;
 }
 
-function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs, modelDefs, nodes: _systemNodes, toolkitTools, payloads, send, saveStatus, saveError }: ChainBuilderInnerProps) {
+function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, operationDefs, modelDefs, nodes: _systemNodes, toolkitTools, payloads, send, saveStatus, saveError }: ChainBuilderInnerProps) {
   const [name, setName] = useState(chain?.name || '');
   const [description, setDescription] = useState(chain?.description || '');
   const [timeout, setChainTimeout] = useState(chain?.timeout || 1800);
@@ -1826,14 +1827,14 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
       // Header.
       //
       */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-subtle bg-[var(--bg-tertiary)]">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-subtle bg-[var(--bg-tertiary)]">
+        <div className="flex items-center gap-2">
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Chain name *"
-            className={`bg-[var(--bg-primary)] border px-3 py-1.5 text-sm text-highlight w-40 focus:outline-none transition-colors ${
+            className={`bg-[var(--bg-primary)] border px-2.5 py-1 text-xs text-highlight w-48 focus:outline-none transition-colors ${
               name.trim() ? 'border-dim focus:border-subtle' : 'border-[var(--accent-error)]'
             }`}
           />
@@ -1842,43 +1843,57 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Description"
-            className="bg-[var(--bg-primary)] border border-dim px-3 py-1.5 text-sm text-highlight flex-1 min-w-[150px] focus:outline-none focus:border-subtle transition-colors"
+            className="bg-[var(--bg-primary)] border border-dim px-2.5 py-1 text-xs text-highlight flex-1 min-w-[450px] focus:outline-none focus:border-subtle transition-colors"
           />
-          <div className="flex items-center gap-1.5">
-            <label className="text-xs tracking-wider text-[var(--text-secondary)]">Timeout:</label>
+          <div className="flex items-center gap-1">
+            <label className="text-[10px] tracking-wider text-[var(--text-secondary)]">Timeout:</label>
             <input
               type="number"
               value={timeout}
               onChange={(e) => setChainTimeout(parseInt(e.target.value) || 1800)}
               min={1}
-              className="bg-[var(--bg-primary)] border border-dim px-2 py-1.5 text-sm text-highlight w-20 text-center focus:outline-none focus:border-subtle transition-colors"
+              className="bg-[var(--bg-primary)] border border-dim px-1.5 py-1 text-xs text-highlight w-16 text-center focus:outline-none focus:border-subtle transition-colors"
             />
-            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>s</span>
+            <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>s</span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <button
             onClick={onCancel}
-            className="flex items-center gap-2 px-4 py-2 text-xs tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1 text-[10px] tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors"
           >
-            <X size={14} />
+            <X size={11} />
             Close
           </button>
           {onDuplicate && (
             <button
               onClick={handleDuplicateClick}
               disabled={!canSave}
-              className="inline-flex items-center gap-2 px-4 py-2 text-xs tracking-wider border border-dim text-muted hover:border-subtle hover:bg-[var(--highlight)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-1.5 px-3 py-1 text-[10px] tracking-wider border border-dim text-muted hover:border-subtle hover:bg-[var(--highlight)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               title="Duplicate as new chain"
             >
-              <Copy size={14} />
+              <Copy size={11} />
               Duplicate
+            </button>
+          )}
+          {onExport && chain && (
+            <button
+              onClick={() => {
+                const definition = flowToChain(nodes, edges, name.trim(), description, category, timeout, extraData);
+                onExport(definition);
+              }}
+              disabled={!canSave}
+              className="inline-flex items-center gap-1.5 px-3 py-1 text-[10px] tracking-wider border border-dim text-muted hover:border-[var(--accent-purple)] hover:text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Export as JSON"
+            >
+              <Download size={11} />
+              Export
             </button>
           )}
           <button
             onClick={handleSave}
             disabled={!canSave}
-            className={`inline-flex items-center gap-2 px-4 py-2 text-xs tracking-wider border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+            className={`inline-flex items-center gap-1.5 px-3 py-1 text-[10px] tracking-wider border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
               saveFlash === 'saved'
                 ? 'border-[var(--accent-success)] bg-[var(--accent-success)]/20 text-[var(--accent-success)]'
                 : saveFlash === 'error'
@@ -1887,7 +1902,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onCancel, operationDefs
             }`}
             title={!canSave ? 'Chain name is required' : undefined}
           >
-            {saveFlash === 'saved' ? <Check size={14} /> : saveFlash === 'error' ? <AlertTriangle size={14} /> : <Save size={14} />}
+            {saveFlash === 'saved' ? <Check size={11} /> : saveFlash === 'error' ? <AlertTriangle size={11} /> : <Save size={11} />}
             {saveFlash === 'saved' ? 'Saved' : saveFlash === 'error' ? 'Error' : 'Save'}
           </button>
         </div>
@@ -2610,6 +2625,7 @@ interface ChainBuilderProps {
   chain?: ChainDefinitionFull | null;
   onSave: (definition: ChainDefinitionInput) => void;
   onDuplicate?: (definition: ChainDefinitionInput) => void;
+  onExport?: (definition: ChainDefinitionInput) => void;
   onCancel: () => void;
   operationDefs: OperationDefinitionInfo[];
   modelDefs?: ModelDefinition[];

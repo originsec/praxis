@@ -74,24 +74,24 @@ export function TargetSpecEditor({ value, onChange, nodes, showTriggeringNodeOpt
   const availableAgents = allAgentNames.filter(n => !value.agent_short_names.includes(n));
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       {/*
       //
       // Node multi-select.
       //
       */}
       <div>
-        <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Target Nodes</label>
-        <div className="flex flex-wrap gap-1.5 mb-1.5">
+        <label className="block text-[10px] tracking-wider text-[var(--text-secondary)] mb-1">Target Nodes</label>
+        <div className="flex flex-wrap gap-1 mb-1">
           {value.node_ids.length === 0 && (
-            <span className="text-xs text-muted italic">All nodes</span>
+            <span className="text-[10px] text-muted italic">All nodes</span>
           )}
           {value.node_ids.map(nodeId => {
             const node = nodes.find(n => n.node_id === nodeId);
             return (
               <span
                 key={nodeId}
-                className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-[var(--accent-info)]/15 text-[var(--accent-info)] border border-[var(--accent-info)]/30"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] bg-[var(--accent-info)]/15 text-[var(--accent-info)] border border-[var(--accent-info)]/30"
               >
                 {node?.machine_name || nodeId.slice(0, 8)}
                 <button
@@ -99,7 +99,7 @@ export function TargetSpecEditor({ value, onChange, nodes, showTriggeringNodeOpt
                   onClick={() => handleRemoveNode(nodeId)}
                   className="hover:text-highlight transition-colors"
                 >
-                  <X size={10} />
+                  <X size={9} />
                 </button>
               </span>
             );
@@ -110,9 +110,9 @@ export function TargetSpecEditor({ value, onChange, nodes, showTriggeringNodeOpt
             type="button"
             onClick={() => { setNodeDropdownOpen(!nodeDropdownOpen); setAgentDropdownOpen(false); }}
             disabled={availableNodes.length === 0}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors w-full disabled:opacity-50"
+            className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors w-full disabled:opacity-50"
           >
-            <ChevronDown size={12} />
+            <ChevronDown size={11} />
             {availableNodes.length === 0 ? 'No more nodes' : 'Add node'}
           </button>
           {nodeDropdownOpen && availableNodes.length > 0 && (
@@ -122,7 +122,7 @@ export function TargetSpecEditor({ value, onChange, nodes, showTriggeringNodeOpt
                   key={node.node_id}
                   type="button"
                   onClick={() => handleAddNode(node.node_id)}
-                  className="block w-full text-left px-2.5 py-1.5 text-xs text-highlight hover:bg-[var(--highlight)] transition-colors"
+                  className="block w-full text-left px-2 py-1 text-[10px] text-highlight hover:bg-[var(--highlight)] transition-colors"
                 >
                   {node.machine_name} <span className="text-muted">({node.os_details})</span>
                 </button>
@@ -138,13 +138,13 @@ export function TargetSpecEditor({ value, onChange, nodes, showTriggeringNodeOpt
       //
       */}
       <div>
-        <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">OS Filter</label>
+        <label className="block text-[10px] tracking-wider text-[var(--text-secondary)] mb-1">OS Filter</label>
         <input
           type="text"
           value={value.os_filter || ''}
           onChange={(e) => onChange({ ...value, os_filter: e.target.value || null })}
           placeholder="e.g. Windows, Linux (empty = all)"
-          className="w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle transition-colors"
+          className="w-full bg-[var(--bg-primary)] border border-dim px-2 py-1 text-[10px] text-highlight focus:outline-none focus:border-subtle transition-colors"
         />
       </div>
 
@@ -154,15 +154,15 @@ export function TargetSpecEditor({ value, onChange, nodes, showTriggeringNodeOpt
       //
       */}
       <div>
-        <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Target Agents</label>
-        <div className="flex flex-wrap gap-1.5 mb-1.5">
+        <label className="block text-[10px] tracking-wider text-[var(--text-secondary)] mb-1">Target Agents</label>
+        <div className="flex flex-wrap gap-1 mb-1">
           {value.agent_short_names.length === 0 && (
-            <span className="text-xs text-muted italic">All agents</span>
+            <span className="text-[10px] text-muted italic">All agents</span>
           )}
           {value.agent_short_names.map(name => (
             <span
               key={name}
-              className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-[var(--accent-purple)]/15 text-[var(--accent-purple)] border border-[var(--accent-purple)]/30"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] bg-[var(--accent-purple)]/15 text-[var(--accent-purple)] border border-[var(--accent-purple)]/30"
             >
               {name}
               <button
@@ -170,7 +170,7 @@ export function TargetSpecEditor({ value, onChange, nodes, showTriggeringNodeOpt
                 onClick={() => handleRemoveAgent(name)}
                 className="hover:text-highlight transition-colors"
               >
-                <X size={10} />
+                <X size={9} />
               </button>
             </span>
           ))}
@@ -180,9 +180,9 @@ export function TargetSpecEditor({ value, onChange, nodes, showTriggeringNodeOpt
             type="button"
             onClick={() => { setAgentDropdownOpen(!agentDropdownOpen); setNodeDropdownOpen(false); }}
             disabled={availableAgents.length === 0}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors w-full disabled:opacity-50"
+            className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors w-full disabled:opacity-50"
           >
-            <ChevronDown size={12} />
+            <ChevronDown size={11} />
             {availableAgents.length === 0 ? 'No more agents' : 'Add agent'}
           </button>
           {agentDropdownOpen && availableAgents.length > 0 && (
@@ -192,7 +192,7 @@ export function TargetSpecEditor({ value, onChange, nodes, showTriggeringNodeOpt
                   key={name}
                   type="button"
                   onClick={() => handleAddAgent(name)}
-                  className="block w-full text-left px-2.5 py-1.5 text-xs text-highlight hover:bg-[var(--highlight)] transition-colors"
+                  className="block w-full text-left px-2 py-1 text-[10px] text-highlight hover:bg-[var(--highlight)] transition-colors"
                 >
                   {name}
                 </button>
@@ -215,7 +215,7 @@ export function TargetSpecEditor({ value, onChange, nodes, showTriggeringNodeOpt
             onChange={(e) => onChange({ ...value, include_triggering_node: e.target.checked })}
             className="accent-[var(--accent-info)]"
           />
-          <span className="text-xs text-[var(--text-secondary)]">Include triggering node</span>
+          <span className="text-[10px] text-[var(--text-secondary)]">Include triggering node</span>
         </label>
       )}
     </div>

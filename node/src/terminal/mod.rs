@@ -7,6 +7,7 @@ pub use session::TerminalSession;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::collections::HashMap;
 use std::io::Read;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
 pub struct TerminalManager {
@@ -68,6 +69,8 @@ impl TerminalManager {
 
         let terminal_id_clone = terminal_id.clone();
         let client_id_clone = client_id.clone();
+        let scrollback = Arc::new(Mutex::new(Vec::new()));
+        let scrollback_writer = scrollback.clone();
 
         std::thread::spawn(move || {
             common::log_info!("Terminal {} reader thread started", terminal_id_clone);
@@ -92,6 +95,7 @@ impl TerminalManager {
                     Ok(n) => {
                         common::log_info!("Terminal {} read {} bytes", terminal_id_clone, n);
                         let data = buf[..n].to_vec();
+                        TerminalSession::append_scrollback(&scrollback_writer, &data);
                         if output_tx
                             .send(TerminalOutputEvent {
                                 terminal_id: terminal_id_clone.clone(),
@@ -128,6 +132,7 @@ impl TerminalManager {
             master: pair.master,
             writer,
             shutdown_tx: Some(shutdown_tx),
+            scrollback,
         };
 
         self.sessions.insert(terminal_id.clone(), session);
@@ -189,6 +194,10 @@ impl TerminalManager {
         for id in to_close {
             let _ = self.close_session(&id);
         }
+    }
+
+    pub fn get_scrollback(&self, terminal_id: &str) -> Option<Vec<u8>> {
+        self.sessions.get(terminal_id).map(|s| s.get_scrollback())
     }
 
     //

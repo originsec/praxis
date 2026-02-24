@@ -365,10 +365,12 @@ pub struct SelectedAgent {
     pub yolo_mode: bool,
     /// Working directory context for the session
     pub working_dir: Option<String>,
-    //
-    // Note: Tools and config are now retrieved via Recon/ReconSemantic
-    // commands.
-    //
+    /// Transaction ID of the currently in-flight prompt (if any).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_transaction_id: Option<String>,
+    /// Prompt text of the currently in-flight prompt (if any).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_prompt_text: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -395,6 +397,9 @@ pub struct NodeInformationUpdate {
     /// Active terminal session ID (if any)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_terminal_id: Option<String>,
+    /// Whether the node is running with elevated privileges (root/admin)
+    #[serde(default)]
+    pub privileged: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -609,6 +614,8 @@ pub enum TerminalCommand {
     Resize { rows: u16, cols: u16 },
     /// Close the terminal session
     Close,
+    /// Request scrollback buffer replay (returns buffered output)
+    Replay,
 }
 
 /// Configuration-related commands (fire-and-forget node settings)
@@ -734,6 +741,8 @@ pub enum TerminalCommandResult {
     Resized,
     /// Terminal closed
     Closed,
+    /// Scrollback buffer replay
+    Replay { data: Vec<u8> },
 }
 
 /// Result of a config command
@@ -1579,9 +1588,7 @@ pub enum ClientSignalMessage {
     //
     // Operation definitions (stored in service database).
     //
-    /// Add/update an operation definition from YAML or JSON content.
-    /// Format is auto-detected: content starting with '{' is treated as JSON,
-    /// otherwise as YAML.
+    /// Add/update an operation definition from JSON content.
     OpDefAdd {
         client_id: String,
         content: String,
@@ -1594,6 +1601,12 @@ pub enum ClientSignalMessage {
     OpDefDelete {
         client_id: String,
         full_name: String,
+    },
+    /// Set the disabled flag on an operation definition
+    OpDefSetDisabled {
+        client_id: String,
+        full_name: String,
+        disabled: bool,
     },
     /// Get a specific operation definition
     OpDefGet {
@@ -1628,6 +1641,12 @@ pub enum ClientSignalMessage {
     ChainDelete {
         client_id: String,
         chain_id: String,
+    },
+    /// Set the disabled flag on a chain
+    ChainSetDisabled {
+        client_id: String,
+        chain_id: String,
+        disabled: bool,
     },
     /// Run a chain
     ChainRun {
@@ -2652,6 +2671,9 @@ pub struct NodeState {
     /// Active terminal session ID (if any)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_terminal_id: Option<String>,
+    /// Whether the node is running with elevated privileges (root/admin)
+    #[serde(default)]
+    pub privileged: bool,
 }
 
 /// Complete system state broadcast to clients

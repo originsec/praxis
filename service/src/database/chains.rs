@@ -233,7 +233,8 @@ pub struct ChainDefinition {
     pub elements: Vec<ChainElement>,
     /// All connections between elements
     pub connections: Vec<ChainConnection>,
-    /// Whether the chain is disabled
+    /// Whether the chain is disabled (stored in table column, not in JSON).
+    #[serde(default, skip_serializing)]
     pub disabled: bool,
     /// Timeout for the entire chain execution in seconds
     pub timeout: Option<u64>,
@@ -915,48 +916,42 @@ impl Database {
     /// Get a chain definition by ID
     /// Automatically migrates old format (SessionBox, positions) to new format
     pub async fn get_chain(&self, id: &str) -> Result<Option<ChainDefinition>> {
-        let sql = "SELECT definition FROM operation_chains WHERE id = $1";
+        let sql = "SELECT definition, disabled FROM operation_chains WHERE id = $1";
 
-        let json_opt: Option<String> = match &self.pool {
+        let row_opt: Option<(String, bool)> = match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let row = sqlx::query(sql)
+                sqlx::query(sql)
                     .bind(id)
                     .fetch_optional(pool)
-                    .await?;
-                row.map(|r| r.get(0))
+                    .await?
+                    .map(|r| (r.get(0), r.get(1)))
             }
             DatabasePool::Postgres(pool) => {
-                let row = sqlx::query(sql)
+                sqlx::query(sql)
                     .bind(id)
                     .fetch_optional(pool)
-                    .await?;
-                row.map(|r| r.get(0))
+                    .await?
+                    .map(|r| {
+                        let disabled: i16 = r.get(1);
+                        (r.get(0), disabled != 0)
+                    })
             }
         };
 
-        match json_opt {
-            Some(json) => {
-                //
-                // Try to deserialize directly first.
-                //
-                match serde_json::from_str::<ChainDefinition>(&json) {
-                    Ok(chain) => Ok(Some(chain)),
+        match row_opt {
+            Some((json, disabled)) => {
+                let mut chain = match serde_json::from_str::<ChainDefinition>(&json) {
+                    Ok(c) => c,
                     Err(_) => {
-                        //
-                        // Try migration for old format.
-                        //
                         if let Some(migrated_json) = migrate_chain_json(&json) {
-                            let chain: ChainDefinition = serde_json::from_str(&migrated_json)?;
-                            Ok(Some(chain))
+                            serde_json::from_str(&migrated_json)?
                         } else {
-                            //
-                            // Migration failed, try original error.
-                            //
-                            let chain: ChainDefinition = serde_json::from_str(&json)?;
-                            Ok(Some(chain))
+                            serde_json::from_str(&json)?
                         }
                     }
-                }
+                };
+                chain.disabled = disabled;
+                Ok(Some(chain))
             }
             None => Ok(None),
         }
@@ -965,38 +960,32 @@ impl Database {
     /// List all chain definitions (returns summary info)
     /// Automatically handles migration of old format chains
     pub async fn list_chains(&self) -> Result<Vec<ChainDefinitionInfo>> {
-        let sql = "SELECT definition FROM operation_chains ORDER BY category, name";
+        let sql = "SELECT definition, disabled FROM operation_chains ORDER BY category, name";
 
-        let rows: Vec<String> = match &self.pool {
+        let rows: Vec<(String, bool)> = match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql)
-                    .fetch_all(pool)
-                    .await?;
-                rows.iter().map(|r| r.get(0)).collect()
+                let rows = sqlx::query(sql).fetch_all(pool).await?;
+                rows.iter().map(|r| (r.get(0), r.get(1))).collect()
             }
             DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql)
-                    .fetch_all(pool)
-                    .await?;
-                rows.iter().map(|r| r.get(0)).collect()
+                let rows = sqlx::query(sql).fetch_all(pool).await?;
+                rows.iter().map(|r| {
+                    let disabled: i16 = r.get(1);
+                    (r.get(0), disabled != 0)
+                }).collect()
             }
         };
 
         let chains: Vec<ChainDefinitionInfo> = rows
             .into_iter()
-            .filter_map(|json| {
-                //
-                // Try direct deserialization first.
-                //
+            .filter_map(|(json, disabled)| {
                 serde_json::from_str::<ChainDefinition>(&json)
                     .ok()
                     .or_else(|| {
-                        //
-                        // Try migration for old format.
-                        //
                         migrate_chain_json(&json)
                             .and_then(|migrated| serde_json::from_str::<ChainDefinition>(&migrated).ok())
                     })
+                    .map(|mut c| { c.disabled = disabled; c })
             })
             .map(|c| c.to_info())
             .collect();
@@ -1008,40 +997,32 @@ impl Database {
     /// Automatically handles migration of old format chains
     #[allow(dead_code)]
     pub async fn list_chains_by_category(&self, category: &str) -> Result<Vec<ChainDefinitionInfo>> {
-        let sql = "SELECT definition FROM operation_chains WHERE category = $1 ORDER BY name";
+        let sql = "SELECT definition, disabled FROM operation_chains WHERE category = $1 ORDER BY name";
 
-        let rows: Vec<String> = match &self.pool {
+        let rows: Vec<(String, bool)> = match &self.pool {
             DatabasePool::Sqlite(pool) => {
-                let rows = sqlx::query(sql)
-                    .bind(category)
-                    .fetch_all(pool)
-                    .await?;
-                rows.iter().map(|r| r.get(0)).collect()
+                let rows = sqlx::query(sql).bind(category).fetch_all(pool).await?;
+                rows.iter().map(|r| (r.get(0), r.get(1))).collect()
             }
             DatabasePool::Postgres(pool) => {
-                let rows = sqlx::query(sql)
-                    .bind(category)
-                    .fetch_all(pool)
-                    .await?;
-                rows.iter().map(|r| r.get(0)).collect()
+                let rows = sqlx::query(sql).bind(category).fetch_all(pool).await?;
+                rows.iter().map(|r| {
+                    let disabled: i16 = r.get(1);
+                    (r.get(0), disabled != 0)
+                }).collect()
             }
         };
 
         let chains: Vec<ChainDefinitionInfo> = rows
             .into_iter()
-            .filter_map(|json| {
-                //
-                // Try direct deserialization first.
-                //
+            .filter_map(|(json, disabled)| {
                 serde_json::from_str::<ChainDefinition>(&json)
                     .ok()
                     .or_else(|| {
-                        //
-                        // Try migration for old format.
-                        //
                         migrate_chain_json(&json)
                             .and_then(|migrated| serde_json::from_str::<ChainDefinition>(&migrated).ok())
                     })
+                    .map(|mut c| { c.disabled = disabled; c })
             })
             .map(|c| c.to_info())
             .collect();
@@ -1068,6 +1049,35 @@ impl Database {
             }
             DatabasePool::Postgres(pool) => {
                 sqlx::query(sql)
+                    .bind(id)
+                    .execute(pool)
+                    .await?
+                    .rows_affected()
+            }
+        };
+
+        Ok(count > 0)
+    }
+
+    /// Set the disabled flag on a chain definition
+    pub async fn set_chain_disabled(&self, id: &str, disabled: bool) -> Result<bool> {
+        let sql = "UPDATE operation_chains SET disabled = $1, updated_at = $2 WHERE id = $3";
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let count = match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                sqlx::query(sql)
+                    .bind(if disabled { 1i32 } else { 0i32 })
+                    .bind(&now)
+                    .bind(id)
+                    .execute(pool)
+                    .await?
+                    .rows_affected()
+            }
+            DatabasePool::Postgres(pool) => {
+                sqlx::query(sql)
+                    .bind(if disabled { 1i16 } else { 0i16 })
+                    .bind(&now)
                     .bind(id)
                     .execute(pool)
                     .await?

@@ -68,7 +68,7 @@ export function StyledOutput({ output }: { output: string }) {
           case 'outgoing':
             return (
               <div key={idx} className="border-l border-[var(--text-secondary)] pl-2">
-                <div className="text-[10px] text-[var(--text-secondary)] font-medium mb-0.5 flex items-center gap-1">
+                <div className="text-[10px] text-[var(--text-primary)] font-medium mb-0.5 flex items-center gap-1">
                   <span>→</span> {block.label}
                 </div>
                 <pre className="text-[11px] whitespace-pre-wrap font-mono text-muted">{block.content}</pre>
@@ -99,14 +99,25 @@ export function StyledOutput({ output }: { output: string }) {
 
             if (!displayContent) return null;
 
+            //
+            // If content contains Braille characters (U+2800-U+28FF) or other
+            // box-drawing art, render as preformatted text to preserve the grid
+            // layout. Markdown processing would collapse the whitespace.
+            //
+            const hasBrailleArt = /[\u2800-\u28FF]/.test(displayContent);
+
             return (
               <div key={idx} className="border-l pl-2" style={{ borderColor }}>
-                <div className="text-[10px] font-medium mb-0.5 flex items-center gap-1 text-[var(--text-secondary)]">
+                <div className="text-[10px] font-medium mb-0.5 flex items-center gap-1 text-[var(--text-primary)]">
                   <span>←</span> {block.label}
                 </div>
-                <div className="prose prose-xs prose-invert max-w-none text-[11px] [&_table]:text-[10px] [&_th]:p-0.5 [&_td]:p-0.5 [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_h3]:text-xs [&_h3]:my-1">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
-                </div>
+                {hasBrailleArt ? (
+                  <pre className="text-[11px] whitespace-pre font-mono text-[var(--text-secondary)]">{displayContent}</pre>
+                ) : (
+                  <div className="prose prose-xs prose-invert max-w-none text-[11px] [&_table]:text-[10px] [&_th]:p-0.5 [&_td]:p-0.5 [&_p]:my-0.5 [&_ul]:my-0.5 [&_li]:my-0 [&_h3]:text-xs [&_h3]:my-1">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
+                  </div>
+                )}
               </div>
             );
           }

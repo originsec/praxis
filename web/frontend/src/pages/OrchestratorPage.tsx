@@ -916,7 +916,7 @@ function OrchestratorLiveMap({
 }
 
 export function OrchestratorPage() {
-  const { state, orchestratorStart, orchestratorStop, orchestratorCancel, orchestratorPrompt, getConfig } = useApp();
+  const { state, orchestratorStart, orchestratorStop, orchestratorCancel, orchestratorPrompt, getConfig, setConfig } = useApp();
   const { orchestrator } = state;
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -970,28 +970,26 @@ export function OrchestratorPage() {
   };
 
   //
-  // Check if Orchestrator is configured via the LLM feature system.
+  // Parse model definitions and check configuration.
   //
-  const orchestratorConfig = (() => {
-    const selectedModelName = state.config.llm_feature_orchestrator;
-    if (!selectedModelName) return null;
-
-    const modelDefsRaw = state.config.llm_model_definitions;
-    if (!modelDefsRaw) return null;
-
+  const modelDefs: Array<{ name: string; provider: string; model: string }> = useMemo(() => {
+    const raw = state.config.llm_model_definitions;
+    if (!raw) return [];
     try {
-      const defs = JSON.parse(modelDefsRaw) as Array<{ name: string; provider: string; model: string }>;
-      const def = defs.find((d) => d.name === selectedModelName);
-      if (def) {
-        return { provider: def.provider, model: def.model };
-      }
+      const defs = JSON.parse(raw);
+      return Array.isArray(defs) ? defs : [];
     } catch {
-      // Parse error
+      return [];
     }
-    return null;
-  })();
+  }, [state.config.llm_model_definitions]);
 
+  const selectedModelName = state.config.llm_feature_orchestrator || '';
+  const orchestratorConfig = modelDefs.find(d => d.name === selectedModelName) ?? null;
   const isConfigured = !!orchestratorConfig;
+
+  const handleModelChange = (name: string) => {
+    setConfig({ llm_feature_orchestrator: name });
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -1012,14 +1010,26 @@ export function OrchestratorPage() {
                 Experimental
               </span>
             </div>
-            <p className="text-muted mt-1">
-              AI-powered red teaming orchestration
-              {orchestratorConfig && (
-                <span className="ml-2 text-[var(--accent-info)]">
-                  · {orchestratorConfig.provider}/{orchestratorConfig.model}
+            <div className="flex items-center gap-3 mt-1">
+              <p className="text-muted">AI-powered red teaming orchestration</p>
+              {!orchestrator.sessionActive && modelDefs.length > 0 && (
+                <select
+                  value={selectedModelName}
+                  onChange={e => handleModelChange(e.target.value)}
+                  className="bg-[var(--bg-secondary)] border border-subtle px-2 py-0.5 text-xs text-highlight focus:outline-none focus:border-[var(--border-active)]"
+                >
+                  {!selectedModelName && <option value="">Select model...</option>}
+                  {modelDefs.map(d => (
+                    <option key={d.name} value={d.name}>{d.name}</option>
+                  ))}
+                </select>
+              )}
+              {orchestrator.sessionActive && orchestratorConfig && (
+                <span className="text-xs text-[var(--accent-info)]">
+                  {orchestratorConfig.provider}/{orchestratorConfig.model}
                 </span>
               )}
-            </p>
+            </div>
           </div>
         </div>
 

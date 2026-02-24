@@ -228,7 +228,7 @@ interface SessionHistoryPoisoningModalProps {
   description: string;
 }
 
-function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionHistoryPoisoningModalProps) {
+export function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionHistoryPoisoningModalProps) {
   const { state, send } = useApp();
 
   const [selectedNodeId, setSelectedNodeId] = useState('');
@@ -529,7 +529,7 @@ interface MessageEncoderModalProps {
   description: string;
 }
 
-function MessageEncoderModal({ isOpen, onClose, description }: MessageEncoderModalProps) {
+export function MessageEncoderModal({ isOpen, onClose, description }: MessageEncoderModalProps) {
   const { state, send } = useApp();
   const [input, setInput] = useState('');
   const [encoding, setEncoding] = useState('unicode_tags');
@@ -570,14 +570,14 @@ function MessageEncoderModal({ isOpen, onClose, description }: MessageEncoderMod
     setTimeout(() => setCopied(false), 1000);
   };
 
-  const labelCls = 'block text-[11px] tracking-wider text-[var(--text-secondary)] uppercase mb-1';
-  const inputCls = 'w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-sm text-highlight focus:outline-none focus:border-subtle';
+  const labelCls = 'block text-[10px] tracking-wider text-[var(--text-secondary)] uppercase mb-1';
+  const inputCls = 'w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle';
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Message Encoder" size="lg">
-      <p className="text-xs text-muted mb-4 leading-relaxed">{description}</p>
+    <Modal isOpen={isOpen} onClose={onClose} title="Message Encoder" size="md">
+      <p className="text-[10px] text-muted mb-3 leading-relaxed">{description}</p>
 
-      <div className="space-y-3">
+      <div className="space-y-2.5">
         <div>
           <label className={labelCls}>Encoding</label>
           <select className={inputCls} value={encoding} onChange={(e) => setEncoding(e.target.value)}>
@@ -595,7 +595,7 @@ function MessageEncoderModal({ isOpen, onClose, description }: MessageEncoderMod
         <div>
           <label className={labelCls}>Input</label>
           <textarea
-            className={`${inputCls} h-32 resize-none`}
+            className={`${inputCls} h-24 resize-none`}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Type text to encode..."
@@ -606,23 +606,23 @@ function MessageEncoderModal({ isOpen, onClose, description }: MessageEncoderMod
           <div className="flex items-center justify-between mb-1">
             <label className={labelCls}>Output</label>
             <button
-              className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] tracking-wider border border-dim text-muted hover:text-highlight hover:border-subtle transition-colors disabled:opacity-40"
+              className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] tracking-wider border border-dim text-muted hover:text-highlight hover:border-subtle transition-colors disabled:opacity-40"
               onClick={copyOutput}
               disabled={!output}
             >
-              <Copy size={11} /> {copied ? 'Copied' : 'Copy'}
+              <Copy size={10} /> {copied ? 'Copied' : 'Copy'}
             </button>
           </div>
           <textarea
-            className={`${inputCls} h-32 font-mono resize-none`}
+            className={`${inputCls} h-24 font-mono resize-none`}
             readOnly
             value={output}
           />
         </div>
 
         {output && (
-          <p className="text-[11px] text-muted/60 leading-relaxed">
-            Some encodings produce invisible or non-printable characters. The output may appear empty but is present — use Copy to transfer it.
+          <p className="text-[10px] text-muted/60 leading-relaxed">
+            Some encodings produce invisible characters. The output may appear empty — use Copy to transfer it.
           </p>
         )}
       </div>
