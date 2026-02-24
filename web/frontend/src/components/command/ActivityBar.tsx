@@ -11,6 +11,7 @@ import {
   Loader2,
   X,
   Trash2,
+  Wrench,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { getOperationStatusColor, StatusBadge } from '../common/StatusBadge';
@@ -20,6 +21,7 @@ import { LibraryModal } from './LibraryModal';
 import { TriggersModal } from './TriggersModal';
 import { TrafficModal } from './TrafficModal';
 import { HuntingModal } from './HuntingModal';
+import { ToolkitModal } from './ToolkitModal';
 
 
 const DEFAULT_PANEL_HEIGHT = 200;
@@ -40,6 +42,7 @@ export function ActivityBar() {
   const [showTriggers, setShowTriggers] = useState(false);
   const [showTraffic, setShowTraffic] = useState(false);
   const [showHunting, setShowHunting] = useState(false);
+  const [showToolkit, setShowToolkit] = useState(false);
 
   const runningOps = state.operations.filter(op => op.status === 'Running');
   const runningChains = state.chains.executions.filter(e => e.status === 'Running' || e.status === 'Queued');
@@ -288,6 +291,13 @@ export function ActivityBar() {
             >
               <Crosshair size={10} /> Hunting
             </button>
+            <div className="w-px h-3.5 bg-[var(--text-muted)]" />
+            <button
+              onClick={() => setShowToolkit(true)}
+              className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-muted hover:text-[var(--text-primary)] transition-colors"
+            >
+              <Wrench size={10} /> Toolkit
+            </button>
           </div>
         </div>
       </div>
@@ -325,6 +335,10 @@ export function ActivityBar() {
 
       {showHunting && (
         <HuntingModal onClose={() => setShowHunting(false)} />
+      )}
+
+      {showToolkit && (
+        <ToolkitModal onClose={() => setShowToolkit(false)} />
       )}
     </>
   );

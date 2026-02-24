@@ -228,7 +228,7 @@ interface SessionHistoryPoisoningModalProps {
   description: string;
 }
 
-function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionHistoryPoisoningModalProps) {
+export function SessionHistoryPoisoningModal({ isOpen, onClose, description }: SessionHistoryPoisoningModalProps) {
   const { state, send } = useApp();
 
   const [selectedNodeId, setSelectedNodeId] = useState('');
@@ -529,7 +529,7 @@ interface MessageEncoderModalProps {
   description: string;
 }
 
-function MessageEncoderModal({ isOpen, onClose, description }: MessageEncoderModalProps) {
+export function MessageEncoderModal({ isOpen, onClose, description }: MessageEncoderModalProps) {
   const { state, send } = useApp();
   const [input, setInput] = useState('');
   const [encoding, setEncoding] = useState('unicode_tags');
