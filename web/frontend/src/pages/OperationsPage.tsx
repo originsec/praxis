@@ -805,7 +805,7 @@ export function OperationsPage() {
         onRun={handleRunOperation}
         onRunAdvanced={handleRunOperationAdvanced}
         title="Run Operation"
-        items={definitions.filter(d => !d.disabled).map(def => ({
+        items={definitions.filter(d => !d.disabled).sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name)).map(def => ({
           id: def.full_name,
           name: def.name,
           description: def.description,
@@ -832,7 +832,7 @@ export function OperationsPage() {
         onRun={handleRunChainFromModal}
         onRunAdvanced={handleRunChainAdvanced}
         title="Run Chain"
-        items={chains.filter(c => !c.disabled).map(chain => ({
+        items={chains.filter(c => !c.disabled).sort((a, b) => a.name.localeCompare(b.name)).map(chain => ({
           id: chain.id,
           name: chain.name,
           description: chain.description,

@@ -2374,7 +2374,7 @@ export function AgentDetailPage() {
         onClose={() => setShowRunOpModal(false)}
         onRun={handleRunOpFromModal}
         title="Run Operation"
-        items={operationDefs.filter(d => !d.disabled).map(def => ({
+        items={operationDefs.filter(d => !d.disabled).sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name)).map(def => ({
           id: def.full_name,
           name: def.name,
           description: def.description,
@@ -2396,7 +2396,7 @@ export function AgentDetailPage() {
         onClose={() => setShowRunChainModal(false)}
         onRun={handleRunChainFromModal}
         title="Run Chain"
-        items={chainDefs.filter(c => !c.disabled).map(chain => ({
+        items={chainDefs.filter(c => !c.disabled).sort((a, b) => a.name.localeCompare(b.name)).map(chain => ({
           id: chain.id,
           name: chain.name,
           description: chain.description,

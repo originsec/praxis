@@ -357,7 +357,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
         onRun={handleRunFromModal}
         onRunAdvanced={handleRunAdvanced}
         title="Run Chain"
-        items={chains.filter(c => !c.disabled).map(chain => ({
+        items={chains.filter(c => !c.disabled).sort((a, b) => a.name.localeCompare(b.name)).map(chain => ({
           id: chain.id,
           name: chain.name,
           description: chain.description,
