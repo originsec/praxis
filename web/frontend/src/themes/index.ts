@@ -9,4 +9,4 @@
 
 export const AVAILABLE_THEMES = ['origin_light', 'praxis_dark'] as const;
 export type ThemeName = (typeof AVAILABLE_THEMES)[number];
-export const DEFAULT_THEME: ThemeName = 'origin_light';
+export const DEFAULT_THEME: ThemeName = 'praxis_dark';
