@@ -1,17 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Monitor, LayoutGrid, Sun, Moon, Cpu, Server, Info, Wifi, WifiOff,
   Plus, Trash2, Edit2, Save, Check, X, Key, List, Loader2,
   Circle, CircleCheck, Download, ExternalLink, FileCode,
+  Upload, RotateCcw, AlertTriangle,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Modal } from '../common/Modal';
+import { LuaCodeEditor } from '../common/LuaCodeEditor';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { getFeatureFlags } from '../../utils/featureFlags';
 import { getUiMode, setUiMode, type UiMode } from '../../utils/uiMode';
 
-type Tab = 'display' | 'llm' | 'service' | 'about';
+type Tab = 'display' | 'llm' | 'agents' | 'service' | 'about';
 type LLMView = 'models' | 'features';
 
 interface SettingsModalProps {
@@ -45,7 +47,11 @@ interface NodeDownloadInfo {
 }
 
 export function SettingsModal({ onClose }: SettingsModalProps) {
-  const { state, getConfig, setConfig, clearEventLog } = useApp();
+  const {
+    state, getConfig, setConfig, clearEventLog,
+    listLuaAgentScripts, addLuaAgentScript, updateLuaAgentScript,
+    deleteLuaAgentScript, resetLuaAgentScriptDefaults, toggleLuaAgentScriptDisabled,
+  } = useApp();
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
 
@@ -64,8 +70,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     model: '',
     apiKey: '',
   });
-  const [isSavingModels, setIsSavingModels] = useState(false);
-  const [showModelsSaved, setShowModelsSaved] = useState(false);
 
   //
   // Feature assignments.
@@ -78,8 +82,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     trafficParser: null,
   });
   const [orchestratorMaxTokens, setOrchestratorMaxTokens] = useState('25000');
-  const [isSavingFeatures, setIsSavingFeatures] = useState(false);
-  const [showFeaturesSaved, setShowFeaturesSaved] = useState(false);
 
   //
   // Model chooser.
@@ -108,6 +110,20 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [mcpServerPort, setMcpServerPort] = useState('8585');
   const [nodeDownloads, setNodeDownloads] = useState<NodeDownloadInfo[]>([]);
   const [isLoadingDownloads, setIsLoadingDownloads] = useState(false);
+
+  //
+  // Agent script state.
+  //
+
+  const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null);
+  const [editingScriptName, setEditingScriptName] = useState('');
+  const [editingScriptContent, setEditingScriptContent] = useState('');
+  const [isEditingScript, setIsEditingScript] = useState(false);
+  const [isAddingScript, setIsAddingScript] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletingScriptId, setDeletingScriptId] = useState<string | null>(null);
+  const [showBuiltinWarning, setShowBuiltinWarning] = useState(false);
 
   //
   // Load config and providers on mount.
@@ -157,6 +173,16 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   }, [activeTab]);
 
   //
+  // Load agent scripts when agents tab becomes active.
+  //
+
+  useEffect(() => {
+    if (activeTab === 'agents' && state.connected) {
+      listLuaAgentScripts();
+    }
+  }, [activeTab, state.connected, listLuaAgentScripts]);
+
+  //
   // Sync config into local state.
   //
 
@@ -198,6 +224,24 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   }, [state.config]);
 
   //
+  // Auto-save helpers. Persist model definitions to backend whenever they change.
+  //
+
+  const saveModels = useCallback((defs: ModelDefinition[]) => {
+    setConfig({ llm_model_definitions: JSON.stringify(defs) });
+  }, [setConfig]);
+
+  const saveFeatures = useCallback((assignments: FeatureAssignments, maxTokens: string) => {
+    setConfig({
+      llm_feature_orchestrator: assignments.orchestrator || '',
+      llm_feature_semantic_ops: assignments.semanticOps || '',
+      llm_feature_semantic_parser: assignments.semanticParser || '',
+      llm_feature_traffic_parser: assignments.trafficParser || '',
+      llm_orchestrator_max_tokens: maxTokens,
+    });
+  }, [setConfig]);
+
+  //
   // Model CRUD handlers.
   //
 
@@ -210,7 +254,9 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       alert(`Model "${name}" already exists.`);
       return;
     }
-    setModelDefinitions([...modelDefinitions, { name, ...newModel }]);
+    const updated = [...modelDefinitions, { name, ...newModel }];
+    setModelDefinitions(updated);
+    saveModels(updated);
     setNewModel({ provider: 'anthropic', model: '', apiKey: '' });
     setIsAddingModel(false);
   };
@@ -223,9 +269,11 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       alert(`Model "${newName}" already exists.`);
       return;
     }
-    setModelDefinitions(modelDefinitions.map(m =>
+    const updated = modelDefinitions.map(m =>
       m.name === oldName ? { ...editingModel, name: newName } : m
-    ));
+    );
+    setModelDefinitions(updated);
+    saveModels(updated);
     if (newName !== oldName) {
       const a = { ...featureAssignments };
       if (a.orchestrator === oldName) a.orchestrator = newName;
@@ -233,52 +281,37 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       if (a.semanticParser === oldName) a.semanticParser = newName;
       if (a.trafficParser === oldName) a.trafficParser = newName;
       setFeatureAssignments(a);
+      saveFeatures(a, orchestratorMaxTokens);
     }
     setEditingModel(null);
   };
 
   const handleDeleteModel = (name: string) => {
     if (!confirm(`Delete model "${name}"?`)) return;
-    setModelDefinitions(modelDefinitions.filter(m => m.name !== name));
+    const updated = modelDefinitions.filter(m => m.name !== name);
+    setModelDefinitions(updated);
+    saveModels(updated);
     const a = { ...featureAssignments };
     if (a.orchestrator === name) a.orchestrator = null;
     if (a.semanticOps === name) a.semanticOps = null;
     if (a.semanticParser === name) a.semanticParser = null;
     if (a.trafficParser === name) a.trafficParser = null;
     setFeatureAssignments(a);
+    saveFeatures(a, orchestratorMaxTokens);
   };
 
-  const handleSaveModels = () => {
-    setIsSavingModels(true);
-    setConfig({ llm_model_definitions: JSON.stringify(modelDefinitions) });
-    setTimeout(() => {
-      setIsSavingModels(false);
-      setShowModelsSaved(true);
-      setTimeout(() => setShowModelsSaved(false), 2000);
-    }, 500);
+  //
+  // Feature assignment change — auto-saves immediately.
+  //
+
+  const handleFeatureChange = (key: keyof FeatureAssignments, value: string | null) => {
+    const updated = { ...featureAssignments, [key]: value };
+    setFeatureAssignments(updated);
+    saveFeatures(updated, orchestratorMaxTokens);
   };
 
-  const handleSaveFeatures = () => {
-    setIsSavingFeatures(true);
-    setConfig({
-      llm_feature_orchestrator: featureAssignments.orchestrator || '',
-      llm_feature_semantic_ops: featureAssignments.semanticOps || '',
-      llm_feature_semantic_parser: featureAssignments.semanticParser || '',
-      llm_feature_traffic_parser: featureAssignments.trafficParser || '',
-      llm_orchestrator_max_tokens: orchestratorMaxTokens,
-    });
-    setTimeout(() => {
-      setIsSavingFeatures(false);
-      setShowFeaturesSaved(true);
-      getConfig([
-        'llm_model_definitions',
-        'llm_feature_orchestrator',
-        'llm_feature_semantic_ops',
-        'llm_feature_semantic_parser',
-        'llm_feature_traffic_parser',
-      ]);
-      setTimeout(() => setShowFeaturesSaved(false), 2000);
-    }, 500);
+  const handleMaxTokensBlur = () => {
+    saveFeatures(featureAssignments, orchestratorMaxTokens);
   };
 
   const fetchModels = async (provider: string, apiKey: string) => {
@@ -346,6 +379,78 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   };
 
   //
+  // Agent script handlers.
+  //
+
+  const handleSelectScript = (scriptId: string) => {
+    const script = state.luaAgentScripts.find(s => s.id === scriptId);
+    if (script) {
+      setSelectedScriptId(scriptId);
+      setEditingScriptName(script.name);
+      setEditingScriptContent(script.script);
+      setIsEditingScript(false);
+      setIsAddingScript(false);
+    }
+  };
+
+  const handleSaveScript = () => {
+    if (!editingScriptName.trim()) return;
+    if (isAddingScript) {
+      addLuaAgentScript(editingScriptName, editingScriptContent);
+    } else if (selectedScriptId) {
+      updateLuaAgentScript(selectedScriptId, editingScriptName, editingScriptContent);
+    }
+    setIsEditingScript(false);
+    setIsAddingScript(false);
+  };
+
+  const handleDeleteScript = (scriptId: string) => {
+    setDeletingScriptId(scriptId);
+    setShowDeleteModal(true);
+  };
+
+  const handleConfirmDelete = () => {
+    if (deletingScriptId) {
+      deleteLuaAgentScript(deletingScriptId);
+      if (selectedScriptId === deletingScriptId) {
+        setSelectedScriptId(null);
+        setEditingScriptName('');
+        setEditingScriptContent('');
+        setIsEditingScript(false);
+      }
+    }
+    setShowDeleteModal(false);
+    setDeletingScriptId(null);
+  };
+
+  const handleConfirmReset = () => {
+    resetLuaAgentScriptDefaults();
+    setSelectedScriptId(null);
+    setEditingScriptName('');
+    setEditingScriptContent('');
+    setIsEditingScript(false);
+    setIsAddingScript(false);
+    setShowResetModal(false);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const content = ev.target?.result as string;
+      const name = file.name.replace(/\.lua$/, '');
+      setSelectedScriptId(null);
+      setEditingScriptName(name);
+      setEditingScriptContent(content);
+      setIsEditingScript(true);
+      setIsAddingScript(true);
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  //
   // UI mode handler.
   //
 
@@ -360,6 +465,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'display', label: 'Display', icon: <Monitor size={14} /> },
     { id: 'llm', label: 'LLM', icon: <Cpu size={14} /> },
+    { id: 'agents', label: 'Agents', icon: <FileCode size={14} /> },
     { id: 'service', label: 'Service', icon: <Server size={14} /> },
     { id: 'about', label: 'About', icon: <Info size={14} /> },
   ];
@@ -397,23 +503,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
               <span className="font-medium">{tab.label}</span>
             </button>
           ))}
-
-          <div className="flex-1" />
-
-          {/*
-          //
-          // Link to agent scripts (too complex for modal).
-          //
-          */}
-
-          <button
-            onClick={() => { navigate('/settings?tab=agents'); onClose(); }}
-            className="flex items-center gap-2 px-3 py-2.5 text-xs text-muted hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors border-l-2 border-transparent"
-          >
-            <FileCode size={14} />
-            <span>Agents</span>
-            <ExternalLink size={10} className="ml-auto opacity-50" />
-          </button>
         </div>
 
         {/*
@@ -422,7 +511,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         //
         */}
 
-        <div className="flex-1 overflow-y-auto p-5">
+        <div className={`flex-1 flex flex-col min-h-0 ${activeTab === 'agents' ? '' : 'overflow-y-auto p-5'}`}>
 
           {/*
           //
@@ -735,12 +824,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                       ))}
                     </div>
                   )}
-
-                  {modelDefinitions.length > 0 && (
-                    <button onClick={handleSaveModels} disabled={isSavingModels} className={btnSave}>
-                      {showModelsSaved ? <><Check size={12} /> Saved</> : <><Save size={12} /> {isSavingModels ? 'Saving...' : 'Save Definitions'}</>}
-                    </button>
-                  )}
                 </div>
               )}
 
@@ -766,14 +849,14 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                     <div className="space-y-2">
                       {getFeatureFlags().orchestrator && (
                         <div className="flex items-center gap-3 p-2.5 bg-[var(--bg-secondary)] border border-dim">
-                          <div className="w-32 flex-shrink-0">
+                          <div className="w-28 flex-shrink-0">
                             <p className="text-xs font-medium text-highlight">Orchestrator</p>
                             <p className="text-[10px] text-muted">AI assistant</p>
                           </div>
                           <select
                             value={featureAssignments.orchestrator || ''}
-                            onChange={e => setFeatureAssignments(a => ({ ...a, orchestrator: e.target.value || null }))}
-                            className={`flex-1 ${inputCls}`}
+                            onChange={e => handleFeatureChange('orchestrator', e.target.value || null)}
+                            className={`flex-1 min-w-0 ${inputCls}`}
                           >
                             <option value="">Select model...</option>
                             {modelDefinitions.map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
@@ -782,23 +865,24 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                             type="number"
                             value={orchestratorMaxTokens}
                             onChange={e => setOrchestratorMaxTokens(e.target.value)}
-                            placeholder="Max tokens"
+                            onBlur={handleMaxTokensBlur}
+                            placeholder="Tokens"
                             min="1000"
                             max="100000"
-                            className={`w-20 ${inputCls}`}
                             title="Max tokens"
+                            className={`w-[5.5rem] flex-shrink-0 ${inputCls}`}
                           />
                         </div>
                       )}
 
                       <div className="flex items-center gap-3 p-2.5 bg-[var(--bg-secondary)] border border-dim">
-                        <div className="w-32 flex-shrink-0">
+                        <div className="w-28 flex-shrink-0">
                           <p className="text-xs font-medium text-highlight">Semantic Ops</p>
                           <p className="text-[10px] text-muted">Default for ops</p>
                         </div>
                         <select
                           value={featureAssignments.semanticOps || ''}
-                          onChange={e => setFeatureAssignments(a => ({ ...a, semanticOps: e.target.value || null }))}
+                          onChange={e => handleFeatureChange('semanticOps', e.target.value || null)}
                           className={`flex-1 ${inputCls}`}
                         >
                           <option value="">Select model...</option>
@@ -807,13 +891,13 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                       </div>
 
                       <div className="flex items-center gap-3 p-2.5 bg-[var(--bg-secondary)] border border-dim">
-                        <div className="w-32 flex-shrink-0">
+                        <div className="w-28 flex-shrink-0">
                           <p className="text-xs font-medium text-highlight">Semantic Parser</p>
                           <p className="text-[10px] text-muted">Tool call parsing</p>
                         </div>
                         <select
                           value={featureAssignments.semanticParser || ''}
-                          onChange={e => setFeatureAssignments(a => ({ ...a, semanticParser: e.target.value || null }))}
+                          onChange={e => handleFeatureChange('semanticParser', e.target.value || null)}
                           className={`flex-1 ${inputCls}`}
                         >
                           <option value="">Select model...</option>
@@ -822,13 +906,13 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                       </div>
 
                       <div className="flex items-center gap-3 p-2.5 bg-[var(--bg-secondary)] border border-dim">
-                        <div className="w-32 flex-shrink-0">
+                        <div className="w-28 flex-shrink-0">
                           <p className="text-xs font-medium text-highlight">Traffic Parser</p>
                           <p className="text-[10px] text-muted">Summarization</p>
                         </div>
                         <select
                           value={featureAssignments.trafficParser || ''}
-                          onChange={e => setFeatureAssignments(a => ({ ...a, trafficParser: e.target.value || null }))}
+                          onChange={e => handleFeatureChange('trafficParser', e.target.value || null)}
                           className={`flex-1 ${inputCls}`}
                         >
                           <option value="">Select model...</option>
@@ -837,16 +921,204 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+            </div>
+          )}
 
-                  {modelDefinitions.length > 0 && (
-                    <div className="flex justify-end">
-                      <button onClick={handleSaveFeatures} disabled={isSavingFeatures} className={btnSave}>
-                        {showFeaturesSaved ? <><Check size={12} /> Saved</> : <><Save size={12} /> {isSavingFeatures ? 'Saving...' : 'Save Feature Config'}</>}
-                      </button>
+          {/*
+          //
+          // Agents tab.
+          //
+          */}
+
+          {activeTab === 'agents' && (
+            <div className="flex flex-col flex-1 min-h-0 p-5 pb-0">
+              <div className="flex items-center justify-between mb-3 flex-shrink-0">
+                <div>
+                  <h3 className="text-xs font-semibold text-highlight tracking-wider mb-0.5">AGENT DEFINITIONS</h3>
+                  <p className="text-[10px] text-muted">Lua agent connector scripts</p>
+                </div>
+                <div className="flex gap-1.5">
+                  <label className={`${btnGreen} cursor-pointer`}>
+                    <Upload size={12} />
+                    Upload
+                    <input type="file" accept=".lua" onChange={handleFileUpload} className="hidden" />
+                  </label>
+                  <button
+                    onClick={() => setShowResetModal(true)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/30 transition-colors"
+                    title="Reset all scripts to built-in defaults"
+                  >
+                    <RotateCcw size={12} />
+                    Reset
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-1 gap-3 min-h-0 pb-5">
+
+                {/*
+                //
+                // Script list.
+                //
+                */}
+
+                <div className="w-44 flex-shrink-0 border border-dim overflow-y-auto">
+                  {state.luaAgentScripts.length === 0 ? (
+                    <div className="p-3 text-center text-muted text-[10px]">No scripts</div>
+                  ) : (
+                    state.luaAgentScripts.map(script => (
+                      <div
+                        key={script.id}
+                        onClick={() => handleSelectScript(script.id)}
+                        className={`group flex items-center justify-between px-2.5 py-1.5 cursor-pointer transition-colors ${
+                          selectedScriptId === script.id
+                            ? 'bg-[var(--highlight)] text-highlight'
+                            : script.disabled
+                              ? 'hover:bg-[var(--bg-tertiary)] text-muted opacity-50'
+                              : 'hover:bg-[var(--bg-tertiary)] text-muted'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1 min-w-0">
+                          <span className="text-[11px] truncate">{script.name}</span>
+                          {script.is_builtin && (
+                            <span className="text-[7px] leading-tight px-0.5 rounded bg-[var(--accent-info)]/15 text-[var(--accent-info)]/70 flex-shrink-0">
+                              builtin
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-0 flex-shrink-0">
+                          <button
+                            onClick={e => { e.stopPropagation(); toggleLuaAgentScriptDisabled(script.id, !script.disabled); }}
+                            className={`p-0.5 transition-colors ${
+                              script.disabled
+                                ? 'text-[var(--accent-warning)]'
+                                : 'text-muted hover:text-[var(--accent-success)] opacity-0 group-hover:opacity-100'
+                            }`}
+                            title={script.disabled ? 'Enable' : 'Disable'}
+                          >
+                            {script.disabled ? <Circle size={12} /> : <CircleCheck size={12} />}
+                          </button>
+                          <button
+                            onClick={e => { e.stopPropagation(); handleDeleteScript(script.id); }}
+                            className={`p-0.5 text-muted hover:text-[var(--accent-error)] transition-colors ${
+                              selectedScriptId === script.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                            }`}
+                            title="Delete"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/*
+                //
+                // Editor panel.
+                //
+                */}
+
+                <div className="flex-1 flex flex-col border border-dim min-h-0">
+                  {(selectedScriptId || isAddingScript) ? (
+                    <>
+                      <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-dim bg-[var(--bg-secondary)] flex-shrink-0">
+                        {isEditingScript ? (
+                          (() => {
+                            const script = state.luaAgentScripts.find(s => s.id === selectedScriptId);
+                            return script?.is_builtin ? (
+                              <span className="text-[11px] font-medium text-highlight">{editingScriptName}</span>
+                            ) : (
+                              <input
+                                type="text"
+                                value={editingScriptName}
+                                onChange={e => setEditingScriptName(e.target.value)}
+                                placeholder="Script name"
+                                className="bg-[var(--bg-primary)] border border-dim px-2 py-0.5 text-[11px] text-highlight focus:outline-none focus:border-subtle w-48"
+                              />
+                            );
+                          })()
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] font-medium text-highlight">{editingScriptName}</span>
+                            {(() => {
+                              const script = state.luaAgentScripts.find(s => s.id === selectedScriptId);
+                              return (
+                                <>
+                                  {script?.is_builtin && (
+                                    <span className="text-[7px] leading-tight px-0.5 rounded bg-[var(--accent-info)]/15 text-[var(--accent-info)]/70">builtin</span>
+                                  )}
+                                  {script?.disabled && (
+                                    <span className="text-[7px] leading-tight px-0.5 rounded bg-[var(--accent-warning)]/15 text-[var(--accent-warning)]/70">disabled</span>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        )}
+                        <div className="flex gap-1.5">
+                          {isEditingScript ? (
+                            <>
+                              <button
+                                onClick={handleSaveScript}
+                                disabled={!editingScriptName.trim()}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors disabled:opacity-50"
+                              >
+                                <Save size={10} /> Save
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (isAddingScript) {
+                                    setIsAddingScript(false);
+                                    setIsEditingScript(false);
+                                    setEditingScriptName('');
+                                    setEditingScriptContent('');
+                                  } else {
+                                    const script = state.luaAgentScripts.find(s => s.id === selectedScriptId);
+                                    if (script) {
+                                      setEditingScriptName(script.name);
+                                      setEditingScriptContent(script.script);
+                                    }
+                                    setIsEditingScript(false);
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] text-muted hover:text-highlight transition-colors"
+                              >
+                                <X size={10} /> Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                const script = state.luaAgentScripts.find(s => s.id === selectedScriptId);
+                                if (script?.is_builtin) {
+                                  setShowBuiltinWarning(true);
+                                } else {
+                                  setIsEditingScript(true);
+                                }
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors"
+                            >
+                              <Edit2 size={10} /> Edit
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <LuaCodeEditor
+                        value={editingScriptContent}
+                        onChange={setEditingScriptContent}
+                        readOnly={!isEditingScript}
+                      />
+                    </>
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center text-muted text-xs">
+                      Select a script or upload a new one
                     </div>
                   )}
                 </div>
-              )}
+              </div>
             </div>
           )}
 
@@ -862,12 +1134,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 <h3 className="text-xs font-semibold text-highlight tracking-wider mb-0.5">SERVICE</h3>
                 <p className="text-[10px] text-muted">Connection and service configuration</p>
               </div>
-
-              {/*
-              //
-              // Connection info.
-              //
-              */}
 
               <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[10px]">
                 <span className="text-muted">Status</span>
@@ -891,12 +1157,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 <span className="text-muted">Version</span>
                 <span className="font-mono text-muted">{state.version ?? 'unknown'}</span>
               </div>
-
-              {/*
-              //
-              // Event Logging.
-              //
-              */}
 
               <div className="pt-4 border-t border-subtle">
                 <h4 className="text-xs font-semibold text-highlight mb-1">Event Logging</h4>
@@ -940,12 +1200,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 </div>
               </div>
 
-              {/*
-              //
-              // MCP Server.
-              //
-              */}
-
               <div className="pt-4 border-t border-subtle">
                 <h4 className="text-xs font-semibold text-highlight mb-1">MCP Server</h4>
                 <p className="text-[10px] text-muted mb-2">Expose tools via Model Context Protocol (SSE)</p>
@@ -975,12 +1229,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                   )}
                 </div>
               </div>
-
-              {/*
-              //
-              // Node downloads.
-              //
-              */}
 
               <div className="pt-4 border-t border-subtle">
                 <h4 className="text-xs font-semibold text-highlight mb-1">Node Downloads</h4>
@@ -1126,6 +1374,75 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           </div>
         </div>
       )}
+
+      {/*
+      //
+      // Agent script confirmation modals.
+      //
+      */}
+
+      <Modal
+        isOpen={showDeleteModal}
+        onClose={() => { setShowDeleteModal(false); setDeletingScriptId(null); }}
+        title="Delete Agent Script"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="flex gap-3 p-3 bg-[var(--accent-error)]/10 border border-[var(--accent-error)]/20">
+            <AlertTriangle size={18} className="text-[var(--accent-error)] flex-shrink-0 mt-0.5" />
+            <div className="text-xs">
+              <p className="text-[var(--accent-error)] font-medium mb-1">Delete this agent script?</p>
+              <p className="text-muted">This will permanently remove the script.</p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => { setShowDeleteModal(false); setDeletingScriptId(null); }} className="px-3 py-1 text-xs text-muted hover:text-highlight transition-colors">Cancel</button>
+            <button onClick={handleConfirmDelete} className="px-3 py-1 text-xs bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors">Delete</button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showResetModal}
+        onClose={() => setShowResetModal(false)}
+        title="Reset Agent Scripts"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="flex gap-3 p-3 bg-[var(--accent-warning)]/10 border border-[var(--accent-warning)]/20">
+            <AlertTriangle size={18} className="text-[var(--accent-warning)] flex-shrink-0 mt-0.5" />
+            <div className="text-xs">
+              <p className="text-[var(--accent-warning)] font-medium mb-1">This action cannot be undone</p>
+              <p className="text-muted">All custom scripts will be replaced with built-in defaults.</p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowResetModal(false)} className="px-3 py-1 text-xs text-muted hover:text-highlight transition-colors">Cancel</button>
+            <button onClick={handleConfirmReset} className="px-3 py-1 text-xs bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/30 transition-colors">Reset to Defaults</button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showBuiltinWarning}
+        onClose={() => setShowBuiltinWarning(false)}
+        title="Editing Built-in Script"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="flex gap-3 p-3 bg-[var(--accent-warning)]/10 border border-[var(--accent-warning)]/20">
+            <AlertTriangle size={18} className="text-[var(--accent-warning)] flex-shrink-0 mt-0.5" />
+            <div className="text-xs">
+              <p className="text-[var(--accent-warning)] font-medium mb-1">This is a built-in script</p>
+              <p className="text-muted">Changes may be overwritten on update. Consider creating a new script instead.</p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowBuiltinWarning(false)} className="px-3 py-1 text-xs text-muted hover:text-highlight transition-colors">Cancel</button>
+            <button onClick={() => { setShowBuiltinWarning(false); setIsEditingScript(true); }} className="px-3 py-1 text-xs bg-[var(--accent-warning)]/20 text-[var(--accent-warning)] hover:bg-[var(--accent-warning)]/30 transition-colors">Edit Anyway</button>
+          </div>
+        </div>
+      </Modal>
     </Modal>
   );
 }
