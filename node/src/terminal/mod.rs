@@ -182,6 +182,13 @@ impl TerminalManager {
         self.sessions.contains_key(terminal_id)
     }
 
+    pub fn close_all(&mut self) {
+        let ids: Vec<String> = self.sessions.keys().cloned().collect();
+        for id in ids {
+            let _ = self.close_session(&id);
+        }
+    }
+
     #[allow(dead_code)]
     pub fn close_all_for_client(&mut self, client_id: &str) {
         let to_close: Vec<String> = self

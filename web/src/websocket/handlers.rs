@@ -71,6 +71,9 @@ pub async fn handle_browser_message(
         BrowserMessage::RemoveNode { node_id } => {
             state.rabbitmq.remove_node(node_id).await?;
         }
+        BrowserMessage::ResetNode { node_id } => {
+            state.rabbitmq.reset_node(node_id).await?;
+        }
         BrowserMessage::ConfigGet { keys } => {
             handle_config_get(state, keys).await?;
         }

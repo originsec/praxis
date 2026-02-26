@@ -51,6 +51,10 @@ pub enum BrowserMessage {
     RemoveNode {
         node_id: String,
     },
+    /// Reset a node (cancel all operations, re-register)
+    ResetNode {
+        node_id: String,
+    },
     /// Get service configuration
     ConfigGet {
         keys: Vec<String>,

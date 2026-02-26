@@ -15,12 +15,19 @@ pub enum NodeCommand {
         /// Node ID prefix
         node: String,
     },
+
+    /// Reset a node (cancel operations, clear state, re-register)
+    Reset {
+        /// Node ID prefix
+        node: String,
+    },
 }
 
 pub async fn execute(client: &mut CliClient, command: NodeCommand, output: &OutputFormat) -> Result<()> {
     match command {
         NodeCommand::List => list_nodes(client, output).await,
         NodeCommand::Select { node } => select_node(client, &node, output).await,
+        NodeCommand::Reset { node } => reset_node(client, &node, output).await,
     }
 }
 
@@ -107,6 +114,46 @@ async fn select_node(client: &CliClient, prefix: &str, output: &OutputFormat) ->
                 OutputFormat::Text => {
                     print_success(&format!(
                         "Selected node: {} ({})",
+                        format_short_id(&node.node_id),
+                        node.machine_name
+                    ));
+                }
+            }
+            Ok(())
+        }
+        None => {
+            if matches!(output, OutputFormat::Json) {
+                print_json(&json!({"status": "error", "message": format!("No node found matching '{}'", prefix)}));
+            }
+            Err(anyhow!("No node found matching '{}'", prefix))
+        }
+    }
+}
+
+async fn reset_node(client: &CliClient, prefix: &str, output: &OutputFormat) -> Result<()> {
+    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+
+    let search = prefix.to_lowercase();
+    let found = state.nodes.iter().find(|n| n.node_id.to_lowercase().starts_with(&search));
+
+    match found {
+        Some(node) => {
+            let node_id = node.node_id.clone();
+            client.reset_node(&node_id).await?;
+
+            match output {
+                OutputFormat::Json => {
+                    print_json(&json!({
+                        "status": "success",
+                        "node_id": node_id,
+                        "node_id_short": format_short_id(&node_id),
+                        "machine_name": node.machine_name,
+                        "message": "Reset command sent to node"
+                    }));
+                }
+                OutputFormat::Text => {
+                    print_success(&format!(
+                        "Reset command sent to node: {} ({})",
                         format_short_id(&node.node_id),
                         node.machine_name
                     ));

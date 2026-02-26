@@ -28,6 +28,8 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             handle_command(ctx, req).await,
         ClientSignalMessage::RemoveNode { node_id } =>
             handle_remove_node(ctx, node_id).await,
+        ClientSignalMessage::ResetNode { node_id } =>
+            handle_reset_node(ctx, node_id).await,
 
         //
         // Semantic operations.
@@ -380,6 +382,25 @@ async fn handle_remove_node(ctx: &ServiceContext, node_id: String) {
         }
     } else {
         common::log_warn!("Attempted to remove unknown node: {}", node_id);
+    }
+}
+
+async fn handle_reset_node(ctx: &ServiceContext, node_id: String) {
+    common::log_info!(
+        "Received ResetNode request for node {}",
+        &node_id[..8.min(node_id.len())]
+    );
+
+    //
+    // Publish reset message to the node's dedicated reset queue. This queue
+    // has its own consumer task on the node so it is never blocked by
+    // in-flight command handlers.
+    //
+
+    let reset_queue = common::node_reset_queue_name(&node_id);
+    let message = NodeDirectMessage::Reset;
+    if let Err(e) = common::publish_json(&ctx.publish_channel, &reset_queue, &message).await {
+        common::log_error!("Failed to send reset to node {}: {}", node_id, e);
     }
 }
 

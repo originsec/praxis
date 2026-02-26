@@ -160,6 +160,10 @@ impl McpClient for CliMcpClient {
     async fn toggle_chain_trigger(&self, trigger_id: String, enabled: bool) -> Result<()> {
         self.inner.lock().await.toggle_chain_trigger(trigger_id, enabled).await
     }
+
+    async fn reset_node(&self, node_id: &str) -> Result<()> {
+        self.inner.lock().await.reset_node(node_id).await
+    }
 }
 
 pub async fn run_server(rabbitmq_url: &str, timeout: u64) -> Result<()> {

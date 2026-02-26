@@ -168,9 +168,13 @@ async fn main() {
         )
         .await
         {
-            Ok(()) => {
+            Ok(runtime::RuntimeExit::Shutdown) => {
                 common::log_info!("Runtime exited cleanly");
                 break;
+            }
+            Ok(runtime::RuntimeExit::Reset) => {
+                common::log_info!("Node reset, re-registering immediately...");
+                continue;
             }
             Err(e) => {
                 common::log_error!("Runtime error: {}", e);

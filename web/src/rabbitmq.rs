@@ -136,6 +136,12 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
+    /// Reset a node (cancel all operations, tear down state, re-register)
+    pub async fn reset_node(&self, node_id: String) -> Result<()> {
+        let message = ClientSignalMessage::ResetNode { node_id };
+        self.publish_signal(message).await
+    }
+
     /// Get service configuration
     pub async fn get_config(&self, keys: Vec<String>) -> Result<()> {
         let message = ClientSignalMessage::ServiceConfigGet {

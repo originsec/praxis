@@ -1175,6 +1175,7 @@ interface AppContextValue {
   // Node Management.
   //
   removeNode: (nodeId: string) => void;
+  resetNode: (nodeId: string) => void;
   //
   // Config.
   //
@@ -1728,6 +1729,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     wsClient.send({ type: 'remove_node', node_id: nodeId });
   }, []);
 
+  const resetNode = useCallback((nodeId: string) => {
+    wsClient.send({ type: 'reset_node', node_id: nodeId });
+  }, []);
+
   //
   // Config.
   //
@@ -2134,6 +2139,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     clearOperations,
     clearEventLog,
     removeNode,
+    resetNode,
     getConfig,
     setConfig,
     clearOpDefStatus,

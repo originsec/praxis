@@ -287,6 +287,7 @@ fn detect_context(tokens: &[&str], trailing_space: bool) -> CompletionContext {
         let (cmd, sub) = (tokens[0], tokens[1]);
         match (cmd, sub) {
             ("node", "select") if completing_idx == 2 => return CompletionContext::NodeId,
+            ("node", "reset") if completing_idx == 2 => return CompletionContext::NodeId,
             ("agent", "select") if completing_idx >= 2 => return CompletionContext::AgentName,
             ("op", "run") if completing_idx == 2 => return CompletionContext::OpName,
             ("op", "info") | ("op", "cancel") if completing_idx == 2 => return CompletionContext::ShortId,
@@ -515,6 +516,7 @@ fn print_help() {
     let cmds = [
         ("node list", "List connected nodes"),
         ("node select <node>", "Select a node"),
+        ("node reset <node>", "Reset a node (cancel ops, re-register)"),
         ("agent list", "List agents on selected node"),
         ("agent select <agent>", "Select an agent"),
         ("agent update", "Request agent info update"),
