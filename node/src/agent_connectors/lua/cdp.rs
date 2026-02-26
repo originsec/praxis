@@ -399,7 +399,10 @@ fn cdp_evaluate(handle: &str, js: &str) -> Result<serde_json::Value> {
         match &conn.backend {
             CdpBackend::Chrome(page) => block_on(async {
                 let result = page.evaluate(js).await?;
-                Ok(result.into_value()?)
+                match result.into_value::<serde_json::Value>() {
+                    Ok(v) => Ok(v),
+                    Err(_) => Ok(serde_json::Value::Null),
+                }
             }),
             CdpBackend::NodeInspector(raw) => block_on(raw.evaluate(&js)),
         }
