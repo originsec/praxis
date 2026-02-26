@@ -3,8 +3,6 @@ use colored::Colorize;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures_util::StreamExt;
 use rustyline::error::ReadlineError;
-use rustyline::history::DefaultHistory;
-use rustyline::{Config, Editor};
 use std::io::{IsTerminal, Write};
 use tokio::sync::mpsc;
 
@@ -64,12 +62,13 @@ pub async fn execute(client: &mut CliClient) -> Result<()> {
     );
     println!();
 
-    let config = Config::builder().build();
-    let mut rl: Editor<(), DefaultHistory> = Editor::with_config(config)?;
+    let plain_prompt = "  ▸ ".to_string();
+    let colored_prompt = format!("  {} ", "▸".bold());
+    let (mut rl, _) = crate::prompt::editor_with_colored_prompt(&plain_prompt, colored_prompt)?;
     let mut prompt_seq: u64 = 0;
 
     loop {
-        let line = rl.readline(&format!("  {} ", "▸".bold()));
+        let line = rl.readline(&plain_prompt);
 
         match line {
             Ok(input) => {
