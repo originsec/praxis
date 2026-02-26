@@ -433,6 +433,13 @@ pub async fn execute_agent_mode(
     let (provider_str, model, api_key) = (model_def.provider, model_def.model, model_def.api_key);
 
     //
+    // Drop the config read lock now that we've extracted the values we need.
+    // Holding it for the duration of the agent loop would block other
+    // operations from reloading config (tokio RwLock is write-preferring).
+    //
+    drop(config);
+
+    //
     // Use the built-in semantic ops agent prompt.
     //
     let agent_prompt = SEMANTIC_OP_AGENT_PROMPT;
