@@ -61,7 +61,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', headerAct
       //
       */}
       <div
-        className={`relative bg-panel border border-subtle shadow-2xl ${sizeClasses[size]} w-full mx-4 max-h-[90vh] flex flex-col ascii-box`}
+        className={`relative bg-panel border border-subtle shadow-2xl ${sizeClasses[size]} w-full mx-4 ${size === 'full' ? 'h-[90vh]' : 'max-h-[90vh]'} flex flex-col ascii-box`}
       >
         {/*
         //
@@ -69,7 +69,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', headerAct
         //
         */}
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-subtle bg-[var(--bg-tertiary)]">
-          <h2 className="text-highlight font-semibold text-lg">{title}</h2>
+          <h2 className="text-highlight font-semibold text-xs">{title}</h2>
           <div className="flex items-center gap-1">
             {headerActions}
             <button

@@ -218,7 +218,7 @@ export function ImportModal({ isOpen, onClose }: ImportModalProps) {
         <div className="flex gap-3">
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm border border-subtle hover:bg-[var(--bg-tertiary)] transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs border border-subtle hover:bg-[var(--bg-tertiary)] transition-colors"
           >
             <Upload size={16} />
             Choose File
@@ -230,7 +230,7 @@ export function ImportModal({ isOpen, onClose }: ImportModalProps) {
             onChange={handleFileSelect}
             className="hidden"
           />
-          <span className="text-muted text-sm self-center">or paste JSON below</span>
+          <span className="text-muted text-xs self-center">or paste JSON below</span>
         </div>
 
         {/*
@@ -239,14 +239,14 @@ export function ImportModal({ isOpen, onClose }: ImportModalProps) {
         //
         */}
         <div>
-          <label className="block text-sm font-medium mb-1">JSON Content</label>
+          <label className="block text-xs font-medium mb-1">JSON Content</label>
           <textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
             disabled={isImporting}
             rows={10}
             placeholder={'{\n  "item_type": "operation",\n  "name": "My Operation",\n  ...\n}'}
-            className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-sm font-mono focus:outline-none focus:border-[var(--border-active)] disabled:opacity-50"
+            className="w-full bg-[var(--bg-secondary)] border border-subtle px-3 py-2 text-xs font-mono focus:outline-none focus:border-[var(--border-active)] disabled:opacity-50"
           />
         </div>
 
@@ -256,21 +256,21 @@ export function ImportModal({ isOpen, onClose }: ImportModalProps) {
         //
         */}
         {parseError && (
-          <div className="flex items-center gap-2 p-3 bg-[var(--accent-error)]/10 text-[var(--accent-error)] text-sm">
+          <div className="flex items-center gap-2 p-3 bg-[var(--accent-error)]/10 text-[var(--accent-error)] text-xs">
             <AlertCircle size={16} />
             {parseError}
           </div>
         )}
 
         {importSuccess && (
-          <div className="flex items-center gap-2 p-3 bg-[var(--accent-success)]/10 text-[var(--accent-success)] text-sm">
+          <div className="flex items-center gap-2 p-3 bg-[var(--accent-success)]/10 text-[var(--accent-success)] text-xs">
             <CheckCircle2 size={16} />
             Import successful!
           </div>
         )}
 
         {parsed && !parseError && !importSuccess && (
-          <div className={`p-3 border text-sm ${
+          <div className={`p-3 border text-xs ${
             parsed.type === 'unknown'
               ? 'bg-[var(--accent-warning)]/10 border-[var(--accent-warning)]/30'
               : 'bg-[var(--accent-info)]/10 border-[var(--accent-info)]/30'
@@ -309,14 +309,14 @@ export function ImportModal({ isOpen, onClose }: ImportModalProps) {
           <button
             onClick={onClose}
             disabled={isImporting}
-            className="px-4 py-2 text-sm border border-subtle hover:bg-[var(--bg-tertiary)] transition-colors disabled:opacity-50"
+            className="px-4 py-2 text-xs border border-subtle hover:bg-[var(--bg-tertiary)] transition-colors disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             onClick={handleImport}
             disabled={!parsed || parsed.type === 'unknown' || isImporting || importSuccess}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors disabled:opacity-50"
           >
             {isImporting && <Loader2 size={16} className="animate-spin" />}
             <Upload size={16} />

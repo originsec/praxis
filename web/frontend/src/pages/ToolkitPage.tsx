@@ -532,7 +532,15 @@ interface MessageEncoderModalProps {
 export function MessageEncoderModal({ isOpen, onClose, description }: MessageEncoderModalProps) {
   const { state, send } = useApp();
   const [input, setInput] = useState('');
-  const [encoding, setEncoding] = useState('unicode_tags');
+
+  const encodingOptions = state.toolkit.tools
+    .find(t => t.tool_name === 'message_encoder')
+    ?.config_schema.find(f => f.name === 'encoding')
+    ?.options ?? [];
+
+  const [encoding, setEncoding] = useState(() =>
+    encodingOptions[0]?.value ?? 'base64'
+  );
   const [copied, setCopied] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -581,14 +589,9 @@ export function MessageEncoderModal({ isOpen, onClose, description }: MessageEnc
         <div>
           <label className={labelCls}>Encoding</label>
           <select className={inputCls} value={encoding} onChange={(e) => setEncoding(e.target.value)}>
-            <option value="unicode_tags">Unicode Tags (ASCII Smuggling)</option>
-            <option value="braille_us_type2">Braille (US Type 2)</option>
-            <option value="fullwidth">Fullwidth Unicode</option>
-            <option value="upside_down">Upside Down</option>
-            <option value="rot13">ROT13</option>
-            <option value="base64">Base64</option>
-            <option value="hex">Hex</option>
-            <option value="morse">Morse Code</option>
+            {encodingOptions.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
           </select>
         </div>
 

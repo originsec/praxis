@@ -20,7 +20,7 @@ export function CommandTopBar({ orchestratorOpen, onToggleOrchestrator }: Comman
 
   return (
     <>
-      <header className="h-10 bg-[var(--bg-secondary)] border-b border-subtle flex items-center justify-between px-4 flex-shrink-0">
+      <header className="cc-text-noscale h-10 bg-[var(--bg-secondary)] border-b border-subtle flex items-center justify-between px-4 flex-shrink-0">
         <div className="flex items-center gap-4">
           <span className="text-highlight font-bold tracking-widest text-sm">[&Oslash;] PRAXIS</span>
           <span className="text-[10px] text-muted">v{state.version ?? '?.?.?'}</span>
