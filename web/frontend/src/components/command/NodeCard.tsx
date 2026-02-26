@@ -20,6 +20,7 @@ import {
   FolderOpen,
   X,
   MessageSquare,
+  RotateCcw,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { StatusBadge, getNodeStatus } from '../common/StatusBadge';
@@ -220,6 +221,7 @@ export function NodeCard({ node }: NodeCardProps) {
     disableIntercept,
     requestChainDefList,
     removeNode,
+    resetNode,
     send,
   } = useApp();
 
@@ -441,8 +443,15 @@ export function NodeCard({ node }: NodeCardProps) {
             <Server size={14} className="text-muted flex-shrink-0" />
             <span className="font-medium text-highlight text-xs truncate">{node.machine_name || 'Unknown'}</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
             <StatusBadge status={status} />
+            <button
+              onClick={() => resetNode(node.node_id)}
+              className="p-0.5 text-muted/30 hover:text-[var(--accent-warning)] transition-colors opacity-0 group-hover/header:opacity-100"
+              title="Reset node"
+            >
+              <RotateCcw size={11} />
+            </button>
             <button
               onClick={() => removeNode(node.node_id)}
               className="p-0.5 text-muted/30 hover:text-[var(--accent-error)] transition-colors opacity-0 group-hover/header:opacity-100"

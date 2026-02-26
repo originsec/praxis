@@ -165,6 +165,33 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         }))
     }
 
+    #[tool(description = "Reset a node: cancel all operations, close sessions, and re-register")]
+    async fn node_reset(
+        &self,
+        Parameters(params): Parameters<NodePrefixParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+
+        let state = client.get_state().await
+            .ok_or_else(|| mcp_err("No state available. The service may still be starting — try again in a moment."))?;
+        let node = state.nodes.iter()
+            .find(|n| n.node_id.to_lowercase().starts_with(&params.prefix.to_lowercase()))
+            .ok_or_else(|| mcp_err(format!("No node found matching '{}'. Use node_list to see connected nodes.", params.prefix)))?;
+
+        let node_id = node.node_id.clone();
+        let machine_name = node.machine_name.clone();
+
+        client.reset_node(&node_id).await
+            .map_err(|e| mcp_err(format!("Failed to reset node: {}", e)))?;
+
+        json_result(json!({
+            "node_id": node_id,
+            "hostname": machine_name,
+            "message": "Reset command sent to node"
+        }))
+    }
+
     // ── Agent Management ─────────────────────────────────────────────────
 
     #[tool(description = "List agents on a node")]

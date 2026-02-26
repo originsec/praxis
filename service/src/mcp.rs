@@ -634,6 +634,13 @@ impl McpClient for ServiceMcpClient {
         };
         self.publish_signal(message).await
     }
+
+    async fn reset_node(&self, node_id: &str) -> Result<()> {
+        let message = ClientSignalMessage::ResetNode {
+            node_id: node_id.to_string(),
+        };
+        self.publish_signal(message).await
+    }
 }
 
 //

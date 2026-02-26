@@ -20,6 +20,11 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 
+pub enum RuntimeExit {
+    Shutdown,
+    Reset,
+}
+
 pub async fn run(
     channel: Arc<Channel>,
     node_id: String,
@@ -29,7 +34,7 @@ pub async fn run(
     factory: Arc<AgentFactory>,
     shutdown_token: CancellationToken,
     lua_scripts: Vec<String>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<RuntimeExit> {
     listen_to_queues(channel, node_id, node_queue, registry, selected_agent, factory, shutdown_token, lua_scripts).await
 }
 
@@ -42,7 +47,7 @@ async fn listen_to_queues(
     factory: Arc<AgentFactory>,
     shutdown_token: CancellationToken,
     lua_scripts: Vec<String>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<RuntimeExit> {
     //
     // Create a private broadcast queue bound to the fanout exchange.
     //
@@ -218,6 +223,64 @@ async fn listen_to_queues(
             }
         }
     });
+
+    //
+    // Dedicated reset queue: a separate consumer that signals the main loop
+    // via a CancellationToken. Runs on its own task so it is never blocked
+    // by in-flight command handlers.
+    //
+
+    let reset_token = shutdown_token.child_token();
+
+    let reset_queue_name = common::node_reset_queue_name(&node_id);
+    channel
+        .queue_declare(
+            &reset_queue_name,
+            QueueDeclareOptions::default(),
+            FieldTable::default(),
+        )
+        .await?;
+    common::log_info!("Declared reset queue: {}", reset_queue_name);
+
+    {
+        let reset_channel = channel.clone();
+        let reset_token_signal = reset_token.clone();
+        let reset_queue_for_consumer = reset_queue_name.clone();
+        tokio::spawn(async move {
+            let mut consumer = match reset_channel
+                .basic_consume(
+                    &reset_queue_for_consumer,
+                    &format!("reset-consumer-{}", uuid::Uuid::new_v4()),
+                    BasicConsumeOptions::default(),
+                    FieldTable::default(),
+                )
+                .await
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    common::log_error!("Failed to create reset consumer: {}", e);
+                    return;
+                }
+            };
+
+            common::log_info!("Reset consumer started on queue {}", reset_queue_for_consumer);
+
+            while let Some(delivery_result) = consumer.next().await {
+                match delivery_result {
+                    Ok(delivery) => {
+                        common::log_info!("Reset message received, signalling main loop");
+                        delivery.ack(BasicAckOptions::default()).await.ok();
+                        reset_token_signal.cancel();
+                        break;
+                    }
+                    Err(e) => {
+                        common::log_error!("Reset consumer error: {}", e);
+                        break;
+                    }
+                }
+            }
+        });
+    }
 
     //
     // Spawn task to forward terminal output to server.
@@ -503,6 +566,7 @@ async fn listen_to_queues(
                 //
                 // Disable intercept to restore system settings.
                 //
+
                 {
                     let mut state = node_state.write().await;
                     if state.intercept_manager.is_enabled() {
@@ -516,7 +580,41 @@ async fn listen_to_queues(
                 }
 
                 common::log_info!("Shutdown complete");
-                return Ok(());
+                return Ok(RuntimeExit::Shutdown);
+            }
+
+            //
+            // Reset: cancel everything, tear down state, re-register.
+            // Signalled by the dedicated reset consumer task.
+            //
+
+            _ = reset_token.cancelled() => {
+                common::log_info!("Reset signal received, tearing down...");
+
+                transaction_manager.cancel_all();
+
+                {
+                    let locked = selected_agent.lock().unwrap();
+                    if let Some(agent) = locked.as_ref() {
+                        if agent.has_session() {
+                            agent.close_session();
+                        }
+                    }
+                }
+
+                {
+                    let mut state = node_state.write().await;
+                    state.terminal_manager.close_all();
+
+                    if state.intercept_manager.is_enabled() {
+                        if let Err(e) = state.intercept_manager.disable().await {
+                            common::log_error!("Failed to disable intercept during reset: {}", e);
+                        }
+                    }
+                }
+
+                common::log_info!("Reset cleanup complete, will re-register");
+                return Ok(RuntimeExit::Reset);
             }
             _ = update_interval.tick() => {
                 //
@@ -564,19 +662,21 @@ async fn listen_to_queues(
                         if let Ok(message) =
                             serde_json::from_slice::<NodeBroadcastMessage>(&delivery.data)
                         {
-                            handle_broadcast_message(
-                                message,
-                                &channel,
-                                &node_id,
-                                &registry,
-                                &selected_agent,
-                                &node_state,
-                                &transaction_manager,
-                                &factory,
-                                &mut pending_registry_update,
-                                &fingerprint_cache,
-                            )
-                            .await;
+                            tokio::select! {
+                                _ = reset_token.cancelled() => {}
+                                _ = handle_broadcast_message(
+                                    message,
+                                    &channel,
+                                    &node_id,
+                                    &registry,
+                                    &selected_agent,
+                                    &node_state,
+                                    &transaction_manager,
+                                    &factory,
+                                    &mut pending_registry_update,
+                                    &fingerprint_cache,
+                                ) => {}
+                            }
                         }
                         delivery.ack(BasicAckOptions::default()).await.ok();
                     }
@@ -624,35 +724,33 @@ async fn listen_to_queues(
                                         cmd_request.command_id,
                                         std::mem::discriminant(&cmd_request.command)
                                     );
-                                    handle_command(
-                                        cmd_request,
-                                        &channel,
-                                        &node_id,
-                                        &registry,
-                                        &selected_agent,
-                                        &node_state,
-                                        &transaction_manager,
-                                        &factory,
-                                        &mut pending_registry_update,
-                                        &info_update_notify,
-                                        &fingerprint_cache,
-                                    )
-                                    .await;
+                                    tokio::select! {
+                                        _ = reset_token.cancelled() => {}
+                                        _ = handle_command(
+                                            cmd_request,
+                                            &channel,
+                                            &node_id,
+                                            &registry,
+                                            &selected_agent,
+                                            &node_state,
+                                            &transaction_manager,
+                                            &factory,
+                                            &mut pending_registry_update,
+                                            &info_update_notify,
+                                            &fingerprint_cache,
+                                        ) => {}
+                                    }
                                 }
                                 NodeDirectMessage::SemanticParserResponse(response) => {
-                                    //
-                                    // Semantic parser responses should arrive
-                                    // on the dedicated
-                                    // semantic queue, not here. If we get one
-                                    // here, log a warning
-                                    // and still process it to avoid losing
-                                    // responses.
-                                    //
                                     common::log_warn!(
                                         "Received semantic parser response {} on main queue (expected on semantic queue)",
                                         &response.request_id[..8.min(response.request_id.len())]
                                     );
                                     semantic_parser_tracker.complete(response);
+                                }
+                                NodeDirectMessage::Reset => {
+                                    common::log_info!("Reset message received on main queue (expected on reset queue)");
+                                    reset_token.cancel();
                                 }
                             },
                             Err(e) => {

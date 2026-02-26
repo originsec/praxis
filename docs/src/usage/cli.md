@@ -169,6 +169,9 @@ node list
 
 # Select a node by ID prefix
 node select abc123
+
+# Reset a node (cancel all operations, close sessions, re-register)
+node reset abc123
 ```
 
 ### Agent Management
@@ -410,6 +413,7 @@ The MCP server exposes the following tools:
 **Node Management:**
 - `node_list` - List all connected nodes (includes privileged status)
 - `node_select` - Get details for a specific node
+- `node_reset` - Reset a node (cancel operations, close sessions, re-register)
 
 **Agent Management:**
 - `agent_list` - List agents on a node

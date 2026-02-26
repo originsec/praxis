@@ -758,6 +758,13 @@ impl CliClient {
         };
         self.publish_signal(message).await
     }
+
+    pub async fn reset_node(&self, node_id: &str) -> Result<()> {
+        let message = ClientSignalMessage::ResetNode {
+            node_id: node_id.to_string(),
+        };
+        self.publish_signal(message).await
+    }
 }
 
 //
@@ -883,5 +890,9 @@ impl McpClient for CliClient {
 
     async fn toggle_chain_trigger(&self, trigger_id: String, enabled: bool) -> Result<()> {
         CliClient::toggle_chain_trigger(self, trigger_id, enabled).await
+    }
+
+    async fn reset_node(&self, node_id: &str) -> Result<()> {
+        CliClient::reset_node(self, node_id).await
     }
 }

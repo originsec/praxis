@@ -94,6 +94,20 @@ impl TransactionManager {
             }
         }
     }
+
+    //
+    // Cancel all pending transactions across all sessions. Used during
+    // node reset to forcibly abort every inflight operation.
+    //
+
+    pub fn cancel_all(&self) {
+        let mut pending = self.pending.lock().unwrap();
+        for (tid, p) in pending.drain() {
+            common::log_info!("Cancelling transaction {} for node reset", tid);
+            p.session.abort_transaction();
+            let _ = p.cancel_tx.send(());
+        }
+    }
 }
 
 pub async fn handle_session_command(

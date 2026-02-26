@@ -97,6 +97,15 @@ pub fn node_semantic_queue_name(node_id: &str) -> String {
     format!("Node_{}_semantic", node_id)
 }
 
+//
+// Dedicated reset queue consumed by its own task so the reset signal
+// is never blocked by in-flight command handlers.
+//
+
+pub fn node_reset_queue_name(node_id: &str) -> String {
+    format!("Node_{}_reset", node_id)
+}
+
 /// Macro for logging events
 #[macro_export]
 macro_rules! log_event {
@@ -1546,6 +1555,9 @@ pub enum ClientSignalMessage {
     RemoveNode {
         node_id: String,
     },
+    ResetNode {
+        node_id: String,
+    },
 
     //
     // Semantic operations.
@@ -2604,6 +2616,9 @@ pub enum NodeDirectMessage {
     Command(CommandRequest),
     /// Response from the service's semantic parser
     SemanticParserResponse(SemanticParserResponse),
+    /// Reset the node: cancel all operations, tear down state, re-register.
+    /// Delivered on a dedicated queue so it is never blocked by handlers.
+    Reset,
 }
 
 /// Node event log entry - sent from node to service for centralized logging

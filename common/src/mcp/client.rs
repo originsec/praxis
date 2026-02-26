@@ -107,4 +107,7 @@ pub trait McpClient: Send + Sync {
 
     /// Toggle a chain trigger's enabled state.
     async fn toggle_chain_trigger(&self, trigger_id: String, enabled: bool) -> Result<()>;
+
+    /// Reset a node (cancel all operations, tear down state, re-register).
+    async fn reset_node(&self, node_id: &str) -> Result<()>;
 }

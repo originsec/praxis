@@ -41,6 +41,18 @@ In the web UI, the left sidebar shows all connected nodes. Click a node to selec
 
 If a node disconnects and you want to remove it from the list, click the remove button. This clears the node from the service's tracking. If the node reconnects, it will appear again.
 
+### Resetting Nodes
+
+You can reset a node to cancel all in-flight operations and return it to a clean state. Reset will:
+
+- Cancel all running transactions (prompts, recon, etc.)
+- Close any active agent session
+- Close any terminal session
+- Disable interception and restore system settings
+- Re-register the node with the service
+
+Use the reset button (↻) in the node card header, the CLI command `node reset <id>`, or the MCP tool `node_reset`. The node briefly goes offline during reset and comes back with fresh state.
+
 ## Agents
 
 Agents are the AI assistants detected on each node. When a node fingerprints successfully, you'll see agents like:

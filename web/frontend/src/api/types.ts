@@ -771,6 +771,7 @@ export type BrowserMessage =
   | { type: 'application_log_clear'; node_id: string | null }
   | { type: 'semantic_op_list_request' }
   | { type: 'remove_node'; node_id: string }
+  | { type: 'reset_node'; node_id: string }
   | { type: 'config_get'; keys: string[] }
   | { type: 'config_set'; values: Record<string, string> }
   | { type: 'op_def_add'; content: string }

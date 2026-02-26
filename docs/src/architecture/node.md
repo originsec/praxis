@@ -245,6 +245,23 @@ Kept in memory:
 - PTY handles
 - Transaction tracking
 
+## Node Reset
+
+A node can be reset at any time via the UI, CLI (`node reset`), or MCP
+(`node_reset`). Reset cancels all in-flight operations, closes sessions and
+terminals, disables interception, and re-registers the node with the service
+— equivalent to a clean restart without killing the process.
+
+The reset signal is delivered on a dedicated RabbitMQ queue
+(`Node_{id}_reset`) consumed by its own task. This guarantees the signal is
+never blocked by a long-running command handler in the main event loop. When
+the reset consumer receives a message it cancels a `CancellationToken` that
+the main loop observes. Slow commands are also wrapped in `tokio::select!`
+with this token so they abort at the next `.await` point.
+
+After cleanup the runtime returns `RuntimeExit::Reset` and the main
+reconnection loop immediately re-registers without the usual reconnect delay.
+
 ## Registration
 
 When the node starts:
