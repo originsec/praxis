@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Wifi, WifiOff, Sun, Moon, RefreshCw, Settings, PanelRightOpen, PanelRightClose } from 'lucide-react';
+import { Wifi, WifiOff, Sun, Moon, RefreshCw, Settings, PanelRightOpen, PanelRightClose, Search } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { SettingsModal } from './SettingsModal';
@@ -7,9 +7,11 @@ import { SettingsModal } from './SettingsModal';
 interface CommandTopBarProps {
   orchestratorOpen: boolean;
   onToggleOrchestrator: () => void;
+  filterText: string;
+  onFilterChange: (value: string) => void;
 }
 
-export function CommandTopBar({ orchestratorOpen, onToggleOrchestrator }: CommandTopBarProps) {
+export function CommandTopBar({ orchestratorOpen, onToggleOrchestrator, filterText, onFilterChange }: CommandTopBarProps) {
   const { state } = useApp();
   const { isDark, toggleTheme } = useTheme();
   const [showSettings, setShowSettings] = useState(false);
@@ -24,6 +26,17 @@ export function CommandTopBar({ orchestratorOpen, onToggleOrchestrator }: Comman
         <div className="flex items-center gap-4">
           <span className="text-highlight font-bold tracking-widest text-sm">[&Oslash;] PRAXIS</span>
           <span className="text-[10px] text-muted">v{state.version ?? '?.?.?'}</span>
+
+          <div className="hidden md:flex items-center gap-1 ml-4 text-muted">
+            <Search size={10} />
+            <input
+              type="text"
+              value={filterText}
+              onChange={e => onFilterChange(e.target.value)}
+              placeholder="Filter nodes..."
+              className="bg-transparent text-[10px] text-[var(--text-primary)] placeholder:text-muted/50 focus:outline-none w-24 focus:w-40 transition-all"
+            />
+          </div>
         </div>
 
         <div className="flex items-center gap-4">
