@@ -17,6 +17,8 @@ export function CommandCenter() {
     return stored !== null ? stored === 'true' : true;
   });
 
+  const [filterText, setFilterText] = useState('');
+
   const toggleOrchestrator = () => {
     setOrchestratorOpen(prev => {
       localStorage.setItem(ORCHESTRATOR_PANEL_KEY, String(!prev));
@@ -48,11 +50,25 @@ export function CommandCenter() {
     });
   }, [state.systemState?.nodes]);
 
+  const filteredNodes = useMemo(() => {
+    if (!filterText.trim()) return sortedNodes;
+    const q = filterText.toLowerCase();
+    return sortedNodes.filter(node =>
+      node.machine_name?.toLowerCase().includes(q) ||
+      node.os_details?.toLowerCase().includes(q) ||
+      node.discovered_agents.some(a =>
+        a.short_name.toLowerCase().includes(q) || a.name.toLowerCase().includes(q)
+      )
+    );
+  }, [sortedNodes, filterText]);
+
   return (
     <div className="cc-text-scaled flex flex-col h-screen overflow-hidden">
       <CommandTopBar
         orchestratorOpen={orchestratorOpen}
         onToggleOrchestrator={toggleOrchestrator}
+        filterText={filterText}
+        onFilterChange={setFilterText}
       />
 
       <div className="flex flex-1 min-h-0">
@@ -95,9 +111,15 @@ export function CommandCenter() {
                   <p className="text-xs text-muted mt-1">Waiting for nodes to check in...</p>
                 </div>
               </div>
+            ) : filteredNodes.length === 0 ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <p className="text-muted text-xs">No nodes match "{filterText}"</p>
+                </div>
+              </div>
             ) : (
               <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 380px))' }}>
-                {sortedNodes.map(node => (
+                {filteredNodes.map(node => (
                   <NodeCard key={node.node_id} node={node} />
                 ))}
               </div>
