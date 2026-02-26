@@ -3,6 +3,7 @@ mod commands;
 mod interactive;
 mod mcp;
 mod output;
+pub(crate) mod prompt;
 mod spinner;
 mod state;
 

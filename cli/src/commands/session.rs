@@ -184,8 +184,6 @@ async fn send_prompt(client: &CliClient, node_prefix: &str, text: &str, output: 
 async fn interactive_prompt(client: &CliClient, node_prefix: &str, output: &OutputFormat) -> Result<()> {
     use colored::Colorize;
     use rustyline::error::ReadlineError;
-    use rustyline::history::DefaultHistory;
-    use rustyline::{Config, Editor};
 
     let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
     let node_id = find_node_id(&state, node_prefix)
@@ -205,17 +203,16 @@ async fn interactive_prompt(client: &CliClient, node_prefix: &str, output: &Outp
         return Err(anyhow!("No active session — create one first with 'session create'"));
     }
 
-    let config = Config::builder().build();
-    let mut rl: Editor<(), DefaultHistory> = Editor::with_config(config)?;
+    let plain_prompt = "  ▸ ".to_string();
+    let colored_prompt = format!("  {} ", "▸".cyan());
+    let (mut rl, _) = crate::prompt::editor_with_colored_prompt(&plain_prompt, colored_prompt)?;
 
     println!();
     println!("  {} {}", "Interactive session".bold(), "(ctrl+c to exit)".dimmed());
     println!();
 
-    let prompt = format!("  {} ", "▸".cyan());
-
     loop {
-        match rl.readline(&prompt) {
+        match rl.readline(&plain_prompt) {
             Ok(line) => {
                 let text = line.trim();
                 if text.is_empty() {

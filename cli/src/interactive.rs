@@ -89,9 +89,19 @@ struct ReplState {
 }
 
 impl ReplState {
-    fn build_prompt(&self) -> String {
+
+    //
+    // Build plain-text and ANSI-colored prompts separately. The plain version
+    // is passed to rustyline for correct width calculation; the colored one is
+    // returned by Highlighter::highlight_prompt for display.
+    //
+
+    fn build_prompt(&self) -> (String, String) {
         if self.selected_node.is_none() {
-            return format!("{} {} ", "praxis".bold(), "❯".bold());
+            return (
+                "praxis ❯ ".to_string(),
+                format!("{} {} ", "praxis".bold(), "❯".bold()),
+            );
         }
 
         let node_display = self
@@ -104,17 +114,29 @@ impl ReplState {
                     .unwrap_or("?")
             });
 
-        let inner = if let Some(ref agent) = self.selected_agent {
+        let (inner_plain, inner_colored) = if let Some(ref agent) = self.selected_agent {
             if self.has_session {
-                format!("{}:{} {}", node_display.cyan(), agent.green(), "*".yellow())
+                (
+                    format!("{}:{} *", node_display, agent),
+                    format!("{}:{} {}", node_display.cyan(), agent.green(), "*".yellow()),
+                )
             } else {
-                format!("{}:{}", node_display.cyan(), agent.green())
+                (
+                    format!("{}:{}", node_display, agent),
+                    format!("{}:{}", node_display.cyan(), agent.green()),
+                )
             }
         } else {
-            format!("{}", node_display.cyan())
+            (
+                node_display.to_string(),
+                format!("{}", node_display.cyan()),
+            )
         };
 
-        format!("{} [{}] {} ", "praxis".bold(), inner, "❯".bold())
+        (
+            format!("praxis [{}] ❯ ", inner_plain),
+            format!("{} [{}] {} ", "praxis".bold(), inner_colored, "❯".bold()),
+        )
     }
 }
 
@@ -288,10 +310,11 @@ fn detect_context(tokens: &[&str], trailing_space: bool) -> CompletionContext {
 struct PraxisCompleter {
     commands: Vec<Vec<String>>,
     cache: Arc<Mutex<CompletionCache>>,
+    colored_prompt: Arc<Mutex<String>>,
 }
 
 impl PraxisCompleter {
-    fn new(cache: Arc<Mutex<CompletionCache>>) -> Self {
+    fn new(cache: Arc<Mutex<CompletionCache>>, colored_prompt: Arc<Mutex<String>>) -> Self {
         let cmd = ReplCli::command();
         let mut paths = Vec::new();
         Self::collect_paths(&cmd, &mut Vec::new(), &mut paths);
@@ -300,7 +323,7 @@ impl PraxisCompleter {
             paths.push(vec![builtin.to_string()]);
         }
 
-        Self { commands: paths, cache }
+        Self { commands: paths, cache, colored_prompt }
     }
 
     //
@@ -444,7 +467,20 @@ impl Completer for PraxisCompleter {
 impl Hinter for PraxisCompleter {
     type Hint = String;
 }
-impl Highlighter for PraxisCompleter {}
+impl Highlighter for PraxisCompleter {
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
+        &'s self,
+        prompt: &'p str,
+        _default: bool,
+    ) -> std::borrow::Cow<'b, str> {
+        if prompt.starts_with("praxis") {
+            let colored = self.colored_prompt.lock().unwrap().clone();
+            std::borrow::Cow::Owned(colored)
+        } else {
+            std::borrow::Cow::Borrowed(prompt)
+        }
+    }
+}
 impl Validator for PraxisCompleter {}
 impl Helper for PraxisCompleter {}
 
@@ -999,6 +1035,7 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
     print_banner(&short_id, node_count, rabbitmq_url);
 
     let cache = Arc::new(Mutex::new(CompletionCache::default()));
+    let colored_prompt = Arc::new(Mutex::new(String::new()));
     let mut repl_state = ReplState::default();
 
     refresh_completion_cache(&client, &cache, repl_state.selected_node.as_deref(), repl_state.selected_agent.as_deref()).await;
@@ -1008,7 +1045,7 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
         .build();
 
     let mut rl = Editor::with_config(config)?;
-    rl.set_helper(Some(PraxisCompleter::new(Arc::clone(&cache))));
+    rl.set_helper(Some(PraxisCompleter::new(Arc::clone(&cache), Arc::clone(&colored_prompt))));
 
     if let Some(path) = history_path() {
         let _ = rl.load_history(&path);
@@ -1041,9 +1078,10 @@ pub async fn run_repl(rabbitmq_url: &str, timeout: u64, output: OutputFormat) ->
     }
 
     loop {
-        let prompt = repl_state.build_prompt();
+        let (plain_prompt, color_prompt) = repl_state.build_prompt();
+        *colored_prompt.lock().unwrap() = color_prompt;
 
-        match rl.readline(&prompt) {
+        match rl.readline(&plain_prompt) {
             Ok(line) => {
                 let trimmed = line.trim();
                 if trimmed.is_empty() {
