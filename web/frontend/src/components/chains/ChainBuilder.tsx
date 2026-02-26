@@ -1876,7 +1876,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
               Duplicate
             </button>
           )}
-          {onExport && chain && (
+          {onExport && (
             <button
               onClick={() => {
                 const definition = flowToChain(nodes, edges, name.trim(), description, category, timeout, extraData);
@@ -2461,7 +2461,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
         <div className="space-y-4">
           <div className="max-h-48 overflow-y-auto border border-[var(--border-color)] rounded">
             {payloads.length === 0 ? (
-              <div className="p-3 text-sm text-muted text-center">No payloads yet. Create one below.</div>
+              <div className="p-3 text-xs text-muted text-center">No payloads yet. Create one below.</div>
             ) : payloads.map(p => (
               <div
                 key={p.id}
@@ -2469,7 +2469,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
                 onClick={() => setPayloadModalSelectedId(p.id)}
               >
                 <div className="min-w-0">
-                  <div className="text-sm font-mono text-highlight">{p.shortname}</div>
+                  <div className="text-xs font-mono text-highlight">{p.shortname}</div>
                   <div className="text-xs text-muted truncate">{p.content.substring(0, 60)}{p.content.length > 60 ? '...' : ''}</div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0 ml-2">
@@ -2496,14 +2496,14 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
                 value={payloadEditName}
                 onChange={(e) => setPayloadEditName(e.target.value)}
                 placeholder="Shortname (one word)"
-                className="w-full bg-[var(--bg-primary)] text-sm px-2 py-1.5 border border-[var(--border-color)] font-mono focus:outline-none focus:border-[var(--accent-warning)]"
+                className="w-full bg-[var(--bg-primary)] text-xs px-2 py-1.5 border border-[var(--border-color)] font-mono focus:outline-none focus:border-[var(--accent-warning)]"
               />
               <textarea
                 value={payloadEditContent}
                 onChange={(e) => setPayloadEditContent(e.target.value)}
                 placeholder="Payload content (markdown)"
                 rows={10}
-                className="w-full bg-[var(--bg-primary)] text-sm px-2 py-1.5 border border-[var(--border-color)] font-mono focus:outline-none focus:border-[var(--accent-warning)] resize-y"
+                className="w-full bg-[var(--bg-primary)] text-xs px-2 py-1.5 border border-[var(--border-color)] font-mono focus:outline-none focus:border-[var(--accent-warning)] resize-y"
               />
               <div className="flex gap-2">
                 <button

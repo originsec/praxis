@@ -59,9 +59,9 @@ impl ToolkitTool for MessageEncoderTool {
                 ToolConfigOption { value: "hex".to_string(), label: "Hex".to_string() },
                 ToolConfigOption { value: "rot13".to_string(), label: "ROT13".to_string() },
                 ToolConfigOption { value: "morse".to_string(), label: "Morse Code".to_string() },
-                ToolConfigOption { value: "fullwidth".to_string(), label: "Fullwidth".to_string() },
-                ToolConfigOption { value: "unicode_tags".to_string(), label: "Unicode Tags".to_string() },
-                ToolConfigOption { value: "braille_us_type2".to_string(), label: "Braille US Type 2".to_string() },
+                ToolConfigOption { value: "fullwidth".to_string(), label: "Fullwidth Unicode".to_string() },
+                ToolConfigOption { value: "unicode_tags".to_string(), label: "Unicode Tags (ASCII Smuggling)".to_string() },
+                ToolConfigOption { value: "braille_us_type2".to_string(), label: "Braille (US Type 2)".to_string() },
                 ToolConfigOption { value: "upside_down".to_string(), label: "Upside Down".to_string() },
             ]),
         }]

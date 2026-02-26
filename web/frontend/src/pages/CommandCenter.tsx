@@ -49,7 +49,7 @@ export function CommandCenter() {
   }, [state.systemState?.nodes]);
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
+    <div className="cc-text-scaled flex flex-col h-screen overflow-hidden">
       <CommandTopBar
         orchestratorOpen={orchestratorOpen}
         onToggleOrchestrator={toggleOrchestrator}

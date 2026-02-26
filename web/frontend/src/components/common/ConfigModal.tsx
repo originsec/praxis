@@ -98,7 +98,7 @@ export function ConfigModal({
 
   const renderField = (field: FieldConfig) => {
     const value = values[field.name] ?? '';
-    const fieldClasses = "w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors";
+    const fieldClasses = "w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-xs text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors";
 
     if (field.type === 'toggle') {
       const boolValue = !!value;

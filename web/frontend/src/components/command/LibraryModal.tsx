@@ -633,7 +633,7 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
           size="full"
           noPadding
         >
-          <div style={{ height: '85vh' }}>
+          <div className="h-full">
             <ChainBuilder
               chain={editingChainId ? currentChain : null}
               onSave={handleSaveChain}

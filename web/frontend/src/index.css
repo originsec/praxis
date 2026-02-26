@@ -155,6 +155,35 @@ th {
   border-radius: 50%;
 }
 
+/*
+ * Command center text scaling — 15% increase for all text except
+ * top bar and modal titles. Applied via cc-text-scaled on the
+ * command center root and cc-text-noscale on the top bar.
+ */
+
+.cc-text-scaled {
+  font-size: calc(13px * 1.15);
+}
+
+.cc-text-scaled .text-\[9px\] { font-size: 10.5px; }
+.cc-text-scaled .text-\[10px\] { font-size: 11.5px; }
+.cc-text-scaled .text-\[11px\] { font-size: 12.5px; }
+.cc-text-scaled .text-xs { font-size: calc(0.75rem * 1.15); }
+.cc-text-scaled .text-sm { font-size: calc(0.875rem * 1.15); }
+.cc-text-scaled th { font-size: calc(0.7rem * 1.15); }
+.cc-text-scaled .footer-text { font-size: calc(0.65rem * 1.15); }
+.cc-text-scaled .label-upper { font-size: calc(0.7rem * 1.15); }
+
+.cc-text-noscale { font-size: 13px; }
+.cc-text-noscale .text-\[9px\] { font-size: 9px; }
+.cc-text-noscale .text-\[10px\] { font-size: 10px; }
+.cc-text-noscale .text-\[11px\] { font-size: 11px; }
+.cc-text-noscale .text-xs { font-size: 0.75rem; }
+.cc-text-noscale .text-sm { font-size: 0.875rem; }
+.cc-text-noscale th { font-size: 0.7rem; }
+.cc-text-noscale .footer-text { font-size: 0.65rem; }
+.cc-text-noscale .label-upper { font-size: 0.7rem; }
+
 /* Card structure */
 .card-ascii {
   position: relative;

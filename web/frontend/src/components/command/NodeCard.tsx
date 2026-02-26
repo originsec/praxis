@@ -439,7 +439,7 @@ export function NodeCard({ node }: NodeCardProps) {
         <div className="px-3 py-2 border-b border-subtle bg-[var(--bg-tertiary)] flex items-center justify-between group/header">
           <div className="flex items-center gap-2 min-w-0">
             <Server size={14} className="text-muted flex-shrink-0" />
-            <span className="font-medium text-highlight text-sm truncate">{node.machine_name || 'Unknown'}</span>
+            <span className="font-medium text-highlight text-xs truncate">{node.machine_name || 'Unknown'}</span>
           </div>
           <div className="flex items-center gap-2">
             <StatusBadge status={status} />
@@ -458,14 +458,14 @@ export function NodeCard({ node }: NodeCardProps) {
         // Node info row.
         //
         */}
-        <div className="px-3 py-2 flex items-center gap-3 text-xs text-muted border-b border-subtle">
+        <div className="px-3 py-2 flex items-center gap-3 text-[10px] text-muted border-b border-subtle">
           <span className="truncate">{node.os_details}</span>
           {node.privileged && (
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] tracking-wider bg-[var(--accent-warning)]/15 text-[var(--accent-warning)] flex-shrink-0">
               <ShieldCheck size={9} /> ROOT
             </span>
           )}
-          <span className="font-mono text-[10px] truncate ml-auto">{node.node_id.slice(0, 12)}...</span>
+          <span className="font-mono text-[9px] truncate ml-auto">{node.node_id.slice(0, 12)}...</span>
         </div>
 
         {/*
@@ -475,8 +475,8 @@ export function NodeCard({ node }: NodeCardProps) {
         */}
         {node.intercept_supported && (
           <div className="px-3 py-1.5 flex items-center justify-between border-b border-subtle">
-            <div className="flex items-center gap-1.5 text-xs">
-              <Shield size={12} className={node.intercept_active ? 'text-[var(--accent-warning)]' : 'text-muted'} />
+            <div className="flex items-center gap-1.5 text-[10px]">
+              <Shield size={11} className={node.intercept_active ? 'text-[var(--accent-warning)]' : 'text-muted'} />
               <span className={node.intercept_active ? 'text-[var(--accent-warning)]' : 'text-muted'}>
                 Intercept {node.intercept_active ? 'ON' : 'OFF'}
               </span>
@@ -485,7 +485,7 @@ export function NodeCard({ node }: NodeCardProps) {
               onClick={handleToggleIntercept}
               disabled={!node.intercept_active && !node.privileged}
               title={!node.intercept_active && !node.privileged ? 'Node must be running as root/admin to enable interception' : undefined}
-              className={`px-2 py-0.5 text-[10px] transition-colors ${
+              className={`px-2 py-0.5 text-[9px] transition-colors ${
                 node.intercept_active
                   ? 'bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30'
                   : !node.privileged
