@@ -865,10 +865,38 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         )
         .map_err(lua_error)?;
 
+    //
+    // Format a Unix timestamp as ISO 8601 UTC string.
+    // Returns empty string for invalid timestamps.
+    //
+
+    praxis
+        .set(
+            "format_unix_timestamp",
+            lua.create_function(|_, timestamp: i64| {
+                use chrono::{TimeZone, Utc};
+                let result = Utc
+                    .timestamp_opt(timestamp, 0)
+                    .single()
+                    .map(|d| d.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+                    .unwrap_or_default();
+                Ok(result)
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
     super::cdp::install_cdp_api(lua, &praxis)?;
     super::uia::install_uia_api(lua, &praxis)?;
 
     lua.globals().set("praxis", praxis).map_err(lua_error)?;
+
+    //
+    // Remove the os library entirely to prevent os.execute, os.remove, etc.
+    //
+
+    let _ = lua.globals().set("os", Value::Nil);
+
     Ok(())
 }
 

@@ -138,7 +138,7 @@ local function discover_sessions_for_home(home)
 
       local last_modified = ""
       if entry.modified_unix then
-        last_modified = os.date("!%Y-%m-%dT%H:%M:%SZ", entry.modified_unix)
+        last_modified = praxis.format_unix_timestamp(entry.modified_unix)
       end
 
       table.insert(sessions, {
