@@ -1495,7 +1495,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
   //
   // Brief "Saved" flash when save succeeds.
   //
-  const [saveFlash, setSaveFlash] = useState<'saved' | 'error' | null>(null);
+  const [saveFlash, setSaveFlash] = useState<'saving' | 'saved' | 'error' | null>(null);
 
   useEffect(() => {
     if (saveStatus) {
@@ -1516,7 +1516,8 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
   const canSave = name.trim().length > 0;
 
   const handleSave = () => {
-    if (!canSave) return;
+    if (!canSave || saveFlash === 'saving') return;
+    setSaveFlash('saving');
     const definition = flowToChain(nodes, edges, name.trim(), description, category, timeout, extraData);
     onSave(definition);
   };
@@ -1892,18 +1893,20 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
           )}
           <button
             onClick={handleSave}
-            disabled={!canSave}
+            disabled={!canSave || saveFlash === 'saving'}
             className={`inline-flex items-center gap-1.5 px-3 py-1 text-[10px] tracking-wider border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
               saveFlash === 'saved'
                 ? 'border-[var(--accent-success)] bg-[var(--accent-success)]/20 text-[var(--accent-success)]'
                 : saveFlash === 'error'
                 ? 'border-[var(--accent-error)] bg-[var(--accent-error)]/20 text-[var(--accent-error)]'
+                : saveFlash === 'saving'
+                ? 'border-[var(--accent-warning)] bg-[var(--accent-warning)]/20 text-[var(--accent-warning)]'
                 : 'border-dim bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:border-[var(--accent-info)] hover:bg-[var(--accent-info)]/30'
             }`}
             title={!canSave ? 'Chain name is required' : undefined}
           >
             {saveFlash === 'saved' ? <Check size={11} /> : saveFlash === 'error' ? <AlertTriangle size={11} /> : <Save size={11} />}
-            {saveFlash === 'saved' ? 'Saved' : saveFlash === 'error' ? 'Error' : 'Save'}
+            {saveFlash === 'saved' ? 'Saved' : saveFlash === 'error' ? 'Error' : saveFlash === 'saving' ? 'Saving...' : 'Save'}
           </button>
         </div>
       </div>
