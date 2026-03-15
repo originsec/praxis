@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Play, Trash2, Clock, Edit2, Zap } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ChainBuilder } from './ChainBuilder';
@@ -70,7 +70,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
   //
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [chainToDelete, setChainToDelete] = useState<ChainDefinitionInfo | null>(null);
-  const [saveResultVersion, setSaveResultVersion] = useState(0);
+  const pendingSaveCallback = useRef<((result: 'saved' | 'error') => void) | null>(null);
 
 
   //
@@ -97,7 +97,10 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
   //
   useEffect(() => {
     if (chainSuccess || chainError) {
-      setSaveResultVersion(v => v + 1);
+      if (pendingSaveCallback.current) {
+        pendingSaveCallback.current(chainError ? 'error' : 'saved');
+        pendingSaveCallback.current = null;
+      }
       const timer = setTimeout(() => {
         clearChainStatus();
       }, 3000);
@@ -195,7 +198,9 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
     runChain(chainId, primaryNode.node_id, agentName, undefined, targetSpec);
   };
 
-  const handleSave = (definition: ChainDefinitionInput) => {
+  const handleSave = useCallback((definition: ChainDefinitionInput, onResult?: (result: 'saved' | 'error') => void) => {
+    if (onResult) pendingSaveCallback.current = onResult;
+
     if (editingChainId) {
       updateChain(editingChainId, definition);
     } else {
@@ -215,7 +220,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
       }
       createChain(definition);
     }
-  };
+  }, [editingChainId, chains, updateChain, createChain]);
 
   const handleDuplicate = (definition: ChainDefinitionInput) => {
     createChain(definition);
@@ -328,7 +333,6 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
           send={send}
           saveStatus={chainSuccess}
           saveError={chainError}
-          saveResultVersion={saveResultVersion}
         />
       </div>
     );

@@ -441,7 +441,7 @@ function PaletteItem({ type, icon, label, disabled, onClick }: PaletteItemProps)
 
 interface ChainBuilderInnerProps {
   chain?: ChainDefinitionFull | null;
-  onSave: (definition: ChainDefinitionInput) => void;
+  onSave: (definition: ChainDefinitionInput, onResult?: (result: 'saved' | 'error') => void) => void;
   onDuplicate?: (definition: ChainDefinitionInput) => void;
   onExport?: (definition: ChainDefinitionInput) => void;
   onCancel: () => void;
@@ -453,10 +453,9 @@ interface ChainBuilderInnerProps {
   send: (msg: BrowserMessage) => void;
   saveStatus?: string | null;
   saveError?: string | null;
-  saveResultVersion?: number;
 }
 
-function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, operationDefs, modelDefs, nodes: _systemNodes, toolkitTools, payloads, send, saveStatus, saveError, saveResultVersion = 0 }: ChainBuilderInnerProps) {
+function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, operationDefs, modelDefs, nodes: _systemNodes, toolkitTools, payloads, send, saveStatus, saveError }: ChainBuilderInnerProps) {
   const [name, setName] = useState(chain?.name || '');
   const [description, setDescription] = useState(chain?.description || '');
   const [timeout, setChainTimeout] = useState(chain?.timeout || 1800);
@@ -1497,21 +1496,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
   // Brief "Saved" flash when save succeeds.
   //
   const [saveFlash, setSaveFlash] = useState<'saving' | 'saved' | 'error' | null>(null);
-  const lastSaveVersion = useRef(saveResultVersion);
-
-  useEffect(() => {
-    if (saveResultVersion === lastSaveVersion.current) return;
-    lastSaveVersion.current = saveResultVersion;
-
-    if (saveError) {
-      setSaveFlash('error');
-      const timer = window.setTimeout(() => setSaveFlash(null), 3000);
-      return () => window.clearTimeout(timer);
-    }
-    setSaveFlash('saved');
-    const timer = window.setTimeout(() => setSaveFlash(null), 2000);
-    return () => window.clearTimeout(timer);
-  }, [saveResultVersion, saveError]);
+  const saveFlashTimer = useRef<number | null>(null);
 
   const canSave = name.trim().length > 0;
   const [saveValidationError, setSaveValidationError] = useState<string | null>(null);
@@ -1527,8 +1512,12 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
     }
 
     setSaveFlash('saving');
+    if (saveFlashTimer.current) window.clearTimeout(saveFlashTimer.current);
     const definition = flowToChain(nodes, edges, name.trim(), description, category, timeout, extraData);
-    onSave(definition);
+    onSave(definition, (result) => {
+      setSaveFlash(result);
+      saveFlashTimer.current = window.setTimeout(() => setSaveFlash(null), result === 'error' ? 3000 : 2000);
+    });
   };
 
   //
@@ -2638,7 +2627,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
 
 interface ChainBuilderProps {
   chain?: ChainDefinitionFull | null;
-  onSave: (definition: ChainDefinitionInput) => void;
+  onSave: (definition: ChainDefinitionInput, onResult?: (result: 'saved' | 'error') => void) => void;
   onDuplicate?: (definition: ChainDefinitionInput) => void;
   onExport?: (definition: ChainDefinitionInput) => void;
   onCancel: () => void;
@@ -2650,14 +2639,13 @@ interface ChainBuilderProps {
   send?: (msg: BrowserMessage) => void;
   saveStatus?: string | null;
   saveError?: string | null;
-  saveResultVersion?: number;
 }
 
 const noopSend = () => {};
-export function ChainBuilder({ modelDefs = [], nodes = [], toolkitTools = [], payloads = [], send = noopSend, saveStatus, saveError, saveResultVersion, ...props }: ChainBuilderProps) {
+export function ChainBuilder({ modelDefs = [], nodes = [], toolkitTools = [], payloads = [], send = noopSend, saveStatus, saveError, ...props }: ChainBuilderProps) {
   return (
     <ReactFlowProvider>
-      <ChainBuilderInner {...props} modelDefs={modelDefs} nodes={nodes} toolkitTools={toolkitTools} payloads={payloads} send={send} saveStatus={saveStatus} saveError={saveError} saveResultVersion={saveResultVersion} />
+      <ChainBuilderInner {...props} modelDefs={modelDefs} nodes={nodes} toolkitTools={toolkitTools} payloads={payloads} send={send} saveStatus={saveStatus} saveError={saveError} />
     </ReactFlowProvider>
   );
 }
