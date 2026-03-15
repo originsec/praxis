@@ -1508,6 +1508,7 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
     if (!hasTrigger || !hasTermination) {
       const missing = [!hasTrigger && 'Trigger', !hasTermination && 'End Terminator'].filter(Boolean).join(' and ');
       setSaveValidationError(`Chain requires a ${missing}`);
+      window.setTimeout(() => setSaveValidationError(null), 3000);
       return;
     }
 
@@ -1906,9 +1907,6 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
             {saveFlash === 'saved' ? <Check size={11} /> : saveFlash === 'error' ? <AlertTriangle size={11} /> : <Save size={11} />}
             {saveFlash === 'saved' ? 'Saved' : saveFlash === 'error' ? 'Error' : saveFlash === 'saving' ? 'Saving...' : 'Save'}
           </button>
-          {saveValidationError && (
-            <span className="text-[10px] text-[var(--accent-error)]">{saveValidationError}</span>
-          )}
         </div>
       </div>
 
@@ -1917,7 +1915,12 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
       // Flow Canvas.
       //
       */}
-      <div className="flex-1 min-h-0" ref={reactFlowWrapper}>
+      <div className="flex-1 min-h-0 relative" ref={reactFlowWrapper}>
+        {saveValidationError && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 px-3 py-1.5 text-[10px] bg-[var(--accent-error)]/20 border border-[var(--accent-error)] text-[var(--accent-error)]">
+            {saveValidationError}
+          </div>
+        )}
         <ReactFlow
           nodes={nodes}
           edges={edges}
