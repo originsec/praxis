@@ -1521,6 +1521,16 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
     });
   };
 
+  useEffect(() => {
+    if (saveFlash !== 'saving') return;
+    if (!saveStatus && !saveError) return;
+
+    const result: 'saved' | 'error' = saveError ? 'error' : 'saved';
+    setSaveFlash(result);
+    if (saveFlashTimer.current) window.clearTimeout(saveFlashTimer.current);
+    saveFlashTimer.current = window.setTimeout(() => setSaveFlash(null), result === 'error' ? 3000 : 2000);
+  }, [saveFlash, saveStatus, saveError]);
+
   //
   // Map React Flow node types back to ChainElement element_type for dagre.
   //

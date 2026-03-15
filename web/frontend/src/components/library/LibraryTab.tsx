@@ -36,11 +36,12 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
     runChain,
     runOperation,
     clearChainStatus,
+    clearLastCreatedChain,
     clearOpDefStatus,
     getConfig,
   } = useApp();
 
-  const { chains, currentChain, chainError, chainSuccess } = state.chains;
+  const { chains, currentChain, chainError, chainSuccess, lastCreatedChainId } = state.chains;
   const operationDefs = state.operationDefs;
   const opDefError = state.opDefError;
   const opDefSuccess = state.opDefSuccess;
@@ -98,6 +99,7 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
   // Chain export state - track which chain is being exported.
   //
   const [exportingChainId, setExportingChainId] = useState<string | null>(null);
+  const pendingSaveCallback = useRef<((result: 'saved' | 'error') => void) | null>(null);
 
   const addMenuRef = useRef<HTMLDivElement>(null);
 
@@ -138,6 +140,13 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
     }
   }, [editingChainId, currentChain]);
 
+  useEffect(() => {
+    if (lastCreatedChainId && showChainBuilder && !editingChainId) {
+      setEditingChainId(lastCreatedChainId);
+      clearLastCreatedChain();
+    }
+  }, [lastCreatedChainId, showChainBuilder, editingChainId, clearLastCreatedChain]);
+
   //
   // Export chain once full definition is loaded.
   //
@@ -176,6 +185,10 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
   //
   useEffect(() => {
     if (chainSuccess || chainError) {
+      if (pendingSaveCallback.current) {
+        pendingSaveCallback.current(chainError ? 'error' : 'saved');
+        pendingSaveCallback.current = null;
+      }
       const timer = setTimeout(() => {
         clearChainStatus();
       }, 3000);
@@ -485,7 +498,10 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
     setEditDef({ ...editDef, [field]: value });
   };
 
-  const handleSaveChain = (definition: ChainDefinitionInput) => {
+  const handleSaveChain = (definition: ChainDefinitionInput, onResult?: (result: 'saved' | 'error') => void) => {
+    if (onResult) pendingSaveCallback.current = onResult;
+    clearChainStatus();
+
     if (editingChainId) {
       updateChain(editingChainId, definition);
     } else {

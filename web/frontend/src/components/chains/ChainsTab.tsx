@@ -200,6 +200,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
 
   const handleSave = useCallback((definition: ChainDefinitionInput, onResult?: (result: 'saved' | 'error') => void) => {
     if (onResult) pendingSaveCallback.current = onResult;
+    clearChainStatus();
 
     if (editingChainId) {
       updateChain(editingChainId, definition);
@@ -220,7 +221,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
       }
       createChain(definition);
     }
-  }, [editingChainId, chains, updateChain, createChain]);
+  }, [editingChainId, chains, updateChain, createChain, clearChainStatus]);
 
   const handleDuplicate = (definition: ChainDefinitionInput) => {
     createChain(definition);

@@ -28,11 +28,11 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
     state, send,
     requestChainDefList, requestChain, createChain, updateChain, deleteChain,
     runOperation, runChain,
-    getConfig, clearOpDefStatus, clearChainStatus,
+    getConfig, clearOpDefStatus, clearChainStatus, clearLastCreatedChain,
   } = useApp();
 
   const ops = state.operationDefs;
-  const { chains, currentChain, chainError, chainSuccess } = state.chains;
+  const { chains, currentChain, chainError, chainSuccess, lastCreatedChainId } = state.chains;
   const opDefError = state.opDefError;
   const opDefSuccess = state.opDefSuccess;
   const nodes = state.systemState?.nodes ?? [];
@@ -76,6 +76,7 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
 
   const [showChainBuilder, setShowChainBuilder] = useState(false);
   const [editingChainId, setEditingChainId] = useState<string | null>(null);
+  const pendingSaveCallback = useRef<((result: 'saved' | 'error') => void) | null>(null);
 
   //
   // Import modal state.
@@ -139,6 +140,13 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
     }
   }, [editingChainId, currentChain]);
 
+  useEffect(() => {
+    if (lastCreatedChainId && showChainBuilder && !editingChainId) {
+      setEditingChainId(lastCreatedChainId);
+      clearLastCreatedChain();
+    }
+  }, [lastCreatedChainId, showChainBuilder, editingChainId, clearLastCreatedChain]);
+
   //
   // Handle op save success/error.
   //
@@ -165,6 +173,10 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
 
   useEffect(() => {
     if (chainSuccess || chainError) {
+      if (pendingSaveCallback.current) {
+        pendingSaveCallback.current(chainError ? 'error' : 'saved');
+        pendingSaveCallback.current = null;
+      }
       const timer = setTimeout(() => clearChainStatus(), 3000);
       return () => clearTimeout(timer);
     }
@@ -364,13 +376,16 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
     setShowChainBuilder(true);
   }, []);
 
-  const handleSaveChain = useCallback((definition: ChainDefinitionInput) => {
+  const handleSaveChain = useCallback((definition: ChainDefinitionInput, onResult?: (result: 'saved' | 'error') => void) => {
+    if (onResult) pendingSaveCallback.current = onResult;
+    clearChainStatus();
+
     if (editingChainId) {
       updateChain(editingChainId, definition);
     } else {
       createChain(definition);
     }
-  }, [editingChainId, updateChain, createChain]);
+  }, [editingChainId, updateChain, createChain, clearChainStatus]);
 
   const handleCancelChain = useCallback(() => {
     setShowChainBuilder(false);
