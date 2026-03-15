@@ -95,7 +95,7 @@ export function OperationDetailFloating({ operation, onClose }: Props) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-3 space-y-3">
+      <div className="flex-1 flex flex-col min-h-0 p-3 space-y-3 overflow-hidden">
 
         {/*
         //
@@ -103,7 +103,7 @@ export function OperationDetailFloating({ operation, onClose }: Props) {
         //
         */}
         {(operation.summary || operation.result) && (
-          <div>
+          <div className="flex-shrink-0">
             <button
               onClick={() => setSummaryCollapsed(!summaryCollapsed)}
               className="flex items-center gap-1.5 text-[10px] text-muted hover:text-[var(--text-primary)] transition-colors"
@@ -129,7 +129,7 @@ export function OperationDetailFloating({ operation, onClose }: Props) {
         // Prompt.
         //
         */}
-        <div>
+        <div className="flex-shrink-0">
           <button
             onClick={() => setPromptCollapsed(!promptCollapsed)}
             className="flex items-center gap-1.5 text-[10px] text-muted mb-1 hover:text-[var(--text-primary)] transition-colors"
@@ -150,16 +150,16 @@ export function OperationDetailFloating({ operation, onClose }: Props) {
         //
         */}
         {operation.output && (
-          <div>
+          <div className="flex-1 min-h-0 flex flex-col">
             <button
               onClick={() => setOutputCollapsed(!outputCollapsed)}
-              className="flex items-center gap-1.5 text-[10px] text-muted mb-1 hover:text-[var(--text-primary)] transition-colors"
+              className="flex-shrink-0 flex items-center gap-1.5 text-[10px] text-muted mb-1 hover:text-[var(--text-primary)] transition-colors"
             >
               {outputCollapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
               Output
             </button>
             {!outputCollapsed && (
-              <div ref={outputRef} className="bg-[var(--bg-secondary)] p-2 max-h-64 overflow-auto text-[var(--text-secondary)]">
+              <div ref={outputRef} className="flex-1 min-h-0 bg-[var(--bg-secondary)] p-2 overflow-auto text-[var(--text-secondary)]">
                 <StyledOutput output={operation.output} />
               </div>
             )}
