@@ -157,7 +157,7 @@ local function discover_sessions_for_home(home)
 
       local last_modified = ""
       if entry.modified_unix then
-        last_modified = os.date("!%Y-%m-%dT%H:%M:%SZ", entry.modified_unix)
+        last_modified = praxis.format_unix_timestamp(entry.modified_unix)
       end
 
       table.insert(sessions, {
@@ -402,7 +402,10 @@ local function build_session_metadata_line(meta, message_count)
   local created_at_text = "unknown"
   if meta and type(meta.createdAt) == "number" then
     local created_unix = math.floor(meta.createdAt / 1000)
-    created_at_text = os.date("!%Y-%m-%dT%H:%M:%SZ", created_unix)
+    created_at_text = praxis.format_unix_timestamp(created_unix)
+    if created_at_text == "" then
+      created_at_text = "unknown"
+    end
   end
 
   local content = table.concat({
