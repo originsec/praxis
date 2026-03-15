@@ -70,6 +70,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
   //
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [chainToDelete, setChainToDelete] = useState<ChainDefinitionInfo | null>(null);
+  const [saveResultVersion, setSaveResultVersion] = useState(0);
 
 
   //
@@ -96,6 +97,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
   //
   useEffect(() => {
     if (chainSuccess || chainError) {
+      setSaveResultVersion(v => v + 1);
       const timer = setTimeout(() => {
         clearChainStatus();
       }, 3000);
@@ -326,6 +328,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
           send={send}
           saveStatus={chainSuccess}
           saveError={chainError}
+          saveResultVersion={saveResultVersion}
         />
       </div>
     );

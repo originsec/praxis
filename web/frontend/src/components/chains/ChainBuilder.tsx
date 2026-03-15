@@ -453,9 +453,10 @@ interface ChainBuilderInnerProps {
   send: (msg: BrowserMessage) => void;
   saveStatus?: string | null;
   saveError?: string | null;
+  saveResultVersion?: number;
 }
 
-function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, operationDefs, modelDefs, nodes: _systemNodes, toolkitTools, payloads, send, saveStatus, saveError }: ChainBuilderInnerProps) {
+function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, operationDefs, modelDefs, nodes: _systemNodes, toolkitTools, payloads, send, saveStatus, saveError, saveResultVersion = 0 }: ChainBuilderInnerProps) {
   const [name, setName] = useState(chain?.name || '');
   const [description, setDescription] = useState(chain?.description || '');
   const [timeout, setChainTimeout] = useState(chain?.timeout || 1800);
@@ -1496,27 +1497,35 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
   // Brief "Saved" flash when save succeeds.
   //
   const [saveFlash, setSaveFlash] = useState<'saving' | 'saved' | 'error' | null>(null);
+  const lastSaveVersion = useRef(saveResultVersion);
 
   useEffect(() => {
-    if (saveStatus) {
-      setSaveFlash('saved');
-      const timer = window.setTimeout(() => setSaveFlash(null), 2000);
-      return () => window.clearTimeout(timer);
-    }
-  }, [saveStatus]);
+    if (saveResultVersion === lastSaveVersion.current) return;
+    lastSaveVersion.current = saveResultVersion;
 
-  useEffect(() => {
     if (saveError) {
       setSaveFlash('error');
       const timer = window.setTimeout(() => setSaveFlash(null), 3000);
       return () => window.clearTimeout(timer);
     }
-  }, [saveError]);
+    setSaveFlash('saved');
+    const timer = window.setTimeout(() => setSaveFlash(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [saveResultVersion, saveError]);
 
   const canSave = name.trim().length > 0;
+  const [saveValidationError, setSaveValidationError] = useState<string | null>(null);
 
   const handleSave = () => {
     if (!canSave || saveFlash === 'saving') return;
+    setSaveValidationError(null);
+
+    if (!hasTrigger || !hasTermination) {
+      const missing = [!hasTrigger && 'Trigger', !hasTermination && 'End Terminator'].filter(Boolean).join(' and ');
+      setSaveValidationError(`Chain requires a ${missing}`);
+      return;
+    }
+
     setSaveFlash('saving');
     const definition = flowToChain(nodes, edges, name.trim(), description, category, timeout, extraData);
     onSave(definition);
@@ -1908,6 +1917,9 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
             {saveFlash === 'saved' ? <Check size={11} /> : saveFlash === 'error' ? <AlertTriangle size={11} /> : <Save size={11} />}
             {saveFlash === 'saved' ? 'Saved' : saveFlash === 'error' ? 'Error' : saveFlash === 'saving' ? 'Saving...' : 'Save'}
           </button>
+          {saveValidationError && (
+            <span className="text-[10px] text-[var(--accent-error)]">{saveValidationError}</span>
+          )}
         </div>
       </div>
 
@@ -2638,13 +2650,14 @@ interface ChainBuilderProps {
   send?: (msg: BrowserMessage) => void;
   saveStatus?: string | null;
   saveError?: string | null;
+  saveResultVersion?: number;
 }
 
 const noopSend = () => {};
-export function ChainBuilder({ modelDefs = [], nodes = [], toolkitTools = [], payloads = [], send = noopSend, saveStatus, saveError, ...props }: ChainBuilderProps) {
+export function ChainBuilder({ modelDefs = [], nodes = [], toolkitTools = [], payloads = [], send = noopSend, saveStatus, saveError, saveResultVersion, ...props }: ChainBuilderProps) {
   return (
     <ReactFlowProvider>
-      <ChainBuilderInner {...props} modelDefs={modelDefs} nodes={nodes} toolkitTools={toolkitTools} payloads={payloads} send={send} saveStatus={saveStatus} saveError={saveError} />
+      <ChainBuilderInner {...props} modelDefs={modelDefs} nodes={nodes} toolkitTools={toolkitTools} payloads={payloads} send={send} saveStatus={saveStatus} saveError={saveError} saveResultVersion={saveResultVersion} />
     </ReactFlowProvider>
   );
 }
