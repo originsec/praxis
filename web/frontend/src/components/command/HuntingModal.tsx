@@ -270,8 +270,12 @@ export function HuntingModal({ onClose }: HuntingModalProps) {
       title="Hunting"
       size="full"
       noPadding
+      resizable
+      storageKey="cmd-hunting"
+      defaultWidth={Math.round(window.innerWidth * 0.9)}
+      defaultHeight={Math.round(window.innerHeight * 0.8)}
     >
-      <div className="flex flex-col h-[80vh]">
+      <div className="flex flex-col h-full">
         {/*
         //
         // Editor + schema reference panel.

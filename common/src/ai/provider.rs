@@ -13,6 +13,7 @@ pub enum Provider {
     Nvidia,
     MiniMax,
     Moonshot,
+    FireworksAI,
 }
 
 impl Provider {
@@ -29,6 +30,7 @@ impl Provider {
             Provider::Nvidia => "nvidia",
             Provider::MiniMax => "minimax",
             Provider::Moonshot => "moonshot",
+            Provider::FireworksAI => "fireworksai",
         }
     }
 
@@ -45,6 +47,7 @@ impl Provider {
             "nvidia" => Some(Provider::Nvidia),
             "minimax" => Some(Provider::MiniMax),
             "moonshot" => Some(Provider::Moonshot),
+            "fireworksai" | "fireworks" => Some(Provider::FireworksAI),
             _ => None,
         }
     }
@@ -62,6 +65,7 @@ impl Provider {
             Provider::Nvidia,
             Provider::MiniMax,
             Provider::Moonshot,
+            Provider::FireworksAI,
         ]
     }
 
@@ -78,6 +82,7 @@ impl Provider {
             Provider::Nvidia => "NVIDIA",
             Provider::MiniMax => "MiniMax",
             Provider::Moonshot => "Moonshot AI",
+            Provider::FireworksAI => "Fireworks AI",
         }
     }
 
@@ -94,6 +99,7 @@ impl Provider {
             Provider::Nvidia => "https://integrate.api.nvidia.com/v1",
             Provider::MiniMax => "https://api.minimax.io/v1",
             Provider::Moonshot => "https://api.moonshot.ai/v1",
+            Provider::FireworksAI => "https://api.fireworks.ai/inference/v1",
         }
     }
 
@@ -109,6 +115,7 @@ impl Provider {
                 | Provider::Nvidia
                 | Provider::MiniMax
                 | Provider::Moonshot
+                | Provider::FireworksAI
         )
     }
 }

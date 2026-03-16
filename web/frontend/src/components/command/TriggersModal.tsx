@@ -114,8 +114,12 @@ export function TriggersModal({ onClose }: TriggersModalProps) {
       title="Triggers"
       size="lg"
       noPadding
+      resizable
+      storageKey="cmd-triggers"
+      defaultWidth={672}
+      defaultHeight={Math.round(window.innerHeight * 0.6)}
     >
-      <div className="flex flex-col" style={{ height: '60vh' }}>
+      <div className="flex flex-col h-full">
 
         {/*
         //

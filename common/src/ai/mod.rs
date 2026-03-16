@@ -10,8 +10,8 @@ pub mod models;
 pub use provider::Provider;
 
 pub use types::{
-    AiResponse, ChatCompletionChoice, ChatCompletionRequest, ChatCompletionResponse,
-    Content, Message, Role, Tool, Usage,
+    AiResponse, ChatCompletionChoice, ChatCompletionDelta, ChatCompletionRequest,
+    ChatCompletionResponse, Content, Message, Role, Tool, Usage,
 };
 
 pub use client::{

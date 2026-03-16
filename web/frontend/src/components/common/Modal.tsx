@@ -1,5 +1,5 @@
 import { X } from 'lucide-react';
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react';
 
 interface ModalProps {
   isOpen: boolean;
@@ -9,6 +9,10 @@ interface ModalProps {
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full';
   headerActions?: ReactNode;
   noPadding?: boolean;
+  resizable?: boolean;
+  storageKey?: string;
+  defaultWidth?: number;
+  defaultHeight?: number;
 }
 
 const sizeClasses = {
@@ -19,10 +23,40 @@ const sizeClasses = {
   full: 'max-w-[95vw]',
 };
 
-export function Modal({ isOpen, onClose, title, children, size = 'md', headerActions, noPadding }: ModalProps) {
+function getStoredSize(key: string): { width: number; height: number } | null {
+  try {
+    const raw = localStorage.getItem(`modal-size-${key}`);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return null;
+}
+
+function saveSize(key: string, w: number, h: number) {
+  try {
+    localStorage.setItem(`modal-size-${key}`, JSON.stringify({ width: Math.round(w), height: Math.round(h) }));
+  } catch { /* ignore */ }
+}
+
+export function Modal({ isOpen, onClose, title, children, size = 'md', headerActions, noPadding, resizable, storageKey, defaultWidth, defaultHeight }: ModalProps) {
+
+  //
+  // Resizable state — initialized from localStorage or defaults.
+  //
+
+  const [modalSize, setModalSize] = useState<{ width: number; height: number } | null>(() => {
+    if (!resizable || !storageKey) return null;
+    const stored = getStoredSize(storageKey);
+    if (stored) return stored;
+    if (defaultWidth && defaultHeight) return { width: defaultWidth, height: defaultHeight };
+    return null;
+  });
+
+  const modalRef = useRef<HTMLDivElement>(null);
+
   //
   // Close on escape key.
   //
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -41,7 +75,52 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', headerAct
     };
   }, [isOpen, onClose]);
 
+  //
+  // Corner resize handler — both width and height scale by 2x because the
+  // modal is centered, so a 1px cursor movement shifts the edge by 0.5px.
+  //
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    if (!resizable || !storageKey) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startW = modalRef.current?.offsetWidth ?? defaultWidth ?? 600;
+    const startH = modalRef.current?.offsetHeight ?? defaultHeight ?? 400;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const newW = Math.max(300, Math.min(window.innerWidth * 0.95, startW + (ev.clientX - startX) * 2));
+      const newH = Math.max(200, Math.min(window.innerHeight * 0.95, startH + (ev.clientY - startY) * 2));
+      setModalSize({ width: newW, height: newH });
+    };
+
+    const onMouseUp = (ev: MouseEvent) => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      const finalW = Math.max(300, Math.min(window.innerWidth * 0.95, startW + (ev.clientX - startX) * 2));
+      const finalH = Math.max(200, Math.min(window.innerHeight * 0.95, startH + (ev.clientY - startY) * 2));
+      saveSize(storageKey, finalW, finalH);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    document.body.style.cursor = 'nwse-resize';
+    document.body.style.userSelect = 'none';
+  }, [resizable, storageKey, defaultWidth, defaultHeight]);
+
   if (!isOpen) return null;
+
+  const hasCustomSize = resizable && modalSize;
+  const sizeStyle = hasCustomSize ? {
+    width: modalSize.width,
+    height: modalSize.height,
+    maxWidth: '95vw',
+    maxHeight: '95vh',
+  } : undefined;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -61,7 +140,9 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', headerAct
       //
       */}
       <div
-        className={`relative bg-panel border border-subtle shadow-2xl ${sizeClasses[size]} w-full mx-4 ${size === 'full' ? 'h-[90vh]' : 'max-h-[90vh]'} flex flex-col ascii-box`}
+        ref={modalRef}
+        className={`relative bg-panel border border-subtle shadow-2xl ${hasCustomSize ? '' : `${sizeClasses[size]} w-full`} mx-4 ${!hasCustomSize ? (size === 'full' ? 'h-[90vh]' : 'max-h-[90vh]') : ''} flex flex-col ascii-box`}
+        style={sizeStyle}
       >
         {/*
         //
@@ -87,6 +168,25 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', headerAct
         //
         */}
         <div className={`flex-1 overflow-auto ${noPadding ? '' : 'p-4'}`}>{children}</div>
+
+        {/*
+        //
+        // Resize handle (bottom-right corner).
+        //
+        */}
+        {resizable && (
+          <div
+            onMouseDown={handleResizeStart}
+            className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize z-10 group"
+            style={{ touchAction: 'none' }}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" className="text-[var(--border-subtle)] group-hover:text-[var(--text-muted)] transition-colors">
+              <line x1="14" y1="4" x2="4" y2="14" stroke="currentColor" strokeWidth="1" />
+              <line x1="14" y1="8" x2="8" y2="14" stroke="currentColor" strokeWidth="1" />
+              <line x1="14" y1="12" x2="12" y2="14" stroke="currentColor" strokeWidth="1" />
+            </svg>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1091,7 +1091,7 @@ export function SettingsPage() {
                         <select
                           value={featureAssignments.orchestrator || ''}
                           onChange={(e) => setFeatureAssignments(a => ({ ...a, orchestrator: e.target.value || null }))}
-                          className="flex-1 bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
+                          className="flex-1 min-w-0 bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                         >
                           <option value="">Select a model...</option>
                           {modelDefinitions.map((m) => (
@@ -1099,13 +1099,16 @@ export function SettingsPage() {
                           ))}
                         </select>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
                           value={featureSettings.orchestratorMaxTokens}
-                          onChange={(e) => setFeatureSettings(s => ({ ...s, orchestratorMaxTokens: e.target.value }))}
-                          placeholder="Max tokens"
-                          min="1000"
-                          max="100000"
-                          className="w-full md:w-28 bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
+                          onChange={(e) => {
+                            const v = e.target.value.replace(/[^0-9]/g, '');
+                            setFeatureSettings(s => ({ ...s, orchestratorMaxTokens: v }));
+                          }}
+                          placeholder="Tokens"
+                          className="w-20 shrink-0 bg-[var(--bg-primary)] border border-dim px-2 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
                           title="Max tokens"
                         />
                       </div>

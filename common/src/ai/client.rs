@@ -1,10 +1,14 @@
+use std::pin::Pin;
+
 use anyhow::Result;
+use futures_core::Stream;
 
 use super::parsing::parse_manual_tool_call;
 use super::provider::Provider;
 use super::providers::{AnthropicClient, GeminiClient, OpenAIClient};
 use super::types::{
-    AiResponse, ChatCompletionRequest, ChatCompletionResponse, Content, Message, Role,
+    AiResponse, ChatCompletionDelta, ChatCompletionRequest, ChatCompletionResponse, Content,
+    Message, Role,
 };
 
 /// Unified AI client that wraps provider-specific implementations
@@ -24,6 +28,42 @@ impl AiClient {
             AiClient::Anthropic(client) => client.chat_completion(request).await,
             AiClient::OpenAI(client) => client.chat_completion(request).await,
             AiClient::Gemini(client) => client.chat_completion(request).await,
+        }
+    }
+
+    /// Send a streaming chat completion request.
+    ///
+    /// Returns a stream of delta chunks. Currently supported for
+    /// OpenAI-compatible providers only. Falls back to a single-chunk
+    /// non-streaming response for unsupported providers.
+    pub fn chat_completion_stream(
+        &self,
+        request: ChatCompletionRequest,
+    ) -> Pin<Box<dyn Stream<Item = Result<ChatCompletionDelta>> + Send + '_>> {
+        match self {
+            AiClient::OpenAI(client) => client.chat_completion_stream(request),
+            _ => {
+                //
+                // Fallback: execute non-streaming and emit as single chunk.
+                //
+                Box::pin(async_stream::try_stream! {
+                    let response = match self {
+                        AiClient::Anthropic(client) => client.chat_completion(request).await,
+                        AiClient::Gemini(client) => client.chat_completion(request).await,
+                        AiClient::OpenAI(_) => unreachable!(),
+                    }?;
+
+                    let text = response.text().unwrap_or_default().to_string();
+                    let finish_reason = response.choices.first()
+                        .and_then(|c| c.finish_reason.clone());
+
+                    yield ChatCompletionDelta {
+                        content: text,
+                        finish_reason,
+                        usage: response.usage,
+                    };
+                })
+            }
         }
     }
 }
@@ -84,6 +124,10 @@ pub fn create_ai_client(provider: Provider, api_key: String) -> Result<AiClient>
         Provider::Moonshot => Ok(AiClient::OpenAI(OpenAIClient::with_base_url(
             api_key,
             "https://api.moonshot.ai/v1".to_string(),
+        ))),
+        Provider::FireworksAI => Ok(AiClient::OpenAI(OpenAIClient::with_base_url(
+            api_key,
+            "https://api.fireworks.ai/inference/v1".to_string(),
         ))),
     }
 }

@@ -36,7 +36,7 @@ export function ToolkitModal({ onClose }: ToolkitModalProps) {
 
   return (
     <>
-      <Modal isOpen={true} onClose={onClose} title="Toolkit" size="lg">
+      <Modal isOpen={true} onClose={onClose} title="Toolkit" size="lg" resizable storageKey="cmd-toolkit" defaultWidth={672} defaultHeight={Math.round(window.innerHeight * 0.45)}>
         <div className="space-y-4">
           <p className="text-[10px] text-muted">Specialized offensive tools</p>
 
