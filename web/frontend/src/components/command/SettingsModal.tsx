@@ -856,21 +856,24 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                           <select
                             value={featureAssignments.orchestrator || ''}
                             onChange={e => handleFeatureChange('orchestrator', e.target.value || null)}
-                            className={`flex-1 min-w-0 ${inputCls}`}
+                            className="flex-1 min-w-0 bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle transition-colors"
                           >
                             <option value="">Select model...</option>
                             {modelDefinitions.map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
                           </select>
                           <input
-                            type="number"
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
                             value={orchestratorMaxTokens}
-                            onChange={e => setOrchestratorMaxTokens(e.target.value)}
+                            onChange={e => {
+                              const v = e.target.value.replace(/[^0-9]/g, '');
+                              setOrchestratorMaxTokens(v);
+                            }}
                             onBlur={handleMaxTokensBlur}
                             placeholder="Tokens"
-                            min="1000"
-                            max="100000"
                             title="Max tokens"
-                            className={`w-[5.5rem] flex-shrink-0 ${inputCls}`}
+                            className="w-16 flex-shrink-0 bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle transition-colors"
                           />
                         </div>
                       )}

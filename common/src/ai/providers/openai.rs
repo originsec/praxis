@@ -1,9 +1,15 @@
+use std::pin::Pin;
+
 use anyhow::{anyhow, Result};
+use async_stream::try_stream;
+use futures_core::Stream;
+use futures_util::StreamExt;
+use reqwest::Response;
 use serde::{Deserialize, Serialize};
 
 use crate::ai::types::{
-    ChatCompletionChoice, ChatCompletionRequest, ChatCompletionResponse, Content, Message, Role,
-    Usage,
+    ChatCompletionChoice, ChatCompletionDelta, ChatCompletionRequest, ChatCompletionResponse,
+    Content, Message, Role, Usage,
 };
 
 const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
@@ -66,12 +72,14 @@ impl OpenAIClient {
             .collect();
 
         //
-        // Build request body.
+        // Apply provider-specific max_tokens cap if configured.
         //
+        let max_tokens = request.max_tokens;
+
         let body = OpenAIRequest {
             model: request.model.clone(),
             messages,
-            max_tokens: request.max_tokens,
+            max_tokens,
             temperature: request.temperature,
             top_p: request.top_p,
         };
@@ -132,6 +140,123 @@ impl OpenAIClient {
             }),
         })
     }
+
+    /// Send a streaming chat completion request.
+    ///
+    /// Returns a stream of ChatCompletionDelta chunks. The final chunk
+    /// will have finish_reason set and may include usage stats.
+    pub fn chat_completion_stream(
+        &self,
+        request: ChatCompletionRequest,
+    ) -> Pin<Box<dyn Stream<Item = Result<ChatCompletionDelta>> + Send + '_>> {
+        let messages: Vec<OpenAIMessage> = request
+            .messages
+            .iter()
+            .map(|msg| OpenAIMessage {
+                role: msg.role.as_str().to_string(),
+                content: msg.text().to_string(),
+            })
+            .collect();
+
+        let max_tokens = request.max_tokens;
+
+        let body = OpenAIStreamRequest {
+            model: request.model.clone(),
+            messages,
+            max_tokens,
+            temperature: request.temperature,
+            top_p: request.top_p,
+            stream: true,
+        };
+
+        Box::pin(try_stream! {
+            let response = self
+                .http_client
+                .post(&self.base_url)
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| anyhow!("HTTP request failed: {}", e))?;
+
+            let response = check_response_status(response).await?;
+
+            for await delta in parse_sse_stream(response) {
+                yield delta?;
+            }
+        })
+    }
+}
+
+async fn check_response_status(response: Response) -> Result<Response> {
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(anyhow!("OpenAI API error {}: {}", status, body));
+    }
+    Ok(response)
+}
+
+//
+// Parse an SSE response stream into ChatCompletionDelta chunks.
+//
+
+fn parse_sse_stream(
+    response: Response,
+) -> Pin<Box<dyn Stream<Item = Result<ChatCompletionDelta>> + Send>> {
+    Box::pin(try_stream! {
+        use tokio::io::AsyncBufReadExt;
+        use tokio_util::io::StreamReader;
+
+        let byte_stream = response.bytes_stream().map(|r| {
+            r.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        });
+        let reader = StreamReader::new(byte_stream);
+        let mut lines = reader.lines();
+
+        while let Some(line) = lines.next_line().await
+            .map_err(|e| anyhow!("Stream read error: {}", e))? {
+
+            let line = line.trim().to_string();
+
+            if line.is_empty() || line.starts_with(':') {
+                continue;
+            }
+
+            let data = if let Some(d) = line.strip_prefix("data: ") {
+                d.trim()
+            } else {
+                continue;
+            };
+
+            if data == "[DONE]" {
+                break;
+            }
+
+            let chunk: OpenAIStreamChunk = match serde_json::from_str(data) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            if let Some(choice) = chunk.choices.first() {
+                let content = choice.delta.content.clone().unwrap_or_default();
+                let finish_reason = choice.finish_reason.clone();
+
+                let usage = chunk.usage.map(|u| Usage {
+                    prompt_tokens: u.prompt_tokens,
+                    completion_tokens: u.completion_tokens,
+                    total_tokens: u.total_tokens,
+                });
+
+                yield ChatCompletionDelta {
+                    content,
+                    finish_reason,
+                    usage,
+                };
+            }
+        }
+    })
 }
 
 //
@@ -154,6 +279,42 @@ struct OpenAIRequest {
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     top_p: Option<f32>,
+}
+
+#[derive(Debug, Serialize)]
+struct OpenAIStreamRequest {
+    model: String,
+    messages: Vec<OpenAIMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_p: Option<f32>,
+    stream: bool,
+}
+
+//
+// Streaming response types.
+//
+
+#[derive(Debug, Deserialize)]
+struct OpenAIStreamChunk {
+    #[allow(dead_code)]
+    id: Option<String>,
+    choices: Vec<OpenAIStreamChoice>,
+    usage: Option<OpenAIUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIStreamChoice {
+    delta: OpenAIStreamDelta,
+    finish_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIStreamDelta {
+    content: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -103,8 +103,12 @@ export function TrafficModal({ onClose, fixedNodeId }: TrafficModalProps) {
       title="Intercepted Traffic"
       size="full"
       noPadding
+      resizable
+      storageKey="cmd-traffic"
+      defaultWidth={Math.round(window.innerWidth * 0.9)}
+      defaultHeight={Math.round(window.innerHeight * 0.75)}
     >
-      <div className="flex flex-col h-[75vh]">
+      <div className="flex flex-col h-full">
 
         {/*
         //

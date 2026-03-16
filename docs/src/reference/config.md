@@ -109,6 +109,7 @@ Then update the port in **Settings** > **MCP Server** to match. The SSE endpoint
 | `mistral` | Mistral | `MISTRAL_API_KEY` |
 | `xai` | xAI | `XAI_API_KEY` |
 | `nvidia` | NVIDIA | `NVIDIA_API_KEY` |
+| `fireworksai` | Fireworks AI | `FIREWORKS_API_KEY` |
 | `minimax` | MiniMax | `MINIMAX_API_KEY` |
 | `ollama` | Ollama (local) | (none) |
 
