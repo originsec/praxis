@@ -13,10 +13,14 @@ chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1.0"
 regex = "1.10"
 dirs = "5.0"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures-core = "0.3"
+futures-util = "0.3"
+async-stream = "0.3"
 indexmap = { version = "2.0", features = ["serde"] }
 lapin = "2.5"
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "io-util"] }
+tokio-util = { version = "0.7", features = ["io"] }
 tracing = "0.1"
 rmcp = { version = "0.8", features = ["server", "transport-io", "transport-sse-server", "schemars"] }
 schemars = "1"

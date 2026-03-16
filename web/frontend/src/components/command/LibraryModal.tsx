@@ -409,8 +409,12 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
         title="Library"
         size="lg"
         noPadding
+        resizable
+        storageKey="cmd-library"
+        defaultWidth={672}
+        defaultHeight={Math.round(window.innerHeight * 0.5)}
       >
-        <div className="flex flex-col" style={{ height: '50vh' }}>
+        <div className="flex flex-col h-full">
 
           {/*
           //

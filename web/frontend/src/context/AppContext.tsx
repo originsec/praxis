@@ -487,17 +487,11 @@ function reduceOrchestrator(state: AppState, action: Action): AppState | null {
         },
       };
     case 'ORCHESTRATOR_ADD_CONTENT': {
-      //
-      // Add newline separator between content chunks if needed.
-      //
-      const existing = state.orchestrator.streamingContent;
-      const needsSeparator = existing.length > 0 && !existing.endsWith('\n') && !action.content.startsWith('\n');
-      const separator = needsSeparator ? '\n\n' : '';
       return {
         ...state,
         orchestrator: {
           ...state.orchestrator,
-          streamingContent: existing + separator + action.content,
+          streamingContent: state.orchestrator.streamingContent + action.content,
         },
       };
     }

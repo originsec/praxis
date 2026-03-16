@@ -200,6 +200,17 @@ pub struct Usage {
     pub total_tokens: u32,
 }
 
+/// A streaming chunk from a chat completion
+#[derive(Debug, Clone)]
+pub struct ChatCompletionDelta {
+    /// Incremental text content (empty string if no content in this chunk)
+    pub content: String,
+    /// Finish reason, present only on the final chunk
+    pub finish_reason: Option<String>,
+    /// Usage stats, present only on the final chunk (some providers only)
+    pub usage: Option<Usage>,
+}
+
 /// Response from AI that may contain a tool call or be a final response
 #[derive(Debug)]
 pub enum AiResponse {

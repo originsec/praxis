@@ -244,6 +244,9 @@ pub async fn fetch_models_for_provider(provider: &str, api_key: &str) -> Result<
         "moonshot" => {
             fetch_openai_compatible_models("https://api.moonshot.ai/v1", api_key).await
         }
+        "fireworksai" | "fireworks" => {
+            fetch_openai_compatible_models("https://api.fireworks.ai/inference/v1", api_key).await
+        }
         "ollama" => fetch_ollama_models().await,
         _ => Err(format!("Unknown or unsupported provider: {}", provider)),
     }?;
