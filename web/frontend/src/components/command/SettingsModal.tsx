@@ -1,17 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Monitor, LayoutGrid, Sun, Moon, Cpu, Server, Info, Wifi, WifiOff,
+  Sun, Moon, Cpu, Server, Info, Wifi, WifiOff,
   Plus, Trash2, Edit2, Save, Check, X, Key, List, Loader2,
   Circle, CircleCheck, Download, ExternalLink, FileCode,
   Upload, RotateCcw, AlertTriangle,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import { Modal } from '../common/Modal';
 import { LuaCodeEditor } from '../common/LuaCodeEditor';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { getFeatureFlags } from '../../utils/featureFlags';
-import { getUiMode, setUiMode, type UiMode } from '../../utils/uiMode';
 
 type Tab = 'display' | 'llm' | 'agents' | 'service' | 'about';
 type LLMView = 'models' | 'features';
@@ -53,7 +51,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     deleteLuaAgentScript, resetLuaAgentScriptDefaults, toggleLuaAgentScriptDisabled,
   } = useApp();
   const { theme, setTheme } = useTheme();
-  const navigate = useNavigate();
+
 
   const [activeTab, setActiveTab] = useState<Tab>('display');
   const [llmView, setLlmView] = useState<LLMView>('models');
@@ -450,18 +448,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     e.target.value = '';
   };
 
-  //
-  // UI mode handler.
-  //
-
-  const handleModeChange = (mode: UiMode) => {
-    setUiMode(mode);
-    if (mode === 'legacy') {
-      navigate('/dashboard');
-      onClose();
-    }
-  };
-
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: 'display', label: 'Display', icon: <Monitor size={14} /> },
     { id: 'llm', label: 'LLM', icon: <Cpu size={14} /> },
@@ -522,49 +508,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
           {activeTab === 'display' && (
             <div className="space-y-5">
               <div>
-                <h3 className="text-xs font-semibold text-highlight tracking-wider mb-0.5">INTERFACE MODE</h3>
-                <p className="text-[10px] text-muted mb-3">Choose your preferred layout</p>
-
-                <div className="space-y-1.5">
-                  <button
-                    onClick={() => handleModeChange('command_center')}
-                    className={`w-full flex items-center gap-3 p-2.5 border transition-colors text-left ${
-                      getUiMode() === 'command_center'
-                        ? 'border-[var(--accent-info)]/50 bg-[var(--accent-info)]/5'
-                        : 'border-subtle hover:border-[var(--border-hover)] hover:bg-[var(--bg-secondary)]'
-                    }`}
-                  >
-                    <LayoutGrid size={16} className={getUiMode() === 'command_center' ? 'text-[var(--accent-info)]' : 'text-muted'} />
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-xs font-medium ${getUiMode() === 'command_center' ? 'text-highlight' : 'text-[var(--text-primary)]'}`}>Command Center</p>
-                      <p className="text-[10px] text-muted">Full-screen grid with node cards and orchestrator</p>
-                    </div>
-                    {getUiMode() === 'command_center' && (
-                      <span className="text-[9px] tracking-wider text-[var(--accent-info)] flex-shrink-0">ACTIVE</span>
-                    )}
-                  </button>
-
-                  <button
-                    onClick={() => handleModeChange('legacy')}
-                    className={`w-full flex items-center gap-3 p-2.5 border transition-colors text-left ${
-                      getUiMode() === 'legacy'
-                        ? 'border-[var(--accent-info)]/50 bg-[var(--accent-info)]/5'
-                        : 'border-subtle hover:border-[var(--border-hover)] hover:bg-[var(--bg-secondary)]'
-                    }`}
-                  >
-                    <Monitor size={16} className={getUiMode() === 'legacy' ? 'text-[var(--accent-info)]' : 'text-muted'} />
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-xs font-medium ${getUiMode() === 'legacy' ? 'text-highlight' : 'text-[var(--text-primary)]'}`}>Classic</p>
-                      <p className="text-[10px] text-muted">Sidebar navigation with dedicated pages</p>
-                    </div>
-                    {getUiMode() === 'legacy' && (
-                      <span className="text-[9px] tracking-wider text-[var(--accent-info)] flex-shrink-0">ACTIVE</span>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-subtle">
                 <h3 className="text-xs font-semibold text-highlight tracking-wider mb-0.5">THEME</h3>
                 <p className="text-[10px] text-muted mb-3">Visual appearance</p>
 
