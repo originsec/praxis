@@ -160,6 +160,6 @@ RUN chmod +x /app/entrypoint.sh
 ENV PRAXIS_RABBITMQ_URL=amqp://praxis:praxis@rabbitmq:5672
 ENV PRAXIS_NODES_DIR=/app/nodes
 
-EXPOSE 8080
+EXPOSE 8080 8585
 
 ENTRYPOINT ["/app/entrypoint.sh"]

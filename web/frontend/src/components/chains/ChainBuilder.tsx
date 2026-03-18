@@ -35,9 +35,6 @@ import type {
 import { computeLayout } from '../../utils/dagreLayout';
 import { getNextSessionColor, getUsedColors } from '../../utils/sessionColors';
 
-//
-// Model definition type (matches SettingsPage).
-//
 interface ModelDefinition {
   //
   // provider::model format.

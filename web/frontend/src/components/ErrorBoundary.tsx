@@ -58,7 +58,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 className="inline-flex items-center gap-2 px-4 py-2 bg-[var(--accent-info)]/20 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/30 transition-colors"
               >
                 <RefreshCw size={16} />
-                Go to Dashboard
+                Reload
               </button>
               <button
                 onClick={() => window.location.reload()}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Sun, Moon, Cpu, Server, Info, Wifi, WifiOff,
+  Monitor, Cpu, Server, Info, Wifi, WifiOff,
   Plus, Trash2, Edit2, Save, Check, X, Key, List, Loader2,
   Circle, CircleCheck, Download, ExternalLink, FileCode,
   Upload, RotateCcw, AlertTriangle,
@@ -8,10 +8,9 @@ import {
 import { Modal } from '../common/Modal';
 import { LuaCodeEditor } from '../common/LuaCodeEditor';
 import { useApp } from '../../context/AppContext';
-import { useTheme } from '../../context/ThemeContext';
 import { getFeatureFlags } from '../../utils/featureFlags';
 
-type Tab = 'display' | 'llm' | 'agents' | 'service' | 'about';
+type Tab = 'llm' | 'agents' | 'service' | 'about';
 type LLMView = 'models' | 'features';
 
 interface SettingsModalProps {
@@ -50,10 +49,9 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     listLuaAgentScripts, addLuaAgentScript, updateLuaAgentScript,
     deleteLuaAgentScript, resetLuaAgentScriptDefaults, toggleLuaAgentScriptDisabled,
   } = useApp();
-  const { theme, setTheme } = useTheme();
 
 
-  const [activeTab, setActiveTab] = useState<Tab>('display');
+  const [activeTab, setActiveTab] = useState<Tab>('llm');
   const [llmView, setLlmView] = useState<LLMView>('models');
 
   //
@@ -104,7 +102,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [eventLoggingEnabled, setEventLoggingEnabled] = useState(false);
   const [huntingQueryRowLimit, setHuntingQueryRowLimit] = useState('10000000');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [mcpServerEnabled, setMcpServerEnabled] = useState(false);
+  const [mcpServerEnabled, setMcpServerEnabled] = useState(true);
   const [mcpServerPort, setMcpServerPort] = useState('8585');
   const [nodeDownloads, setNodeDownloads] = useState<NodeDownloadInfo[]>([]);
   const [isLoadingDownloads, setIsLoadingDownloads] = useState(false);
@@ -216,7 +214,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       const v = cfg.mcp_server_enabled.toLowerCase();
       setMcpServerEnabled(!(v === 'false' || v === '0' || v === 'no'));
     } else {
-      setMcpServerEnabled(false);
+      setMcpServerEnabled(true);
     }
     setMcpServerPort(cfg.mcp_server_port || '8585');
   }, [state.config]);
@@ -449,7 +447,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   };
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'display', label: 'Display', icon: <Monitor size={14} /> },
     { id: 'llm', label: 'LLM', icon: <Cpu size={14} /> },
     { id: 'agents', label: 'Agents', icon: <FileCode size={14} /> },
     { id: 'service', label: 'Service', icon: <Server size={14} /> },
@@ -462,7 +459,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
   const inputCls = 'w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle transition-colors';
   const btnSave = 'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors disabled:opacity-50';
-  const btnGreen = 'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors';
+  const btnGreen = 'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors';
 
   return (
     <Modal isOpen={true} onClose={onClose} title="Settings" size="xl" noPadding>
@@ -498,46 +495,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         */}
 
         <div className={`flex-1 flex flex-col min-h-0 ${activeTab === 'agents' ? '' : 'overflow-y-auto p-5'}`}>
-
-          {/*
-          //
-          // Display tab.
-          //
-          */}
-
-          {activeTab === 'display' && (
-            <div className="space-y-5">
-              <div>
-                <h3 className="text-xs font-semibold text-highlight tracking-wider mb-0.5">THEME</h3>
-                <p className="text-[10px] text-muted mb-3">Visual appearance</p>
-
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setTheme('origin_light')}
-                    className={`flex-1 flex items-center justify-center gap-2 p-2.5 border transition-colors ${
-                      theme === 'origin_light'
-                        ? 'border-[var(--accent-info)]/50 bg-[var(--accent-info)]/5'
-                        : 'border-subtle hover:border-[var(--border-hover)] hover:bg-[var(--bg-secondary)]'
-                    }`}
-                  >
-                    <Sun size={14} className={theme === 'origin_light' ? 'text-[var(--accent-info)]' : 'text-muted'} />
-                    <span className={`text-xs ${theme === 'origin_light' ? 'text-highlight' : 'text-muted'}`}>Light</span>
-                  </button>
-                  <button
-                    onClick={() => setTheme('praxis_dark')}
-                    className={`flex-1 flex items-center justify-center gap-2 p-2.5 border transition-colors ${
-                      theme === 'praxis_dark'
-                        ? 'border-[var(--accent-info)]/50 bg-[var(--accent-info)]/5'
-                        : 'border-subtle hover:border-[var(--border-hover)] hover:bg-[var(--bg-secondary)]'
-                    }`}
-                  >
-                    <Moon size={14} className={theme === 'praxis_dark' ? 'text-[var(--accent-info)]' : 'text-muted'} />
-                    <span className={`text-xs ${theme === 'praxis_dark' ? 'text-highlight' : 'text-muted'}`}>Dark</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/*
           //
@@ -1105,6 +1062,36 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
               </div>
 
               <div className="pt-4 border-t border-subtle">
+                <h4 className="text-xs font-semibold text-highlight mb-1">MCP Server</h4>
+                <p className="text-[10px] text-muted mb-2">Expose tools via Model Context Protocol (SSE)</p>
+
+                <div className="space-y-2">
+                  <button onClick={handleMcpToggle} className="flex items-center gap-1.5 text-xs text-muted hover:text-highlight transition-colors">
+                    {mcpServerEnabled
+                      ? <CircleCheck size={14} className="text-[var(--accent-success)]" />
+                      : <Circle size={14} className="text-[var(--text-secondary)]" />}
+                    <span>{mcpServerEnabled ? 'Enabled' : 'Disabled'}</span>
+                  </button>
+
+                  {mcpServerEnabled && (
+                    <div className="flex items-center gap-2 pl-5">
+                      <label className="text-[10px] text-muted">Port</label>
+                      <input
+                        type="number"
+                        value={mcpServerPort}
+                        onChange={e => setMcpServerPort(e.target.value)}
+                        onBlur={handleMcpPortSave}
+                        min="1"
+                        max="65535"
+                        className={`w-20 ${inputCls}`}
+                      />
+                      <span className="text-[10px] text-muted font-mono">http://localhost:{mcpServerPort}/sse</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-subtle">
                 <h4 className="text-xs font-semibold text-highlight mb-1">Event Logging</h4>
                 <p className="text-[10px] text-muted mb-2">Centralized application logs</p>
 
@@ -1143,36 +1130,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                     className={`w-28 ${inputCls}`}
                   />
                   <span className="text-[10px] text-muted">per table</span>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-subtle">
-                <h4 className="text-xs font-semibold text-highlight mb-1">MCP Server</h4>
-                <p className="text-[10px] text-muted mb-2">Expose tools via Model Context Protocol (SSE)</p>
-
-                <div className="space-y-2">
-                  <button onClick={handleMcpToggle} className="flex items-center gap-1.5 text-xs text-muted hover:text-highlight transition-colors">
-                    {mcpServerEnabled
-                      ? <CircleCheck size={14} className="text-[var(--accent-success)]" />
-                      : <Circle size={14} className="text-[var(--text-secondary)]" />}
-                    <span>{mcpServerEnabled ? 'Enabled' : 'Disabled'}</span>
-                  </button>
-
-                  {mcpServerEnabled && (
-                    <div className="flex items-center gap-2 pl-5">
-                      <label className="text-[10px] text-muted">Port</label>
-                      <input
-                        type="number"
-                        value={mcpServerPort}
-                        onChange={e => setMcpServerPort(e.target.value)}
-                        onBlur={handleMcpPortSave}
-                        min="1"
-                        max="65535"
-                        className={`w-20 ${inputCls}`}
-                      />
-                      <span className="text-[10px] text-muted font-mono">http://localhost:{mcpServerPort}/sse</span>
-                    </div>
-                  )}
                 </div>
               </div>
 

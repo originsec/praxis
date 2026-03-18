@@ -141,7 +141,7 @@ impl ServiceConfig {
 
     /// Check if MCP server is enabled
     pub fn is_mcp_server_enabled(&self) -> bool {
-        self.get_bool(MCP_SERVER_ENABLED, false)
+        self.get_bool(MCP_SERVER_ENABLED, true)
     }
 
     /// Get the MCP server port
