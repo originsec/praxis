@@ -56,6 +56,7 @@ interface ConfigModalProps {
   submitDisabled?: boolean;
   error?: string | null;
   size?: 'sm' | 'md' | 'lg' | 'xl';
+  footerLeft?: ReactNode;
 }
 
 export function ConfigModal({
@@ -73,6 +74,7 @@ export function ConfigModal({
   submitDisabled = false,
   error = null,
   size = 'lg',
+  footerLeft,
 }: ConfigModalProps) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -291,24 +293,29 @@ export function ConfigModal({
         )}
 
         <div className="p-2.5 bg-[var(--bg-secondary)]">
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={isSubmitting}
-              className="px-4 py-2 text-xs tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting || submitDisabled}
-              className={getSubmitButtonClasses()}
-            >
-              {isSubmitting && <Loader2 size={14} className="animate-spin" />}
-              {!isSubmitting && (submitIcon || <Save size={14} />)}
-              {submitLabel}
-            </button>
+          <div className="flex justify-between gap-2">
+            <div className="flex gap-2">
+              {footerLeft}
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={isSubmitting}
+                className="px-4 py-2 text-xs tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmitting || submitDisabled}
+                className={getSubmitButtonClasses()}
+              >
+                {isSubmitting && <Loader2 size={14} className="animate-spin" />}
+                {!isSubmitting && (submitIcon || <Save size={14} />)}
+                {submitLabel}
+              </button>
+            </div>
           </div>
         </div>
       </form>
