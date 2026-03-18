@@ -69,3 +69,13 @@
   - `docs/src/connectors/` - Agent connector documentation
 - But look through entire docs/src to locate any areas that may need updates
 - Don't make changes to CLAUDE.md unless specifically instructed to
+
+## Release Process
+
+- **Do not initiate any release steps unless explicitly asked to.**
+
+1. **Version bump**: Ensure the version is updated on the `prerelease` branch. It should be a minor bump over the current `main` version (unless otherwise specified).
+2. **Create PR**: Create a PR from `prerelease` into `main` with a clear, well-written description summarizing all changes since the last release.
+3. **Squash merge**: Squash-merge the PR into `main`.
+4. **GitHub release**: Create a GitHub release on `main` with an excellent changelog covering all notable changes, new features, fixes, and breaking changes.
+5. **Tag and push**: Create a version tag (e.g., `v0.10.0`), push the tag, and push the release.
