@@ -306,7 +306,7 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
     const newDef: OperationDefinitionInfo = {
       name: '',
       short_name: '',
-      category: 'custom',
+      category: '',
       full_name: '',
       description: '',
       agent_info: '',
@@ -893,7 +893,12 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
           clearOpDefStatus();
         }}
         title={isNewOperation ? 'New Operation' : `Edit: ${editDef?.name ?? 'Operation'}`}
-        size="xl"
+        size="lg"
+        noPadding
+        resizable
+        storageKey="cmd-edit-op"
+        defaultWidth={672}
+        defaultHeight={Math.round(window.innerHeight * 0.75)}
       >
         {editDef && (
           <div className="space-y-0">
