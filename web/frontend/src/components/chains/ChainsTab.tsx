@@ -37,6 +37,7 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
     runChain,
     clearChainStatus,
     clearLastCreatedChain,
+    clearOpDefStatus,
     getConfig,
   } = useApp();
 
@@ -334,6 +335,9 @@ export function ChainsTab({ nodes, triggerNew, onNewHandled, triggerEdit, onEdit
           send={send}
           saveStatus={chainSuccess}
           saveError={chainError}
+          opDefSuccess={state.opDefSuccess}
+          opDefError={state.opDefError}
+          clearOpDefStatus={clearOpDefStatus}
         />
       </div>
     );
