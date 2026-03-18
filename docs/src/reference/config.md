@@ -78,6 +78,14 @@ Access via **Settings** > **LLM Providers** in the web UI.
 | `llm.orchestrator.model` | `claude-sonnet-4-20250514` | Model for Orchestrator |
 | `llm.orchestrator.api_key` | (encrypted) | API key for provider |
 
+### Toolkit Settings
+
+Access via **Settings** > **Toolkit** in the web UI.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `toolkit_llmmap_url` | `http://localhost:5000` | LLMMap REST API endpoint URL |
+
 ### MCP Server Settings
 
 Access via **Settings** > **MCP Server** in the web UI.
@@ -189,10 +197,12 @@ Operations are defined in JSON and stored in the service database.
 | `agent_info` | string | No | Context for the AI agent |
 | `timeout` | u64 | Yes | Timeout in seconds |
 | `operation_prompt` | string | Yes | The prompt to execute |
-| `mode` | string | Yes | `one-shot` or `agent` |
+| `mode` | string | Yes | `one-shot`, `agent`, or `llmmap` |
 | `agent_iterations` | u32 | No | Max iterations (agent mode) |
 | `yolo_mode` | bool | No | Auto-approve actions |
 | `model_ref` | string | No | Model override (`provider::model`) |
+| `llmmap_transform` | string | No | LLMMap transform (llmmap mode): `none`, `spacing`, `unicode`, `base64`, `wrapper` |
+| `llmmap_intensity` | u8 | No | LLMMap intensity 1-5 (llmmap mode) |
 | `disabled` | bool | No | Disable the operation |
 
 ### Full Name

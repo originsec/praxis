@@ -37,6 +37,12 @@ pub struct OperationDefinition {
     /// Optional model override (format: "provider::model")
     #[serde(default)]
     pub model_ref: Option<String>,
+    /// LLMMap transform (for llmmap mode)
+    #[serde(default)]
+    pub llmmap_transform: Option<String>,
+    /// LLMMap intensity 1-5 (for llmmap mode)
+    #[serde(default)]
+    pub llmmap_intensity: Option<u8>,
     /// When the definition was created
     pub created_at: DateTime<Utc>,
     /// When the definition was last updated
@@ -65,6 +71,8 @@ impl OperationDefinition {
             disabled: self.disabled,
             yolo_mode: self.yolo_mode,
             model_ref: self.model_ref.clone(),
+            llmmap_transform: self.llmmap_transform.clone(),
+            llmmap_intensity: self.llmmap_intensity,
         }
     }
 
@@ -93,6 +101,10 @@ impl OperationDefinition {
             yolo_mode: bool,
             #[serde(default)]
             model_ref: Option<String>,
+            #[serde(default)]
+            llmmap_transform: Option<String>,
+            #[serde(default)]
+            llmmap_intensity: Option<u8>,
         }
 
         fn default_timeout() -> u64 { 60 }
@@ -137,6 +149,8 @@ impl OperationDefinition {
             disabled: parsed.disabled,
             yolo_mode: parsed.yolo_mode,
             model_ref: parsed.model_ref,
+            llmmap_transform: parsed.llmmap_transform,
+            llmmap_intensity: parsed.llmmap_intensity,
             created_at: now,
             updated_at: now,
         })
@@ -164,6 +178,10 @@ impl OperationDefinition {
             yolo_mode: bool,
             #[serde(skip_serializing_if = "Option::is_none")]
             model_ref: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            llmmap_transform: Option<String>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            llmmap_intensity: Option<u8>,
         }
 
         let export = JsonExport {
@@ -180,6 +198,8 @@ impl OperationDefinition {
             disabled: self.disabled,
             yolo_mode: self.yolo_mode,
             model_ref: self.model_ref.clone(),
+            llmmap_transform: self.llmmap_transform.clone(),
+            llmmap_intensity: self.llmmap_intensity,
         };
 
         serde_json::to_string_pretty(&export).unwrap_or_default()
@@ -197,6 +217,8 @@ impl OperationDefinition {
             agent_iterations: self.agent_iterations,
             yolo_mode: self.yolo_mode,
             model_ref: self.model_ref.clone(),
+            llmmap_transform: self.llmmap_transform.clone(),
+            llmmap_intensity: self.llmmap_intensity,
         }
     }
 }
@@ -204,8 +226,8 @@ impl OperationDefinition {
 impl Database {
     /// Insert or update an operation definition
     pub async fn upsert_operation_definition(&self, definition: &OperationDefinition) -> Result<()> {
-        let sql = "INSERT INTO operation_definitions (full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        let sql = "INSERT INTO operation_definitions (full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, llmmap_transform, llmmap_intensity, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
              ON CONFLICT(full_name) DO UPDATE SET
                  category = excluded.category,
                  short_name = excluded.short_name,
@@ -220,6 +242,8 @@ impl Database {
                  disabled = excluded.disabled,
                  yolo_mode = excluded.yolo_mode,
                  model_ref = excluded.model_ref,
+                 llmmap_transform = excluded.llmmap_transform,
+                 llmmap_intensity = excluded.llmmap_intensity,
                  updated_at = excluded.updated_at";
 
         match &self.pool {
@@ -239,6 +263,8 @@ impl Database {
                     .bind(definition.disabled)
                     .bind(definition.yolo_mode)
                     .bind(&definition.model_ref)
+                    .bind(&definition.llmmap_transform)
+                    .bind(definition.llmmap_intensity.map(|v| v as i64))
                     .bind(definition.created_at.to_rfc3339())
                     .bind(definition.updated_at.to_rfc3339())
                     .execute(pool)
@@ -260,6 +286,8 @@ impl Database {
                     .bind(if definition.disabled { 1i16 } else { 0i16 })
                     .bind(if definition.yolo_mode { 1i16 } else { 0i16 })
                     .bind(&definition.model_ref)
+                    .bind(&definition.llmmap_transform)
+                    .bind(definition.llmmap_intensity.map(|v| v as i64))
                     .bind(definition.created_at.to_rfc3339())
                     .bind(definition.updated_at.to_rfc3339())
                     .execute(pool)
@@ -277,7 +305,7 @@ impl Database {
 
     /// Get an operation definition by full_name
     pub async fn get_operation_definition(&self, full_name: &str) -> Result<Option<OperationDefinition>> {
-        let sql = "SELECT full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, created_at, updated_at
+        let sql = "SELECT full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, llmmap_transform, llmmap_intensity, created_at, updated_at
              FROM operation_definitions WHERE full_name = $1";
 
         match &self.pool {
@@ -306,7 +334,7 @@ impl Database {
 
     /// List all operation definitions
     pub async fn list_operation_definitions(&self) -> Result<Vec<OperationDefinition>> {
-        let sql = "SELECT full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, created_at, updated_at
+        let sql = "SELECT full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, llmmap_transform, llmmap_intensity, created_at, updated_at
              FROM operation_definitions ORDER BY category, short_name";
 
         match &self.pool {
@@ -336,7 +364,7 @@ impl Database {
     /// List operation definitions by category
     #[allow(dead_code)]
     pub async fn list_operation_definitions_by_category(&self, category: &str) -> Result<Vec<OperationDefinition>> {
-        let sql = "SELECT full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, created_at, updated_at
+        let sql = "SELECT full_name, category, short_name, name, description, agent_info, timeout, operation_prompt, mode, agent_iterations, operation_chain, disabled, yolo_mode, model_ref, llmmap_transform, llmmap_intensity, created_at, updated_at
              FROM operation_definitions WHERE category = $1 ORDER BY short_name";
 
         match &self.pool {
@@ -491,8 +519,10 @@ fn parse_definition_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> Result<Operatio
     let disabled: bool = row.get(11);
     let yolo_mode: bool = row.get(12);
     let model_ref: Option<String> = row.get(13);
-    let created_at_str: String = row.get(14);
-    let updated_at_str: String = row.get(15);
+    let llmmap_transform: Option<String> = row.get(14);
+    let llmmap_intensity_raw: Option<i64> = row.get(15);
+    let created_at_str: String = row.get(16);
+    let updated_at_str: String = row.get(17);
 
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)?.with_timezone(&Utc);
     let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)?.with_timezone(&Utc);
@@ -515,6 +545,8 @@ fn parse_definition_row_sqlite(row: &sqlx::sqlite::SqliteRow) -> Result<Operatio
         disabled,
         yolo_mode,
         model_ref,
+        llmmap_transform,
+        llmmap_intensity: llmmap_intensity_raw.map(|v| v as u8),
         created_at,
         updated_at,
     })
@@ -535,8 +567,10 @@ fn parse_definition_row_postgres(row: &sqlx::postgres::PgRow) -> Result<Operatio
     let disabled: i16 = row.get(11);
     let yolo_mode: i16 = row.get(12);
     let model_ref: Option<String> = row.get(13);
-    let created_at_str: String = row.get(14);
-    let updated_at_str: String = row.get(15);
+    let llmmap_transform: Option<String> = row.get(14);
+    let llmmap_intensity_raw: Option<i64> = row.get(15);
+    let created_at_str: String = row.get(16);
+    let updated_at_str: String = row.get(17);
 
     let created_at = DateTime::parse_from_rfc3339(&created_at_str)?.with_timezone(&Utc);
     let updated_at = DateTime::parse_from_rfc3339(&updated_at_str)?.with_timezone(&Utc);
@@ -559,6 +593,8 @@ fn parse_definition_row_postgres(row: &sqlx::postgres::PgRow) -> Result<Operatio
         disabled: disabled != 0,
         yolo_mode: yolo_mode != 0,
         model_ref,
+        llmmap_transform,
+        llmmap_intensity: llmmap_intensity_raw.map(|v| v as u8),
         created_at,
         updated_at,
     })

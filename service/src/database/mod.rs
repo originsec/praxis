@@ -371,6 +371,30 @@ impl Database {
             }
         }
 
+        //
+        // Migration: Add llmmap_transform and llmmap_intensity columns to
+        // operation_definitions for LLMMap mode support.
+        //
+
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let _ = sqlx::query("ALTER TABLE operation_definitions ADD COLUMN llmmap_transform TEXT")
+                    .execute(pool)
+                    .await;
+                let _ = sqlx::query("ALTER TABLE operation_definitions ADD COLUMN llmmap_intensity INTEGER")
+                    .execute(pool)
+                    .await;
+            }
+            DatabasePool::Postgres(pool) => {
+                let _ = sqlx::query("ALTER TABLE operation_definitions ADD COLUMN IF NOT EXISTS llmmap_transform TEXT")
+                    .execute(pool)
+                    .await;
+                let _ = sqlx::query("ALTER TABLE operation_definitions ADD COLUMN IF NOT EXISTS llmmap_intensity BIGINT")
+                    .execute(pool)
+                    .await;
+            }
+        }
+
         Ok(())
     }
 

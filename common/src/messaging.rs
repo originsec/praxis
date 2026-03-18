@@ -817,7 +817,7 @@ pub struct SemanticOperationSpec {
     pub timeout: u64,
     pub operation_prompt: String,
     //
-    // "one-shot" or "agent".
+    // "one-shot", "agent", or "llmmap".
     //
     pub mode: String,
     pub agent_iterations: u32,
@@ -827,6 +827,12 @@ pub struct SemanticOperationSpec {
     /// Optional model override (format: "provider::model")
     #[serde(default)]
     pub model_ref: Option<String>,
+    /// LLMMap transform (for llmmap mode)
+    #[serde(default)]
+    pub llmmap_transform: Option<String>,
+    /// LLMMap intensity 1-5 (for llmmap mode)
+    #[serde(default)]
+    pub llmmap_intensity: Option<u8>,
 }
 
 /// Status of a semantic operation
@@ -869,7 +875,7 @@ pub struct OperationDefinitionInfo {
     pub timeout: u64,
     /// The prompt to run for this operation
     pub operation_prompt: String,
-    /// Execution mode: "one-shot" or "agent"
+    /// Execution mode: "one-shot", "agent", or "llmmap"
     pub mode: String,
     /// Maximum iterations for agent mode
     pub agent_iterations: u32,
@@ -884,6 +890,12 @@ pub struct OperationDefinitionInfo {
     /// Optional model override (format: "provider::model")
     #[serde(default)]
     pub model_ref: Option<String>,
+    /// LLMMap transform (for llmmap mode)
+    #[serde(default)]
+    pub llmmap_transform: Option<String>,
+    /// LLMMap intensity 1-5 (for llmmap mode)
+    #[serde(default)]
+    pub llmmap_intensity: Option<u8>,
 }
 
 //

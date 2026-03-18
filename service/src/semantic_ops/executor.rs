@@ -737,6 +737,172 @@ pub async fn execute_agent_mode(
 }
 
 
+/// Execute an operation in llmmap mode.
+/// Generates a payload via LLMMap, delivers it to the target session, collects
+/// the response, and sends it back to LLMMap for judgement.
+pub async fn execute_llmmap_mode(
+    operation_id: &str,
+    node_id: &str,
+    spec: &SemanticOperationSpec,
+    working_dir: Option<String>,
+    config: &Arc<TokioRwLock<ServiceConfig>>,
+    rabbitmq_channel: &Channel,
+    response_tracker: Arc<ResponseTracker>,
+    database: Arc<Database>,
+    mut cancel_rx: oneshot::Receiver<()>,
+    use_existing_session: bool,
+) -> Result<(String, String)> {
+    use crate::tools::llmmap::LlmMapClient;
+
+    common::log_debug!(
+        "[semop {}] START llmmap '{}' | input: {} bytes",
+        &operation_id[..8], spec.name, spec.operation_prompt.len()
+    );
+
+    let llmmap_url = {
+        let cfg = config.read().await;
+        cfg.get_llmmap_url()
+    };
+
+    let transform = spec.llmmap_transform.as_deref().unwrap_or("none");
+    let intensity = spec.llmmap_intensity.unwrap_or(3);
+
+    let client = LlmMapClient::new(&llmmap_url);
+
+    //
+    // Step 1: Generate payload via LLMMap.
+    //
+
+    let _ = database.append_output(
+        operation_id,
+        &fmt_outgoing("LLMMap generate", &format!(
+            "goal: {}\ntransform: {}\nintensity: {}",
+            spec.operation_prompt, transform, intensity
+        )),
+    ).await;
+
+    let generate_resp = tokio::select! {
+        result = client.generate(&spec.operation_prompt, transform, intensity) => {
+            result.context("LLMMap payload generation failed")?
+        }
+        _ = &mut cancel_rx => {
+            let _ = database.append_output(operation_id, &fmt_error("Operation cancelled")).await;
+            return Err(anyhow::anyhow!("Operation cancelled"));
+        }
+    };
+
+    let payload = &generate_resp.payload;
+    let _ = database.append_output(
+        operation_id,
+        &fmt_incoming("LLMMap payload", payload),
+    ).await;
+
+    common::log_info!(
+        "LLMMapGenerate: op={} transform={} payload_len={}",
+        &operation_id[..8], generate_resp.transform_used, payload.len()
+    );
+
+    //
+    // Step 2: Create session and deliver payload to target.
+    //
+
+    if !use_existing_session {
+        create_session(
+            node_id, spec.yolo_mode, working_dir.clone(),
+            rabbitmq_channel, response_tracker.clone(),
+        )
+        .await
+        .context("Failed to create session for llmmap operation")?;
+    }
+
+    let _ = database.append_output(
+        operation_id,
+        &fmt_outgoing("Delivering payload to target", payload),
+    ).await;
+
+    let target_response = tokio::select! {
+        result = send_remote_prompt(
+            operation_id, node_id, payload,
+            rabbitmq_channel, response_tracker.clone(), spec.timeout,
+        ) => {
+            match result {
+                Ok(resp) => resp,
+                Err(e) => {
+                    let _ = database.append_output(operation_id, &fmt_error(&format!("Delivery failed: {}", e))).await;
+                    if !use_existing_session {
+                        let _ = close_session(node_id, rabbitmq_channel).await;
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        _ = &mut cancel_rx => {
+            let _ = database.append_output(operation_id, &fmt_error("Operation cancelled")).await;
+            if !use_existing_session {
+                let _ = close_session(node_id, rabbitmq_channel).await;
+            }
+            return Err(anyhow::anyhow!("Operation cancelled"));
+        }
+    };
+
+    let _ = database.append_output(
+        operation_id,
+        &fmt_incoming("Target response", &target_response),
+    ).await;
+
+    //
+    // Step 3: Close session.
+    //
+
+    if !use_existing_session {
+        let _ = close_session(node_id, rabbitmq_channel).await;
+    }
+
+    //
+    // Step 4: Send to LLMMap for judgement.
+    //
+
+    let _ = database.append_output(
+        operation_id,
+        &fmt_outgoing("LLMMap judge", &format!(
+            "goal: {}\npayload_len: {}\nresponse_len: {}",
+            spec.operation_prompt, payload.len(), target_response.len()
+        )),
+    ).await;
+
+    let judge_resp = client
+        .judge(&spec.operation_prompt, payload, &target_response)
+        .await
+        .context("LLMMap judgement failed")?;
+
+    let summary = format!(
+        "success: {}\nconfidence: {:.2}\nreasoning: {}\nevidence: {}",
+        judge_resp.success,
+        judge_resp.confidence,
+        judge_resp.reasoning,
+        judge_resp.evidence.join("; "),
+    );
+
+    let result_str = if judge_resp.success { "success" } else { "failure" };
+
+    let _ = database.append_output(
+        operation_id,
+        &fmt_complete(result_str, &summary),
+    ).await;
+
+    common::log_info!(
+        "LLMMapJudge: op={} success={} confidence={:.2}",
+        &operation_id[..8], judge_resp.success, judge_resp.confidence
+    );
+
+    common::log_debug!(
+        "[semop {}] END   llmmap '{}' | result: {}",
+        &operation_id[..8], spec.name, result_str
+    );
+
+    Ok((summary, result_str.to_string()))
+}
+
 /// Send a prompt to a remote node and wait for response
 async fn send_remote_prompt(
     operation_id: &str,

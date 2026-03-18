@@ -52,6 +52,12 @@
   - `docs/src/usage/hunting.md` — documentation
 - All table lists must be in **alphabetical order** by table name.
 
+## Toolkit
+
+- Toolkit tools that require external service URLs should default to `localhost` starting from port 5000, incrementing for each new tool (5000, 5001, 5002, etc.).
+- Default URL constants are defined in `service/src/config/service_config.rs`.
+- Toolkit settings are configured in the **Settings** > **Toolkit** tab.
+
 ## CLI / MCP Parity
 
 - Capabilities of the CLI REPL and non-interactive CLI must always match. Any command available in the REPL must also work in one-shot mode (`-C`) and as a direct subcommand.

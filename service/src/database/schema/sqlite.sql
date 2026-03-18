@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS operation_definitions (
     disabled INTEGER NOT NULL DEFAULT 0,
     yolo_mode INTEGER NOT NULL DEFAULT 0,
     model_ref TEXT,
+    llmmap_transform TEXT,
+    llmmap_intensity INTEGER,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );

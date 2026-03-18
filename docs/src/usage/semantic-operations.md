@@ -8,7 +8,7 @@ An operation is a task specification:
 
 - **Name** - Identifier for the operation
 - **Prompt** - What you want the agent to do
-- **Mode** - How to execute (one-shot or agent)
+- **Mode** - How to execute (one-shot, agent, or llmmap)
 - **Timeout** - How long to wait
 - **YOLO Mode** - Auto-approve actions
 
@@ -43,6 +43,26 @@ How it works:
 Best for: Complex tasks, multi-step operations, tasks requiring judgment.
 
 The orchestrator is a separate LLM (configured in Settings as "Semantic Ops" LLM) that manages the interaction. It has access to a `session_prompt` tool to communicate with the target agent.
+
+### LLMMap Mode
+
+Uses [LLMMap](https://github.com/Hellsender01/LLMMap) to generate prompt injection payloads, deliver them to the target, and have LLMMap judge the response.
+
+How it works:
+1. Operation prompt is sent to LLMMap as the injection goal
+2. LLMMap generates a payload using the configured transform and intensity
+3. Payload is delivered to the target agent via session prompt
+4. Target agent's response is collected
+5. Response is sent back to LLMMap for judgement
+6. LLMMap returns success/failure with confidence score and reasoning
+
+Configuration fields (on the operation definition):
+- **LLMMap Transform** — obfuscation method (none, spacing, unicode, base64, wrapper)
+- **LLMMap Intensity** — aggressiveness level (1-5)
+
+Best for: Automated prompt injection testing against AI agents.
+
+Requires a running LLMMap instance with the `--api` flag. The REST endpoint URL is configured in **Settings** > **Toolkit**.
 
 ### Model Requirements
 
@@ -97,7 +117,7 @@ Operations are stored in the library:
 3. Fill in the details:
    - Name and description
    - Operation prompt
-   - Mode (one-shot or agent)
+   - Mode (one-shot, agent, or llmmap)
    - Timeout value
    - YOLO mode setting
 4. Save
@@ -142,6 +162,12 @@ Click a run to see details:
 Each operation produces output:
 
 **One-shot mode** - The agent's response to your prompt.
+
+**LLMMap mode** - Full transcript including:
+- Generated payload from LLMMap
+- Payload delivered to target
+- Target agent's response
+- LLMMap judgement (success/failure, confidence, reasoning, evidence)
 
 **Agent mode** - Full transcript of the orchestrator's iterations:
 - Prompts sent to target agent

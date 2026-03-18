@@ -3240,6 +3240,7 @@ dependencies = [
  "lapin",
  "nom",
  "regex",
+ "reqwest",
  "rmcp",
  "semantic_parser",
  "serde",

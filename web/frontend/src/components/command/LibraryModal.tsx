@@ -918,11 +918,12 @@ function EditOpForm({ editDef, isNewOp, isSaving, error, onUpdate, onSave, onExp
             >
               <option value="one-shot">one-shot</option>
               <option value="agent">agent</option>
+              <option value="llmmap">llmmap</option>
             </select>
           </div>
         </div>
 
-        <div className={`grid ${editDef.mode === 'agent' ? 'grid-cols-2' : 'grid-cols-1'} gap-2`}>
+        <div className={`grid ${editDef.mode === 'agent' ? 'grid-cols-2' : editDef.mode === 'llmmap' ? 'grid-cols-3' : 'grid-cols-1'} gap-2`}>
           <div>
             <label className="block text-[10px] tracking-wider text-[var(--text-secondary)] mb-1">Timeout (seconds)</label>
             <input
@@ -944,6 +945,40 @@ function EditOpForm({ editDef, isNewOp, isSaving, error, onUpdate, onSave, onExp
                 className="w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
               />
             </div>
+          )}
+          {editDef.mode === 'llmmap' && (
+            <>
+              <div>
+                <label className="block text-[10px] tracking-wider text-[var(--text-secondary)] mb-1">Transform</label>
+                <select
+                  value={editDef.llmmap_transform || 'none'}
+                  onChange={e => onUpdate('llmmap_transform', e.target.value)}
+                  disabled={isSaving}
+                  className="w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                >
+                  <option value="none">None</option>
+                  <option value="spacing">Spacing</option>
+                  <option value="unicode">Unicode Injection</option>
+                  <option value="base64">Base64</option>
+                  <option value="wrapper">Wrapper Framing</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] tracking-wider text-[var(--text-secondary)] mb-1">Intensity</label>
+                <select
+                  value={editDef.llmmap_intensity ?? 3}
+                  onChange={e => onUpdate('llmmap_intensity', parseInt(e.target.value))}
+                  disabled={isSaving}
+                  className="w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                >
+                  <option value={1}>1 - Minimal</option>
+                  <option value={2}>2 - Low</option>
+                  <option value={3}>3 - Medium</option>
+                  <option value={4}>4 - High</option>
+                  <option value={5}>5 - Maximum</option>
+                </select>
+              </div>
+            </>
           )}
         </div>
 

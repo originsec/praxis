@@ -6,12 +6,33 @@ The Toolkit provides a library of built-in offensive operations that run directl
 
 Go to **Toolkit** in the sidebar. The page lists all available tools with their descriptions and configuration options.
 
+## Available Tools
+
+### Session History Poisoning
+
+Reads session history from a target agent, uses an LLM to transform messages for injection purposes, and writes the modified history back. Requires node/agent selection and an LLM model.
+
+### Message Encoder
+
+Encodes text payloads using various encoding schemes (Base64, Hex, ROT13, Morse, Fullwidth Unicode, Unicode Tags, Braille, Upside Down). Standalone tool — no node interaction required.
+
+### LLMMap
+
+Generates prompt injection payloads using [LLMMap](https://github.com/Hellsender01/LLMMap) transforms. Standalone tool — no node interaction required. Requires a running LLMMap instance with the `--api` flag.
+
+Configuration:
+- **Goal** — describe what the injection should achieve
+- **Transform** — obfuscation method (None, Spacing, Unicode Injection, Base64, Wrapper Framing)
+- **Intensity** — aggressiveness level (1-5)
+
+The LLMMap REST endpoint URL is configured in **Settings** > **Toolkit**.
+
 ## Running a Tool
 
 1. Select a tool from the list
 2. Configure any required parameters
-3. Select the target node and agent
-4. Click **Run**
+3. For tools that require targeting, select the target node and agent
+4. Click **Run** or **Generate**
 
 Execution results appear inline on the Toolkit page.
 

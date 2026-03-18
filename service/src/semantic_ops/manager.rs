@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::config::ServiceConfig;
 use crate::database::{Database, OperationRecord};
-use crate::semantic_ops::executor::{execute_agent_mode, execute_one_shot, ResponseTracker};
+use crate::semantic_ops::executor::{execute_agent_mode, execute_llmmap_mode, execute_one_shot, ResponseTracker};
 
 /// A queued operation waiting to be executed
 #[derive(Debug, Clone)]
@@ -696,6 +696,23 @@ impl SemanticOpsManager {
             )
             .await
             .map(|(summary, result, _semantic_success)| (summary, result))
+        } else if spec.mode == "llmmap" {
+            execute_llmmap_mode(
+                &operation_id,
+                &node_id,
+                &spec,
+                working_dir.clone(),
+                &config,
+                &rabbitmq_channel,
+                response_tracker.clone(),
+                database.clone(),
+                cancel_rx,
+                //
+                // session already created by manager.
+                //
+                true,
+            )
+            .await
         } else {
             execute_one_shot(
                 &operation_id,

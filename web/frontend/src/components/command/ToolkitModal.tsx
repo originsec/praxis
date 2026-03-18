@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Code2, Eye, ShieldAlert } from 'lucide-react';
+import { Code2, Crosshair, Eye, ShieldAlert } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { useApp } from '../../context/AppContext';
 import type { ToolkitToolInfo } from '../../api/types';
@@ -9,11 +9,12 @@ import type { ToolkitToolInfo } from '../../api/types';
 // self-contained and already use Modal internally.
 //
 
-import { SessionHistoryPoisoningModal, MessageEncoderModal } from '../../pages/ToolkitPage';
+import { SessionHistoryPoisoningModal, MessageEncoderModal, LlmMapModal } from '../../pages/ToolkitPage';
 
 function toolIcon(toolName: string) {
   if (toolName === 'session_history_poisoning') return ShieldAlert;
   if (toolName === 'message_encoder') return Code2;
+  if (toolName === 'llmmap') return Crosshair;
   return Eye;
 }
 
@@ -80,6 +81,14 @@ export function ToolkitModal({ onClose }: ToolkitModalProps) {
           isOpen
           onClose={() => setActiveTool(null)}
           description={descriptionFor('message_encoder')}
+        />
+      )}
+
+      {activeTool === 'llmmap' && (
+        <LlmMapModal
+          isOpen
+          onClose={() => setActiveTool(null)}
+          description={descriptionFor('llmmap')}
         />
       )}
     </>

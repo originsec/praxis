@@ -1138,6 +1138,8 @@ impl ChainExecutor {
             agent_iterations: op_def.agent_iterations,
             yolo_mode: yolo_mode_override || op_def.yolo_mode,
             model_ref: model_ref.clone().or(op_def.model_ref.clone()),
+            llmmap_transform: op_def.llmmap_transform.clone(),
+            llmmap_intensity: op_def.llmmap_intensity,
         };
 
         let op_id = Uuid::new_v4().to_string();
@@ -1303,6 +1305,8 @@ impl ChainExecutor {
             agent_iterations: 1,
             yolo_mode: session_group.as_ref().map(|sg| sg.yolo_mode).unwrap_or(yolo_mode),
             model_ref: None,
+            llmmap_transform: None,
+            llmmap_intensity: None,
         };
 
         let op_id = Uuid::new_v4().to_string();

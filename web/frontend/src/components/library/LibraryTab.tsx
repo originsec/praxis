@@ -317,6 +317,8 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
       operation_chain: [],
       disabled: false,
       yolo_mode: false,
+      llmmap_transform: null,
+      llmmap_intensity: null,
     };
     setEditDef(newDef);
     setIsNewOperation(true);
@@ -415,6 +417,8 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
         disabled: op.disabled,
         yolo_mode: op.yolo_mode,
         ...(op.model_ref && { model_ref: op.model_ref }),
+        ...(op.llmmap_transform && { llmmap_transform: op.llmmap_transform }),
+        ...(op.llmmap_intensity != null && { llmmap_intensity: op.llmmap_intensity }),
       };
       const content = JSON.stringify(exportData, null, 2);
       const filename = `${op.category}_${op.short_name}.json`;
@@ -486,6 +490,8 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
       disabled: editDef.disabled,
       yolo_mode: editDef.yolo_mode,
       ...(editDef.model_ref && { model_ref: editDef.model_ref }),
+      ...(editDef.llmmap_transform && { llmmap_transform: editDef.llmmap_transform }),
+      ...(editDef.llmmap_intensity != null && { llmmap_intensity: editDef.llmmap_intensity }),
     };
 
     clearOpDefStatus();
@@ -959,6 +965,7 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
                   >
                     <option value="one-shot">one-shot</option>
                     <option value="agent">agent</option>
+                    <option value="llmmap">llmmap</option>
                   </select>
                 </div>
               </div>
@@ -985,6 +992,40 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
                       className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
                     />
                   </div>
+                )}
+                {editDef.mode === 'llmmap' && (
+                  <>
+                    <div>
+                      <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">LLMMap Transform</label>
+                      <select
+                        value={editDef.llmmap_transform || 'none'}
+                        onChange={(e) => updateEditDef('llmmap_transform', e.target.value)}
+                        disabled={isEditing}
+                        className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                      >
+                        <option value="none">None</option>
+                        <option value="spacing">Spacing</option>
+                        <option value="unicode">Unicode Injection</option>
+                        <option value="base64">Base64</option>
+                        <option value="wrapper">Wrapper Framing</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">LLMMap Intensity</label>
+                      <select
+                        value={editDef.llmmap_intensity ?? 3}
+                        onChange={(e) => updateEditDef('llmmap_intensity', parseInt(e.target.value))}
+                        disabled={isEditing}
+                        className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                      >
+                        <option value={1}>1 - Minimal</option>
+                        <option value={2}>2 - Low</option>
+                        <option value={3}>3 - Medium</option>
+                        <option value={4}>4 - High</option>
+                        <option value={5}>5 - Maximum</option>
+                      </select>
+                    </div>
+                  </>
                 )}
               </div>
 
@@ -1115,6 +1156,8 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
                         disabled: editDef.disabled,
                         yolo_mode: editDef.yolo_mode,
                         ...(editDef.model_ref && { model_ref: editDef.model_ref }),
+                        ...(editDef.llmmap_transform && { llmmap_transform: editDef.llmmap_transform }),
+                        ...(editDef.llmmap_intensity != null && { llmmap_intensity: editDef.llmmap_intensity }),
                       };
                       const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
                       const url = URL.createObjectURL(blob);

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Server, Save, Check, List, Loader2, X, Cpu, Plus, Trash2, Edit2, Key, Info, ExternalLink, Download, Monitor, Circle, CircleCheck, FileCode, Upload, RotateCcw, AlertTriangle, LayoutGrid, Sun, Moon } from 'lucide-react';
+import { Server, Save, Check, List, Loader2, X, Cpu, Plus, Trash2, Edit2, Key, Info, ExternalLink, Download, Monitor, Circle, CircleCheck, FileCode, Upload, RotateCcw, AlertTriangle, LayoutGrid, Sun, Moon, Wrench, Zap } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { useTheme } from '../context/ThemeContext';
@@ -9,7 +9,7 @@ import { getUiMode, setUiMode, type UiMode } from '../utils/uiMode';
 import { Modal } from '../components/common/Modal';
 import { LuaCodeEditor } from '../components/common/LuaCodeEditor';
 
-type Tab = 'display' | 'llm_providers' | 'agents' | 'service' | 'about';
+type Tab = 'display' | 'llm_providers' | 'agents' | 'toolkit' | 'service' | 'about';
 type LLMTab = 'model_definitions' | 'feature_selection';
 
 //
@@ -70,7 +70,7 @@ export function SettingsPage() {
   // Tab from URL or default.
   //
   const tabParam = searchParams.get('tab');
-  const activeTab: Tab = tabParam === 'display' || tabParam === 'agents' || tabParam === 'service' || tabParam === 'about' ? tabParam : 'llm_providers';
+  const activeTab: Tab = tabParam === 'display' || tabParam === 'agents' || tabParam === 'toolkit' || tabParam === 'service' || tabParam === 'about' ? tabParam : 'llm_providers';
   const setActiveTab = (tab: Tab) => {
     const newParams: Record<string, string> = { tab };
     if (tab === 'llm_providers') {
@@ -160,6 +160,13 @@ export function SettingsPage() {
   const [mcpServerPort, setMcpServerPort] = useState('8585');
 
   //
+  // Toolkit settings.
+  //
+  const [llmmapUrl, setLlmmapUrl] = useState('http://localhost:5000');
+  const [llmmapTestStatus, setLlmmapTestStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle');
+  const [llmmapTestMessage, setLlmmapTestMessage] = useState('');
+
+  //
   // Agent script editor state.
   //
   const [selectedScriptId, setSelectedScriptId] = useState<string | null>(null);
@@ -189,6 +196,7 @@ export function SettingsPage() {
       'hunting_query_row_limit',
       'mcp_server_enabled',
       'mcp_server_port',
+      'toolkit_llmmap_url',
     ]);
   }, [state.connected, getConfig]);
 
@@ -294,6 +302,7 @@ export function SettingsPage() {
       setMcpServerEnabled(false);
     }
     setMcpServerPort(cfg.mcp_server_port || '8585');
+    setLlmmapUrl(cfg.toolkit_llmmap_url || 'http://localhost:5000');
   }, [state.config]);
 
   //
@@ -614,6 +623,7 @@ export function SettingsPage() {
     { id: 'display', label: 'Display', icon: <Monitor size={18} /> },
     { id: 'llm_providers', label: 'LLM Providers', icon: <Cpu size={18} /> },
     { id: 'agents', label: 'Agents', icon: <FileCode size={18} /> },
+    { id: 'toolkit', label: 'Toolkit', icon: <Wrench size={18} /> },
     { id: 'service', label: 'Service', icon: <Server size={18} /> },
     { id: 'about', label: 'About', icon: <Info size={18} /> },
   ];
@@ -1512,6 +1522,89 @@ export function SettingsPage() {
                   </div>
                 </div>
               </Modal>
+            </div>
+          )}
+
+          {activeTab === 'toolkit' && (
+            <div className="space-y-6">
+              <div>
+                <h2 className="text-lg font-semibold text-highlight mb-1">Toolkit</h2>
+                <p className="text-sm text-muted">Configure external toolkit integrations</p>
+              </div>
+
+              <div className="pt-4 border-t border-subtle">
+                <h3 className="text-md font-semibold text-highlight mb-3">LLMMap</h3>
+                <p className="text-xs text-muted mb-4">REST API endpoint for LLMMap prompt injection payload generation and judgement.</p>
+                <div className="flex flex-col gap-2">
+                  <label className="text-sm text-muted">Endpoint URL</label>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      value={llmmapUrl}
+                      onChange={(e) => setLlmmapUrl(e.target.value)}
+                      onBlur={() => setConfig({ toolkit_llmmap_url: llmmapUrl })}
+                      onKeyDown={(e) => { if (e.key === 'Enter') setConfig({ toolkit_llmmap_url: llmmapUrl }); }}
+                      placeholder="http://localhost:5000"
+                      className="flex-1 max-w-lg bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle transition-colors"
+                    />
+                    <button
+                      onClick={() => setConfig({ toolkit_llmmap_url: llmmapUrl })}
+                      style={{ cursor: 'pointer' }}
+                      className="px-3 py-2 text-sm border border-dim text-highlight hover:bg-[var(--highlight)] transition-colors flex items-center gap-2"
+                    >
+                      <Save size={14} />
+                      Save
+                    </button>
+                    <button
+                      onClick={async () => {
+                        setLlmmapTestStatus('testing');
+                        setLlmmapTestMessage('');
+                        try {
+                          const url = llmmapUrl.replace(/\/+$/, '');
+                          const resp = await fetch(`${url}/api/generate`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ goal: 'test', transform: 'none', intensity: 1 }),
+                            signal: AbortSignal.timeout(10000),
+                          });
+                          if (resp.ok) {
+                            setLlmmapTestStatus('ok');
+                            setLlmmapTestMessage('Connected successfully.');
+                          } else {
+                            setLlmmapTestStatus('error');
+                            setLlmmapTestMessage(`HTTP ${resp.status}: ${resp.statusText}`);
+                          }
+                        } catch (e: unknown) {
+                          setLlmmapTestStatus('error');
+                          const msg = e instanceof Error ? e.message : String(e);
+                          setLlmmapTestMessage(msg.includes('abort') ? 'Connection timed out (10s).' : `Connection failed: ${msg}`);
+                        }
+                      }}
+                      disabled={llmmapTestStatus === 'testing'}
+                      style={{ cursor: 'pointer' }}
+                      className="px-3 py-2 text-sm border border-dim text-highlight hover:bg-[var(--highlight)] transition-colors flex items-center gap-2 disabled:opacity-50"
+                    >
+                      {llmmapTestStatus === 'testing' ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
+                      Test
+                    </button>
+                  </div>
+                  {llmmapTestStatus === 'ok' && (
+                    <div className="flex items-center gap-2 mt-2 text-xs text-[var(--accent-success)]">
+                      <Check size={14} />
+                      {llmmapTestMessage}
+                    </div>
+                  )}
+                  {llmmapTestStatus === 'error' && (
+                    <div className="flex items-center gap-2 mt-2 text-xs text-[var(--accent-error)]">
+                      <X size={14} />
+                      {llmmapTestMessage}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-muted mt-2">
+                    Test sends a minimal request to the LLMMap REST API to verify connectivity. Requires LLMMap running with the <code>--api</code> flag.
+                  </p>
+                </div>
+              </div>
             </div>
           )}
 

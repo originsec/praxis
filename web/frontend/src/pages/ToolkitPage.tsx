@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
-import { Code2, Copy, Eye, ShieldAlert } from 'lucide-react';
+import { Code2, Copy, Crosshair, Eye, Loader2, ShieldAlert } from 'lucide-react';
 import { Modal } from '../components/common/Modal';
 import { useApp } from '../context/AppContext';
 import type { SessionItem, ToolkitToolInfo, ToolkitDiffHunk, ToolkitDiffLine, ToolkitTargetPreview } from '../api/types';
@@ -7,6 +7,7 @@ import type { SessionItem, ToolkitToolInfo, ToolkitDiffHunk, ToolkitDiffLine, To
 function toolIcon(toolName: string) {
   if (toolName === 'session_history_poisoning') return ShieldAlert;
   if (toolName === 'message_encoder') return Code2;
+  if (toolName === 'llmmap') return Crosshair;
   return Eye;
 }
 
@@ -633,6 +634,141 @@ export function MessageEncoderModal({ isOpen, onClose, description }: MessageEnc
   );
 }
 
+interface LlmMapModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  description: string;
+}
+
+export function LlmMapModal({ isOpen, onClose, description }: LlmMapModalProps) {
+  const { state, send } = useApp();
+  const [goal, setGoal] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const transformOptions = state.toolkit.tools
+    .find(t => t.tool_name === 'llmmap')
+    ?.config_schema.find(f => f.name === 'transform')
+    ?.options ?? [];
+
+  const intensityOptions = state.toolkit.tools
+    .find(t => t.tool_name === 'llmmap')
+    ?.config_schema.find(f => f.name === 'intensity')
+    ?.options ?? [];
+
+  const [transform, setTransform] = useState(() => transformOptions[0]?.value ?? 'none');
+  const [intensity, setIntensity] = useState(() => intensityOptions[2]?.value ?? '3');
+
+  const execResult = state.toolkit.executeResult?.tool_name === 'llmmap'
+    ? state.toolkit.executeResult : null;
+  const output = execResult?.previews[0]?.preview_content ?? '';
+  const error = execResult?.previews[0]?.error ?? '';
+
+  //
+  // Clear loading when we get a result back.
+  //
+
+  useEffect(() => {
+    if (execResult) setLoading(false);
+  }, [execResult]);
+
+  const handleGenerate = () => {
+    if (!goal.trim()) return;
+    setLoading(true);
+    send({
+      type: 'toolkit_execute',
+      tool_name: 'llmmap',
+      target_spec: {
+        node_ids: [],
+        os_filter: null,
+        agent_short_names: [],
+        include_triggering_node: false,
+      },
+      params: { input_text: goal, transform, intensity },
+    });
+  };
+
+  const copyOutput = async () => {
+    if (!output) return;
+    await navigator.clipboard.writeText(output);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1000);
+  };
+
+  const labelCls = 'block text-[10px] tracking-wider text-[var(--text-secondary)] uppercase mb-1';
+  const inputCls = 'w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle';
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="LLMMap" size="md">
+      <p className="text-[10px] text-muted mb-3 leading-relaxed">{description}</p>
+
+      <div className="space-y-2.5">
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className={labelCls}>Transform</label>
+            <select className={inputCls} value={transform} onChange={(e) => setTransform(e.target.value)}>
+              {transformOptions.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>Intensity</label>
+            <select className={inputCls} value={intensity} onChange={(e) => setIntensity(e.target.value)}>
+              {intensityOptions.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className={labelCls}>Goal</label>
+          <textarea
+            className={`${inputCls} h-24 resize-none`}
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            placeholder="Describe the injection goal..."
+          />
+        </div>
+
+        <button
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-dim text-highlight hover:bg-[var(--highlight)] transition-colors disabled:opacity-40"
+          onClick={handleGenerate}
+          disabled={!goal.trim() || loading}
+        >
+          {loading ? <Loader2 size={12} className="animate-spin" /> : <Crosshair size={12} />}
+          Generate Payload
+        </button>
+
+        {error && (
+          <p className="text-[10px] text-[var(--accent-error)] leading-relaxed">{error}</p>
+        )}
+
+        {output && (
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className={labelCls}>Payload</label>
+              <button
+                className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] tracking-wider border border-dim text-muted hover:text-highlight hover:border-subtle transition-colors disabled:opacity-40"
+                onClick={copyOutput}
+                disabled={!output}
+              >
+                <Copy size={10} /> {copied ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+            <textarea
+              className={`${inputCls} h-32 font-mono resize-none`}
+              readOnly
+              value={output}
+            />
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 export function ToolkitPage() {
   const { state, send } = useApp();
   const [activeTool, setActiveTool] = useState<string | null>(null);
@@ -686,6 +822,14 @@ export function ToolkitPage() {
           isOpen
           onClose={closeTool}
           description={descriptionFor('message_encoder')}
+        />
+      )}
+
+      {activeTool === 'llmmap' && (
+        <LlmMapModal
+          isOpen
+          onClose={closeTool}
+          description={descriptionFor('llmmap')}
         />
       )}
     </div>

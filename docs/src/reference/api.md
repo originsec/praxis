@@ -399,10 +399,12 @@ pub struct SemanticOperationSpec {
     pub agent_info: String,
     pub timeout: u64,
     pub operation_prompt: String,
-    pub mode: String,                  // "one-shot" or "agent"
+    pub mode: String,                  // "one-shot", "agent", or "llmmap"
     pub agent_iterations: u32,
     pub yolo_mode: bool,
     pub model_ref: Option<String>,
+    pub llmmap_transform: Option<String>,  // for llmmap mode
+    pub llmmap_intensity: Option<u8>,      // for llmmap mode (1-5)
 }
 ```
 

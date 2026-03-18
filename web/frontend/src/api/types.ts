@@ -346,6 +346,8 @@ export interface OperationDefinitionInfo {
   disabled: boolean;
   yolo_mode: boolean;
   model_ref?: string | null;
+  llmmap_transform?: string | null;
+  llmmap_intensity?: number | null;
 }
 
 //

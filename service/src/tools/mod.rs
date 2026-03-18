@@ -1,3 +1,4 @@
+pub mod llmmap;
 mod message_encoder;
 mod session_poisoning;
 
@@ -25,6 +26,7 @@ use crate::state::NodeRegistry;
 
 const SESSION_HISTORY_POISONING_TOOL: &str = "session_history_poisoning";
 const MESSAGE_ENCODER_TOOL: &str = "message_encoder";
+const LLMMAP_TOOL: &str = "llmmap";
 
 //
 // Trait for toolkit tools that can be invoked from chain execution.
@@ -37,6 +39,65 @@ pub trait ToolkitTool: Send + Sync {
     fn description(&self) -> &str;
     fn config_schema(&self) -> Vec<ToolConfigField>;
     async fn execute_chain(&self, input: &str, params: &serde_json::Value) -> Result<String>;
+}
+
+struct LlmMapTool;
+
+#[async_trait::async_trait]
+impl ToolkitTool for LlmMapTool {
+    fn name(&self) -> &str { LLMMAP_TOOL }
+    fn display_name(&self) -> &str { "LLMMap" }
+    fn description(&self) -> &str { "Generate prompt injection payloads using LLMMap transforms." }
+
+    fn config_schema(&self) -> Vec<ToolConfigField> {
+        vec![
+            ToolConfigField {
+                name: "transform".to_string(),
+                label: "Transform".to_string(),
+                field_type: "select".to_string(),
+                required: true,
+                default_value: Some("none".to_string()),
+                options: Some(vec![
+                    ToolConfigOption { value: "none".to_string(), label: "None".to_string() },
+                    ToolConfigOption { value: "spacing".to_string(), label: "Spacing".to_string() },
+                    ToolConfigOption { value: "unicode".to_string(), label: "Unicode Injection".to_string() },
+                    ToolConfigOption { value: "base64".to_string(), label: "Base64".to_string() },
+                    ToolConfigOption { value: "wrapper".to_string(), label: "Wrapper Framing".to_string() },
+                ]),
+            },
+            ToolConfigField {
+                name: "intensity".to_string(),
+                label: "Intensity".to_string(),
+                field_type: "select".to_string(),
+                required: true,
+                default_value: Some("3".to_string()),
+                options: Some(vec![
+                    ToolConfigOption { value: "1".to_string(), label: "1 - Minimal".to_string() },
+                    ToolConfigOption { value: "2".to_string(), label: "2 - Low".to_string() },
+                    ToolConfigOption { value: "3".to_string(), label: "3 - Medium".to_string() },
+                    ToolConfigOption { value: "4".to_string(), label: "4 - High".to_string() },
+                    ToolConfigOption { value: "5".to_string(), label: "5 - Maximum".to_string() },
+                ]),
+            },
+        ]
+    }
+
+    async fn execute_chain(&self, input: &str, params: &serde_json::Value) -> Result<String> {
+        let url = params.get("_llmmap_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("http://localhost:5000");
+        let transform = params.get("transform")
+            .and_then(|v| v.as_str())
+            .unwrap_or("none");
+        let intensity: u8 = params.get("intensity")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(3);
+
+        let client = llmmap::LlmMapClient::new(url);
+        let resp = client.generate(input, transform, intensity).await?;
+        Ok(resp.payload)
+    }
 }
 
 struct MessageEncoderTool;
@@ -93,6 +154,7 @@ impl ToolkitManager {
         publish_channel: Channel,
     ) -> Self {
         let chain_tools: Vec<Box<dyn ToolkitTool>> = vec![
+            Box::new(LlmMapTool),
             Box::new(MessageEncoderTool),
         ];
         Self {
@@ -135,7 +197,7 @@ impl ToolkitManager {
     }
 
     pub async fn recon(&self, tool_name: &str, target_spec: &TargetSpec) -> Result<Vec<ToolkitReconTarget>> {
-        if tool_name == MESSAGE_ENCODER_TOOL {
+        if tool_name == MESSAGE_ENCODER_TOOL || tool_name == LLMMAP_TOOL {
             return Ok(Vec::new());
         }
         if tool_name != SESSION_HISTORY_POISONING_TOOL {
@@ -190,7 +252,10 @@ impl ToolkitManager {
         params: Value,
         progress_tx: Option<tokio::sync::mpsc::UnboundedSender<(usize, usize)>>,
     ) -> Result<ToolkitExecuteResult> {
-        if tool_name != SESSION_HISTORY_POISONING_TOOL && tool_name != MESSAGE_ENCODER_TOOL {
+        if tool_name != SESSION_HISTORY_POISONING_TOOL
+            && tool_name != MESSAGE_ENCODER_TOOL
+            && tool_name != LLMMAP_TOOL
+        {
             return Err(anyhow!("Unknown toolkit tool: {}", tool_name));
         }
 
@@ -226,6 +291,59 @@ impl ToolkitManager {
                 diff_hunks: None,
                 error: None,
             });
+        } else if tool_name == LLMMAP_TOOL {
+            let input_text = params
+                .get("input_text")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("llmmap requires params.input_text"))?;
+            let transform = params
+                .get("transform")
+                .and_then(|v| v.as_str())
+                .unwrap_or("none");
+            let intensity: u8 = params
+                .get("intensity")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(3);
+
+            let llmmap_url = {
+                let cfg = self.service_config.read().await;
+                cfg.get_llmmap_url()
+            };
+
+            let client = llmmap::LlmMapClient::new(&llmmap_url);
+            match client.generate(input_text, transform, intensity).await {
+                Ok(resp) => {
+                    previews.push(ToolkitTargetPreview {
+                        target: ToolkitTargetRef {
+                            node_id: "local".to_string(),
+                            agent_short_name: "llmmap".to_string(),
+                            session_id: "n/a".to_string(),
+                            session_file: "n/a".to_string(),
+                        },
+                        success: true,
+                        preview_content: Some(resp.payload),
+                        original_content: None,
+                        diff_hunks: None,
+                        error: None,
+                    });
+                }
+                Err(e) => {
+                    previews.push(ToolkitTargetPreview {
+                        target: ToolkitTargetRef {
+                            node_id: "local".to_string(),
+                            agent_short_name: "llmmap".to_string(),
+                            session_id: "n/a".to_string(),
+                            session_file: "n/a".to_string(),
+                        },
+                        success: false,
+                        preview_content: None,
+                        original_content: None,
+                        diff_hunks: None,
+                        error: Some(e.to_string()),
+                    });
+                }
+            }
         } else {
             let selected_targets = parse_selected_targets(&params)?;
             let model_ref = params

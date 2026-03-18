@@ -31,6 +31,10 @@ pub const MCP_SERVER_PORT: &str = "mcp_server_port";
 /// Default MCP server port
 pub const MCP_SERVER_DEFAULT_PORT: u16 = 8585;
 
+/// LLMMap REST API endpoint
+pub const TOOLKIT_LLMMAP_URL: &str = "toolkit_llmmap_url";
+pub const TOOLKIT_LLMMAP_URL_DEFAULT: &str = "http://localhost:5000";
+
 /// A model definition stored in config
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -149,6 +153,13 @@ impl ServiceConfig {
         self.get(MCP_SERVER_PORT)
             .and_then(|s| s.parse().ok())
             .unwrap_or(MCP_SERVER_DEFAULT_PORT)
+    }
+
+    /// Get the LLMMap REST API URL
+    pub fn get_llmmap_url(&self) -> String {
+        self.get(TOOLKIT_LLMMAP_URL)
+            .cloned()
+            .unwrap_or_else(|| TOOLKIT_LLMMAP_URL_DEFAULT.to_string())
     }
 
 }
