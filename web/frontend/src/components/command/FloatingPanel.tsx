@@ -1,11 +1,6 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react';
 import { X } from 'lucide-react';
-
-//
-// Global z-index counter — each panel claims the next value on focus.
-//
-let globalZIndex = 1000;
-function nextZIndex() { return ++globalZIndex; }
+import { nextZIndex, currentZIndex } from '../../utils/zIndex';
 
 interface FloatingPanelProps {
   title: string;
@@ -29,7 +24,7 @@ export function FloatingPanel({
 
   const bringToFront = useCallback(() => {
     setZIndex(prev => {
-      if (prev < globalZIndex) return nextZIndex();
+      if (prev < currentZIndex()) return nextZIndex();
       return prev;
     });
   }, []);

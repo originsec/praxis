@@ -82,7 +82,7 @@ export function ConfigModal({
   };
 
   const getSubmitButtonClasses = () => {
-    const base = 'inline-flex items-center gap-2 px-4 py-2 text-xs tracking-wider border border-dim transition-colors disabled:opacity-50';
+    const base = 'inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] tracking-wider border border-dim transition-colors disabled:opacity-50';
 
     switch (submitVariant) {
       case 'success':
@@ -100,7 +100,7 @@ export function ConfigModal({
 
   const renderField = (field: FieldConfig) => {
     const value = values[field.name] ?? '';
-    const fieldClasses = "w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-xs text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors";
+    const fieldClasses = "w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors";
 
     if (field.type === 'toggle') {
       const boolValue = !!value;
@@ -113,11 +113,11 @@ export function ConfigModal({
           className="flex items-center gap-2 disabled:opacity-50 hover:opacity-80 transition-opacity"
         >
           {boolValue ? (
-            <CircleCheck size={16} className="text-[var(--accent-error)]" />
+            <CircleCheck size={12} className="text-[var(--accent-error)]" />
           ) : (
-            <Circle size={16} className="text-[var(--text-secondary)]" />
+            <Circle size={12} className="text-[var(--text-secondary)]" />
           )}
-          <span className={`text-xs tracking-wider ${boolValue ? 'text-[var(--accent-error)]' : 'text-[var(--text-secondary)]'}`}>
+          <span className={`text-[10px] tracking-wider ${boolValue ? 'text-[var(--accent-error)]' : 'text-[var(--text-secondary)]'}`}>
             {field.label}
           </span>
         </button>
@@ -126,13 +126,13 @@ export function ConfigModal({
 
     return (
       <div key={field.name} className={field.span === 'full' ? '' : ''}>
-        <div className="flex items-baseline gap-2 mb-1.5">
-          <label className="text-xs tracking-wider text-[var(--text-secondary)]">
+        <div className="flex items-baseline gap-2 mb-1">
+          <label className="text-[10px] tracking-wider text-[var(--text-secondary)]">
             {field.label}
             {field.required && <span className="text-[var(--accent-error)]/70"> *</span>}
           </label>
           {field.subtext && (
-            <span className="text-xs text-muted/60">{field.subtext}</span>
+            <span className="text-[9px] text-muted/60">{field.subtext}</span>
           )}
         </div>
         {field.type === 'text' && (
@@ -184,7 +184,7 @@ export function ConfigModal({
           </select>
         )}
         {field.help && (
-          <p className="text-xs mt-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>{field.help}</p>
+          <p className="text-[9px] mt-1.5 leading-relaxed" style={{ color: 'var(--text-muted)' }}>{field.help}</p>
         )}
       </div>
     );
@@ -302,7 +302,7 @@ export function ConfigModal({
                 type="button"
                 onClick={onClose}
                 disabled={isSubmitting}
-                className="px-4 py-2 text-xs tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors disabled:opacity-50"
+                className="px-3 py-1.5 text-[10px] tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>

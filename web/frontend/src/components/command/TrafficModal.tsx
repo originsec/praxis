@@ -210,7 +210,7 @@ export function TrafficModal({ onClose, fixedNodeId }: TrafficModalProps) {
 }
 
 //
-// Rules tab — compact modal version of InterceptPage RulesTab.
+// Rules tab.
 //
 
 function RulesTab() {
@@ -568,7 +568,7 @@ function RuleFormModal({ rule, nodes, onClose }: {
 }
 
 //
-// Matches tab — compact modal version of InterceptPage MatchesTab.
+// Matches tab.
 //
 
 function MatchesTab() {

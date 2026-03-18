@@ -4,12 +4,7 @@ import { Modal } from '../common/Modal';
 import { useApp } from '../../context/AppContext';
 import type { ToolkitToolInfo } from '../../api/types';
 
-//
-// Lazy-import the tool-specific modals from the ToolkitPage. They are
-// self-contained and already use Modal internally.
-//
-
-import { SessionHistoryPoisoningModal, MessageEncoderModal } from '../../pages/ToolkitPage';
+import { SessionHistoryPoisoningModal, MessageEncoderModal } from './ToolkitToolModals';
 
 function toolIcon(toolName: string) {
   if (toolName === 'session_history_poisoning') return ShieldAlert;
