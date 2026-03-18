@@ -1519,7 +1519,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         //
         case 'recon_get_response':
           //
-          // Dispatch as custom event for AgentDetailPage to catch.
+          // Dispatch as custom event so UI components can catch recon responses.
           //
           window.dispatchEvent(new CustomEvent('ws-message', { detail: message }));
           break;

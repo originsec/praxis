@@ -8,7 +8,7 @@
 #
 # Access:
 #   Web UI: http://localhost:8080
-#   MCP Server: http://localhost:8585/sse (when enabled in settings)
+#   MCP Server: http://localhost:8585/sse (enabled by default)
 #   RabbitMQ Management: http://localhost:15672 (praxis/praxis)
 #
 # Environment Variables:

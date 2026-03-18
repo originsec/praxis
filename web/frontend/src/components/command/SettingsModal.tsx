@@ -1,19 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Monitor, LayoutGrid, Sun, Moon, Cpu, Server, Info, Wifi, WifiOff,
+  Monitor, Cpu, Server, Info, Wifi, WifiOff,
   Plus, Trash2, Edit2, Save, Check, X, Key, List, Loader2,
   Circle, CircleCheck, Download, ExternalLink, FileCode,
   Upload, RotateCcw, AlertTriangle,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import { Modal } from '../common/Modal';
 import { LuaCodeEditor } from '../common/LuaCodeEditor';
 import { useApp } from '../../context/AppContext';
-import { useTheme } from '../../context/ThemeContext';
 import { getFeatureFlags } from '../../utils/featureFlags';
-import { getUiMode, setUiMode, type UiMode } from '../../utils/uiMode';
 
-type Tab = 'display' | 'llm' | 'agents' | 'service' | 'about';
+type Tab = 'llm' | 'agents' | 'service' | 'about';
 type LLMView = 'models' | 'features';
 
 interface SettingsModalProps {
@@ -52,10 +49,9 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     listLuaAgentScripts, addLuaAgentScript, updateLuaAgentScript,
     deleteLuaAgentScript, resetLuaAgentScriptDefaults, toggleLuaAgentScriptDisabled,
   } = useApp();
-  const { theme, setTheme } = useTheme();
-  const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] = useState<Tab>('display');
+
+  const [activeTab, setActiveTab] = useState<Tab>('llm');
   const [llmView, setLlmView] = useState<LLMView>('models');
 
   //
@@ -106,7 +102,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [eventLoggingEnabled, setEventLoggingEnabled] = useState(false);
   const [huntingQueryRowLimit, setHuntingQueryRowLimit] = useState('10000000');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [mcpServerEnabled, setMcpServerEnabled] = useState(false);
+  const [mcpServerEnabled, setMcpServerEnabled] = useState(true);
   const [mcpServerPort, setMcpServerPort] = useState('8585');
   const [nodeDownloads, setNodeDownloads] = useState<NodeDownloadInfo[]>([]);
   const [isLoadingDownloads, setIsLoadingDownloads] = useState(false);
@@ -218,7 +214,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       const v = cfg.mcp_server_enabled.toLowerCase();
       setMcpServerEnabled(!(v === 'false' || v === '0' || v === 'no'));
     } else {
-      setMcpServerEnabled(false);
+      setMcpServerEnabled(true);
     }
     setMcpServerPort(cfg.mcp_server_port || '8585');
   }, [state.config]);
@@ -450,20 +446,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     e.target.value = '';
   };
 
-  //
-  // UI mode handler.
-  //
-
-  const handleModeChange = (mode: UiMode) => {
-    setUiMode(mode);
-    if (mode === 'legacy') {
-      navigate('/dashboard');
-      onClose();
-    }
-  };
-
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'display', label: 'Display', icon: <Monitor size={14} /> },
     { id: 'llm', label: 'LLM', icon: <Cpu size={14} /> },
     { id: 'agents', label: 'Agents', icon: <FileCode size={14} /> },
     { id: 'service', label: 'Service', icon: <Server size={14} /> },
@@ -476,11 +459,11 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
   const inputCls = 'w-full bg-[var(--bg-primary)] border border-dim px-2.5 py-1.5 text-xs text-highlight focus:outline-none focus:border-subtle transition-colors';
   const btnSave = 'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors disabled:opacity-50';
-  const btnGreen = 'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors';
+  const btnGreen = 'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors';
 
   return (
-    <Modal isOpen={true} onClose={onClose} title="Settings" size="xl" noPadding>
-      <div className="flex h-[70vh]">
+    <Modal isOpen={true} onClose={onClose} title="Settings" size="xl" noPadding resizable storageKey="cmd-settings" defaultWidth={760} defaultHeight={Math.round(window.innerHeight * 0.7)}>
+      <div className="flex h-full">
 
         {/*
         //
@@ -512,89 +495,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         */}
 
         <div className={`flex-1 flex flex-col min-h-0 ${activeTab === 'agents' ? '' : 'overflow-y-auto p-5'}`}>
-
-          {/*
-          //
-          // Display tab.
-          //
-          */}
-
-          {activeTab === 'display' && (
-            <div className="space-y-5">
-              <div>
-                <h3 className="text-xs font-semibold text-highlight tracking-wider mb-0.5">INTERFACE MODE</h3>
-                <p className="text-[10px] text-muted mb-3">Choose your preferred layout</p>
-
-                <div className="space-y-1.5">
-                  <button
-                    onClick={() => handleModeChange('command_center')}
-                    className={`w-full flex items-center gap-3 p-2.5 border transition-colors text-left ${
-                      getUiMode() === 'command_center'
-                        ? 'border-[var(--accent-info)]/50 bg-[var(--accent-info)]/5'
-                        : 'border-subtle hover:border-[var(--border-hover)] hover:bg-[var(--bg-secondary)]'
-                    }`}
-                  >
-                    <LayoutGrid size={16} className={getUiMode() === 'command_center' ? 'text-[var(--accent-info)]' : 'text-muted'} />
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-xs font-medium ${getUiMode() === 'command_center' ? 'text-highlight' : 'text-[var(--text-primary)]'}`}>Command Center</p>
-                      <p className="text-[10px] text-muted">Full-screen grid with node cards and orchestrator</p>
-                    </div>
-                    {getUiMode() === 'command_center' && (
-                      <span className="text-[9px] tracking-wider text-[var(--accent-info)] flex-shrink-0">ACTIVE</span>
-                    )}
-                  </button>
-
-                  <button
-                    onClick={() => handleModeChange('legacy')}
-                    className={`w-full flex items-center gap-3 p-2.5 border transition-colors text-left ${
-                      getUiMode() === 'legacy'
-                        ? 'border-[var(--accent-info)]/50 bg-[var(--accent-info)]/5'
-                        : 'border-subtle hover:border-[var(--border-hover)] hover:bg-[var(--bg-secondary)]'
-                    }`}
-                  >
-                    <Monitor size={16} className={getUiMode() === 'legacy' ? 'text-[var(--accent-info)]' : 'text-muted'} />
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-xs font-medium ${getUiMode() === 'legacy' ? 'text-highlight' : 'text-[var(--text-primary)]'}`}>Classic</p>
-                      <p className="text-[10px] text-muted">Sidebar navigation with dedicated pages</p>
-                    </div>
-                    {getUiMode() === 'legacy' && (
-                      <span className="text-[9px] tracking-wider text-[var(--accent-info)] flex-shrink-0">ACTIVE</span>
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-subtle">
-                <h3 className="text-xs font-semibold text-highlight tracking-wider mb-0.5">THEME</h3>
-                <p className="text-[10px] text-muted mb-3">Visual appearance</p>
-
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setTheme('origin_light')}
-                    className={`flex-1 flex items-center justify-center gap-2 p-2.5 border transition-colors ${
-                      theme === 'origin_light'
-                        ? 'border-[var(--accent-info)]/50 bg-[var(--accent-info)]/5'
-                        : 'border-subtle hover:border-[var(--border-hover)] hover:bg-[var(--bg-secondary)]'
-                    }`}
-                  >
-                    <Sun size={14} className={theme === 'origin_light' ? 'text-[var(--accent-info)]' : 'text-muted'} />
-                    <span className={`text-xs ${theme === 'origin_light' ? 'text-highlight' : 'text-muted'}`}>Light</span>
-                  </button>
-                  <button
-                    onClick={() => setTheme('praxis_dark')}
-                    className={`flex-1 flex items-center justify-center gap-2 p-2.5 border transition-colors ${
-                      theme === 'praxis_dark'
-                        ? 'border-[var(--accent-info)]/50 bg-[var(--accent-info)]/5'
-                        : 'border-subtle hover:border-[var(--border-hover)] hover:bg-[var(--bg-secondary)]'
-                    }`}
-                  >
-                    <Moon size={14} className={theme === 'praxis_dark' ? 'text-[var(--accent-info)]' : 'text-muted'} />
-                    <span className={`text-xs ${theme === 'praxis_dark' ? 'text-highlight' : 'text-muted'}`}>Dark</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/*
           //
@@ -799,8 +699,11 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                           ) : (
                             <div className="flex items-center justify-between gap-2">
                               <div className="min-w-0">
-                                <p className="font-mono text-xs text-highlight truncate">{model.name}</p>
-                                <p className="text-[10px] text-muted">{providers.find(p => p.value === model.provider)?.label || model.provider}</p>
+                                <p className="text-xs truncate">
+                                  <span className="text-muted">{providers.find(p => p.value === model.provider)?.label || model.provider}</span>
+                                  {' '}
+                                  <span className="text-highlight">{model.model}</span>
+                                </p>
                               </div>
                               <div className="flex gap-1 flex-shrink-0">
                                 <button
@@ -1162,6 +1065,36 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
               </div>
 
               <div className="pt-4 border-t border-subtle">
+                <h4 className="text-xs font-semibold text-highlight mb-1">MCP Server</h4>
+                <p className="text-[10px] text-muted mb-2">Expose tools via Model Context Protocol (SSE)</p>
+
+                <div className="space-y-2">
+                  <button onClick={handleMcpToggle} className="flex items-center gap-1.5 text-xs text-muted hover:text-highlight transition-colors">
+                    {mcpServerEnabled
+                      ? <CircleCheck size={14} className="text-[var(--accent-success)]" />
+                      : <Circle size={14} className="text-[var(--text-secondary)]" />}
+                    <span>{mcpServerEnabled ? 'Enabled' : 'Disabled'}</span>
+                  </button>
+
+                  {mcpServerEnabled && (
+                    <div className="flex items-center gap-2 pl-5">
+                      <label className="text-[10px] text-muted">Port</label>
+                      <input
+                        type="number"
+                        value={mcpServerPort}
+                        onChange={e => setMcpServerPort(e.target.value)}
+                        onBlur={handleMcpPortSave}
+                        min="1"
+                        max="65535"
+                        className={`w-20 ${inputCls}`}
+                      />
+                      <span className="text-[10px] text-muted font-mono">http://localhost:{mcpServerPort}/sse</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-subtle">
                 <h4 className="text-xs font-semibold text-highlight mb-1">Event Logging</h4>
                 <p className="text-[10px] text-muted mb-2">Centralized application logs</p>
 
@@ -1200,36 +1133,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                     className={`w-28 ${inputCls}`}
                   />
                   <span className="text-[10px] text-muted">per table</span>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-subtle">
-                <h4 className="text-xs font-semibold text-highlight mb-1">MCP Server</h4>
-                <p className="text-[10px] text-muted mb-2">Expose tools via Model Context Protocol (SSE)</p>
-
-                <div className="space-y-2">
-                  <button onClick={handleMcpToggle} className="flex items-center gap-1.5 text-xs text-muted hover:text-highlight transition-colors">
-                    {mcpServerEnabled
-                      ? <CircleCheck size={14} className="text-[var(--accent-success)]" />
-                      : <Circle size={14} className="text-[var(--text-secondary)]" />}
-                    <span>{mcpServerEnabled ? 'Enabled' : 'Disabled'}</span>
-                  </button>
-
-                  {mcpServerEnabled && (
-                    <div className="flex items-center gap-2 pl-5">
-                      <label className="text-[10px] text-muted">Port</label>
-                      <input
-                        type="number"
-                        value={mcpServerPort}
-                        onChange={e => setMcpServerPort(e.target.value)}
-                        onBlur={handleMcpPortSave}
-                        min="1"
-                        max="65535"
-                        className={`w-20 ${inputCls}`}
-                      />
-                      <span className="text-[10px] text-muted font-mono">http://localhost:{mcpServerPort}/sse</span>
-                    </div>
-                  )}
                 </div>
               </div>
 

@@ -1,14 +1,8 @@
 import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
-import { Code2, Copy, Eye, ShieldAlert } from 'lucide-react';
-import { Modal } from '../components/common/Modal';
-import { useApp } from '../context/AppContext';
-import type { SessionItem, ToolkitToolInfo, ToolkitDiffHunk, ToolkitDiffLine, ToolkitTargetPreview } from '../api/types';
-
-function toolIcon(toolName: string) {
-  if (toolName === 'session_history_poisoning') return ShieldAlert;
-  if (toolName === 'message_encoder') return Code2;
-  return Eye;
-}
+import { Copy } from 'lucide-react';
+import { Modal } from '../common/Modal';
+import { useApp } from '../../context/AppContext';
+import type { SessionItem, ToolkitDiffHunk, ToolkitDiffLine, ToolkitTargetPreview } from '../../api/types';
 
 //
 // Word-level inline diff. Splits two strings into words (preserving whitespace
@@ -630,64 +624,5 @@ export function MessageEncoderModal({ isOpen, onClose, description }: MessageEnc
         )}
       </div>
     </Modal>
-  );
-}
-
-export function ToolkitPage() {
-  const { state, send } = useApp();
-  const [activeTool, setActiveTool] = useState<string | null>(null);
-
-  useEffect(() => {
-    send({ type: 'toolkit_list' });
-  }, [send]);
-
-  const tools = state.toolkit.tools;
-  const closeTool = () => setActiveTool(null);
-
-  const descriptionFor = (toolName: string) =>
-    tools.find((t) => t.tool_name === toolName)?.description ?? '';
-
-  return (
-    <div className="space-y-6 h-full overflow-auto pb-8">
-      <div>
-        <h1 className="text-2xl font-bold text-highlight">Toolkit</h1>
-        <p className="text-muted mt-1">Specialized offensive tools</p>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {tools.map((tool: ToolkitToolInfo) => {
-          const Icon = toolIcon(tool.tool_name);
-          return (
-            <button
-              key={tool.tool_name}
-              onClick={() => setActiveTool(tool.tool_name)}
-              className="text-left border border-subtle bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors p-4 ascii-box"
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <Icon size={18} className="text-[var(--accent-info)]" />
-                <h2 className="text-sm font-semibold text-highlight">{tool.display_name}</h2>
-              </div>
-              <p className="text-xs text-muted leading-relaxed">{tool.description}</p>
-            </button>
-          );
-        })}
-      </div>
-
-      {activeTool === 'session_history_poisoning' && (
-        <SessionHistoryPoisoningModal
-          isOpen
-          onClose={closeTool}
-          description={descriptionFor('session_history_poisoning')}
-        />
-      )}
-
-      {activeTool === 'message_encoder' && (
-        <MessageEncoderModal
-          isOpen
-          onClose={closeTool}
-          description={descriptionFor('message_encoder')}
-        />
-      )}
-    </div>
   );
 }

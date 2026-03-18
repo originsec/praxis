@@ -462,8 +462,12 @@ export function ReconModal({ nodeId, agentShortName, onClose }: ReconModalProps)
       title={`Recon: ${agentShortName}`}
       size="xl"
       noPadding
+      resizable
+      storageKey="cmd-recon"
+      defaultWidth={760}
+      defaultHeight={Math.round(window.innerHeight * 0.7)}
     >
-      <div className="flex flex-col" style={{ height: '70vh' }}>
+      <div className="flex flex-col h-full">
 
         {/*
         //
