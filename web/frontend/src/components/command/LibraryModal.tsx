@@ -680,6 +680,9 @@ export function LibraryModal({ onClose }: LibraryModalProps) {
               toolkitTools={state.toolkit.tools}
               payloads={state.payloads}
               send={send}
+              opDefSuccess={opDefSuccess}
+              opDefError={opDefError}
+              clearOpDefStatus={clearOpDefStatus}
             />
           </div>
         </Modal>

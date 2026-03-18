@@ -15,7 +15,7 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge, Connection, OnSelectionChangeParams } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, X, Save, Copy, Download, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings, Check, AlertTriangle, Wrench, FileText } from 'lucide-react';
+import { Play, X, Save, Copy, Download, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings, Check, AlertTriangle, Wrench, FileText, Plus, Loader2, Circle, CircleCheck } from 'lucide-react';
 import { ConfigModal } from '../common/ConfigModal';
 import { Modal } from '../common/Modal';
 import { ChainTriggerPanel } from './ChainTriggerPanel';
@@ -453,9 +453,12 @@ interface ChainBuilderInnerProps {
   send: (msg: BrowserMessage) => void;
   saveStatus?: string | null;
   saveError?: string | null;
+  opDefSuccess?: string | null;
+  opDefError?: string | null;
+  clearOpDefStatus?: () => void;
 }
 
-function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, operationDefs, modelDefs, nodes: _systemNodes, toolkitTools, payloads, send, saveStatus, saveError }: ChainBuilderInnerProps) {
+function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, operationDefs, modelDefs, nodes: _systemNodes, toolkitTools, payloads, send, saveStatus, saveError, opDefSuccess, opDefError, clearOpDefStatus }: ChainBuilderInnerProps) {
   const [name, setName] = useState(chain?.name || '');
   const [description, setDescription] = useState(chain?.description || '');
   const [timeout, setChainTimeout] = useState(chain?.timeout || 1800);
@@ -513,6 +516,13 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
   const [showOperationModal, setShowOperationModal] = useState(false);
   const [pendingPosition, setPendingPosition] = useState<{ x: number; y: number } | null>(null);
   const [selectedOperation, setSelectedOperation] = useState<string>('');
+
+  //
+  // Modal state for creating a new operation from the chain builder.
+  //
+  const [showNewOpModal, setShowNewOpModal] = useState(false);
+  const [newOpDef, setNewOpDef] = useState<OperationDefinitionInfo | null>(null);
+  const [isSavingNewOp, setIsSavingNewOp] = useState(false);
 
   //
   // Modal state for transform configuration.
@@ -632,6 +642,69 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
     setBlockWorkingDir(existing?.working_dir || '');
     setBlockRequireAllInputs(existing?.require_all_inputs !== false);
   };
+
+  //
+  // New operation helpers — for creating an op inline from the chain builder.
+  //
+
+  const blankOpDef: OperationDefinitionInfo = {
+    full_name: '',
+    category: '',
+    short_name: '',
+    name: '',
+    description: '',
+    agent_info: '',
+    timeout: 60,
+    operation_prompt: '',
+    mode: 'one-shot',
+    agent_iterations: 5,
+    operation_chain: [],
+    disabled: false,
+    yolo_mode: false,
+  };
+
+  const handleOpenNewOp = () => {
+    setNewOpDef({ ...blankOpDef });
+    setShowNewOpModal(true);
+    clearOpDefStatus?.();
+  };
+
+  const handleSaveNewOp = () => {
+    if (!newOpDef) return;
+    const opData = {
+      item_type: 'operation',
+      name: newOpDef.name,
+      short_name: newOpDef.short_name,
+      category: newOpDef.category,
+      description: newOpDef.description,
+      agent_info: newOpDef.agent_info,
+      timeout: newOpDef.timeout,
+      operation_prompt: newOpDef.operation_prompt,
+      mode: newOpDef.mode,
+      agent_iterations: newOpDef.agent_iterations,
+      disabled: false,
+      yolo_mode: newOpDef.yolo_mode,
+    };
+    clearOpDefStatus?.();
+    setIsSavingNewOp(true);
+    send({ type: 'op_def_add', content: JSON.stringify(opData) });
+  };
+
+  const updateNewOpDef = (field: keyof OperationDefinitionInfo, value: string | number | boolean | string[]) => {
+    if (!newOpDef) return;
+    setNewOpDef({ ...newOpDef, [field]: value });
+  };
+
+  useEffect(() => {
+    if (opDefSuccess && isSavingNewOp) {
+      setIsSavingNewOp(false);
+      setShowNewOpModal(false);
+      setNewOpDef(null);
+      setSelectedOperation(opDefSuccess);
+      clearOpDefStatus?.();
+      send({ type: 'op_def_list' });
+    }
+  }, [opDefSuccess, isSavingNewOp, clearOpDefStatus, send]);
 
   //
   // Build a BlockConfig from current state and save it to extraData for the
@@ -2198,7 +2271,221 @@ function ChainBuilderInner({ chain, onSave, onDuplicate, onExport, onCancel, ope
         submitIcon={<Cpu size={14} />}
         submitVariant="info"
         submitDisabled={!selectedOperation}
+        footerLeft={
+          !editingNodeId && (
+            <button
+              type="button"
+              onClick={handleOpenNewOp}
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs tracking-wider text-muted border border-dim hover:border-[var(--accent-purple)] hover:text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/10 transition-colors"
+            >
+              <Plus size={14} />
+              New
+            </button>
+          )
+        }
       />
+
+      {/*
+      //
+      // New Operation Modal (opened from operation selection).
+      //
+      */}
+      <Modal
+        isOpen={showNewOpModal}
+        onClose={() => {
+          setShowNewOpModal(false);
+          setNewOpDef(null);
+          setIsSavingNewOp(false);
+          clearOpDefStatus?.();
+        }}
+        title="New Operation"
+        size="xl"
+      >
+        {newOpDef && (
+          <div className="space-y-0">
+            <div className="space-y-3 p-4 bg-[var(--bg-secondary)]">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">
+                    Name <span className="text-[var(--accent-error)]/70">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newOpDef.name}
+                    onChange={(e) => updateNewOpDef('name', e.target.value)}
+                    disabled={isSavingNewOp}
+                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                    placeholder="Display name for operation"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">
+                    Short Name <span className="text-[var(--accent-error)]/70">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newOpDef.short_name}
+                    onChange={(e) => updateNewOpDef('short_name', e.target.value)}
+                    disabled={isSavingNewOp}
+                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                    placeholder="unique_identifier"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">
+                    Category <span className="text-[var(--accent-error)]/70">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newOpDef.category}
+                    onChange={(e) => updateNewOpDef('category', e.target.value)}
+                    disabled={isSavingNewOp}
+                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                    placeholder="recon, exfiltration, etc."
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Mode</label>
+                  <select
+                    value={newOpDef.mode}
+                    onChange={(e) => updateNewOpDef('mode', e.target.value)}
+                    disabled={isSavingNewOp}
+                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                  >
+                    <option value="one-shot">one-shot</option>
+                    <option value="agent">agent</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className={`grid ${newOpDef.mode === 'agent' ? 'grid-cols-2' : 'grid-cols-1'} gap-3`}>
+                <div>
+                  <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Timeout (seconds)</label>
+                  <input
+                    type="number"
+                    value={newOpDef.timeout}
+                    onChange={(e) => updateNewOpDef('timeout', parseInt(e.target.value) || 60)}
+                    disabled={isSavingNewOp}
+                    className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                  />
+                </div>
+                {newOpDef.mode === 'agent' && (
+                  <div>
+                    <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Agent Iterations</label>
+                    <input
+                      type="number"
+                      value={newOpDef.agent_iterations}
+                      onChange={(e) => updateNewOpDef('agent_iterations', parseInt(e.target.value) || 5)}
+                      disabled={isSavingNewOp}
+                      className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Description</label>
+                <input
+                  type="text"
+                  value={newOpDef.description}
+                  onChange={(e) => updateNewOpDef('description', e.target.value)}
+                  disabled={isSavingNewOp}
+                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors"
+                  placeholder="Brief description of what this operation does"
+                />
+              </div>
+            </div>
+
+            <div className="border-t border-dim"></div>
+
+            <div className="space-y-3 p-4 bg-[var(--bg-secondary)]">
+              <div>
+                <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">Agent Info</label>
+                <p className="text-xs mb-2 leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+                  Optional. Technical context for AI agents to understand when and how to use this operation.
+                </p>
+                <textarea
+                  value={newOpDef.agent_info}
+                  onChange={(e) => updateNewOpDef('agent_info', e.target.value)}
+                  disabled={isSavingNewOp}
+                  rows={3}
+                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm font-mono text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors resize-none"
+                  placeholder="e.g., Searches for emails through communication channels, contact lists, and directory services."
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs tracking-wider text-[var(--text-secondary)] mb-1.5">
+                  Operation Prompt <span className="text-[var(--accent-error)]/70">*</span>
+                </label>
+                <textarea
+                  value={newOpDef.operation_prompt}
+                  onChange={(e) => updateNewOpDef('operation_prompt', e.target.value)}
+                  disabled={isSavingNewOp}
+                  rows={6}
+                  className="w-full bg-[var(--bg-primary)] border border-dim px-3 py-2 text-sm font-mono text-highlight focus:outline-none focus:border-subtle disabled:opacity-50 transition-colors resize-none"
+                  placeholder="The actual instructions given to the agent when executing this operation"
+                />
+              </div>
+            </div>
+
+            <div className="border-t border-dim"></div>
+
+            <div className="p-4 bg-[var(--bg-secondary)]">
+              <div className="flex items-center gap-6 mb-4">
+                <button
+                  onClick={() => updateNewOpDef('yolo_mode', !newOpDef.yolo_mode)}
+                  disabled={isSavingNewOp}
+                  className="flex items-center gap-2 disabled:opacity-50 hover:opacity-80 transition-opacity"
+                  type="button"
+                >
+                  {newOpDef.yolo_mode ? (
+                    <CircleCheck size={16} className="text-[var(--accent-error)]" />
+                  ) : (
+                    <Circle size={16} className="text-[var(--text-secondary)]" />
+                  )}
+                  <span className={`text-xs tracking-wider ${newOpDef.yolo_mode ? 'text-[var(--accent-error)]' : 'text-[var(--text-secondary)]'}`}>
+                    YOLO Mode
+                  </span>
+                </button>
+              </div>
+
+              {opDefError && (
+                <div className="mb-4 p-3 bg-[var(--accent-error)]/10 border border-[var(--accent-error)]/30 text-[var(--accent-error)] text-xs">
+                  {opDefError}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => {
+                    setShowNewOpModal(false);
+                    setNewOpDef(null);
+                    setIsSavingNewOp(false);
+                    clearOpDefStatus?.();
+                  }}
+                  disabled={isSavingNewOp}
+                  className="px-4 py-2 text-xs tracking-wider text-muted border border-dim hover:border-subtle hover:bg-[var(--highlight)] transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveNewOp}
+                  disabled={isSavingNewOp || !newOpDef.short_name || !newOpDef.category}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-xs tracking-wider bg-[var(--text-secondary)]/10 text-[var(--text-secondary)] border border-dim hover:border-[var(--text-secondary)] hover:bg-[var(--text-secondary)]/20 transition-colors disabled:opacity-50"
+                >
+                  {isSavingNewOp && <Loader2 size={14} className="animate-spin" />}
+                  <Save size={14} />
+                  {isSavingNewOp ? 'Creating...' : 'Create'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/*
       //
@@ -2652,13 +2939,16 @@ interface ChainBuilderProps {
   send?: (msg: BrowserMessage) => void;
   saveStatus?: string | null;
   saveError?: string | null;
+  opDefSuccess?: string | null;
+  opDefError?: string | null;
+  clearOpDefStatus?: () => void;
 }
 
 const noopSend = () => {};
-export function ChainBuilder({ modelDefs = [], nodes = [], toolkitTools = [], payloads = [], send = noopSend, saveStatus, saveError, ...props }: ChainBuilderProps) {
+export function ChainBuilder({ modelDefs = [], nodes = [], toolkitTools = [], payloads = [], send = noopSend, saveStatus, saveError, opDefSuccess, opDefError, clearOpDefStatus, ...props }: ChainBuilderProps) {
   return (
     <ReactFlowProvider>
-      <ChainBuilderInner {...props} modelDefs={modelDefs} nodes={nodes} toolkitTools={toolkitTools} payloads={payloads} send={send} saveStatus={saveStatus} saveError={saveError} />
+      <ChainBuilderInner {...props} modelDefs={modelDefs} nodes={nodes} toolkitTools={toolkitTools} payloads={payloads} send={send} saveStatus={saveStatus} saveError={saveError} opDefSuccess={opDefSuccess} opDefError={opDefError} clearOpDefStatus={clearOpDefStatus} />
     </ReactFlowProvider>
   );
 }

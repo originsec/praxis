@@ -660,6 +660,9 @@ export function LibraryTab({ nodes }: LibraryTabProps) {
           toolkitTools={state.toolkit.tools}
           payloads={state.payloads}
           send={send}
+          opDefSuccess={opDefSuccess}
+          opDefError={opDefError}
+          clearOpDefStatus={clearOpDefStatus}
         />
       </div>
     );
