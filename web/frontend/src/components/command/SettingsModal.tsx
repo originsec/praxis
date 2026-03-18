@@ -462,8 +462,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const btnGreen = 'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30 transition-colors';
 
   return (
-    <Modal isOpen={true} onClose={onClose} title="Settings" size="xl" noPadding>
-      <div className="flex h-[70vh]">
+    <Modal isOpen={true} onClose={onClose} title="Settings" size="xl" noPadding resizable storageKey="cmd-settings" defaultWidth={760} defaultHeight={Math.round(window.innerHeight * 0.7)}>
+      <div className="flex h-full">
 
         {/*
         //
@@ -699,8 +699,11 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                           ) : (
                             <div className="flex items-center justify-between gap-2">
                               <div className="min-w-0">
-                                <p className="font-mono text-xs text-highlight truncate">{model.name}</p>
-                                <p className="text-[10px] text-muted">{providers.find(p => p.value === model.provider)?.label || model.provider}</p>
+                                <p className="text-xs truncate">
+                                  <span className="text-muted">{providers.find(p => p.value === model.provider)?.label || model.provider}</span>
+                                  {' '}
+                                  <span className="text-highlight">{model.model}</span>
+                                </p>
                               </div>
                               <div className="flex gap-1 flex-shrink-0">
                                 <button
