@@ -22,7 +22,6 @@ This matters for:
 
 | Feature | Description |
 |---------|-------------|
-| **Agent Discovery** | Fingerprint and detect computer-use agents on endpoints |
 | **Reconnaissance** | Enumerate tools (MCP servers, skills), configurations, and session histories |
 | **Config Visibility** | View and edit agent configuration files directly |
 | **Traffic Interception** | MITM proxy for agent-to-LLM traffic |

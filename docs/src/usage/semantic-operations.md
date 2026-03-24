@@ -360,7 +360,7 @@ Scheduled triggers can be **recurring** (fire repeatedly) or **one-shot** (fire 
 
 **Intercept Match** - Fires when intercepted traffic matches a specific intercept rule. You specify the rule ID, and whenever traffic triggers that rule, the chain executes. Intercept-match triggers have a 60-second debounce window to prevent rapid repeated firings.
 
-**New Node** - Fires whenever a new node registers with the service. There is a 10-second delay after registration to allow agent discovery to complete before the chain executes.
+**New Node** - Fires whenever a new node registers with the service. There is a 10-second delay after registration before the chain executes.
 
 #### Creating Triggers
 

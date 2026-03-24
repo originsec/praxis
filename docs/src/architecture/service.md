@@ -188,7 +188,7 @@ Event triggers fire outside the polling loop, in direct response to events:
 
 **InterceptMatch** - When intercepted traffic matches an intercept rule, the node dispatch handler calls `fire_intercept_match_triggers()`. The engine looks up all enabled InterceptMatch triggers whose `rule_id` matches, applies a 60-second debounce per trigger, and fires matching chains.
 
-**NewNode** - When a node registers, the node dispatch handler spawns a delayed task (10 seconds to allow agent discovery) that calls `fire_new_node_triggers()`. The engine fires all enabled NewNode triggers with the registering node ID as the triggering node.
+**NewNode** - When a node registers, the node dispatch handler spawns a delayed task (10 seconds) that calls `fire_new_node_triggers()`. The engine fires all enabled NewNode triggers with the registering node ID as the triggering node.
 
 ### Trigger Storage
 
