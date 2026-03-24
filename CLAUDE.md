@@ -78,4 +78,4 @@
 2. **Create PR**: Create a PR from `prerelease` into `main` with a clear, well-written description summarizing all changes since the last release.
 3. **Squash merge**: Squash-merge the PR into `main`.
 4. **GitHub release**: Create a GitHub release on `main` with an excellent changelog covering all notable changes, new features, fixes, and breaking changes.
-5. **Tag and push**: Create a version tag (e.g., `v0.10.0`), push the tag, and push the release.
+5. **Tag and push**: Create a version tag matching the version number set on the `prerelease` branch (e.g., `v0.10.0`), push the tag, and push the release.
