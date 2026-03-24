@@ -35,7 +35,6 @@ import type {
   ChainTriggerInfo,
   TriggerConfig,
   TargetSpec,
-  DiscoveredLlmEndpoint,
   PayloadInfo,
   AgentChatAgentInfo,
   AgentChatAgentStatus,
@@ -126,21 +125,6 @@ const initialChainState: ChainState = {
 };
 
 //
-// Agent discovery state.
-//
-interface DiscoveryState {
-  endpoints: DiscoveredLlmEndpoint[];
-  isLoading: boolean;
-  error: string | null;
-}
-
-const initialDiscoveryState: DiscoveryState = {
-  endpoints: [],
-  isLoading: false,
-  error: null,
-};
-
-//
 // Agent Chat state.
 //
 interface AgentChatState {
@@ -218,7 +202,6 @@ interface AppState {
   intercept: InterceptState;
   hunting: HuntingState;
   chains: ChainState;
-  discovery: DiscoveryState;
   agentChat: AgentChatState;
   toolkit: ToolkitState;
   luaAgentScripts: LuaAgentScriptInfo[];
@@ -253,7 +236,6 @@ function createInitialState(): AppState {
     intercept: initialInterceptState,
     hunting: initialHuntingState,
     chains: initialChainState,
-    discovery: initialDiscoveryState,
     agentChat: initialAgentChatState,
     toolkit: initialToolkitState,
     luaAgentScripts: [],
@@ -336,13 +318,6 @@ type Action =
   // Recent nodes action.
   //
   | { type: 'ACCESS_NODE'; nodeId: string }
-  //
-  // Agent discovery actions.
-  //
-  | { type: 'SET_DISCOVERED_ENDPOINTS'; endpoints: DiscoveredLlmEndpoint[] }
-  | { type: 'SET_DISCOVERY_LOADING'; loading: boolean }
-  | { type: 'SET_DISCOVERY_ERROR'; error: string | null }
-  //
   //
   // Agent Chat actions.
   //
@@ -862,39 +837,6 @@ function reduceRecentNodes(state: AppState, action: Action): AppState | null {
   }
 }
 
-function reduceDiscovery(state: AppState, action: Action): AppState | null {
-  switch (action.type) {
-    case 'SET_DISCOVERED_ENDPOINTS':
-      return {
-        ...state,
-        discovery: {
-          ...state.discovery,
-          endpoints: action.endpoints,
-          isLoading: false,
-        },
-      };
-    case 'SET_DISCOVERY_LOADING':
-      return {
-        ...state,
-        discovery: {
-          ...state.discovery,
-          isLoading: action.loading,
-        },
-      };
-    case 'SET_DISCOVERY_ERROR':
-      return {
-        ...state,
-        discovery: {
-          ...state.discovery,
-          error: action.error,
-          isLoading: false,
-        },
-      };
-    default:
-      return null;
-  }
-}
-
 function reduceAgentChat(state: AppState, action: Action): AppState | null {
   switch (action.type) {
     case 'AGENT_CHAT_SESSION_STARTED': {
@@ -1131,7 +1073,6 @@ function reducer(state: AppState, action: Action): AppState {
     ?? reduceAgentSessions(state, action)
     ?? reduceChains(state, action)
     ?? reduceRecentNodes(state, action)
-    ?? reduceDiscovery(state, action)
     ?? reduceAgentChat(state, action)
     ?? reduceToolkit(state, action)
     ?? state
@@ -1235,13 +1176,6 @@ interface AppContextValue {
   createChainTrigger: (chainId: string, triggerConfig: TriggerConfig, targetSpec: TargetSpec) => void;
   updateChainTrigger: (triggerId: string, updates: { enabled?: boolean; trigger_config?: TriggerConfig; target_spec?: TargetSpec }) => void;
   deleteChainTrigger: (triggerId: string) => void;
-  //
-  // Agent discovery.
-  //
-  enableAgentDiscovery: (nodeId: string) => void;
-  disableAgentDiscovery: (nodeId: string) => void;
-  requestDiscoveredEndpoints: (nodeId?: string) => void;
-  clearDiscoveryError: () => void;
   //
   // Agent Chat.
   //
@@ -1492,16 +1426,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           break;
         case 'chain_trigger_list_response':
           dispatch({ type: 'SET_CHAIN_TRIGGERS', triggers: message.triggers });
-          break;
-
-        //
-        // Agent discovery messages.
-        //
-        case 'discovered_endpoints_list':
-          dispatch({ type: 'SET_DISCOVERED_ENDPOINTS', endpoints: message.endpoints });
-          break;
-        case 'agent_discovery_error':
-          dispatch({ type: 'SET_DISCOVERY_ERROR', error: message.message });
           break;
 
         //
@@ -1969,26 +1893,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   //
-  // Agent discovery functions.
-  //
-  const enableAgentDiscovery = useCallback((nodeId: string) => {
-    wsClient.send({ type: 'agent_discovery_enable', node_id: nodeId });
-  }, []);
-
-  const disableAgentDiscovery = useCallback((nodeId: string) => {
-    wsClient.send({ type: 'agent_discovery_disable', node_id: nodeId });
-  }, []);
-
-  const requestDiscoveredEndpoints = useCallback((nodeId?: string) => {
-    dispatch({ type: 'SET_DISCOVERY_LOADING', loading: true });
-    wsClient.send({ type: 'discovered_endpoints_request', node_id: nodeId ?? null });
-  }, []);
-
-  const clearDiscoveryError = useCallback(() => {
-    dispatch({ type: 'SET_DISCOVERY_ERROR', error: null });
-  }, []);
-
-  //
   // Agent Chat functions.
   //
   const agentChatStart = useCallback((goal: string | null, yoloMode: boolean) => {
@@ -2178,13 +2082,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     updateChainTrigger,
     deleteChainTrigger,
     trackNodeAccess,
-    //
-    // Agent discovery.
-    //
-    enableAgentDiscovery,
-    disableAgentDiscovery,
-    requestDiscoveredEndpoints,
-    clearDiscoveryError,
     //
     // Agent Chat.
     //

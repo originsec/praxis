@@ -152,23 +152,6 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                     }
                 }
 
-                //
-                // Send AgentDiscoveryError if the command failed.
-                //
-                if let common::NodeCommandResult::AgentDiscovery(
-                    common::AgentDiscoveryCommandResult::Error { ref message },
-                ) = response.result
-                {
-                    let _ = send_to_client(
-                        &ctx.client_publish_channel,
-                        &pending.client_id,
-                        ClientDirectMessage::AgentDiscoveryError {
-                            message: message.clone(),
-                        },
-                    )
-                    .await;
-                }
-
                 let client_message = ClientDirectMessage::CommandResponse(response.clone());
                 if let Err(e) = send_to_client(
                     &ctx.client_publish_channel,
@@ -402,23 +385,6 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             //
             let message = ClientBroadcastMessage::InterceptStatusUpdate(status);
             let _ = publish_json_exchange(&ctx.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &message).await;
-        }
-
-        NodeSignalMessage::DiscoveredLlmEndpoint(endpoint) => {
-            common::log_info!(
-                "Received discovered LLM endpoint from node {}: {} at {}:{}",
-                &endpoint.node_id[..8.min(endpoint.node_id.len())],
-                endpoint.domain.as_deref().unwrap_or(&endpoint.ip_address),
-                endpoint.ip_address,
-                endpoint.port
-            );
-
-            //
-            // Store in database.
-            //
-            if let Err(e) = ctx.database.upsert_discovered_endpoint(&endpoint).await {
-                common::log_error!("Failed to store discovered endpoint: {}", e);
-            }
         }
 
         NodeSignalMessage::ReconResultUpdate {

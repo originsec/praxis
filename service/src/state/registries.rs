@@ -138,8 +138,6 @@ impl NodeRegistry {
                 selected_agent: update.and_then(|u| u.selected_agent.clone()),
                 intercept_active: node.intercept_active,
                 intercept_supported: node.intercept_supported,
-                agent_discovery_enabled: update.map(|u| u.agent_discovery_enabled).unwrap_or(false),
-                discovered_endpoints_count: update.map(|u| u.discovered_endpoints_count).unwrap_or(0),
                 last_update: node.last_update_received,
                 active_terminal_id: update.and_then(|u| u.active_terminal_id.clone()),
                 privileged: node.privileged,

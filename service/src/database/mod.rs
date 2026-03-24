@@ -8,7 +8,6 @@ mod chain_executions;
 mod chain_memories;
 mod chain_payloads;
 mod chain_triggers;
-mod discovered_endpoints;
 mod event_log;
 mod lua_agent_scripts;
 mod recon;
@@ -340,6 +339,22 @@ impl Database {
                 let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_chain_triggers_chain_id ON chain_triggers(chain_id)").execute(pool).await;
                 let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_chain_triggers_enabled ON chain_triggers(enabled)").execute(pool).await;
                 let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_chain_triggers_next_fire ON chain_triggers(next_fire_at)").execute(pool).await;
+            }
+        }
+
+        //
+        // Migration: Drop discovered_endpoints table (feature removed).
+        //
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let _ = sqlx::query("DROP TABLE IF EXISTS discovered_endpoints")
+                    .execute(pool)
+                    .await;
+            }
+            DatabasePool::Postgres(pool) => {
+                let _ = sqlx::query("DROP TABLE IF EXISTS discovered_endpoints")
+                    .execute(pool)
+                    .await;
             }
         }
 

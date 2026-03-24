@@ -10,8 +10,6 @@ export interface NodeState {
   selected_agent: SelectedAgent | null;
   intercept_active: boolean;
   intercept_supported: boolean;
-  agent_discovery_enabled: boolean;
-  discovered_endpoints_count: number;
   //
   // ISO datetime.
   //
@@ -702,23 +700,6 @@ export interface InterceptStatus {
 }
 
 //
-// Agent Discovery Types.
-//
-
-export interface DiscoveredLlmEndpoint {
-  id: string;
-  ip_address: string;
-  domain: string | null;
-  port: number;
-  is_https: boolean;
-  models: string[];
-  base_url: string;
-  api_key: string | null;
-  discovered_at: string;
-  node_id: string;
-}
-
-//
 // Agent Chat types - IRC-style multi-agent chat system.
 //
 export type AgentChatAgentStatus = 'Initializing' | 'Ready' | 'Waiting' | 'Prompting' | 'Disconnected';
@@ -820,12 +801,6 @@ export type BrowserMessage =
   | { type: 'chain_trigger_update'; trigger_id: string; enabled?: boolean | null; trigger_config?: TriggerConfig | null; target_spec?: TargetSpec | null }
   | { type: 'chain_trigger_delete'; trigger_id: string }
   | { type: 'chain_trigger_list'; chain_id?: string | null }
-  //
-  // Agent discovery messages.
-  //
-  | { type: 'agent_discovery_enable'; node_id: string }
-  | { type: 'agent_discovery_disable'; node_id: string }
-  | { type: 'discovered_endpoints_request'; node_id: string | null }
   //
   // Recon messages.
   //
@@ -929,11 +904,6 @@ export type ServerMessage =
   | { type: 'chain_trigger_updated'; trigger: ChainTriggerInfo }
   | { type: 'chain_trigger_deleted'; trigger_id: string }
   | { type: 'chain_trigger_list_response'; triggers: ChainTriggerInfo[] }
-  //
-  // Agent discovery messages.
-  //
-  | { type: 'discovered_endpoints_list'; endpoints: DiscoveredLlmEndpoint[] }
-  | { type: 'agent_discovery_error'; message: string }
   //
   // Recon messages.
   //

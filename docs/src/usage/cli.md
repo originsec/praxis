@@ -507,6 +507,5 @@ Features **not** available in the CLI:
 - Real-time traffic monitoring
 - Terminal emulation
 - Intercept rule management
-- Agent discovery
 
 Use the web interface for these features.

@@ -491,36 +491,6 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
-    //
-    // Agent discovery methods.
-    //
-
-    /// Enable agent discovery on a node
-    pub async fn enable_agent_discovery(&self, node_id: String) -> Result<()> {
-        let message = ClientSignalMessage::AgentDiscoveryEnable {
-            client_id: self.state.client_id.clone(),
-            node_id,
-        };
-        self.publish_signal(message).await
-    }
-
-    /// Disable agent discovery on a node
-    pub async fn disable_agent_discovery(&self, node_id: String) -> Result<()> {
-        let message = ClientSignalMessage::AgentDiscoveryDisable {
-            client_id: self.state.client_id.clone(),
-            node_id,
-        };
-        self.publish_signal(message).await
-    }
-
-    /// Request list of discovered endpoints
-    pub async fn request_discovered_endpoints(&self, node_id: Option<String>) -> Result<()> {
-        let message = ClientSignalMessage::DiscoveredEndpointsList {
-            client_id: self.state.client_id.clone(),
-            node_id,
-        };
-        self.publish_signal(message).await
-    }
 
     /// Request node event log entries
     pub async fn request_node_event_log(
@@ -1189,16 +1159,6 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::ChainTriggerListResponse { triggers } => {
                 self.state.broadcast(ServerMessage::ChainTriggerListResponse { triggers });
-            }
-
-            //
-            // Agent discovery responses.
-            //
-            ClientDirectMessage::DiscoveredEndpointsListResponse { endpoints } => {
-                self.state.broadcast(ServerMessage::DiscoveredEndpointsList { endpoints });
-            }
-            ClientDirectMessage::AgentDiscoveryError { message } => {
-                self.state.broadcast(ServerMessage::AgentDiscoveryError { message });
             }
 
             //
