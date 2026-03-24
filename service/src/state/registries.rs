@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use common::{NodeInformationUpdate, NodeRegistration, NodeState, SystemState};
+use common::{NodeCapability, NodeInformationUpdate, NodeRegistration, NodeState, SystemState};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
@@ -8,6 +8,7 @@ use tokio::sync::RwLock;
 pub struct RegisteredNode {
     pub id: String,
     pub node_type: String,
+    pub capabilities: Vec<NodeCapability>,
     pub machine_name: String,
     pub os_details: String,
     pub queue_name: String,
@@ -19,6 +20,16 @@ pub struct RegisteredNode {
     /// Whether interception is supported on this node (Windows + has agent with intercept domain)
     pub intercept_supported: bool,
     pub privileged: bool,
+}
+
+impl RegisteredNode {
+    //
+    // Check whether this node has a given capability. Empty capabilities
+    // (legacy nodes) are treated as having all capabilities.
+    //
+    pub fn has_capability(&self, capability: &NodeCapability) -> bool {
+        self.capabilities.is_empty() || self.capabilities.contains(capability)
+    }
 }
 
 /// Registry of connected nodes
@@ -38,6 +49,7 @@ impl NodeRegistry {
         let node = RegisteredNode {
             id: registration.node_id.clone(),
             node_type: registration.node_type.clone(),
+            capabilities: registration.capabilities.clone(),
             machine_name: registration.machine_name.clone(),
             os_details: registration.os_details.clone(),
             queue_name: format!("Node_{}", registration.node_id),
@@ -118,6 +130,8 @@ impl NodeRegistry {
             let update = node.last_update.as_ref();
             NodeState {
                 node_id: node.id.clone(),
+                node_type: node.node_type.clone(),
+                capabilities: node.capabilities.clone(),
                 machine_name: node.machine_name.clone(),
                 os_details: node.os_details.clone(),
                 discovered_agents: update.map(|u| u.discovered_agents.clone()).unwrap_or_default(),
