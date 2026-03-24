@@ -149,51 +149,6 @@ pub struct DiscoveredAgent {
 // Agent Discovery - Discovered LLM endpoints on the network.
 //
 
-/// Discovered LLM endpoint information (OpenAI-compatible API)
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct DiscoveredLlmEndpoint {
-    /// Unique identifier for this endpoint
-    pub id: String,
-    /// IP address of the endpoint
-    pub ip_address: String,
-    /// Domain name (from SNI or Host header)
-    pub domain: Option<String>,
-    /// Port number
-    pub port: u16,
-    /// Whether the connection is HTTPS
-    pub is_https: bool,
-    /// List of available model names from /v1/models
-    pub models: Vec<String>,
-    /// Base URL for the API (e.g., https://api.example.com)
-    pub base_url: String,
-    /// API key extracted from Authorization header in traffic
-    pub api_key: Option<String>,
-    /// When the endpoint was discovered
-    pub discovered_at: DateTime<Utc>,
-    /// Node that discovered this endpoint
-    pub node_id: String,
-}
-
-/// Agent discovery commands
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum AgentDiscoveryCommand {
-    /// Enable agent discovery (requires proxy to be enabled)
-    Enable,
-    /// Disable agent discovery
-    Disable,
-}
-
-/// Result of an agent discovery command
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum AgentDiscoveryCommandResult {
-    /// Agent discovery enabled
-    Enabled,
-    /// Agent discovery disabled
-    Disabled,
-    /// Error occurred
-    Error { message: String },
-}
-
 /// Info about a Lua agent script stored in the service database
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LuaAgentScriptInfo {
@@ -407,12 +362,6 @@ pub struct NodeInformationUpdate {
     /// Current interception method (if enabled)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intercept_method: Option<crate::InterceptMethod>,
-    /// Whether agent discovery is enabled on this node
-    #[serde(default)]
-    pub agent_discovery_enabled: bool,
-    /// Number of discovered LLM endpoints
-    #[serde(default)]
-    pub discovered_endpoints_count: usize,
     /// Active terminal session ID (if any)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_terminal_id: Option<String>,
@@ -662,8 +611,6 @@ pub enum NodeCommand {
     Terminal(TerminalCommand),
     Config(ConfigCommand),
     AgentRegistry(AgentRegistryCommand),
-    /// Agent discovery commands (discover LLM endpoints on the network)
-    AgentDiscovery(AgentDiscoveryCommand),
 }
 
 impl NodeCommand {
@@ -809,8 +756,6 @@ pub enum NodeCommandResult {
     Terminal(TerminalCommandResult),
     Config(ConfigCommandResult),
     AgentRegistry(AgentRegistryCommandResult),
-    /// Agent discovery command result
-    AgentDiscovery(AgentDiscoveryCommandResult),
     Error {
         message: String,
     },
@@ -1819,25 +1764,6 @@ pub enum ClientSignalMessage {
     },
 
     //
-    // Agent Discovery.
-    //
-    /// Enable agent discovery on a node
-    AgentDiscoveryEnable {
-        client_id: String,
-        node_id: String,
-    },
-    /// Disable agent discovery on a node
-    AgentDiscoveryDisable {
-        client_id: String,
-        node_id: String,
-    },
-    /// Request list of discovered LLM endpoints
-    DiscoveredEndpointsList {
-        client_id: String,
-        /// Optional node_id filter. If None, returns all endpoints across all nodes.
-        node_id: Option<String>,
-    },
-    //
     // Node Event Log.
     //
     /// Request application log entries
@@ -2198,18 +2124,6 @@ pub enum ClientDirectMessage {
     },
     /// Intercept status update for a node
     InterceptStatusUpdate(InterceptStatus),
-
-    //
-    // Agent Discovery responses.
-    //
-    /// List of discovered LLM endpoints
-    DiscoveredEndpointsListResponse {
-        endpoints: Vec<DiscoveredLlmEndpoint>,
-    },
-    /// Agent discovery error
-    AgentDiscoveryError {
-        message: String,
-    },
 
     //
     // Node Event Log responses.
@@ -2679,8 +2593,6 @@ pub enum NodeSignalMessage {
     InterceptedTraffic(InterceptedTrafficEntry),
     /// Node intercept status update
     InterceptStatusUpdate(InterceptStatus),
-    /// Discovered LLM endpoint from agent discovery
-    DiscoveredLlmEndpoint(DiscoveredLlmEndpoint),
     /// Recon result update from node
     ReconResultUpdate {
         node_id: String,
@@ -2710,12 +2622,6 @@ pub struct NodeState {
     #[serde(default)]
     pub intercept_supported: bool,
     pub last_update: chrono::DateTime<chrono::Utc>,
-    /// Whether agent discovery is enabled on this node
-    #[serde(default)]
-    pub agent_discovery_enabled: bool,
-    /// Number of discovered LLM endpoints
-    #[serde(default)]
-    pub discovered_endpoints_count: usize,
     /// Active terminal session ID (if any)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_terminal_id: Option<String>,

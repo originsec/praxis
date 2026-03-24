@@ -157,23 +157,6 @@ CREATE INDEX IF NOT EXISTS idx_chain_triggers_chain_id ON chain_triggers(chain_i
 CREATE INDEX IF NOT EXISTS idx_chain_triggers_enabled ON chain_triggers(enabled);
 CREATE INDEX IF NOT EXISTS idx_chain_triggers_next_fire ON chain_triggers(next_fire_at);
 
--- Discovered endpoints table
-CREATE TABLE IF NOT EXISTS discovered_endpoints (
-    id TEXT PRIMARY KEY,
-    node_id TEXT NOT NULL,
-    ip_address TEXT NOT NULL,
-    domain TEXT,
-    port INTEGER NOT NULL,
-    is_https INTEGER NOT NULL,
-    models TEXT NOT NULL,
-    base_url TEXT NOT NULL,
-    api_key TEXT,
-    discovered_at TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_discovered_node ON discovered_endpoints(node_id);
-CREATE INDEX IF NOT EXISTS idx_discovered_at ON discovered_endpoints(discovered_at);
-
 -- Event log table
 CREATE TABLE IF NOT EXISTS event_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

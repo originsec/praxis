@@ -1,4 +1,3 @@
-pub mod agent_discovery;
 pub mod certificate;
 pub mod dns_resolver;
 pub mod env_vars;
@@ -15,9 +14,8 @@ pub mod tun_device;
 pub mod tun_linux;
 pub mod wintun;
 
-pub use agent_discovery::AgentDiscoveryManager;
 pub use certificate::CertificateAuthority;
-pub use proxy::{InterceptProxy, ObservedConnection, ProxyConfig};
+pub use proxy::{InterceptProxy, ProxyConfig};
 pub use state::cleanup_stale_state;
 pub use system_proxy::{disable_system_proxy, enable_system_proxy, SavedProxySettings};
 #[cfg(target_os = "linux")]
@@ -28,7 +26,7 @@ pub use tun_linux::LinuxTunManager;
 pub use wintun::WintunManager;
 
 use anyhow::{Context, Result};
-use common::{DiscoveredLlmEndpoint, InterceptMethod, InterceptedTrafficEntry};
+use common::{InterceptMethod, InterceptedTrafficEntry};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
@@ -114,19 +112,6 @@ pub struct NodeInterceptManager {
     #[cfg(target_os = "linux")]
     tproxy_dns_resolver: Option<Arc<DomainResolver>>,
 
-    //
-    // Agent discovery.
-    //
-    /// Agent discovery manager for detecting LLM endpoints
-    agent_discovery: Arc<RwLock<AgentDiscoveryManager>>,
-    /// Discovery observer task handle
-    discovery_observer_task: Option<tokio::task::JoinHandle<()>>,
-    /// Dynamic intercept task handle (for adding domains at runtime)
-    dynamic_intercept_task: Option<tokio::task::JoinHandle<()>>,
-    /// Shared intercept domains (for dynamic updates)
-    shared_intercept_domains: Option<Arc<RwLock<HashSet<String>>>>,
-    /// Channel for requesting domain interception (stored for enable_agent_discovery)
-    intercept_domain_tx: Option<mpsc::UnboundedSender<String>>,
 }
 
 impl NodeInterceptManager {
@@ -134,7 +119,6 @@ impl NodeInterceptManager {
     pub fn new(
         node_id: String,
         traffic_tx: mpsc::UnboundedSender<InterceptedTrafficEntry>,
-        discovery_tx: mpsc::UnboundedSender<DiscoveredLlmEndpoint>,
     ) -> Self {
         Self {
             is_enabled: false,
@@ -175,15 +159,6 @@ impl NodeInterceptManager {
             tproxy_manager: None,
             #[cfg(target_os = "linux")]
             tproxy_dns_resolver: None,
-
-            //
-            // Agent discovery.
-            //
-            agent_discovery: Arc::new(RwLock::new(AgentDiscoveryManager::new(node_id, discovery_tx))),
-            discovery_observer_task: None,
-            dynamic_intercept_task: None,
-            shared_intercept_domains: None,
-            intercept_domain_tx: None,
         }
     }
 
@@ -349,90 +324,7 @@ impl NodeInterceptManager {
 
         let ca = Arc::new(RwLock::new(ca));
 
-        //
-        // Create shared intercept domains (for dynamic updates).
-        //
         let shared_intercept_domains = Arc::new(RwLock::new(self.domains.clone()));
-        self.shared_intercept_domains = Some(Arc::clone(&shared_intercept_domains));
-
-        //
-        // Create channel for observed connections (for agent discovery).
-        //
-        let (connection_observer_tx, mut connection_observer_rx) =
-            mpsc::unbounded_channel::<ObservedConnection>();
-
-        //
-        // Create channel for dynamic domain interception requests.
-        //
-        let (intercept_domain_tx, mut intercept_domain_rx) =
-            mpsc::unbounded_channel::<String>();
-        self.intercept_domain_tx = Some(intercept_domain_tx.clone());
-
-        //
-        // Spawn dynamic intercept task to handle domain additions at runtime.
-        //
-        let shared_domains_for_task = Arc::clone(&shared_intercept_domains);
-        let ca_for_task = Arc::clone(&ca);
-        let dynamic_task = tokio::spawn(async move {
-            while let Some(domain) = intercept_domain_rx.recv().await {
-                common::log_info!("Adding domain {} to intercept list dynamically", domain);
-
-                //
-                // Generate certificate for the new domain.
-                //
-                {
-                    let mut ca_guard = ca_for_task.write().await;
-                    if let Err(e) = ca_guard.generate_leaf_cert(&domain) {
-                        common::log_error!("Failed to generate certificate for {}: {}", domain, e);
-                        continue;
-                    }
-                }
-
-                //
-                // Add domain to intercept list.
-                //
-                {
-                    let mut domains = shared_domains_for_task.write().await;
-                    domains.insert(domain.clone());
-                    common::log_info!("Domain {} added to intercept list (total: {})", domain, domains.len());
-                }
-            }
-        });
-        self.dynamic_intercept_task = Some(dynamic_task);
-
-        //
-        // Spawn discovery observer task.
-        //
-        let discovery_manager = Arc::clone(&self.agent_discovery);
-        let discovery_task = tokio::spawn(async move {
-            while let Some(conn) = connection_observer_rx.recv().await {
-                let manager = discovery_manager.read().await;
-                if manager.is_enabled() {
-                    common::log_debug!(
-                        "Discovery observer received: domain={:?}, has_api_key={}",
-                        conn.domain,
-                        conn.api_key.is_some()
-                    );
-
-                    //
-                    // If we have an API key, record it for this domain.
-                    //
-                    if let (Some(domain), Some(api_key)) = (&conn.domain, &conn.api_key) {
-                        common::log_debug!(
-                            "Recording API key for domain {} (key length: {})",
-                            domain,
-                            api_key.len()
-                        );
-                        manager.record_api_key(domain, api_key.clone()).await;
-                    }
-
-                    manager
-                        .probe_endpoint(conn.ip, conn.port, conn.domain, conn.is_https)
-                        .await;
-                }
-            }
-        });
-        self.discovery_observer_task = Some(discovery_task);
 
         //
         // For Hosts mode, resolve real IPs BEFORE modifying hosts file.
@@ -471,7 +363,6 @@ impl NodeInterceptManager {
             domain_to_url_pattern,
             node_id: self.node_id.clone(),
             intercept_method: method,
-            connection_observer_tx: Some(connection_observer_tx),
             domain_to_real_ip,
         };
 
@@ -1110,54 +1001,6 @@ impl NodeInterceptManager {
         self.proxy_port
     }
 
-    //
-    // Agent Discovery methods.
-    //
-
-    /// Enable agent discovery (requires intercept to be enabled first)
-    pub async fn enable_agent_discovery(&mut self) -> Result<()> {
-        if !self.is_enabled {
-            return Err(anyhow::anyhow!(
-                "Intercept must be enabled before agent discovery"
-            ));
-        }
-
-        let ca = self.ca.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("Certificate Authority not available")
-        })?;
-
-        let intercept_tx = self.intercept_domain_tx.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("Intercept domain channel not available")
-        })?;
-
-        self.agent_discovery
-            .write()
-            .await
-            .enable(Arc::clone(ca), intercept_tx.clone());
-
-        Ok(())
-    }
-
-    /// Disable agent discovery
-    pub async fn disable_agent_discovery(&mut self) {
-        self.agent_discovery.write().await.disable();
-    }
-
-    /// Check if agent discovery is enabled
-    pub async fn is_agent_discovery_enabled(&self) -> bool {
-        self.agent_discovery.read().await.is_enabled()
-    }
-
-    /// Get the count of discovered endpoints
-    pub async fn discovered_endpoints_count(&self) -> usize {
-        self.agent_discovery.read().await.discovered_count().await
-    }
-
-    /// Get a reference to the agent discovery manager (Arc-wrapped)
-    #[allow(dead_code)]
-    pub fn agent_discovery(&self) -> &Arc<RwLock<AgentDiscoveryManager>> {
-        &self.agent_discovery
-    }
 }
 
 impl NodeInterceptManager {

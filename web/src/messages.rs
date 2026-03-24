@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use common::{
     ChainDefinitionFull, ChainDefinitionInfo, ChainExecutionUpdate,
-    CommandRequest, CommandResponse, DiscoveredLlmEndpoint,
+    CommandRequest, CommandResponse,
     InterceptMethod, InterceptRule, InterceptStatus, InterceptedTrafficEntry,
     ApplicationLogEntry, OrchestratorPlan, OperationDefinitionInfo, PayloadInfo,
     SemanticOpUpdate, SystemState, TerminalOutput, TrafficLogFilters,
@@ -228,22 +228,6 @@ pub enum BrowserMessage {
         chain_id: Option<String>,
     },
 
-    //
-    // Agent discovery messages.
-    //
-    /// Enable agent discovery on a node
-    AgentDiscoveryEnable {
-        node_id: String,
-    },
-    /// Disable agent discovery on a node
-    AgentDiscoveryDisable {
-        node_id: String,
-    },
-    /// Request list of discovered endpoints
-    DiscoveredEndpointsRequest {
-        /// If Some, get endpoints for a specific node; if None, get all
-        node_id: Option<String>,
-    },
     //
     // Node event log messages.
     //
@@ -611,18 +595,6 @@ pub enum ServerMessage {
     /// Chain trigger list response
     ChainTriggerListResponse {
         triggers: Vec<common::ChainTriggerInfo>,
-    },
-
-    //
-    // Agent discovery messages.
-    //
-    /// Discovered endpoints list
-    DiscoveredEndpointsList {
-        endpoints: Vec<DiscoveredLlmEndpoint>,
-    },
-    /// Agent discovery error
-    AgentDiscoveryError {
-        message: String,
     },
 
     //

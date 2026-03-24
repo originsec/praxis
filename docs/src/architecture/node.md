@@ -199,7 +199,6 @@ pub enum NodeCommand {
     Terminal(TerminalCommand),
     Config(ConfigCommand),
     AgentRegistry(AgentRegistryCommand),
-    AgentDiscovery(AgentDiscoveryCommand),
 }
 ```
 

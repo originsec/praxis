@@ -62,9 +62,6 @@ pub enum NodeSignalMessage {
     // Intercept status update
     InterceptStatusUpdate(InterceptStatus),
 
-    // Discovered LLM endpoint
-    DiscoveredLlmEndpoint(DiscoveredLlmEndpoint),
-
     // Recon result update
     ReconResultUpdate {
         node_id: String,
@@ -173,11 +170,6 @@ pub enum ClientSignalMessage {
     InterceptEnable { client_id, node_id, method },
     InterceptDisable { client_id, node_id },
 
-    // Agent Discovery
-    AgentDiscoveryEnable { client_id, node_id },
-    AgentDiscoveryDisable { client_id, node_id },
-    DiscoveredEndpointsList { client_id, node_id },
-
     // Application Log
     ApplicationLogRequest { client_id, node_id, level_filter, regex_filter, limit, offset },
     ApplicationLogClear { client_id, node_id },
@@ -245,10 +237,6 @@ pub enum ClientDirectMessage {
     InterceptRuleError { message },
     InterceptStatusUpdate(InterceptStatus),
 
-    // Agent Discovery
-    DiscoveredEndpointsListResponse { endpoints: Vec<DiscoveredLlmEndpoint> },
-    AgentDiscoveryError { message },
-
     // Application Log
     ApplicationLogResponse { node_id, entries, total_count },
     ApplicationLogCleared { deleted_count },
@@ -293,7 +281,6 @@ pub enum NodeCommand {
     Terminal(TerminalCommand),
     Config(ConfigCommand),
     AgentRegistry(AgentRegistryCommand),
-    AgentDiscovery(AgentDiscoveryCommand),
 }
 ```
 

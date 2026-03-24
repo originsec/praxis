@@ -239,18 +239,6 @@ pub async fn handle_browser_message(
         }
 
         //
-        // Agent discovery messages.
-        //
-        BrowserMessage::AgentDiscoveryEnable { node_id } => {
-            state.rabbitmq.enable_agent_discovery(node_id).await?;
-        }
-        BrowserMessage::AgentDiscoveryDisable { node_id } => {
-            state.rabbitmq.disable_agent_discovery(node_id).await?;
-        }
-        BrowserMessage::DiscoveredEndpointsRequest { node_id } => {
-            state.rabbitmq.request_discovered_endpoints(node_id).await?;
-        }
-        //
         // Application log messages.
         //
         BrowserMessage::ApplicationLogRequest { node_id, level_filter, regex_filter, limit, offset } => {

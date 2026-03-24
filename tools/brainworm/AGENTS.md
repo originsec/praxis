@@ -370,8 +370,6 @@ Second — system state:
     "intercept_active":false,
     "intercept_supported":true,
     "last_update":"2025-01-01T00:00:00Z",
-    "agent_discovery_enabled":false,
-    "discovered_endpoints_count":0,
     "active_terminal_id":null
   }
 ]}}
@@ -416,8 +414,6 @@ Sent periodically (~10s) as a heartbeat. Published to `NodeSignal`.
   "intercept_supported":true,
   "intercept_enabled":false,
   "intercept_method":null,
-  "agent_discovery_enabled":false,
-  "discovered_endpoints_count":0,
   "active_terminal_id":null
 }}
 ```
@@ -451,16 +447,6 @@ Published to `NodeSignal` in response to a received `Command`.
 {"SemanticParserRequest":{
   "node_id":"<UUID>",
   "request":{...}
-}}
-```
-
-### DiscoveredLlmEndpoint
-
-```json
-{"DiscoveredLlmEndpoint":{
-  "id":"...","ip_address":"...","domain":"api.openai.com","port":443,
-  "is_https":true,"models":["gpt-4"],"base_url":"https://api.openai.com",
-  "api_key":"sk-...","discovered_at":"...","node_id":"..."
 }}
 ```
 
@@ -602,20 +588,6 @@ Fire-and-forget — no `CommandResponse` is returned.
 command:  {"Config":{"SetReportInterval":{"interval_secs":30}}}
 ```
 
-
-### Agent Discovery Commands
-
-**Enable** — enable LLM endpoint discovery:
-```
-command:  {"AgentDiscovery":"Enable"}
-result:   {"AgentDiscovery":"Enabled"}
-```
-
-**Disable** — disable discovery:
-```
-command:  {"AgentDiscovery":"Disable"}
-result:   {"AgentDiscovery":"Disabled"}
-```
 
 ### Error Results
 
