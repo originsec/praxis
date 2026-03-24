@@ -15,7 +15,7 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge, Connection, OnSelectionChangeParams } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Play, X, Save, Copy, Download, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings, Check, AlertTriangle, Wrench, FileText, Plus, Loader2, Circle, CircleCheck } from 'lucide-react';
+import { Play, X, Save, Copy, Download, Cpu, Maximize2, GitMerge, Sparkles, MessageSquare, Users, Database, RefreshCw, LayoutGrid, Square, Settings, Check, AlertTriangle, Wrench, FileText, Plus } from 'lucide-react';
 import { ConfigModal } from '../common/ConfigModal';
 import { Modal } from '../common/Modal';
 import { EditOpForm } from '../common/EditOpForm';

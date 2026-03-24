@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Zap, GitBranch, Play, Pencil, Trash2, Search, Plus, ChevronDown,
-  Upload, Download, Loader2, Circle, CircleCheck, Save, Ban,
+  Upload, CircleCheck, Ban,
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { RunModal, type RunItem } from '../common/RunModal';
