@@ -363,7 +363,6 @@ impl NodeInterceptManager {
             domain_to_url_pattern,
             node_id: self.node_id.clone(),
             intercept_method: method,
-            connection_observer_tx: None,
             domain_to_real_ip,
         };
 

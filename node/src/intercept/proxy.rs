@@ -22,74 +22,6 @@ use tokio_rustls::TlsAcceptor;
 
 use super::certificate::CertificateAuthority;
 
-/// Observed connection for agent discovery
-#[derive(Debug, Clone)]
-pub struct ObservedConnection {
-    /// Target IP address
-    pub ip: std::net::IpAddr,
-    /// Target port
-    pub port: u16,
-    /// Domain name (from SNI or Host header)
-    pub domain: Option<String>,
-    /// Whether it's HTTPS
-    pub is_https: bool,
-    /// API key extracted from Authorization or x-api-key header
-    pub api_key: Option<String>,
-}
-
-/// Extract API key from HTTP headers.
-///
-/// Checks x-api-key header first, then Authorization header for Bearer token.
-fn extract_api_key_from_headers(headers: &IndexMap<String, String>, host: &str) -> Option<String> {
-    //
-    // Dump all header names for debugging.
-    //
-    let header_names: Vec<&str> = headers.keys().map(|k| k.as_str()).collect();
-    common::log_debug!(
-        "Checking headers for API key on {}: {:?}",
-        host, header_names
-    );
-
-    //
-    // Check x-api-key header first (most specific).
-    //
-    for (key, value) in headers {
-        if key.to_lowercase() == "x-api-key" {
-            common::log_debug!(
-                "Found x-api-key header for {} (key length: {})",
-                host,
-                value.len()
-            );
-            return Some(value.to_string());
-        }
-    }
-
-    //
-    // Check Authorization header for Bearer token.
-    //
-    for (key, value) in headers {
-        if key.to_lowercase() == "authorization" {
-            if let Some(token) = value.strip_prefix("Bearer ") {
-                common::log_debug!(
-                    "Found Authorization Bearer token for {} (token length: {})",
-                    host,
-                    token.len()
-                );
-                return Some(token.to_string());
-            } else {
-                common::log_debug!(
-                    "Found Authorization header for {} but not Bearer format: {}",
-                    host,
-                    common::truncate_str(&value, 20)
-                );
-            }
-        }
-    }
-
-    common::log_debug!("No API key found in headers for {}", host);
-    None
-}
-
 /// Configuration for the intercept proxy
 pub struct ProxyConfig {
     /// Domains to intercept (extract and log traffic) - dynamically updatable
@@ -103,8 +35,6 @@ pub struct ProxyConfig {
     pub node_id: String,
     /// Interception method used
     pub intercept_method: InterceptMethod,
-    /// Optional channel for observed connections (for agent discovery)
-    pub connection_observer_tx: Option<mpsc::UnboundedSender<ObservedConnection>>,
     /// Pre-resolved IPs for domains (used in Hosts mode to bypass hosts file redirection)
     pub domain_to_real_ip: HashMap<String, std::net::IpAddr>,
 }
@@ -425,22 +355,6 @@ async fn handle_tls_connection(
     // Determine the actual destination port (from SO_ORIGINAL_DST or default 443).
     //
     let dest_port = original_dst.map(|a| a.port()).unwrap_or(443);
-
-    //
-    // Send observation for agent discovery.
-    //
-    if let Some(ref tx) = config.connection_observer_tx {
-        let ip = original_dst
-            .map(|a| a.ip())
-            .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
-        let _ = tx.send(ObservedConnection {
-            ip,
-            port: dest_port,
-            domain: Some(sni.clone()),
-            is_https: true,
-            api_key: None,
-        });
-    }
 
     //
     // Check if this domain should be intercepted.
@@ -894,19 +808,6 @@ async fn handle_connect(
     };
 
     let port = req.uri().port_u16().unwrap_or(443);
-
-    //
-    // Send observation for agent discovery.
-    //
-    if let Some(ref tx) = config.connection_observer_tx {
-        let _ = tx.send(ObservedConnection {
-            ip: std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
-            port,
-            domain: Some(host.clone()),
-            is_https: port == 443,
-            api_key: None,
-        });
-    }
 
     //
     // Check if this domain should be intercepted.
@@ -1809,26 +1710,6 @@ where
         // Convert to IndexMap for logging (preserves original order and case).
         //
         let headers_map: IndexMap<String, String> = headers.iter().cloned().collect();
-
-        //
-        // Extract API key from headers and send observation for agent discovery.
-        //
-        if let Some(ref tx) = config.connection_observer_tx {
-            let api_key = extract_api_key_from_headers(&headers_map, &host);
-            if api_key.is_some() {
-                common::log_debug!(
-                    "Sending observation with API key for {} (method={}, path={})",
-                    host, method, path
-                );
-                let _ = tx.send(ObservedConnection {
-                    ip: std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
-                    port: 443,
-                    domain: Some(host.clone()),
-                    is_https: true,
-                    api_key,
-                });
-            }
-        }
 
         //
         // Read body if present.
