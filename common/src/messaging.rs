@@ -118,12 +118,22 @@ macro_rules! log_event {
 // Node Registration and Information.
 //
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Hash)]
+pub enum NodeCapability {
+    Session,
+    Interception,
+    Terminal,
+    Recon,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeRegistration {
     pub node_id: String,
     pub node_type: String,
     pub machine_name: String,
     pub os_details: String,
+    #[serde(default)]
+    pub capabilities: Vec<NodeCapability>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -654,6 +664,26 @@ pub enum NodeCommand {
     AgentRegistry(AgentRegistryCommand),
     /// Agent discovery commands (discover LLM endpoints on the network)
     AgentDiscovery(AgentDiscoveryCommand),
+}
+
+impl NodeCommand {
+    pub fn required_capability(&self) -> Option<NodeCapability> {
+        match self {
+            NodeCommand::Session(_) => Some(NodeCapability::Session),
+            NodeCommand::Intercept(_) => Some(NodeCapability::Interception),
+            NodeCommand::Terminal(_) => Some(NodeCapability::Terminal),
+            NodeCommand::Agent(cmd) => match cmd {
+                AgentCommand::Recon
+                | AgentCommand::ReconSemantic
+                | AgentCommand::ReadFile { .. }
+                | AgentCommand::WriteFile { .. }
+                | AgentCommand::GrepFiles { .. }
+                | AgentCommand::WriteSessionContent { .. } => Some(NodeCapability::Recon),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 /// Command request sent from client to server (and relayed to node)
@@ -2668,6 +2698,9 @@ pub enum NodeSignalMessage {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeState {
     pub node_id: String,
+    pub node_type: String,
+    #[serde(default)]
+    pub capabilities: Vec<NodeCapability>,
     pub machine_name: String,
     pub os_details: String,
     pub discovered_agents: Vec<DiscoveredAgent>,

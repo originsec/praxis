@@ -5,8 +5,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::utils;
 use common::{
-    publish_json, node_queue_name, rabbitmq_url, NodeDirectMessage, NodeRegistration,
-    NodeRegistrationAck, NodeSignalMessage, NODE_SIGNAL_QUEUE,
+    publish_json, node_queue_name, rabbitmq_url, NodeCapability, NodeDirectMessage,
+    NodeRegistration, NodeRegistrationAck, NodeSignalMessage, NODE_SIGNAL_QUEUE,
 };
 
 pub struct RegistrationResult {
@@ -18,11 +18,21 @@ pub struct RegistrationResult {
 }
 
 pub async fn publish_registration(channel: &Channel, node_id: &str) -> Result<()> {
+    let mut capabilities = vec![
+        NodeCapability::Session,
+        NodeCapability::Terminal,
+        NodeCapability::Recon,
+    ];
+    if utils::is_privileged() {
+        capabilities.push(NodeCapability::Interception);
+    }
+
     let registration = NodeRegistration {
         node_id: node_id.to_string(),
-        node_type: "praxis-node".to_string(),
+        node_type: "full".to_string(),
         machine_name: utils::get_machine_name(),
         os_details: utils::get_os_details(),
+        capabilities,
     };
     let message = NodeSignalMessage::Registration(registration);
     publish_json(channel, NODE_SIGNAL_QUEUE, &message).await?.await?;
