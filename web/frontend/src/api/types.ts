@@ -1,5 +1,9 @@
+export type NodeCapability = 'Session' | 'Interception' | 'Terminal' | 'Recon';
+
 export interface NodeState {
   node_id: string;
+  node_type: string;
+  capabilities: NodeCapability[];
   machine_name: string;
   os_details: string;
   discovered_agents: DiscoveredAgent[];

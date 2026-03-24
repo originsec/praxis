@@ -30,7 +30,7 @@ import { ReconModal } from './ReconModal';
 import { TerminalModal } from './TerminalModal';
 import { AgentSessionModal } from './AgentSessionModal';
 import { StyledOutput } from '../common/StyledOutput';
-import type { NodeState, InterceptMethod, SemanticOpUpdate } from '../../api/types';
+import type { NodeState, NodeCapability, InterceptMethod, SemanticOpUpdate } from '../../api/types';
 
 interface NodeCardProps {
   node: NodeState;
@@ -224,6 +224,14 @@ export function NodeCard({ node }: NodeCardProps) {
     resetNode,
     send,
   } = useApp();
+
+  //
+  // Capability check — empty list (legacy node) means all capabilities.
+  //
+  const hasCapability = useCallback(
+    (cap: NodeCapability) => !node.capabilities?.length || node.capabilities.includes(cap),
+    [node.capabilities],
+  );
 
   const [agentsExpanded, setAgentsExpanded] = useState(node.discovered_agents.length <= 3);
   const [collapsed, setCollapsed] = useState(false);
@@ -501,6 +509,11 @@ export function NodeCard({ node }: NodeCardProps) {
         //
         */}
         <div className="px-3 py-2 flex items-center gap-3 text-[10px] text-muted border-b border-subtle">
+          {node.node_type && (
+            <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] tracking-wider bg-[var(--accent-info)]/15 text-[var(--accent-info)] flex-shrink-0 uppercase">
+              {node.node_type}
+            </span>
+          )}
           <span className="truncate">{node.os_details}</span>
           {node.privileged && (
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] tracking-wider bg-[var(--accent-warning)]/15 text-[var(--accent-warning)] flex-shrink-0">
@@ -515,7 +528,7 @@ export function NodeCard({ node }: NodeCardProps) {
         // Intercept status.
         //
         */}
-        {node.intercept_supported && (
+        {node.intercept_supported && hasCapability('Interception') && (
           <div className="px-3 py-1.5 flex items-center justify-between border-b border-subtle">
             <div className="flex items-center gap-1.5 text-[10px]">
               <Shield size={11} className={node.intercept_active ? 'text-[var(--accent-warning)]' : 'text-muted'} />
@@ -600,9 +613,9 @@ export function NodeCard({ node }: NodeCardProps) {
                     ) : (
                       <button
                         onClick={() => handleInitCreateSession(agent.short_name)}
-                        disabled={!agent.available || creatingSessionFor === agent.short_name}
+                        disabled={!agent.available || creatingSessionFor === agent.short_name || !hasCapability('Session')}
                         className="p-0.5 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/20 transition-colors disabled:opacity-50"
-                        title="Start session"
+                        title={hasCapability('Session') ? 'Start session' : 'Node does not support sessions'}
                       >
                         {creatingSessionFor === agent.short_name
                           ? <Loader2 size={11} className="animate-spin" />
@@ -611,8 +624,9 @@ export function NodeCard({ node }: NodeCardProps) {
                     )}
                     <button
                       onClick={() => setShowReconModal({ agentShortName: agent.short_name })}
-                      className="p-0.5 text-muted hover:text-[var(--accent-info)] hover:bg-[var(--accent-info)]/20 transition-colors"
-                      title="Recon"
+                      disabled={!hasCapability('Recon')}
+                      className="p-0.5 text-muted hover:text-[var(--accent-info)] hover:bg-[var(--accent-info)]/20 transition-colors disabled:opacity-50"
+                      title={hasCapability('Recon') ? 'Recon' : 'Node does not support recon'}
                     >
                       <Search size={11} />
                     </button>
@@ -679,12 +693,15 @@ export function NodeCard({ node }: NodeCardProps) {
           </button>
           <button
             onClick={() => setShowTerminalModal(true)}
+            disabled={!hasCapability('Terminal')}
             className={`inline-flex items-center gap-1 px-2 py-1 text-[10px] transition-colors ${
-              node.active_terminal_id
-                ? 'bg-[var(--accent-success)]/10 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/20'
-                : 'bg-[var(--bg-secondary)] text-muted hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
+              !hasCapability('Terminal')
+                ? 'bg-[var(--bg-secondary)] text-muted cursor-not-allowed opacity-50'
+                : node.active_terminal_id
+                  ? 'bg-[var(--accent-success)]/10 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/20'
+                  : 'bg-[var(--bg-secondary)] text-muted hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
             }`}
-            title="Terminal"
+            title={hasCapability('Terminal') ? 'Terminal' : 'Node does not support terminal'}
           >
             <TerminalIcon size={10} /> Term
           </button>
