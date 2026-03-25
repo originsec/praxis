@@ -30,6 +30,7 @@ pub enum PopupKind {
     CommandPalette,
     ModelSelect,
     SaveSession,
+    RunTarget,
 }
 
 #[derive(Clone)]
@@ -161,26 +162,34 @@ impl Default for NodesState {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum OpsTab {
+    Library,
+    Executions,
+}
+
 pub struct OperationsState {
+    pub tab: OpsTab,
     pub op_definitions: Vec<common::OperationDefinitionInfo>,
     pub chain_definitions: Vec<common::ChainDefinitionInfo>,
     pub operations: Vec<common::SemanticOpUpdate>,
     pub chain_executions: Vec<common::ChainExecutionUpdate>,
-    pub available_selected: usize,
+    pub library_selected: usize,
     pub exec_selected: usize,
-    pub focused_pane: u8, // 0=available, 1=executions, 2=detail
+    pub detail_scroll: u16,
 }
 
 impl Default for OperationsState {
     fn default() -> Self {
         Self {
+            tab: OpsTab::Library,
             op_definitions: Vec::new(),
             chain_definitions: Vec::new(),
             operations: Vec::new(),
             chain_executions: Vec::new(),
-            available_selected: 0,
+            library_selected: 0,
             exec_selected: 0,
-            focused_pane: 0,
+            detail_scroll: 0,
         }
     }
 }
@@ -268,7 +277,7 @@ impl App {
                     return;
                 }
                 _ => {
-                    if matches!(popup.kind, PopupKind::ModelSelect) {
+                    if matches!(popup.kind, PopupKind::ModelSelect | PopupKind::RunTarget) {
                         self.handle_popup_key(key).await;
                         return;
                     }
@@ -610,50 +619,46 @@ impl App {
 
     async fn handle_operations_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Tab => {
-                self.operations.focused_pane = (self.operations.focused_pane + 1) % 3;
+            KeyCode::Tab | KeyCode::BackTab => {
+                self.operations.tab = match self.operations.tab {
+                    OpsTab::Library => OpsTab::Executions,
+                    OpsTab::Executions => OpsTab::Library,
+                };
             }
-            KeyCode::Up => {
-                match self.operations.focused_pane {
-                    0 => {
-                        if self.operations.available_selected > 0 {
-                            self.operations.available_selected -= 1;
-                        }
+            KeyCode::Up => match self.operations.tab {
+                OpsTab::Library => {
+                    if self.operations.library_selected > 0 {
+                        self.operations.library_selected -= 1;
                     }
-                    1 => {
-                        if self.operations.exec_selected > 0 {
-                            self.operations.exec_selected -= 1;
-                        }
-                    }
-                    _ => {}
                 }
-            }
-            KeyCode::Down => {
-                match self.operations.focused_pane {
-                    0 => {
-                        let total = self.operations.op_definitions.iter().filter(|d| !d.disabled).count()
-                            + self.operations.chain_definitions.iter().filter(|c| !c.disabled).count();
-                        if self.operations.available_selected + 1 < total {
-                            self.operations.available_selected += 1;
-                        }
+                OpsTab::Executions => {
+                    if self.operations.exec_selected > 0 {
+                        self.operations.exec_selected -= 1;
                     }
-                    1 => {
-                        let total = self.operations.operations.len()
-                            + self.operations.chain_executions.len();
-                        if self.operations.exec_selected + 1 < total {
-                            self.operations.exec_selected += 1;
-                        }
-                    }
-                    _ => {}
                 }
-            }
-            KeyCode::Enter => {
-                if self.operations.focused_pane == 0 {
-                    self.run_selected_operation().await;
+            },
+            KeyCode::Down => match self.operations.tab {
+                OpsTab::Library => {
+                    let total = self.ops_library_count();
+                    if self.operations.library_selected + 1 < total {
+                        self.operations.library_selected += 1;
+                    }
+                }
+                OpsTab::Executions => {
+                    let total = self.operations.operations.len()
+                        + self.operations.chain_executions.len();
+                    if self.operations.exec_selected + 1 < total {
+                        self.operations.exec_selected += 1;
+                    }
+                }
+            },
+            KeyCode::Char('e') => {
+                if self.operations.tab == OpsTab::Library {
+                    self.open_run_target_popup();
                 }
             }
             KeyCode::Char('c') => {
-                if self.operations.focused_pane == 1 {
+                if self.operations.tab == OpsTab::Executions {
                     self.cancel_selected_execution().await;
                 }
             }
@@ -664,10 +669,53 @@ impl App {
         }
     }
 
-    async fn run_selected_operation(&mut self) {
+    fn ops_library_count(&self) -> usize {
+        self.operations.op_definitions.iter().filter(|d| !d.disabled).count()
+            + self.operations.chain_definitions.iter().filter(|c| !c.disabled).count()
+    }
+
+    fn open_run_target_popup(&mut self) {
         //
-        // Determine what's selected — an op or a chain.
+        // Build node/agent items for the targeting popup.
         //
+        let mut items: Vec<PopupItem> = Vec::new();
+        for node in &self.nodes.nodes {
+            for agent in &node.discovered_agents {
+                if !agent.available {
+                    continue;
+                }
+                let short_id = if node.node_id.len() >= 8 {
+                    &node.node_id[..8]
+                } else {
+                    &node.node_id
+                };
+                items.push(PopupItem {
+                    label: format!("{} / {}", node.machine_name, agent.short_name),
+                    value: format!("{}:{}", node.node_id, agent.short_name),
+                    description: format!("{} ({})", short_id, node.os_details),
+                });
+            }
+        }
+
+        if items.is_empty() {
+            return;
+        }
+
+        self.popup = Some(Popup {
+            kind: PopupKind::RunTarget,
+            items,
+            filter: String::new(),
+            selected: 0,
+        });
+    }
+
+    async fn execute_run_on_target(&mut self, target: &str) {
+        let parts: Vec<&str> = target.splitn(2, ':').collect();
+        if parts.len() != 2 {
+            return;
+        }
+        let (node_id, agent) = (parts[0].to_string(), parts[1].to_string());
+
         let enabled_ops: Vec<_> = self.operations.op_definitions
             .iter()
             .filter(|d| !d.disabled)
@@ -677,39 +725,16 @@ impl App {
             .filter(|c| !c.disabled)
             .collect();
 
-        let idx = self.operations.available_selected;
-
-        //
-        // Need a node and agent. Use first available node with a selected agent.
-        //
-        let (node_id, agent) = match self.nodes.nodes.first() {
-            Some(node) => {
-                let agent_name = node
-                    .selected_agent
-                    .as_ref()
-                    .map(|a| a.short_name.clone())
-                    .or_else(|| {
-                        node.discovered_agents.first().map(|a| a.short_name.clone())
-                    });
-                match agent_name {
-                    Some(a) => (node.node_id.clone(), a),
-                    None => return,
-                }
-            }
-            None => return,
-        };
+        let idx = self.operations.library_selected;
 
         if idx < enabled_ops.len() {
             let op_name = enabled_ops[idx].full_name.clone();
-            match self.client.run_semantic_op(
+            if let Err(e) = self.client.run_semantic_op(
                 node_id, agent, op_name, None,
             ).await {
-                Ok(_) => {}
-                Err(e) => {
-                    self.orchestrator
-                        .messages
-                        .push(ConversationEntry::Error(format!("Op run failed: {}", e)));
-                }
+                self.orchestrator
+                    .messages
+                    .push(ConversationEntry::Error(format!("Op run failed: {}", e)));
             }
         } else {
             let chain_idx = idx - enabled_ops.len();
@@ -726,8 +751,9 @@ impl App {
         }
 
         //
-        // Refresh after launching.
+        // Switch to executions tab and refresh.
         //
+        self.operations.tab = OpsTab::Executions;
         tokio::time::sleep(Duration::from_millis(500)).await;
         self.operations.operations = self.client.get_operations().await;
         self.operations.chain_executions = self.client.get_chain_executions().await;
@@ -875,6 +901,10 @@ impl App {
                         PopupKind::ModelSelect => {
                             self.popup = None;
                             self.select_model(&value).await;
+                        }
+                        PopupKind::RunTarget => {
+                            self.popup = None;
+                            self.execute_run_on_target(&value).await;
                         }
                         PopupKind::SaveSession => {}
                     }

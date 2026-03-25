@@ -14,9 +14,10 @@ const POPUP_BG: Color = Color::Rgb(30, 30, 35);
 
 pub fn render(f: &mut Frame, popup: &Popup) {
     match popup.kind {
-        PopupKind::ModelSelect => render_model_select(f, popup),
+        PopupKind::ModelSelect => render_list_select(f, popup, " Select Model "),
         PopupKind::CommandPalette => render_command_palette(f, popup),
         PopupKind::SaveSession => render_save_session(f, popup),
+        PopupKind::RunTarget => render_list_select(f, popup, " Select Target "),
     }
 }
 
@@ -24,7 +25,7 @@ pub fn render(f: &mut Frame, popup: &Popup) {
 // Model select: centered, compact popup sized to content.
 //
 
-fn render_model_select(f: &mut Frame, popup: &Popup) {
+fn render_list_select(f: &mut Frame, popup: &Popup, title: &str) {
     let filtered = popup.filtered_items();
     let item_count = filtered.len().min(12) as u16;
     let height = item_count + 2; // +2 for borders
@@ -41,7 +42,7 @@ fn render_model_select(f: &mut Frame, popup: &Popup) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(DIM))
-        .title(" Select Model ")
+        .title(title)
         .title_style(Style::default().fg(MUTED))
         .style(Style::default().bg(POPUP_BG));
 

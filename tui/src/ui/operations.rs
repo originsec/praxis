@@ -1,4 +1,4 @@
-use crate::app::OperationsState;
+use crate::app::{OperationsState, OpsTab};
 use common::{SemanticOpStatus, ChainExecutionStatus};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -15,35 +15,102 @@ const STATUS_RUNNING: Color = Color::Rgb(180, 160, 60);
 const STATUS_DONE: Color = Color::Rgb(80, 160, 80);
 const STATUS_FAIL: Color = Color::Rgb(160, 60, 60);
 const STATUS_QUEUED: Color = Color::Rgb(100, 140, 180);
+const CHAIN_COLOR: Color = Color::Rgb(140, 120, 180);
+const TAB_ACTIVE_BG: Color = Color::Rgb(40, 42, 40);
 
 pub fn render(f: &mut Frame, area: Rect, state: &OperationsState) {
-    let chunks = Layout::horizontal([
-        Constraint::Percentage(35),
-        Constraint::Percentage(35),
-        Constraint::Percentage(30),
+    let chunks = Layout::vertical([
+        Constraint::Length(2), // tabs
+        Constraint::Min(1),   // content
+        Constraint::Length(1), // hints
     ])
     .split(area);
 
-    render_available(f, chunks[0], state);
-    render_executions(f, chunks[1], state);
-    render_detail(f, chunks[2], state);
+    render_tabs(f, chunks[0], state);
+
+    match state.tab {
+        OpsTab::Library => render_library(f, chunks[1], state),
+        OpsTab::Executions => render_executions(f, chunks[1], state),
+    }
+
+    render_hints(f, chunks[2], state);
+}
+
+fn render_tabs(f: &mut Frame, area: Rect, state: &OperationsState) {
+    let lib_count = state.op_definitions.iter().filter(|d| !d.disabled).count()
+        + state.chain_definitions.iter().filter(|c| !c.disabled).count();
+    let exec_count = state.operations.len() + state.chain_executions.len();
+
+    let lib_style = if state.tab == OpsTab::Library {
+        Style::default().fg(ACCENT).bg(TAB_ACTIVE_BG).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(MUTED)
+    };
+    let exec_style = if state.tab == OpsTab::Executions {
+        Style::default().fg(ACCENT).bg(TAB_ACTIVE_BG).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(MUTED)
+    };
+
+    let tabs = Line::from(vec![
+        Span::raw("  "),
+        Span::styled(format!(" Library {} ", lib_count), lib_style),
+        Span::raw("  "),
+        Span::styled(format!(" Executions {} ", exec_count), exec_style),
+        Span::styled("  (Tab to switch)", Style::default().fg(DIM)),
+    ]);
+
+    let sep = Line::from(Span::styled(
+        "\u{2500}".repeat(area.width as usize),
+        Style::default().fg(DIM),
+    ));
+
+    let paragraph = Paragraph::new(vec![tabs, sep]);
+    f.render_widget(paragraph, area);
+}
+
+fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
+    let hints = match state.tab {
+        OpsTab::Library => Line::from(vec![
+            Span::raw(" "),
+            Span::styled("e", Style::default().fg(ACCENT)),
+            Span::styled(" execute  ", Style::default().fg(MUTED)),
+            Span::styled("r", Style::default().fg(ACCENT)),
+            Span::styled(" refresh", Style::default().fg(MUTED)),
+        ]),
+        OpsTab::Executions => Line::from(vec![
+            Span::raw(" "),
+            Span::styled("c", Style::default().fg(ACCENT)),
+            Span::styled(" cancel  ", Style::default().fg(MUTED)),
+            Span::styled("r", Style::default().fg(ACCENT)),
+            Span::styled(" refresh", Style::default().fg(MUTED)),
+        ]),
+    };
+
+    f.render_widget(Paragraph::new(hints), area);
 }
 
 //
-// Left pane: available operations and chains.
+// Library view: list of available ops and chains.
 //
 
-fn render_available(f: &mut Frame, area: Rect, state: &OperationsState) {
-    let focus_style = if state.focused_pane == 0 {
-        Style::default().fg(ACCENT)
-    } else {
-        Style::default().fg(DIM)
-    };
+fn render_library(f: &mut Frame, area: Rect, state: &OperationsState) {
+    let chunks = Layout::horizontal([
+        Constraint::Percentage(50),
+        Constraint::Percentage(50),
+    ])
+    .split(area);
 
+    render_library_list(f, chunks[0], state);
+    render_library_detail(f, chunks[1], state);
+}
+
+fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsState) {
     let header = Row::new(vec![
         Cell::from("Name"),
         Cell::from("Type"),
-        Cell::from("Mode"),
+        Cell::from("Category"),
+        Cell::from("Mode/Elements"),
     ])
     .style(Style::default().fg(ACCENT));
 
@@ -54,8 +121,9 @@ fn render_available(f: &mut Frame, area: Rect, state: &OperationsState) {
             continue;
         }
         rows.push(Row::new(vec![
-            Cell::from(def.full_name.clone()).style(Style::default().fg(TEXT)),
+            Cell::from(def.name.clone()).style(Style::default().fg(TEXT)),
             Cell::from("op").style(Style::default().fg(MUTED)),
+            Cell::from(def.category.clone()).style(Style::default().fg(DIM)),
             Cell::from(def.mode.clone()).style(Style::default().fg(DIM)),
         ]));
     }
@@ -66,15 +134,17 @@ fn render_available(f: &mut Frame, area: Rect, state: &OperationsState) {
         }
         rows.push(Row::new(vec![
             Cell::from(chain.name.clone()).style(Style::default().fg(TEXT)),
-            Cell::from("chain").style(Style::default().fg(Color::Rgb(140, 120, 180))),
-            Cell::from(format!("{} els", chain.element_count)).style(Style::default().fg(DIM)),
+            Cell::from("chain").style(Style::default().fg(CHAIN_COLOR)),
+            Cell::from(chain.category.clone()).style(Style::default().fg(DIM)),
+            Cell::from(format!("{} elements", chain.element_count)).style(Style::default().fg(DIM)),
         ]));
     }
 
     let widths = [
         Constraint::Min(15),
         Constraint::Length(6),
-        Constraint::Length(10),
+        Constraint::Length(12),
+        Constraint::Length(12),
     ];
 
     let table = Table::new(rows, widths)
@@ -82,295 +152,362 @@ fn render_available(f: &mut Frame, area: Rect, state: &OperationsState) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(focus_style)
+                .border_style(Style::default().fg(DIM))
                 .title_style(Style::default().fg(MUTED))
-                .title(" Available "),
+                .title(" Operations & Chains "),
         )
         .row_highlight_style(Style::default().bg(HIGHLIGHT_BG));
 
     let mut table_state = TableState::default();
-    if state.focused_pane == 0 {
-        table_state.select(Some(state.available_selected));
-    }
+    table_state.select(Some(state.library_selected));
 
     f.render_stateful_widget(table, area, &mut table_state);
 }
 
-//
-// Center pane: running and recent executions.
-//
-
-fn render_executions(f: &mut Frame, area: Rect, state: &OperationsState) {
-    let focus_style = if state.focused_pane == 1 {
-        Style::default().fg(ACCENT)
-    } else {
-        Style::default().fg(DIM)
-    };
-
-    let header = Row::new(vec![
-        Cell::from("ID"),
-        Cell::from("Name"),
-        Cell::from("Status"),
-        Cell::from("Node"),
-    ])
-    .style(Style::default().fg(ACCENT));
-
-    let now = chrono::Utc::now();
-    let mut rows: Vec<Row> = Vec::new();
-
-    //
-    // Operations.
-    //
-    for op in &state.operations {
-        let short_id = if op.operation_id.len() >= 8 {
-            &op.operation_id[..8]
-        } else {
-            &op.operation_id
-        };
-
-        let (status_str, status_color) = op_status_display(&op.status);
-
-        let duration = match op.end_time {
-            Some(end) => format_duration(end - op.start_time),
-            None => format_duration(now - op.start_time),
-        };
-
-        let node_short = if op.node_id.len() >= 8 {
-            &op.node_id[..8]
-        } else {
-            &op.node_id
-        };
-
-        rows.push(Row::new(vec![
-            Cell::from(short_id.to_string()).style(Style::default().fg(MUTED)),
-            Cell::from(op.spec.name.clone()).style(Style::default().fg(TEXT)),
-            Cell::from(format!("{} {}", status_str, duration))
-                .style(Style::default().fg(status_color)),
-            Cell::from(node_short.to_string()).style(Style::default().fg(DIM)),
-        ]));
-    }
-
-    //
-    // Chain executions.
-    //
-    for exec in &state.chain_executions {
-        let short_id = if exec.execution_id.len() >= 8 {
-            &exec.execution_id[..8]
-        } else {
-            &exec.execution_id
-        };
-
-        let (status_str, status_color) = chain_status_display(&exec.status);
-
-        let duration = match exec.ended_at {
-            Some(end) => format_duration(end - exec.started_at),
-            None => format_duration(now - exec.started_at),
-        };
-
-        let node_short = if exec.node_id.len() >= 8 {
-            &exec.node_id[..8]
-        } else {
-            &exec.node_id
-        };
-
-        rows.push(Row::new(vec![
-            Cell::from(short_id.to_string()).style(Style::default().fg(MUTED)),
-            Cell::from(exec.chain_name.clone()).style(Style::default().fg(Color::Rgb(140, 120, 180))),
-            Cell::from(format!("{} {}", status_str, duration))
-                .style(Style::default().fg(status_color)),
-            Cell::from(node_short.to_string()).style(Style::default().fg(DIM)),
-        ]));
-    }
-
-    let widths = [
-        Constraint::Length(10),
-        Constraint::Min(10),
-        Constraint::Length(14),
-        Constraint::Length(10),
-    ];
-
-    let table = Table::new(rows, widths)
-        .header(header)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(focus_style)
-                .title_style(Style::default().fg(MUTED))
-                .title(" Executions "),
-        )
-        .row_highlight_style(Style::default().bg(HIGHLIGHT_BG));
-
-    let mut table_state = TableState::default();
-    if state.focused_pane == 1 {
-        table_state.select(Some(state.exec_selected));
-    }
-
-    f.render_stateful_widget(table, area, &mut table_state);
-}
-
-//
-// Right pane: detail view of selected execution.
-//
-
-fn render_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
-    let focus_style = if state.focused_pane == 2 {
-        Style::default().fg(ACCENT)
-    } else {
-        Style::default().fg(DIM)
-    };
-
+fn render_library_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(focus_style)
+        .border_style(Style::default().fg(DIM))
         .title_style(Style::default().fg(MUTED))
         .title(" Detail ");
 
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    //
-    // Find the selected execution.
-    //
-    let total_ops = state.operations.len();
-    let total_execs = total_ops + state.chain_executions.len();
+    let enabled_ops: Vec<_> = state.op_definitions.iter().filter(|d| !d.disabled).collect();
+    let enabled_chains: Vec<_> = state.chain_definitions.iter().filter(|c| !c.disabled).collect();
+    let idx = state.library_selected;
 
-    if total_execs == 0 || state.exec_selected >= total_execs {
-        let empty = Paragraph::new(Line::from(Span::styled(
-            " No execution selected",
+    let mut lines: Vec<Line> = Vec::new();
+
+    if idx < enabled_ops.len() {
+        let def = &enabled_ops[idx];
+        lines.push(Line::from(Span::styled(
+            format!(" {}", def.name),
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            format!(" {}", def.full_name),
             Style::default().fg(DIM),
         )));
-        f.render_widget(empty, inner);
+        lines.push(Line::from(""));
+        if !def.description.is_empty() {
+            lines.push(Line::from(Span::styled(
+                format!(" {}", def.description),
+                Style::default().fg(MUTED),
+            )));
+            lines.push(Line::from(""));
+        }
+        lines.push(Line::from(vec![
+            Span::styled(" Mode: ", Style::default().fg(DIM)),
+            Span::styled(&def.mode, Style::default().fg(TEXT)),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled(" Timeout: ", Style::default().fg(DIM)),
+            Span::styled(format!("{}s", def.timeout), Style::default().fg(TEXT)),
+        ]));
+        if def.mode == "agent" {
+            lines.push(Line::from(vec![
+                Span::styled(" Iterations: ", Style::default().fg(DIM)),
+                Span::styled(format!("{}", def.agent_iterations), Style::default().fg(TEXT)),
+            ]));
+        }
+        lines.push(Line::from(vec![
+            Span::styled(" YOLO: ", Style::default().fg(DIM)),
+            Span::styled(
+                if def.yolo_mode { "yes" } else { "no" },
+                Style::default().fg(if def.yolo_mode { STATUS_RUNNING } else { DIM }),
+            ),
+        ]));
+        if let Some(ref model) = def.model_ref {
+            lines.push(Line::from(vec![
+                Span::styled(" Model: ", Style::default().fg(DIM)),
+                Span::styled(model.as_str(), Style::default().fg(TEXT)),
+            ]));
+        }
+        if !def.operation_prompt.is_empty() {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(" Prompt", Style::default().fg(ACCENT))));
+            for line in def.operation_prompt.lines().take(10) {
+                lines.push(Line::from(Span::styled(
+                    format!(" {}", line),
+                    Style::default().fg(MUTED),
+                )));
+            }
+        }
+    } else {
+        let chain_idx = idx - enabled_ops.len();
+        if chain_idx < enabled_chains.len() {
+            let chain = &enabled_chains[chain_idx];
+            lines.push(Line::from(Span::styled(
+                format!(" {}", chain.name),
+                Style::default().fg(CHAIN_COLOR).add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(""));
+            if !chain.description.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    format!(" {}", chain.description),
+                    Style::default().fg(MUTED),
+                )));
+                lines.push(Line::from(""));
+            }
+            lines.push(Line::from(vec![
+                Span::styled(" Elements: ", Style::default().fg(DIM)),
+                Span::styled(format!("{}", chain.element_count), Style::default().fg(TEXT)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled(" Operations: ", Style::default().fg(DIM)),
+                Span::styled(format!("{}", chain.operation_count), Style::default().fg(TEXT)),
+            ]));
+            if let Some(timeout) = chain.timeout {
+                lines.push(Line::from(vec![
+                    Span::styled(" Timeout: ", Style::default().fg(DIM)),
+                    Span::styled(format!("{}s", timeout), Style::default().fg(TEXT)),
+                ]));
+            }
+        } else {
+            lines.push(Line::from(Span::styled(
+                " No item selected",
+                Style::default().fg(DIM),
+            )));
+        }
+    }
+
+    f.render_widget(
+        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+        inner,
+    );
+}
+
+//
+// Executions view: running and recent, with detail.
+//
+
+fn render_executions(f: &mut Frame, area: Rect, state: &OperationsState) {
+    let chunks = Layout::horizontal([
+        Constraint::Percentage(50),
+        Constraint::Percentage(50),
+    ])
+    .split(area);
+
+    render_exec_list(f, chunks[0], state);
+    render_exec_detail(f, chunks[1], state);
+}
+
+fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
+    let header = Row::new(vec![
+        Cell::from(""),
+        Cell::from("ID"),
+        Cell::from("Name"),
+        Cell::from("Status"),
+        Cell::from("Duration"),
+    ])
+    .style(Style::default().fg(ACCENT));
+
+    let now = chrono::Utc::now();
+    let mut rows: Vec<Row> = Vec::new();
+
+    for op in &state.operations {
+        let short_id = &op.operation_id[..8.min(op.operation_id.len())];
+        let (status_str, status_color) = op_status_display(&op.status);
+        let duration = match op.end_time {
+            Some(end) => format_duration(end - op.start_time),
+            None => format_duration(now - op.start_time),
+        };
+
+        rows.push(Row::new(vec![
+            Cell::from("\u{25b8}").style(Style::default().fg(ACCENT)),
+            Cell::from(short_id.to_string()).style(Style::default().fg(MUTED)),
+            Cell::from(op.spec.name.clone()).style(Style::default().fg(TEXT)),
+            Cell::from(status_str).style(Style::default().fg(status_color)),
+            Cell::from(duration).style(Style::default().fg(DIM)),
+        ]));
+    }
+
+    for exec in &state.chain_executions {
+        let short_id = &exec.execution_id[..8.min(exec.execution_id.len())];
+        let (status_str, status_color) = chain_status_display(&exec.status);
+        let duration = match exec.ended_at {
+            Some(end) => format_duration(end - exec.started_at),
+            None => format_duration(now - exec.started_at),
+        };
+
+        rows.push(Row::new(vec![
+            Cell::from("\u{2637}").style(Style::default().fg(CHAIN_COLOR)),
+            Cell::from(short_id.to_string()).style(Style::default().fg(MUTED)),
+            Cell::from(exec.chain_name.clone()).style(Style::default().fg(TEXT)),
+            Cell::from(status_str).style(Style::default().fg(status_color)),
+            Cell::from(duration).style(Style::default().fg(DIM)),
+        ]));
+    }
+
+    let widths = [
+        Constraint::Length(2),
+        Constraint::Length(10),
+        Constraint::Min(12),
+        Constraint::Length(10),
+        Constraint::Length(8),
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(DIM))
+                .title_style(Style::default().fg(MUTED))
+                .title(" Executions "),
+        )
+        .row_highlight_style(Style::default().bg(HIGHLIGHT_BG));
+
+    let mut table_state = TableState::default();
+    table_state.select(Some(state.exec_selected));
+
+    f.render_stateful_widget(table, area, &mut table_state);
+}
+
+fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(DIM))
+        .title_style(Style::default().fg(MUTED))
+        .title(" Detail ");
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let total_ops = state.operations.len();
+    let total = total_ops + state.chain_executions.len();
+
+    if total == 0 || state.exec_selected >= total {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(" No execution selected", Style::default().fg(DIM)))),
+            inner,
+        );
         return;
     }
 
     let mut lines: Vec<Line> = Vec::new();
 
     if state.exec_selected < total_ops {
-        //
-        // Operation detail.
-        //
         let op = &state.operations[state.exec_selected];
         let (status_str, status_color) = op_status_display(&op.status);
+        let now = chrono::Utc::now();
+        let duration = match op.end_time {
+            Some(end) => format_duration(end - op.start_time),
+            None => format_duration(now - op.start_time),
+        };
+        let short_id = &op.operation_id[..8.min(op.operation_id.len())];
 
+        //
+        // Header: name and status bar.
+        //
+        lines.push(Line::from(Span::styled(
+            format!(" Op: {}", op.spec.name),
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        )));
         lines.push(Line::from(vec![
-            Span::styled(" ", Style::default()),
-            Span::styled(
-                op.spec.name.clone(),
-                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
-            ),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("  Status: ", Style::default().fg(MUTED)),
+            Span::styled(" Status: ", Style::default().fg(DIM)),
             Span::styled(status_str, Style::default().fg(status_color)),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("  Node: ", Style::default().fg(MUTED)),
-            Span::styled(
-                format!("{} / {}", &op.node_id[..8.min(op.node_id.len())], op.agent_short_name),
-                Style::default().fg(TEXT),
-            ),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("  Mode: ", Style::default().fg(MUTED)),
-            Span::styled(&op.spec.mode, Style::default().fg(DIM)),
+            Span::styled("  Agent: ", Style::default().fg(DIM)),
+            Span::styled(&op.agent_short_name, Style::default().fg(TEXT)),
+            Span::styled("  Mode: ", Style::default().fg(DIM)),
+            Span::styled(&op.spec.mode, Style::default().fg(TEXT)),
+            Span::styled("  Duration: ", Style::default().fg(DIM)),
+            Span::styled(duration.clone(), Style::default().fg(ACCENT)),
+            Span::styled(format!("  {}", short_id), Style::default().fg(DIM)),
         ]));
 
+        //
+        // Summary.
+        //
         if let Some(ref summary) = op.summary {
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                " Summary",
-                Style::default().fg(ACCENT),
-            )));
+            lines.push(Line::from(Span::styled(" Summary", Style::default().fg(ACCENT))));
             for line in summary.lines() {
-                lines.push(Line::from(Span::styled(
-                    format!("  {}", line),
-                    Style::default().fg(TEXT),
-                )));
+                lines.push(Line::from(Span::styled(format!("  {}", line), Style::default().fg(TEXT))));
             }
         }
 
+        //
+        // Result / Findings.
+        //
         if let Some(ref result) = op.result {
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                " Result",
-                Style::default().fg(ACCENT),
-            )));
-            for line in result.lines().take(20) {
-                lines.push(Line::from(Span::styled(
-                    format!("  {}", line),
-                    Style::default().fg(TEXT),
-                )));
+            lines.push(Line::from(Span::styled(" Result", Style::default().fg(ACCENT))));
+            for line in result.lines() {
+                lines.push(Line::from(Span::styled(format!("  {}", line), Style::default().fg(TEXT))));
+            }
+        }
+
+        //
+        // Prompt.
+        //
+        if !op.spec.operation_prompt.is_empty() {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(" Prompt", Style::default().fg(ACCENT))));
+            for line in op.spec.operation_prompt.lines() {
+                lines.push(Line::from(Span::styled(format!("  {}", line), Style::default().fg(MUTED))));
+            }
+        }
+
+        //
+        // Streaming output (session interactions).
+        //
+        if let Some(ref output) = op.output {
+            if !output.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(" Output", Style::default().fg(ACCENT))));
+                for line in output.lines() {
+                    let style = if line.contains("\u{2192}") || line.contains("Sending") {
+                        Style::default().fg(ACCENT)
+                    } else if line.contains("\u{2190}") || line.contains("response") {
+                        Style::default().fg(Color::Rgb(100, 160, 180))
+                    } else {
+                        Style::default().fg(MUTED)
+                    };
+                    lines.push(Line::from(Span::styled(format!("  {}", line), style)));
+                }
             }
         }
     } else {
-        //
-        // Chain execution detail.
-        //
         let exec = &state.chain_executions[state.exec_selected - total_ops];
         let (status_str, status_color) = chain_status_display(&exec.status);
+        let now = chrono::Utc::now();
+        let duration = match exec.ended_at {
+            Some(end) => format_duration(end - exec.started_at),
+            None => format_duration(now - exec.started_at),
+        };
+        let short_id = &exec.execution_id[..8.min(exec.execution_id.len())];
+        let started = exec.started_at.format("%H:%M:%S").to_string();
+        let ended = exec.ended_at.map(|e| e.format("%H:%M:%S").to_string())
+            .unwrap_or_else(|| "...".to_string());
 
+        //
+        // Header.
+        //
+        lines.push(Line::from(Span::styled(
+            format!(" Chain: {}", exec.chain_name),
+            Style::default().fg(CHAIN_COLOR).add_modifier(Modifier::BOLD),
+        )));
         lines.push(Line::from(vec![
-            Span::styled(" ", Style::default()),
-            Span::styled(
-                exec.chain_name.clone(),
-                Style::default()
-                    .fg(Color::Rgb(140, 120, 180))
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("  Status: ", Style::default().fg(MUTED)),
+            Span::styled(" Status: ", Style::default().fg(DIM)),
             Span::styled(status_str, Style::default().fg(status_color)),
+            Span::styled("  Started: ", Style::default().fg(DIM)),
+            Span::styled(started.clone(), Style::default().fg(TEXT)),
+            Span::styled("  Ended: ", Style::default().fg(DIM)),
+            Span::styled(ended.clone(), Style::default().fg(TEXT)),
+            Span::styled("  Duration: ", Style::default().fg(DIM)),
+            Span::styled(duration, Style::default().fg(ACCENT)),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("  Node: ", Style::default().fg(MUTED)),
+            Span::styled(" Node: ", Style::default().fg(DIM)),
             Span::styled(
-                format!(
-                    "{} / {}",
-                    &exec.node_id[..8.min(exec.node_id.len())],
-                    exec.agent_short_name
-                ),
+                format!("{} / {}", &exec.node_id[..8.min(exec.node_id.len())], exec.agent_short_name),
                 Style::default().fg(TEXT),
             ),
+            Span::styled(format!("  {}", short_id), Style::default().fg(DIM)),
         ]));
-        lines.push(Line::from(vec![
-            Span::styled("  Elements: ", Style::default().fg(MUTED)),
-            Span::styled(
-                format!("{}", exec.elements.len()),
-                Style::default().fg(TEXT),
-            ),
-        ]));
-
-        //
-        // Element statuses.
-        //
-        if !exec.elements.is_empty() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                " Elements",
-                Style::default().fg(ACCENT),
-            )));
-
-            let mut elements: Vec<_> = exec.elements.iter().collect();
-            elements.sort_by_key(|(_, el)| el.started_at);
-
-            for (id, el) in &elements {
-                let short_id = if id.len() >= 6 { &id[..6] } else { id };
-                let (el_status, el_color) = element_status_display(&el.status);
-                let el_type = el
-                    .config
-                    .as_ref()
-                    .map(|c| format!("{:?}", c))
-                    .unwrap_or_default();
-                let type_short = el_type.split('{').next().unwrap_or("").trim();
-
-                lines.push(Line::from(vec![
-                    Span::styled(format!("  {} ", el_status), Style::default().fg(el_color)),
-                    Span::styled(format!("{} ", short_id), Style::default().fg(DIM)),
-                    Span::styled(type_short.to_string(), Style::default().fg(MUTED)),
-                ]));
-            }
-        }
 
         //
         // Final outputs.
@@ -378,22 +515,121 @@ fn render_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         if !exec.outputs.is_empty() {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                " Outputs",
+                format!(" Final Output  {} output{}", exec.outputs.len(), if exec.outputs.len() == 1 { "" } else { "s" }),
                 Style::default().fg(ACCENT),
             )));
-            for (key, val) in &exec.outputs {
-                lines.push(Line::from(Span::styled(
-                    format!("  {}: {}", key, &val[..val.len().min(80)]),
-                    Style::default().fg(TEXT),
-                )));
+            for (_key, val) in &exec.outputs {
+                for line in val.lines() {
+                    lines.push(Line::from(Span::styled(
+                        format!("  {}", line),
+                        Style::default().fg(TEXT),
+                    )));
+                }
+            }
+        }
+
+        //
+        // Execution steps (elements) with full detail.
+        //
+        if !exec.elements.is_empty() {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                " Execution Steps",
+                Style::default().fg(ACCENT),
+            )));
+
+            let mut elements: Vec<_> = exec.elements.iter().collect();
+            elements.sort_by_key(|(_, el)| el.started_at);
+
+            for (id, el) in &elements {
+                let short_el_id = &id[..8.min(id.len())];
+                let (icon, color) = element_status_display(&el.status);
+
+                //
+                // Element type from config.
+                //
+                let el_type_name = match &el.config {
+                    Some(common::ElementConfig::Trigger) => "Trigger",
+                    Some(common::ElementConfig::Operation { operation_name, .. }) => {
+                        // Can't return borrowed &str from format, use static
+                        if operation_name.is_empty() { "Operation" } else { "Operation" }
+                    }
+                    Some(common::ElementConfig::Transform { .. }) => "Transform",
+                    Some(common::ElementConfig::GenericPrompt { .. }) => "Prompt",
+                    Some(common::ElementConfig::Memory { .. }) => "Memory",
+                    Some(common::ElementConfig::Loop { .. }) => "Loop",
+                    Some(common::ElementConfig::Tool { .. }) => "Tool",
+                    Some(common::ElementConfig::Payload { .. }) => "Payload",
+                    Some(common::ElementConfig::Termination) => "End",
+                    None => "Unknown",
+                };
+
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {} ", icon), Style::default().fg(color)),
+                    Span::styled(el_type_name, Style::default().fg(TEXT)),
+                    Span::styled(format!("  {}", short_el_id), Style::default().fg(DIM)),
+                ]));
+
+                //
+                // Element config details.
+                //
+                match &el.config {
+                    Some(common::ElementConfig::Operation { operation_name, .. }) => {
+                        lines.push(Line::from(Span::styled(
+                            format!("    op: {}", operation_name),
+                            Style::default().fg(MUTED),
+                        )));
+                    }
+                    Some(common::ElementConfig::GenericPrompt { prompt, .. }) => {
+                        let short = if prompt.len() > 60 { &prompt[..60] } else { prompt };
+                        lines.push(Line::from(Span::styled(
+                            format!("    \"{}\"", short),
+                            Style::default().fg(MUTED),
+                        )));
+                    }
+                    Some(common::ElementConfig::Transform { prompt, .. }) => {
+                        let short = if prompt.len() > 60 { &prompt[..60] } else { prompt };
+                        lines.push(Line::from(Span::styled(
+                            format!("    \"{}\"", short),
+                            Style::default().fg(MUTED),
+                        )));
+                    }
+                    _ => {}
+                }
+
+                //
+                // Element output.
+                //
+                match &el.status {
+                    common::ElementExecutionStatus::Completed { output, .. } => {
+                        if !output.is_empty() {
+                            let short = if output.len() > 100 {
+                                format!("{}...", &output[..100])
+                            } else {
+                                output.clone()
+                            };
+                            lines.push(Line::from(Span::styled(
+                                format!("    \u{2192} {}", short.replace('\n', " ")),
+                                Style::default().fg(Color::Rgb(100, 160, 180)),
+                            )));
+                        }
+                    }
+                    common::ElementExecutionStatus::Failed { error } => {
+                        lines.push(Line::from(Span::styled(
+                            format!("    \u{2717} {}", error),
+                            Style::default().fg(STATUS_FAIL),
+                        )));
+                    }
+                    _ => {}
+                }
             }
         }
     }
 
-    let paragraph = Paragraph::new(Text::from(lines))
-        .wrap(Wrap { trim: false });
-
-    f.render_widget(paragraph, inner);
+    f.render_widget(
+        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+        inner,
+    );
 }
 
 fn op_status_display(status: &SemanticOpStatus) -> (&'static str, Color) {
