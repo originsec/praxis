@@ -32,6 +32,16 @@ pub enum PopupKind {
     SaveSession,
     RunTarget,
     NewOp,
+    Confirm,
+}
+
+pub struct ConfirmAction {
+    pub message: String,
+    pub action: ConfirmKind,
+}
+
+pub enum ConfirmKind {
+    DeleteOp(String), // full_name
 }
 
 pub struct NewOpForm {
@@ -69,6 +79,7 @@ pub struct App {
     pub connected: bool,
     pub popup: Option<Popup>,
     pub new_op_form: Option<NewOpForm>,
+    pub confirm: Option<ConfirmAction>,
     pub terminal_width: u16,
 }
 
@@ -230,6 +241,7 @@ impl App {
             connected: true,
             popup: None,
             new_op_form: None,
+            confirm: None,
             terminal_width: 0,
         }
     }
@@ -278,6 +290,14 @@ impl App {
     }
 
     async fn handle_key(&mut self, key: KeyEvent) {
+        //
+        // Confirm dialog intercepts all keys.
+        //
+        if self.confirm.is_some() {
+            self.handle_confirm_key(key).await;
+            return;
+        }
+
         //
         // New op form intercepts all keys.
         //
@@ -1148,27 +1168,43 @@ impl App {
             .iter()
             .filter(|d| !d.disabled)
             .collect();
-        let enabled_chains: Vec<_> = self.operations.chain_definitions
-            .iter()
-            .filter(|c| !c.disabled)
-            .collect();
 
         let idx = self.operations.library_selected;
 
         if idx < enabled_ops.len() {
             let full_name = enabled_ops[idx].full_name.clone();
-            if let Err(e) = self.client.delete_op_def(full_name).await {
-                self.orchestrator
-                    .messages
-                    .push(ConversationEntry::Error(format!("Delete failed: {}", e)));
-            }
+            let name = enabled_ops[idx].name.clone();
+            self.confirm = Some(ConfirmAction {
+                message: format!("Delete operation \"{}\" ({})?", name, full_name),
+                action: ConfirmKind::DeleteOp(full_name),
+            });
         }
-        // Chain deletion would go here.
+    }
 
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        let _ = self.client.request_op_def_list().await;
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        self.operations.op_definitions = self.client.get_operation_definitions().await;
+    async fn handle_confirm_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Enter => {
+                if let Some(confirm) = self.confirm.take() {
+                    match confirm.action {
+                        ConfirmKind::DeleteOp(full_name) => {
+                            if let Err(e) = self.client.delete_op_def(full_name).await {
+                                self.orchestrator
+                                    .messages
+                                    .push(ConversationEntry::Error(format!("Delete failed: {}", e)));
+                            }
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                            let _ = self.client.request_op_def_list().await;
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                            self.operations.op_definitions = self.client.get_operation_definitions().await;
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('n') | KeyCode::Esc => {
+                self.confirm = None;
+            }
+            _ => {}
+        }
     }
 
     fn open_command_palette(&mut self) {
@@ -1304,6 +1340,7 @@ impl App {
                         }
                         PopupKind::SaveSession => {}
                         PopupKind::NewOp => {}
+                        PopupKind::Confirm => {}
                     }
                 }
             }

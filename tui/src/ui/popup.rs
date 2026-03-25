@@ -19,7 +19,41 @@ pub fn render(f: &mut Frame, popup: &Popup) {
         PopupKind::SaveSession => render_save_session(f, popup),
         PopupKind::RunTarget => render_list_select(f, popup, " Select Target "),
         PopupKind::NewOp => {} // rendered separately via new_op_form
+        PopupKind::Confirm => {} // rendered separately via confirm
     }
+}
+
+pub fn render_confirm(f: &mut Frame, confirm: &crate::app::ConfirmAction) {
+    let width = (confirm.message.len() as u16 + 6).min(f.area().width - 4).max(30);
+    let height = 5;
+    let area = centered_rect_fixed(width, height, f.area());
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Rgb(180, 60, 60)))
+        .title(" Confirm ")
+        .title_style(Style::default().fg(Color::Rgb(180, 60, 60)))
+        .style(Style::default().bg(POPUP_BG));
+
+    f.render_widget(Clear, area);
+    f.render_widget(block.clone(), area);
+
+    let inner = block.inner(area);
+    let lines = vec![
+        Line::from(Span::styled(
+            format!(" {}", confirm.message),
+            Style::default().fg(TEXT),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(" y", Style::default().fg(Color::Rgb(180, 60, 60))),
+            Span::styled(" yes  ", Style::default().fg(MUTED)),
+            Span::styled("n", Style::default().fg(ACCENT)),
+            Span::styled(" no", Style::default().fg(MUTED)),
+        ]),
+    ];
+
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 pub fn render_new_op_form(f: &mut Frame, form: &crate::app::NewOpForm) {

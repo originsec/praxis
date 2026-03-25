@@ -44,6 +44,9 @@ pub fn render(f: &mut Frame, app: &App) {
     if let Some(ref form) = app.new_op_form {
         popup::render_new_op_form(f, form);
     }
+    if let Some(ref confirm) = app.confirm {
+        popup::render_confirm(f, confirm);
+    }
 }
 
 fn render_header(f: &mut Frame, area: ratatui::layout::Rect) {
