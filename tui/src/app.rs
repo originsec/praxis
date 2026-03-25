@@ -71,15 +71,8 @@ pub struct App {
 
 pub enum ConversationEntry {
     UserPrompt(String),
-    //
-    // Raw accumulated content (including think tags) plus tool calls
-    // with their position in the content stream. Thinking and tool call
-    // interleaving is resolved at render time.
-    //
-    AssistantResponse {
-        content: String,
-        tool_calls: Vec<(usize, Vec<ToolCall>)>, // (content_offset, tools)
-    },
+    AssistantText(String),
+    ToolGroup(Vec<ToolCall>),
     Info(String),
     Error(String),
 }
@@ -1003,20 +996,19 @@ impl App {
                 ConversationEntry::UserPrompt(prompt) => {
                     md.push_str(&format!("\n**\u{25b8} {}**\n", prompt));
                 }
-                ConversationEntry::AssistantResponse { content, tool_calls } => {
+                ConversationEntry::AssistantText(content) => {
                     let stripped = strip_think_tags(content);
                     let trimmed = stripped.trim();
                     if !trimmed.is_empty() {
                         md.push_str(&format!("\n{}\n", trimmed));
                     }
-
-                    let all_tools: Vec<&ToolCall> =
-                        tool_calls.iter().flat_map(|(_, tools)| tools.iter()).collect();
-                    if !all_tools.is_empty() {
-                        let names: Vec<&str> = all_tools.iter().map(|t| t.name.as_str()).collect();
+                }
+                ConversationEntry::ToolGroup(tools) => {
+                    if !tools.is_empty() {
+                        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
                         md.push_str(&format!(
                             "\n\u{2713} {} tool calls ({})\n",
-                            all_tools.len(),
+                            tools.len(),
                             names.join(", ")
                         ));
                     }
@@ -1050,26 +1042,6 @@ impl App {
         }
     }
 
-    fn get_or_create_response(&mut self) -> (&mut String, &mut Vec<(usize, Vec<ToolCall>)>) {
-        //
-        // Find or create the current AssistantResponse entry.
-        //
-        let needs_new = !matches!(
-            self.orchestrator.messages.last(),
-            Some(ConversationEntry::AssistantResponse { .. })
-        );
-        if needs_new {
-            self.orchestrator.messages.push(ConversationEntry::AssistantResponse {
-                content: String::new(),
-                tool_calls: Vec::new(),
-            });
-        }
-        match self.orchestrator.messages.last_mut().unwrap() {
-            ConversationEntry::AssistantResponse { content, tool_calls } => (content, tool_calls),
-            _ => unreachable!(),
-        }
-    }
-
     fn handle_orchestrator_event(&mut self, msg: ClientDirectMessage) {
         match msg {
             ClientDirectMessage::OrchestratorStarted { provider, model } => {
@@ -1078,26 +1050,32 @@ impl App {
                 self.orchestrator.session_active = true;
             }
             ClientDirectMessage::OrchestratorContent { content, .. } => {
-                //
-                // Accumulate raw content (including think tags) into the
-                // last AssistantText entry, even if tool calls have been
-                // inserted in between. This keeps think tags intact across
-                // tool call boundaries. Thinking is extracted at render time.
-                //
-
                 self.orchestrator.active_tool = None;
 
                 //
-                // Flush pending tool calls into the current response,
-                // recording the content offset where they occurred.
+                // Flush pending tool calls before appending text so tool
+                // calls appear between text blocks.
                 //
                 if !self.orchestrator.pending_tools.is_empty() {
                     let tools = std::mem::take(&mut self.orchestrator.pending_tools);
-                    let response = self.get_or_create_response();
-                    let offset = response.0.len();
-                    response.1.push((offset, tools));
+                    self.orchestrator
+                        .messages
+                        .push(ConversationEntry::ToolGroup(tools));
                 }
-                self.get_or_create_response().0.push_str(&content);
+
+                //
+                // Append to the last AssistantText, or create a new one.
+                //
+                match self.orchestrator.messages.last_mut() {
+                    Some(ConversationEntry::AssistantText(existing)) => {
+                        existing.push_str(&content);
+                    }
+                    _ => {
+                        self.orchestrator
+                            .messages
+                            .push(ConversationEntry::AssistantText(content));
+                    }
+                }
             }
             ClientDirectMessage::OrchestratorToolExecuting { name, .. } => {
                 if name != "report_plan" {
@@ -1124,14 +1102,11 @@ impl App {
                 self.orchestrator.total_tokens += total_tokens;
             }
             ClientDirectMessage::OrchestratorDone { .. } => {
-                //
-                // Flush any remaining tool calls into the response.
-                //
                 if !self.orchestrator.pending_tools.is_empty() {
                     let tools = std::mem::take(&mut self.orchestrator.pending_tools);
-                    let response = self.get_or_create_response();
-                    let offset = response.0.len();
-                    response.1.push((offset, tools));
+                    self.orchestrator
+                        .messages
+                        .push(ConversationEntry::ToolGroup(tools));
                 }
                 self.orchestrator.active_tool = None;
                 self.orchestrator.current_plan = None;
