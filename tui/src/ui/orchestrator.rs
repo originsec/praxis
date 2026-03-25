@@ -25,13 +25,15 @@ const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦
 pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     let plan_height = if state.current_plan.is_some() {
         let plan = state.current_plan.as_ref().unwrap();
-        (plan.steps.len() as u16 + 2).min(10)
+        (plan.steps.len() as u16 + 2).min(12)
     } else {
         0
     };
+    let plan_spacer = if plan_height > 0 { 1 } else { 0 };
 
     let chunks = Layout::vertical([
         Constraint::Min(1),
+        Constraint::Length(plan_spacer),
         Constraint::Length(plan_height),
         Constraint::Length(1),
         Constraint::Length(3),
@@ -51,12 +53,12 @@ pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     };
 
     if plan_height > 0 {
-        render_plan_widget(f, padded(chunks[1]), state);
+        render_plan_widget(f, padded(chunks[2]), state);
     }
 
-    render_model_info(f, padded(chunks[2]), state);
-    render_input(f, padded(chunks[3]), state);
-    render_tokens(f, padded(chunks[4]), state);
+    render_model_info(f, padded(chunks[3]), state);
+    render_input(f, padded(chunks[4]), state);
+    render_tokens(f, padded(chunks[5]), state);
 }
 
 fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
@@ -376,10 +378,19 @@ fn render_plan_widget(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 
     let mut lines: Vec<Line> = Vec::new();
 
+    //
+    // Dim separator line above the plan.
+    //
+    let sep_width = area.width.saturating_sub(2) as usize;
+    lines.push(Line::from(Span::styled(
+        "\u{2500}".repeat(sep_width),
+        Style::default().fg(DIM),
+    )));
+
     if let Some(ref desc) = plan.current_step_description {
         lines.push(Line::from(vec![
             Span::styled(
-                "\u{25b8} ",
+                " \u{25b8} ",
                 Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -400,14 +411,14 @@ fn render_plan_widget(f: &mut Frame, area: Rect, state: &OrchestratorState) {
             common::PlanStepStatus::NotStarted => ("\u{25cb}", DIM, Style::default().fg(DIM)),
         };
         lines.push(Line::from(vec![
-            Span::styled(format!("{} ", icon), Style::default().fg(icon_color)),
+            Span::styled(format!(" {} ", icon), Style::default().fg(icon_color)),
             Span::styled(step.description.clone(), text_style),
         ]));
     }
 
     if let Some(ref summary) = plan.summary {
         lines.push(Line::from(Span::styled(
-            summary.clone(),
+            format!(" {}", summary),
             Style::default().fg(DIM),
         )));
     }

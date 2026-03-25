@@ -366,6 +366,24 @@ impl OrchestratorManager {
                             break;
                         }
 
+                        //
+                        // Flush any remaining send buffer before tool parsing
+                        // so text preceding tool calls is delivered to the
+                        // client before ToolExecuting events.
+                        //
+                        if !send_buffer.is_empty() && !held_back {
+                            bytes_sent += send_buffer.len();
+                            let _ = send_to_client(
+                                &publish_channel_clone,
+                                &client_id_owned,
+                                ClientDirectMessage::OrchestratorContent {
+                                    prompt_id: prompt_id.clone(),
+                                    content: send_buffer.clone(),
+                                },
+                            ).await;
+                            send_buffer.clear();
+                        }
+
                         let mut response_text = full_response.clone();
                         let mut tool_results: Vec<(String, String)> = Vec::new();
 
@@ -374,6 +392,30 @@ impl OrchestratorManager {
                                cancel_flag_clone.load(Ordering::SeqCst) {
                                 break;
                             }
+
+                            //
+                            // Send any unsent text that precedes this tool call
+                            // so it arrives before the ToolExecuting event.
+                            //
+                            let tool_fence_pos = response_text.find("```")
+                                .or_else(|| response_text.find("{\"tool\""))
+                                .unwrap_or(response_text.len());
+
+                            if tool_fence_pos > bytes_sent {
+                                let unsent = &response_text[bytes_sent..tool_fence_pos];
+                                let unsent_trimmed = unsent.trim();
+                                if !unsent_trimmed.is_empty() {
+                                    let _ = send_to_client(
+                                        &publish_channel_clone,
+                                        &client_id_owned,
+                                        ClientDirectMessage::OrchestratorContent {
+                                            prompt_id: prompt_id.clone(),
+                                            content: unsent.to_string(),
+                                        },
+                                    ).await;
+                                }
+                            }
+                            bytes_sent = response_text.len().saturating_sub(remaining_text.len());
 
                             common::log_info!("Orchestrator executing tool: {}", tool_name);
 
