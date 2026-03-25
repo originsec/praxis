@@ -231,15 +231,24 @@ fn flush_table(rows: &mut Vec<String>, lines: &mut Vec<Line<'static>>, indent: &
                 .get(i)
                 .map(|s| s.as_str())
                 .unwrap_or("");
-            let padded = format!("{:<width$}", cell_text, width = width);
 
             if is_header {
+                let padded = format!("{:<width$}", cell_text, width = width);
                 spans.push(Span::styled(
                     padded,
                     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 ));
             } else {
-                spans.push(Span::styled(padded, Style::default().fg(TEXT)));
+                //
+                // Parse inline markdown in data cells.
+                //
+                let cell_spans = parse_inline(cell_text, "");
+                let cell_len: usize = cell_spans.iter().map(|s| s.width()).sum();
+                spans.extend(cell_spans);
+                let padding = width.saturating_sub(cell_len);
+                if padding > 0 {
+                    spans.push(Span::raw(" ".repeat(padding)));
+                }
             }
         }
 

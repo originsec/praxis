@@ -66,8 +66,15 @@ pub struct App {
 
 pub enum ConversationEntry {
     UserPrompt(String),
-    AssistantText(String),
-    ToolGroup(Vec<ToolCall>),
+    //
+    // Raw accumulated content (including think tags) plus tool calls
+    // with their position in the content stream. Thinking and tool call
+    // interleaving is resolved at render time.
+    //
+    AssistantResponse {
+        content: String,
+        tool_calls: Vec<(usize, Vec<ToolCall>)>, // (content_offset, tools)
+    },
     Error(String),
 }
 
@@ -709,6 +716,26 @@ impl App {
         self.start_orchestrator_session().await;
     }
 
+    fn get_or_create_response(&mut self) -> (&mut String, &mut Vec<(usize, Vec<ToolCall>)>) {
+        //
+        // Find or create the current AssistantResponse entry.
+        //
+        let needs_new = !matches!(
+            self.orchestrator.messages.last(),
+            Some(ConversationEntry::AssistantResponse { .. })
+        );
+        if needs_new {
+            self.orchestrator.messages.push(ConversationEntry::AssistantResponse {
+                content: String::new(),
+                tool_calls: Vec::new(),
+            });
+        }
+        match self.orchestrator.messages.last_mut().unwrap() {
+            ConversationEntry::AssistantResponse { content, tool_calls } => (content, tool_calls),
+            _ => unreachable!(),
+        }
+    }
+
     fn handle_orchestrator_event(&mut self, msg: ClientDirectMessage) {
         match msg {
             ClientDirectMessage::OrchestratorStarted { provider, model } => {
@@ -717,34 +744,26 @@ impl App {
                 self.orchestrator.session_active = true;
             }
             ClientDirectMessage::OrchestratorContent { content, .. } => {
-                let content = strip_thinking(&content);
-                if content.is_empty() {
-                    return;
-                }
+                //
+                // Accumulate raw content (including think tags) into the
+                // last AssistantText entry, even if tool calls have been
+                // inserted in between. This keeps think tags intact across
+                // tool call boundaries. Thinking is extracted at render time.
+                //
 
-                //
-                // If there are pending tool calls and we're now getting text,
-                // flush the tool group first — same interleaving as the CLI.
-                //
-                if !self.orchestrator.pending_tools.is_empty() {
-                    let tools =
-                        std::mem::take(&mut self.orchestrator.pending_tools);
-                    self.orchestrator
-                        .messages
-                        .push(ConversationEntry::ToolGroup(tools));
-                }
                 self.orchestrator.active_tool = None;
 
-                match self.orchestrator.messages.last_mut() {
-                    Some(ConversationEntry::AssistantText(existing)) => {
-                        existing.push_str(&content);
-                    }
-                    _ => {
-                        self.orchestrator
-                            .messages
-                            .push(ConversationEntry::AssistantText(content));
-                    }
+                //
+                // Flush pending tool calls into the current response,
+                // recording the content offset where they occurred.
+                //
+                if !self.orchestrator.pending_tools.is_empty() {
+                    let tools = std::mem::take(&mut self.orchestrator.pending_tools);
+                    let response = self.get_or_create_response();
+                    let offset = response.0.len();
+                    response.1.push((offset, tools));
                 }
+                self.get_or_create_response().0.push_str(&content);
             }
             ClientDirectMessage::OrchestratorToolExecuting { name, .. } => {
                 if name != "report_plan" {
@@ -772,14 +791,13 @@ impl App {
             }
             ClientDirectMessage::OrchestratorDone { .. } => {
                 //
-                // Flush any remaining tool calls.
+                // Flush any remaining tool calls into the response.
                 //
                 if !self.orchestrator.pending_tools.is_empty() {
-                    let tools =
-                        std::mem::take(&mut self.orchestrator.pending_tools);
-                    self.orchestrator
-                        .messages
-                        .push(ConversationEntry::ToolGroup(tools));
+                    let tools = std::mem::take(&mut self.orchestrator.pending_tools);
+                    let response = self.get_or_create_response();
+                    let offset = response.0.len();
+                    response.1.push((offset, tools));
                 }
                 self.orchestrator.active_tool = None;
                 self.orchestrator.current_plan = None;
@@ -808,27 +826,8 @@ impl App {
     }
 }
 
-fn strip_thinking(content: &str) -> String {
-    let start_tag = "<think>";
-    let end_tag = "</think>";
-    let mut result = content.to_string();
+//
+// Extract visible content from a streaming chunk, properly handling
+// <think>...</think> blocks that may span multiple deltas.
+//
 
-    while let Some(start) = result.find(start_tag) {
-        if let Some(end) = result[start..].find(end_tag) {
-            result = format!(
-                "{}{}",
-                &result[..start],
-                &result[start + end + end_tag.len()..]
-            );
-        } else {
-            //
-            // Incomplete think tag — strip from start_tag onwards (will be
-            // completed in a future delta).
-            //
-            result = result[..start].to_string();
-            break;
-        }
-    }
-
-    result
-}

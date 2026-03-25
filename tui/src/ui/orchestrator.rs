@@ -85,13 +85,95 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                     ),
                 ]));
             }
-            ConversationEntry::AssistantText(content) => {
-                lines.push(Line::from(""));
-                let md_lines = markdown::render(content, "");
-                lines.extend(md_lines);
-            }
-            ConversationEntry::ToolGroup(tools) => {
-                lines.extend(build_tool_summary(tools));
+            ConversationEntry::AssistantResponse { content, tool_calls } => {
+                //
+                // Split content into think/visible segments and interleave
+                // tool calls at their recorded offsets.
+                //
+                let segments = split_think_segments(content);
+
+                //
+                // Build a map of byte offset → tool group for interleaving.
+                //
+                let mut tool_idx = 0;
+                let mut content_pos = 0usize;
+
+                for seg in &segments {
+                    let seg_text = match seg {
+                        ThinkSegment::Thinking(t) => t,
+                        ThinkSegment::Visible(t) => t,
+                    };
+
+                    //
+                    // Calculate the byte range this segment covers in the
+                    // original content (accounting for <think></think> tags).
+                    //
+                    let seg_start = content_pos;
+                    // Advance past the segment text + tags in the raw content
+                    let seg_end = match seg {
+                        ThinkSegment::Thinking(_) => {
+                            // raw: <think>{text}</think>
+                            content_pos + "<think>".len() + seg_text.len() + "</think>".len()
+                        }
+                        ThinkSegment::Visible(_) => {
+                            content_pos + seg_text.len()
+                        }
+                    };
+
+                    //
+                    // Insert any tool calls that occurred before this segment.
+                    //
+                    while tool_idx < tool_calls.len() && tool_calls[tool_idx].0 <= seg_start {
+                        lines.extend(build_tool_summary(&tool_calls[tool_idx].1));
+                        tool_idx += 1;
+                    }
+
+                    match seg {
+                        ThinkSegment::Thinking(text) => {
+                            let trimmed = text.trim();
+                            if !trimmed.is_empty() {
+                                lines.push(Line::from(""));
+                                let mut first = true;
+                                for line in trimmed.lines() {
+                                    let line = line.trim();
+                                    if line.is_empty() {
+                                        continue;
+                                    }
+                                    if first {
+                                        lines.push(Line::from(vec![
+                                            Span::styled("\u{00b7} ", Style::default().fg(DIM)),
+                                            Span::styled(line.to_string(), Style::default().fg(DIM)),
+                                        ]));
+                                        first = false;
+                                    } else {
+                                        lines.push(Line::from(Span::styled(
+                                            format!("  {}", line),
+                                            Style::default().fg(DIM),
+                                        )));
+                                    }
+                                }
+                            }
+                        }
+                        ThinkSegment::Visible(text) => {
+                            let trimmed = text.trim();
+                            if !trimmed.is_empty() {
+                                lines.push(Line::from(""));
+                                let md_lines = markdown::render(trimmed, "");
+                                lines.extend(md_lines);
+                            }
+                        }
+                    }
+
+                    content_pos = seg_end;
+                }
+
+                //
+                // Flush any remaining tool calls after all segments.
+                //
+                while tool_idx < tool_calls.len() {
+                    lines.extend(build_tool_summary(&tool_calls[tool_idx].1));
+                    tool_idx += 1;
+                }
             }
             ConversationEntry::Error(msg) => {
                 lines.push(Line::from(""));
@@ -134,7 +216,7 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                 format!("{} {}", spinner_char, tool_name)
             };
             lines.push(Line::from(Span::styled(label, Style::default().fg(MUTED))));
-        } else if !matches!(state.messages.last(), Some(ConversationEntry::AssistantText(_))) {
+        } else if !matches!(state.messages.last(), Some(ConversationEntry::AssistantResponse { .. })) {
             let frame_idx = (std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -150,9 +232,25 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
         }
     }
 
-    let total_lines = lines.len() as u16;
-    let visible_height = area.height;
-    let max_scroll = total_lines.saturating_sub(visible_height);
+    //
+    // Estimate visual line count accounting for word wrap. Each logical
+    // line that exceeds the visible width wraps into multiple visual lines.
+    //
+    let visible_width = inner.width.max(1) as usize;
+    let total_visual_lines: u16 = lines
+        .iter()
+        .map(|line| {
+            let w = line.width();
+            if w == 0 {
+                1u16
+            } else {
+                ((w as f64 / visible_width as f64).ceil() as u16).max(1)
+            }
+        })
+        .sum();
+
+    let visible_height = inner.height;
+    let max_scroll = total_visual_lines.saturating_sub(visible_height);
     state.max_scroll.set(max_scroll);
     let scroll = max_scroll.saturating_sub(state.scroll_offset);
 
@@ -216,6 +314,43 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
         .alignment(ratatui::layout::Alignment::Center);
 
     f.render_widget(paragraph, area);
+}
+
+enum ThinkSegment {
+    Thinking(String),
+    Visible(String),
+}
+
+fn split_think_segments(raw: &str) -> Vec<ThinkSegment> {
+    let mut segments = Vec::new();
+    let mut remaining = raw;
+
+    while !remaining.is_empty() {
+        if let Some(start) = remaining.find("<think>") {
+            let before = &remaining[..start];
+            if !before.is_empty() {
+                segments.push(ThinkSegment::Visible(before.to_string()));
+            }
+            remaining = &remaining[start + "<think>".len()..];
+
+            if let Some(end) = remaining.find("</think>") {
+                let think_text = &remaining[..end];
+                segments.push(ThinkSegment::Thinking(think_text.to_string()));
+                remaining = &remaining[end + "</think>".len()..];
+            } else {
+                //
+                // Unclosed think tag — treat rest as thinking (still streaming).
+                //
+                segments.push(ThinkSegment::Thinking(remaining.to_string()));
+                break;
+            }
+        } else {
+            segments.push(ThinkSegment::Visible(remaining.to_string()));
+            break;
+        }
+    }
+
+    segments
 }
 
 fn build_tool_summary(tools: &[crate::app::ToolCall]) -> Vec<Line<'static>> {
