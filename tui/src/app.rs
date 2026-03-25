@@ -269,7 +269,7 @@ impl Default for OperationsState {
                 sections: vec![false; 5],
                 focused_section: 0,
             },
-            split_percent: 50,
+            split_percent: 40,
             dragging: false,
         }
     }

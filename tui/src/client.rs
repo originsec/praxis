@@ -3,7 +3,8 @@ use common::{
     client_queue_name, publish_json, CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE,
     ClientBroadcastMessage, ClientDirectMessage, ClientRegistration, ClientSignalMessage,
     SystemState, SemanticOpUpdate, OperationDefinitionInfo, ChainDefinitionInfo,
-    ChainExecutionUpdate, ChainDefinitionFull,
+    ChainExecutionUpdate, ChainDefinitionFull, NodeCommand, NodeCommandResult,
+    CommandRequest, CommandResponse,
 };
 use std::collections::HashMap;
 use futures_util::StreamExt;
@@ -31,6 +32,7 @@ struct ClientState {
     system_state: Option<SystemState>,
     orchestrator_event_tx: Option<tokio::sync::mpsc::UnboundedSender<ClientDirectMessage>>,
     pending_config: Option<HashMap<String, String>>,
+    pending_commands: std::collections::HashMap<String, Option<NodeCommandResult>>,
     operations: Vec<SemanticOpUpdate>,
     operation_definitions: Vec<OperationDefinitionInfo>,
     chain_definitions: Vec<ChainDefinitionInfo>,
@@ -193,6 +195,11 @@ impl Client {
                 state.system_state = Some(system_state);
             }
 
+            ClientDirectMessage::CommandResponse(response) => {
+                if let Some(entry) = state.pending_commands.get_mut(&response.command_id) {
+                    *entry = Some(response.result);
+                }
+            }
             ClientDirectMessage::ServiceConfigResponse { values } => {
                 state.pending_config = Some(values);
             }
@@ -412,6 +419,54 @@ impl Client {
     //
     // Operation methods.
     //
+
+    pub async fn send_command(&self, node_id: &str, command: NodeCommand) -> Result<CommandResponse> {
+        let command_id = uuid::Uuid::new_v4().to_string();
+
+        {
+            let mut state = self.state.lock().await;
+            state.pending_commands.insert(command_id.clone(), None);
+        }
+
+        let request = CommandRequest {
+            command_id: command_id.clone(),
+            client_id: self.client_id.clone(),
+            node_id: node_id.to_string(),
+            command,
+        };
+
+        self.publish_signal(ClientSignalMessage::Command(request)).await?;
+
+        let poll_interval = Duration::from_millis(250);
+        let max_polls = 2400; // 10 minutes
+
+        for _ in 0..max_polls {
+            tokio::time::sleep(poll_interval).await;
+            let mut state = self.state.lock().await;
+            let has_result = state
+                .pending_commands
+                .get(&command_id)
+                .map(|v| v.is_some())
+                .unwrap_or(false);
+
+            if has_result {
+                if let Some(Some(result)) = state.pending_commands.remove(&command_id) {
+                    return Ok(CommandResponse {
+                        command_id: command_id.clone(),
+                        node_id: node_id.to_string(),
+                        result,
+                    });
+                }
+            }
+        }
+
+        {
+            let mut state = self.state.lock().await;
+            state.pending_commands.remove(&command_id);
+        }
+
+        Err(anyhow!("Timeout waiting for command response"))
+    }
 
     pub async fn request_op_def_list(&self) -> Result<()> {
         let message = ClientSignalMessage::OpDefList {
