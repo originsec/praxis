@@ -73,8 +73,41 @@ scripts or other wrappers to call the Anthropic API — use the CLI as specified
 
 ## Connector Specifications
 
-This section defines how the node invokes each supported agent for session
-operations (fingerprinting, session create/transact/close).
+This section defines the connector specifications for the built-in agents and
+how the node invokes them. Use these requirements to re-implement an
+agent connector in any language/runtime. It is additive to the node/client
+protocol above.
+
+### Connector Call Contract
+
+The node expects each connector implementation to expose the following fields
+and functions:
+
+- Required fields: `name`, `short_name`
+- Required functions: `fingerprint`, `create_session`, `session_transact`,
+  `session_close`
+
+Invocation details enforced by the node:
+
+- `fingerprint(ctx)`
+  - `ctx` is an empty object.
+  - Must return `true/false` or a table with `available`, `process_path`,
+    and `version`.
+  - The node caches successful fingerprints for 60 seconds and stores
+    `process_path` and `version` for later session usage.
+- `create_session(ctx)`
+  - `ctx` includes `working_dir`, `yolo_mode`, and `process_path`.
+  - Returns a JSON-serializable state object stored by the node.
+- `session_transact(ctx, state, prompt)`
+  - Must return `{ response = "...", state = <new_state> }`.
+  - The node persists `state` and returns `response` to the client.
+- `session_close(ctx, state)`
+  - Called on session close or replacement.
+  - The node additionally performs safety cleanup based on `state`:
+    - If `state.process_id` exists, the node kills the process tree.
+    - If `state.cdp_handle` exists, the node cleans up the CDP connection.
+
+### Per-Agent Specifications
 
 **Claude Code (`claudecode`)**
 - Agent name: `Claude Code`
