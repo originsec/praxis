@@ -30,7 +30,13 @@ pub fn render(f: &mut Frame, app: &App) {
     match app.active_window {
         Window::Orchestrator => orchestrator::render(f, chunks[1], &app.orchestrator),
         Window::Nodes => nodes::render(f, chunks[1], &app.nodes),
-        Window::Operations => operations::render(f, chunks[1], &app.operations),
+        Window::Operations => {
+            if let Some(ref form) = app.new_op_form {
+                popup::render_new_op_form(f, chunks[1], form);
+            } else {
+                operations::render(f, chunks[1], &app.operations);
+            }
+        }
     }
 
     status_bar::render(f, chunks[2], app);
@@ -40,9 +46,6 @@ pub fn render(f: &mut Frame, app: &App) {
     //
     if let Some(ref p) = app.popup {
         popup::render(f, p);
-    }
-    if let Some(ref form) = app.new_op_form {
-        popup::render_new_op_form(f, form);
     }
     if let Some(ref confirm) = app.confirm {
         popup::render_confirm(f, confirm);

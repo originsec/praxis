@@ -434,13 +434,9 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         // Result at top (most important).
         //
         if let Some(ref result) = op.result {
-            let arrow = if col.result { "\u{25b8}" } else { "\u{25be}" };
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled(format!(" {} ", arrow), Style::default().fg(ACCENT)),
-                Span::styled("Result (2)", Style::default().fg(ACCENT)),
-            ]));
-            if !col.result {
+            let focused = state.detail_focus && col.focused_section == 0;
+            lines.extend(section_header_line("Result", col.sections[0], focused));
+            if !col.sections[0] {
                 for line in result.lines() {
                     lines.push(Line::from(Span::styled(format!("  {}", line), Style::default().fg(TEXT))));
                 }
@@ -451,13 +447,9 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         // Summary.
         //
         if let Some(ref summary) = op.summary {
-            let arrow = if col.summary { "\u{25b8}" } else { "\u{25be}" };
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled(format!(" {} ", arrow), Style::default().fg(ACCENT)),
-                Span::styled("Summary (1)", Style::default().fg(ACCENT)),
-            ]));
-            if !col.summary {
+            let focused = state.detail_focus && col.focused_section == 1;
+            lines.extend(section_header_line("Summary", col.sections[1], focused));
+            if !col.sections[1] {
                 for line in summary.lines() {
                     lines.push(Line::from(Span::styled(format!("  {}", line), Style::default().fg(TEXT))));
                 }
@@ -468,13 +460,9 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         // Prompt.
         //
         if !op.spec.operation_prompt.is_empty() {
-            let arrow = if col.prompt { "\u{25b8}" } else { "\u{25be}" };
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled(format!(" {} ", arrow), Style::default().fg(ACCENT)),
-                Span::styled("Prompt (3)", Style::default().fg(ACCENT)),
-            ]));
-            if !col.prompt {
+            let focused = state.detail_focus && col.focused_section == 2;
+            lines.extend(section_header_line("Prompt", col.sections[2], focused));
+            if !col.sections[2] {
                 for line in op.spec.operation_prompt.lines() {
                     lines.push(Line::from(Span::styled(format!("  {}", line), Style::default().fg(MUTED))));
                 }
@@ -486,13 +474,9 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         //
         if let Some(ref output) = op.output {
             if !output.is_empty() {
-                let arrow = if col.output { "\u{25b8}" } else { "\u{25be}" };
-                lines.push(Line::from(""));
-                lines.push(Line::from(vec![
-                    Span::styled(format!(" {} ", arrow), Style::default().fg(ACCENT)),
-                    Span::styled("Output (4)", Style::default().fg(ACCENT)),
-                ]));
-                if !col.output {
+                let focused = state.detail_focus && col.focused_section == 3;
+                lines.extend(section_header_line("Output", col.sections[3], focused));
+                if !col.sections[3] {
                     for line in output.lines() {
                         let style = if line.contains(">>>") || line.contains("Sending") {
                             Style::default().fg(ACCENT)
@@ -663,9 +647,9 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
     }
 
     let scroll_hint = if state.detail_focus {
-        " \u{2191}\u{2193} scroll  1-5 toggle sections "
+        " \u{2191}\u{2193} sections  enter toggle  pgup/pgdn scroll "
     } else {
-        " Enter/\u{2192} to focus "
+        ""
     };
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(scroll_hint, Style::default().fg(DIM))));
@@ -675,6 +659,23 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         .scroll((state.detail_scroll, 0));
 
     f.render_widget(paragraph, inner);
+}
+
+fn section_header_line(label: &str, collapsed: bool, focused: bool) -> Vec<Line<'static>> {
+    let arrow = if collapsed { "\u{25b8}" } else { "\u{25be}" };
+    let style = if focused {
+        Style::default().fg(TEXT).bg(Color::Rgb(35, 40, 35)).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(ACCENT)
+    };
+
+    vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(format!(" {} ", arrow), style),
+            Span::styled(label.to_string(), style),
+        ]),
+    ]
 }
 
 fn op_status_display(status: &SemanticOpStatus) -> (&'static str, Color) {

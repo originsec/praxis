@@ -56,19 +56,8 @@ pub fn render_confirm(f: &mut Frame, confirm: &crate::app::ConfirmAction) {
     f.render_widget(Paragraph::new(lines), inner);
 }
 
-pub fn render_new_op_form(f: &mut Frame, form: &crate::app::NewOpForm) {
+pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpForm) {
     use crate::app::NewOpForm;
-
-    //
-    // Full-screen form: fills the entire frame area.
-    //
-    let area = f.area();
-
-    f.render_widget(Clear, area);
-    f.render_widget(
-        Block::default().style(Style::default().bg(POPUP_BG)),
-        area,
-    );
 
     let chunks = ratatui::layout::Layout::vertical([
         ratatui::layout::Constraint::Length(2),  // title
@@ -138,13 +127,21 @@ pub fn render_new_op_form(f: &mut Frame, form: &crate::app::NewOpForm) {
                     spans.push(Span::raw(" "));
                 }
                 if is_focused {
-                    spans.push(Span::styled("  (Enter to toggle)", Style::default().fg(DIM)));
+                    spans.push(Span::styled("  (enter)", Style::default().fg(DIM)));
                 }
                 lines.push(Line::from(spans));
                 continue;
             }
             5 => form.timeout.clone(),
-            6 => form.iterations.clone(),
+            6 => {
+                //
+                // Only show iterations when mode is agent.
+                //
+                if form.mode == 0 {
+                    continue;
+                }
+                form.iterations.clone()
+            }
             7 => {
                 //
                 // YOLO toggle display.
@@ -159,7 +156,7 @@ pub fn render_new_op_form(f: &mut Frame, form: &crate::app::NewOpForm) {
                     indicator,
                 ];
                 if is_focused {
-                    spans.push(Span::styled("  (Enter to toggle)", Style::default().fg(DIM)));
+                    spans.push(Span::styled("  (enter)", Style::default().fg(DIM)));
                 }
                 lines.push(Line::from(spans));
                 continue;

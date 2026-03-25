@@ -234,11 +234,23 @@ pub struct OperationsState {
 
 #[derive(Default)]
 pub struct CollapsedSections {
-    pub summary: bool,
-    pub result: bool,
-    pub prompt: bool,
-    pub output: bool,
-    pub elements: bool,
+    pub sections: Vec<bool>,  // indexed by section order
+    pub focused_section: usize,
+}
+
+impl CollapsedSections {
+    pub fn section_count() -> usize { 5 }
+
+    pub fn label(idx: usize) -> &'static str {
+        match idx {
+            0 => "Result",
+            1 => "Summary",
+            2 => "Prompt",
+            3 => "Output",
+            4 => "Elements",
+            _ => "",
+        }
+    }
 }
 
 impl Default for OperationsState {
@@ -253,7 +265,10 @@ impl Default for OperationsState {
             exec_selected: 0,
             detail_scroll: 0,
             detail_focus: false,
-            collapsed: CollapsedSections::default(),
+            collapsed: CollapsedSections {
+                sections: vec![false; 5],
+                focused_section: 0,
+            },
             split_percent: 50,
             dragging: false,
         }
@@ -852,13 +867,23 @@ impl App {
                 KeyCode::Esc | KeyCode::Left => {
                     self.operations.detail_focus = false;
                 }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.operations.detail_scroll =
-                        self.operations.detail_scroll.saturating_sub(1);
+                KeyCode::Up => {
+                    if self.operations.collapsed.focused_section > 0 {
+                        self.operations.collapsed.focused_section -= 1;
+                    }
                 }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    self.operations.detail_scroll =
-                        self.operations.detail_scroll.saturating_add(1);
+                KeyCode::Down => {
+                    let max = CollapsedSections::section_count().saturating_sub(1);
+                    if self.operations.collapsed.focused_section < max {
+                        self.operations.collapsed.focused_section += 1;
+                    }
+                }
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    let idx = self.operations.collapsed.focused_section;
+                    if idx < self.operations.collapsed.sections.len() {
+                        self.operations.collapsed.sections[idx] =
+                            !self.operations.collapsed.sections[idx];
+                    }
                 }
                 KeyCode::PageUp => {
                     self.operations.detail_scroll =
@@ -867,21 +892,6 @@ impl App {
                 KeyCode::PageDown => {
                     self.operations.detail_scroll =
                         self.operations.detail_scroll.saturating_add(10);
-                }
-                KeyCode::Char('1') => {
-                    self.operations.collapsed.summary = !self.operations.collapsed.summary;
-                }
-                KeyCode::Char('2') => {
-                    self.operations.collapsed.result = !self.operations.collapsed.result;
-                }
-                KeyCode::Char('3') => {
-                    self.operations.collapsed.prompt = !self.operations.collapsed.prompt;
-                }
-                KeyCode::Char('4') => {
-                    self.operations.collapsed.output = !self.operations.collapsed.output;
-                }
-                KeyCode::Char('5') => {
-                    self.operations.collapsed.elements = !self.operations.collapsed.elements;
                 }
                 _ => {}
             }
@@ -1071,8 +1081,8 @@ impl App {
             category: "custom".to_string(),
             description: String::new(),
             mode: 0,
-            timeout: "60".to_string(),
-            iterations: "5".to_string(),
+            timeout: "600".to_string(),
+            iterations: "10".to_string(),
             yolo: false,
             prompt: String::new(),
             focused_field: 0,
@@ -1139,6 +1149,16 @@ impl App {
                         form.focused_field -= 1;
                     } else {
                         form.focused_field = NewOpForm::field_count() - 1;
+                    }
+                }
+            }
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                //
+                // Shift+Enter adds newline in prompt field.
+                //
+                if let Some(ref mut form) = self.new_op_form {
+                    if form.focused_field == 8 {
+                        form.prompt.push('\n');
                     }
                 }
             }
