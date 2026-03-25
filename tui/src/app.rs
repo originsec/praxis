@@ -1180,7 +1180,7 @@ impl App {
                     }
                 }
             },
-            KeyCode::Right | KeyCode::Enter => {
+            KeyCode::Right => {
                 //
                 // Focus the detail pane for scrolling.
                 //
@@ -1190,6 +1190,12 @@ impl App {
             KeyCode::Enter => {
                 if self.operations.tab == OpsTab::Library {
                     self.open_run_target_popup();
+                } else {
+                    //
+                    // In executions tab, Enter focuses the detail pane.
+                    //
+                    self.operations.detail_focus = true;
+                    self.operations.detail_scroll = 0;
                 }
             }
             KeyCode::Char('n') => {
@@ -1197,11 +1203,10 @@ impl App {
                     self.open_new_op_form();
                 }
             }
-            KeyCode::Char('d') => {
-                if self.operations.tab == OpsTab::Library {
-                    self.delete_selected_op().await;
-                }
-            }
+            KeyCode::Char('d') => match self.operations.tab {
+                OpsTab::Library => self.delete_selected_op().await,
+                OpsTab::Executions => self.delete_selected_execution().await,
+            },
             KeyCode::Char('c') => {
                 if self.operations.tab == OpsTab::Executions {
                     self.cancel_selected_execution().await;
@@ -1317,6 +1322,37 @@ impl App {
                 let exec_id = self.operations.chain_executions[chain_idx].execution_id.clone();
                 let _ = self.client.cancel_chain(exec_id).await;
             }
+        }
+    }
+
+    async fn delete_selected_execution(&mut self) {
+        let total_ops = self.operations.operations.len();
+        let idx = self.operations.exec_selected;
+
+        if idx < total_ops {
+            let op_id = self.operations.operations[idx].operation_id.clone();
+            let _ = self.client.remove_semantic_op(op_id).await;
+        } else {
+            let chain_idx = idx - total_ops;
+            if chain_idx < self.operations.chain_executions.len() {
+                let exec_id = self.operations.chain_executions[chain_idx].execution_id.clone();
+                let _ = self.client.remove_chain_execution(exec_id).await;
+            }
+        }
+
+        self.operations.operations = self.client.get_operations().await;
+        self.operations.chain_executions = self.client.get_chain_executions().await;
+
+        //
+        // Adjust selection if it now exceeds the list length.
+        //
+
+        let total = self.operations.operations.len()
+            + self.operations.chain_executions.len();
+        if total == 0 {
+            self.operations.exec_selected = 0;
+        } else if self.operations.exec_selected >= total {
+            self.operations.exec_selected = total - 1;
         }
     }
 

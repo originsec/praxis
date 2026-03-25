@@ -87,6 +87,8 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
             Span::raw(" "),
             Span::styled("c", Style::default().fg(ACCENT)),
             Span::styled(" cancel  ", Style::default().fg(MUTED)),
+            Span::styled("d", Style::default().fg(ACCENT)),
+            Span::styled(" delete  ", Style::default().fg(MUTED)),
             Span::styled("r", Style::default().fg(ACCENT)),
             Span::styled(" refresh", Style::default().fg(MUTED)),
         ]),

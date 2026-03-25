@@ -595,4 +595,14 @@ impl Client {
         };
         self.publish_signal(message).await
     }
+
+    pub async fn remove_semantic_op(&self, operation_id: String) -> Result<()> {
+        let message = ClientSignalMessage::SemanticOpRemove { operation_id };
+        self.publish_signal(message).await
+    }
+
+    pub async fn remove_chain_execution(&self, execution_id: String) -> Result<()> {
+        let message = ClientSignalMessage::ChainExecutionRemove { execution_id };
+        self.publish_signal(message).await
+    }
 }

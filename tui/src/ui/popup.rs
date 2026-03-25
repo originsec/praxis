@@ -87,7 +87,8 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
     let mut lines: Vec<Line> = Vec::new();
     let modes = ["one-shot", "agent"];
 
-    for i in 0..NewOpForm::field_count() {
+    let render_order = [0, 1, 2, 3, 4, 6, 5, 7, 8];
+    for &i in &render_order {
         let is_focused = i == form.focused_field;
         let label = NewOpForm::field_label(i);
         let label_style = if is_focused {
