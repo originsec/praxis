@@ -71,6 +71,39 @@ scripts or other wrappers to call the Anthropic API — use the CLI as specified
 
 ---
 
+## Connector Specifications
+
+This section defines how the node invokes each supported agent for session
+operations (fingerprinting, session create/transact/close).
+
+**Claude Code (`claudecode`)**
+- Agent name: `Claude Code`
+- Agent short_name: `claudecode`
+- Fingerprint: finds `claude` and verifies `--version` output contains "claude".
+- Session transact: uses `--session-id` on first call, `--resume` thereafter;
+  yolo adds `--dangerously-skip-permissions`, `--no-chrome`, and `--add-dir` root;
+  prompt via `-p -- <prompt>`. Must unset both `CLAUDECODE` and
+  `CLAUDE_CODE_ENTRYPOINT` env vars when spawning nested. Subprocess timeout
+  must be 300s+ due to MCP server startup/teardown overhead (~50s).
+
+**Codex CLI (`codex`)**
+- Agent name: `Codex CLI`
+- Agent short_name: `codex`
+- Fingerprint: finds `codex` and verifies `--version` output contains "codex".
+- Session transact: first call `codex exec` with `--color never`, optional
+  `--cd`, optional `--add-dir` (yolo). Subsequent calls use
+  `codex exec resume --last`. Always sets `history.persistence=none`,
+  `network_access=true`, `--skip-git-repo-check`. Prompt via stdin using `-`.
+
+**Gemini CLI (`gemini`)**
+- Agent name: `Gemini CLI`
+- Agent short_name: `gemini`
+- Fingerprint: finds `gemini`, any successful `--version`.
+- Session transact: `-y` for yolo, `-r <session_id>` to resume; prompt via stdin.
+  If no session id, it discovers the latest from storage. Close deletes session.
+
+---
+
 ## Transport Primitives
 
 All communication uses the RabbitMQ Management HTTP API. Implement these four
