@@ -393,33 +393,6 @@ impl OrchestratorManager {
                                 break;
                             }
 
-                            //
-                            // Send any unsent text that precedes this tool call
-                            // so it arrives before the ToolExecuting event.
-                            //
-                            let tool_fence_pos = response_text.find("```")
-                                .or_else(|| response_text.find("{\"tool\""))
-                                .unwrap_or(response_text.len());
-
-                            if tool_fence_pos > bytes_sent {
-                                let unsent = &response_text[bytes_sent..tool_fence_pos];
-                                let unsent_trimmed = unsent.trim();
-                                if !unsent_trimmed.is_empty() {
-                                    let _ = send_to_client(
-                                        &publish_channel_clone,
-                                        &client_id_owned,
-                                        ClientDirectMessage::OrchestratorContent {
-                                            prompt_id: prompt_id.clone(),
-                                            content: unsent.to_string(),
-                                        },
-                                    ).await;
-                                }
-                            }
-                            //
-                            // Reset bytes_sent for the next iteration since
-                            // remaining_text is a new string with nothing sent.
-                            //
-                            bytes_sent = 0;
 
                             common::log_info!("Orchestrator executing tool: {}", tool_name);
 
