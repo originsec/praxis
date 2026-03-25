@@ -177,6 +177,19 @@ pub struct OperationsState {
     pub library_selected: usize,
     pub exec_selected: usize,
     pub detail_scroll: u16,
+    pub detail_focus: bool,
+    pub collapsed: CollapsedSections,
+    pub split_percent: u16,
+    pub dragging: bool,
+}
+
+#[derive(Default)]
+pub struct CollapsedSections {
+    pub summary: bool,
+    pub result: bool,
+    pub prompt: bool,
+    pub output: bool,
+    pub elements: bool,
 }
 
 impl Default for OperationsState {
@@ -190,6 +203,10 @@ impl Default for OperationsState {
             library_selected: 0,
             exec_selected: 0,
             detail_scroll: 0,
+            detail_focus: false,
+            collapsed: CollapsedSections::default(),
+            split_percent: 50,
+            dragging: false,
         }
     }
 }
@@ -317,55 +334,197 @@ impl App {
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent) {
-        //
-        // Scroll wheel works in any window for the orchestrator.
-        //
+        let h = self.terminal_width;
+        let term_h = crossterm::terminal::size().map(|(_, h)| h).unwrap_or(40);
+
         match mouse.kind {
             MouseEventKind::ScrollUp => {
-                if self.active_window == Window::Orchestrator {
-                    self.orchestrator.scroll_offset =
-                        self.orchestrator.scroll_offset.saturating_add(3);
-                    self.clamp_scroll();
+                match self.active_window {
+                    Window::Orchestrator => {
+                        self.orchestrator.scroll_offset =
+                            self.orchestrator.scroll_offset.saturating_add(3);
+                        self.clamp_scroll();
+                    }
+                    Window::Operations if self.operations.detail_focus => {
+                        self.operations.detail_scroll =
+                            self.operations.detail_scroll.saturating_sub(3);
+                    }
+                    _ => {}
                 }
                 return;
             }
             MouseEventKind::ScrollDown => {
-                if self.active_window == Window::Orchestrator {
-                    self.orchestrator.scroll_offset =
-                        self.orchestrator.scroll_offset.saturating_sub(3);
+                match self.active_window {
+                    Window::Orchestrator => {
+                        self.orchestrator.scroll_offset =
+                            self.orchestrator.scroll_offset.saturating_sub(3);
+                    }
+                    Window::Operations if self.operations.detail_focus => {
+                        self.operations.detail_scroll =
+                            self.operations.detail_scroll.saturating_add(3);
+                    }
+                    _ => {}
                 }
                 return;
             }
             _ => {}
         }
 
-        if self.active_window != Window::Nodes {
+        //
+        // Status bar clicks — last row.
+        //
+        if mouse.row >= term_h.saturating_sub(1) {
+            if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                let col = mouse.column;
+                //
+                // Approximate positions of status bar items.
+                //
+                if col < 30 {
+                    // node count area — ignore
+                } else if col < 50 {
+                    // first item region
+                }
+                // Check text positions for ^o, ^l, ^e
+                // Simpler: use column ranges based on typical layout
+                let status_text = format!(
+                    " 0 nodes  \u{00b7} ^o orchestrator  ^l nodes  ^e ops  \u{00b7} ^q quit"
+                );
+                let orch_pos = status_text.find("^o").unwrap_or(999) as u16;
+                let nodes_pos = status_text.find("^l").unwrap_or(999) as u16;
+                let ops_pos = status_text.find("^e").unwrap_or(999) as u16;
+
+                if col >= ops_pos && col < ops_pos + 7 {
+                    self.active_window = Window::Operations;
+                } else if col >= nodes_pos && col < nodes_pos + 9 {
+                    self.active_window = Window::Nodes;
+                } else if col >= orch_pos && col < orch_pos + 16 {
+                    self.active_window = Window::Orchestrator;
+                }
+                return;
+            }
+        }
+
+        //
+        // Operations window tab clicks and list clicks.
+        //
+        if self.active_window == Window::Operations {
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    //
+                    // Tab bar is at row 1 (after header row 0).
+                    //
+                    if mouse.row <= 2 {
+                        if mouse.column < 20 {
+                            self.operations.tab = OpsTab::Library;
+                        } else if mouse.column < 40 {
+                            self.operations.tab = OpsTab::Executions;
+                        }
+                        return;
+                    }
+
+                    //
+                    // List item click — rows start at ~4 (tabs + separator + header).
+                    //
+                    let list_start_row = 4u16;
+                    if mouse.row >= list_start_row {
+                        let clicked_idx = (mouse.row - list_start_row) as usize;
+                        let border_x = (h as u32 * self.operations.split_percent as u32 / 100) as u16;
+
+                        if mouse.column < border_x {
+                            //
+                            // Left pane click.
+                            //
+                            match self.operations.tab {
+                                OpsTab::Library => {
+                                    let total = self.ops_library_count();
+                                    if clicked_idx < total {
+                                        self.operations.library_selected = clicked_idx;
+                                        self.operations.detail_focus = false;
+                                    }
+                                }
+                                OpsTab::Executions => {
+                                    let total = self.operations.operations.len()
+                                        + self.operations.chain_executions.len();
+                                    if clicked_idx < total {
+                                        self.operations.exec_selected = clicked_idx;
+                                        self.operations.detail_scroll = 0;
+                                        self.operations.detail_focus = false;
+                                    }
+                                }
+                            }
+                        } else {
+                            //
+                            // Right pane (detail) click — focus it.
+                            //
+                            self.operations.detail_focus = true;
+                        }
+                    }
+
+                    //
+                    // Pane border drag start.
+                    //
+                    let border_x = (h as u32 * self.operations.split_percent as u32 / 100) as u16;
+                    if mouse.column >= border_x.saturating_sub(1)
+                        && mouse.column <= border_x + 1
+                        && mouse.row > 2
+                    {
+                        self.operations.dragging = true;
+                    }
+                }
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    if self.operations.dragging && h > 0 {
+                        let pct = (mouse.column as u32 * 100 / h as u32) as u16;
+                        self.operations.split_percent = pct.clamp(20, 80);
+                    }
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    self.operations.dragging = false;
+                }
+                _ => {}
+            }
             return;
         }
 
-        match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) => {
-                //
-                // Start drag if clicking near the split border.
-                //
-                let border_x =
-                    (self.terminal_width as u32 * self.nodes.split_percent as u32 / 100) as u16;
-                if mouse.column >= border_x.saturating_sub(1)
-                    && mouse.column <= border_x + 1
-                {
-                    self.nodes.dragging = true;
+        //
+        // Nodes window mouse handling.
+        //
+        if self.active_window == Window::Nodes {
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    let border_x =
+                        (h as u32 * self.nodes.split_percent as u32 / 100) as u16;
+
+                    //
+                    // List item click.
+                    //
+                    let list_start_row = 3u16;
+                    if mouse.row >= list_start_row && mouse.column < border_x {
+                        let clicked_idx = (mouse.row - list_start_row) as usize;
+                        if clicked_idx < self.nodes.nodes.len() {
+                            self.nodes.selected = clicked_idx;
+                        }
+                    }
+
+                    //
+                    // Drag start.
+                    //
+                    if mouse.column >= border_x.saturating_sub(1)
+                        && mouse.column <= border_x + 1
+                    {
+                        self.nodes.dragging = true;
+                    }
                 }
-            }
-            MouseEventKind::Drag(MouseButton::Left) => {
-                if self.nodes.dragging && self.terminal_width > 0 {
-                    let pct = (mouse.column as u32 * 100 / self.terminal_width as u32) as u16;
-                    self.nodes.split_percent = pct.clamp(20, 80);
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    if self.nodes.dragging && h > 0 {
+                        let pct = (mouse.column as u32 * 100 / h as u32) as u16;
+                        self.nodes.split_percent = pct.clamp(20, 80);
+                    }
                 }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    self.nodes.dragging = false;
+                }
+                _ => {}
             }
-            MouseEventKind::Up(MouseButton::Left) => {
-                self.nodes.dragging = false;
-            }
-            _ => {}
         }
     }
 
@@ -618,6 +777,50 @@ impl App {
     }
 
     async fn handle_operations_key(&mut self, key: KeyEvent) {
+        //
+        // When detail pane is focused, handle scroll and section toggles.
+        //
+        if self.operations.detail_focus {
+            match key.code {
+                KeyCode::Esc | KeyCode::Left => {
+                    self.operations.detail_focus = false;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.operations.detail_scroll =
+                        self.operations.detail_scroll.saturating_sub(1);
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.operations.detail_scroll =
+                        self.operations.detail_scroll.saturating_add(1);
+                }
+                KeyCode::PageUp => {
+                    self.operations.detail_scroll =
+                        self.operations.detail_scroll.saturating_sub(10);
+                }
+                KeyCode::PageDown => {
+                    self.operations.detail_scroll =
+                        self.operations.detail_scroll.saturating_add(10);
+                }
+                KeyCode::Char('1') => {
+                    self.operations.collapsed.summary = !self.operations.collapsed.summary;
+                }
+                KeyCode::Char('2') => {
+                    self.operations.collapsed.result = !self.operations.collapsed.result;
+                }
+                KeyCode::Char('3') => {
+                    self.operations.collapsed.prompt = !self.operations.collapsed.prompt;
+                }
+                KeyCode::Char('4') => {
+                    self.operations.collapsed.output = !self.operations.collapsed.output;
+                }
+                KeyCode::Char('5') => {
+                    self.operations.collapsed.elements = !self.operations.collapsed.elements;
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match key.code {
             KeyCode::Tab | KeyCode::BackTab => {
                 self.operations.tab = match self.operations.tab {
@@ -634,6 +837,7 @@ impl App {
                 OpsTab::Executions => {
                     if self.operations.exec_selected > 0 {
                         self.operations.exec_selected -= 1;
+                        self.operations.detail_scroll = 0;
                     }
                 }
             },
@@ -649,9 +853,17 @@ impl App {
                         + self.operations.chain_executions.len();
                     if self.operations.exec_selected + 1 < total {
                         self.operations.exec_selected += 1;
+                        self.operations.detail_scroll = 0;
                     }
                 }
             },
+            KeyCode::Right | KeyCode::Enter => {
+                //
+                // Focus the detail pane for scrolling.
+                //
+                self.operations.detail_focus = true;
+                self.operations.detail_scroll = 0;
+            }
             KeyCode::Char('e') => {
                 if self.operations.tab == OpsTab::Library {
                     self.open_run_target_popup();

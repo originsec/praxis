@@ -15,7 +15,8 @@ const STATUS_RUNNING: Color = Color::Rgb(180, 160, 60);
 const STATUS_DONE: Color = Color::Rgb(80, 160, 80);
 const STATUS_FAIL: Color = Color::Rgb(160, 60, 60);
 const STATUS_QUEUED: Color = Color::Rgb(100, 140, 180);
-const CHAIN_COLOR: Color = Color::Rgb(140, 120, 180);
+const CHAIN_COLOR: Color = Color::Rgb(80, 180, 180);
+const OP_COLOR: Color = Color::Rgb(160, 120, 200);
 const TAB_ACTIVE_BG: Color = Color::Rgb(40, 42, 40);
 
 pub fn render(f: &mut Frame, area: Rect, state: &OperationsState) {
@@ -57,7 +58,7 @@ fn render_tabs(f: &mut Frame, area: Rect, state: &OperationsState) {
         Span::styled(format!(" Library {} ", lib_count), lib_style),
         Span::raw("  "),
         Span::styled(format!(" Executions {} ", exec_count), exec_style),
-        Span::styled("  (Tab to switch)", Style::default().fg(DIM)),
+        Span::styled("  (tab)", Style::default().fg(DIM)),
     ]);
 
     let sep = Line::from(Span::styled(
@@ -96,8 +97,8 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
 
 fn render_library(f: &mut Frame, area: Rect, state: &OperationsState) {
     let chunks = Layout::horizontal([
-        Constraint::Percentage(50),
-        Constraint::Percentage(50),
+        Constraint::Percentage(state.split_percent),
+        Constraint::Percentage(100 - state.split_percent),
     ])
     .split(area);
 
@@ -107,10 +108,10 @@ fn render_library(f: &mut Frame, area: Rect, state: &OperationsState) {
 
 fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsState) {
     let header = Row::new(vec![
+        Cell::from(""),
         Cell::from("Name"),
-        Cell::from("Type"),
         Cell::from("Category"),
-        Cell::from("Mode/Elements"),
+        Cell::from("Mode"),
     ])
     .style(Style::default().fg(ACCENT));
 
@@ -121,8 +122,8 @@ fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsState) {
             continue;
         }
         rows.push(Row::new(vec![
+            Cell::from("O").style(Style::default().fg(OP_COLOR)),
             Cell::from(def.name.clone()).style(Style::default().fg(TEXT)),
-            Cell::from("op").style(Style::default().fg(MUTED)),
             Cell::from(def.category.clone()).style(Style::default().fg(DIM)),
             Cell::from(def.mode.clone()).style(Style::default().fg(DIM)),
         ]));
@@ -133,18 +134,18 @@ fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsState) {
             continue;
         }
         rows.push(Row::new(vec![
+            Cell::from("C").style(Style::default().fg(CHAIN_COLOR)),
             Cell::from(chain.name.clone()).style(Style::default().fg(TEXT)),
-            Cell::from("chain").style(Style::default().fg(CHAIN_COLOR)),
             Cell::from(chain.category.clone()).style(Style::default().fg(DIM)),
             Cell::from(format!("{} elements", chain.element_count)).style(Style::default().fg(DIM)),
         ]));
     }
 
     let widths = [
-        Constraint::Min(15),
-        Constraint::Length(6),
-        Constraint::Length(12),
-        Constraint::Length(12),
+        Constraint::Length(1),
+        Constraint::Min(10),
+        Constraint::Length(10),
+        Constraint::Length(10),
     ];
 
     let table = Table::new(rows, widths)
@@ -285,8 +286,8 @@ fn render_library_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
 
 fn render_executions(f: &mut Frame, area: Rect, state: &OperationsState) {
     let chunks = Layout::horizontal([
-        Constraint::Percentage(50),
-        Constraint::Percentage(50),
+        Constraint::Percentage(state.split_percent),
+        Constraint::Percentage(100 - state.split_percent),
     ])
     .split(area);
 
@@ -316,7 +317,7 @@ fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
         };
 
         rows.push(Row::new(vec![
-            Cell::from("\u{25b8}").style(Style::default().fg(ACCENT)),
+            Cell::from("O").style(Style::default().fg(OP_COLOR)),
             Cell::from(short_id.to_string()).style(Style::default().fg(MUTED)),
             Cell::from(op.spec.name.clone()).style(Style::default().fg(TEXT)),
             Cell::from(status_str).style(Style::default().fg(status_color)),
@@ -333,7 +334,7 @@ fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
         };
 
         rows.push(Row::new(vec![
-            Cell::from("\u{2637}").style(Style::default().fg(CHAIN_COLOR)),
+            Cell::from("C").style(Style::default().fg(CHAIN_COLOR)),
             Cell::from(short_id.to_string()).style(Style::default().fg(MUTED)),
             Cell::from(exec.chain_name.clone()).style(Style::default().fg(TEXT)),
             Cell::from(status_str).style(Style::default().fg(status_color)),
@@ -367,9 +368,15 @@ fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
 }
 
 fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
+    let border_style = if state.detail_focus {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(DIM)
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(DIM))
+        .border_style(border_style)
         .title_style(Style::default().fg(MUTED))
         .title(" Detail ");
 
@@ -387,6 +394,7 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         return;
     }
 
+    let col = &state.collapsed;
     let mut lines: Vec<Line> = Vec::new();
 
     if state.exec_selected < total_ops {
@@ -419,24 +427,36 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         ]));
 
         //
-        // Summary.
+        // Result at top (most important).
         //
-        if let Some(ref summary) = op.summary {
+        if let Some(ref result) = op.result {
+            let arrow = if col.result { "\u{25b8}" } else { "\u{25be}" };
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(" Summary", Style::default().fg(ACCENT))));
-            for line in summary.lines() {
-                lines.push(Line::from(Span::styled(format!("  {}", line), Style::default().fg(TEXT))));
+            lines.push(Line::from(vec![
+                Span::styled(format!(" {} ", arrow), Style::default().fg(ACCENT)),
+                Span::styled("Result (2)", Style::default().fg(ACCENT)),
+            ]));
+            if !col.result {
+                for line in result.lines() {
+                    lines.push(Line::from(Span::styled(format!("  {}", line), Style::default().fg(TEXT))));
+                }
             }
         }
 
         //
-        // Result / Findings.
+        // Summary.
         //
-        if let Some(ref result) = op.result {
+        if let Some(ref summary) = op.summary {
+            let arrow = if col.summary { "\u{25b8}" } else { "\u{25be}" };
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(" Result", Style::default().fg(ACCENT))));
-            for line in result.lines() {
-                lines.push(Line::from(Span::styled(format!("  {}", line), Style::default().fg(TEXT))));
+            lines.push(Line::from(vec![
+                Span::styled(format!(" {} ", arrow), Style::default().fg(ACCENT)),
+                Span::styled("Summary (1)", Style::default().fg(ACCENT)),
+            ]));
+            if !col.summary {
+                for line in summary.lines() {
+                    lines.push(Line::from(Span::styled(format!("  {}", line), Style::default().fg(TEXT))));
+                }
             }
         }
 
@@ -444,29 +464,41 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         // Prompt.
         //
         if !op.spec.operation_prompt.is_empty() {
+            let arrow = if col.prompt { "\u{25b8}" } else { "\u{25be}" };
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(" Prompt", Style::default().fg(ACCENT))));
-            for line in op.spec.operation_prompt.lines() {
-                lines.push(Line::from(Span::styled(format!("  {}", line), Style::default().fg(MUTED))));
+            lines.push(Line::from(vec![
+                Span::styled(format!(" {} ", arrow), Style::default().fg(ACCENT)),
+                Span::styled("Prompt (3)", Style::default().fg(ACCENT)),
+            ]));
+            if !col.prompt {
+                for line in op.spec.operation_prompt.lines() {
+                    lines.push(Line::from(Span::styled(format!("  {}", line), Style::default().fg(MUTED))));
+                }
             }
         }
 
         //
-        // Streaming output (session interactions).
+        // Streaming output.
         //
         if let Some(ref output) = op.output {
             if !output.is_empty() {
+                let arrow = if col.output { "\u{25b8}" } else { "\u{25be}" };
                 lines.push(Line::from(""));
-                lines.push(Line::from(Span::styled(" Output", Style::default().fg(ACCENT))));
-                for line in output.lines() {
-                    let style = if line.contains("\u{2192}") || line.contains("Sending") {
-                        Style::default().fg(ACCENT)
-                    } else if line.contains("\u{2190}") || line.contains("response") {
-                        Style::default().fg(Color::Rgb(100, 160, 180))
-                    } else {
-                        Style::default().fg(MUTED)
-                    };
-                    lines.push(Line::from(Span::styled(format!("  {}", line), style)));
+                lines.push(Line::from(vec![
+                    Span::styled(format!(" {} ", arrow), Style::default().fg(ACCENT)),
+                    Span::styled("Output (4)", Style::default().fg(ACCENT)),
+                ]));
+                if !col.output {
+                    for line in output.lines() {
+                        let style = if line.contains(">>>") || line.contains("Sending") {
+                            Style::default().fg(ACCENT)
+                        } else if line.contains("<<<") || line.contains("response") {
+                            Style::default().fg(Color::Rgb(100, 160, 180))
+                        } else {
+                            Style::default().fg(MUTED)
+                        };
+                        lines.push(Line::from(Span::styled(format!("  {}", line), style)));
+                    }
                 }
             }
         }
@@ -626,10 +658,19 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         }
     }
 
-    f.render_widget(
-        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
-        inner,
-    );
+    let scroll_hint = if state.detail_focus {
+        " \u{2191}\u{2193} scroll  1-5 toggle sections "
+    } else {
+        " Enter/\u{2192} to focus "
+    };
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(scroll_hint, Style::default().fg(DIM))));
+
+    let paragraph = Paragraph::new(Text::from(lines))
+        .wrap(Wrap { trim: false })
+        .scroll((state.detail_scroll, 0));
+
+    f.render_widget(paragraph, inner);
 }
 
 fn op_status_display(status: &SemanticOpStatus) -> (&'static str, Color) {
