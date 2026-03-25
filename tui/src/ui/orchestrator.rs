@@ -1,6 +1,5 @@
 use crate::app::{ConversationEntry, OrchestratorState};
 use crate::markdown;
-use common::PlanStepStatus;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -24,8 +23,16 @@ const PLAN_ACTIVE: Color = Color::Rgb(180, 160, 60);
 const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
+    let plan_height = if state.current_plan.is_some() {
+        let plan = state.current_plan.as_ref().unwrap();
+        (plan.steps.len() as u16 + 2).min(10)
+    } else {
+        0
+    };
+
     let chunks = Layout::vertical([
         Constraint::Min(1),
+        Constraint::Length(plan_height),
         Constraint::Length(1),
         Constraint::Length(3),
         Constraint::Length(1),
@@ -43,9 +50,13 @@ pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
         }
     };
 
-    render_model_info(f, padded(chunks[1]), state);
-    render_input(f, padded(chunks[2]), state);
-    render_tokens(f, padded(chunks[3]), state);
+    if plan_height > 0 {
+        render_plan_widget(f, padded(chunks[1]), state);
+    }
+
+    render_model_info(f, padded(chunks[2]), state);
+    render_input(f, padded(chunks[3]), state);
+    render_tokens(f, padded(chunks[4]), state);
 }
 
 fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
@@ -150,12 +161,8 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     }
 
     //
-    // Render current plan (always at the end, updated in-place).
+    // Plan is rendered as a separate fixed widget, not in the scroll area.
     //
-    if let Some(ref plan) = state.current_plan {
-        let plan = plan.clone();
-        lines.extend(build_plan(&plan));
-    }
 
     //
     // Show active tool or waiting spinner.
@@ -362,44 +369,35 @@ fn build_tool_summary(tools: &[crate::app::ToolCall]) -> Vec<Line<'static>> {
     vec![Line::from(spans)]
 }
 
-fn build_plan(plan: &common::OrchestratorPlan) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-    lines.push(Line::from(""));
+fn render_plan_widget(f: &mut Frame, area: Rect, state: &OrchestratorState) {
+    let Some(ref plan) = state.current_plan else {
+        return;
+    };
+
+    let mut lines: Vec<Line> = Vec::new();
 
     if let Some(ref desc) = plan.current_step_description {
         lines.push(Line::from(vec![
             Span::styled(
                 "\u{25b8} ",
-                Style::default()
-                    .fg(TEXT)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 desc.clone(),
-                Style::default()
-                    .fg(TEXT)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
             ),
         ]));
     }
 
     for step in &plan.steps {
         let (icon, icon_color, text_style) = match step.status {
-            PlanStepStatus::Done => (
-                "\u{2713}",
-                PLAN_DONE,
-                Style::default().fg(DIM),
-            ),
-            PlanStepStatus::InProgress => (
+            common::PlanStepStatus::Done => ("\u{2713}", PLAN_DONE, Style::default().fg(DIM)),
+            common::PlanStepStatus::InProgress => (
                 "\u{25cf}",
                 PLAN_ACTIVE,
                 Style::default().fg(TEXT),
             ),
-            PlanStepStatus::NotStarted => (
-                "\u{25cb}",
-                DIM,
-                Style::default().fg(DIM),
-            ),
+            common::PlanStepStatus::NotStarted => ("\u{25cb}", DIM, Style::default().fg(DIM)),
         };
         lines.push(Line::from(vec![
             Span::styled(format!("{} ", icon), Style::default().fg(icon_color)),
@@ -409,13 +407,13 @@ fn build_plan(plan: &common::OrchestratorPlan) -> Vec<Line<'static>> {
 
     if let Some(ref summary) = plan.summary {
         lines.push(Line::from(Span::styled(
-            format!("{}", summary),
+            summary.clone(),
             Style::default().fg(DIM),
         )));
     }
 
-    lines.push(Line::from(""));
-    lines
+    let paragraph = Paragraph::new(Text::from(lines));
+    f.render_widget(paragraph, area);
 }
 
 fn render_model_info(f: &mut Frame, area: Rect, state: &OrchestratorState) {

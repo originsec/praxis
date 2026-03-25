@@ -1043,6 +1043,18 @@ impl App {
     }
 
     fn handle_orchestrator_event(&mut self, msg: ClientDirectMessage) {
+        //
+        // Append raw event to /tmp/session.log for debugging.
+        //
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/session.log")
+        {
+            let _ = writeln!(f, "{:?}", msg);
+        }
+
         match msg {
             ClientDirectMessage::OrchestratorStarted { provider, model } => {
                 self.orchestrator.provider = Some(provider);
