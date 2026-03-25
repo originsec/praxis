@@ -107,7 +107,7 @@ Invocation details enforced by the node:
     - If `state.process_id` exists, the node kills the process tree.
     - If `state.cdp_handle` exists, the node cleans up the CDP connection.
 
-### Per-Agent Specifications
+### Connector Specifications
 
 **Claude Code (`claudecode`)**
 - Agent name: `Claude Code`
