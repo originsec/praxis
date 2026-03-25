@@ -474,12 +474,18 @@ impl OrchestratorManager {
 
                         if !tool_results.is_empty() {
                             //
-                            // Send remaining text after all tool calls. This
-                            // text was not streamed — it's what follows the
-                            // last tool call JSON in the response.
+                            // Send remaining text after all tool calls, but
+                            // only what hasn't already been sent. The
+                            // response_text at this point is the text after
+                            // the last tool call JSON in the original
+                            // full_response. Calculate its offset in
+                            // full_response and skip what was already streamed.
                             //
                             let remaining = response_text.trim();
-                            if !remaining.is_empty() {
+                            let offset_in_full = full_response.len().saturating_sub(
+                                response_text.len()
+                            );
+                            if !remaining.is_empty() && offset_in_full >= bytes_sent {
                                 let _ = send_to_client(
                                     &publish_channel_clone,
                                     &client_id_owned,
@@ -488,6 +494,25 @@ impl OrchestratorManager {
                                         content: remaining.to_string(),
                                     },
                                 ).await;
+                            } else if !remaining.is_empty() && bytes_sent < full_response.len() {
+                                //
+                                // Part of this text may overlap with streamed
+                                // content. Send only the unsent tail.
+                                //
+                                let skip = bytes_sent.saturating_sub(offset_in_full);
+                                if skip < remaining.len() {
+                                    let unsent = remaining[skip..].trim();
+                                    if !unsent.is_empty() {
+                                        let _ = send_to_client(
+                                            &publish_channel_clone,
+                                            &client_id_owned,
+                                            ClientDirectMessage::OrchestratorContent {
+                                                prompt_id: prompt_id.clone(),
+                                                content: unsent.to_string(),
+                                            },
+                                        ).await;
+                                    }
+                                }
                             }
 
                             if let Some(usage) = &stream_usage {
