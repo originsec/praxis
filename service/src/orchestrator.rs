@@ -321,9 +321,28 @@ impl OrchestratorManager {
                                         if !held_back {
                                             send_buffer.push_str(&delta.content);
 
-                                            if send_buffer.contains("{\"tool\"")
-                                                || send_buffer.contains("```")
-                                            {
+                                            let tool_marker = send_buffer.find("{\"tool\"")
+                                                .or_else(|| send_buffer.find("```"));
+
+                                            if let Some(marker_pos) = tool_marker {
+                                                //
+                                                // Flush text before the tool marker so it
+                                                // arrives at the client before tool events.
+                                                //
+                                                if marker_pos > 0 {
+                                                    let pre_tool = send_buffer[..marker_pos].to_string();
+                                                    if !pre_tool.trim().is_empty() {
+                                                        bytes_sent += pre_tool.len();
+                                                        let _ = send_to_client(
+                                                            &publish_channel_clone,
+                                                            &client_id_owned,
+                                                            ClientDirectMessage::OrchestratorContent {
+                                                                prompt_id: prompt_id.clone(),
+                                                                content: pre_tool,
+                                                            },
+                                                        ).await;
+                                                    }
+                                                }
                                                 held_back = true;
                                                 send_buffer.clear();
                                             } else if send_buffer.len() >= 50 || delta.content.contains('\n') {
