@@ -418,7 +418,7 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
             format!(" Op: {}", op.spec.name),
             Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
         )));
-        lines.push(Line::from(vec![
+        let mut status_spans = vec![
             Span::styled(" Status: ", Style::default().fg(DIM)),
             Span::styled(status_str, Style::default().fg(status_color)),
             Span::styled("  Agent: ", Style::default().fg(DIM)),
@@ -428,20 +428,19 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
             Span::styled("  Duration: ", Style::default().fg(DIM)),
             Span::styled(duration.clone(), Style::default().fg(ACCENT)),
             Span::styled(format!("  {}", short_id), Style::default().fg(DIM)),
-        ]));
+        ];
 
-        //
-        // Result at top (most important).
-        //
         if let Some(ref result) = op.result {
-            let focused = state.detail_focus && col.focused_section == 0;
-            lines.extend(section_header_line("Result", col.sections[0], focused));
-            if !col.sections[0] {
-                for line in result.lines() {
-                    lines.push(Line::from(Span::styled(format!("  {}", line), Style::default().fg(TEXT))));
-                }
-            }
+            let short_result = if result.len() > 40 {
+                format!("{}...", &result[..40])
+            } else {
+                result.replace('\n', " ")
+            };
+            status_spans.push(Span::styled("  Result: ", Style::default().fg(DIM)));
+            status_spans.push(Span::styled(short_result, Style::default().fg(ACCENT)));
         }
+
+        lines.push(Line::from(status_spans));
 
         //
         // Summary.
@@ -646,13 +645,6 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         }
     }
 
-    let scroll_hint = if state.detail_focus {
-        " \u{2191}\u{2193} sections  enter toggle  pgup/pgdn scroll "
-    } else {
-        ""
-    };
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(scroll_hint, Style::default().fg(DIM))));
 
     let paragraph = Paragraph::new(Text::from(lines))
         .wrap(Wrap { trim: false })
