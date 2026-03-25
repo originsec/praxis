@@ -415,7 +415,11 @@ impl OrchestratorManager {
                                     ).await;
                                 }
                             }
-                            bytes_sent = response_text.len().saturating_sub(remaining_text.len());
+                            //
+                            // Reset bytes_sent for the next iteration since
+                            // remaining_text is a new string with nothing sent.
+                            //
+                            bytes_sent = 0;
 
                             common::log_info!("Orchestrator executing tool: {}", tool_name);
 
