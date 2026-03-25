@@ -474,22 +474,20 @@ impl OrchestratorManager {
 
                         if !tool_results.is_empty() {
                             //
-                            // Send remaining text (tool calls stripped) that
-                            // wasn't already streamed to the client.
+                            // Send remaining text after all tool calls. This
+                            // text was not streamed — it's what follows the
+                            // last tool call JSON in the response.
                             //
                             let remaining = response_text.trim();
-                            if !remaining.is_empty() && remaining.len() > bytes_sent {
-                                let unsent = &remaining[bytes_sent.min(remaining.len())..];
-                                if !unsent.trim().is_empty() {
-                                    let _ = send_to_client(
-                                        &publish_channel_clone,
-                                        &client_id_owned,
-                                        ClientDirectMessage::OrchestratorContent {
-                                            prompt_id: prompt_id.clone(),
-                                            content: unsent.to_string(),
-                                        },
-                                    ).await;
-                                }
+                            if !remaining.is_empty() {
+                                let _ = send_to_client(
+                                    &publish_channel_clone,
+                                    &client_id_owned,
+                                    ClientDirectMessage::OrchestratorContent {
+                                        prompt_id: prompt_id.clone(),
+                                        content: remaining.to_string(),
+                                    },
+                                ).await;
                             }
 
                             if let Some(usage) = &stream_usage {
