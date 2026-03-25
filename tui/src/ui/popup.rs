@@ -57,25 +57,50 @@ pub fn render_confirm(f: &mut Frame, confirm: &crate::app::ConfirmAction) {
 }
 
 pub fn render_new_op_form(f: &mut Frame, form: &crate::app::NewOpForm) {
-    let height = (form.fields.len() as u16 + 3).min(20);
-    let width = 60u16.min(f.area().width - 4);
-    let area = centered_rect_fixed(width, height, f.area());
+    use crate::app::NewOpForm;
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(DIM))
-        .title(" New Operation ")
-        .title_style(Style::default().fg(ACCENT))
-        .style(Style::default().bg(POPUP_BG));
+    //
+    // Full-screen form: fills the entire frame area.
+    //
+    let area = f.area();
 
     f.render_widget(Clear, area);
-    f.render_widget(block.clone(), area);
+    f.render_widget(
+        Block::default().style(Style::default().bg(POPUP_BG)),
+        area,
+    );
 
-    let inner = block.inner(area);
+    let chunks = ratatui::layout::Layout::vertical([
+        ratatui::layout::Constraint::Length(2),  // title
+        ratatui::layout::Constraint::Min(1),     // fields
+        ratatui::layout::Constraint::Length(1),   // hints
+    ])
+    .split(area);
+
+    //
+    // Title.
+    //
+    let title = Paragraph::new(Line::from(Span::styled(
+        " New Operation",
+        Style::default().fg(TEXT).add_modifier(ratatui::style::Modifier::BOLD),
+    )));
+    f.render_widget(title, chunks[0]);
+
+    //
+    // Fields with proper spacing and labels.
+    //
+    let inner = ratatui::layout::Rect {
+        x: chunks[1].x + 2,
+        width: chunks[1].width.saturating_sub(4),
+        ..chunks[1]
+    };
+
     let mut lines: Vec<Line> = Vec::new();
+    let modes = ["one-shot", "agent"];
 
-    for (i, (name, value)) in form.fields.iter().enumerate() {
+    for i in 0..NewOpForm::field_count() {
         let is_focused = i == form.focused_field;
+        let label = NewOpForm::field_label(i);
         let label_style = if is_focused {
             Style::default().fg(ACCENT)
         } else {
@@ -86,23 +111,117 @@ pub fn render_new_op_form(f: &mut Frame, form: &crate::app::NewOpForm) {
         } else {
             Style::default().fg(DIM)
         };
-
         let cursor = if is_focused { "\u{258f}" } else { "" };
 
+        let value = match i {
+            0 => form.name.clone(),
+            1 => form.short_name.clone(),
+            2 => form.category.clone(),
+            3 => form.description.clone(),
+            4 => {
+                //
+                // Mode toggle display.
+                //
+                let mut spans = vec![Span::styled(format!("{}: ", label), label_style)];
+                for (mi, m) in modes.iter().enumerate() {
+                    if mi == form.mode {
+                        spans.push(Span::styled(
+                            format!(" {} ", m),
+                            Style::default().fg(Color::Black).bg(ACCENT),
+                        ));
+                    } else {
+                        spans.push(Span::styled(
+                            format!(" {} ", m),
+                            Style::default().fg(DIM),
+                        ));
+                    }
+                    spans.push(Span::raw(" "));
+                }
+                if is_focused {
+                    spans.push(Span::styled("  (Enter to toggle)", Style::default().fg(DIM)));
+                }
+                lines.push(Line::from(spans));
+                continue;
+            }
+            5 => form.timeout.clone(),
+            6 => form.iterations.clone(),
+            7 => {
+                //
+                // YOLO toggle display.
+                //
+                let indicator = if form.yolo {
+                    Span::styled(" \u{25cf} true ", Style::default().fg(Color::Black).bg(Color::Rgb(180, 160, 60)))
+                } else {
+                    Span::styled(" \u{25cb} false ", Style::default().fg(DIM))
+                };
+                let mut spans = vec![
+                    Span::styled(format!("{}: ", label), label_style),
+                    indicator,
+                ];
+                if is_focused {
+                    spans.push(Span::styled("  (Enter to toggle)", Style::default().fg(DIM)));
+                }
+                lines.push(Line::from(spans));
+                continue;
+            }
+            8 => form.prompt.clone(),
+            _ => String::new(),
+        };
+
+        //
+        // Prompt gets a larger display.
+        //
+        if i == 8 {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(format!("{}:", label), label_style)));
+            if value.is_empty() && is_focused {
+                lines.push(Line::from(Span::styled(
+                    cursor,
+                    Style::default().fg(ACCENT),
+                )));
+            } else {
+                for line in value.lines() {
+                    lines.push(Line::from(Span::styled(line.to_string(), value_style)));
+                }
+                if is_focused {
+                    // Show cursor at end of last line
+                    if let Some(last) = lines.last_mut() {
+                        let spans = vec![
+                            Span::styled(
+                                value.lines().last().unwrap_or("").to_string(),
+                                value_style,
+                            ),
+                            Span::styled(cursor, Style::default().fg(ACCENT)),
+                        ];
+                        *last = Line::from(spans);
+                    }
+                }
+            }
+            continue;
+        }
+
         lines.push(Line::from(vec![
-            Span::styled(format!(" {}: ", name), label_style),
-            Span::styled(value.clone(), value_style),
+            Span::styled(format!("{}: ", label), label_style),
+            Span::styled(value, value_style),
             Span::styled(cursor, Style::default().fg(ACCENT)),
         ]));
     }
 
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        " Tab/\u{2191}\u{2193} fields  Enter submit  Esc cancel",
-        Style::default().fg(DIM),
-    )));
-
     f.render_widget(Paragraph::new(lines), inner);
+
+    //
+    // Bottom hints.
+    //
+    let hints = Line::from(vec![
+        Span::raw(" "),
+        Span::styled("Tab/\u{2191}\u{2193}", Style::default().fg(ACCENT)),
+        Span::styled(" fields  ", Style::default().fg(MUTED)),
+        Span::styled("Enter", Style::default().fg(ACCENT)),
+        Span::styled(" create  ", Style::default().fg(MUTED)),
+        Span::styled("Esc", Style::default().fg(ACCENT)),
+        Span::styled(" cancel", Style::default().fg(MUTED)),
+    ]);
+    f.render_widget(Paragraph::new(hints), chunks[2]);
 }
 
 //

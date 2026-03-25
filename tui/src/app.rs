@@ -45,8 +45,39 @@ pub enum ConfirmKind {
 }
 
 pub struct NewOpForm {
-    pub fields: Vec<(&'static str, String)>,
-    pub focused_field: usize,
+    pub name: String,
+    pub short_name: String,
+    pub category: String,
+    pub description: String,
+    pub mode: usize,         // 0=one-shot, 1=agent
+    pub timeout: String,
+    pub iterations: String,
+    pub yolo: bool,
+    pub prompt: String,
+    pub focused_field: usize, // 0-8
+}
+
+impl NewOpForm {
+    pub fn field_count() -> usize { 9 }
+
+    pub fn field_label(idx: usize) -> &'static str {
+        match idx {
+            0 => "Name",
+            1 => "Short Name",
+            2 => "Category",
+            3 => "Description",
+            4 => "Mode",
+            5 => "Timeout",
+            6 => "Iterations",
+            7 => "YOLO",
+            8 => "Prompt",
+            _ => "",
+        }
+    }
+
+    pub fn is_toggle(idx: usize) -> bool {
+        matches!(idx, 4 | 7)
+    }
 }
 
 #[derive(Clone)]
@@ -1035,17 +1066,15 @@ impl App {
 
     fn open_new_op_form(&mut self) {
         self.new_op_form = Some(NewOpForm {
-            fields: vec![
-                ("Name", String::new()),
-                ("Short Name", String::new()),
-                ("Category", "custom".to_string()),
-                ("Description", String::new()),
-                ("Prompt", String::new()),
-                ("Mode", "one-shot".to_string()),
-                ("Timeout", "60".to_string()),
-                ("Iterations", "5".to_string()),
-                ("YOLO", "false".to_string()),
-            ],
+            name: String::new(),
+            short_name: String::new(),
+            category: "custom".to_string(),
+            description: String::new(),
+            mode: 0,
+            timeout: "60".to_string(),
+            iterations: "5".to_string(),
+            yolo: false,
+            prompt: String::new(),
             focused_field: 0,
         });
     }
@@ -1056,35 +1085,26 @@ impl App {
             None => return,
         };
 
-        let get = |name: &str| -> String {
-            form.fields.iter()
-                .find(|(n, _)| *n == name)
-                .map(|(_, v)| v.clone())
-                .unwrap_or_default()
-        };
-
-        let name = get("Name");
-        let short_name = get("Short Name");
-        let category = get("Category");
-
-        if name.is_empty() || short_name.is_empty() {
+        if form.name.is_empty() || form.short_name.is_empty() {
             return;
         }
 
+        let mode_str = if form.mode == 0 { "one-shot" } else { "agent" };
+
         let op_def = serde_json::json!({
-            "full_name": format!("{}::{}", category, short_name),
-            "category": category,
-            "short_name": short_name,
-            "name": name,
-            "description": get("Description"),
+            "full_name": format!("{}::{}", form.category, form.short_name),
+            "category": form.category,
+            "short_name": form.short_name,
+            "name": form.name,
+            "description": form.description,
             "agent_info": "",
-            "timeout": get("Timeout").parse::<u64>().unwrap_or(60),
-            "operation_prompt": get("Prompt"),
-            "mode": get("Mode"),
-            "agent_iterations": get("Iterations").parse::<u32>().unwrap_or(5),
+            "timeout": form.timeout.parse::<u64>().unwrap_or(60),
+            "operation_prompt": form.prompt,
+            "mode": mode_str,
+            "agent_iterations": form.iterations.parse::<u32>().unwrap_or(5),
             "operation_chain": [],
             "disabled": false,
-            "yolo_mode": get("YOLO") == "true",
+            "yolo_mode": form.yolo,
             "model_ref": null,
         });
 
@@ -1110,7 +1130,7 @@ impl App {
             }
             KeyCode::Tab | KeyCode::Down => {
                 if let Some(ref mut form) = self.new_op_form {
-                    form.focused_field = (form.focused_field + 1) % form.fields.len();
+                    form.focused_field = (form.focused_field + 1) % NewOpForm::field_count();
                 }
             }
             KeyCode::BackTab | KeyCode::Up => {
@@ -1118,32 +1138,52 @@ impl App {
                     if form.focused_field > 0 {
                         form.focused_field -= 1;
                     } else {
-                        form.focused_field = form.fields.len() - 1;
+                        form.focused_field = NewOpForm::field_count() - 1;
                     }
                 }
             }
-            KeyCode::Enter => {
-                //
-                // If on Mode field, toggle between one-shot/agent.
-                // If on YOLO field, toggle true/false.
-                // Otherwise submit the form.
-                //
+            KeyCode::Enter | KeyCode::Char(' ') => {
                 let should_submit = if let Some(ref mut form) = self.new_op_form {
-                    let (name, val) = &mut form.fields[form.focused_field];
-                    match *name {
-                        "Mode" => {
-                            *val = if val == "one-shot" { "agent".to_string() } else { "one-shot".to_string() };
-                            false
-                        }
-                        "YOLO" => {
-                            *val = if val == "true" { "false".to_string() } else { "true".to_string() };
-                            false
-                        }
-                        _ => true,
+                    let idx = form.focused_field;
+                    if idx == 4 {
+                        // Mode toggle
+                        form.mode = (form.mode + 1) % 2;
+                        false
+                    } else if idx == 7 {
+                        // YOLO toggle
+                        form.yolo = !form.yolo;
+                        false
+                    } else if key.code == KeyCode::Char(' ') {
+                        // Space just types in text fields
+                        false
+                    } else {
+                        true
                     }
                 } else {
                     false
                 };
+
+                //
+                // Space in text fields adds a space character.
+                //
+                if key.code == KeyCode::Char(' ') {
+                    if let Some(ref mut form) = self.new_op_form {
+                        let idx = form.focused_field;
+                        if !NewOpForm::is_toggle(idx) {
+                            match idx {
+                                0 => form.name.push(' '),
+                                1 => form.short_name.push(' '),
+                                2 => form.category.push(' '),
+                                3 => form.description.push(' '),
+                                5 => form.timeout.push(' '),
+                                6 => form.iterations.push(' '),
+                                8 => form.prompt.push(' '),
+                                _ => {}
+                            }
+                        }
+                    }
+                    return;
+                }
 
                 if should_submit {
                     self.submit_new_op().await;
@@ -1151,17 +1191,40 @@ impl App {
             }
             KeyCode::Char(c) => {
                 if let Some(ref mut form) = self.new_op_form {
-                    form.fields[form.focused_field].1.push(c);
+                    if !NewOpForm::is_toggle(form.focused_field) {
+                        let idx = form.focused_field;
+                        match idx {
+                            0 => form.name.push(c),
+                            1 => form.short_name.push(c),
+                            2 => form.category.push(c),
+                            3 => form.description.push(c),
+                            5 => form.timeout.push(c),
+                            6 => form.iterations.push(c),
+                            8 => form.prompt.push(c),
+                            _ => {}
+                        }
+                    }
                 }
             }
             KeyCode::Backspace => {
                 if let Some(ref mut form) = self.new_op_form {
-                    form.fields[form.focused_field].1.pop();
+                    let idx = form.focused_field;
+                    match idx {
+                        0 => { form.name.pop(); }
+                        1 => { form.short_name.pop(); }
+                        2 => { form.category.pop(); }
+                        3 => { form.description.pop(); }
+                        5 => { form.timeout.pop(); }
+                        6 => { form.iterations.pop(); }
+                        8 => { form.prompt.pop(); }
+                        _ => {}
+                    }
                 }
             }
             _ => {}
         }
     }
+
 
     async fn delete_selected_op(&mut self) {
         let enabled_ops: Vec<_> = self.operations.op_definitions
