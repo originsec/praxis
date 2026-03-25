@@ -122,16 +122,29 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                         });
                     } else {
                         //
-                        // Split visible text at tool call offsets that
-                        // fall within this segment.
+                        // Split visible text at tool call offsets, snapping
+                        // to the nearest preceding newline so text isn't
+                        // cut mid-sentence.
                         //
                         let mut text_offset = 0usize;
                         for &tool_off in &tool_offsets {
                             if tool_off > seg_start && tool_off < seg_end {
-                                let split_at = tool_off - seg_start;
-                                if split_at > text_offset && split_at <= text.len() {
+                                let raw_split = tool_off - seg_start;
+                                if raw_split <= text_offset || raw_split > text.len() {
+                                    continue;
+                                }
+
+                                //
+                                // Find the last newline before the split point.
+                                //
+                                let split_at = text[text_offset..raw_split]
+                                    .rfind('\n')
+                                    .map(|p| text_offset + p + 1)
+                                    .unwrap_or(raw_split);
+
+                                if split_at > text_offset {
                                     let chunk = &text[text_offset..split_at];
-                                    if !chunk.is_empty() {
+                                    if !chunk.trim().is_empty() {
                                         events.push(RenderEvent {
                                             offset: seg_start + text_offset,
                                             kind: RenderEventKind::Visible(chunk.to_string()),
