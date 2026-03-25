@@ -5,11 +5,14 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, Mous
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
+use chrono::Utc;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Window {
     Orchestrator,
     Nodes,
+    Operations,
 }
 
 //
@@ -26,6 +29,7 @@ pub struct Popup {
 pub enum PopupKind {
     CommandPalette,
     ModelSelect,
+    SaveSession,
 }
 
 #[derive(Clone)]
@@ -52,6 +56,7 @@ pub struct App {
     pub active_window: Window,
     pub orchestrator: OrchestratorState,
     pub nodes: NodesState,
+    pub operations: OperationsState,
     pub client: Arc<Client>,
     pub should_quit: bool,
     pub connected: bool,
@@ -75,6 +80,7 @@ pub enum ConversationEntry {
         content: String,
         tool_calls: Vec<(usize, Vec<ToolCall>)>, // (content_offset, tools)
     },
+    Info(String),
     Error(String),
 }
 
@@ -161,12 +167,37 @@ impl Default for NodesState {
     }
 }
 
+pub struct OperationsState {
+    pub op_definitions: Vec<common::OperationDefinitionInfo>,
+    pub chain_definitions: Vec<common::ChainDefinitionInfo>,
+    pub operations: Vec<common::SemanticOpUpdate>,
+    pub chain_executions: Vec<common::ChainExecutionUpdate>,
+    pub available_selected: usize,
+    pub exec_selected: usize,
+    pub focused_pane: u8, // 0=available, 1=executions, 2=detail
+}
+
+impl Default for OperationsState {
+    fn default() -> Self {
+        Self {
+            op_definitions: Vec::new(),
+            chain_definitions: Vec::new(),
+            operations: Vec::new(),
+            chain_executions: Vec::new(),
+            available_selected: 0,
+            exec_selected: 0,
+            focused_pane: 0,
+        }
+    }
+}
+
 impl App {
     pub fn new(client: Arc<Client>) -> Self {
         Self {
             active_window: Window::Orchestrator,
             orchestrator: OrchestratorState::default(),
             nodes: NodesState::default(),
+            operations: OperationsState::default(),
             client,
             should_quit: false,
             connected: true,
@@ -205,7 +236,15 @@ impl App {
             AppEvent::Terminal(Event::Mouse(mouse)) => self.handle_mouse(mouse),
             AppEvent::Orchestrator(msg) => self.handle_orchestrator_event(msg),
             AppEvent::StateUpdate(state) => self.handle_state_update(state),
-            AppEvent::Tick => {}
+            AppEvent::Tick => {
+                //
+                // Periodically refresh operations data when viewing that window.
+                //
+                if self.active_window == Window::Operations {
+                    self.operations.operations = self.client.get_operations().await;
+                    self.operations.chain_executions = self.client.get_chain_executions().await;
+                }
+            }
             _ => {}
         }
     }
@@ -216,6 +255,11 @@ impl App {
         // For command palette, typing still goes to the input.
         //
         if let Some(ref popup) = self.popup {
+            if matches!(popup.kind, PopupKind::SaveSession) {
+                self.handle_save_session_key(key).await;
+                return;
+            }
+
             match key.code {
                 KeyCode::Esc => {
                     self.popup = None;
@@ -253,6 +297,11 @@ impl App {
                     self.active_window = Window::Nodes;
                     return;
                 }
+                KeyCode::Char('e') => {
+                    self.active_window = Window::Operations;
+                    self.refresh_operations().await;
+                    return;
+                }
                 KeyCode::Char('m') => {
                     self.open_model_select().await;
                     return;
@@ -264,6 +313,7 @@ impl App {
         match self.active_window {
             Window::Orchestrator => self.handle_orchestrator_key(key).await,
             Window::Nodes => self.handle_nodes_key(key),
+            Window::Operations => self.handle_operations_key(key).await,
         }
     }
 
@@ -335,6 +385,10 @@ impl App {
                     if self.orchestrator.is_streaming {
                         let _ = self.client.cancel_orchestrator().await;
                     }
+                    return;
+                }
+                KeyCode::Char('s') => {
+                    self.open_save_session();
                     return;
                 }
                 _ => {}
@@ -547,6 +601,164 @@ impl App {
         }
     }
 
+    async fn refresh_operations(&mut self) {
+        let _ = self.client.request_op_def_list().await;
+        let _ = self.client.request_semantic_op_list().await;
+        let _ = self.client.request_chain_list().await;
+        let _ = self.client.request_chain_execution_list().await;
+
+        //
+        // Brief delay then fetch cached results.
+        //
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        self.operations.op_definitions = self.client.get_operation_definitions().await;
+        self.operations.chain_definitions = self.client.get_chain_definitions().await;
+        self.operations.operations = self.client.get_operations().await;
+        self.operations.chain_executions = self.client.get_chain_executions().await;
+    }
+
+    async fn handle_operations_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Tab => {
+                self.operations.focused_pane = (self.operations.focused_pane + 1) % 3;
+            }
+            KeyCode::Up => {
+                match self.operations.focused_pane {
+                    0 => {
+                        if self.operations.available_selected > 0 {
+                            self.operations.available_selected -= 1;
+                        }
+                    }
+                    1 => {
+                        if self.operations.exec_selected > 0 {
+                            self.operations.exec_selected -= 1;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            KeyCode::Down => {
+                match self.operations.focused_pane {
+                    0 => {
+                        let total = self.operations.op_definitions.iter().filter(|d| !d.disabled).count()
+                            + self.operations.chain_definitions.iter().filter(|c| !c.disabled).count();
+                        if self.operations.available_selected + 1 < total {
+                            self.operations.available_selected += 1;
+                        }
+                    }
+                    1 => {
+                        let total = self.operations.operations.len()
+                            + self.operations.chain_executions.len();
+                        if self.operations.exec_selected + 1 < total {
+                            self.operations.exec_selected += 1;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            KeyCode::Enter => {
+                if self.operations.focused_pane == 0 {
+                    self.run_selected_operation().await;
+                }
+            }
+            KeyCode::Char('c') => {
+                if self.operations.focused_pane == 1 {
+                    self.cancel_selected_execution().await;
+                }
+            }
+            KeyCode::Char('r') => {
+                self.refresh_operations().await;
+            }
+            _ => {}
+        }
+    }
+
+    async fn run_selected_operation(&mut self) {
+        //
+        // Determine what's selected — an op or a chain.
+        //
+        let enabled_ops: Vec<_> = self.operations.op_definitions
+            .iter()
+            .filter(|d| !d.disabled)
+            .collect();
+        let enabled_chains: Vec<_> = self.operations.chain_definitions
+            .iter()
+            .filter(|c| !c.disabled)
+            .collect();
+
+        let idx = self.operations.available_selected;
+
+        //
+        // Need a node and agent. Use first available node with a selected agent.
+        //
+        let (node_id, agent) = match self.nodes.nodes.first() {
+            Some(node) => {
+                let agent_name = node
+                    .selected_agent
+                    .as_ref()
+                    .map(|a| a.short_name.clone())
+                    .or_else(|| {
+                        node.discovered_agents.first().map(|a| a.short_name.clone())
+                    });
+                match agent_name {
+                    Some(a) => (node.node_id.clone(), a),
+                    None => return,
+                }
+            }
+            None => return,
+        };
+
+        if idx < enabled_ops.len() {
+            let op_name = enabled_ops[idx].full_name.clone();
+            match self.client.run_semantic_op(
+                node_id, agent, op_name, None,
+            ).await {
+                Ok(_) => {}
+                Err(e) => {
+                    self.orchestrator
+                        .messages
+                        .push(ConversationEntry::Error(format!("Op run failed: {}", e)));
+                }
+            }
+        } else {
+            let chain_idx = idx - enabled_ops.len();
+            if chain_idx < enabled_chains.len() {
+                let chain_id = enabled_chains[chain_idx].id.clone();
+                if let Err(e) = self.client.run_chain(
+                    chain_id, node_id, agent, None,
+                ).await {
+                    self.orchestrator
+                        .messages
+                        .push(ConversationEntry::Error(format!("Chain run failed: {}", e)));
+                }
+            }
+        }
+
+        //
+        // Refresh after launching.
+        //
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        self.operations.operations = self.client.get_operations().await;
+        self.operations.chain_executions = self.client.get_chain_executions().await;
+    }
+
+    async fn cancel_selected_execution(&mut self) {
+        let total_ops = self.operations.operations.len();
+        let idx = self.operations.exec_selected;
+
+        if idx < total_ops {
+            let op_id = self.operations.operations[idx].operation_id.clone();
+            let _ = self.client.cancel_semantic_op(op_id).await;
+        } else {
+            let chain_idx = idx - total_ops;
+            if chain_idx < self.operations.chain_executions.len() {
+                let exec_id = self.operations.chain_executions[chain_idx].execution_id.clone();
+                let _ = self.client.cancel_chain(exec_id).await;
+            }
+        }
+    }
+
     fn open_command_palette(&mut self) {
         let commands = vec![
             PopupItem {
@@ -674,6 +886,7 @@ impl App {
                             self.popup = None;
                             self.select_model(&value).await;
                         }
+                        PopupKind::SaveSession => {}
                     }
                 }
             }
@@ -714,6 +927,126 @@ impl App {
         }
         self.orchestrator = OrchestratorState::default();
         self.start_orchestrator_session().await;
+    }
+
+    fn open_save_session(&mut self) {
+        let timestamp = Utc::now().format("%Y-%m-%d-%H%M%S");
+        let default_path = format!("~/praxis-session-{}.md", timestamp);
+
+        self.popup = Some(Popup {
+            kind: PopupKind::SaveSession,
+            items: Vec::new(),
+            filter: default_path,
+            selected: 0,
+        });
+    }
+
+    async fn handle_save_session_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.popup = None;
+            }
+            KeyCode::Enter => {
+                let path = match self.popup.as_ref() {
+                    Some(p) => p.filter.clone(),
+                    None => return,
+                };
+                self.popup = None;
+                self.save_session_to_file(&path);
+            }
+            KeyCode::Char(c) => {
+                if let Some(ref mut popup) = self.popup {
+                    popup.filter.push(c);
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(ref mut popup) = self.popup {
+                    popup.filter.pop();
+                }
+            }
+            KeyCode::Left | KeyCode::Right | KeyCode::Home | KeyCode::End => {}
+            _ => {}
+        }
+    }
+
+    fn save_session_to_file(&mut self, path: &str) {
+        let expanded = if path.starts_with("~/") {
+            match std::env::var("HOME") {
+                Ok(home) => format!("{}/{}", home, &path[2..]),
+                Err(_) => path.to_string(),
+            }
+        } else {
+            path.to_string()
+        };
+
+        let now = Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+        let provider = self.orchestrator.provider.as_deref().unwrap_or("unknown");
+        let model = self.orchestrator.model.as_deref().unwrap_or("unknown");
+        let pt = self.orchestrator.prompt_tokens;
+        let ct = self.orchestrator.completion_tokens;
+        let tt = self.orchestrator.total_tokens;
+
+        let mut md = String::new();
+        md.push_str("# Praxis Orchestrator Session\n\n");
+        md.push_str(&format!("- **Date**: {}\n", now));
+        md.push_str(&format!("- **Provider**: {}\n", provider));
+        md.push_str(&format!("- **Model**: {}\n", model));
+        md.push_str(&format!(
+            "- **Tokens**: {} prompt + {} completion = {} total\n",
+            pt, ct, tt
+        ));
+        md.push_str("\n---\n");
+
+        for entry in &self.orchestrator.messages {
+            match entry {
+                ConversationEntry::UserPrompt(prompt) => {
+                    md.push_str(&format!("\n**\u{25b8} {}**\n", prompt));
+                }
+                ConversationEntry::AssistantResponse { content, tool_calls } => {
+                    let stripped = strip_think_tags(content);
+                    let trimmed = stripped.trim();
+                    if !trimmed.is_empty() {
+                        md.push_str(&format!("\n{}\n", trimmed));
+                    }
+
+                    let all_tools: Vec<&ToolCall> =
+                        tool_calls.iter().flat_map(|(_, tools)| tools.iter()).collect();
+                    if !all_tools.is_empty() {
+                        let names: Vec<&str> = all_tools.iter().map(|t| t.name.as_str()).collect();
+                        md.push_str(&format!(
+                            "\n\u{2713} {} tool calls ({})\n",
+                            all_tools.len(),
+                            names.join(", ")
+                        ));
+                    }
+                }
+                ConversationEntry::Info(msg) => {
+                    md.push_str(&format!("\n*{}*\n", msg));
+                }
+                ConversationEntry::Error(msg) => {
+                    md.push_str(&format!("\n**Error**: {}\n", msg));
+                }
+            }
+        }
+
+        match std::fs::write(&expanded, &md) {
+            Ok(_) => {
+                self.orchestrator
+                    .messages
+                    .push(ConversationEntry::Info(format!(
+                        "Session saved to {}",
+                        expanded
+                    )));
+            }
+            Err(e) => {
+                self.orchestrator
+                    .messages
+                    .push(ConversationEntry::Error(format!(
+                        "Failed to save session: {}",
+                        e
+                    )));
+            }
+        }
     }
 
     fn get_or_create_response(&mut self) -> (&mut String, &mut Vec<(usize, Vec<ToolCall>)>) {
@@ -824,6 +1157,30 @@ impl App {
         }
         self.connected = true;
     }
+}
+
+//
+// Strip <think>...</think> tags from content, returning only visible text.
+//
+
+fn strip_think_tags(content: &str) -> String {
+    let mut result = String::new();
+    let mut remaining = content;
+
+    while let Some(start) = remaining.find("<think>") {
+        result.push_str(&remaining[..start]);
+        let after_open = &remaining[start..];
+        match after_open.find("</think>") {
+            Some(end) => {
+                remaining = &after_open[end + 8..];
+            }
+            None => {
+                return result;
+            }
+        }
+    }
+    result.push_str(remaining);
+    result
 }
 
 //

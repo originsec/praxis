@@ -35,6 +35,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         active_label("^o orchestrator", app.active_window == Window::Orchestrator),
         Span::raw("  "),
         active_label("^l nodes", app.active_window == Window::Nodes),
+        Span::raw("  "),
+        active_label("^e ops", app.active_window == Window::Operations),
         sep.clone(),
         Span::styled("^q quit", Style::default().fg(DIM)),
     ]);

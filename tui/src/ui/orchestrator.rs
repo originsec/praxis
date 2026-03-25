@@ -93,7 +93,9 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                 let segments = split_think_segments(content);
 
                 //
-                // Build a map of byte offset → tool group for interleaving.
+                // Interleave segments and tool calls. Tool calls are
+                // inserted after the segment whose end offset they fall
+                // within or before.
                 //
                 let mut tool_idx = 0;
                 let mut content_pos = 0usize;
@@ -104,15 +106,8 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                         ThinkSegment::Visible(t) => t,
                     };
 
-                    //
-                    // Calculate the byte range this segment covers in the
-                    // original content (accounting for <think></think> tags).
-                    //
-                    let seg_start = content_pos;
-                    // Advance past the segment text + tags in the raw content
                     let seg_end = match seg {
                         ThinkSegment::Thinking(_) => {
-                            // raw: <think>{text}</think>
                             content_pos + "<think>".len() + seg_text.len() + "</think>".len()
                         }
                         ThinkSegment::Visible(_) => {
@@ -121,13 +116,8 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                     };
 
                     //
-                    // Insert any tool calls that occurred before this segment.
+                    // Render the segment content.
                     //
-                    while tool_idx < tool_calls.len() && tool_calls[tool_idx].0 <= seg_start {
-                        lines.extend(build_tool_summary(&tool_calls[tool_idx].1));
-                        tool_idx += 1;
-                    }
-
                     match seg {
                         ThinkSegment::Thinking(text) => {
                             let trimmed = text.trim();
@@ -164,6 +154,15 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                         }
                     }
 
+                    //
+                    // Insert any tool calls whose offset falls within
+                    // this segment (i.e. offset <= seg_end).
+                    //
+                    while tool_idx < tool_calls.len() && tool_calls[tool_idx].0 <= seg_end {
+                        lines.extend(build_tool_summary(&tool_calls[tool_idx].1));
+                        tool_idx += 1;
+                    }
+
                     content_pos = seg_end;
                 }
 
@@ -174,6 +173,13 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                     lines.extend(build_tool_summary(&tool_calls[tool_idx].1));
                     tool_idx += 1;
                 }
+            }
+            ConversationEntry::Info(msg) => {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    msg.clone(),
+                    Style::default().fg(MUTED),
+                )));
             }
             ConversationEntry::Error(msg) => {
                 lines.push(Line::from(""));

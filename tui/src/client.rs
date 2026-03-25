@@ -2,7 +2,8 @@ use anyhow::{anyhow, Result};
 use common::{
     client_queue_name, publish_json, CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE,
     ClientBroadcastMessage, ClientDirectMessage, ClientRegistration, ClientSignalMessage,
-    SystemState,
+    SystemState, SemanticOpUpdate, OperationDefinitionInfo, ChainDefinitionInfo,
+    ChainExecutionUpdate, ChainDefinitionFull,
 };
 use std::collections::HashMap;
 use futures_util::StreamExt;
@@ -30,6 +31,12 @@ struct ClientState {
     system_state: Option<SystemState>,
     orchestrator_event_tx: Option<tokio::sync::mpsc::UnboundedSender<ClientDirectMessage>>,
     pending_config: Option<HashMap<String, String>>,
+    operations: Vec<SemanticOpUpdate>,
+    operation_definitions: Vec<OperationDefinitionInfo>,
+    chain_definitions: Vec<ChainDefinitionInfo>,
+    chain_executions: Vec<ChainExecutionUpdate>,
+    current_chain: Option<ChainDefinitionFull>,
+    pending_semantic_op: Option<String>,
 }
 
 impl Client {
@@ -192,6 +199,42 @@ impl Client {
             ClientDirectMessage::ServiceConfigSaved => {}
 
             //
+            // Operation and chain responses.
+            //
+            ClientDirectMessage::SemanticOpQueued { operation_id, .. } => {
+                state.pending_semantic_op = Some(operation_id);
+            }
+            ClientDirectMessage::SemanticOpUpdate(update) => {
+                if let Some(idx) = state.operations.iter().position(|o| o.operation_id == update.operation_id) {
+                    state.operations[idx] = update;
+                } else {
+                    state.operations.push(update);
+                }
+            }
+            ClientDirectMessage::SemanticOpList(ops) => {
+                state.operations = ops;
+            }
+            ClientDirectMessage::OpDefListResponse { definitions } => {
+                state.operation_definitions = definitions;
+            }
+            ClientDirectMessage::ChainDefListResponse { chains } => {
+                state.chain_definitions = chains;
+            }
+            ClientDirectMessage::ChainGetResponse { chain } => {
+                state.current_chain = chain;
+            }
+            ClientDirectMessage::ChainExecutionUpdate(exec) => {
+                if let Some(idx) = state.chain_executions.iter().position(|e| e.execution_id == exec.execution_id) {
+                    state.chain_executions[idx] = exec;
+                } else {
+                    state.chain_executions.push(exec);
+                }
+            }
+            ClientDirectMessage::ChainExecutionListResponse { executions } => {
+                state.chain_executions = executions;
+            }
+
+            //
             // Forward orchestrator events to subscriber if present.
             //
             msg @ (ClientDirectMessage::OrchestratorStarted { .. }
@@ -222,6 +265,20 @@ impl Client {
         match message {
             ClientBroadcastMessage::StateUpdate(system_state) => {
                 state.system_state = Some(system_state);
+            }
+            ClientBroadcastMessage::SemanticOpUpdate(update) => {
+                if let Some(idx) = state.operations.iter().position(|o| o.operation_id == update.operation_id) {
+                    state.operations[idx] = update;
+                } else {
+                    state.operations.push(update);
+                }
+            }
+            ClientBroadcastMessage::ChainExecutionUpdate(exec) => {
+                if let Some(idx) = state.chain_executions.iter().position(|e| e.execution_id == exec.execution_id) {
+                    state.chain_executions[idx] = exec;
+                } else {
+                    state.chain_executions.push(exec);
+                }
             }
             _ => {}
         }
@@ -348,6 +405,122 @@ impl Client {
         let message = ClientSignalMessage::ServiceConfigSet {
             client_id: self.client_id.clone(),
             values,
+        };
+        self.publish_signal(message).await
+    }
+
+    //
+    // Operation methods.
+    //
+
+    pub async fn request_op_def_list(&self) -> Result<()> {
+        let message = ClientSignalMessage::OpDefList {
+            client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn get_operation_definitions(&self) -> Vec<OperationDefinitionInfo> {
+        self.state.lock().await.operation_definitions.clone()
+    }
+
+    pub async fn request_semantic_op_list(&self) -> Result<()> {
+        let message = ClientSignalMessage::SemanticOpListRequest;
+        self.publish_signal(message).await
+    }
+
+    pub async fn get_operations(&self) -> Vec<SemanticOpUpdate> {
+        self.state.lock().await.operations.clone()
+    }
+
+    pub async fn run_semantic_op(
+        &self,
+        node_id: String,
+        agent_short_name: String,
+        operation_name: String,
+        working_dir: Option<String>,
+    ) -> Result<String> {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        {
+            let mut state = self.state.lock().await;
+            state.pending_semantic_op = None;
+        }
+
+        let message = ClientSignalMessage::SemanticOpRun {
+            client_id: self.client_id.clone(),
+            node_id,
+            agent_short_name,
+            operation_name,
+            request_id: request_id.clone(),
+            working_dir,
+        };
+        self.publish_signal(message).await?;
+
+        let poll_interval = Duration::from_millis(100);
+        for _ in 0..50 {
+            tokio::time::sleep(poll_interval).await;
+            let mut state = self.state.lock().await;
+            if let Some(op_id) = state.pending_semantic_op.take() {
+                return Ok(op_id);
+            }
+        }
+
+        Err(anyhow!("Timeout waiting for operation to be queued"))
+    }
+
+    pub async fn cancel_semantic_op(&self, operation_id: String) -> Result<()> {
+        let message = ClientSignalMessage::SemanticOpCancel { operation_id };
+        self.publish_signal(message).await
+    }
+
+    //
+    // Chain methods.
+    //
+
+    pub async fn request_chain_list(&self) -> Result<()> {
+        let message = ClientSignalMessage::ChainDefList {
+            client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn get_chain_definitions(&self) -> Vec<ChainDefinitionInfo> {
+        self.state.lock().await.chain_definitions.clone()
+    }
+
+    pub async fn request_chain_execution_list(&self) -> Result<()> {
+        let message = ClientSignalMessage::ChainExecutionList {
+            client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn get_chain_executions(&self) -> Vec<ChainExecutionUpdate> {
+        self.state.lock().await.chain_executions.clone()
+    }
+
+    pub async fn run_chain(
+        &self,
+        chain_id: String,
+        node_id: String,
+        agent_short_name: String,
+        working_dir: Option<String>,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::ChainRun {
+            client_id: self.client_id.clone(),
+            chain_id,
+            node_id,
+            agent_short_name,
+            working_dir,
+            target_spec: None,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn cancel_chain(&self, execution_id: String) -> Result<()> {
+        let message = ClientSignalMessage::ChainCancel {
+            client_id: self.client_id.clone(),
+            execution_id,
         };
         self.publish_signal(message).await
     }

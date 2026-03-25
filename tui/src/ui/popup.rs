@@ -3,7 +3,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 
 const ACCENT: Color = Color::Rgb(100, 180, 100);
 const DIM: Color = Color::Rgb(80, 80, 80);
@@ -16,6 +16,7 @@ pub fn render(f: &mut Frame, popup: &Popup) {
     match popup.kind {
         PopupKind::ModelSelect => render_model_select(f, popup),
         PopupKind::CommandPalette => render_command_palette(f, popup),
+        PopupKind::SaveSession => render_save_session(f, popup),
     }
 }
 
@@ -83,6 +84,34 @@ fn render_command_palette(f: &mut Frame, popup: &Popup) {
 
     let inner = block.inner(area);
     render_list(f, inner, popup, &filtered);
+}
+
+//
+// Save session: centered input box for the file path.
+//
+
+fn render_save_session(f: &mut Frame, popup: &Popup) {
+    let width = 60u16.min(f.area().width - 4).max(30);
+    let height = 3u16;
+    let area = centered_rect_fixed(width, height, f.area());
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(DIM))
+        .title(" Save Session ")
+        .title_style(Style::default().fg(MUTED))
+        .style(Style::default().bg(POPUP_BG));
+
+    f.render_widget(Clear, area);
+    f.render_widget(block.clone(), area);
+
+    let inner = block.inner(area);
+    let input_line = Line::from(vec![
+        Span::styled(&popup.filter, Style::default().fg(TEXT)),
+        Span::styled("_", Style::default().fg(ACCENT)),
+    ]);
+    let paragraph = Paragraph::new(input_line);
+    f.render_widget(paragraph, inner);
 }
 
 fn render_list(

@@ -1,4 +1,5 @@
 pub mod nodes;
+pub mod operations;
 pub mod orchestrator;
 pub mod popup;
 pub mod status_bar;
@@ -29,6 +30,7 @@ pub fn render(f: &mut Frame, app: &App) {
     match app.active_window {
         Window::Orchestrator => orchestrator::render(f, chunks[1], &app.orchestrator),
         Window::Nodes => nodes::render(f, chunks[1], &app.nodes),
+        Window::Operations => operations::render(f, chunks[1], &app.operations),
     }
 
     status_bar::render(f, chunks[2], app);
