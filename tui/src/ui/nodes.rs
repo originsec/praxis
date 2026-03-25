@@ -1,4 +1,4 @@
-use crate::app::NodesState;
+use crate::app::{NodesState, ChatRole};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -12,14 +12,28 @@ const TEXT: Color = Color::Rgb(180, 180, 180);
 const HIGHLIGHT_BG: Color = Color::Rgb(35, 35, 40);
 
 pub fn render(f: &mut Frame, area: Rect, state: &NodesState) {
-    let chunks = Layout::horizontal([
-        Constraint::Percentage(state.split_percent),
-        Constraint::Percentage(100 - state.split_percent),
-    ])
-    .split(area);
+    if let Some(ref session) = state.session {
+        //
+        // Session chat mode: node list on left, chat on right.
+        //
+        let chunks = Layout::horizontal([
+            Constraint::Percentage(30),
+            Constraint::Percentage(70),
+        ])
+        .split(area);
 
-    render_node_list(f, chunks[0], state);
-    render_node_detail(f, chunks[1], state);
+        render_node_list(f, chunks[0], state);
+        render_session_chat(f, chunks[1], session);
+    } else {
+        let chunks = Layout::horizontal([
+            Constraint::Percentage(state.split_percent),
+            Constraint::Percentage(100 - state.split_percent),
+        ])
+        .split(area);
+
+        render_node_list(f, chunks[0], state);
+        render_node_detail(f, chunks[1], state);
+    }
 }
 
 fn render_node_list(f: &mut Frame, area: Rect, state: &NodesState) {
@@ -251,4 +265,152 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState) {
     ]));
 
     f.render_widget(Paragraph::new(Text::from(cap_lines)), chunks[2]);
+}
+
+fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionChat) {
+    let chunks = Layout::vertical([
+        Constraint::Length(1),  // header
+        Constraint::Min(1),    // messages
+        Constraint::Length(3), // input
+        Constraint::Length(1), // hints
+    ])
+    .split(area);
+
+    //
+    // Header.
+    //
+    let header = Line::from(vec![
+        Span::styled(" Session: ", Style::default().fg(MUTED)),
+        Span::styled(&session.agent_name, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("  @ {}", &session.node_id[..8.min(session.node_id.len())]),
+            Style::default().fg(DIM),
+        ),
+        if let Some(ref sid) = session.session_id {
+            Span::styled(format!("  ({})", &sid[..8.min(sid.len())]), Style::default().fg(DIM))
+        } else {
+            Span::styled("  (connecting...)", Style::default().fg(DIM))
+        },
+    ]);
+    f.render_widget(Paragraph::new(header), chunks[0]);
+
+    //
+    // Messages.
+    //
+    let msg_area = Rect {
+        x: chunks[1].x + 1,
+        width: chunks[1].width.saturating_sub(2),
+        ..chunks[1]
+    };
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    for msg in &session.messages {
+        match msg.role {
+            ChatRole::User => {
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "\u{25b8} ",
+                        Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        msg.text.clone(),
+                        Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+            }
+            ChatRole::Agent => {
+                lines.push(Line::from(""));
+                for line in msg.text.lines() {
+                    lines.push(Line::from(Span::styled(
+                        line.to_string(),
+                        Style::default().fg(TEXT),
+                    )));
+                }
+            }
+            ChatRole::System => {
+                lines.push(Line::from(Span::styled(
+                    msg.text.clone(),
+                    Style::default().fg(MUTED),
+                )));
+            }
+        }
+    }
+
+    if session.is_waiting {
+        let frame_idx = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            / 100) as usize
+            % 10;
+        let spinners = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("{}", spinners[frame_idx]),
+            Style::default().fg(MUTED),
+        )));
+    }
+
+    let total_lines = lines.len() as u16;
+    let visible = msg_area.height;
+    let max_scroll = total_lines.saturating_sub(visible);
+    let scroll = max_scroll.saturating_sub(session.scroll_offset);
+
+    let paragraph = Paragraph::new(Text::from(lines))
+        .wrap(ratatui::widgets::Wrap { trim: false })
+        .scroll((scroll, 0));
+    f.render_widget(paragraph, msg_area);
+
+    //
+    // Input.
+    //
+    let input_area = Rect {
+        x: chunks[2].x + 1,
+        width: chunks[2].width.saturating_sub(2),
+        ..chunks[2]
+    };
+
+    let input_style = if session.is_waiting {
+        Style::default().fg(DIM)
+    } else {
+        Style::default().fg(TEXT)
+    };
+
+    let mut spans = vec![Span::styled("\u{25b8} ", Style::default().fg(ACCENT))];
+
+    if session.is_waiting {
+        spans.push(Span::styled("^c to cancel", Style::default().fg(DIM)));
+    } else {
+        let pos = session.cursor_pos;
+        let before = &session.input[..pos];
+        let after = &session.input[pos..];
+        if !before.is_empty() {
+            spans.push(Span::styled(before.to_string(), input_style));
+        }
+        spans.push(Span::styled("\u{258f}", Style::default().fg(ACCENT)));
+        if !after.is_empty() {
+            spans.push(Span::styled(after.to_string(), input_style));
+        }
+    }
+
+    let input_block = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_style(Style::default().fg(Color::Rgb(60, 70, 60)));
+
+    let paragraph = Paragraph::new(Line::from(spans)).block(input_block);
+    f.render_widget(paragraph, input_area);
+
+    //
+    // Hints.
+    //
+    let hints = Line::from(vec![
+        Span::raw(" "),
+        Span::styled("enter", Style::default().fg(ACCENT)),
+        Span::styled(" send  ", Style::default().fg(MUTED)),
+        Span::styled("esc", Style::default().fg(ACCENT)),
+        Span::styled(" close session", Style::default().fg(MUTED)),
+    ]);
+    f.render_widget(Paragraph::new(hints), chunks[3]);
 }

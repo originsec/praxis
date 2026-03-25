@@ -1,6 +1,6 @@
 use crate::client::Client;
 use crate::event::AppEvent;
-use common::{ClientDirectMessage, NodeState, OrchestratorPlan, SystemState};
+use common::{ClientDirectMessage, NodeCommand, NodeCommandResult, NodeState, OrchestratorPlan, SystemState};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -198,6 +198,29 @@ pub struct NodesState {
     pub selected: usize,
     pub split_percent: u16,
     pub dragging: bool,
+    pub session: Option<SessionChat>,
+}
+
+pub struct SessionChat {
+    pub node_id: String,
+    pub agent_name: String,
+    pub session_id: Option<String>,
+    pub messages: Vec<ChatMessage>,
+    pub input: String,
+    pub cursor_pos: usize,
+    pub scroll_offset: u16,
+    pub is_waiting: bool,
+}
+
+pub struct ChatMessage {
+    pub role: ChatRole,
+    pub text: String,
+}
+
+pub enum ChatRole {
+    User,
+    Agent,
+    System,
 }
 
 impl Default for NodesState {
@@ -207,6 +230,7 @@ impl Default for NodesState {
             selected: 0,
             split_percent: 55,
             dragging: false,
+            session: None,
         }
     }
 }
@@ -410,7 +434,7 @@ impl App {
 
         match self.active_window {
             Window::Orchestrator => self.handle_orchestrator_key(key).await,
-            Window::Nodes => self.handle_nodes_key(key),
+            Window::Nodes => self.handle_nodes_key(key).await,
             Window::Operations => self.handle_operations_key(key).await,
         }
     }
@@ -825,7 +849,15 @@ impl App {
         }
     }
 
-    fn handle_nodes_key(&mut self, key: KeyEvent) {
+    async fn handle_nodes_key(&mut self, key: KeyEvent) {
+        //
+        // Session chat mode.
+        //
+        if self.nodes.session.is_some() {
+            self.handle_session_key(key).await;
+            return;
+        }
+
         match key.code {
             KeyCode::Up => {
                 if self.nodes.selected > 0 {
@@ -835,6 +867,220 @@ impl App {
             KeyCode::Down => {
                 if self.nodes.selected + 1 < self.nodes.nodes.len() {
                     self.nodes.selected += 1;
+                }
+            }
+            KeyCode::Char('s') => {
+                self.start_session_chat();
+            }
+            _ => {}
+        }
+    }
+
+    fn start_session_chat(&mut self) {
+        let node = match self.nodes.nodes.get(self.nodes.selected) {
+            Some(n) => n,
+            None => return,
+        };
+
+        let agent_name = node
+            .selected_agent
+            .as_ref()
+            .map(|a| a.short_name.clone())
+            .or_else(|| node.discovered_agents.first().map(|a| a.short_name.clone()));
+
+        let Some(agent) = agent_name else { return };
+
+        self.nodes.session = Some(SessionChat {
+            node_id: node.node_id.clone(),
+            agent_name: agent,
+            session_id: None,
+            messages: vec![ChatMessage {
+                role: ChatRole::System,
+                text: "Starting session... (type a message and press Enter)".to_string(),
+            }],
+            input: String::new(),
+            cursor_pos: 0,
+            scroll_offset: 0,
+            is_waiting: false,
+        });
+    }
+
+    async fn handle_session_key(&mut self, key: KeyEvent) {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            match key.code {
+                KeyCode::Char('c') => {
+                    //
+                    // Cancel waiting or close session.
+                    //
+                    if let Some(ref session) = self.nodes.session {
+                        if !session.is_waiting {
+                            self.nodes.session = None;
+                        }
+                        // TODO: cancel transaction
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
+
+        match key.code {
+            KeyCode::Esc => {
+                //
+                // Close session. The actual session_close command
+                // is sent asynchronously.
+                //
+                self.nodes.session = None;
+            }
+            KeyCode::Enter => {
+                let (input, node_id, agent_name, needs_create) = {
+                    let Some(ref mut session) = self.nodes.session else { return };
+                    let input = session.input.trim().to_string();
+                    if input.is_empty() || session.is_waiting {
+                        return;
+                    }
+                    session.messages.push(ChatMessage {
+                        role: ChatRole::User,
+                        text: input.clone(),
+                    });
+                    session.input.clear();
+                    session.cursor_pos = 0;
+                    session.is_waiting = true;
+                    session.scroll_offset = 0;
+                    let needs = session.session_id.is_none();
+                    (input, session.node_id.clone(), session.agent_name.clone(), needs)
+                };
+
+                use common::{SessionCommand, SessionContext, AgentCommand};
+
+                //
+                // Select agent and create session if needed.
+                //
+                if needs_create {
+                    let _ = self.client.send_command(
+                        &node_id,
+                        NodeCommand::Agent(AgentCommand::Select {
+                            short_name: agent_name.clone(),
+                        }),
+                    ).await;
+
+                    match self.client.send_command(
+                        &node_id,
+                        NodeCommand::Session(SessionCommand::Create {
+                            context: SessionContext::default(),
+                        }),
+                    ).await {
+                        Ok(resp) => {
+                            if let NodeCommandResult::Session(
+                                common::SessionCommandResult::Created { session_id }
+                            ) = resp.result {
+                                if let Some(ref mut session) = self.nodes.session {
+                                    session.session_id = Some(session_id.clone());
+                                    session.messages.push(ChatMessage {
+                                        role: ChatRole::System,
+                                        text: format!("Session created ({})", &session_id[..8]),
+                                    });
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            if let Some(ref mut session) = self.nodes.session {
+                                session.messages.push(ChatMessage {
+                                    role: ChatRole::System,
+                                    text: format!("Failed to create session: {}", e),
+                                });
+                                session.is_waiting = false;
+                            }
+                            return;
+                        }
+                    }
+                }
+
+                //
+                // Send prompt and wait for response.
+                //
+                let tid = uuid::Uuid::new_v4().to_string();
+                match self.client.send_command(
+                    &node_id,
+                    NodeCommand::Session(SessionCommand::Prompt {
+                        text: input,
+                        transaction_id: tid,
+                    }),
+                ).await {
+                    Ok(resp) => {
+                        if let Some(ref mut session) = self.nodes.session {
+                            match resp.result {
+                                NodeCommandResult::Session(
+                                    common::SessionCommandResult::PromptResponse { response, .. }
+                                ) => {
+                                    session.messages.push(ChatMessage {
+                                        role: ChatRole::Agent,
+                                        text: response,
+                                    });
+                                }
+                                NodeCommandResult::Error { message } => {
+                                    session.messages.push(ChatMessage {
+                                        role: ChatRole::System,
+                                        text: format!("Error: {}", message),
+                                    });
+                                }
+                                _ => {
+                                    session.messages.push(ChatMessage {
+                                        role: ChatRole::System,
+                                        text: "Unexpected response".to_string(),
+                                    });
+                                }
+                            }
+                            session.is_waiting = false;
+                        }
+                    }
+                    Err(e) => {
+                        if let Some(ref mut session) = self.nodes.session {
+                            session.messages.push(ChatMessage {
+                                role: ChatRole::System,
+                                text: format!("Error: {}", e),
+                            });
+                            session.is_waiting = false;
+                        }
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(ref mut session) = self.nodes.session {
+                    session.input.insert(session.cursor_pos, c);
+                    session.cursor_pos += 1;
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(ref mut session) = self.nodes.session {
+                    if session.cursor_pos > 0 {
+                        session.cursor_pos -= 1;
+                        session.input.remove(session.cursor_pos);
+                    }
+                }
+            }
+            KeyCode::Left => {
+                if let Some(ref mut session) = self.nodes.session {
+                    if session.cursor_pos > 0 {
+                        session.cursor_pos -= 1;
+                    }
+                }
+            }
+            KeyCode::Right => {
+                if let Some(ref mut session) = self.nodes.session {
+                    if session.cursor_pos < session.input.len() {
+                        session.cursor_pos += 1;
+                    }
+                }
+            }
+            KeyCode::PageUp => {
+                if let Some(ref mut session) = self.nodes.session {
+                    session.scroll_offset = session.scroll_offset.saturating_add(10);
+                }
+            }
+            KeyCode::PageDown => {
+                if let Some(ref mut session) = self.nodes.session {
+                    session.scroll_offset = session.scroll_offset.saturating_sub(10);
                 }
             }
             _ => {}
@@ -941,7 +1187,7 @@ impl App {
                 self.operations.detail_focus = true;
                 self.operations.detail_scroll = 0;
             }
-            KeyCode::Char('e') => {
+            KeyCode::Char('e') | KeyCode::Enter => {
                 if self.operations.tab == OpsTab::Library {
                     self.open_run_target_popup();
                 }

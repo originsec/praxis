@@ -74,7 +74,7 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
     let hints = match state.tab {
         OpsTab::Library => Line::from(vec![
             Span::raw(" "),
-            Span::styled("e", Style::default().fg(ACCENT)),
+            Span::styled("enter", Style::default().fg(ACCENT)),
             Span::styled(" execute  ", Style::default().fg(MUTED)),
             Span::styled("n", Style::default().fg(ACCENT)),
             Span::styled(" new  ", Style::default().fg(MUTED)),
