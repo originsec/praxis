@@ -430,11 +430,9 @@ fn render_plan_widget(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 fn render_model_info(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     let line = match (&state.provider, &state.model) {
         (Some(provider), Some(model)) => Line::from(vec![
-            Span::styled("(^m) ", Style::default().fg(DIM)),
             Span::styled(format!("{} / {} ", provider, model), Style::default().fg(MUTED)),
         ]),
         _ => Line::from(vec![
-            Span::styled("(^m) ", Style::default().fg(DIM)),
             Span::styled("No session ", Style::default().fg(MUTED)),
         ]),
     };
