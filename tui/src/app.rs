@@ -84,6 +84,7 @@ pub enum ConversationEntry {
     Error(String),
 }
 
+#[derive(Clone)]
 pub struct ToolCall {
     pub name: String,
     pub success: bool,

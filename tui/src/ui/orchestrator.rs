@@ -90,36 +90,96 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                 // Split content into think/visible segments and interleave
                 // tool calls at their recorded offsets.
                 //
+                //
+                // Build an ordered list of render events. Visible text
+                // segments are split at tool call offsets so tool calls
+                // appear between the text chunks where they occurred.
+                //
                 let segments = split_think_segments(content);
+                let tool_offsets: Vec<usize> = tool_calls.iter().map(|(o, _)| *o).collect();
+                let mut events: Vec<RenderEvent> = Vec::new();
 
-                //
-                // Interleave segments and tool calls. Tool calls are
-                // inserted after the segment whose end offset they fall
-                // within or before.
-                //
-                let mut tool_idx = 0;
-                let mut content_pos = 0usize;
-
+                let mut pos = 0usize;
                 for seg in &segments {
-                    let seg_text = match seg {
-                        ThinkSegment::Thinking(t) => t,
-                        ThinkSegment::Visible(t) => t,
+                    let (text, is_thinking) = match seg {
+                        ThinkSegment::Thinking(t) => (t.as_str(), true),
+                        ThinkSegment::Visible(t) => (t.as_str(), false),
                     };
 
-                    let seg_end = match seg {
-                        ThinkSegment::Thinking(_) => {
-                            content_pos + "<think>".len() + seg_text.len() + "</think>".len()
-                        }
-                        ThinkSegment::Visible(_) => {
-                            content_pos + seg_text.len()
-                        }
+                    let seg_raw_len = if is_thinking {
+                        "<think>".len() + text.len() + "</think>".len()
+                    } else {
+                        text.len()
                     };
 
-                    //
-                    // Render the segment content.
-                    //
-                    match seg {
-                        ThinkSegment::Thinking(text) => {
+                    let seg_start = pos;
+                    let seg_end = pos + seg_raw_len;
+
+                    if is_thinking {
+                        events.push(RenderEvent {
+                            offset: seg_start,
+                            kind: RenderEventKind::Thinking(text.to_string()),
+                        });
+                    } else {
+                        //
+                        // Split visible text at tool call offsets that
+                        // fall within this segment.
+                        //
+                        let mut text_offset = 0usize;
+                        for &tool_off in &tool_offsets {
+                            if tool_off > seg_start && tool_off < seg_end {
+                                let split_at = tool_off - seg_start;
+                                if split_at > text_offset && split_at <= text.len() {
+                                    let chunk = &text[text_offset..split_at];
+                                    if !chunk.is_empty() {
+                                        events.push(RenderEvent {
+                                            offset: seg_start + text_offset,
+                                            kind: RenderEventKind::Visible(chunk.to_string()),
+                                        });
+                                    }
+                                    text_offset = split_at;
+                                }
+                            }
+                        }
+
+                        let remainder = &text[text_offset..];
+                        if !remainder.is_empty() {
+                            events.push(RenderEvent {
+                                offset: seg_start + text_offset,
+                                kind: RenderEventKind::Visible(remainder.to_string()),
+                            });
+                        }
+                    }
+
+                    pos = seg_end;
+                }
+
+                //
+                // Insert tool call events at their offsets.
+                //
+                for (offset, tools) in tool_calls {
+                    events.push(RenderEvent {
+                        offset: *offset,
+                        kind: RenderEventKind::ToolGroup(tools.clone()),
+                    });
+                }
+
+                //
+                // Sort by offset. Tool calls sort after text at same offset.
+                //
+                events.sort_by_key(|e| (e.offset, match &e.kind {
+                    RenderEventKind::Thinking(_) => 0,
+                    RenderEventKind::Visible(_) => 0,
+                    RenderEventKind::ToolGroup(_) => 1,
+                }));
+
+                //
+                // Render events in order. For visible segments that have
+                // tool calls in the middle, split at tool call offsets.
+                //
+                for event in &events {
+                    match &event.kind {
+                        RenderEventKind::Thinking(text) => {
                             let trimmed = text.trim();
                             if !trimmed.is_empty() {
                                 lines.push(Line::from(""));
@@ -144,7 +204,7 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                                 }
                             }
                         }
-                        ThinkSegment::Visible(text) => {
+                        RenderEventKind::Visible(text) => {
                             let trimmed = text.trim();
                             if !trimmed.is_empty() {
                                 lines.push(Line::from(""));
@@ -152,26 +212,10 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                                 lines.extend(md_lines);
                             }
                         }
+                        RenderEventKind::ToolGroup(tools) => {
+                            lines.extend(build_tool_summary(tools));
+                        }
                     }
-
-                    //
-                    // Insert any tool calls whose offset falls within
-                    // this segment (i.e. offset <= seg_end).
-                    //
-                    while tool_idx < tool_calls.len() && tool_calls[tool_idx].0 <= seg_end {
-                        lines.extend(build_tool_summary(&tool_calls[tool_idx].1));
-                        tool_idx += 1;
-                    }
-
-                    content_pos = seg_end;
-                }
-
-                //
-                // Flush any remaining tool calls after all segments.
-                //
-                while tool_idx < tool_calls.len() {
-                    lines.extend(build_tool_summary(&tool_calls[tool_idx].1));
-                    tool_idx += 1;
                 }
             }
             ConversationEntry::Info(msg) => {
@@ -325,6 +369,18 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
 enum ThinkSegment {
     Thinking(String),
     Visible(String),
+}
+
+struct RenderEvent {
+    offset: usize,
+    kind: RenderEventKind,
+}
+
+#[derive(Clone)]
+enum RenderEventKind {
+    Thinking(String),
+    Visible(String),
+    ToolGroup(Vec<crate::app::ToolCall>),
 }
 
 fn split_think_segments(raw: &str) -> Vec<ThinkSegment> {
