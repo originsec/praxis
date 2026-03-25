@@ -238,6 +238,7 @@ local function run_session_transact(state, prompt)
   local args = {
     "--output-format", "text",
     "--resume", state.chat_id,
+    "--trust",
     "-p",
   }
 
@@ -250,7 +251,6 @@ local function run_session_transact(state, prompt)
   if state.yolo_mode then
     table.insert(args, "--force")
     table.insert(args, "--approve-mcps")
-    table.insert(args, "--browser")
   end
 
   local spec = {
