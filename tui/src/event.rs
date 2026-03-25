@@ -51,7 +51,7 @@ impl EventHandler {
         //
         let tx_tick = tx;
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
             loop {
                 interval.tick().await;
                 if let Some(state) = client.get_state().await {

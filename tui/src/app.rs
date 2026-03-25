@@ -1,13 +1,51 @@
 use crate::client::Client;
 use crate::event::AppEvent;
 use common::{ClientDirectMessage, NodeState, OrchestratorPlan, SystemState};
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use std::cell::Cell;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Window {
     Orchestrator,
     Nodes,
+}
+
+//
+// Popup overlay shown on top of the current window.
+//
+
+pub struct Popup {
+    pub kind: PopupKind,
+    pub items: Vec<PopupItem>,
+    pub filter: String,
+    pub selected: usize,
+}
+
+pub enum PopupKind {
+    CommandPalette,
+    ModelSelect,
+}
+
+#[derive(Clone)]
+pub struct PopupItem {
+    pub label: String,
+    pub value: String,
+    pub description: String,
+}
+
+impl Popup {
+    pub fn filtered_items(&self) -> Vec<(usize, &PopupItem)> {
+        self.items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| {
+                self.filter.is_empty()
+                    || item.label.to_lowercase().contains(&self.filter.to_lowercase())
+            })
+            .collect()
+    }
 }
 
 pub struct App {
@@ -17,6 +55,8 @@ pub struct App {
     pub client: Arc<Client>,
     pub should_quit: bool,
     pub connected: bool,
+    pub popup: Option<Popup>,
+    pub terminal_width: u16,
 }
 
 //
@@ -28,7 +68,6 @@ pub enum ConversationEntry {
     UserPrompt(String),
     AssistantText(String),
     ToolGroup(Vec<ToolCall>),
-    Plan(OrchestratorPlan),
     Error(String),
 }
 
@@ -56,6 +95,19 @@ pub struct OrchestratorState {
     //
     pub pending_tools: Vec<ToolCall>,
     pub active_tool: Option<String>,
+    pub current_plan: Option<OrchestratorPlan>,
+
+    //
+    // Command history.
+    //
+    pub history: Vec<String>,
+    pub history_index: Option<usize>,
+    pub saved_input: String,
+
+    //
+    // Set by the renderer so scroll offset can be clamped.
+    //
+    pub max_scroll: Cell<u16>,
 }
 
 impl Default for OrchestratorState {
@@ -75,6 +127,11 @@ impl Default for OrchestratorState {
             session_active: false,
             pending_tools: Vec::new(),
             active_tool: None,
+            current_plan: None,
+            history: Vec::new(),
+            history_index: None,
+            saved_input: String::new(),
+            max_scroll: Cell::new(0),
         }
     }
 }
@@ -82,6 +139,8 @@ impl Default for OrchestratorState {
 pub struct NodesState {
     pub nodes: Vec<NodeState>,
     pub selected: usize,
+    pub split_percent: u16,
+    pub dragging: bool,
 }
 
 impl Default for NodesState {
@@ -89,6 +148,8 @@ impl Default for NodesState {
         Self {
             nodes: Vec::new(),
             selected: 0,
+            split_percent: 55,
+            dragging: false,
         }
     }
 }
@@ -102,6 +163,15 @@ impl App {
             client,
             should_quit: false,
             connected: true,
+            popup: None,
+            terminal_width: 0,
+        }
+    }
+
+    fn clamp_scroll(&mut self) {
+        let max = self.orchestrator.max_scroll.get();
+        if self.orchestrator.scroll_offset > max {
+            self.orchestrator.scroll_offset = max;
         }
     }
 
@@ -125,6 +195,7 @@ impl App {
     pub async fn handle_event(&mut self, event: AppEvent) {
         match event {
             AppEvent::Terminal(Event::Key(key)) => self.handle_key(key).await,
+            AppEvent::Terminal(Event::Mouse(mouse)) => self.handle_mouse(mouse),
             AppEvent::Orchestrator(msg) => self.handle_orchestrator_event(msg),
             AppEvent::StateUpdate(state) => self.handle_state_update(state),
             AppEvent::Tick => {}
@@ -133,6 +204,34 @@ impl App {
     }
 
     async fn handle_key(&mut self, key: KeyEvent) {
+        //
+        // If a popup is open, handle navigation keys for it.
+        // For command palette, typing still goes to the input.
+        //
+        if let Some(ref popup) = self.popup {
+            match key.code {
+                KeyCode::Esc => {
+                    self.popup = None;
+                    return;
+                }
+                KeyCode::Up | KeyCode::Down | KeyCode::Enter => {
+                    //
+                    // For ModelSelect, all keys go to popup.
+                    // For CommandPalette, only nav keys.
+                    //
+                    self.handle_popup_key(key).await;
+                    return;
+                }
+                _ => {
+                    if matches!(popup.kind, PopupKind::ModelSelect) {
+                        self.handle_popup_key(key).await;
+                        return;
+                    }
+                    // CommandPalette: fall through to normal input handling.
+                }
+            }
+        }
+
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('q') => {
@@ -147,6 +246,10 @@ impl App {
                     self.active_window = Window::Nodes;
                     return;
                 }
+                KeyCode::Char('m') => {
+                    self.open_model_select().await;
+                    return;
+                }
                 _ => {}
             }
         }
@@ -154,6 +257,59 @@ impl App {
         match self.active_window {
             Window::Orchestrator => self.handle_orchestrator_key(key).await,
             Window::Nodes => self.handle_nodes_key(key),
+        }
+    }
+
+    fn handle_mouse(&mut self, mouse: MouseEvent) {
+        //
+        // Scroll wheel works in any window for the orchestrator.
+        //
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                if self.active_window == Window::Orchestrator {
+                    self.orchestrator.scroll_offset =
+                        self.orchestrator.scroll_offset.saturating_add(3);
+                    self.clamp_scroll();
+                }
+                return;
+            }
+            MouseEventKind::ScrollDown => {
+                if self.active_window == Window::Orchestrator {
+                    self.orchestrator.scroll_offset =
+                        self.orchestrator.scroll_offset.saturating_sub(3);
+                }
+                return;
+            }
+            _ => {}
+        }
+
+        if self.active_window != Window::Nodes {
+            return;
+        }
+
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                //
+                // Start drag if clicking near the split border.
+                //
+                let border_x =
+                    (self.terminal_width as u32 * self.nodes.split_percent as u32 / 100) as u16;
+                if mouse.column >= border_x.saturating_sub(1)
+                    && mouse.column <= border_x + 1
+                {
+                    self.nodes.dragging = true;
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if self.nodes.dragging && self.terminal_width > 0 {
+                    let pct = (mouse.column as u32 * 100 / self.terminal_width as u32) as u16;
+                    self.nodes.split_percent = pct.clamp(20, 80);
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.nodes.dragging = false;
+            }
+            _ => {}
         }
     }
 
@@ -182,6 +338,23 @@ impl App {
             KeyCode::Enter => {
                 let input = self.orchestrator.input.trim().to_string();
                 if !input.is_empty() && !self.orchestrator.is_streaming {
+                    //
+                    // Save to history.
+                    //
+                    self.orchestrator.history.push(input.clone());
+                    self.orchestrator.history_index = None;
+
+                    //
+                    // Handle / commands.
+                    //
+                    if input.starts_with('/') {
+                        self.orchestrator.input.clear();
+                        self.orchestrator.cursor_pos = 0;
+                        self.popup = None;
+                        self.handle_slash_command(&input).await;
+                        return;
+                    }
+
                     if !self.orchestrator.session_active {
                         self.start_orchestrator_session().await;
                     }
@@ -210,15 +383,53 @@ impl App {
                 }
             }
             KeyCode::Char(c) => {
+                //
+                // Opening / at start of empty input opens command palette.
+                //
                 self.orchestrator
                     .input
                     .insert(self.orchestrator.cursor_pos, c);
                 self.orchestrator.cursor_pos += 1;
+
+                //
+                // Open command palette when typing / at start.
+                //
+                if c == '/' && self.orchestrator.input == "/" {
+                    self.open_command_palette();
+                } else if self.popup.is_some() && self.orchestrator.input.starts_with('/') {
+                    //
+                    // Update palette filter as user types more.
+                    //
+                    if let Some(ref mut popup) = self.popup {
+                        if matches!(popup.kind, PopupKind::CommandPalette) {
+                            popup.filter = self.orchestrator.input[1..].to_string();
+                            popup.selected = 0;
+                        }
+                    }
+                } else {
+                    self.popup = None;
+                }
             }
             KeyCode::Backspace => {
                 if self.orchestrator.cursor_pos > 0 {
                     self.orchestrator.cursor_pos -= 1;
                     self.orchestrator.input.remove(self.orchestrator.cursor_pos);
+
+                    //
+                    // Update or close command palette on backspace.
+                    //
+                    if self.orchestrator.input.starts_with('/') {
+                        if let Some(ref mut popup) = self.popup {
+                            if matches!(popup.kind, PopupKind::CommandPalette) {
+                                popup.filter = self.orchestrator.input[1..].to_string();
+                                popup.selected = 0;
+                            }
+                        }
+                    } else {
+                        if self.popup.as_ref().is_some_and(|p| matches!(p.kind, PopupKind::CommandPalette)) {
+                            self.popup = None;
+                        }
+                    }
                 }
             }
             KeyCode::Delete => {
@@ -243,14 +454,73 @@ impl App {
                 self.orchestrator.cursor_pos = self.orchestrator.input.len();
             }
             KeyCode::Up => {
-                self.orchestrator.scroll_offset =
-                    self.orchestrator.scroll_offset.saturating_add(1);
+                let hist_len = self.orchestrator.history.len();
+                if hist_len > 0 {
+                    match self.orchestrator.history_index {
+                        None => {
+                            self.orchestrator.saved_input = self.orchestrator.input.clone();
+                            self.orchestrator.history_index = Some(hist_len - 1);
+                        }
+                        Some(idx) if idx > 0 => {
+                            self.orchestrator.history_index = Some(idx - 1);
+                        }
+                        _ => {}
+                    }
+                    if let Some(idx) = self.orchestrator.history_index {
+                        self.orchestrator.input = self.orchestrator.history[idx].clone();
+                        self.orchestrator.cursor_pos = self.orchestrator.input.len();
+                    }
+                }
             }
             KeyCode::Down => {
+                if let Some(idx) = self.orchestrator.history_index {
+                    if idx + 1 < self.orchestrator.history.len() {
+                        self.orchestrator.history_index = Some(idx + 1);
+                        self.orchestrator.input =
+                            self.orchestrator.history[idx + 1].clone();
+                        self.orchestrator.cursor_pos = self.orchestrator.input.len();
+                    } else {
+                        self.orchestrator.history_index = None;
+                        self.orchestrator.input = self.orchestrator.saved_input.clone();
+                        self.orchestrator.cursor_pos = self.orchestrator.input.len();
+                    }
+                }
+            }
+            KeyCode::PageUp => {
                 self.orchestrator.scroll_offset =
-                    self.orchestrator.scroll_offset.saturating_sub(1);
+                    self.orchestrator.scroll_offset.saturating_add(10);
+                self.clamp_scroll();
+            }
+            KeyCode::PageDown => {
+                self.orchestrator.scroll_offset =
+                    self.orchestrator.scroll_offset.saturating_sub(10);
             }
             _ => {}
+        }
+    }
+
+    async fn handle_slash_command(&mut self, input: &str) {
+        let cmd = input.trim_start_matches('/').trim();
+
+        match cmd {
+            "clear" => {
+                if self.orchestrator.session_active {
+                    let _ = self.client.stop_orchestrator().await;
+                }
+                self.orchestrator = OrchestratorState::default();
+                self.start_orchestrator_session().await;
+            }
+            "model" => {
+                self.open_model_select().await;
+            }
+            _ => {
+                self.orchestrator
+                    .messages
+                    .push(ConversationEntry::Error(format!(
+                        "Unknown command: /{}",
+                        cmd
+                    )));
+            }
         }
     }
 
@@ -268,6 +538,175 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    fn open_command_palette(&mut self) {
+        let commands = vec![
+            PopupItem {
+                label: "clear".to_string(),
+                value: "clear".to_string(),
+                description: "Start a new orchestrator session".to_string(),
+            },
+            PopupItem {
+                label: "model".to_string(),
+                value: "model".to_string(),
+                description: "Select orchestrator model".to_string(),
+            },
+        ];
+
+        self.popup = Some(Popup {
+            kind: PopupKind::CommandPalette,
+            items: commands,
+            filter: String::new(),
+            selected: 0,
+        });
+    }
+
+    async fn open_model_select(&mut self) {
+        let config = match self
+            .client
+            .get_config(vec![
+                "llm_model_definitions".to_string(),
+                "llm_feature_orchestrator".to_string(),
+            ])
+            .await
+        {
+            Ok(c) => c,
+            Err(e) => {
+                self.orchestrator
+                    .messages
+                    .push(ConversationEntry::Error(format!(
+                        "Failed to fetch models: {}",
+                        e
+                    )));
+                return;
+            }
+        };
+
+        let defs_json = config.get("llm_model_definitions").cloned().unwrap_or_default();
+        let current = config.get("llm_feature_orchestrator").cloned().unwrap_or_default();
+
+        #[derive(serde::Deserialize)]
+        struct ModelDef {
+            name: String,
+            provider: String,
+            model: String,
+        }
+
+        let defs: Vec<ModelDef> = serde_json::from_str(&defs_json).unwrap_or_default();
+
+        if defs.is_empty() {
+            self.orchestrator
+                .messages
+                .push(ConversationEntry::Error(
+                    "No models configured. Configure models in Settings.".to_string(),
+                ));
+            return;
+        }
+
+        let items: Vec<PopupItem> = defs
+            .iter()
+            .map(|d| PopupItem {
+                label: d.name.clone(),
+                value: d.name.clone(),
+                description: format!("{} / {}", d.provider, d.model),
+            })
+            .collect();
+
+        let selected = items
+            .iter()
+            .position(|i| i.value == current)
+            .unwrap_or(0);
+
+        self.popup = Some(Popup {
+            kind: PopupKind::ModelSelect,
+            items,
+            filter: String::new(),
+            selected,
+        });
+    }
+
+    async fn handle_popup_key(&mut self, key: KeyEvent) {
+        if key.code == KeyCode::Esc {
+            self.popup = None;
+            return;
+        }
+
+        let popup = match self.popup.as_mut() {
+            Some(p) => p,
+            None => return,
+        };
+
+        match key.code {
+            KeyCode::Up => {
+                let filtered = popup.filtered_items();
+                if !filtered.is_empty() {
+                    popup.selected = popup.selected.saturating_sub(1);
+                }
+            }
+            KeyCode::Down => {
+                let filtered = popup.filtered_items();
+                if popup.selected + 1 < filtered.len() {
+                    popup.selected += 1;
+                }
+            }
+            KeyCode::Enter => {
+                let filtered = popup.filtered_items();
+                if let Some((_, item)) = filtered.get(popup.selected) {
+                    let value = item.value.clone();
+                    let kind = &popup.kind;
+
+                    match kind {
+                        PopupKind::CommandPalette => {
+                            self.popup = None;
+                            self.orchestrator.input.clear();
+                            self.orchestrator.cursor_pos = 0;
+                            self.handle_slash_command(&format!("/{}", value)).await;
+                        }
+                        PopupKind::ModelSelect => {
+                            self.popup = None;
+                            self.select_model(&value).await;
+                        }
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                popup.filter.push(c);
+                popup.selected = 0;
+            }
+            KeyCode::Backspace => {
+                popup.filter.pop();
+                popup.selected = 0;
+            }
+            _ => {}
+        }
+    }
+
+    async fn select_model(&mut self, model_name: &str) {
+        let mut values = HashMap::new();
+        values.insert(
+            "llm_feature_orchestrator".to_string(),
+            model_name.to_string(),
+        );
+
+        if let Err(e) = self.client.set_config(values).await {
+            self.orchestrator
+                .messages
+                .push(ConversationEntry::Error(format!(
+                    "Failed to set model: {}",
+                    e
+                )));
+            return;
+        }
+
+        //
+        // Restart the orchestrator session with the new model.
+        //
+        if self.orchestrator.session_active {
+            let _ = self.client.stop_orchestrator().await;
+        }
+        self.orchestrator = OrchestratorState::default();
+        self.start_orchestrator_session().await;
     }
 
     fn handle_orchestrator_event(&mut self, msg: ClientDirectMessage) {
@@ -319,22 +758,7 @@ impl App {
                 }
             }
             ClientDirectMessage::OrchestratorPlanUpdated { plan, .. } => {
-                //
-                // Replace any existing plan entry, or add a new one.
-                //
-                let mut replaced = false;
-                for entry in self.orchestrator.messages.iter_mut().rev() {
-                    if let ConversationEntry::Plan(existing) = entry {
-                        *existing = plan.clone();
-                        replaced = true;
-                        break;
-                    }
-                }
-                if !replaced {
-                    self.orchestrator
-                        .messages
-                        .push(ConversationEntry::Plan(plan));
-                }
+                self.orchestrator.current_plan = Some(plan);
             }
             ClientDirectMessage::OrchestratorTokenUsage {
                 prompt_tokens,
@@ -358,6 +782,7 @@ impl App {
                         .push(ConversationEntry::ToolGroup(tools));
                 }
                 self.orchestrator.active_tool = None;
+                self.orchestrator.current_plan = None;
                 self.orchestrator.is_streaming = false;
             }
             ClientDirectMessage::OrchestratorStopped => {

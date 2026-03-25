@@ -21,7 +21,7 @@ const PLAN_ACTIVE: Color = Color::Rgb(180, 160, 60);
 //
 // Braille spinner frames, matching the CLI's spinner.
 //
-const SPINNER_FRAMES: &[char] = &['\u{2800}', '\u{2801}', '\u{2803}', '\u{2807}', '\u{280f}', '\u{281f}', '\u{283f}', '\u{287f}', '\u{28ff}'];
+const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     let chunks = Layout::vertical([
@@ -29,13 +29,23 @@ pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
         Constraint::Length(1),
         Constraint::Length(3),
         Constraint::Length(1),
+        Constraint::Length(1),
     ])
     .split(area);
 
     render_conversation(f, chunks[0], state);
-    render_model_info(f, chunks[1], state);
-    render_input(f, chunks[2], state);
-    render_tokens(f, chunks[3], state);
+
+    let padded = |r: Rect| -> Rect {
+        Rect {
+            x: r.x + 1,
+            width: r.width.saturating_sub(2),
+            ..r
+        }
+    };
+
+    render_model_info(f, padded(chunks[1]), state);
+    render_input(f, padded(chunks[2]), state);
+    render_tokens(f, padded(chunks[3]), state);
 }
 
 fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
@@ -83,9 +93,6 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
             ConversationEntry::ToolGroup(tools) => {
                 lines.extend(build_tool_summary(tools));
             }
-            ConversationEntry::Plan(plan) => {
-                lines.extend(build_plan(plan));
-            }
             ConversationEntry::Error(msg) => {
                 lines.push(Line::from(""));
                 lines.push(Line::from(vec![
@@ -97,6 +104,14 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     }
 
     //
+    // Render current plan (always at the end, updated in-place).
+    //
+    if let Some(ref plan) = state.current_plan {
+        let plan = plan.clone();
+        lines.extend(build_plan(&plan));
+    }
+
+    //
     // Show active tool or waiting spinner.
     //
     if state.is_streaming {
@@ -104,8 +119,8 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
             let frame_idx = (std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
-                .subsec_millis()
-                / 80) as usize
+                .as_millis()
+                / 100) as usize
                 % SPINNER_FRAMES.len();
             let spinner_char = SPINNER_FRAMES[frame_idx];
 
@@ -123,8 +138,8 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
             let frame_idx = (std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
-                .subsec_millis()
-                / 80) as usize
+                .as_millis()
+                / 100) as usize
                 % SPINNER_FRAMES.len();
             let spinner_char = SPINNER_FRAMES[frame_idx];
             lines.push(Line::from(""));
@@ -138,6 +153,7 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     let total_lines = lines.len() as u16;
     let visible_height = area.height;
     let max_scroll = total_lines.saturating_sub(visible_height);
+    state.max_scroll.set(max_scroll);
     let scroll = max_scroll.saturating_sub(state.scroll_offset);
 
     let paragraph = Paragraph::new(Text::from(lines))
@@ -164,7 +180,7 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
     ];
 
     let content_height = art.len() as u16 + 2;
-    let y_offset = area.height.saturating_sub(content_height) / 3;
+    let y_offset = area.height.saturating_sub(content_height) / 2;
 
     let mut lines: Vec<Line> = Vec::new();
 
@@ -303,16 +319,19 @@ fn build_plan(plan: &common::OrchestratorPlan) -> Vec<Line<'static>> {
 }
 
 fn render_model_info(f: &mut Frame, area: Rect, state: &OrchestratorState) {
-    let info = match (&state.provider, &state.model) {
-        (Some(provider), Some(model)) => format!("{} / {} ", provider, model),
-        _ => "No session ".to_string(),
+    let line = match (&state.provider, &state.model) {
+        (Some(provider), Some(model)) => Line::from(vec![
+            Span::styled("(^m) ", Style::default().fg(DIM)),
+            Span::styled(format!("{} / {} ", provider, model), Style::default().fg(MUTED)),
+        ]),
+        _ => Line::from(vec![
+            Span::styled("(^m) ", Style::default().fg(DIM)),
+            Span::styled("No session ", Style::default().fg(MUTED)),
+        ]),
     };
 
-    let paragraph = Paragraph::new(Line::from(Span::styled(
-        info,
-        Style::default().fg(MUTED),
-    )))
-    .alignment(ratatui::layout::Alignment::Right);
+    let paragraph = Paragraph::new(line)
+        .alignment(ratatui::layout::Alignment::Right);
 
     f.render_widget(paragraph, area);
 }
@@ -332,8 +351,8 @@ fn render_input(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 
     let mut spans = vec![prompt_char];
 
-    if state.is_streaming || state.input.is_empty() && state.is_streaming {
-        spans.push(Span::styled(state.input.clone(), input_style));
+    if state.is_streaming {
+        spans.push(Span::styled("^c to cancel", Style::default().fg(DIM)));
     } else {
         let pos = state.cursor_pos;
         let before = &state.input[..pos];

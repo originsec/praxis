@@ -1,5 +1,6 @@
 pub mod nodes;
 pub mod orchestrator;
+pub mod popup;
 pub mod status_bar;
 
 use crate::app::{App, Window};
@@ -31,6 +32,13 @@ pub fn render(f: &mut Frame, app: &App) {
     }
 
     status_bar::render(f, chunks[2], app);
+
+    //
+    // Render popup overlay on top of everything.
+    //
+    if let Some(ref p) = app.popup {
+        popup::render(f, p);
+    }
 }
 
 fn render_header(f: &mut Frame, area: ratatui::layout::Rect) {

@@ -10,6 +10,7 @@ use app::App;
 use clap::Parser;
 use crossterm::{
     execute,
+    event::{EnableMouseCapture, DisableMouseCapture},
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use event::EventHandler;
@@ -55,7 +56,7 @@ async fn main() -> Result<()> {
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
         original_hook(info);
     }));
 
@@ -64,7 +65,7 @@ async fn main() -> Result<()> {
     //
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -79,7 +80,10 @@ async fn main() -> Result<()> {
     // Main render loop.
     //
     loop {
-        terminal.draw(|f| ui::render(f, &app))?;
+        terminal.draw(|f| {
+            app.terminal_width = f.area().width;
+            ui::render(f, &app);
+        })?;
 
         if let Some(event) = events.next().await {
             app.handle_event(event).await;
@@ -96,7 +100,7 @@ async fn main() -> Result<()> {
     // Restore terminal.
     //
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
 
     //
     // Graceful disconnect — only possible if we have sole ownership.

@@ -13,8 +13,8 @@ const HIGHLIGHT_BG: Color = Color::Rgb(35, 35, 40);
 
 pub fn render(f: &mut Frame, area: Rect, state: &NodesState) {
     let chunks = Layout::horizontal([
-        Constraint::Percentage(55),
-        Constraint::Percentage(45),
+        Constraint::Percentage(state.split_percent),
+        Constraint::Percentage(100 - state.split_percent),
     ])
     .split(area);
 

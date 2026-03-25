@@ -4,6 +4,7 @@ use common::{
     ClientBroadcastMessage, ClientDirectMessage, ClientRegistration, ClientSignalMessage,
     SystemState,
 };
+use std::collections::HashMap;
 use futures_util::StreamExt;
 use lapin::{
     options::{
@@ -28,6 +29,7 @@ pub struct Client {
 struct ClientState {
     system_state: Option<SystemState>,
     orchestrator_event_tx: Option<tokio::sync::mpsc::UnboundedSender<ClientDirectMessage>>,
+    pending_config: Option<HashMap<String, String>>,
 }
 
 impl Client {
@@ -184,6 +186,11 @@ impl Client {
                 state.system_state = Some(system_state);
             }
 
+            ClientDirectMessage::ServiceConfigResponse { values } => {
+                state.pending_config = Some(values);
+            }
+            ClientDirectMessage::ServiceConfigSaved => {}
+
             //
             // Forward orchestrator events to subscriber if present.
             //
@@ -305,6 +312,42 @@ impl Client {
     pub async fn cancel_orchestrator(&self) -> Result<()> {
         let message = ClientSignalMessage::OrchestratorCancel {
             client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    //
+    // Service config methods.
+    //
+
+    pub async fn get_config(&self, keys: Vec<String>) -> Result<HashMap<String, String>> {
+        {
+            let mut state = self.state.lock().await;
+            state.pending_config = None;
+        }
+
+        let message = ClientSignalMessage::ServiceConfigGet {
+            client_id: self.client_id.clone(),
+            keys,
+        };
+        self.publish_signal(message).await?;
+
+        let poll_interval = Duration::from_millis(100);
+        for _ in 0..50 {
+            tokio::time::sleep(poll_interval).await;
+            let mut state = self.state.lock().await;
+            if let Some(values) = state.pending_config.take() {
+                return Ok(values);
+            }
+        }
+
+        Err(anyhow!("Timeout waiting for config response"))
+    }
+
+    pub async fn set_config(&self, values: HashMap<String, String>) -> Result<()> {
+        let message = ClientSignalMessage::ServiceConfigSet {
+            client_id: self.client_id.clone(),
+            values,
         };
         self.publish_signal(message).await
     }
