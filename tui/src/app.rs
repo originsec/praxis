@@ -1187,7 +1187,7 @@ impl App {
                 self.operations.detail_focus = true;
                 self.operations.detail_scroll = 0;
             }
-            KeyCode::Char('e') | KeyCode::Enter => {
+            KeyCode::Enter => {
                 if self.operations.tab == OpsTab::Library {
                     self.open_run_target_popup();
                 }
