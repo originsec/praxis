@@ -302,14 +302,6 @@ Published to `NodeSignal` in response to a received `Command`.
 }}
 ```
 
-### ApplicationLogEntry (separate queue)
-
-Log entries are sent to `NodeEventLog` queue (not `NodeSignal`):
-
-```json
-{"source":"node","level":"error","message":"Connection failed","target":null,"timestamp":"2025-01-01T00:00:00Z"}
-```
-
 ## Command Envelope
 
 Node commands are wrapped in a `Command` envelope and published to `ClientSignal`.
