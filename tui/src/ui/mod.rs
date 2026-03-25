@@ -41,6 +41,9 @@ pub fn render(f: &mut Frame, app: &App) {
     if let Some(ref p) = app.popup {
         popup::render(f, p);
     }
+    if let Some(ref form) = app.new_op_form {
+        popup::render_new_op_form(f, form);
+    }
 }
 
 fn render_header(f: &mut Frame, area: ratatui::layout::Rect) {

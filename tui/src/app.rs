@@ -31,6 +31,12 @@ pub enum PopupKind {
     ModelSelect,
     SaveSession,
     RunTarget,
+    NewOp,
+}
+
+pub struct NewOpForm {
+    pub fields: Vec<(&'static str, String)>,
+    pub focused_field: usize,
 }
 
 #[derive(Clone)]
@@ -62,6 +68,7 @@ pub struct App {
     pub should_quit: bool,
     pub connected: bool,
     pub popup: Option<Popup>,
+    pub new_op_form: Option<NewOpForm>,
     pub terminal_width: u16,
 }
 
@@ -222,6 +229,7 @@ impl App {
             should_quit: false,
             connected: true,
             popup: None,
+            new_op_form: None,
             terminal_width: 0,
         }
     }
@@ -270,6 +278,14 @@ impl App {
     }
 
     async fn handle_key(&mut self, key: KeyEvent) {
+        //
+        // New op form intercepts all keys.
+        //
+        if self.new_op_form.is_some() {
+            self.handle_new_op_form_key(key).await;
+            return;
+        }
+
         //
         // If a popup is open, handle navigation keys for it.
         // For command palette, typing still goes to the input.
@@ -869,6 +885,16 @@ impl App {
                     self.open_run_target_popup();
                 }
             }
+            KeyCode::Char('n') => {
+                if self.operations.tab == OpsTab::Library {
+                    self.open_new_op_form();
+                }
+            }
+            KeyCode::Char('d') => {
+                if self.operations.tab == OpsTab::Library {
+                    self.delete_selected_op().await;
+                }
+            }
             KeyCode::Char('c') => {
                 if self.operations.tab == OpsTab::Executions {
                     self.cancel_selected_execution().await;
@@ -985,6 +1011,164 @@ impl App {
                 let _ = self.client.cancel_chain(exec_id).await;
             }
         }
+    }
+
+    fn open_new_op_form(&mut self) {
+        self.new_op_form = Some(NewOpForm {
+            fields: vec![
+                ("Name", String::new()),
+                ("Short Name", String::new()),
+                ("Category", "custom".to_string()),
+                ("Description", String::new()),
+                ("Prompt", String::new()),
+                ("Mode", "one-shot".to_string()),
+                ("Timeout", "60".to_string()),
+                ("Iterations", "5".to_string()),
+                ("YOLO", "false".to_string()),
+            ],
+            focused_field: 0,
+        });
+    }
+
+    async fn submit_new_op(&mut self) {
+        let form = match self.new_op_form.take() {
+            Some(f) => f,
+            None => return,
+        };
+
+        let get = |name: &str| -> String {
+            form.fields.iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_default()
+        };
+
+        let name = get("Name");
+        let short_name = get("Short Name");
+        let category = get("Category");
+
+        if name.is_empty() || short_name.is_empty() {
+            return;
+        }
+
+        let op_def = serde_json::json!({
+            "full_name": format!("{}::{}", category, short_name),
+            "category": category,
+            "short_name": short_name,
+            "name": name,
+            "description": get("Description"),
+            "agent_info": "",
+            "timeout": get("Timeout").parse::<u64>().unwrap_or(60),
+            "operation_prompt": get("Prompt"),
+            "mode": get("Mode"),
+            "agent_iterations": get("Iterations").parse::<u32>().unwrap_or(5),
+            "operation_chain": [],
+            "disabled": false,
+            "yolo_mode": get("YOLO") == "true",
+            "model_ref": null,
+        });
+
+        if let Err(e) = self.client.add_op_def(op_def.to_string()).await {
+            self.orchestrator
+                .messages
+                .push(ConversationEntry::Error(format!("Failed to add op: {}", e)));
+        }
+
+        //
+        // Refresh definitions.
+        //
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let _ = self.client.request_op_def_list().await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        self.operations.op_definitions = self.client.get_operation_definitions().await;
+    }
+
+    async fn handle_new_op_form_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.new_op_form = None;
+            }
+            KeyCode::Tab | KeyCode::Down => {
+                if let Some(ref mut form) = self.new_op_form {
+                    form.focused_field = (form.focused_field + 1) % form.fields.len();
+                }
+            }
+            KeyCode::BackTab | KeyCode::Up => {
+                if let Some(ref mut form) = self.new_op_form {
+                    if form.focused_field > 0 {
+                        form.focused_field -= 1;
+                    } else {
+                        form.focused_field = form.fields.len() - 1;
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                //
+                // If on Mode field, toggle between one-shot/agent.
+                // If on YOLO field, toggle true/false.
+                // Otherwise submit the form.
+                //
+                let should_submit = if let Some(ref mut form) = self.new_op_form {
+                    let (name, val) = &mut form.fields[form.focused_field];
+                    match *name {
+                        "Mode" => {
+                            *val = if val == "one-shot" { "agent".to_string() } else { "one-shot".to_string() };
+                            false
+                        }
+                        "YOLO" => {
+                            *val = if val == "true" { "false".to_string() } else { "true".to_string() };
+                            false
+                        }
+                        _ => true,
+                    }
+                } else {
+                    false
+                };
+
+                if should_submit {
+                    self.submit_new_op().await;
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(ref mut form) = self.new_op_form {
+                    form.fields[form.focused_field].1.push(c);
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(ref mut form) = self.new_op_form {
+                    form.fields[form.focused_field].1.pop();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    async fn delete_selected_op(&mut self) {
+        let enabled_ops: Vec<_> = self.operations.op_definitions
+            .iter()
+            .filter(|d| !d.disabled)
+            .collect();
+        let enabled_chains: Vec<_> = self.operations.chain_definitions
+            .iter()
+            .filter(|c| !c.disabled)
+            .collect();
+
+        let idx = self.operations.library_selected;
+
+        if idx < enabled_ops.len() {
+            let full_name = enabled_ops[idx].full_name.clone();
+            if let Err(e) = self.client.delete_op_def(full_name).await {
+                self.orchestrator
+                    .messages
+                    .push(ConversationEntry::Error(format!("Delete failed: {}", e)));
+            }
+        }
+        // Chain deletion would go here.
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let _ = self.client.request_op_def_list().await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        self.operations.op_definitions = self.client.get_operation_definitions().await;
     }
 
     fn open_command_palette(&mut self) {
@@ -1119,6 +1303,7 @@ impl App {
                             self.execute_run_on_target(&value).await;
                         }
                         PopupKind::SaveSession => {}
+                        PopupKind::NewOp => {}
                     }
                 }
             }

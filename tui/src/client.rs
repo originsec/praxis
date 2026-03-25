@@ -473,6 +473,22 @@ impl Client {
         self.publish_signal(message).await
     }
 
+    pub async fn add_op_def(&self, content: String) -> Result<()> {
+        let message = ClientSignalMessage::OpDefAdd {
+            client_id: self.client_id.clone(),
+            content,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn delete_op_def(&self, full_name: String) -> Result<()> {
+        let message = ClientSignalMessage::OpDefDelete {
+            client_id: self.client_id.clone(),
+            full_name,
+        };
+        self.publish_signal(message).await
+    }
+
     //
     // Chain methods.
     //

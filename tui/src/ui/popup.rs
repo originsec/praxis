@@ -18,7 +18,57 @@ pub fn render(f: &mut Frame, popup: &Popup) {
         PopupKind::CommandPalette => render_command_palette(f, popup),
         PopupKind::SaveSession => render_save_session(f, popup),
         PopupKind::RunTarget => render_list_select(f, popup, " Select Target "),
+        PopupKind::NewOp => {} // rendered separately via new_op_form
     }
+}
+
+pub fn render_new_op_form(f: &mut Frame, form: &crate::app::NewOpForm) {
+    let height = (form.fields.len() as u16 + 3).min(20);
+    let width = 60u16.min(f.area().width - 4);
+    let area = centered_rect_fixed(width, height, f.area());
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(DIM))
+        .title(" New Operation ")
+        .title_style(Style::default().fg(ACCENT))
+        .style(Style::default().bg(POPUP_BG));
+
+    f.render_widget(Clear, area);
+    f.render_widget(block.clone(), area);
+
+    let inner = block.inner(area);
+    let mut lines: Vec<Line> = Vec::new();
+
+    for (i, (name, value)) in form.fields.iter().enumerate() {
+        let is_focused = i == form.focused_field;
+        let label_style = if is_focused {
+            Style::default().fg(ACCENT)
+        } else {
+            Style::default().fg(MUTED)
+        };
+        let value_style = if is_focused {
+            Style::default().fg(TEXT)
+        } else {
+            Style::default().fg(DIM)
+        };
+
+        let cursor = if is_focused { "\u{258f}" } else { "" };
+
+        lines.push(Line::from(vec![
+            Span::styled(format!(" {}: ", name), label_style),
+            Span::styled(value.clone(), value_style),
+            Span::styled(cursor, Style::default().fg(ACCENT)),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        " Tab/\u{2191}\u{2193} fields  Enter submit  Esc cancel",
+        Style::default().fg(DIM),
+    )));
+
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 //
