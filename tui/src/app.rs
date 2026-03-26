@@ -3245,6 +3245,7 @@ impl App {
                         form.model_name = name.clone();
                     }
                     form.model_dropdown_open = false;
+                    form.cursor_pos = form.model_name.chars().count();
                 }
                 _ => {}
             }
