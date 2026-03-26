@@ -33,6 +33,7 @@ struct ClientState {
     orchestrator_event_tx: Option<tokio::sync::mpsc::UnboundedSender<ClientDirectMessage>>,
     pending_config: Option<HashMap<String, String>>,
     pending_commands: std::collections::HashMap<String, Option<NodeCommandResult>>,
+    cached_project_paths: Vec<String>,
     operations: Vec<SemanticOpUpdate>,
     operation_definitions: Vec<OperationDefinitionInfo>,
     chain_definitions: Vec<ChainDefinitionInfo>,
@@ -208,6 +209,11 @@ impl Client {
             //
             // Operation and chain responses.
             //
+            ClientDirectMessage::ReconGetResponse { recon_result, .. } => {
+                if let Some(ref recon) = recon_result {
+                    state.cached_project_paths = recon.project_paths.clone();
+                }
+            }
             ClientDirectMessage::SemanticOpQueued { operation_id, .. } => {
                 state.pending_semantic_op = Some(operation_id);
             }
@@ -466,6 +472,19 @@ impl Client {
         }
 
         Err(anyhow!("Timeout waiting for command response"))
+    }
+
+    pub async fn request_recon(&self, node_id: &str, agent_short_name: &str) {
+        let message = ClientSignalMessage::ReconGet {
+            client_id: self.client_id.clone(),
+            node_id: node_id.to_string(),
+            agent_short_name: agent_short_name.to_string(),
+        };
+        let _ = self.publish_signal(message).await;
+    }
+
+    pub async fn get_cached_project_paths(&self) -> Vec<String> {
+        self.state.lock().await.cached_project_paths.clone()
     }
 
     pub async fn request_op_def_list(&self) -> Result<()> {

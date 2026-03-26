@@ -200,8 +200,18 @@ pub struct NodesState {
     pub split_percent: u16,
     pub dragging: bool,
     pub session: Option<SessionChat>,
+    pub session_options: Option<SessionOptions>,
     pub detail_focus: bool,
     pub agent_selected: usize,
+}
+
+pub struct SessionOptions {
+    pub node_id: String,
+    pub agent_name: String,
+    pub working_dirs: Vec<String>,
+    pub selected_dir: usize,
+    pub yolo: bool,
+    pub focused_field: u8, // 0=dir, 1=yolo
 }
 
 pub struct SessionChat {
@@ -216,6 +226,7 @@ pub struct SessionChat {
     pub history: Vec<String>,
     pub history_index: Option<usize>,
     pub saved_input: String,
+    pub yolo: bool,
 }
 
 pub struct ChatMessage {
@@ -237,6 +248,7 @@ impl Default for NodesState {
             split_percent: 55,
             dragging: false,
             session: None,
+            session_options: None,
             detail_focus: false,
             agent_selected: 0,
         }
@@ -391,6 +403,18 @@ impl App {
                 if self.active_window == Window::Operations {
                     self.operations.operations = self.client.get_operations().await;
                     self.operations.chain_executions = self.client.get_chain_executions().await;
+                }
+
+                //
+                // Refresh session options working dirs from recon cache.
+                //
+                if let Some(ref mut opts) = self.nodes.session_options {
+                    if opts.working_dirs.is_empty() {
+                        let paths = self.client.get_cached_project_paths().await;
+                        if !paths.is_empty() {
+                            opts.working_dirs = paths;
+                        }
+                    }
                 }
             }
             _ => {}
@@ -899,6 +923,14 @@ impl App {
 
     async fn handle_nodes_key(&mut self, key: KeyEvent) {
         //
+        // Session options screen.
+        //
+        if self.nodes.session_options.is_some() {
+            self.handle_session_options_key(key).await;
+            return;
+        }
+
+        //
         // Session chat mode.
         //
         if self.nodes.session.is_some() {
@@ -973,6 +1005,122 @@ impl App {
 
         let node_id = node.node_id.clone();
 
+        //
+        // Request recon to get project paths for working directory options.
+        //
+        let client = self.client.clone();
+        let nid = node_id.clone();
+        let ag = agent.clone();
+        tokio::spawn(async move {
+            client.request_recon(&nid, &ag).await;
+        });
+
+        self.nodes.session_options = Some(SessionOptions {
+            node_id,
+            agent_name: agent,
+            working_dirs: Vec::new(), // populated async via tick
+            selected_dir: 0,
+            yolo: false,
+            focused_field: 0,
+        });
+        self.nodes.detail_focus = false;
+    }
+
+    async fn handle_session_options_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.nodes.session_options = None;
+            }
+            KeyCode::Up => {
+                if let Some(ref mut opts) = self.nodes.session_options {
+                    match opts.focused_field {
+                        0 => {
+                            //
+                            // Navigate working dir list up.
+                            //
+                            if opts.selected_dir > 0 {
+                                opts.selected_dir -= 1;
+                            }
+                        }
+                        _ => {
+                            //
+                            // Move to dir field.
+                            //
+                            opts.focused_field = 0;
+                        }
+                    }
+                }
+            }
+            KeyCode::Down => {
+                if let Some(ref mut opts) = self.nodes.session_options {
+                    match opts.focused_field {
+                        0 => {
+                            let max = opts.working_dirs.len();
+                            if opts.selected_dir < max {
+                                opts.selected_dir += 1;
+                            } else {
+                                //
+                                // Past end of dir list — move to YOLO field.
+                                //
+                                opts.focused_field = 1;
+                            }
+                        }
+                        _ => {
+                            //
+                            // Already at bottom, wrap to dir field.
+                            //
+                            opts.focused_field = 0;
+                        }
+                    }
+                }
+            }
+            KeyCode::Tab => {
+                //
+                // Tab toggles YOLO when on YOLO field, or switches field.
+                //
+                if let Some(ref mut opts) = self.nodes.session_options {
+                    if opts.focused_field == 1 {
+                        opts.yolo = !opts.yolo;
+                    } else {
+                        opts.focused_field = 1;
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                self.confirm_session_options();
+            }
+            _ => {}
+        }
+
+        //
+        // Refresh working dirs from cached recon paths.
+        //
+        if self.nodes.session_options.is_some() {
+            let paths = self.client.get_cached_project_paths().await;
+            if let Some(ref mut opts) = self.nodes.session_options {
+                if opts.working_dirs.is_empty() && !paths.is_empty() {
+                    opts.working_dirs = paths;
+                }
+            }
+        }
+    }
+
+    fn confirm_session_options(&mut self) {
+        let opts = match self.nodes.session_options.take() {
+            Some(o) => o,
+            None => return,
+        };
+
+        let working_dir = if opts.selected_dir > 0 && opts.selected_dir <= opts.working_dirs.len() {
+            Some(opts.working_dirs[opts.selected_dir - 1].clone())
+        } else {
+            None // index 0 = "Default (home)"
+        };
+
+        let node_id = opts.node_id.clone();
+        let agent = opts.agent_name.clone();
+        let yolo = opts.yolo;
+
         self.nodes.session = Some(SessionChat {
             node_id: node_id.clone(),
             agent_name: agent.clone(),
@@ -985,11 +1133,11 @@ impl App {
             history: Vec::new(),
             history_index: None,
             saved_input: String::new(),
+            yolo,
         });
-        self.nodes.detail_focus = false;
 
         //
-        // Select agent and create session immediately in the background.
+        // Select agent and create session in background.
         //
         let client = self.client.clone();
         let tx = self.event_tx.clone();
@@ -1010,7 +1158,10 @@ impl App {
             match client.send_command(
                 &node_id,
                 NodeCommand::Session(SessionCommand::Create {
-                    context: SessionContext::default(),
+                    context: SessionContext {
+                        working_dir,
+                        yolo_mode: yolo,
+                    },
                 }),
             ).await {
                 Ok(resp) => {
@@ -1622,12 +1773,12 @@ impl App {
             KeyCode::Esc => {
                 self.new_op_form = None;
             }
-            KeyCode::Tab | KeyCode::Down => {
+            KeyCode::Down => {
                 if let Some(ref mut form) = self.new_op_form {
                     form.focused_field = (form.focused_field + 1) % NewOpForm::field_count();
                 }
             }
-            KeyCode::BackTab | KeyCode::Up => {
+            KeyCode::Up => {
                 if let Some(ref mut form) = self.new_op_form {
                     if form.focused_field > 0 {
                         form.focused_field -= 1;
@@ -1636,68 +1787,63 @@ impl App {
                     }
                 }
             }
+            KeyCode::Tab => {
+                //
+                // Tab toggles Mode and YOLO fields.
+                //
+                if let Some(ref mut form) = self.new_op_form {
+                    let idx = form.focused_field;
+                    if idx == 4 {
+                        form.mode = (form.mode + 1) % 2;
+                    } else if idx == 7 {
+                        form.yolo = !form.yolo;
+                    }
+                }
+            }
             KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                //
-                // Shift+Enter adds newline in prompt field.
-                //
                 if let Some(ref mut form) = self.new_op_form {
                     if form.focused_field == 8 {
                         form.prompt.push('\n');
                     }
                 }
             }
-            KeyCode::Enter | KeyCode::Char(' ') => {
-                let should_submit = if let Some(ref mut form) = self.new_op_form {
-                    let idx = form.focused_field;
-                    if idx == 4 {
-                        // Mode toggle
-                        form.mode = (form.mode + 1) % 2;
-                        false
-                    } else if idx == 7 {
-                        // YOLO toggle
-                        form.yolo = !form.yolo;
-                        false
-                    } else if key.code == KeyCode::Char(' ') {
-                        // Space just types in text fields
-                        false
-                    } else {
-                        true
-                    }
+            KeyCode::Enter => {
+                //
+                // Validate mandatory fields and submit.
+                //
+                let valid = if let Some(ref form) = self.new_op_form {
+                    !form.name.is_empty()
+                        && !form.short_name.is_empty()
+                        && !form.category.is_empty()
+                        && !form.prompt.is_empty()
+                        && !form.timeout.is_empty()
                 } else {
                     false
                 };
 
-                //
-                // Space in text fields adds a space character.
-                //
-                if key.code == KeyCode::Char(' ') {
-                    if let Some(ref mut form) = self.new_op_form {
-                        let idx = form.focused_field;
-                        if !NewOpForm::is_toggle(idx) {
-                            match idx {
-                                0 => form.name.push(' '),
-                                1 => form.short_name.push(' '),
-                                2 => form.category.push(' '),
-                                3 => form.description.push(' '),
-                                5 => form.timeout.push(' '),
-                                6 => form.iterations.push(' '),
-                                8 => form.prompt.push(' '),
-                                _ => {}
-                            }
-                        }
-                    }
-                    return;
-                }
-
-                if should_submit {
+                if valid {
                     self.submit_new_op().await;
+                } else {
+                    //
+                    // Show which fields are missing.
+                    //
+                    if let Some(ref form) = self.new_op_form {
+                        let mut missing = Vec::new();
+                        if form.name.is_empty() { missing.push("Name"); }
+                        if form.short_name.is_empty() { missing.push("Short Name"); }
+                        if form.category.is_empty() { missing.push("Category"); }
+                        if form.prompt.is_empty() { missing.push("Prompt"); }
+                        if form.timeout.is_empty() { missing.push("Timeout"); }
+                        self.orchestrator.messages.push(
+                            ConversationEntry::Error(format!("Missing fields: {}", missing.join(", ")))
+                        );
+                    }
                 }
             }
             KeyCode::Char(c) => {
                 if let Some(ref mut form) = self.new_op_form {
                     if !NewOpForm::is_toggle(form.focused_field) {
-                        let idx = form.focused_field;
-                        match idx {
+                        match form.focused_field {
                             0 => form.name.push(c),
                             1 => form.short_name.push(c),
                             2 => form.category.push(c),
@@ -1712,8 +1858,7 @@ impl App {
             }
             KeyCode::Backspace => {
                 if let Some(ref mut form) = self.new_op_form {
-                    let idx = form.focused_field;
-                    match idx {
+                    match form.focused_field {
                         0 => { form.name.pop(); }
                         1 => { form.short_name.pop(); }
                         2 => { form.category.pop(); }

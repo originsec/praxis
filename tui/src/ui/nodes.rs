@@ -1,4 +1,4 @@
-use crate::app::{NodesState, ChatRole};
+use crate::app::{NodesState, ChatRole, SessionOptions};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -12,18 +12,13 @@ const TEXT: Color = Color::Rgb(180, 180, 180);
 const HIGHLIGHT_BG: Color = Color::Rgb(35, 35, 40);
 
 pub fn render(f: &mut Frame, area: Rect, state: &NodesState) {
-    if let Some(ref session) = state.session {
-        //
-        // Session chat mode: node list on left, chat on right.
-        //
-        let chunks = Layout::horizontal([
-            Constraint::Percentage(30),
-            Constraint::Percentage(70),
-        ])
-        .split(area);
+    if let Some(ref opts) = state.session_options {
+        render_session_options(f, area, opts);
+        return;
+    }
 
-        render_node_list(f, chunks[0], state);
-        render_session_chat(f, chunks[1], session);
+    if let Some(ref session) = state.session {
+        render_session_chat(f, area, session);
     } else {
         let chunks = Layout::horizontal([
             Constraint::Percentage(state.split_percent),
@@ -471,4 +466,123 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
         Span::styled(" close session", Style::default().fg(MUTED)),
     ]);
     f.render_widget(Paragraph::new(hints), chunks[4]);
+}
+
+fn render_session_options(f: &mut Frame, area: Rect, opts: &SessionOptions) {
+    let chunks = Layout::vertical([
+        Constraint::Length(2), // title
+        Constraint::Min(1),   // options
+        Constraint::Length(1), // hints
+    ])
+    .split(area);
+
+    //
+    // Title.
+    //
+    let title = Line::from(vec![
+        Span::styled("  New Session: ", Style::default().fg(MUTED)),
+        Span::styled(
+            &opts.agent_name,
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  @ {}", &opts.node_id[..8.min(opts.node_id.len())]),
+            Style::default().fg(DIM),
+        ),
+    ]);
+    f.render_widget(Paragraph::new(title), chunks[0]);
+
+    //
+    // Options.
+    //
+    let inner = Rect {
+        x: chunks[1].x + 2,
+        width: chunks[1].width.saturating_sub(4),
+        ..chunks[1]
+    };
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    //
+    // Working directory.
+    //
+    let dir_focused = opts.focused_field == 0;
+    let dir_label_style = if dir_focused {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(MUTED)
+    };
+
+    lines.push(Line::from(Span::styled("Working Directory:", dir_label_style)));
+
+    let mut dir_options = vec!["Default (home)".to_string()];
+    dir_options.extend(opts.working_dirs.iter().cloned());
+
+    for (i, dir) in dir_options.iter().enumerate() {
+        let is_selected = i == opts.selected_dir;
+        let style = if is_selected && dir_focused {
+            Style::default().fg(TEXT).bg(Color::Rgb(35, 40, 35)).add_modifier(Modifier::BOLD)
+        } else if is_selected {
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(DIM)
+        };
+
+        let marker = if is_selected { " \u{25b8} " } else { "   " };
+        lines.push(Line::from(Span::styled(format!("{}{}", marker, dir), style)));
+    }
+
+    if opts.working_dirs.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "   (loading paths from recon...)",
+            Style::default().fg(DIM),
+        )));
+    }
+
+    //
+    // YOLO mode.
+    //
+    lines.push(Line::from(""));
+    let yolo_focused = opts.focused_field == 1;
+    let yolo_label_style = if yolo_focused {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(MUTED)
+    };
+
+    let yolo_indicator = if opts.yolo {
+        Span::styled(
+            " \u{25cf} enabled ",
+            Style::default().fg(Color::Black).bg(Color::Rgb(180, 160, 60)),
+        )
+    } else {
+        Span::styled(" \u{25cb} disabled ", Style::default().fg(DIM))
+    };
+
+    lines.push(Line::from(vec![
+        Span::styled("YOLO Mode: ", yolo_label_style),
+        yolo_indicator,
+        if yolo_focused {
+            Span::styled("  (tab)", Style::default().fg(DIM))
+        } else {
+            Span::raw("")
+        },
+    ]));
+
+    f.render_widget(Paragraph::new(lines), inner);
+
+    //
+    // Hints.
+    //
+    let hints = Line::from(vec![
+        Span::styled("  \u{2191}\u{2193}", Style::default().fg(ACCENT)),
+        Span::styled(" navigate  ", Style::default().fg(MUTED)),
+        Span::styled("tab", Style::default().fg(ACCENT)),
+        Span::styled(" toggle  ", Style::default().fg(MUTED)),
+        Span::styled("enter", Style::default().fg(ACCENT)),
+        Span::styled(" start  ", Style::default().fg(MUTED)),
+        Span::styled("esc", Style::default().fg(ACCENT)),
+        Span::styled(" cancel", Style::default().fg(MUTED)),
+    ]);
+    f.render_widget(Paragraph::new(hints), chunks[2]);
 }
