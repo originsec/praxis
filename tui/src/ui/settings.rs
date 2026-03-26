@@ -448,11 +448,15 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
         .map(|p| p.display_name())
         .unwrap_or("?");
 
-    let height = if form.model_dropdown_open {
-        (12 + form.available_models.len() as u16).min(area.height.saturating_sub(4))
+    let base_lines: u16 = 5 + 2; // 3 fields + blank + hints + border top/bottom
+    let dropdown_extra = if form.model_dropdown_open {
+        1 + form.available_models.len() as u16 // blank + model list
+    } else if form.loading_models {
+        1
     } else {
-        12
+        0
     };
+    let height = (base_lines + dropdown_extra).min(area.height.saturating_sub(4));
     let width = 60u16.min(area.width.saturating_sub(4));
 
     let x = area.x + (area.width.saturating_sub(width)) / 2;
