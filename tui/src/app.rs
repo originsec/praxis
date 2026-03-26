@@ -3323,18 +3323,6 @@ impl App {
 
         if form.editing_text {
 
-            //
-            // ^l on model field loads available models from provider API.
-            //
-
-            if form.focused_field == 2
-                && key.code == KeyCode::Char('l')
-                && key.modifiers.contains(KeyModifiers::CONTROL)
-            {
-                self.load_provider_models().await;
-                return;
-            }
-
             match key.code {
                 KeyCode::Esc => {
                     self.settings.model_form = None;
@@ -3346,7 +3334,17 @@ impl App {
                         Self::sync_model_form_edit(form);
                     }
                 }
-                KeyCode::Down | KeyCode::Enter | KeyCode::Tab => {
+                KeyCode::Enter => {
+                    if form.focused_field == 2 {
+                        self.load_provider_models().await;
+                        return;
+                    }
+                    if form.focused_field < 2 {
+                        form.focused_field += 1;
+                        Self::sync_model_form_edit(form);
+                    }
+                }
+                KeyCode::Down | KeyCode::Tab => {
                     if form.focused_field < 2 {
                         form.focused_field += 1;
                         Self::sync_model_form_edit(form);
@@ -3472,12 +3470,6 @@ impl App {
                     form.focused_field = 1;
                     Self::sync_model_form_edit(form);
                 }
-            }
-            KeyCode::Char('l')
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && form.focused_field == 2 =>
-            {
-                self.load_provider_models().await;
             }
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 // Save shortcut.

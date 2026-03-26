@@ -655,7 +655,7 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
         Span::styled(" cancel", Style::default().fg(MUTED)),
     ];
     if form.focused_field == 2 && form.editing_text {
-        hints.push(Span::styled("  ^l", Style::default().fg(DIM)));
+        hints.push(Span::styled("  enter", Style::default().fg(DIM)));
         hints.push(Span::styled(" load models", Style::default().fg(MUTED)));
     }
     lines.push(Line::from(hints));
