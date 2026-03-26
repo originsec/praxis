@@ -321,9 +321,28 @@ impl OrchestratorManager {
                                         if !held_back {
                                             send_buffer.push_str(&delta.content);
 
-                                            if send_buffer.contains("{\"tool\"")
-                                                || send_buffer.contains("```")
-                                            {
+                                            let tool_marker = send_buffer.find("{\"tool\"")
+                                                .or_else(|| send_buffer.find("```"));
+
+                                            if let Some(marker_pos) = tool_marker {
+                                                //
+                                                // Flush text before the tool marker so it
+                                                // arrives at the client before tool events.
+                                                //
+                                                if marker_pos > 0 {
+                                                    let pre_tool = send_buffer[..marker_pos].to_string();
+                                                    if !pre_tool.trim().is_empty() {
+                                                        bytes_sent += pre_tool.len();
+                                                        let _ = send_to_client(
+                                                            &publish_channel_clone,
+                                                            &client_id_owned,
+                                                            ClientDirectMessage::OrchestratorContent {
+                                                                prompt_id: prompt_id.clone(),
+                                                                content: pre_tool,
+                                                            },
+                                                        ).await;
+                                                    }
+                                                }
                                                 held_back = true;
                                                 send_buffer.clear();
                                             } else if send_buffer.len() >= 50 || delta.content.contains('\n') {
@@ -366,6 +385,24 @@ impl OrchestratorManager {
                             break;
                         }
 
+                        //
+                        // Flush any remaining send buffer before tool parsing
+                        // so text preceding tool calls is delivered to the
+                        // client before ToolExecuting events.
+                        //
+                        if !send_buffer.is_empty() && !held_back {
+                            bytes_sent += send_buffer.len();
+                            let _ = send_to_client(
+                                &publish_channel_clone,
+                                &client_id_owned,
+                                ClientDirectMessage::OrchestratorContent {
+                                    prompt_id: prompt_id.clone(),
+                                    content: send_buffer.clone(),
+                                },
+                            ).await;
+                            send_buffer.clear();
+                        }
+
                         let mut response_text = full_response.clone();
                         let mut tool_results: Vec<(String, String)> = Vec::new();
 
@@ -374,6 +411,7 @@ impl OrchestratorManager {
                                cancel_flag_clone.load(Ordering::SeqCst) {
                                 break;
                             }
+
 
                             common::log_info!("Orchestrator executing tool: {}", tool_name);
 
@@ -436,23 +474,11 @@ impl OrchestratorManager {
 
                         if !tool_results.is_empty() {
                             //
-                            // Send remaining text (tool calls stripped) that
-                            // wasn't already streamed to the client.
+                            // No content to send here — all pre-tool text was
+                            // already flushed during streaming. The next loop
+                            // iteration will stream the model's response to
+                            // tool results as fresh content.
                             //
-                            let remaining = response_text.trim();
-                            if !remaining.is_empty() && remaining.len() > bytes_sent {
-                                let unsent = &remaining[bytes_sent.min(remaining.len())..];
-                                if !unsent.trim().is_empty() {
-                                    let _ = send_to_client(
-                                        &publish_channel_clone,
-                                        &client_id_owned,
-                                        ClientDirectMessage::OrchestratorContent {
-                                            prompt_id: prompt_id.clone(),
-                                            content: unsent.to_string(),
-                                        },
-                                    ).await;
-                                }
-                            }
 
                             if let Some(usage) = &stream_usage {
                                 let _ = send_to_client(
