@@ -51,7 +51,7 @@ pub enum ConfirmKind {
     DeleteOp(String), // full_name
     ClearAllExecutions,
     DeleteModel(usize), // index into model_definitions
-    ResetNode(String),   // node_id
+    ResetNode(String),  // node_id
     Info,
 }
 
@@ -373,7 +373,6 @@ pub struct SettingsState {
     //
     // LLM settings.
     //
-
     pub model_definitions: Vec<ModelDef>,
     pub model_form: Option<ModelEditForm>,
     pub orchestrator_model: String,
@@ -385,7 +384,6 @@ pub struct SettingsState {
     //
     // Service settings.
     //
-
     pub mcp_enabled: bool,
     pub mcp_port: String,
     pub logging_enabled: bool,
@@ -394,7 +392,6 @@ pub struct SettingsState {
     //
     // Model select dropdown for feature assignments.
     //
-
     pub dropdown_open: bool,
     pub dropdown_selected: usize,
     pub dropdown_field: usize, // which feature field (1-5) the dropdown is for
@@ -411,7 +408,11 @@ pub struct ModelDef {
 
 pub fn sorted_providers() -> Vec<common::Provider> {
     let mut providers = common::Provider::all();
-    providers.sort_by(|a, b| a.display_name().to_lowercase().cmp(&b.display_name().to_lowercase()));
+    providers.sort_by(|a, b| {
+        a.display_name()
+            .to_lowercase()
+            .cmp(&b.display_name().to_lowercase())
+    });
     providers
 }
 
@@ -421,8 +422,8 @@ pub struct ModelEditForm {
     pub provider_idx: usize,       // index into Provider::all()
     pub api_key: String,
     pub model_name: String,
-    pub editing_text: bool,        // true when typing in a text field
-    pub cursor_pos: usize,         // char-based cursor position in active field
+    pub editing_text: bool, // true when typing in a text field
+    pub cursor_pos: usize,  // char-based cursor position in active field
     pub available_models: Vec<String>,
     pub model_dropdown_open: bool,
     pub model_dropdown_selected: usize,
@@ -521,7 +522,9 @@ impl App {
 
     pub async fn handle_event(&mut self, event: AppEvent) {
         match event {
-            AppEvent::Terminal(Event::Key(key)) if key.kind == crossterm::event::KeyEventKind::Press => {
+            AppEvent::Terminal(Event::Key(key))
+                if key.kind == crossterm::event::KeyEventKind::Press =>
+            {
                 self.handle_key(key).await;
             }
             AppEvent::Terminal(Event::Mouse(mouse)) => self.handle_mouse(mouse).await,
@@ -786,12 +789,18 @@ impl App {
                     MouseEventKind::ScrollUp => {
                         // Send scroll-up (typically 3 lines of Up arrow)
                         for _ in 0..3 {
-                            let _ = self.client.send_terminal_input(&node_id, b"\x1b[A".to_vec()).await;
+                            let _ = self
+                                .client
+                                .send_terminal_input(&node_id, b"\x1b[A".to_vec())
+                                .await;
                         }
                     }
                     MouseEventKind::ScrollDown => {
                         for _ in 0..3 {
-                            let _ = self.client.send_terminal_input(&node_id, b"\x1b[B".to_vec()).await;
+                            let _ = self
+                                .client
+                                .send_terminal_input(&node_id, b"\x1b[B".to_vec())
+                                .await;
                         }
                     }
                     _ => {}
@@ -877,15 +886,10 @@ impl App {
                 let settings_label = "^s settings";
                 let status_text = format!(
                     " {}  \u{00b7} {}  {}  {}  {} \u{00b7} ^q quit",
-                    node_text,
-                    orch_label,
-                    nodes_label,
-                    ops_label,
-                    settings_label
+                    node_text, orch_label, nodes_label, ops_label, settings_label
                 );
                 let orch_pos = status_area.x + status_text.find(orch_label).unwrap_or(999) as u16;
-                let nodes_pos =
-                    status_area.x + status_text.find(nodes_label).unwrap_or(999) as u16;
+                let nodes_pos = status_area.x + status_text.find(nodes_label).unwrap_or(999) as u16;
                 let ops_pos = status_area.x + status_text.find(ops_label).unwrap_or(999) as u16;
                 let settings_pos =
                     status_area.x + status_text.find(settings_label).unwrap_or(999) as u16;
@@ -924,11 +928,10 @@ impl App {
                     Constraint::Percentage(100 - self.operations.split_percent),
                 ])
                 .split(main_area),
-                OpsTab::Executions => Layout::horizontal([
-                    Constraint::Percentage(60),
-                    Constraint::Percentage(40),
-                ])
-                .split(main_area),
+                OpsTab::Executions => {
+                    Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+                        .split(main_area)
+                }
             };
             let list_area = split[0];
             let detail_area = split[1];
@@ -1397,11 +1400,12 @@ impl App {
     fn terminal_content_size() -> (u16, u16) {
         let (term_cols, term_rows) = crossterm::terminal::size().unwrap_or((80, 24));
         //
-        // Subtract: 2 vertical padding + 1 header + 1 hints + 1 status bar = 5 rows
+        // Subtract: 2 vertical padding + 1 header bar + 1 status bar
+        //           + 1 terminal header + 1 terminal hints = 6 rows
         //           4 horizontal padding
         //
         let cols = term_cols.saturating_sub(4);
-        let rows = term_rows.saturating_sub(5);
+        let rows = term_rows.saturating_sub(6);
         (cols, rows)
     }
 
@@ -1418,7 +1422,10 @@ impl App {
 
         let result = self
             .client
-            .send_command(&node_id, NodeCommand::Terminal(common::TerminalCommand::Create))
+            .send_command(
+                &node_id,
+                NodeCommand::Terminal(common::TerminalCommand::Create),
+            )
             .await;
 
         match result {
@@ -1834,12 +1841,11 @@ impl App {
                                     response,
                                 },
                             ) => {
-                                let _ = tx.send(AppEvent::SessionResponse(
-                                    SessionResult::Response {
+                                let _ =
+                                    tx.send(AppEvent::SessionResponse(SessionResult::Response {
                                         transaction_id,
                                         text: response,
-                                    },
-                                ));
+                                    }));
                             }
                             NodeCommandResult::Session(
                                 common::SessionCommandResult::TransactionCancelled {
@@ -2201,7 +2207,10 @@ impl App {
         }
 
         entries.sort_by(|a, b| b.0.cmp(&a.0));
-        entries.into_iter().map(|(_, is_op, idx)| (is_op, idx)).collect()
+        entries
+            .into_iter()
+            .map(|(_, is_op, idx)| (is_op, idx))
+            .collect()
     }
 
     pub fn sorted_exec_static(
@@ -2233,7 +2242,10 @@ impl App {
         }
 
         entries.sort_by(|a, b| b.0.cmp(&a.0));
-        entries.into_iter().map(|(_, is_op, idx)| (is_op, idx)).collect()
+        entries
+            .into_iter()
+            .map(|(_, is_op, idx)| (is_op, idx))
+            .collect()
     }
 
     fn ops_library_count(&self) -> usize {
@@ -2292,10 +2304,11 @@ impl App {
         });
     }
 
-
     async fn cancel_selected_execution(&mut self) {
         let sorted = self.sorted_executions();
-        let Some(&(is_op, idx)) = sorted.get(self.operations.exec_selected) else { return };
+        let Some(&(is_op, idx)) = sorted.get(self.operations.exec_selected) else {
+            return;
+        };
 
         if is_op {
             let op_id = self.operations.operations[idx].operation_id.clone();
@@ -2308,7 +2321,9 @@ impl App {
 
     async fn delete_selected_execution(&mut self) {
         let sorted = self.sorted_executions();
-        let Some(&(is_op, idx)) = sorted.get(self.operations.exec_selected) else { return };
+        let Some(&(is_op, idx)) = sorted.get(self.operations.exec_selected) else {
+            return;
+        };
 
         if is_op {
             let op_id = self.operations.operations[idx].operation_id.clone();
@@ -2431,7 +2446,10 @@ impl App {
             KeyCode::Down | KeyCode::Tab => {
                 if let Some(ref mut form) = self.new_op_form {
                     let order = visual_order(form);
-                    let pos = order.iter().position(|&f| f == form.focused_field).unwrap_or(0);
+                    let pos = order
+                        .iter()
+                        .position(|&f| f == form.focused_field)
+                        .unwrap_or(0);
                     let next = (pos + 1) % order.len();
                     form.focused_field = order[next];
                 }
@@ -2439,7 +2457,10 @@ impl App {
             KeyCode::Up | KeyCode::BackTab => {
                 if let Some(ref mut form) = self.new_op_form {
                     let order = visual_order(form);
-                    let pos = order.iter().position(|&f| f == form.focused_field).unwrap_or(0);
+                    let pos = order
+                        .iter()
+                        .position(|&f| f == form.focused_field)
+                        .unwrap_or(0);
                     let prev = if pos > 0 { pos - 1 } else { order.len() - 1 };
                     form.focused_field = order[prev];
                 }
@@ -2511,7 +2532,10 @@ impl App {
                 //
                 if let Some(ref mut form) = self.new_op_form {
                     let order = visual_order(form);
-                    let pos = order.iter().position(|&f| f == form.focused_field).unwrap_or(0);
+                    let pos = order
+                        .iter()
+                        .position(|&f| f == form.focused_field)
+                        .unwrap_or(0);
                     let next = (pos + 1) % order.len();
                     form.focused_field = order[next];
                 }
@@ -2535,11 +2559,21 @@ impl App {
                 } else {
                     if let Some(ref form) = self.new_op_form {
                         let mut missing = Vec::new();
-                        if form.name.is_empty() { missing.push("Name"); }
-                        if form.short_name.is_empty() { missing.push("Short Name"); }
-                        if form.category.is_empty() { missing.push("Category"); }
-                        if form.prompt.is_empty() { missing.push("Prompt"); }
-                        if form.timeout.is_empty() { missing.push("Timeout"); }
+                        if form.name.is_empty() {
+                            missing.push("Name");
+                        }
+                        if form.short_name.is_empty() {
+                            missing.push("Short Name");
+                        }
+                        if form.category.is_empty() {
+                            missing.push("Category");
+                        }
+                        if form.prompt.is_empty() {
+                            missing.push("Prompt");
+                        }
+                        if form.timeout.is_empty() {
+                            missing.push("Timeout");
+                        }
                         self.confirm = Some(ConfirmAction {
                             message: format!("Required: {}", missing.join(", ")),
                             action: ConfirmKind::Info,
@@ -2614,7 +2648,11 @@ impl App {
 
     async fn handle_confirm_key(&mut self, key: KeyEvent) {
         match key.code {
-            _ if self.confirm.as_ref().is_some_and(|c| matches!(c.action, ConfirmKind::Info)) => {
+            _ if self
+                .confirm
+                .as_ref()
+                .is_some_and(|c| matches!(c.action, ConfirmKind::Info)) =>
+            {
                 //
                 // Info popup — any key dismisses.
                 //
@@ -2655,10 +2693,9 @@ impl App {
                                 self.settings.model_definitions.remove(idx);
                                 self.save_model_definitions().await;
                                 if self.settings.selected > 0 {
-                                    self.settings.selected =
-                                        self.settings.selected.min(
-                                            self.settings.model_definitions.len().saturating_sub(1),
-                                        );
+                                    self.settings.selected = self.settings.selected.min(
+                                        self.settings.model_definitions.len().saturating_sub(1),
+                                    );
                                 }
                             }
                         }
@@ -3218,7 +3255,8 @@ impl App {
                     .cloned()
                     .unwrap_or_default();
                 s.model_definitions = serde_json::from_str(&defs_json).unwrap_or_default();
-                s.model_definitions.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                s.model_definitions
+                    .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
                 s.orchestrator_model = config
                     .get("llm_feature_orchestrator")
@@ -3261,8 +3299,7 @@ impl App {
                 s.status_message = None;
             }
             Err(e) => {
-                self.settings.status_message =
-                    Some(format!("Failed to load settings: {}", e));
+                self.settings.status_message = Some(format!("Failed to load settings: {}", e));
             }
         }
     }
@@ -3339,7 +3376,6 @@ impl App {
     }
 
     async fn handle_settings_key(&mut self, key: KeyEvent) {
-
         //
         // If editing a field, capture input.
         //
@@ -3421,13 +3457,11 @@ impl App {
                         match field {
                             1 => {
                                 self.settings.orchestrator_model = name.clone();
-                                self.save_setting("llm_feature_orchestrator", &name)
-                                    .await;
+                                self.save_setting("llm_feature_orchestrator", &name).await;
                             }
                             3 => {
                                 self.settings.semantic_ops_model = name.clone();
-                                self.save_setting("llm_feature_semantic_ops", &name)
-                                    .await;
+                                self.save_setting("llm_feature_semantic_ops", &name).await;
                             }
                             4 => {
                                 self.settings.semantic_parser_model = name.clone();
@@ -3436,8 +3470,7 @@ impl App {
                             }
                             5 => {
                                 self.settings.traffic_parser_model = name.clone();
-                                self.save_setting("llm_feature_traffic_parser", &name)
-                                    .await;
+                                self.save_setting("llm_feature_traffic_parser", &name).await;
                             }
                             _ => {}
                         }
@@ -3574,8 +3607,7 @@ impl App {
                     3 => {
                         // Edit hunting row limit.
                         self.settings.editing = true;
-                        self.settings.edit_buffer =
-                            self.settings.hunting_row_limit.clone();
+                        self.settings.edit_buffer = self.settings.hunting_row_limit.clone();
                     }
                     _ => {}
                 }
@@ -3596,8 +3628,7 @@ impl App {
                     match idx {
                         2 => {
                             self.settings.orchestrator_max_tokens = val.clone();
-                            self.save_setting("llm_orchestrator_max_tokens", &val)
-                                .await;
+                            self.save_setting("llm_orchestrator_max_tokens", &val).await;
                         }
                         _ => {}
                     }
@@ -3691,7 +3722,6 @@ impl App {
         //
 
         if form.editing_text {
-
             match key.code {
                 KeyCode::Esc => {
                     self.settings.model_form = None;
@@ -3745,9 +3775,12 @@ impl App {
                     let field = match form.focused_field {
                         1 => &mut form.api_key,
                         2 => &mut form.model_name,
-                        _ => { return; }
+                        _ => {
+                            return;
+                        }
                     };
-                    let byte_pos = field.char_indices()
+                    let byte_pos = field
+                        .char_indices()
                         .nth(pos)
                         .map(|(i, _)| i)
                         .unwrap_or(field.len());
@@ -3760,9 +3793,12 @@ impl App {
                         let field = match form.focused_field {
                             1 => &mut form.api_key,
                             2 => &mut form.model_name,
-                            _ => { return; }
+                            _ => {
+                                return;
+                            }
                         };
-                        let byte_pos = field.char_indices()
+                        let byte_pos = field
+                            .char_indices()
                             .nth(pos)
                             .map(|(i, _)| i)
                             .unwrap_or(field.len());
@@ -3775,11 +3811,14 @@ impl App {
                     let field = match form.focused_field {
                         1 => &mut form.api_key,
                         2 => &mut form.model_name,
-                        _ => { return; }
+                        _ => {
+                            return;
+                        }
                     };
                     let len = field.chars().count();
                     if pos < len {
-                        let byte_pos = field.char_indices()
+                        let byte_pos = field
+                            .char_indices()
                             .nth(pos)
                             .map(|(i, _)| i)
                             .unwrap_or(field.len());
@@ -3883,8 +3922,7 @@ impl App {
                 }
             }
             Err(e) => {
-                self.settings.status_message =
-                    Some(format!("Failed to load models: {}", e));
+                self.settings.status_message = Some(format!("Failed to load models: {}", e));
             }
         }
     }
@@ -3959,8 +3997,7 @@ impl App {
                 self.save_setting("llm_model_definitions", &json).await;
             }
             Err(e) => {
-                self.settings.status_message =
-                    Some(format!("Failed to serialize models: {}", e));
+                self.settings.status_message = Some(format!("Failed to serialize models: {}", e));
             }
         }
     }
