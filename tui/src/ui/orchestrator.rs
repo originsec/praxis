@@ -231,29 +231,6 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     f.render_widget(paragraph, inner);
 }
 
-fn splash_visibility(_state: &OrchestratorState) -> f32 {
-    return 0.0;
-
-    #[allow(unreachable_code)]
-    let elapsed = _state
-        .splash_started_at
-        .elapsed()
-        .unwrap_or_default()
-        .as_millis() as u64;
-
-    const SPLASH_TOTAL_MS: u64 = 400;
-    const FADE_MS: u64 = 200;
-
-    if elapsed >= SPLASH_TOTAL_MS {
-        0.0
-    } else if elapsed <= SPLASH_TOTAL_MS.saturating_sub(FADE_MS) {
-        1.0
-    } else {
-        let fade_elapsed = elapsed - (SPLASH_TOTAL_MS - FADE_MS);
-        1.0 - (fade_elapsed as f32 / FADE_MS as f32)
-    }
-}
-
 fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
     let art: &[&str] = &[
         "██████╗ ██████╗  █████╗ ██╗  ██╗██╗███████╗",
@@ -273,147 +250,13 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
         Color::Rgb(45, 90, 45),
     ];
 
-    let visibility = splash_visibility(_state);
-    let animation_fade = visibility.clamp(0.0, 1.0);
-
-    let w = area.width as usize;
     let h = area.height as usize;
     let art_h = art.len();
     let logo_y = h.saturating_sub(art_h + 3) / 2;
 
-    #[derive(Clone, Copy)]
-    struct BgCell {
-        ch: char,
-        color: Color,
-        priority: u8,
-    }
-
     let mut lines: Vec<Line> = Vec::new();
-    let mut bg: Vec<Option<BgCell>> = vec![None; w.saturating_mul(h)];
-
-    if animation_fade > 0.0 {
-        let elapsed_ms = _state
-            .splash_started_at
-            .elapsed()
-            .unwrap_or_default()
-            .as_millis() as f32;
-
-        //
-        // Source: center of the PRAXIS logo.
-        //
-        let art_display_w = art[0].chars().count();
-        let logo_x_px = w.saturating_sub(art_display_w) / 2;
-        let source_x = (logo_x_px as f32 + art_display_w as f32 / 2.0).min(w.saturating_sub(1) as f32);
-        let source_y = (logo_y as f32 + art_h as f32 / 2.0).min(h.saturating_sub(1) as f32);
-
-        //
-        // Rays emanate from P, rotate slowly, fade with distance and time.
-        //
-        let rotation = elapsed_ms / 600.0;
-        let max_len = 28.0_f32;
-        let ray_count = 16usize;
-
-        //
-        // Glyphs by distance: bright core -> beam body -> wispy tail.
-        //
-        let core_glyphs: &[char] = &['█', '▓', '◆', '✦'];
-        let beam_glyphs: &[char] = &['▒', '═', '║', '╱', '╲'];
-        let tail_glyphs: &[char] = &['░', '·', '∙', ':', '˙'];
-
-        for ray_idx in 0..ray_count {
-            let base_angle = (ray_idx as f32 / ray_count as f32) * std::f32::consts::TAU;
-            let angle = base_angle + rotation;
-            let dir_x = angle.cos();
-            let dir_y = angle.sin() * 0.5; // terminal aspect ratio
-
-            let mut step = 1.5_f32;
-            while step <= max_len {
-                let x = source_x + dir_x * step;
-                let y = source_y + dir_y * step;
-                let px = x.round() as i32;
-                let py = y.round() as i32;
-
-                if px < 0 || py < 0 || px >= w as i32 || py >= h as i32 {
-                    step += 0.7;
-                    continue;
-                }
-
-                let idx = py as usize * w + px as usize;
-                let progress = step / max_len;
-                let falloff = (1.0 - progress).clamp(0.0, 1.0).powf(0.45);
-
-                //
-                // Shimmer wave that crawls outward along each ray.
-                //
-                let shimmer = ((step * 0.9 - elapsed_ms / 80.0 + ray_idx as f32 * 0.7)
-                    .sin()
-                    * 0.5
-                    + 0.5)
-                    * 0.25;
-
-                let brightness = (falloff + shimmer).clamp(0.0, 1.0) * animation_fade;
-                if brightness < 0.05 {
-                    step += 0.7;
-                    continue;
-                }
-
-                let step_hash = ((step * 7.3 + ray_idx as f32 * 13.1) as u32) as usize;
-
-                let ch = if progress < 0.15 {
-                    core_glyphs[step_hash % core_glyphs.len()]
-                } else if progress < 0.55 {
-                    let bi = step_hash % beam_glyphs.len();
-                    if dir_x.abs() > 0.8 {
-                        beam_glyphs[1] // ═
-                    } else if dir_y.abs() > 0.6 {
-                        beam_glyphs[2] // ║
-                    } else if dir_x.signum() == dir_y.signum() {
-                        beam_glyphs[4] // ╲
-                    } else {
-                        beam_glyphs[3] // ╱
-                    }
-                } else {
-                    tail_glyphs[step_hash % tail_glyphs.len()]
-                };
-
-                let priority = if progress < 0.15 { 8 } else if progress < 0.55 { 6 } else { 4 };
-
-                //
-                // Color shifts from bright white-green core to dim green tail.
-                //
-                let color = if progress < 0.15 {
-                    Color::Rgb(
-                        (200.0 * brightness).min(255.0) as u8,
-                        (255.0 * brightness).min(255.0) as u8,
-                        (200.0 * brightness).min(255.0) as u8,
-                    )
-                } else if progress < 0.55 {
-                    Color::Rgb(
-                        (130.0 * brightness).min(255.0) as u8,
-                        (220.0 * brightness).min(255.0) as u8,
-                        (120.0 * brightness).min(255.0) as u8,
-                    )
-                } else {
-                    Color::Rgb(
-                        (70.0 * brightness).min(255.0) as u8,
-                        (140.0 * brightness).min(255.0) as u8,
-                        (70.0 * brightness).min(255.0) as u8,
-                    )
-                };
-
-                if bg[idx].map(|e| e.priority).unwrap_or(0) <= priority {
-                    bg[idx] = Some(BgCell { ch, color, priority });
-                }
-
-                step += 0.8;
-            }
-        }
-    }
 
     for row in 0..h {
-        //
-        // Logo rows.
-        //
         if row >= logo_y && row < logo_y + art_h {
             let art_idx = row - logo_y;
             let color = shades[art_idx.min(shades.len() - 1)];
@@ -421,38 +264,15 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
                 art[art_idx],
                 Style::default().fg(color),
             )));
-            continue;
-        }
-
-        //
-        // "By [Ø] Origin" tagline.
-        //
-        if row == logo_y + art_h + 1 {
+        } else if row == logo_y + art_h + 1 {
             lines.push(Line::from(vec![
                 Span::styled("By ", Style::default().fg(DIM)),
                 Span::styled("[\u{00d8}]", Style::default().fg(Color::Rgb(70, 130, 70))),
                 Span::styled(" Origin", Style::default().fg(DIM)),
             ]));
-            continue;
+        } else {
+            lines.push(Line::raw(""));
         }
-
-        //
-        // Background glyph rows.
-        //
-        let mut spans: Vec<Span> = Vec::new();
-
-        for col in 0..w {
-            if let Some(cell) = bg[row * w + col] {
-                spans.push(Span::styled(
-                    cell.ch.to_string(),
-                    Style::default().fg(cell.color),
-                ));
-            } else {
-                spans.push(Span::raw(" "));
-            }
-        }
-
-        lines.push(Line::from(spans));
     }
 
     let paragraph = Paragraph::new(Text::from(lines)).alignment(ratatui::layout::Alignment::Center);

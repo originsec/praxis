@@ -10,7 +10,7 @@ use crossterm::event::{
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Window {
@@ -178,7 +178,6 @@ pub struct OrchestratorState {
     // Set by the renderer so scroll offset can be clamped.
     //
     pub max_scroll: Cell<u16>,
-    pub splash_started_at: SystemTime,
 }
 
 impl Default for OrchestratorState {
@@ -203,7 +202,6 @@ impl Default for OrchestratorState {
             history_index: None,
             saved_input: String::new(),
             max_scroll: Cell::new(0),
-            splash_started_at: SystemTime::now(),
         }
     }
 }
