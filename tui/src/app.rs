@@ -888,6 +888,11 @@ impl App {
                     }
                 }
             }
+            KeyCode::Esc => {
+                self.orchestrator.input.clear();
+                self.orchestrator.cursor_pos = 0;
+                self.popup = None;
+            }
             KeyCode::PageUp => {
                 self.orchestrator.scroll_offset =
                     self.orchestrator.scroll_offset.saturating_add(10);

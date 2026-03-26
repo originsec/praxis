@@ -236,11 +236,6 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 }
 
 fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
-    //
-    // Block-style ASCII art using full block and box-drawing characters.
-    // Each character is written literally to avoid unicode escape rendering
-    // issues.
-    //
     let art: &[&str] = &[
         "██████╗ ██████╗  █████╗ ██╗  ██╗██╗███████╗",
         "██╔══██╗██╔══██╗██╔══██╗╚██╗██╔╝██║██╔════╝",
@@ -249,15 +244,6 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
         "██║     ██║  ██║██║  ██║██╔╝ ██╗██║███████║",
         "╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝",
     ];
-
-    let content_height = art.len() as u16 + 2;
-    let y_offset = area.height.saturating_sub(content_height) / 2;
-
-    let mut lines: Vec<Line> = Vec::new();
-
-    for _ in 0..y_offset {
-        lines.push(Line::from(""));
-    }
 
     let shades = [
         Color::Rgb(100, 180, 100),
@@ -273,79 +259,97 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
         .unwrap_or_default()
         .as_millis();
 
+    let w = area.width as usize;
+    let h = area.height as usize;
+    let art_h = art.len();
+    let logo_y = h.saturating_sub(art_h + 3) / 2;
+
     //
-    // Glitch animation — frequent, obvious character distortion.
-    // Every few frames, random rows get shifted, corrupted, or
-    // have characters replaced with block/line chars.
+    // Floating symbols — scattered across the entire area, drifting down.
     //
-    let glitch_chars: &[char] = &[
-        '\u{2588}', '\u{2591}', '\u{2592}', '\u{2593}',
-        '/', '\\', '|', '_', '#', '@', '!',
+    let symbols: &[char] = &[
+        '\u{0394}', '\u{03A8}', '\u{03A9}', '\u{03A3}', '\u{03B8}',
+        '\u{03BB}', '\u{03C6}', '\u{00B5}', '\u{00D8}', '\u{03C0}',
+        '$', '#', '&', '@', '!', '?', '1', '0',
+        '\u{25A0}', '\u{25B2}', '\u{2302}', '\u{00A7}',
     ];
 
-    //
-    // Glitch cycles: ~800ms period, active for ~200ms.
-    //
-    let cycle = (t / 100) % 12;
-    let is_glitching = cycle < 1;
+    let mut lines: Vec<Line> = Vec::new();
 
-    //
-    // Which rows to glitch (changes each cycle).
-    //
-    let glitch_seed = (t / 100) as usize;
-
-    for (i, line) in art.iter().enumerate() {
-        let color = shades[i.min(shades.len() - 1)];
-
+    for row in 0..h {
         //
-        // Determine if this row should glitch.
+        // Logo rows.
         //
-        let row_glitch = is_glitching
-            && ((glitch_seed.wrapping_mul(i * 7 + 3)) % 3 == 0);
-
-        if row_glitch {
-            let chars: Vec<char> = line.chars().collect();
-            let mut spans: Vec<Span> = Vec::new();
-
-            //
-            // Horizontal shift — offset some chars to the right.
-            //
-            let shift = (glitch_seed.wrapping_mul(i + 1) % 4) as i32 - 1;
-
-            for (ci, ch) in chars.iter().enumerate() {
-                let glitch_this = (glitch_seed.wrapping_mul(ci * 13 + i * 7)) % 8 < 4;
-
-                if glitch_this && *ch != ' ' {
-                    let gi = (glitch_seed + ci + i) % glitch_chars.len();
-                    spans.push(Span::styled(
-                        glitch_chars[gi].to_string(),
-                        Style::default().fg(Color::Rgb(180, 255, 180)),
-                    ));
-                } else if shift > 0 && ci < shift as usize {
-                    spans.push(Span::raw(" "));
-                } else {
-                    spans.push(Span::styled(
-                        ch.to_string(),
-                        Style::default().fg(color),
-                    ));
-                }
-            }
-
-            lines.push(Line::from(spans));
-        } else {
+        if row >= logo_y && row < logo_y + art_h {
+            let art_idx = row - logo_y;
+            let color = shades[art_idx.min(shades.len() - 1)];
             lines.push(Line::from(Span::styled(
-                *line,
+                art[art_idx],
                 Style::default().fg(color),
             )));
+            continue;
         }
-    }
 
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::styled("By ", Style::default().fg(DIM)),
-        Span::styled("[\u{00d8}]", Style::default().fg(Color::Rgb(70, 130, 70))),
-        Span::styled(" Origin", Style::default().fg(DIM)),
-    ]));
+        //
+        // "By [Ø] Origin" tagline.
+        //
+        if row == logo_y + art_h + 1 {
+            lines.push(Line::from(vec![
+                Span::styled("By ", Style::default().fg(DIM)),
+                Span::styled("[\u{00d8}]", Style::default().fg(Color::Rgb(70, 130, 70))),
+                Span::styled(" Origin", Style::default().fg(DIM)),
+            ]));
+            continue;
+        }
+
+        //
+        // Floating symbol rows.
+        //
+        let mut spans: Vec<Span> = Vec::new();
+
+        for col in 0..w {
+            //
+            // Each cell has a pseudo-random "stream" that falls down.
+            // Use column as seed, time drives the vertical position.
+            //
+            let stream_seed = (col as u128).wrapping_mul(71).wrapping_add(37);
+            let speed = (stream_seed % 4) + 1;
+            let y_pos = ((t / (speed * 100)).wrapping_add(stream_seed)) % (h as u128 * 2);
+
+            let is_active = y_pos == row as u128;
+            let is_trail = y_pos > 0 && (y_pos - 1) == row as u128;
+            let is_faint = y_pos > 1 && (y_pos - 2) == row as u128;
+
+            //
+            // ~25% of columns have active streams for denser rain.
+            //
+            let has_stream = stream_seed % 4 == 0;
+
+            if has_stream && is_active {
+                let si = ((t / 80).wrapping_add(col as u128 * 13)) as usize % symbols.len();
+                spans.push(Span::styled(
+                    symbols[si].to_string(),
+                    Style::default().fg(Color::Rgb(100, 200, 100)),
+                ));
+            } else if has_stream && is_trail {
+                let si = ((t / 80).wrapping_add(col as u128 * 13 + 5)) as usize % symbols.len();
+                spans.push(Span::styled(
+                    symbols[si].to_string(),
+                    Style::default().fg(Color::Rgb(50, 100, 50)),
+                ));
+            } else if has_stream && is_faint {
+                let si = ((t / 80).wrapping_add(col as u128 * 13 + 10)) as usize % symbols.len();
+                spans.push(Span::styled(
+                    symbols[si].to_string(),
+                    Style::default().fg(Color::Rgb(30, 55, 30)),
+                ));
+            } else {
+                spans.push(Span::raw(" "));
+            }
+        }
+
+        lines.push(Line::from(spans));
+    }
 
     let paragraph = Paragraph::new(Text::from(lines))
         .alignment(ratatui::layout::Alignment::Center);

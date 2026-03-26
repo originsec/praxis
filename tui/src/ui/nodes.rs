@@ -11,7 +11,7 @@ const MUTED: Color = Color::Rgb(120, 120, 120);
 const TEXT: Color = Color::Rgb(180, 180, 180);
 const HIGHLIGHT_BG: Color = Color::Rgb(35, 35, 40);
 
-pub fn render(f: &mut Frame, area: Rect, state: &NodesState, ops: &[common::SemanticOpUpdate]) {
+pub fn render(f: &mut Frame, area: Rect, state: &NodesState, ops: &[common::SemanticOpUpdate], chains: &[common::ChainExecutionUpdate]) {
     if let Some(ref opts) = state.session_options {
         render_session_options(f, area, opts);
         return;
@@ -27,7 +27,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &NodesState, ops: &[common::Sema
         .split(area);
 
         render_node_list(f, chunks[0], state);
-        render_node_detail(f, chunks[1], state, ops);
+        render_node_detail(f, chunks[1], state, ops, chains);
     }
 }
 
@@ -104,7 +104,7 @@ fn render_node_list(f: &mut Frame, area: Rect, state: &NodesState) {
     f.render_stateful_widget(table, area, &mut table_state);
 }
 
-fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[common::SemanticOpUpdate]) {
+fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[common::SemanticOpUpdate], chains: &[common::ChainExecutionUpdate]) {
     let border_style = if state.detail_focus {
         Style::default().fg(ACCENT)
     } else {
@@ -222,6 +222,40 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
                     )));
                 }
             }
+        }
+    }
+
+    //
+    // Active chain executions on this node.
+    //
+    let node_chains: Vec<_> = chains.iter()
+        .filter(|c| c.node_id == node.node_id)
+        .filter(|c| matches!(c.status, common::ChainExecutionStatus::Running | common::ChainExecutionStatus::Queued))
+        .collect();
+
+    if !node_chains.is_empty() {
+        if !activity_lines.is_empty() {
+            activity_lines.push(Line::from(""));
+        }
+        activity_lines.push(Line::from(Span::styled(
+            " Active Chains",
+            Style::default().fg(ACCENT),
+        )));
+        for chain in &node_chains {
+            let (status_str, status_color) = match chain.status {
+                common::ChainExecutionStatus::Running => ("\u{25cf}", Color::Rgb(180, 160, 60)),
+                common::ChainExecutionStatus::Queued => ("\u{25cb}", Color::Rgb(100, 140, 180)),
+                _ => ("\u{25cb}", DIM),
+            };
+            let done = chain.elements.values()
+                .filter(|e| matches!(e.status, common::ElementExecutionStatus::Completed { .. }))
+                .count();
+            let total = chain.elements.len();
+            activity_lines.push(Line::from(vec![
+                Span::styled(format!("  {} ", status_str), Style::default().fg(status_color)),
+                Span::styled(&chain.chain_name, Style::default().fg(TEXT)),
+                Span::styled(format!("  {}/{} elements", done, total), Style::default().fg(DIM)),
+            ]));
         }
     }
 
