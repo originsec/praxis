@@ -1898,27 +1898,42 @@ impl App {
     }
 
     async fn handle_new_op_form_key(&mut self, key: KeyEvent) {
+        //
+        // Visual field order: 0,1,2,3,4,6,5,7,8
+        // Field 6 (iterations) is skipped when mode is one-shot.
+        //
+        let visual_order = |form: &NewOpForm| -> Vec<usize> {
+            let mut order = vec![0, 1, 2, 3, 4];
+            if form.mode == 1 {
+                order.push(6); // iterations only for agent mode
+            }
+            order.extend([5, 7, 8]);
+            order
+        };
+
         match key.code {
             KeyCode::Esc => {
                 self.new_op_form = None;
             }
             KeyCode::Down => {
                 if let Some(ref mut form) = self.new_op_form {
-                    form.focused_field = (form.focused_field + 1) % NewOpForm::field_count();
+                    let order = visual_order(form);
+                    let pos = order.iter().position(|&f| f == form.focused_field).unwrap_or(0);
+                    let next = (pos + 1) % order.len();
+                    form.focused_field = order[next];
                 }
             }
             KeyCode::Up => {
                 if let Some(ref mut form) = self.new_op_form {
-                    if form.focused_field > 0 {
-                        form.focused_field -= 1;
-                    } else {
-                        form.focused_field = NewOpForm::field_count() - 1;
-                    }
+                    let order = visual_order(form);
+                    let pos = order.iter().position(|&f| f == form.focused_field).unwrap_or(0);
+                    let prev = if pos > 0 { pos - 1 } else { order.len() - 1 };
+                    form.focused_field = order[prev];
                 }
             }
-            KeyCode::Tab => {
+            KeyCode::Char(' ') => {
                 //
-                // Tab toggles Mode and YOLO fields.
+                // Space toggles Mode and YOLO, or types space in text fields.
                 //
                 if let Some(ref mut form) = self.new_op_form {
                     let idx = form.focused_field;
@@ -1926,6 +1941,18 @@ impl App {
                         form.mode = (form.mode + 1) % 2;
                     } else if idx == 7 {
                         form.yolo = !form.yolo;
+                    } else {
+                        // Type space in text fields
+                        match idx {
+                            0 => form.name.push(' '),
+                            1 => form.short_name.push(' '),
+                            2 => form.category.push(' '),
+                            3 => form.description.push(' '),
+                            5 => form.timeout.push(' '),
+                            6 => form.iterations.push(' '),
+                            8 => form.prompt.push(' '),
+                            _ => {}
+                        }
                     }
                 }
             }

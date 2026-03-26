@@ -301,76 +301,64 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
             .unwrap_or_default()
             .as_millis();
         let logo_x = w.saturating_sub(art[0].len()) / 2;
-        let source_x = (logo_x as f32 + 1.5).min(w.saturating_sub(1) as f32);
+        let source_x = (logo_x as f32 + 3.0).min(w.saturating_sub(1) as f32);
         let source_y = (logo_y as f32 + 2.0).min(h.saturating_sub(1) as f32);
-        let rotation = t as f32 / 210.0;
-        let pulse = ((t as f32 / 160.0).sin() * 0.5 + 0.5) * 0.28 + 0.72;
-        let ray_count = 12usize;
-        let max_len = (w.max(h) as f32 * 1.05).max(12.0);
+        let rotation = t as f32 / 480.0;
+        let pulse = ((t as f32 / 190.0).sin() * 0.5 + 0.5) * 0.22 + 0.78;
+        let ray_count = 10usize;
+        let max_len = (w.max(h) as f32 * 1.1).max(18.0);
 
         for ray_idx in 0..ray_count {
-            let seed = mix(ray_idx as u64 * 97 + w as u64 * 11 + h as u64 * 7);
             let base_angle = (ray_idx as f32 / ray_count as f32) * std::f32::consts::TAU;
-            let angle = base_angle + rotation + ((seed & 0xff) as f32 / 255.0 - 0.5) * 0.18;
+            let angle = base_angle + rotation;
             let dir_x = angle.cos();
             let dir_y = angle.sin();
-            let ray_len = max_len * (0.72 + ((seed >> 8) & 0xff) as f32 / 255.0 * 0.28);
-            let head = ((((t / (40 + (seed % 35) as u128)) as u64) + seed) % 1000) as f32 / 1000.0;
             let perp_x = -dir_y;
             let perp_y = dir_x;
-            let thickness = 2 + ((seed >> 20) & 1) as i32;
+            let thickness = if ray_idx % 2 == 0 { 1 } else { 2 };
 
             let mut step = 0.0_f32;
-            while step < ray_len {
-                let progress = step / ray_len;
+            while step <= max_len {
+                let progress = step / max_len;
                 let x = source_x + dir_x * step;
                 let y = source_y + dir_y * step;
 
-                let beam = (1.0 - progress).powf(0.42);
-                let shimmer =
-                    ((rotation * 2.4 + progress * 10.0 + ray_idx as f32).sin() * 0.5 + 0.5) * 0.3
-                        + 0.7;
-                let flare = (1.0 - (progress - head).abs() * 8.0).clamp(0.0, 1.0);
-                let glow = beam * shimmer * (0.76 + flare * 0.9) * pulse * animation_fade;
+                let beam = (1.0 - progress).clamp(0.0, 1.0).powf(0.34);
+                let ripple = (((step / 2.6) - rotation * 3.2 + ray_idx as f32 * 0.7).sin() * 0.5
+                    + 0.5)
+                    * 0.25
+                    + 0.75;
+                let glow = beam * ripple * pulse * animation_fade;
 
                 if glow >= 0.08 {
-                    let (base_ch, priority, color) = if flare > 0.72 || glow > 0.84 {
+                    let line_ch = if dir_x.abs() > 0.92 {
+                        '-'
+                    } else if dir_y.abs() > 0.92 {
+                        '|'
+                    } else if dir_x.signum() == dir_y.signum() {
+                        '\\'
+                    } else {
+                        '/'
+                    };
+
+                    let (base_ch, priority, color) = if glow > 0.72 {
                         (
-                            '*',
+                            if (step as i32) % 6 == 0 { '*' } else { line_ch },
                             6,
                             Color::Rgb(
-                                (190.0 * glow).min(255.0) as u8,
-                                (250.0 * glow).min(255.0) as u8,
                                 (170.0 * glow).min(255.0) as u8,
-                            ),
-                        )
-                    } else if glow > 0.55 {
-                        let line_ch = if dir_x.abs() > 0.9 {
-                            '-'
-                        } else if dir_y.abs() > 0.9 {
-                            '|'
-                        } else if dir_x.signum() == dir_y.signum() {
-                            '\\'
-                        } else {
-                            '/'
-                        };
-                        (
-                            line_ch,
-                            5,
-                            Color::Rgb(
-                                (126.0 * glow).min(255.0) as u8,
-                                (208.0 * glow).min(255.0) as u8,
-                                (114.0 * glow).min(255.0) as u8,
+                                (235.0 * glow).min(255.0) as u8,
+                                (150.0 * glow).min(255.0) as u8,
                             ),
                         )
                     } else {
                         (
-                            '.',
-                            4,
+                            line_ch,
+                            5,
                             Color::Rgb(
-                                (72.0 * glow).min(255.0) as u8,
-                                (138.0 * glow).min(255.0) as u8,
-                                (78.0 * glow).min(255.0) as u8,
+                                (90.0 * glow).min(255.0) as u8,
+                                (165.0 * glow).min(255.0) as u8,
+                                (92.0 * glow).min(255.0) as u8,
                             ),
                         )
                     };
@@ -396,16 +384,13 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
                     }
                 }
 
-                step += 0.55;
+                step += 0.9;
             }
         }
 
-        let orbit_count = 8usize;
-        for orbit_idx in 0..orbit_count {
-            let seed = mix(orbit_idx as u64 * 173 + w as u64 * 3 + h as u64 * 29);
-            let orbit_angle = rotation * (1.2 + orbit_idx as f32 * 0.08)
-                + (orbit_idx as f32 / orbit_count as f32) * std::f32::consts::TAU;
-            let radius = 2.0 + orbit_idx as f32 * 1.2 + ((seed >> 16) & 0xf) as f32 * 0.1;
+        for orbit_idx in 0..6usize {
+            let orbit_angle = rotation * 1.8 + (orbit_idx as f32 / 6.0) * std::f32::consts::TAU;
+            let radius = 1.5 + orbit_idx as f32 * 0.85;
             let px = (source_x + orbit_angle.cos() * radius).round() as i32;
             let py = (source_y + orbit_angle.sin() * radius).round() as i32;
 
@@ -413,10 +398,8 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
                 continue;
             }
 
-            let intensity = ((((t / 55) as u64 + seed) % 100) as f32 / 100.0) * animation_fade;
-            if intensity < 0.35 {
-                continue;
-            }
+            let intensity =
+                ((((t / 45) as u64 + orbit_idx as u64 * 17) % 100) as f32 / 100.0) * animation_fade;
 
             bg[py as usize * w + px as usize] = Some(BgCell {
                 ch: if intensity > 0.72 { '*' } else { '+' },
