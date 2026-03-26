@@ -1386,20 +1386,7 @@ impl App {
                     let cols = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80);
                     let rows = crossterm::terminal::size().map(|(_, h)| h).unwrap_or(24);
 
-                    //
-                    // Send initial resize.
-                    //
-
-                    let _ = self
-                        .client
-                        .send_command(
-                            &node_id,
-                            NodeCommand::Terminal(common::TerminalCommand::Resize {
-                                rows,
-                                cols,
-                            }),
-                        )
-                        .await;
+                    let _ = self.client.send_terminal_resize(&node_id, rows, cols).await;
 
                     self.nodes.terminal = Some(TerminalState {
                         node_id: node_id.clone(),
@@ -1463,26 +1450,14 @@ impl App {
 
         if let Some(ref term) = self.nodes.terminal {
             let node_id = term.node_id.clone();
-            let _ = self
-                .client
-                .send_command(
-                    &node_id,
-                    NodeCommand::Terminal(common::TerminalCommand::Write { data }),
-                )
-                .await;
+            let _ = self.client.send_terminal_input(&node_id, data).await;
         }
     }
 
     async fn close_terminal(&mut self) {
         if let Some(ref term) = self.nodes.terminal {
             let node_id = term.node_id.clone();
-            let _ = self
-                .client
-                .send_command(
-                    &node_id,
-                    NodeCommand::Terminal(common::TerminalCommand::Close),
-                )
-                .await;
+            let _ = self.client.send_terminal_close(&node_id).await;
         }
         self.nodes.terminal = None;
     }

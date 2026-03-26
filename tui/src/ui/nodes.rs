@@ -798,8 +798,8 @@ fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
             let ch = cell.contents();
             let display = if ch.is_empty() { " " } else { &ch };
 
-            let fg = vt100_color_to_ratatui(cell.fgcolor());
-            let bg = vt100_color_to_ratatui(cell.bgcolor());
+            let fg = vt100_fg_to_ratatui(cell.fgcolor());
+            let bg = vt100_bg_to_ratatui(cell.bgcolor());
 
             let mut style = Style::default().fg(fg);
             if bg != super::BG {
@@ -835,9 +835,17 @@ fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
     f.render_widget(Paragraph::new(hints), chunks[2]);
 }
 
-fn vt100_color_to_ratatui(color: vt100::Color) -> Color {
+fn vt100_fg_to_ratatui(color: vt100::Color) -> Color {
     match color {
         vt100::Color::Default => Color::Rgb(180, 180, 180),
+        vt100::Color::Idx(i) => Color::Indexed(i),
+        vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
+    }
+}
+
+fn vt100_bg_to_ratatui(color: vt100::Color) -> Color {
+    match color {
+        vt100::Color::Default => super::BG,
         vt100::Color::Idx(i) => Color::Indexed(i),
         vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
     }

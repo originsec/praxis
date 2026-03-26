@@ -522,6 +522,42 @@ impl Client {
     // Terminal methods.
     //
 
+    async fn send_terminal_command_fire_and_forget(
+        &self,
+        node_id: &str,
+        cmd: common::TerminalCommand,
+    ) -> Result<()> {
+        let command_id = uuid::Uuid::new_v4().to_string();
+        let request = CommandRequest {
+            command_id,
+            client_id: self.client_id.clone(),
+            node_id: node_id.to_string(),
+            command: NodeCommand::Terminal(cmd),
+        };
+        self.publish_signal(ClientSignalMessage::Command(request)).await
+    }
+
+    pub async fn send_terminal_input(&self, node_id: &str, data: Vec<u8>) -> Result<()> {
+        self.send_terminal_command_fire_and_forget(
+            node_id,
+            common::TerminalCommand::Write { data },
+        ).await
+    }
+
+    pub async fn send_terminal_resize(&self, node_id: &str, rows: u16, cols: u16) -> Result<()> {
+        self.send_terminal_command_fire_and_forget(
+            node_id,
+            common::TerminalCommand::Resize { rows, cols },
+        ).await
+    }
+
+    pub async fn send_terminal_close(&self, node_id: &str) -> Result<()> {
+        self.send_terminal_command_fire_and_forget(
+            node_id,
+            common::TerminalCommand::Close,
+        ).await
+    }
+
     pub fn subscribe_terminal_output(
         &self,
     ) -> tokio::sync::mpsc::UnboundedReceiver<TerminalOutput> {
