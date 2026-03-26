@@ -335,6 +335,16 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
         } else {
             Span::styled("  (connecting...)", Style::default().fg(DIM))
         },
+        if let Some(ref wd) = session.working_dir {
+            Span::styled(format!("  dir:{}", wd), Style::default().fg(DIM))
+        } else {
+            Span::raw("")
+        },
+        if session.yolo {
+            Span::styled("  YOLO", Style::default().fg(Color::Rgb(180, 160, 60)))
+        } else {
+            Span::raw("")
+        },
     ]);
     f.render_widget(Paragraph::new(header), chunks[0]);
 
@@ -506,24 +516,39 @@ fn render_session_options(f: &mut Frame, area: Rect, opts: &SessionOptions) {
     //
     // Working directory.
     //
-    let dir_focused = opts.focused_field == 0;
-    let dir_label_style = if dir_focused {
-        Style::default().fg(ACCENT)
+    //
+    // YOLO mode — always toggleable with Tab.
+    //
+    let yolo_indicator = if opts.yolo {
+        Span::styled(
+            " \u{25cf} enabled ",
+            Style::default().fg(Color::Black).bg(Color::Rgb(180, 160, 60)),
+        )
     } else {
-        Style::default().fg(MUTED)
+        Span::styled(" \u{25cb} disabled ", Style::default().fg(DIM))
     };
+
+    lines.push(Line::from(vec![
+        Span::styled("YOLO Mode: ", Style::default().fg(MUTED)),
+        yolo_indicator,
+        Span::styled("  (tab)", Style::default().fg(DIM)),
+    ]));
+
+    //
+    // Working directory — always focused for Up/Down navigation.
+    //
+    lines.push(Line::from(""));
+    let dir_label_style = Style::default().fg(ACCENT);
 
     lines.push(Line::from(Span::styled("Working Directory:", dir_label_style)));
 
-    let mut dir_options = vec!["Default (home)".to_string()];
+    let mut dir_options = vec!["Default".to_string()];
     dir_options.extend(opts.working_dirs.iter().cloned());
 
     for (i, dir) in dir_options.iter().enumerate() {
         let is_selected = i == opts.selected_dir;
-        let style = if is_selected && dir_focused {
+        let style = if is_selected {
             Style::default().fg(TEXT).bg(Color::Rgb(35, 40, 35)).add_modifier(Modifier::BOLD)
-        } else if is_selected {
-            Style::default().fg(TEXT).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(DIM)
         };
@@ -538,36 +563,6 @@ fn render_session_options(f: &mut Frame, area: Rect, opts: &SessionOptions) {
             Style::default().fg(DIM),
         )));
     }
-
-    //
-    // YOLO mode.
-    //
-    lines.push(Line::from(""));
-    let yolo_focused = opts.focused_field == 1;
-    let yolo_label_style = if yolo_focused {
-        Style::default().fg(ACCENT)
-    } else {
-        Style::default().fg(MUTED)
-    };
-
-    let yolo_indicator = if opts.yolo {
-        Span::styled(
-            " \u{25cf} enabled ",
-            Style::default().fg(Color::Black).bg(Color::Rgb(180, 160, 60)),
-        )
-    } else {
-        Span::styled(" \u{25cb} disabled ", Style::default().fg(DIM))
-    };
-
-    lines.push(Line::from(vec![
-        Span::styled("YOLO Mode: ", yolo_label_style),
-        yolo_indicator,
-        if yolo_focused {
-            Span::styled("  (tab)", Style::default().fg(DIM))
-        } else {
-            Span::raw("")
-        },
-    ]));
 
     f.render_widget(Paragraph::new(lines), inner);
 

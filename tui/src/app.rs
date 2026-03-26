@@ -211,7 +211,6 @@ pub struct SessionOptions {
     pub working_dirs: Vec<String>,
     pub selected_dir: usize,
     pub yolo: bool,
-    pub focused_field: u8, // 0=dir, 1=yolo
 }
 
 pub struct SessionChat {
@@ -227,6 +226,7 @@ pub struct SessionChat {
     pub history_index: Option<usize>,
     pub saved_input: String,
     pub yolo: bool,
+    pub working_dir: Option<String>,
 }
 
 pub struct ChatMessage {
@@ -1018,10 +1018,9 @@ impl App {
         self.nodes.session_options = Some(SessionOptions {
             node_id,
             agent_name: agent,
-            working_dirs: Vec::new(), // populated async via tick
+            working_dirs: Vec::new(),
             selected_dir: 0,
             yolo: false,
-            focused_field: 0,
         });
         self.nodes.detail_focus = false;
     }
@@ -1033,57 +1032,22 @@ impl App {
             }
             KeyCode::Up => {
                 if let Some(ref mut opts) = self.nodes.session_options {
-                    match opts.focused_field {
-                        0 => {
-                            //
-                            // Navigate working dir list up.
-                            //
-                            if opts.selected_dir > 0 {
-                                opts.selected_dir -= 1;
-                            }
-                        }
-                        _ => {
-                            //
-                            // Move to dir field.
-                            //
-                            opts.focused_field = 0;
-                        }
+                    if opts.selected_dir > 0 {
+                        opts.selected_dir -= 1;
                     }
                 }
             }
             KeyCode::Down => {
                 if let Some(ref mut opts) = self.nodes.session_options {
-                    match opts.focused_field {
-                        0 => {
-                            let max = opts.working_dirs.len();
-                            if opts.selected_dir < max {
-                                opts.selected_dir += 1;
-                            } else {
-                                //
-                                // Past end of dir list — move to YOLO field.
-                                //
-                                opts.focused_field = 1;
-                            }
-                        }
-                        _ => {
-                            //
-                            // Already at bottom, wrap to dir field.
-                            //
-                            opts.focused_field = 0;
-                        }
+                    let max = opts.working_dirs.len();
+                    if opts.selected_dir < max {
+                        opts.selected_dir += 1;
                     }
                 }
             }
             KeyCode::Tab => {
-                //
-                // Tab toggles YOLO when on YOLO field, or switches field.
-                //
                 if let Some(ref mut opts) = self.nodes.session_options {
-                    if opts.focused_field == 1 {
-                        opts.yolo = !opts.yolo;
-                    } else {
-                        opts.focused_field = 1;
-                    }
+                    opts.yolo = !opts.yolo;
                 }
             }
             KeyCode::Enter => {
@@ -1134,6 +1098,7 @@ impl App {
             history_index: None,
             saved_input: String::new(),
             yolo,
+            working_dir: working_dir.clone(),
         });
 
         //

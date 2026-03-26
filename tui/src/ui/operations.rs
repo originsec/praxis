@@ -451,9 +451,8 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
             let focused = state.detail_focus && col.focused_section == 1;
             lines.extend(section_header_line("Summary", col.sections[1], focused));
             if !col.sections[1] {
-                for line in summary.lines() {
-                    lines.push(Line::from(Span::styled(format!("  {}", line), Style::default().fg(TEXT))));
-                }
+                let md_lines = crate::markdown::render(summary, "  ");
+                lines.extend(md_lines);
             }
         }
 
