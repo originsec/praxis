@@ -51,8 +51,21 @@ fn setup_shutdown_signal() -> CancellationToken {
     token
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    let worker_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(20)
+        .max(20);
+
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(worker_threads)
+        .enable_all()
+        .build()
+        .expect("Failed to build tokio runtime")
+        .block_on(async_main());
+}
+
+async fn async_main() {
     use tracing_subscriber::EnvFilter;
 
     //
