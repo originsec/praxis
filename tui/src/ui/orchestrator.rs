@@ -268,52 +268,77 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
         Color::Rgb(45, 90, 45),
     ];
 
-    for (i, line) in art.iter().enumerate() {
-        let color = shades[i.min(shades.len() - 1)];
-        lines.push(Line::from(Span::styled(
-            *line,
-            Style::default().fg(color),
-        )));
-    }
-
     //
-    // Drip animation: characters fall below the logo at random columns.
+    // Animated scanning border — a bright dot travels around the logo.
     //
     let t = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
+    let art_width = art.first().map(|l| l.chars().count()).unwrap_or(44);
+    let perimeter = (art_width + art.len()) * 2;
+    let scan_pos = ((t / 60) % perimeter as u128) as usize;
 
-    let drip_chars = ['\u{2591}', '\u{2592}', '\u{2593}', '\u{2588}', '\u{2593}', '\u{2592}', '\u{2591}', ' '];
-    let drip_positions: &[usize] = &[3, 8, 14, 19, 25, 30, 37, 42];
-
-    for drip_row in 0..3u16 {
-        let art_width = art.last().map(|l| l.chars().count()).unwrap_or(40);
-        let mut drip_line = vec![' '; art_width];
-
-        for &col in drip_positions {
-            if col >= art_width {
-                continue;
-            }
-            let speed = (col * 7 + 13) % 5 + 2;
-            let offset = ((t / (speed as u128 * 80)) + col as u128) % drip_chars.len() as u128;
-            let phase = ((t / (speed as u128 * 120)) + col as u128 * 3) % 8;
-            if phase < (3 - drip_row as u128) + 1 {
-                drip_line[col] = drip_chars[offset as usize];
-            }
-        }
-
-        let drip_str: String = drip_line.into_iter().collect();
-        let brightness = match drip_row {
-            0 => Color::Rgb(45, 90, 45),
-            1 => Color::Rgb(35, 70, 35),
-            _ => Color::Rgb(25, 50, 25),
+    //
+    // Top border with scanning dot.
+    //
+    let mut top_border: Vec<Span> = Vec::new();
+    for col in 0..art_width {
+        let is_scan = scan_pos == col;
+        let near = scan_pos.abs_diff(col) <= 2;
+        let ch = if is_scan { "\u{2584}" } else { "\u{2500}" };
+        let color = if is_scan {
+            Color::Rgb(130, 220, 130)
+        } else if near {
+            Color::Rgb(80, 150, 80)
+        } else {
+            Color::Rgb(35, 55, 35)
         };
-        lines.push(Line::from(Span::styled(
-            drip_str,
-            Style::default().fg(brightness),
-        )));
+        top_border.push(Span::styled(ch, Style::default().fg(color)));
     }
+    lines.push(Line::from(top_border));
+
+    for (i, line) in art.iter().enumerate() {
+        let color = shades[i.min(shades.len() - 1)];
+        //
+        // Left/right border dots.
+        //
+        let left_pos = art_width + art.len() + (art_width - 1) + (art.len() - 1 - i);
+        let right_pos = art_width + i;
+        let left_scan = scan_pos.abs_diff(left_pos) <= 1;
+        let right_scan = scan_pos.abs_diff(right_pos) <= 1;
+
+        let left_ch = if left_scan { "\u{2588}" } else { "\u{2502}" };
+        let right_ch = if right_scan { "\u{2588}" } else { "\u{2502}" };
+        let left_color = if left_scan { Color::Rgb(130, 220, 130) } else { Color::Rgb(35, 55, 35) };
+        let right_color = if right_scan { Color::Rgb(130, 220, 130) } else { Color::Rgb(35, 55, 35) };
+
+        let mut spans = vec![Span::styled(left_ch, Style::default().fg(left_color))];
+        spans.push(Span::styled(*line, Style::default().fg(color)));
+        spans.push(Span::styled(right_ch, Style::default().fg(right_color)));
+        lines.push(Line::from(spans));
+    }
+
+    //
+    // Bottom border with scanning dot.
+    //
+    let bottom_start = art_width + art.len();
+    let mut bottom_border: Vec<Span> = Vec::new();
+    for col in 0..art_width {
+        let pos = bottom_start + col;
+        let is_scan = scan_pos == pos;
+        let near = scan_pos.abs_diff(pos) <= 2;
+        let ch = if is_scan { "\u{2580}" } else { "\u{2500}" };
+        let color = if is_scan {
+            Color::Rgb(130, 220, 130)
+        } else if near {
+            Color::Rgb(80, 150, 80)
+        } else {
+            Color::Rgb(35, 55, 35)
+        };
+        bottom_border.push(Span::styled(ch, Style::default().fg(color)));
+    }
+    lines.push(Line::from(bottom_border));
 
     lines.push(Line::from(""));
     lines.push(Line::from(vec![

@@ -337,6 +337,10 @@ impl App {
 
     pub async fn init(&mut self) {
         self.start_orchestrator_session().await;
+        //
+        // Request initial op list so broadcasts can update it.
+        //
+        let _ = self.client.request_semantic_op_list().await;
     }
 
     pub async fn start_orchestrator_session(&mut self) {
@@ -391,12 +395,11 @@ impl App {
                 //
                 // Periodically refresh operations data when viewing that window.
                 //
-                if self.active_window == Window::Operations
-                    || self.active_window == Window::Nodes
-                {
-                    self.operations.operations = self.client.get_operations().await;
-                    self.operations.chain_executions = self.client.get_chain_executions().await;
-                }
+                //
+                // Always keep operations data fresh for both Ops and Nodes views.
+                //
+                self.operations.operations = self.client.get_operations().await;
+                self.operations.chain_executions = self.client.get_chain_executions().await;
 
                 //
                 // Refresh session options working dirs from recon cache.
