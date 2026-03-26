@@ -110,11 +110,16 @@ fn render_node_list(f: &mut Frame, area: Rect, state: &NodesState) {
 }
 
 fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState) {
+    let border_style = if state.detail_focus {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(DIM)
+    };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(DIM))
+        .border_style(border_style)
         .title_style(Style::default().fg(MUTED))
-        .title(" Detail ");
+        .title(" Detail (enter to open session) ");
 
     let Some(node) = state.nodes.get(state.selected) else {
         let empty = Paragraph::new(Line::from(Span::styled(
@@ -180,7 +185,7 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState) {
             Style::default().fg(DIM),
         )));
     } else {
-        for agent in &node.discovered_agents {
+        for (idx, agent) in node.discovered_agents.iter().enumerate() {
             let version = agent
                 .version
                 .as_deref()
@@ -193,14 +198,21 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState) {
             };
 
             //
-            // Highlight the selected agent.
+            // Highlight: * for node's active agent, bg for cursor-selected.
             //
-            let is_selected = node
+            let is_active = node
                 .selected_agent
                 .as_ref()
                 .is_some_and(|s| s.short_name == agent.short_name);
 
-            let name_style = if is_selected {
+            let is_cursor = state.detail_focus && idx == state.agent_selected;
+
+            let name_style = if is_cursor {
+                Style::default()
+                    .fg(TEXT)
+                    .bg(Color::Rgb(35, 40, 35))
+                    .add_modifier(Modifier::BOLD)
+            } else if is_active {
                 Style::default()
                     .fg(TEXT)
                     .add_modifier(Modifier::BOLD)
@@ -208,7 +220,7 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState) {
                 Style::default().fg(TEXT)
             };
 
-            let selected_marker = if is_selected { " *" } else { "" };
+            let selected_marker = if is_active { " *" } else { "" };
 
             agent_lines.push(Line::from(vec![
                 Span::raw("  "),

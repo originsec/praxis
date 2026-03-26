@@ -199,6 +199,8 @@ pub struct NodesState {
     pub split_percent: u16,
     pub dragging: bool,
     pub session: Option<SessionChat>,
+    pub detail_focus: bool,
+    pub agent_selected: usize,
 }
 
 pub struct SessionChat {
@@ -231,6 +233,8 @@ impl Default for NodesState {
             split_percent: 55,
             dragging: false,
             session: None,
+            detail_focus: false,
+            agent_selected: 0,
         }
     }
 }
@@ -858,51 +862,85 @@ impl App {
             return;
         }
 
+        //
+        // Detail pane focused — navigate agents.
+        //
+        if self.nodes.detail_focus {
+            match key.code {
+                KeyCode::Esc | KeyCode::Left => {
+                    self.nodes.detail_focus = false;
+                }
+                KeyCode::Up => {
+                    if self.nodes.agent_selected > 0 {
+                        self.nodes.agent_selected -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    let agent_count = self.nodes.nodes
+                        .get(self.nodes.selected)
+                        .map(|n| n.discovered_agents.len())
+                        .unwrap_or(0);
+                    if self.nodes.agent_selected + 1 < agent_count {
+                        self.nodes.agent_selected += 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    //
+                    // Open session with selected agent.
+                    //
+                    self.start_session_with_selected_agent();
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match key.code {
             KeyCode::Up => {
                 if self.nodes.selected > 0 {
                     self.nodes.selected -= 1;
+                    self.nodes.agent_selected = 0;
                 }
             }
             KeyCode::Down => {
                 if self.nodes.selected + 1 < self.nodes.nodes.len() {
                     self.nodes.selected += 1;
+                    self.nodes.agent_selected = 0;
                 }
             }
-            KeyCode::Char('s') => {
-                self.start_session_chat();
+            KeyCode::Right | KeyCode::Enter => {
+                self.nodes.detail_focus = true;
+                self.nodes.agent_selected = 0;
             }
             _ => {}
         }
     }
 
-    fn start_session_chat(&mut self) {
+    fn start_session_with_selected_agent(&mut self) {
         let node = match self.nodes.nodes.get(self.nodes.selected) {
             Some(n) => n,
             None => return,
         };
 
-        let agent_name = node
-            .selected_agent
-            .as_ref()
-            .map(|a| a.short_name.clone())
-            .or_else(|| node.discovered_agents.first().map(|a| a.short_name.clone()));
-
-        let Some(agent) = agent_name else { return };
+        let agent = match node.discovered_agents.get(self.nodes.agent_selected) {
+            Some(a) => a.short_name.clone(),
+            None => return,
+        };
 
         self.nodes.session = Some(SessionChat {
             node_id: node.node_id.clone(),
-            agent_name: agent,
+            agent_name: agent.clone(),
             session_id: None,
             messages: vec![ChatMessage {
                 role: ChatRole::System,
-                text: "Starting session... (type a message and press Enter)".to_string(),
+                text: format!("Session with {} — type a message and press Enter", agent),
             }],
             input: String::new(),
             cursor_pos: 0,
             scroll_offset: 0,
             is_waiting: false,
         });
+        self.nodes.detail_focus = false;
     }
 
     async fn handle_session_key(&mut self, key: KeyEvent) {
