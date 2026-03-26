@@ -1,9 +1,8 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::Subcommand;
-use serde_json::json;
 
-use crate::client::CliClient;
-use crate::output::{format_short_id, format_status, print_error, print_header, print_json, print_success, OutputFormat};
+use crate::client::Client;
+use crate::output::{format_short_id, print_header, print_success};
 
 #[derive(Subcommand)]
 pub enum NodeCommand {
@@ -23,149 +22,95 @@ pub enum NodeCommand {
     },
 }
 
-pub async fn execute(client: &mut CliClient, command: NodeCommand, output: &OutputFormat) -> Result<()> {
+pub async fn execute(client: &Client, command: NodeCommand) -> Result<()> {
     match command {
-        NodeCommand::List => list_nodes(client, output).await,
-        NodeCommand::Select { node } => select_node(client, &node, output).await,
-        NodeCommand::Reset { node } => reset_node(client, &node, output).await,
+        NodeCommand::List => list_nodes(client).await,
+        NodeCommand::Select { node } => select_node(client, &node).await,
+        NodeCommand::Reset { node } => reset_node(client, &node).await,
     }
 }
 
-async fn list_nodes(client: &CliClient, output: &OutputFormat) -> Result<()> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+async fn list_nodes(client: &Client) -> Result<()> {
+    let state = client
+        .get_state()
+        .await
+        .ok_or_else(|| anyhow!("No state available"))?;
 
     if state.nodes.is_empty() {
-        match output {
-            OutputFormat::Json => print_json(&json!({"nodes": [], "count": 0})),
-            OutputFormat::Text => print_error("No nodes connected"),
-        }
+        println!("No nodes connected");
         return Ok(());
     }
 
     let now = chrono::Utc::now();
+    print_header("Connected Nodes");
+    println!();
 
-    match output {
-        OutputFormat::Json => {
-            let nodes: Vec<_> = state.nodes.iter().map(|n| {
-                let age_seconds = (now - n.last_update).num_seconds();
-                let status = if age_seconds < 60 { "active" } else if age_seconds < 120 { "warning" } else { "inactive" };
-                json!({
-                    "node_id": n.node_id,
-                    "node_id_short": format_short_id(&n.node_id),
-                    "machine_name": n.machine_name,
-                    "os_details": n.os_details,
-                    "agent_count": n.discovered_agents.len(),
-                    "status": status,
-                    "privileged": n.privileged,
-                    "last_seen_seconds": age_seconds
-                })
-            }).collect();
-            print_json(&json!({"nodes": nodes, "count": nodes.len()}));
-        }
-        OutputFormat::Text => {
-            print_header("Connected Nodes");
-            println!();
-            for node in &state.nodes {
-                let age_seconds = (now - node.last_update).num_seconds();
-                let status = if age_seconds < 60 {
-                    format_status("active")
-                } else if age_seconds < 120 {
-                    format_status("warning")
-                } else {
-                    format_status("inactive")
-                };
+    for node in &state.nodes {
+        let age_seconds = (now - node.last_update).num_seconds();
+        let status = if age_seconds < 60 {
+            "active"
+        } else if age_seconds < 120 {
+            "warning"
+        } else {
+            "inactive"
+        };
+        let privileged = if node.privileged { " [privileged]" } else { "" };
 
-                let priv_tag = if node.privileged { " [privileged]" } else { "" };
-                println!(
-                    "  {} {} ({}) - {} agents [{}]{}",
-                    format_short_id(&node.node_id),
-                    node.machine_name,
-                    node.os_details,
-                    node.discovered_agents.len(),
-                    status,
-                    priv_tag
-                );
-            }
-            println!();
-            print_success(&format!("{} node(s) connected", state.nodes.len()));
-        }
+        println!(
+            "  {} {} ({}) - {} agents [{}]{}",
+            format_short_id(&node.node_id),
+            node.machine_name,
+            node.os_details,
+            node.discovered_agents.len(),
+            status,
+            privileged
+        );
     }
 
+    println!();
+    print_success(&format!("{} node(s) connected", state.nodes.len()));
     Ok(())
 }
 
-async fn select_node(client: &CliClient, prefix: &str, output: &OutputFormat) -> Result<()> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+async fn select_node(client: &Client, prefix: &str) -> Result<()> {
+    let state = client
+        .get_state()
+        .await
+        .ok_or_else(|| anyhow!("No state available"))?;
 
     let search = prefix.to_lowercase();
-    let found = state.nodes.iter().find(|n| n.node_id.to_lowercase().starts_with(&search));
+    let node = state
+        .nodes
+        .iter()
+        .find(|node| node.node_id.to_lowercase().starts_with(&search))
+        .ok_or_else(|| anyhow!("No node found matching '{}'", prefix))?;
 
-    match found {
-        Some(node) => {
-            match output {
-                OutputFormat::Json => {
-                    print_json(&json!({
-                        "status": "success",
-                        "node_id": node.node_id,
-                        "node_id_short": format_short_id(&node.node_id),
-                        "machine_name": node.machine_name
-                    }));
-                }
-                OutputFormat::Text => {
-                    print_success(&format!(
-                        "Selected node: {} ({})",
-                        format_short_id(&node.node_id),
-                        node.machine_name
-                    ));
-                }
-            }
-            Ok(())
-        }
-        None => {
-            if matches!(output, OutputFormat::Json) {
-                print_json(&json!({"status": "error", "message": format!("No node found matching '{}'", prefix)}));
-            }
-            Err(anyhow!("No node found matching '{}'", prefix))
-        }
-    }
+    print_success(&format!(
+        "Selected node: {} ({})",
+        format_short_id(&node.node_id),
+        node.machine_name
+    ));
+    Ok(())
 }
 
-async fn reset_node(client: &CliClient, prefix: &str, output: &OutputFormat) -> Result<()> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+async fn reset_node(client: &Client, prefix: &str) -> Result<()> {
+    let state = client
+        .get_state()
+        .await
+        .ok_or_else(|| anyhow!("No state available"))?;
 
     let search = prefix.to_lowercase();
-    let found = state.nodes.iter().find(|n| n.node_id.to_lowercase().starts_with(&search));
+    let node = state
+        .nodes
+        .iter()
+        .find(|node| node.node_id.to_lowercase().starts_with(&search))
+        .ok_or_else(|| anyhow!("No node found matching '{}'", prefix))?;
 
-    match found {
-        Some(node) => {
-            let node_id = node.node_id.clone();
-            client.reset_node(&node_id).await?;
-
-            match output {
-                OutputFormat::Json => {
-                    print_json(&json!({
-                        "status": "success",
-                        "node_id": node_id,
-                        "node_id_short": format_short_id(&node_id),
-                        "machine_name": node.machine_name,
-                        "message": "Reset command sent to node"
-                    }));
-                }
-                OutputFormat::Text => {
-                    print_success(&format!(
-                        "Reset command sent to node: {} ({})",
-                        format_short_id(&node.node_id),
-                        node.machine_name
-                    ));
-                }
-            }
-            Ok(())
-        }
-        None => {
-            if matches!(output, OutputFormat::Json) {
-                print_json(&json!({"status": "error", "message": format!("No node found matching '{}'", prefix)}));
-            }
-            Err(anyhow!("No node found matching '{}'", prefix))
-        }
-    }
+    client.reset_node(&node.node_id).await?;
+    print_success(&format!(
+        "Reset command sent to node: {} ({})",
+        format_short_id(&node.node_id),
+        node.machine_name
+    ));
+    Ok(())
 }

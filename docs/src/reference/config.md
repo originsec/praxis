@@ -87,15 +87,7 @@ Access via **Settings** > **MCP Server** in the web UI.
 | `mcp_server_enabled` | `false` | Enable the built-in MCP SSE server |
 | `mcp_server_port` | `8585` | Port for the MCP SSE server |
 
-The MCP server exposes all Praxis tools via the Model Context Protocol over SSE transport. It must be enabled for the Orchestrator to function — the Orchestrator connects to this server as an MCP client to access node, agent, session, operation, and chain tools.
-
-When running with Docker, port 8585 is exposed by default. To use a different port, set `PRAXIS_MCP_PORT` before starting:
-
-```bash
-PRAXIS_MCP_PORT=9090 docker compose up --build
-```
-
-Then update the port in **Settings** > **MCP Server** to match. The SSE endpoint is `http://localhost:{port}/sse`.
+The MCP server exposes all Praxis tools via the Model Context Protocol over SSE transport. It is used by the built-in Orchestrator and can also be used by external AI agents. See [MCP Server](../usage/mcp.md) for full details.
 
 ### Supported Providers
 
@@ -343,41 +335,10 @@ Contents:
 | Option | Environment Variable | Default | Description |
 |--------|---------------------|---------|-------------|
 | `-r, --rabbitmq` | `PRAXIS_RABBITMQ_URL` | `amqp://praxis:praxis@localhost:5672` | RabbitMQ URL |
-| `-o, --output` | - | `text` | Output format (`text` or `json`) |
-| `-t, --timeout` | - | `300` | Command timeout in seconds |
-| `--mcp` | - | - | Run as MCP server (stdio) |
+| `-t, --timeout` | - | `600` | Connection/command timeout in seconds |
+| `-C, --command` | - | - | Run a single command and exit |
 | `--status` | - | - | Check connection status |
 | `--clear` | - | - | Clear local state |
-
-### MCP Server Configuration
-
-When running as an MCP server (`--mcp`), the CLI can be integrated with any MCP-compatible AI assistant.
-
-**Claude Code:**
-
-```bash
-# User scope (available across all projects)
-claude mcp add praxis --scope user -- ~/.praxis/bin/praxis_cli --mcp
-
-# Project scope (shared with team via .mcp.json)
-claude mcp add praxis -- ~/.praxis/bin/praxis_cli --mcp
-```
-
-**Other MCP clients** use JSON configuration:
-
-```json
-{
-  "mcpServers": {
-    "praxis": {
-      "command": "/path/to/praxis_cli",
-      "args": ["--mcp"],
-      "env": {
-        "PRAXIS_RABBITMQ_URL": "amqp://praxis:praxis@your-server:5672"
-      }
-    }
-  }
-}
-```
 
 ## File Locations
 

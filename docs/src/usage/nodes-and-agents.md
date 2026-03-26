@@ -31,7 +31,7 @@ When the node runs as root, it can operate as different users based on the selec
 
 Each node reports whether it is running with elevated privileges. On Linux/macOS this means running as root (UID 0); on Windows this means running as an elevated administrator.
 
-Privileged nodes display a **ROOT** badge in the web UI and a `[privileged]` tag in the CLI. Some features — particularly interception methods that modify system-level configuration (VPN, Hosts, TPROXY) — require elevated privileges. The web UI will disable the intercept Enable button on non-privileged nodes.
+Privileged nodes display a **ROOT** badge in the web UI and CLI. Some features — particularly interception methods that modify system-level configuration (VPN, Hosts, TPROXY) — require elevated privileges. The web UI will disable the intercept Enable button on non-privileged nodes.
 
 ### Node List
 

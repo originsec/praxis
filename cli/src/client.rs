@@ -1,26 +1,26 @@
-use anyhow::{anyhow, Result};
-use async_trait::async_trait;
+use anyhow::{Result, anyhow};
 use common::{
-    client_queue_name, mcp::McpClient, publish_json, CLIENT_BROADCAST_EXCHANGE,
-    CLIENT_SIGNAL_QUEUE, ClientBroadcastMessage, ClientDirectMessage, ClientRegistration,
+    CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE, ChainDefinitionFull, ChainDefinitionInfo,
+    ChainExecutionUpdate, ClientBroadcastMessage, ClientDirectMessage, ClientRegistration,
     ClientSignalMessage, CommandRequest, CommandResponse, NodeCommand, NodeCommandResult,
-    ReconResult, SemanticOpUpdate, SystemState, InterceptedTrafficEntry, TrafficSearchFilters,
-    ChainExecutionUpdate, ChainDefinitionInfo, OperationDefinitionInfo,
+    OperationDefinitionInfo, SemanticOpUpdate, SystemState, TerminalOutput, client_queue_name,
+    publish_json,
 };
 use futures_util::StreamExt;
 use lapin::{
+    Channel, Connection, ConnectionProperties, ExchangeKind,
     options::{
         BasicAckOptions, BasicConsumeOptions, ExchangeDeclareOptions, QueueBindOptions,
         QueueDeclareOptions,
     },
     types::FieldTable,
-    Channel, Connection, ConnectionProperties, ExchangeKind,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
-pub struct CliClient {
+pub struct Client {
     channel: Channel,
     client_id: String,
     timeout: Duration,
@@ -31,31 +31,20 @@ pub struct CliClient {
 #[derive(Default)]
 struct ClientState {
     system_state: Option<SystemState>,
+    orchestrator_event_tx: Option<tokio::sync::mpsc::UnboundedSender<ClientDirectMessage>>,
+    terminal_output_tx: Option<tokio::sync::mpsc::UnboundedSender<TerminalOutput>>,
+    pending_config: Option<HashMap<String, String>>,
     pending_commands: std::collections::HashMap<String, Option<NodeCommandResult>>,
-    pending_semantic_ops: std::collections::HashMap<String, Option<String>>,
-    pending_traffic_search: Option<(Vec<InterceptedTrafficEntry>, usize)>,
-    pending_recon_get: Option<ReconGetResult>,
     cached_project_paths: Vec<String>,
-    cached_config_paths: Vec<String>,
-    cached_session_paths: Vec<String>,
     operations: Vec<SemanticOpUpdate>,
     operation_definitions: Vec<OperationDefinitionInfo>,
     chain_definitions: Vec<ChainDefinitionInfo>,
-    current_chain: Option<common::ChainDefinitionFull>,
     chain_executions: Vec<ChainExecutionUpdate>,
-    chain_triggers: Vec<common::ChainTriggerInfo>,
-    orchestrator_event_tx: Option<tokio::sync::mpsc::UnboundedSender<ClientDirectMessage>>,
+    current_chain: Option<ChainDefinitionFull>,
+    pending_semantic_op: Option<String>,
 }
 
-struct ReconGetResult {
-    recon_result: Option<ReconResult>,
-    #[allow(dead_code)]
-    performed_at: Option<String>,
-    #[allow(dead_code)]
-    is_semantic: Option<bool>,
-}
-
-impl CliClient {
+impl Client {
     pub async fn connect(url: &str, timeout_secs: u64, client_id: String) -> Result<Self> {
         let connection = Connection::connect(url, ConnectionProperties::default())
             .await
@@ -69,8 +58,7 @@ impl CliClient {
         let client_queue = client_queue_name(&client_id);
 
         //
-        // Declare client-specific queue and purge any stale messages from
-        // previous CLI sessions.
+        // Declare client-specific queue and purge any stale messages.
         //
         channel
             .queue_declare(
@@ -128,15 +116,11 @@ impl CliClient {
             consumer_handle: None,
         };
 
-        //
-        // Start consuming messages.
-        //
-        client.start_consuming(&client_queue, broadcast_queue.name().as_str()).await?;
+        client
+            .start_consuming(&client_queue, broadcast_queue.name().as_str())
+            .await?;
 
-        //
-        // Register with the service and wait for initial state.
-        //
-        client.register().await?;
+        client.register(timeout_secs).await?;
 
         Ok(client)
     }
@@ -148,10 +132,7 @@ impl CliClient {
         let broadcast_queue = broadcast_queue.to_string();
 
         let handle = tokio::spawn(async move {
-            //
-            // Consume from client-specific queue.
-            //
-            let consumer_tag = format!("cli_direct_{}", uuid::Uuid::new_v4());
+            let consumer_tag = format!("tui_direct_{}", uuid::Uuid::new_v4());
             let mut direct_consumer = match channel
                 .basic_consume(
                     &client_queue,
@@ -162,16 +143,10 @@ impl CliClient {
                 .await
             {
                 Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Failed to create direct consumer: {}", e);
-                    return;
-                }
+                Err(_) => return,
             };
 
-            //
-            // Consume from broadcast queue.
-            //
-            let broadcast_tag = format!("cli_broadcast_{}", uuid::Uuid::new_v4());
+            let broadcast_tag = format!("tui_broadcast_{}", uuid::Uuid::new_v4());
             let mut broadcast_consumer = match channel
                 .basic_consume(
                     &broadcast_queue,
@@ -182,10 +157,7 @@ impl CliClient {
                 .await
             {
                 Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Failed to create broadcast consumer: {}", e);
-                    return;
-                }
+                Err(_) => return,
             };
 
             loop {
@@ -222,28 +194,41 @@ impl CliClient {
             ClientDirectMessage::StateUpdate(system_state) => {
                 state.system_state = Some(system_state);
             }
+
             ClientDirectMessage::CommandResponse(response) => {
                 if let Some(entry) = state.pending_commands.get_mut(&response.command_id) {
                     *entry = Some(response.result);
                 }
             }
-            ClientDirectMessage::SemanticOpQueued { operation_id, request_id, .. } => {
-                if let Some(entry) = state.pending_semantic_ops.get_mut(&request_id) {
-                    *entry = Some(operation_id);
+            ClientDirectMessage::ServiceConfigResponse { values } => {
+                state.pending_config = Some(values);
+            }
+            ClientDirectMessage::ServiceConfigSaved => {}
+
+            //
+            // Operation and chain responses.
+            //
+            ClientDirectMessage::ReconGetResponse { recon_result, .. } => {
+                if let Some(ref recon) = recon_result {
+                    state.cached_project_paths = recon.project_paths.clone();
                 }
             }
+            ClientDirectMessage::SemanticOpQueued { operation_id, .. } => {
+                state.pending_semantic_op = Some(operation_id);
+            }
             ClientDirectMessage::SemanticOpUpdate(update) => {
-                if let Some(idx) = state.operations.iter().position(|o| o.operation_id == update.operation_id) {
+                if let Some(idx) = state
+                    .operations
+                    .iter()
+                    .position(|o| o.operation_id == update.operation_id)
+                {
                     state.operations[idx] = update;
                 } else {
                     state.operations.push(update);
                 }
             }
-            ClientDirectMessage::SemanticOpList(operations) => {
-                state.operations = operations;
-            }
-            ClientDirectMessage::TrafficSearchResponse { entries, total_count } => {
-                state.pending_traffic_search = Some((entries, total_count));
+            ClientDirectMessage::SemanticOpList(ops) => {
+                state.operations = ops;
             }
             ClientDirectMessage::OpDefListResponse { definitions } => {
                 state.operation_definitions = definitions;
@@ -254,57 +239,41 @@ impl CliClient {
             ClientDirectMessage::ChainGetResponse { chain } => {
                 state.current_chain = chain;
             }
-            ClientDirectMessage::ChainExecutionUpdate(execution) => {
-                if let Some(idx) = state.chain_executions.iter().position(|e| e.execution_id == execution.execution_id) {
-                    state.chain_executions[idx] = execution;
+            ClientDirectMessage::ChainExecutionUpdate(exec) => {
+                if let Some(idx) = state
+                    .chain_executions
+                    .iter()
+                    .position(|e| e.execution_id == exec.execution_id)
+                {
+                    state.chain_executions[idx] = exec;
                 } else {
-                    state.chain_executions.push(execution);
+                    state.chain_executions.push(exec);
                 }
             }
             ClientDirectMessage::ChainExecutionListResponse { executions } => {
                 state.chain_executions = executions;
-            }
-            ClientDirectMessage::ChainTriggerListResponse { triggers } => {
-                state.chain_triggers = triggers;
-            }
-            ClientDirectMessage::ChainTriggerCreated { trigger } => {
-                state.chain_triggers.push(trigger);
-            }
-            ClientDirectMessage::ChainTriggerUpdated { trigger } => {
-                if let Some(idx) = state.chain_triggers.iter().position(|t| t.id == trigger.id) {
-                    state.chain_triggers[idx] = trigger;
-                }
-            }
-            ClientDirectMessage::ChainTriggerDeleted { trigger_id } => {
-                state.chain_triggers.retain(|t| t.id != trigger_id);
-            }
-            ClientDirectMessage::ReconGetResponse { recon_result, performed_at, is_semantic, .. } => {
-                if let Some(ref recon) = recon_result {
-                    state.cached_project_paths = recon.project_paths.clone();
-                    state.cached_config_paths = recon.config.iter().map(|c| c.path.clone()).collect();
-                    state.cached_session_paths = recon.sessions.iter().map(|s| s.session_file.clone()).collect();
-                }
-                state.pending_recon_get = Some(ReconGetResult {
-                    recon_result,
-                    performed_at,
-                    is_semantic,
-                });
             }
 
             //
             // Forward orchestrator events to subscriber if present.
             //
             msg @ (ClientDirectMessage::OrchestratorStarted { .. }
-                | ClientDirectMessage::OrchestratorContent { .. }
-                | ClientDirectMessage::OrchestratorToolExecuting { .. }
-                | ClientDirectMessage::OrchestratorToolExecuted { .. }
-                | ClientDirectMessage::OrchestratorPlanUpdated { .. }
-                | ClientDirectMessage::OrchestratorDone { .. }
-                | ClientDirectMessage::OrchestratorStopped
-                | ClientDirectMessage::OrchestratorError { .. }
-                | ClientDirectMessage::OrchestratorTokenUsage { .. }) => {
+            | ClientDirectMessage::OrchestratorContent { .. }
+            | ClientDirectMessage::OrchestratorToolExecuting { .. }
+            | ClientDirectMessage::OrchestratorToolExecuted { .. }
+            | ClientDirectMessage::OrchestratorPlanUpdated { .. }
+            | ClientDirectMessage::OrchestratorDone { .. }
+            | ClientDirectMessage::OrchestratorStopped
+            | ClientDirectMessage::OrchestratorError { .. }
+            | ClientDirectMessage::OrchestratorTokenUsage { .. }) => {
                 if let Some(ref tx) = state.orchestrator_event_tx {
                     let _ = tx.send(msg);
+                }
+            }
+
+            ClientDirectMessage::TerminalOutput(output) => {
+                if let Some(ref tx) = state.terminal_output_tx {
+                    let _ = tx.send(output);
                 }
             }
 
@@ -323,29 +292,41 @@ impl CliClient {
             ClientBroadcastMessage::StateUpdate(system_state) => {
                 state.system_state = Some(system_state);
             }
-            ClientBroadcastMessage::ChainExecutionUpdate(execution) => {
-                if let Some(idx) = state.chain_executions.iter().position(|e| e.execution_id == execution.execution_id) {
-                    state.chain_executions[idx] = execution;
+            ClientBroadcastMessage::SemanticOpUpdate(update) => {
+                if let Some(idx) = state
+                    .operations
+                    .iter()
+                    .position(|o| o.operation_id == update.operation_id)
+                {
+                    state.operations[idx] = update;
                 } else {
-                    state.chain_executions.push(execution);
+                    state.operations.push(update);
+                }
+            }
+            ClientBroadcastMessage::ChainExecutionUpdate(exec) => {
+                if let Some(idx) = state
+                    .chain_executions
+                    .iter()
+                    .position(|e| e.execution_id == exec.execution_id)
+                {
+                    state.chain_executions[idx] = exec;
+                } else {
+                    state.chain_executions.push(exec);
                 }
             }
             _ => {}
         }
     }
 
-    async fn register(&self) -> Result<()> {
+    async fn register(&self, timeout_secs: u64) -> Result<()> {
         let registration = ClientRegistration {
             client_id: self.client_id.clone(),
         };
         let message = ClientSignalMessage::Registration(registration);
         self.publish_signal(message).await?;
 
-        //
-        // Wait for initial state.
-        //
         let poll_interval = Duration::from_millis(100);
-        let max_polls = (self.timeout.as_millis() / 100) as usize;
+        let max_polls = (timeout_secs * 10) as usize;
 
         for _ in 0..max_polls {
             tokio::time::sleep(poll_interval).await;
@@ -373,296 +354,14 @@ impl CliClient {
         self.state.lock().await.system_state.clone()
     }
 
-    pub async fn send_command(&self, node_id: &str, command: NodeCommand) -> Result<CommandResponse> {
-        let command_id = uuid::Uuid::new_v4().to_string();
-
-        {
-            let mut state = self.state.lock().await;
-            state.pending_commands.insert(command_id.clone(), None);
-        }
-
-        let request = CommandRequest {
-            command_id: command_id.clone(),
-            client_id: self.client_id.clone(),
-            node_id: node_id.to_string(),
-            command,
-        };
-
-        self.publish_signal(ClientSignalMessage::Command(request)).await?;
-
-        //
-        // Poll for response.
-        //
-        let poll_interval = Duration::from_millis(250);
-        let max_polls = (self.timeout.as_millis() / 250) as usize;
-
-        for _ in 0..max_polls {
-            tokio::time::sleep(poll_interval).await;
-            let mut state = self.state.lock().await;
-
-            //
-            // Check if result is ready - only remove when we have a result.
-            //
-            let has_result = state
-                .pending_commands
-                .get(&command_id)
-                .map(|v| v.is_some())
-                .unwrap_or(false);
-
-            if has_result {
-                if let Some(Some(result)) = state.pending_commands.remove(&command_id) {
-                    return Ok(CommandResponse {
-                        command_id: command_id.clone(),
-                        node_id: node_id.to_string(),
-                        result,
-                    });
-                }
-            }
-        }
-
-        {
-            let mut state = self.state.lock().await;
-            state.pending_commands.remove(&command_id);
-        }
-
-        Err(anyhow!("Timeout waiting for command response"))
-    }
-
-    pub async fn run_semantic_op(
-        &self,
-        node_id: String,
-        agent_short_name: String,
-        operation_name: String,
-        working_dir: Option<String>,
-    ) -> Result<String> {
-        let request_id = uuid::Uuid::new_v4().to_string();
-
-        {
-            let mut state = self.state.lock().await;
-            state.pending_semantic_ops.insert(request_id.clone(), None);
-        }
-
-        let message = ClientSignalMessage::SemanticOpRun {
-            client_id: self.client_id.clone(),
-            node_id,
-            agent_short_name,
-            operation_name,
-            request_id: request_id.clone(),
-            working_dir,
-        };
-
-        self.publish_signal(message).await?;
-
-        //
-        // Poll for queued response.
-        //
-        let poll_interval = Duration::from_millis(100);
-        let max_polls = 50;
-
-        for _ in 0..max_polls {
-            tokio::time::sleep(poll_interval).await;
-            let mut state = self.state.lock().await;
-            if let Some(Some(operation_id)) = state.pending_semantic_ops.remove(&request_id) {
-                return Ok(operation_id);
-            }
-        }
-
-        {
-            let mut state = self.state.lock().await;
-            state.pending_semantic_ops.remove(&request_id);
-        }
-
-        Err(anyhow!("Timeout waiting for operation to be queued"))
-    }
-
-    pub async fn cancel_semantic_op(&self, operation_id: String) -> Result<()> {
-        let message = ClientSignalMessage::SemanticOpCancel { operation_id };
-        self.publish_signal(message).await
-    }
-
-    pub async fn request_semantic_op_list(&self) -> Result<()> {
-        let message = ClientSignalMessage::SemanticOpListRequest;
-        self.publish_signal(message).await
-    }
-
-    pub async fn get_operations(&self) -> Vec<SemanticOpUpdate> {
-        self.state.lock().await.operations.clone()
-    }
-
-    pub async fn request_op_def_list(&self) -> Result<()> {
-        let message = ClientSignalMessage::OpDefList {
-            client_id: self.client_id.clone(),
-        };
-        self.publish_signal(message).await
-    }
-
-    pub async fn get_operation_definitions(&self) -> Vec<OperationDefinitionInfo> {
-        self.state.lock().await.operation_definitions.clone()
-    }
-
-    pub async fn search_traffic(&self, filters: TrafficSearchFilters) -> Result<(Vec<InterceptedTrafficEntry>, usize)> {
-        {
-            let mut state = self.state.lock().await;
-            state.pending_traffic_search = None;
-        }
-
-        let message = ClientSignalMessage::TrafficSearchRequest {
-            client_id: self.client_id.clone(),
-            filters,
-        };
-
-        self.publish_signal(message).await?;
-
-        //
-        // Poll for response.
-        //
-        let poll_interval = Duration::from_millis(100);
-        let max_polls = 100;
-
-        for _ in 0..max_polls {
-            tokio::time::sleep(poll_interval).await;
-            let mut state = self.state.lock().await;
-            if let Some(response) = state.pending_traffic_search.take() {
-                return Ok(response);
-            }
-        }
-
-        Err(anyhow!("Timeout waiting for traffic search response"))
-    }
-
-    pub async fn request_chain_list(&self) -> Result<()> {
-        let message = ClientSignalMessage::ChainDefList {
-            client_id: self.client_id.clone(),
-        };
-        self.publish_signal(message).await
-    }
-
-    pub async fn get_chain_definitions(&self) -> Vec<ChainDefinitionInfo> {
-        self.state.lock().await.chain_definitions.clone()
-    }
-
-    pub async fn request_chain(&self, chain_id: &str) -> Result<()> {
-        let message = ClientSignalMessage::ChainGet {
-            client_id: self.client_id.clone(),
-            chain_id: chain_id.to_string(),
-        };
-        self.publish_signal(message).await
-    }
-
-    pub async fn get_current_chain(&self) -> Option<common::ChainDefinitionFull> {
-        self.state.lock().await.current_chain.clone()
-    }
-
-    pub async fn run_chain(
-        &self,
-        chain_id: String,
-        node_id: String,
-        agent_short_name: String,
-        working_dir: Option<String>,
-    ) -> Result<()> {
-        let message = ClientSignalMessage::ChainRun {
-            client_id: self.client_id.clone(),
-            chain_id,
-            node_id,
-            agent_short_name,
-            working_dir,
-            target_spec: None,
-        };
-        self.publish_signal(message).await
-    }
-
-    pub async fn cancel_chain(&self, execution_id: String) -> Result<()> {
-        let message = ClientSignalMessage::ChainCancel {
-            client_id: self.client_id.clone(),
-            execution_id,
-        };
-        self.publish_signal(message).await
-    }
-
-    pub async fn request_chain_execution_list(&self) -> Result<()> {
-        let message = ClientSignalMessage::ChainExecutionList {
-            client_id: self.client_id.clone(),
-        };
-        self.publish_signal(message).await
-    }
-
-    pub async fn get_chain_executions(&self) -> Vec<ChainExecutionUpdate> {
-        self.state.lock().await.chain_executions.clone()
-    }
-
-    //
-    // Blocking fetch of recon result — used by the interactive project picker
-    // where the user is explicitly waiting.
-    //
-
-    pub async fn get_recon_result(
-        &self,
-        node_id: &str,
-        agent_short_name: &str,
-    ) -> Result<Option<ReconResult>> {
-        {
-            let mut state = self.state.lock().await;
-            state.pending_recon_get = None;
-        }
-
-        let message = ClientSignalMessage::ReconGet {
-            client_id: self.client_id.clone(),
-            node_id: node_id.to_string(),
-            agent_short_name: agent_short_name.to_string(),
-        };
-        self.publish_signal(message).await?;
-
-        let poll_interval = Duration::from_millis(100);
-        let max_polls = 50;
-
-        for _ in 0..max_polls {
-            tokio::time::sleep(poll_interval).await;
-            let mut state = self.state.lock().await;
-            if let Some(result) = state.pending_recon_get.take() {
-                return Ok(result.recon_result);
-            }
-        }
-
-        Err(anyhow!("Timeout waiting for recon result"))
-    }
-
-    //
-    // Fire-and-forget recon request — the response will be picked up by the
-    // background consumer and cached in `cached_project_paths`. Use
-    // `get_cached_project_paths()` to read the result.
-    //
-
-    pub async fn request_recon_result(&self, node_id: &str, agent_short_name: &str) {
-        let message = ClientSignalMessage::ReconGet {
-            client_id: self.client_id.clone(),
-            node_id: node_id.to_string(),
-            agent_short_name: agent_short_name.to_string(),
-        };
-        let _ = self.publish_signal(message).await;
-    }
-
-    pub async fn get_cached_project_paths(&self) -> Vec<String> {
-        self.state.lock().await.cached_project_paths.clone()
-    }
-
-    pub async fn get_cached_config_paths(&self) -> Vec<String> {
-        self.state.lock().await.cached_config_paths.clone()
-    }
-
-    pub async fn get_cached_session_paths(&self) -> Vec<String> {
-        self.state.lock().await.cached_session_paths.clone()
-    }
-
     //
     // Orchestrator methods.
     //
 
-    pub fn subscribe_orchestrator_events(&self) -> tokio::sync::mpsc::UnboundedReceiver<ClientDirectMessage> {
+    pub fn subscribe_orchestrator_events(
+        &self,
+    ) -> tokio::sync::mpsc::UnboundedReceiver<ClientDirectMessage> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        //
-        // Store the sender synchronously via a blocking lock. The consumer
-        // task holds the async lock only briefly, so this won't deadlock.
-        //
         let state = self.state.clone();
         tokio::task::block_in_place(|| {
             let rt = tokio::runtime::Handle::current();
@@ -672,11 +371,6 @@ impl CliClient {
             });
         });
         rx
-    }
-
-    pub async fn unsubscribe_orchestrator_events(&self) {
-        let mut state = self.state.lock().await;
-        state.orchestrator_event_tx = None;
     }
 
     pub async fn start_orchestrator(&self) -> Result<()> {
@@ -710,54 +404,117 @@ impl CliClient {
     }
 
     //
-    // Chain trigger methods.
+    // Service config methods.
     //
 
-    pub async fn request_chain_trigger_list(&self, chain_id: Option<String>) -> Result<()> {
-        let message = ClientSignalMessage::ChainTriggerList {
+    pub async fn get_config(&self, keys: Vec<String>) -> Result<HashMap<String, String>> {
+        {
+            let mut state = self.state.lock().await;
+            state.pending_config = None;
+        }
+
+        let message = ClientSignalMessage::ServiceConfigGet {
             client_id: self.client_id.clone(),
-            chain_id,
+            keys,
+        };
+        self.publish_signal(message).await?;
+
+        let poll_interval = Duration::from_millis(100);
+        for _ in 0..50 {
+            tokio::time::sleep(poll_interval).await;
+            let mut state = self.state.lock().await;
+            if let Some(values) = state.pending_config.take() {
+                return Ok(values);
+            }
+        }
+
+        Err(anyhow!("Timeout waiting for config response"))
+    }
+
+    pub async fn set_config(&self, values: HashMap<String, String>) -> Result<()> {
+        let message = ClientSignalMessage::ServiceConfigSet {
+            client_id: self.client_id.clone(),
+            values,
         };
         self.publish_signal(message).await
     }
 
-    pub async fn get_chain_triggers(&self) -> Vec<common::ChainTriggerInfo> {
-        self.state.lock().await.chain_triggers.clone()
-    }
+    //
+    // Operation methods.
+    //
 
-    pub async fn create_chain_trigger(
+    pub async fn send_command(
         &self,
-        chain_id: String,
-        trigger_config: common::TriggerConfig,
-        target_spec: common::TargetSpec,
-    ) -> Result<()> {
-        let message = ClientSignalMessage::ChainTriggerCreate {
+        node_id: &str,
+        command: NodeCommand,
+    ) -> Result<CommandResponse> {
+        let command_id = uuid::Uuid::new_v4().to_string();
+
+        {
+            let mut state = self.state.lock().await;
+            state.pending_commands.insert(command_id.clone(), None);
+        }
+
+        let request = CommandRequest {
+            command_id: command_id.clone(),
             client_id: self.client_id.clone(),
-            chain_id,
-            trigger_config,
-            target_spec,
+            node_id: node_id.to_string(),
+            command,
         };
-        self.publish_signal(message).await
+
+        self.publish_signal(ClientSignalMessage::Command(request))
+            .await?;
+
+        let poll_interval = Duration::from_millis(250);
+        let max_polls = (self.timeout.as_millis() / poll_interval.as_millis()) as usize;
+
+        for _ in 0..max_polls {
+            tokio::time::sleep(poll_interval).await;
+            let mut state = self.state.lock().await;
+            let has_result = state
+                .pending_commands
+                .get(&command_id)
+                .map(|v| v.is_some())
+                .unwrap_or(false);
+
+            if has_result {
+                if let Some(Some(result)) = state.pending_commands.remove(&command_id) {
+                    return Ok(CommandResponse {
+                        command_id: command_id.clone(),
+                        node_id: node_id.to_string(),
+                        result,
+                    });
+                }
+            }
+        }
+
+        {
+            let mut state = self.state.lock().await;
+            state.pending_commands.remove(&command_id);
+        }
+
+        Err(anyhow!(
+            "Timeout waiting for command response after {} seconds",
+            self.timeout.as_secs()
+        ))
     }
 
-    pub async fn delete_chain_trigger(&self, trigger_id: String) -> Result<()> {
-        let message = ClientSignalMessage::ChainTriggerDelete {
+    pub async fn request_recon(&self, node_id: &str, agent_short_name: &str) {
+        let message = ClientSignalMessage::ReconGet {
             client_id: self.client_id.clone(),
-            trigger_id,
+            node_id: node_id.to_string(),
+            agent_short_name: agent_short_name.to_string(),
         };
-        self.publish_signal(message).await
+        let _ = self.publish_signal(message).await;
     }
 
-    pub async fn toggle_chain_trigger(&self, trigger_id: String, enabled: bool) -> Result<()> {
-        let message = ClientSignalMessage::ChainTriggerUpdate {
-            client_id: self.client_id.clone(),
-            trigger_id,
-            enabled: Some(enabled),
-            trigger_config: None,
-            target_spec: None,
-        };
-        self.publish_signal(message).await
+    pub async fn get_cached_project_paths(&self) -> Vec<String> {
+        self.state.lock().await.cached_project_paths.clone()
     }
+
+    //
+    // Node management.
+    //
 
     pub async fn reset_node(&self, node_id: &str) -> Result<()> {
         let message = ClientSignalMessage::ResetNode {
@@ -765,134 +522,215 @@ impl CliClient {
         };
         self.publish_signal(message).await
     }
-}
 
-//
-// McpClient implementation for CliClient. Delegates to the inherent methods
-// above, enabling the shared ops layer in common::mcp::ops to work directly
-// with CliClient.
-//
+    //
+    // Terminal methods.
+    //
 
-#[async_trait]
-impl McpClient for CliClient {
-    async fn get_state(&self) -> Option<SystemState> {
-        CliClient::get_state(self).await
-    }
-
-    async fn send_command(&self, node_id: &str, command: NodeCommand) -> Result<CommandResponse> {
-        CliClient::send_command(self, node_id, command).await
-    }
-
-    async fn search_traffic(
+    async fn send_terminal_command_fire_and_forget(
         &self,
-        filters: TrafficSearchFilters,
-    ) -> Result<(Vec<InterceptedTrafficEntry>, usize)> {
-        CliClient::search_traffic(self, filters).await
+        node_id: &str,
+        cmd: common::TerminalCommand,
+    ) -> Result<()> {
+        let command_id = uuid::Uuid::new_v4().to_string();
+        let request = CommandRequest {
+            command_id,
+            client_id: self.client_id.clone(),
+            node_id: node_id.to_string(),
+            command: NodeCommand::Terminal(cmd),
+        };
+        self.publish_signal(ClientSignalMessage::Command(request))
+            .await
     }
 
-    async fn run_semantic_op(
+    pub async fn send_terminal_input(&self, node_id: &str, data: Vec<u8>) -> Result<()> {
+        self.send_terminal_command_fire_and_forget(node_id, common::TerminalCommand::Write { data })
+            .await
+    }
+
+    pub async fn send_terminal_resize(&self, node_id: &str, rows: u16, cols: u16) -> Result<()> {
+        self.send_terminal_command_fire_and_forget(
+            node_id,
+            common::TerminalCommand::Resize { rows, cols },
+        )
+        .await
+    }
+
+    pub async fn send_terminal_close(&self, node_id: &str) -> Result<()> {
+        self.send_terminal_command_fire_and_forget(node_id, common::TerminalCommand::Close)
+            .await
+    }
+
+    pub fn subscribe_terminal_output(
+        &self,
+    ) -> tokio::sync::mpsc::UnboundedReceiver<TerminalOutput> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            state.lock().await.terminal_output_tx = Some(tx);
+        });
+        rx
+    }
+
+    pub async fn request_op_def_list(&self) -> Result<()> {
+        let message = ClientSignalMessage::OpDefList {
+            client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn get_operation_definitions(&self) -> Vec<OperationDefinitionInfo> {
+        self.state.lock().await.operation_definitions.clone()
+    }
+
+    pub async fn request_semantic_op_list(&self) -> Result<()> {
+        let message = ClientSignalMessage::SemanticOpListRequest;
+        self.publish_signal(message).await
+    }
+
+    pub async fn get_operations(&self) -> Vec<SemanticOpUpdate> {
+        self.state.lock().await.operations.clone()
+    }
+
+    pub async fn run_semantic_op(
         &self,
         node_id: String,
         agent_short_name: String,
         operation_name: String,
         working_dir: Option<String>,
     ) -> Result<String> {
-        CliClient::run_semantic_op(self, node_id, agent_short_name, operation_name, working_dir)
-            .await
+        let request_id = uuid::Uuid::new_v4().to_string();
+        {
+            let mut state = self.state.lock().await;
+            state.pending_semantic_op = None;
+        }
+
+        let message = ClientSignalMessage::SemanticOpRun {
+            client_id: self.client_id.clone(),
+            node_id,
+            agent_short_name,
+            operation_name,
+            request_id: request_id.clone(),
+            working_dir,
+        };
+        self.publish_signal(message).await?;
+
+        let poll_interval = Duration::from_millis(100);
+        for _ in 0..50 {
+            tokio::time::sleep(poll_interval).await;
+            let mut state = self.state.lock().await;
+            if let Some(op_id) = state.pending_semantic_op.take() {
+                return Ok(op_id);
+            }
+        }
+
+        Err(anyhow!("Timeout waiting for operation to be queued"))
     }
 
-    async fn cancel_semantic_op(&self, operation_id: String) -> Result<()> {
-        CliClient::cancel_semantic_op(self, operation_id).await
+    pub async fn cancel_semantic_op(&self, operation_id: String) -> Result<()> {
+        let message = ClientSignalMessage::SemanticOpCancel { operation_id };
+        self.publish_signal(message).await
     }
 
-    async fn request_semantic_op_list(&self) -> Result<()> {
-        CliClient::request_semantic_op_list(self).await
+    pub async fn add_op_def(&self, content: String) -> Result<()> {
+        let message = ClientSignalMessage::OpDefAdd {
+            client_id: self.client_id.clone(),
+            content,
+        };
+        self.publish_signal(message).await
     }
 
-    async fn get_operations(&self) -> Vec<SemanticOpUpdate> {
-        CliClient::get_operations(self).await
+    pub async fn delete_op_def(&self, full_name: String) -> Result<()> {
+        let message = ClientSignalMessage::OpDefDelete {
+            client_id: self.client_id.clone(),
+            full_name,
+        };
+        self.publish_signal(message).await
     }
 
-    async fn request_op_def_list(&self) -> Result<()> {
-        CliClient::request_op_def_list(self).await
+    //
+    // Chain methods.
+    //
+
+    pub async fn request_chain_list(&self) -> Result<()> {
+        let message = ClientSignalMessage::ChainDefList {
+            client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
     }
 
-    async fn get_operation_definitions(&self) -> Vec<OperationDefinitionInfo> {
-        CliClient::get_operation_definitions(self).await
+    pub async fn get_chain_definitions(&self) -> Vec<ChainDefinitionInfo> {
+        self.state.lock().await.chain_definitions.clone()
     }
 
-    async fn request_chain_list(&self) -> Result<()> {
-        CliClient::request_chain_list(self).await
+    pub async fn request_chain_execution_list(&self) -> Result<()> {
+        let message = ClientSignalMessage::ChainExecutionList {
+            client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
     }
 
-    async fn get_chain_definitions(&self) -> Vec<ChainDefinitionInfo> {
-        CliClient::get_chain_definitions(self).await
+    pub async fn get_chain_executions(&self) -> Vec<ChainExecutionUpdate> {
+        self.state.lock().await.chain_executions.clone()
     }
 
-    async fn request_chain(&self, chain_id: &str) -> Result<()> {
-        CliClient::request_chain(self, chain_id).await
-    }
-
-    async fn get_current_chain(&self) -> Option<common::ChainDefinitionFull> {
-        CliClient::get_current_chain(self).await
-    }
-
-    async fn run_chain(
+    pub async fn run_chain(
         &self,
         chain_id: String,
         node_id: String,
         agent_short_name: String,
         working_dir: Option<String>,
     ) -> Result<()> {
-        CliClient::run_chain(self, chain_id, node_id, agent_short_name, working_dir).await
+        let message = ClientSignalMessage::ChainRun {
+            client_id: self.client_id.clone(),
+            chain_id,
+            node_id,
+            agent_short_name,
+            working_dir,
+            target_spec: None,
+        };
+        self.publish_signal(message).await
     }
 
-    async fn cancel_chain(&self, execution_id: String) -> Result<()> {
-        CliClient::cancel_chain(self, execution_id).await
+    pub async fn cancel_chain(&self, execution_id: String) -> Result<()> {
+        let message = ClientSignalMessage::ChainCancel {
+            client_id: self.client_id.clone(),
+            execution_id,
+        };
+        self.publish_signal(message).await
     }
 
-    async fn request_chain_execution_list(&self) -> Result<()> {
-        CliClient::request_chain_execution_list(self).await
+    pub async fn remove_semantic_op(&self, operation_id: String) -> Result<()> {
+        let message = ClientSignalMessage::SemanticOpRemove { operation_id };
+        self.publish_signal(message).await
     }
 
-    async fn get_chain_executions(&self) -> Vec<ChainExecutionUpdate> {
-        CliClient::get_chain_executions(self).await
+    #[allow(dead_code)]
+    pub async fn request_chain_def(&self, chain_id: &str) -> Result<()> {
+        let message = ClientSignalMessage::ChainGet {
+            client_id: self.client_id.clone(),
+            chain_id: chain_id.to_string(),
+        };
+        self.publish_signal(message).await
     }
 
-    async fn get_stored_recon(
-        &self,
-        node_id: &str,
-        agent_short_name: &str,
-    ) -> Result<Option<ReconResult>> {
-        CliClient::get_recon_result(self, node_id, agent_short_name).await
+    #[allow(dead_code)]
+    pub async fn get_current_chain(&self) -> Option<ChainDefinitionFull> {
+        self.state.lock().await.current_chain.clone()
     }
 
-    async fn request_chain_trigger_list(&self, chain_id: Option<String>) -> Result<()> {
-        CliClient::request_chain_trigger_list(self, chain_id).await
+    pub async fn clear_all_ops(&self) -> Result<()> {
+        self.publish_signal(ClientSignalMessage::SemanticOpClear)
+            .await
     }
 
-    async fn get_chain_triggers(&self) -> Vec<common::ChainTriggerInfo> {
-        CliClient::get_chain_triggers(self).await
+    pub async fn clear_all_chains(&self) -> Result<()> {
+        self.publish_signal(ClientSignalMessage::ChainExecutionClear)
+            .await
     }
 
-    async fn create_chain_trigger(
-        &self,
-        chain_id: String,
-        trigger_config: common::TriggerConfig,
-        target_spec: common::TargetSpec,
-    ) -> Result<()> {
-        CliClient::create_chain_trigger(self, chain_id, trigger_config, target_spec).await
-    }
-
-    async fn delete_chain_trigger(&self, trigger_id: String) -> Result<()> {
-        CliClient::delete_chain_trigger(self, trigger_id).await
-    }
-
-    async fn toggle_chain_trigger(&self, trigger_id: String, enabled: bool) -> Result<()> {
-        CliClient::toggle_chain_trigger(self, trigger_id, enabled).await
-    }
-
-    async fn reset_node(&self, node_id: &str) -> Result<()> {
-        CliClient::reset_node(self, node_id).await
+    pub async fn remove_chain_execution(&self, execution_id: String) -> Result<()> {
+        let message = ClientSignalMessage::ChainExecutionRemove { execution_id };
+        self.publish_signal(message).await
     }
 }

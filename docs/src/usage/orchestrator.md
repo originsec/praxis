@@ -6,7 +6,7 @@ The Orchestrator is an interactive AI agent that can autonomously manage nodes, 
 
 Before using the Orchestrator, you need:
 
-1. **MCP Server enabled** — Go to **Settings** > **MCP Server** and enable it. The Orchestrator connects to this server to access all Praxis tools.
+1. **MCP Server enabled** — Go to **Settings** > **MCP Server** and enable it. The Orchestrator connects to the [MCP server](./mcp.md) as a client to access all Praxis tools.
 
 2. **Orchestrator LLM configured** — Go to **Settings** > **LLM Providers** and configure a model definition, then assign it to the Orchestrator feature in the Feature Selection section.
 
