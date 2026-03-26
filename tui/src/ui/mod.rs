@@ -19,7 +19,10 @@ const DIM: Color = Color::Rgb(80, 80, 80);
 pub fn render(f: &mut Frame, app: &App) {
     f.render_widget(Block::default().style(Style::default().bg(BG)), f.area());
 
-    let inner = f.area().inner(Margin { vertical: 1, horizontal: 2 });
+    let inner = f.area().inner(Margin {
+        vertical: 1,
+        horizontal: 2,
+    });
 
     let chunks = Layout::vertical([
         Constraint::Length(1),

@@ -36,6 +36,14 @@ impl CliState {
         Ok(())
     }
 
+    pub fn clear() -> Result<()> {
+        let path = Self::state_file()?;
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+        Ok(())
+    }
+
     pub fn get_or_create_client_id(&mut self) -> Result<String> {
         if let Some(ref id) = self.client_id {
             Ok(id.clone())

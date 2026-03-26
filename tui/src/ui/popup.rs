@@ -48,10 +48,7 @@ pub fn render_confirm(f: &mut Frame, confirm: &crate::app::ConfirmAction) {
 
     let inner = block.inner(area);
     let hint_line = if is_info {
-        Line::from(Span::styled(
-            " press any key",
-            Style::default().fg(MUTED),
-        ))
+        Line::from(Span::styled(" press any key", Style::default().fg(MUTED)))
     } else {
         Line::from(vec![
             Span::styled(" y", Style::default().fg(Color::Rgb(180, 60, 60))),

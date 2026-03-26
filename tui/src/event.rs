@@ -18,7 +18,21 @@ pub enum AppEvent {
         operations: Vec<SemanticOpUpdate>,
         chain_executions: Vec<ChainExecutionUpdate>,
     },
+    LibraryRefreshed {
+        op_definitions: Vec<OperationDefinitionInfo>,
+        chain_definitions: Vec<ChainDefinitionInfo>,
+    },
+    ExecutionListsRefreshed {
+        operations: Vec<SemanticOpUpdate>,
+        chain_executions: Vec<ChainExecutionUpdate>,
+        reset_selection: bool,
+    },
     SessionResponse(SessionResult),
+    TerminalCreated {
+        node_id: String,
+        terminal_id: String,
+    },
+    TerminalCreateFailed(String),
     TerminalOutput(TerminalOutput),
     Tick,
 }
@@ -82,19 +96,36 @@ impl EventHandler {
         });
 
         //
-        // Tick timer — polls system state every 100ms.
+        // State poll — checks for new system state at a lower frequency and
+        // only emits when the timestamp changes.
         //
         let tx_for_app = tx.clone();
-        let tx_tick = tx;
+        let tx_state = tx.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
+            let mut last_timestamp = None;
             loop {
                 interval.tick().await;
                 if let Some(state) = client.get_state().await {
-                    if tx_tick.send(AppEvent::StateUpdate(state)).is_err() {
-                        break;
+                    let timestamp = state.timestamp;
+                    if last_timestamp.as_ref() != Some(&timestamp) {
+                        last_timestamp = Some(timestamp);
+                        if tx_state.send(AppEvent::StateUpdate(state)).is_err() {
+                            break;
+                        }
                     }
                 }
+            }
+        });
+
+        //
+        // Animation / housekeeping tick.
+        //
+        let tx_tick = tx;
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(125));
+            loop {
+                interval.tick().await;
                 if tx_tick.send(AppEvent::Tick).is_err() {
                     break;
                 }

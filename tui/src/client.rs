@@ -23,6 +23,7 @@ use tokio::sync::Mutex;
 pub struct Client {
     channel: Channel,
     client_id: String,
+    timeout: Duration,
     state: Arc<Mutex<ClientState>>,
     consumer_handle: Option<tokio::task::JoinHandle<()>>,
 }
@@ -110,6 +111,7 @@ impl Client {
         let mut client = Self {
             channel,
             client_id,
+            timeout: Duration::from_secs(timeout_secs),
             state,
             consumer_handle: None,
         };
@@ -464,7 +466,7 @@ impl Client {
             .await?;
 
         let poll_interval = Duration::from_millis(250);
-        let max_polls = 2400; // 10 minutes
+        let max_polls = (self.timeout.as_millis() / poll_interval.as_millis()) as usize;
 
         for _ in 0..max_polls {
             tokio::time::sleep(poll_interval).await;
@@ -491,7 +493,10 @@ impl Client {
             state.pending_commands.remove(&command_id);
         }
 
-        Err(anyhow!("Timeout waiting for command response"))
+        Err(anyhow!(
+            "Timeout waiting for command response after {} seconds",
+            self.timeout.as_secs()
+        ))
     }
 
     pub async fn request_recon(&self, node_id: &str, agent_short_name: &str) {
@@ -534,28 +539,26 @@ impl Client {
             node_id: node_id.to_string(),
             command: NodeCommand::Terminal(cmd),
         };
-        self.publish_signal(ClientSignalMessage::Command(request)).await
+        self.publish_signal(ClientSignalMessage::Command(request))
+            .await
     }
 
     pub async fn send_terminal_input(&self, node_id: &str, data: Vec<u8>) -> Result<()> {
-        self.send_terminal_command_fire_and_forget(
-            node_id,
-            common::TerminalCommand::Write { data },
-        ).await
+        self.send_terminal_command_fire_and_forget(node_id, common::TerminalCommand::Write { data })
+            .await
     }
 
     pub async fn send_terminal_resize(&self, node_id: &str, rows: u16, cols: u16) -> Result<()> {
         self.send_terminal_command_fire_and_forget(
             node_id,
             common::TerminalCommand::Resize { rows, cols },
-        ).await
+        )
+        .await
     }
 
     pub async fn send_terminal_close(&self, node_id: &str) -> Result<()> {
-        self.send_terminal_command_fire_and_forget(
-            node_id,
-            common::TerminalCommand::Close,
-        ).await
+        self.send_terminal_command_fire_and_forget(node_id, common::TerminalCommand::Close)
+            .await
     }
 
     pub fn subscribe_terminal_output(
@@ -717,11 +720,13 @@ impl Client {
     }
 
     pub async fn clear_all_ops(&self) -> Result<()> {
-        self.publish_signal(ClientSignalMessage::SemanticOpClear).await
+        self.publish_signal(ClientSignalMessage::SemanticOpClear)
+            .await
     }
 
     pub async fn clear_all_chains(&self) -> Result<()> {
-        self.publish_signal(ClientSignalMessage::ChainExecutionClear).await
+        self.publish_signal(ClientSignalMessage::ChainExecutionClear)
+            .await
     }
 
     pub async fn remove_chain_execution(&self, execution_id: String) -> Result<()> {

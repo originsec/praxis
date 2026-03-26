@@ -102,17 +102,32 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
             // Show ^c only if selected item is running/queued.
             //
             let sorted = crate::app::App::sorted_exec_static(
-                &state.operations, &state.chain_executions, &state.filter,
+                &state.operations,
+                &state.chain_executions,
+                &state.filter,
             );
-            let selected_active = sorted.get(state.exec_selected).map(|(is_op, idx)| {
-                if *is_op {
-                    state.operations.get(*idx)
-                        .is_some_and(|o| matches!(o.status, common::SemanticOpStatus::Running | common::SemanticOpStatus::Queued))
-                } else {
-                    state.chain_executions.get(*idx)
-                        .is_some_and(|c| matches!(c.status, common::ChainExecutionStatus::Running | common::ChainExecutionStatus::Queued))
-                }
-            }).unwrap_or(false);
+            let selected_active = sorted
+                .get(state.exec_selected)
+                .map(|(is_op, idx)| {
+                    if *is_op {
+                        state.operations.get(*idx).is_some_and(|o| {
+                            matches!(
+                                o.status,
+                                common::SemanticOpStatus::Running
+                                    | common::SemanticOpStatus::Queued
+                            )
+                        })
+                    } else {
+                        state.chain_executions.get(*idx).is_some_and(|c| {
+                            matches!(
+                                c.status,
+                                common::ChainExecutionStatus::Running
+                                    | common::ChainExecutionStatus::Queued
+                            )
+                        })
+                    }
+                })
+                .unwrap_or(false);
 
             if selected_active {
                 spans.push(Span::styled("^c", Style::default().fg(ACCENT)));
@@ -130,7 +145,7 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
                 spans.push(Span::styled("type to filter", Style::default().fg(DIM)));
             }
             Line::from(spans)
-        },
+        }
     };
 
     f.render_widget(Paragraph::new(hints), area);
@@ -346,11 +361,8 @@ fn render_library_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
 //
 
 fn render_executions(f: &mut Frame, area: Rect, state: &OperationsState) {
-    let chunks = Layout::horizontal([
-        Constraint::Percentage(60),
-        Constraint::Percentage(40),
-    ])
-    .split(area);
+    let chunks =
+        Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).split(area);
 
     render_exec_list(f, chunks[0], state);
     render_exec_detail(f, chunks[1], state);
@@ -369,7 +381,8 @@ fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
     .style(Style::default().fg(ACCENT));
 
     let now = chrono::Utc::now();
-    let entries = App::sorted_exec_static(&state.operations, &state.chain_executions, &state.filter);
+    let entries =
+        App::sorted_exec_static(&state.operations, &state.chain_executions, &state.filter);
 
     let mut rows: Vec<Row> = Vec::new();
 
@@ -459,7 +472,9 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
     f.render_widget(block, area);
 
     let sorted = crate::app::App::sorted_exec_static(
-        &state.operations, &state.chain_executions, &state.filter,
+        &state.operations,
+        &state.chain_executions,
+        &state.filter,
     );
 
     if sorted.is_empty() || state.exec_selected >= sorted.len() {
