@@ -259,28 +259,59 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
         lines.push(Line::from(""));
     }
 
+    let shades = [
+        Color::Rgb(100, 180, 100),
+        Color::Rgb(90, 165, 90),
+        Color::Rgb(80, 150, 80),
+        Color::Rgb(70, 130, 70),
+        Color::Rgb(55, 110, 55),
+        Color::Rgb(45, 90, 45),
+    ];
+
+    for (i, line) in art.iter().enumerate() {
+        let color = shades[i.min(shades.len() - 1)];
+        lines.push(Line::from(Span::styled(
+            *line,
+            Style::default().fg(color),
+        )));
+    }
+
     //
-    // Animated gradient — bright band sweeps through the logo.
+    // Drip animation: characters fall below the logo at random columns.
     //
     let t = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    let phase = ((t / 150) % 12) as i32;
 
-    for (i, line) in art.iter().enumerate() {
-        let dist = (i as i32 - phase).unsigned_abs() as u8;
-        let (r, g, b) = match dist {
-            0 => (130, 220, 130),
-            1 => (110, 195, 110),
-            2 => (90, 170, 90),
-            3 => (75, 145, 75),
-            4 => (60, 120, 60),
-            _ => (45, 95, 45),
+    let drip_chars = ['\u{2591}', '\u{2592}', '\u{2593}', '\u{2588}', '\u{2593}', '\u{2592}', '\u{2591}', ' '];
+    let drip_positions: &[usize] = &[3, 8, 14, 19, 25, 30, 37, 42];
+
+    for drip_row in 0..3u16 {
+        let art_width = art.last().map(|l| l.chars().count()).unwrap_or(40);
+        let mut drip_line = vec![' '; art_width];
+
+        for &col in drip_positions {
+            if col >= art_width {
+                continue;
+            }
+            let speed = (col * 7 + 13) % 5 + 2;
+            let offset = ((t / (speed as u128 * 80)) + col as u128) % drip_chars.len() as u128;
+            let phase = ((t / (speed as u128 * 120)) + col as u128 * 3) % 8;
+            if phase < (3 - drip_row as u128) + 1 {
+                drip_line[col] = drip_chars[offset as usize];
+            }
+        }
+
+        let drip_str: String = drip_line.into_iter().collect();
+        let brightness = match drip_row {
+            0 => Color::Rgb(45, 90, 45),
+            1 => Color::Rgb(35, 70, 35),
+            _ => Color::Rgb(25, 50, 25),
         };
         lines.push(Line::from(Span::styled(
-            *line,
-            Style::default().fg(Color::Rgb(r, g, b)),
+            drip_str,
+            Style::default().fg(brightness),
         )));
     }
 
