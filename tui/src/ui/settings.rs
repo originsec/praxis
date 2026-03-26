@@ -115,7 +115,7 @@ fn setting_row<'a>(
         Span::styled(if selected { "\u{25b8} " } else { "  " }, label_style),
         Span::styled(format!("{:<28}", label), label_style),
         Span::styled(val_display.to_string(), val_style),
-        Span::styled(cursor, Style::default().fg(ACCENT)),
+        Span::styled(cursor, Style::default().fg(ACCENT).bg(Color::Rgb(50, 55, 50))),
     ])
 }
 
@@ -564,7 +564,7 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
 
     let field_max = inner.width.saturating_sub(16) as usize;
     let edit_style = Style::default().fg(EDIT_FG).bg(Color::Rgb(50, 55, 50));
-    let cursor_style = Style::default().fg(ACCENT);
+    let cursor_style = Style::default().fg(ACCENT).bg(Color::Rgb(50, 55, 50));
 
     //
     // Helper to build a text field line with cursor support.
