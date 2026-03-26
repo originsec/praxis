@@ -490,6 +490,11 @@ impl App {
                         self.operations.detail_scroll =
                             self.operations.detail_scroll.saturating_sub(3);
                     }
+                    Window::Nodes if self.nodes.session.is_some() => {
+                        if let Some(ref mut session) = self.nodes.session {
+                            session.scroll_offset = session.scroll_offset.saturating_add(3);
+                        }
+                    }
                     _ => {}
                 }
                 return;
@@ -503,6 +508,11 @@ impl App {
                     Window::Operations if self.operations.detail_focus => {
                         self.operations.detail_scroll =
                             self.operations.detail_scroll.saturating_add(3);
+                    }
+                    Window::Nodes if self.nodes.session.is_some() => {
+                        if let Some(ref mut session) = self.nodes.session {
+                            session.scroll_offset = session.scroll_offset.saturating_sub(3);
+                        }
                     }
                     _ => {}
                 }
@@ -958,8 +968,10 @@ impl App {
             None => return,
         };
 
+        let node_id = node.node_id.clone();
+
         self.nodes.session = Some(SessionChat {
-            node_id: node.node_id.clone(),
+            node_id: node_id.clone(),
             agent_name: agent.clone(),
             session_id: None,
             messages: Vec::new(),
@@ -969,6 +981,48 @@ impl App {
             is_waiting: false,
         });
         self.nodes.detail_focus = false;
+
+        //
+        // Select agent and create session immediately in the background.
+        //
+        let client = self.client.clone();
+        let tx = self.event_tx.clone();
+
+        tokio::spawn(async move {
+            use common::{SessionCommand, SessionContext, AgentCommand};
+            use crate::event::{AppEvent, SessionResult};
+
+            let Some(tx) = tx else { return };
+
+            let _ = client.send_command(
+                &node_id,
+                NodeCommand::Agent(AgentCommand::Select {
+                    short_name: agent.clone(),
+                }),
+            ).await;
+
+            match client.send_command(
+                &node_id,
+                NodeCommand::Session(SessionCommand::Create {
+                    context: SessionContext::default(),
+                }),
+            ).await {
+                Ok(resp) => {
+                    if let NodeCommandResult::Session(
+                        common::SessionCommandResult::Created { session_id }
+                    ) = resp.result {
+                        let _ = tx.send(AppEvent::SessionResponse(
+                            SessionResult::Created(session_id),
+                        ));
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(AppEvent::SessionResponse(
+                        SessionResult::Error(format!("Session create failed: {}", e)),
+                    ));
+                }
+            }
+        });
     }
 
     fn handle_session_key(&mut self, key: KeyEvent) {

@@ -281,7 +281,6 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState) {
 
 fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionChat) {
     let chunks = Layout::vertical([
-        Constraint::Length(1),  // spacer
         Constraint::Length(1),  // header
         Constraint::Length(1),  // separator
         Constraint::Min(1),    // messages
@@ -306,27 +305,27 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
             Span::styled("  (connecting...)", Style::default().fg(DIM))
         },
     ]);
-    f.render_widget(Paragraph::new(header), chunks[1]);
+    f.render_widget(Paragraph::new(header), chunks[0]);
 
     //
     // Separator.
     //
-    let sep_width = chunks[2].width.saturating_sub(4) as usize;
+    let sep_width = chunks[1].width.saturating_sub(4) as usize;
     f.render_widget(
         Paragraph::new(Line::from(Span::styled(
             format!("  {}", "\u{2500}".repeat(sep_width)),
             Style::default().fg(DIM),
         ))),
-        chunks[2],
+        chunks[1],
     );
 
     //
     // Messages.
     //
     let msg_area = Rect {
-        x: chunks[3].x + 2,
-        width: chunks[3].width.saturating_sub(4),
-        ..chunks[3]
+        x: chunks[2].x + 2,
+        width: chunks[2].width.saturating_sub(4),
+        ..chunks[2]
     };
 
     let mut lines: Vec<Line> = Vec::new();
@@ -348,12 +347,8 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
             }
             ChatRole::Agent => {
                 lines.push(Line::from(""));
-                for line in msg.text.lines() {
-                    lines.push(Line::from(Span::styled(
-                        line.to_string(),
-                        Style::default().fg(TEXT),
-                    )));
-                }
+                let md_lines = crate::markdown::render(&msg.text, "");
+                lines.extend(md_lines);
             }
             ChatRole::System => {
                 lines.push(Line::from(Span::styled(
@@ -393,9 +388,9 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
     // Input.
     //
     let input_area = Rect {
-        x: chunks[4].x + 2,
-        width: chunks[4].width.saturating_sub(4),
-        ..chunks[4]
+        x: chunks[3].x + 2,
+        width: chunks[3].width.saturating_sub(4),
+        ..chunks[3]
     };
 
     let input_style = if session.is_waiting {
@@ -429,14 +424,13 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
     f.render_widget(paragraph, input_area);
 
     //
-    // Hints.
+    // Hints below input.
     //
     let hints = Line::from(vec![
-        Span::raw(" "),
-        Span::styled("enter", Style::default().fg(ACCENT)),
+        Span::styled("  enter", Style::default().fg(ACCENT)),
         Span::styled(" send  ", Style::default().fg(MUTED)),
         Span::styled("esc", Style::default().fg(ACCENT)),
         Span::styled(" close session", Style::default().fg(MUTED)),
     ]);
-    f.render_widget(Paragraph::new(hints), chunks[5]);
+    f.render_widget(Paragraph::new(hints), chunks[4]);
 }
