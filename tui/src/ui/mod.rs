@@ -6,7 +6,7 @@ pub mod status_bar;
 
 use crate::app::{App, Window};
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Layout};
+use ratatui::layout::{Alignment, Constraint, Layout, Margin};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
@@ -18,12 +18,14 @@ const DIM: Color = Color::Rgb(80, 80, 80);
 pub fn render(f: &mut Frame, app: &App) {
     f.render_widget(Block::default().style(Style::default().bg(BG)), f.area());
 
+    let inner = f.area().inner(Margin { vertical: 1, horizontal: 2 });
+
     let chunks = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(1),
         Constraint::Length(1),
     ])
-    .split(f.area());
+    .split(inner);
 
     render_header(f, chunks[0]);
 
