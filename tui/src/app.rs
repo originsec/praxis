@@ -770,13 +770,6 @@ impl App {
                     self.load_settings().await;
                     return;
                 }
-                KeyCode::Char('t') => {
-                    if self.nodes.terminal.is_some() {
-                        self.active_window = Window::Nodes;
-                        return;
-                    }
-                    // Fall through to per-window handler.
-                }
                 _ => {}
             }
         }
