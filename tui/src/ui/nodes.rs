@@ -31,14 +31,29 @@ pub fn render(
     if let Some(ref session) = state.session {
         render_session_chat(f, area, session);
     } else {
+        let outer = Layout::vertical([
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+
         let chunks = Layout::horizontal([
             Constraint::Percentage(state.split_percent),
             Constraint::Percentage(100 - state.split_percent),
         ])
-        .split(area);
+        .split(outer[0]);
 
         render_node_list(f, chunks[0], state);
         render_node_detail(f, chunks[1], state, ops, chains);
+
+        let hints = Line::from(vec![
+            Span::raw(" "),
+            Span::styled("^r", Style::default().fg(ACCENT)),
+            Span::styled(" reset  ", Style::default().fg(MUTED)),
+            Span::styled("^t", Style::default().fg(ACCENT)),
+            Span::styled(" terminal", Style::default().fg(MUTED)),
+        ]);
+        f.render_widget(Paragraph::new(hints), outer[1]);
     }
 }
 
