@@ -525,6 +525,14 @@ impl App {
                 self.handle_key(key).await;
             }
             AppEvent::Terminal(Event::Mouse(mouse)) => self.handle_mouse(mouse).await,
+            AppEvent::Terminal(Event::Resize(_, _)) => {
+                if let Some(ref mut term) = self.nodes.terminal {
+                    let (cols, rows) = Self::terminal_content_size();
+                    term.parser.set_size(rows, cols);
+                    let node_id = term.node_id.clone();
+                    let _ = self.client.send_terminal_resize(&node_id, rows, cols).await;
+                }
+            }
             AppEvent::Orchestrator(msg) => self.handle_orchestrator_event(msg),
             AppEvent::StateUpdate(state) => self.handle_state_update(state),
             AppEvent::OperationsRefreshed {
@@ -767,6 +775,31 @@ impl App {
     }
 
     async fn handle_mouse(&mut self, mouse: MouseEvent) {
+        //
+        // Terminal mode: forward scroll as escape sequences.
+        //
+
+        if self.nodes.terminal.is_some() {
+            if let Some(ref term) = self.nodes.terminal {
+                let node_id = term.node_id.clone();
+                match mouse.kind {
+                    MouseEventKind::ScrollUp => {
+                        // Send scroll-up (typically 3 lines of Up arrow)
+                        for _ in 0..3 {
+                            let _ = self.client.send_terminal_input(&node_id, b"\x1b[A".to_vec()).await;
+                        }
+                    }
+                    MouseEventKind::ScrollDown => {
+                        for _ in 0..3 {
+                            let _ = self.client.send_terminal_input(&node_id, b"\x1b[B".to_vec()).await;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            return;
+        }
+
         let h = self.terminal_width;
         let term_h = crossterm::terminal::size().map(|(_, h)| h).unwrap_or(40);
         let terminal_area = Rect::new(0, 0, h, term_h);
@@ -1361,6 +1394,17 @@ impl App {
         }
     }
 
+    fn terminal_content_size() -> (u16, u16) {
+        let (term_cols, term_rows) = crossterm::terminal::size().unwrap_or((80, 24));
+        //
+        // Subtract: 2 vertical padding + 1 header + 1 hints + 1 status bar = 5 rows
+        //           4 horizontal padding
+        //
+        let cols = term_cols.saturating_sub(4);
+        let rows = term_rows.saturating_sub(5);
+        (cols, rows)
+    }
+
     async fn open_terminal(&mut self) {
         let node = match self.nodes.nodes.get(self.nodes.selected) {
             Some(n) => n,
@@ -1383,8 +1427,7 @@ impl App {
                     terminal_id,
                 }) = resp.result
                 {
-                    let cols = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80);
-                    let rows = crossterm::terminal::size().map(|(_, h)| h).unwrap_or(24);
+                    let (cols, rows) = Self::terminal_content_size();
 
                     let _ = self.client.send_terminal_resize(&node_id, rows, cols).await;
 

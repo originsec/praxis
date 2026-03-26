@@ -788,6 +788,7 @@ fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
     //
 
     let screen = term.parser.screen();
+    let cursor_pos = screen.cursor_position();
     let mut lines: Vec<Line> = Vec::new();
 
     for row in 0..screen.size().0 {
@@ -798,20 +799,28 @@ fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
             let ch = cell.contents();
             let display = if ch.is_empty() { " " } else { &ch };
 
+            let is_cursor = row == cursor_pos.0 && col == cursor_pos.1;
+
             let fg = vt100_fg_to_ratatui(cell.fgcolor());
             let bg = vt100_bg_to_ratatui(cell.bgcolor());
 
-            let mut style = Style::default().fg(fg);
-            if bg != super::BG {
-                style = style.bg(bg);
-            }
+            let mut style = if is_cursor {
+                Style::default().fg(super::BG).bg(ACCENT)
+            } else {
+                let mut s = Style::default().fg(fg);
+                if bg != super::BG {
+                    s = s.bg(bg);
+                }
+                s
+            };
+
             if cell.bold() {
                 style = style.add_modifier(Modifier::BOLD);
             }
             if cell.underline() {
                 style = style.add_modifier(Modifier::UNDERLINED);
             }
-            if cell.inverse() {
+            if cell.inverse() && !is_cursor {
                 style = style.add_modifier(Modifier::REVERSED);
             }
 
