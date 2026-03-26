@@ -378,6 +378,14 @@ pub struct SettingsState {
     pub mcp_port: String,
     pub logging_enabled: bool,
     pub hunting_row_limit: String,
+
+    //
+    // Model select dropdown for feature assignments.
+    //
+
+    pub dropdown_open: bool,
+    pub dropdown_selected: usize,
+    pub dropdown_field: usize, // which feature field (1-5) the dropdown is for
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -410,6 +418,9 @@ impl Default for SettingsState {
             mcp_port: "8585".to_string(),
             logging_enabled: false,
             hunting_row_limit: "10000000".to_string(),
+            dropdown_open: false,
+            dropdown_selected: 0,
+            dropdown_field: 0,
         }
     }
 }
@@ -2870,6 +2881,65 @@ impl App {
         }
 
         //
+        // If dropdown is open for model selection.
+        //
+
+        if self.settings.dropdown_open {
+            let count = self.settings.model_definitions.len();
+            match key.code {
+                KeyCode::Esc => {
+                    self.settings.dropdown_open = false;
+                }
+                KeyCode::Up => {
+                    if self.settings.dropdown_selected > 0 {
+                        self.settings.dropdown_selected -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    if count > 0 && self.settings.dropdown_selected < count - 1 {
+                        self.settings.dropdown_selected += 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    if let Some(def) = self
+                        .settings
+                        .model_definitions
+                        .get(self.settings.dropdown_selected)
+                    {
+                        let name = def.name.clone();
+                        let field = self.settings.dropdown_field;
+                        match field {
+                            1 => {
+                                self.settings.orchestrator_model = name.clone();
+                                self.save_setting("llm_feature_orchestrator", &name)
+                                    .await;
+                            }
+                            3 => {
+                                self.settings.semantic_ops_model = name.clone();
+                                self.save_setting("llm_feature_semantic_ops", &name)
+                                    .await;
+                            }
+                            4 => {
+                                self.settings.semantic_parser_model = name.clone();
+                                self.save_setting("llm_feature_semantic_parser", &name)
+                                    .await;
+                            }
+                            5 => {
+                                self.settings.traffic_parser_model = name.clone();
+                                self.save_setting("llm_feature_traffic_parser", &name)
+                                    .await;
+                            }
+                            _ => {}
+                        }
+                    }
+                    self.settings.dropdown_open = false;
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        //
         // If editing a model definition inline.
         //
 
@@ -2941,35 +3011,32 @@ impl App {
                             self.settings.edit_buffer.clear();
                             self.settings.editing = true;
                         }
-                        1 => {
-                            // Orchestrator model — open edit.
-                            self.settings.editing = true;
-                            self.settings.edit_buffer =
-                                self.settings.orchestrator_model.clone();
+                        1 | 3 | 4 | 5 => {
+                            //
+                            // Model assignment fields — open dropdown.
+                            //
+                            let current = match idx {
+                                1 => &self.settings.orchestrator_model,
+                                3 => &self.settings.semantic_ops_model,
+                                4 => &self.settings.semantic_parser_model,
+                                5 => &self.settings.traffic_parser_model,
+                                _ => unreachable!(),
+                            };
+                            let pos = self
+                                .settings
+                                .model_definitions
+                                .iter()
+                                .position(|d| d.name == *current)
+                                .unwrap_or(0);
+                            self.settings.dropdown_open = true;
+                            self.settings.dropdown_selected = pos;
+                            self.settings.dropdown_field = idx;
                         }
                         2 => {
-                            // Max tokens.
+                            // Max tokens — free text edit.
                             self.settings.editing = true;
                             self.settings.edit_buffer =
                                 self.settings.orchestrator_max_tokens.clone();
-                        }
-                        3 => {
-                            // Semantic ops model.
-                            self.settings.editing = true;
-                            self.settings.edit_buffer =
-                                self.settings.semantic_ops_model.clone();
-                        }
-                        4 => {
-                            // Semantic parser model.
-                            self.settings.editing = true;
-                            self.settings.edit_buffer =
-                                self.settings.semantic_parser_model.clone();
-                        }
-                        5 => {
-                            // Traffic parser model.
-                            self.settings.editing = true;
-                            self.settings.edit_buffer =
-                                self.settings.traffic_parser_model.clone();
                         }
                         _ => {}
                     }
@@ -3025,27 +3092,9 @@ impl App {
                 } else {
                     let idx = sel - model_count;
                     match idx {
-                        1 => {
-                            self.settings.orchestrator_model = val.clone();
-                            self.save_setting("llm_feature_orchestrator", &val).await;
-                        }
                         2 => {
                             self.settings.orchestrator_max_tokens = val.clone();
                             self.save_setting("llm_orchestrator_max_tokens", &val)
-                                .await;
-                        }
-                        3 => {
-                            self.settings.semantic_ops_model = val.clone();
-                            self.save_setting("llm_feature_semantic_ops", &val).await;
-                        }
-                        4 => {
-                            self.settings.semantic_parser_model = val.clone();
-                            self.save_setting("llm_feature_semantic_parser", &val)
-                                .await;
-                        }
-                        5 => {
-                            self.settings.traffic_parser_model = val.clone();
-                            self.save_setting("llm_feature_traffic_parser", &val)
                                 .await;
                         }
                         _ => {}

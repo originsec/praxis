@@ -3,7 +3,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 const ACCENT: Color = Color::Rgb(100, 180, 100);
 const DIM: Color = Color::Rgb(80, 80, 80);
@@ -33,6 +33,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState) {
         SettingsTab::Llm => render_llm(f, content, state),
         SettingsTab::Service => render_service(f, content, state),
         SettingsTab::About => render_about(f, content, state),
+    }
+
+    if state.dropdown_open {
+        render_model_dropdown(f, area, state);
     }
 
     if let Some(ref msg) = state.status_message {
@@ -352,4 +356,55 @@ fn render_about(f: &mut Frame, area: Rect, _state: &SettingsState) {
     let block = Block::default().borders(Borders::NONE);
     let paragraph = Paragraph::new(lines).block(block);
     f.render_widget(paragraph, area);
+}
+
+fn render_model_dropdown(f: &mut Frame, area: Rect, state: &SettingsState) {
+    let items = &state.model_definitions;
+    if items.is_empty() {
+        return;
+    }
+
+    let height = (items.len() as u16 + 2).min(area.height.saturating_sub(4));
+    let width = items
+        .iter()
+        .map(|d| d.name.len())
+        .max()
+        .unwrap_or(20) as u16
+        + 6;
+    let width = width.min(area.width.saturating_sub(4));
+
+    //
+    // Center the dropdown in the area.
+    //
+
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup_area = Rect::new(x, y, width, height);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(ACCENT))
+        .title(" Select Model ");
+
+    let inner = block.inner(popup_area);
+    f.render_widget(Clear, popup_area);
+    f.render_widget(block, popup_area);
+
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, def) in items.iter().enumerate() {
+        let selected = i == state.dropdown_selected;
+        let style = if selected {
+            Style::default().fg(ACCENT).bg(HIGHLIGHT_BG)
+        } else {
+            Style::default().fg(TEXT)
+        };
+        let prefix = if selected { "\u{25b8} " } else { "  " };
+        lines.push(Line::from(Span::styled(
+            format!("{}{}", prefix, def.name),
+            style,
+        )));
+    }
+
+    let paragraph = Paragraph::new(lines);
+    f.render_widget(paragraph, inner);
 }
