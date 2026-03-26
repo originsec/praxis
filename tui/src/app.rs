@@ -3271,15 +3271,24 @@ impl App {
 
             match key.code {
                 KeyCode::Esc => {
-                    form.editing_text = false;
+                    self.settings.model_form = None;
+                    return;
                 }
-                KeyCode::Enter | KeyCode::Tab => {
-                    form.editing_text = false;
+                KeyCode::Up | KeyCode::BackTab => {
+                    if form.focused_field > 0 {
+                        form.focused_field -= 1;
+                        Self::sync_model_form_edit(form);
+                    }
+                }
+                KeyCode::Down | KeyCode::Enter | KeyCode::Tab => {
                     if form.focused_field < 2 {
                         form.focused_field += 1;
-                        let len = form.active_field_len();
-                        form.cursor_pos = len;
+                        Self::sync_model_form_edit(form);
                     }
+                }
+                KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.save_model_form().await;
+                    return;
                 }
                 KeyCode::Left => {
                     if form.cursor_pos > 0 {
