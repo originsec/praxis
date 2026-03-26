@@ -8,7 +8,7 @@ use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -233,7 +233,16 @@ pub struct TerminalState {
     pub terminal_id: Option<String>,
     pub parser: vt100::Parser,
     pub scroll_offset: usize,
+    pub max_scroll: Cell<usize>,
     pub raw_output: Vec<u8>,
+    pub scrollback_cache: RefCell<Option<TerminalScrollbackCache>>,
+}
+
+pub struct TerminalScrollbackCache {
+    pub cols: u16,
+    pub tall_rows: u16,
+    pub raw_len: usize,
+    pub lines: Vec<ratatui::text::Line<'static>>,
 }
 
 pub struct SessionOptions {
@@ -538,6 +547,7 @@ impl App {
                     let cols = new_cols.saturating_sub(7);
                     let rows = new_rows.saturating_sub(8);
                     term.parser.set_size(rows, cols);
+                    *term.scrollback_cache.borrow_mut() = None;
                     let node_id = term.node_id.clone();
                     let _ = self.client.send_terminal_resize(&node_id, rows, cols).await;
                 }
@@ -612,6 +622,7 @@ impl App {
                     if term.terminal_id.as_deref() == Some(&output.terminal_id) {
                         term.raw_output.extend_from_slice(&output.data);
                         term.parser.process(&output.data);
+                        *term.scrollback_cache.borrow_mut() = None;
                     }
                 }
             }
@@ -792,10 +803,10 @@ impl App {
 
         if self.nodes.terminal.is_some() && self.active_window == Window::Nodes {
             if let Some(ref mut term) = self.nodes.terminal {
-                let max_scroll = term.raw_output.iter().filter(|&&b| b == b'\n').count();
                 match mouse.kind {
                     MouseEventKind::ScrollUp => {
-                        term.scroll_offset = (term.scroll_offset + 3).min(max_scroll);
+                        let max = term.max_scroll.get();
+                        term.scroll_offset = (term.scroll_offset + 3).min(max);
                     }
                     MouseEventKind::ScrollDown => {
                         term.scroll_offset = term.scroll_offset.saturating_sub(3);
@@ -1390,7 +1401,9 @@ impl App {
             KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if let Some(node) = self.nodes.nodes.get(self.nodes.selected) {
                     if node.capabilities.is_empty()
-                        || node.capabilities.contains(&common::NodeCapability::Terminal)
+                        || node
+                            .capabilities
+                            .contains(&common::NodeCapability::Terminal)
                     {
                         self.open_terminal().await;
                     }
@@ -1446,7 +1459,9 @@ impl App {
                         terminal_id: Some(terminal_id),
                         parser: vt100::Parser::new(rows, cols, 0),
                         scroll_offset: 0,
+                        max_scroll: Cell::new(usize::MAX),
                         raw_output: Vec::new(),
+                        scrollback_cache: RefCell::new(None),
                     });
                 }
             }

@@ -47,8 +47,7 @@ pub fn render(
             .get(state.selected)
             .map(|n| {
                 n.capabilities.is_empty()
-                    || n.capabilities
-                        .contains(&common::NodeCapability::Terminal)
+                    || n.capabilities.contains(&common::NodeCapability::Terminal)
             })
             .unwrap_or(false);
 
@@ -831,36 +830,7 @@ fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
     let lines = if term.scroll_offset == 0 {
         render_vt100_screen(screen, true)
     } else {
-        //
-        // Replay all output in a tall terminal. The cursor position in the
-        // tall terminal tells us where the live bottom is — the same row
-        // the user sees at scroll_offset=0. Scrolling up from there shows
-        // the history above.
-        //
-
-        let tall_rows = (visible_rows + term.scroll_offset) as u16;
-        let mut tall_parser = vt100::Parser::new(tall_rows, cols, 0);
-        tall_parser.process(&term.raw_output);
-
-        let tall_screen = tall_parser.screen();
-        let all_lines = render_vt100_screen(tall_screen, false);
-
-        //
-        // The bottom `visible_rows` of the tall screen correspond to what
-        // the live terminal shows. Scrolling up N means showing the window
-        // ending N rows above that.
-        //
-
-        let total = all_lines.len();
-        let live_bottom = total;
-        let end = live_bottom.saturating_sub(term.scroll_offset);
-        let start = end.saturating_sub(visible_rows);
-
-        if start < end && end <= total {
-            all_lines[start..end].to_vec()
-        } else {
-            all_lines[..visible_rows.min(total)].to_vec()
-        }
+        render_terminal_scrollback(term, visible_rows, cols)
     };
 
     let content_area = Rect {
@@ -939,6 +909,79 @@ pub fn vt100_fg_to_color(color: vt100::Color) -> Color {
         vt100::Color::Default => Color::Rgb(180, 180, 180),
         vt100::Color::Idx(i) => Color::Indexed(i),
         vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
+    }
+}
+
+fn render_terminal_scrollback(
+    term: &TerminalState,
+    visible_rows: usize,
+    cols: u16,
+) -> Vec<Line<'static>> {
+    let tall_rows = visible_rows
+        .saturating_add(term.scroll_offset)
+        .min(u16::MAX as usize) as u16;
+    let raw_len = term.raw_output.len();
+
+    {
+        let cache = term.scrollback_cache.borrow();
+        if let Some(cache) = cache.as_ref() {
+            if cache.cols == cols && cache.raw_len == raw_len && cache.tall_rows >= tall_rows {
+                //
+                // max_scroll already set from previous replay.
+                //
+                return slice_terminal_scrollback(&cache.lines, visible_rows, term.scroll_offset);
+            }
+        }
+    }
+
+    //
+    // Replay all output in a taller virtual terminal only when the backing
+    // output, width, or requested history depth has changed.
+    //
+    let mut tall_parser = vt100::Parser::new(tall_rows, cols, 0);
+    tall_parser.process(&term.raw_output);
+
+    //
+    // Compute max scroll from cursor position in the tall terminal.
+    // The cursor row indicates where content ends.
+    //
+
+    let cursor_row = tall_parser.screen().cursor_position().0 as usize;
+    let max_scroll = cursor_row.saturating_sub(visible_rows.saturating_sub(1));
+    term.max_scroll.set(max_scroll);
+
+    let lines = render_vt100_screen(tall_parser.screen(), false);
+    let visible_lines = slice_terminal_scrollback(&lines, visible_rows, term.scroll_offset);
+
+    *term.scrollback_cache.borrow_mut() = Some(crate::app::TerminalScrollbackCache {
+        cols,
+        tall_rows,
+        raw_len,
+        lines,
+    });
+
+    visible_lines
+}
+
+fn slice_terminal_scrollback(
+    all_lines: &[Line<'static>],
+    visible_rows: usize,
+    scroll_offset: usize,
+) -> Vec<Line<'static>> {
+    //
+    // The bottom `visible_rows` of the tall screen correspond to the live
+    // terminal. Scrolling up N means showing the window ending N rows above
+    // that live bottom.
+    //
+    let total = all_lines.len();
+    let live_bottom = total;
+    let end = live_bottom.saturating_sub(scroll_offset);
+    let start = end.saturating_sub(visible_rows);
+
+    if start < end && end <= total {
+        all_lines[start..end].to_vec()
+    } else {
+        all_lines[..visible_rows.min(total)].to_vec()
     }
 }
 
