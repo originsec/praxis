@@ -286,8 +286,8 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
     //
     // Glitch cycles: ~800ms period, active for ~200ms.
     //
-    let cycle = (t / 100) % 8;
-    let is_glitching = cycle < 2;
+    let cycle = (t / 100) % 12;
+    let is_glitching = cycle < 1;
 
     //
     // Which rows to glitch (changes each cycle).

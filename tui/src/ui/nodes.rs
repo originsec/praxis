@@ -323,33 +323,31 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
             //
             // Highlight: * for node's active agent, bg for cursor-selected.
             //
-            let is_active = node
-                .selected_agent
-                .as_ref()
-                .is_some_and(|s| s.short_name == agent.short_name);
+            //
+            // Green bg + dark text when agent has an active session.
+            //
+            let has_session = node.selected_agent.as_ref()
+                .is_some_and(|s| s.short_name == agent.short_name && s.session_id.is_some());
 
             let is_cursor = state.detail_focus && idx == state.agent_selected;
 
-            let name_style = if is_cursor {
+            let name_style = if has_session {
+                Style::default()
+                    .fg(Color::Rgb(20, 20, 25))
+                    .bg(Color::Rgb(100, 180, 100))
+            } else if is_cursor {
                 Style::default()
                     .fg(TEXT)
                     .bg(Color::Rgb(35, 40, 35))
-                    .add_modifier(Modifier::BOLD)
-            } else if is_active {
-                Style::default()
-                    .fg(TEXT)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(TEXT)
             };
 
-            let selected_marker = if is_active { " *" } else { "" };
-
             agent_lines.push(Line::from(vec![
                 Span::raw("  "),
                 status_indicator,
-                Span::styled(&agent.short_name, name_style),
-                Span::styled(selected_marker, Style::default().fg(ACCENT)),
+                Span::styled(format!(" {} ", &agent.short_name), name_style),
                 Span::styled(format!("  v{}", version), Style::default().fg(DIM)),
             ]));
         }
