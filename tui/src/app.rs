@@ -590,6 +590,22 @@ impl App {
         }
 
         //
+        // Model edit form intercepts all keys.
+        //
+        if self.settings.model_form.is_some() {
+            self.handle_model_form_key(key).await;
+            return;
+        }
+
+        //
+        // Settings dropdown intercepts all keys.
+        //
+        if self.settings.dropdown_open {
+            self.handle_settings_key(key).await;
+            return;
+        }
+
+        //
         // If a popup is open, handle navigation keys for it.
         // For command palette, typing still goes to the input.
         //
@@ -3292,13 +3308,8 @@ impl App {
                         form.editing_text = true;
                     }
                     2 => {
-                        // Model name — start editing or save.
-                        if form.model_name.is_empty() {
-                            form.editing_text = true;
-                        } else {
-                            // Save and close.
-                            self.save_model_form().await;
-                        }
+                        // Model name — start editing.
+                        form.editing_text = true;
                     }
                     _ => {}
                 }
