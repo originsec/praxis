@@ -29,7 +29,7 @@ pub fn render(f: &mut Frame, app: &App) {
 
     match app.active_window {
         Window::Orchestrator => orchestrator::render(f, chunks[1], &app.orchestrator),
-        Window::Nodes => nodes::render(f, chunks[1], &app.nodes),
+        Window::Nodes => nodes::render(f, chunks[1], &app.nodes, &app.operations.operations),
         Window::Operations => {
             if let Some(ref form) = app.new_op_form {
                 popup::render_new_op_form(f, chunks[1], form);

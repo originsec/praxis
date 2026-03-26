@@ -11,7 +11,7 @@ const MUTED: Color = Color::Rgb(120, 120, 120);
 const TEXT: Color = Color::Rgb(180, 180, 180);
 const HIGHLIGHT_BG: Color = Color::Rgb(35, 35, 40);
 
-pub fn render(f: &mut Frame, area: Rect, state: &NodesState) {
+pub fn render(f: &mut Frame, area: Rect, state: &NodesState, ops: &[common::SemanticOpUpdate]) {
     if let Some(ref opts) = state.session_options {
         render_session_options(f, area, opts);
         return;
@@ -27,7 +27,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &NodesState) {
         .split(area);
 
         render_node_list(f, chunks[0], state);
-        render_node_detail(f, chunks[1], state);
+        render_node_detail(f, chunks[1], state, ops);
     }
 }
 
@@ -104,7 +104,7 @@ fn render_node_list(f: &mut Frame, area: Rect, state: &NodesState) {
     f.render_stateful_widget(table, area, &mut table_state);
 }
 
-fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState) {
+fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[common::SemanticOpUpdate]) {
     let border_style = if state.detail_focus {
         Style::default().fg(ACCENT)
     } else {
@@ -305,6 +305,37 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState) {
             "  intercept: active",
             Style::default().fg(Color::Rgb(180, 160, 60)),
         )));
+    }
+
+    //
+    // Active operations on this node.
+    //
+    let node_ops: Vec<_> = ops.iter()
+        .filter(|o| o.node_id == node.node_id)
+        .filter(|o| matches!(o.status, common::SemanticOpStatus::Running | common::SemanticOpStatus::Queued))
+        .collect();
+
+    if !node_ops.is_empty() {
+        cap_lines.push(Line::from(""));
+        cap_lines.push(Line::from(Span::styled(
+            " Active Operations",
+            Style::default().fg(ACCENT),
+        )));
+        for op in &node_ops {
+            let (status_str, status_color) = match op.status {
+                common::SemanticOpStatus::Running => ("\u{25cf}", Color::Rgb(180, 160, 60)),
+                common::SemanticOpStatus::Queued => ("\u{25cb}", Color::Rgb(100, 140, 180)),
+                _ => ("\u{25cb}", DIM),
+            };
+            cap_lines.push(Line::from(vec![
+                Span::styled(format!("  {} ", status_str), Style::default().fg(status_color)),
+                Span::styled(&op.spec.name, Style::default().fg(TEXT)),
+                Span::styled(
+                    format!("  ({})", &op.operation_id[..8.min(op.operation_id.len())]),
+                    Style::default().fg(DIM),
+                ),
+            ]));
+        }
     }
 
     f.render_widget(Paragraph::new(Text::from(cap_lines)), chunks[2]);
