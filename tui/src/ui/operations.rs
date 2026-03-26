@@ -21,6 +21,7 @@ const OP_COLOR: Color = Color::Rgb(160, 120, 200);
 pub fn render(f: &mut Frame, area: Rect, state: &OperationsState) {
     let chunks = Layout::vertical([
         Constraint::Length(1), // tabs
+        Constraint::Length(1), // spacer
         Constraint::Min(1),    // content
         Constraint::Length(1), // hints
     ])
@@ -29,11 +30,11 @@ pub fn render(f: &mut Frame, area: Rect, state: &OperationsState) {
     render_tabs(f, chunks[0], state);
 
     match state.tab {
-        OpsTab::Library => render_library(f, chunks[1], state),
-        OpsTab::Executions => render_executions(f, chunks[1], state),
+        OpsTab::Library => render_library(f, chunks[2], state),
+        OpsTab::Executions => render_executions(f, chunks[2], state),
     }
 
-    render_hints(f, chunks[2], state);
+    render_hints(f, chunks[3], state);
 }
 
 fn render_tabs(f: &mut Frame, area: Rect, state: &OperationsState) {
@@ -53,17 +54,15 @@ fn render_tabs(f: &mut Frame, area: Rect, state: &OperationsState) {
         }
     };
 
+    let count_style = Style::default().fg(DIM);
+
     let tabs = Line::from(vec![
         Span::raw("  "),
-        Span::styled(
-            format!(" Library {} ", lib_count),
-            tab_style(state.tab == OpsTab::Library),
-        ),
+        Span::styled(" Library ", tab_style(state.tab == OpsTab::Library)),
+        Span::styled(format!("{} ", lib_count), count_style),
         Span::styled("  \u{2502}  ", Style::default().fg(DIM)),
-        Span::styled(
-            format!(" Executions {} ", exec_count),
-            tab_style(state.tab == OpsTab::Executions),
-        ),
+        Span::styled(" Executions ", tab_style(state.tab == OpsTab::Executions)),
+        Span::styled(format!("{} ", exec_count), count_style),
         Span::raw("      "),
         Span::styled("tab", Style::default().fg(DIM)),
         Span::styled(" switch", Style::default().fg(MUTED)),
