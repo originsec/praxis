@@ -231,8 +231,11 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     f.render_widget(paragraph, inner);
 }
 
-fn splash_visibility(state: &OrchestratorState) -> f32 {
-    let elapsed = state
+fn splash_visibility(_state: &OrchestratorState) -> f32 {
+    return 0.0;
+
+    #[allow(unreachable_code)]
+    let elapsed = _state
         .splash_started_at
         .elapsed()
         .unwrap_or_default()
