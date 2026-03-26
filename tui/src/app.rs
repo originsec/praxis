@@ -1850,7 +1850,7 @@ impl App {
             iterations: "10".to_string(),
             yolo: false,
             prompt: String::new(),
-            focused_field: 0,
+            focused_field: 4, // Mode is first in visual order
         });
     }
 
