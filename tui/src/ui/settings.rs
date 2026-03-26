@@ -415,7 +415,8 @@ fn render_model_dropdown(f: &mut Frame, area: Rect, state: &SettingsState) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(ACCENT))
-        .title(" Select Model ");
+        .title(" Select Model ")
+        .style(Style::default().bg(super::BG));
 
     let inner = block.inner(popup_area);
     f.render_widget(Clear, popup_area);
@@ -441,7 +442,7 @@ fn render_model_dropdown(f: &mut Frame, area: Rect, state: &SettingsState) {
 }
 
 fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
-    let providers = common::ai::Provider::all();
+    let providers = crate::app::sorted_providers();
     let provider_name = providers
         .get(form.provider_idx)
         .map(|p| p.display_name())
@@ -467,7 +468,8 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(ACCENT))
-        .title(title);
+        .title(title)
+        .style(Style::default().bg(super::BG));
 
     let inner = block.inner(popup_area);
     f.render_widget(Clear, popup_area);

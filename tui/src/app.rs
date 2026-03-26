@@ -397,6 +397,12 @@ pub struct ModelDef {
     pub api_key: String,
 }
 
+pub fn sorted_providers() -> Vec<common::Provider> {
+    let mut providers = common::Provider::all();
+    providers.sort_by(|a, b| a.display_name().to_lowercase().cmp(&b.display_name().to_lowercase()));
+    providers
+}
+
 pub struct ModelEditForm {
     pub edit_index: Option<usize>, // None = adding new, Some(i) = editing existing
     pub focused_field: usize,      // 0=provider, 1=apiKey, 2=model
@@ -3134,7 +3140,7 @@ impl App {
     }
 
     fn open_model_form(&mut self, edit_index: Option<usize>) {
-        let providers = common::Provider::all();
+        let providers = sorted_providers();
         let (provider_idx, api_key, model_name) = match edit_index {
             Some(idx) => {
                 let def = &self.settings.model_definitions[idx];
@@ -3256,7 +3262,7 @@ impl App {
             KeyCode::Left => {
                 let form = self.settings.model_form.as_mut().unwrap();
                 if form.focused_field == 0 {
-                    let providers = common::Provider::all();
+                    let providers = sorted_providers();
                     if form.provider_idx > 0 {
                         form.provider_idx -= 1;
                     } else {
@@ -3268,7 +3274,7 @@ impl App {
             KeyCode::Right => {
                 let form = self.settings.model_form.as_mut().unwrap();
                 if form.focused_field == 0 {
-                    let providers = common::Provider::all();
+                    let providers = sorted_providers();
                     form.provider_idx = (form.provider_idx + 1) % providers.len();
                     form.available_models.clear();
                 }
@@ -3303,7 +3309,7 @@ impl App {
                 //
 
                 let form = self.settings.model_form.as_mut().unwrap();
-                let providers = common::Provider::all();
+                let providers = sorted_providers();
                 let provider = providers[form.provider_idx].as_str().to_string();
                 let api_key = form.api_key.clone();
 
@@ -3352,7 +3358,7 @@ impl App {
             None => return,
         };
 
-        let providers = common::Provider::all();
+        let providers = sorted_providers();
         let provider_str = providers[form.provider_idx].as_str().to_string();
 
         if form.model_name.is_empty() {
