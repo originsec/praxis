@@ -768,7 +768,7 @@ impl App {
                     }
                     return;
                 }
-                KeyCode::Char('s') => {
+                KeyCode::Char('w') => {
                     self.open_save_session();
                     return;
                 }
