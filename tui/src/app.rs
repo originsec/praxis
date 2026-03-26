@@ -31,7 +31,9 @@ pub enum PopupKind {
     ModelSelect,
     SaveSession,
     RunTarget,
+    #[allow(dead_code)]
     NewOp,
+    #[allow(dead_code)]
     Confirm,
 }
 
@@ -284,17 +286,6 @@ pub struct CollapsedSections {
 
 impl CollapsedSections {
     pub fn section_count() -> usize { 5 }
-
-    pub fn label(idx: usize) -> &'static str {
-        match idx {
-            0 => "Result",
-            1 => "Summary",
-            2 => "Prompt",
-            3 => "Output",
-            4 => "Elements",
-            _ => "",
-        }
-    }
 }
 
 impl Default for OperationsState {
@@ -400,7 +391,9 @@ impl App {
                 //
                 // Periodically refresh operations data when viewing that window.
                 //
-                if self.active_window == Window::Operations {
+                if self.active_window == Window::Operations
+                    || self.active_window == Window::Nodes
+                {
                     self.operations.operations = self.client.get_operations().await;
                     self.operations.chain_executions = self.client.get_chain_executions().await;
                 }

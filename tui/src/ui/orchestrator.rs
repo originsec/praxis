@@ -259,20 +259,28 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
         lines.push(Line::from(""));
     }
 
-    let shades = [
-        Color::Rgb(100, 180, 100),
-        Color::Rgb(90, 165, 90),
-        Color::Rgb(80, 150, 80),
-        Color::Rgb(70, 130, 70),
-        Color::Rgb(55, 110, 55),
-        Color::Rgb(45, 90, 45),
-    ];
+    //
+    // Animated gradient — bright band sweeps through the logo.
+    //
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let phase = ((t / 150) % 12) as i32;
 
     for (i, line) in art.iter().enumerate() {
-        let color = shades[i.min(shades.len() - 1)];
+        let dist = (i as i32 - phase).unsigned_abs() as u8;
+        let (r, g, b) = match dist {
+            0 => (130, 220, 130),
+            1 => (110, 195, 110),
+            2 => (90, 170, 90),
+            3 => (75, 145, 75),
+            4 => (60, 120, 60),
+            _ => (45, 95, 45),
+        };
         lines.push(Line::from(Span::styled(
             *line,
-            Style::default().fg(color),
+            Style::default().fg(Color::Rgb(r, g, b)),
         )));
     }
 
