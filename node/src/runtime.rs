@@ -517,23 +517,28 @@ async fn listen_to_queues(
     {
         let registry = registry.clone();
         let cache = fingerprint_cache.clone();
-        let shutdown = shutdown_token.clone();
+        let stop = reset_token.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             interval.tick().await; // consume immediate first tick
             loop {
                 tokio::select! {
-                    _ = shutdown.cancelled() => break,
+                    _ = stop.cancelled() => break,
                     _ = interval.tick() => {}
                 }
                 let agents = registry.read().await.get_all();
                 let mut new_cache = std::collections::HashMap::new();
                 for agent in &agents {
+                    if stop.is_cancelled() {
+                        break;
+                    }
                     let available = agent.do_fingerprint().await;
                     new_cache.insert(agent.short_name().to_string(), available);
                 }
-                *cache.write().await = new_cache;
+                if !stop.is_cancelled() {
+                    *cache.write().await = new_cache;
+                }
             }
         });
     }
