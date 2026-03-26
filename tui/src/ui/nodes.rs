@@ -1,4 +1,4 @@
-use crate::app::{ChatRole, NodesState, SessionOptions};
+use crate::app::{ChatRole, NodesState, SessionOptions, TerminalState};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -18,6 +18,11 @@ pub fn render(
     ops: &[common::SemanticOpUpdate],
     chains: &[common::ChainExecutionUpdate],
 ) {
+    if let Some(ref term) = state.terminal {
+        render_terminal(f, area, term);
+        return;
+    }
+
     if let Some(ref opts) = state.session_options {
         render_session_options(f, area, opts);
         return;
@@ -740,4 +745,85 @@ fn render_session_options(f: &mut Frame, area: Rect, opts: &SessionOptions) {
         Span::styled(" cancel", Style::default().fg(MUTED)),
     ]);
     f.render_widget(Paragraph::new(hints), chunks[2]);
+}
+
+fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
+    let chunks = Layout::vertical([
+        Constraint::Length(1), // header
+        Constraint::Min(1),    // terminal content
+        Constraint::Length(1), // hints
+    ])
+    .split(area);
+
+    //
+    // Header.
+    //
+
+    let header = Line::from(vec![
+        Span::styled("  \u{2335} Terminal  ", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            term.node_id[..8.min(term.node_id.len())].to_string(),
+            Style::default().fg(DIM),
+        ),
+    ]);
+    f.render_widget(Paragraph::new(header), chunks[0]);
+
+    //
+    // Render terminal screen from vt100 parser.
+    //
+
+    let screen = term.parser.screen();
+    let mut lines: Vec<Line> = Vec::new();
+
+    for row in 0..screen.size().0 {
+        let mut spans: Vec<Span> = Vec::new();
+        let mut col = 0u16;
+        while col < screen.size().1 {
+            let cell = screen.cell(row, col).unwrap();
+            let ch = cell.contents();
+            let display = if ch.is_empty() { " " } else { &ch };
+
+            let fg = vt100_color_to_ratatui(cell.fgcolor());
+            let bg = vt100_color_to_ratatui(cell.bgcolor());
+
+            let mut style = Style::default().fg(fg);
+            if bg != super::BG {
+                style = style.bg(bg);
+            }
+            if cell.bold() {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            if cell.underline() {
+                style = style.add_modifier(Modifier::UNDERLINED);
+            }
+            if cell.inverse() {
+                style = style.add_modifier(Modifier::REVERSED);
+            }
+
+            spans.push(Span::styled(display.to_string(), style));
+            col += 1;
+        }
+        lines.push(Line::from(spans));
+    }
+
+    let paragraph = Paragraph::new(lines);
+    f.render_widget(paragraph, chunks[1]);
+
+    //
+    // Hints.
+    //
+
+    let hints = Line::from(vec![
+        Span::styled("  ^t", Style::default().fg(ACCENT)),
+        Span::styled(" close terminal", Style::default().fg(MUTED)),
+    ]);
+    f.render_widget(Paragraph::new(hints), chunks[2]);
+}
+
+fn vt100_color_to_ratatui(color: vt100::Color) -> Color {
+    match color {
+        vt100::Color::Default => Color::Rgb(180, 180, 180),
+        vt100::Color::Idx(i) => Color::Indexed(i),
+        vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
+    }
 }

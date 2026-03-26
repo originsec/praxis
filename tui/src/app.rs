@@ -51,6 +51,7 @@ pub enum ConfirmKind {
     DeleteOp(String), // full_name
     ClearAllExecutions,
     DeleteModel(usize), // index into model_definitions
+    ResetNode(String),   // node_id
     Info,
 }
 
@@ -222,8 +223,15 @@ pub struct NodesState {
     pub dragging: bool,
     pub session: Option<SessionChat>,
     pub session_options: Option<SessionOptions>,
+    pub terminal: Option<TerminalState>,
     pub detail_focus: bool,
     pub agent_selected: usize,
+}
+
+pub struct TerminalState {
+    pub node_id: String,
+    pub terminal_id: Option<String>,
+    pub parser: vt100::Parser,
 }
 
 pub struct SessionOptions {
@@ -271,6 +279,7 @@ impl Default for NodesState {
             dragging: false,
             session: None,
             session_options: None,
+            terminal: None,
             detail_focus: false,
             agent_selected: 0,
         }
@@ -581,6 +590,13 @@ impl App {
                     }
                 }
             }
+            AppEvent::TerminalOutput(output) => {
+                if let Some(ref mut term) = self.nodes.terminal {
+                    if term.terminal_id.as_deref() == Some(&output.terminal_id) {
+                        term.parser.process(&output.data);
+                    }
+                }
+            }
             AppEvent::Tick => {
                 //
                 // Periodically refresh operations data when viewing that window.
@@ -629,6 +645,18 @@ impl App {
     }
 
     async fn handle_key(&mut self, key: KeyEvent) {
+        //
+        // Terminal mode intercepts all keys except ^q.
+        //
+        if self.nodes.terminal.is_some() {
+            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('q') {
+                self.should_quit = true;
+                return;
+            }
+            self.handle_terminal_key(key).await;
+            return;
+        }
+
         //
         // Confirm dialog intercepts all keys.
         //
@@ -1241,6 +1269,14 @@ impl App {
 
     async fn handle_nodes_key(&mut self, key: KeyEvent) {
         //
+        // Terminal mode — forward all keys except ^q and ^t (close terminal).
+        //
+        if self.nodes.terminal.is_some() {
+            self.handle_terminal_key(key).await;
+            return;
+        }
+
+        //
         // Session options screen.
         //
         if self.nodes.session_options.is_some() {
@@ -1308,8 +1344,147 @@ impl App {
                 self.nodes.detail_focus = true;
                 self.nodes.agent_selected = 0;
             }
+            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(node) = self.nodes.nodes.get(self.nodes.selected) {
+                    let node_id = node.node_id.clone();
+                    let machine = node.machine_name.clone();
+                    self.confirm = Some(ConfirmAction {
+                        message: format!("Reset node '{}'?", machine),
+                        action: ConfirmKind::ResetNode(node_id),
+                    });
+                }
+            }
+            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.open_terminal().await;
+            }
             _ => {}
         }
+    }
+
+    async fn open_terminal(&mut self) {
+        let node = match self.nodes.nodes.get(self.nodes.selected) {
+            Some(n) => n,
+            None => return,
+        };
+        let node_id = node.node_id.clone();
+
+        //
+        // Create terminal session on the node.
+        //
+
+        let result = self
+            .client
+            .send_command(&node_id, NodeCommand::Terminal(common::TerminalCommand::Create))
+            .await;
+
+        match result {
+            Ok(resp) => {
+                if let NodeCommandResult::Terminal(common::TerminalCommandResult::Created {
+                    terminal_id,
+                }) = resp.result
+                {
+                    let cols = crossterm::terminal::size().map(|(w, _)| w).unwrap_or(80);
+                    let rows = crossterm::terminal::size().map(|(_, h)| h).unwrap_or(24);
+
+                    //
+                    // Send initial resize.
+                    //
+
+                    let _ = self
+                        .client
+                        .send_command(
+                            &node_id,
+                            NodeCommand::Terminal(common::TerminalCommand::Resize {
+                                rows,
+                                cols,
+                            }),
+                        )
+                        .await;
+
+                    self.nodes.terminal = Some(TerminalState {
+                        node_id: node_id.clone(),
+                        terminal_id: Some(terminal_id),
+                        parser: vt100::Parser::new(rows, cols, 0),
+                    });
+                }
+            }
+            Err(e) => {
+                self.orchestrator
+                    .messages
+                    .push(ConversationEntry::Error(format!(
+                        "Failed to open terminal: {}",
+                        e
+                    )));
+            }
+        }
+    }
+
+    async fn handle_terminal_key(&mut self, key: KeyEvent) {
+        //
+        // ^t closes the terminal.
+        //
+
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('t') {
+            self.close_terminal().await;
+            return;
+        }
+
+        //
+        // Convert key event to bytes and send to the node PTY.
+        //
+
+        let data = match key.code {
+            KeyCode::Char(c) => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    // Ctrl+A = 0x01, Ctrl+C = 0x03, etc.
+                    let byte = (c as u8).wrapping_sub(b'a').wrapping_add(1);
+                    vec![byte]
+                } else {
+                    let mut buf = [0u8; 4];
+                    let s = c.encode_utf8(&mut buf);
+                    s.as_bytes().to_vec()
+                }
+            }
+            KeyCode::Enter => vec![b'\r'],
+            KeyCode::Backspace => vec![0x7f],
+            KeyCode::Tab => vec![b'\t'],
+            KeyCode::Esc => vec![0x1b],
+            KeyCode::Up => b"\x1b[A".to_vec(),
+            KeyCode::Down => b"\x1b[B".to_vec(),
+            KeyCode::Right => b"\x1b[C".to_vec(),
+            KeyCode::Left => b"\x1b[D".to_vec(),
+            KeyCode::Home => b"\x1b[H".to_vec(),
+            KeyCode::End => b"\x1b[F".to_vec(),
+            KeyCode::Delete => b"\x1b[3~".to_vec(),
+            KeyCode::PageUp => b"\x1b[5~".to_vec(),
+            KeyCode::PageDown => b"\x1b[6~".to_vec(),
+            _ => return,
+        };
+
+        if let Some(ref term) = self.nodes.terminal {
+            let node_id = term.node_id.clone();
+            let _ = self
+                .client
+                .send_command(
+                    &node_id,
+                    NodeCommand::Terminal(common::TerminalCommand::Write { data }),
+                )
+                .await;
+        }
+    }
+
+    async fn close_terminal(&mut self) {
+        if let Some(ref term) = self.nodes.terminal {
+            let node_id = term.node_id.clone();
+            let _ = self
+                .client
+                .send_command(
+                    &node_id,
+                    NodeCommand::Terminal(common::TerminalCommand::Close),
+                )
+                .await;
+        }
+        self.nodes.terminal = None;
     }
 
     fn start_session_with_selected_agent(&mut self) {
@@ -2453,6 +2628,9 @@ impl App {
                             self.operations.chain_executions =
                                 self.client.get_chain_executions().await;
                             self.operations.exec_selected = 0;
+                        }
+                        ConfirmKind::ResetNode(node_id) => {
+                            let _ = self.client.reset_node(&node_id).await;
                         }
                         ConfirmKind::DeleteModel(idx) => {
                             if idx < self.settings.model_definitions.len() {

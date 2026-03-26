@@ -3,7 +3,8 @@ use common::{
     CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE, ChainDefinitionFull, ChainDefinitionInfo,
     ChainExecutionUpdate, ClientBroadcastMessage, ClientDirectMessage, ClientRegistration,
     ClientSignalMessage, CommandRequest, CommandResponse, NodeCommand, NodeCommandResult,
-    OperationDefinitionInfo, SemanticOpUpdate, SystemState, client_queue_name, publish_json,
+    OperationDefinitionInfo, SemanticOpUpdate, SystemState, TerminalOutput, client_queue_name,
+    publish_json,
 };
 use futures_util::StreamExt;
 use lapin::{
@@ -30,6 +31,7 @@ pub struct Client {
 struct ClientState {
     system_state: Option<SystemState>,
     orchestrator_event_tx: Option<tokio::sync::mpsc::UnboundedSender<ClientDirectMessage>>,
+    terminal_output_tx: Option<tokio::sync::mpsc::UnboundedSender<TerminalOutput>>,
     pending_config: Option<HashMap<String, String>>,
     pending_commands: std::collections::HashMap<String, Option<NodeCommandResult>>,
     cached_project_paths: Vec<String>,
@@ -267,6 +269,12 @@ impl Client {
                 }
             }
 
+            ClientDirectMessage::TerminalOutput(output) => {
+                if let Some(ref tx) = state.terminal_output_tx {
+                    let _ = tx.send(output);
+                }
+            }
+
             _ => {}
         }
     }
@@ -497,6 +505,32 @@ impl Client {
 
     pub async fn get_cached_project_paths(&self) -> Vec<String> {
         self.state.lock().await.cached_project_paths.clone()
+    }
+
+    //
+    // Node management.
+    //
+
+    pub async fn reset_node(&self, node_id: &str) -> Result<()> {
+        let message = ClientSignalMessage::ResetNode {
+            node_id: node_id.to_string(),
+        };
+        self.publish_signal(message).await
+    }
+
+    //
+    // Terminal methods.
+    //
+
+    pub fn subscribe_terminal_output(
+        &self,
+    ) -> tokio::sync::mpsc::UnboundedReceiver<TerminalOutput> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            state.lock().await.terminal_output_tx = Some(tx);
+        });
+        rx
     }
 
     pub async fn request_op_def_list(&self) -> Result<()> {

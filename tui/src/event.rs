@@ -1,7 +1,7 @@
 use crate::client::Client;
 use common::{
     ChainDefinitionInfo, ChainExecutionUpdate, ClientDirectMessage, OperationDefinitionInfo,
-    SemanticOpUpdate, SystemState,
+    SemanticOpUpdate, SystemState, TerminalOutput,
 };
 use crossterm::event::{Event, EventStream};
 use futures_util::StreamExt;
@@ -19,6 +19,7 @@ pub enum AppEvent {
         chain_executions: Vec<ChainExecutionUpdate>,
     },
     SessionResponse(SessionResult),
+    TerminalOutput(TerminalOutput),
     Tick,
 }
 
@@ -62,6 +63,19 @@ impl EventHandler {
         tokio::spawn(async move {
             while let Some(msg) = orch_rx.recv().await {
                 if tx_orch.send(AppEvent::Orchestrator(msg)).is_err() {
+                    break;
+                }
+            }
+        });
+
+        //
+        // Terminal output from node PTY sessions.
+        //
+        let tx_term_out = tx.clone();
+        let mut term_rx = client.subscribe_terminal_output();
+        tokio::spawn(async move {
+            while let Some(output) = term_rx.recv().await {
+                if tx_term_out.send(AppEvent::TerminalOutput(output)).is_err() {
                     break;
                 }
             }
