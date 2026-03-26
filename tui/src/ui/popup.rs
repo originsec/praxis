@@ -520,11 +520,11 @@ pub fn render_run_options(f: &mut Frame, area: Rect, opts: &crate::app::RunOptio
     let hints = Line::from(vec![
         Span::styled("  \u{2191}\u{2193}", Style::default().fg(ACCENT)),
         Span::styled(" navigate  ", Style::default().fg(MUTED)),
-        Span::styled("space", Style::default().fg(ACCENT)),
+        Span::styled("enter", Style::default().fg(ACCENT)),
         Span::styled(" toggle  ", Style::default().fg(MUTED)),
         Span::styled("tab", Style::default().fg(ACCENT)),
         Span::styled(" section  ", Style::default().fg(MUTED)),
-        Span::styled("enter", Style::default().fg(ACCENT)),
+        Span::styled("^r", Style::default().fg(ACCENT)),
         Span::styled(" run  ", Style::default().fg(MUTED)),
         Span::styled("esc", Style::default().fg(ACCENT)),
         Span::styled(" cancel", Style::default().fg(MUTED)),

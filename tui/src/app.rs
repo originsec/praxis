@@ -2465,9 +2465,9 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char(' ') => {
+            KeyCode::Char(' ') | KeyCode::Enter => {
                 //
-                // Space toggles selection of current item.
+                // Space/Enter toggles selection of current item.
                 //
                 if let Some(ref mut opts) = self.run_options {
                     match opts.focused_section {
@@ -2486,7 +2486,7 @@ impl App {
                     }
                 }
             }
-            KeyCode::Enter => {
+            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 //
                 // Execute with selected targets.
                 //
