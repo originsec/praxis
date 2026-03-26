@@ -75,6 +75,7 @@ async fn main() -> Result<()> {
     let mut app = App::new(client.clone());
     app.init().await;
     let mut events = EventHandler::new(client.clone());
+    app.event_tx = Some(events.sender());
 
     //
     // Main render loop.

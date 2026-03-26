@@ -112,6 +112,7 @@ pub struct App {
     pub new_op_form: Option<NewOpForm>,
     pub confirm: Option<ConfirmAction>,
     pub terminal_width: u16,
+    pub event_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::event::AppEvent>>,
 }
 
 //
@@ -317,6 +318,7 @@ impl App {
             new_op_form: None,
             confirm: None,
             terminal_width: 0,
+            event_tx: None,
         }
     }
 
@@ -350,6 +352,35 @@ impl App {
             AppEvent::Terminal(Event::Mouse(mouse)) => self.handle_mouse(mouse),
             AppEvent::Orchestrator(msg) => self.handle_orchestrator_event(msg),
             AppEvent::StateUpdate(state) => self.handle_state_update(state),
+            AppEvent::SessionResponse(result) => {
+                use crate::event::SessionResult;
+                if let Some(ref mut session) = self.nodes.session {
+                    match result {
+                        SessionResult::Created(sid) => {
+                            session.session_id = Some(sid.clone());
+                            session.messages.push(ChatMessage {
+                                role: ChatRole::System,
+                                text: format!("Session created ({})", &sid[..8.min(sid.len())]),
+                            });
+                        }
+                        SessionResult::Response(text) => {
+                            session.messages.push(ChatMessage {
+                                role: ChatRole::Agent,
+                                text,
+                            });
+                            session.is_waiting = false;
+                            session.scroll_offset = 0;
+                        }
+                        SessionResult::Error(msg) => {
+                            session.messages.push(ChatMessage {
+                                role: ChatRole::System,
+                                text: format!("Error: {}", msg),
+                            });
+                            session.is_waiting = false;
+                        }
+                    }
+                }
+            }
             AppEvent::Tick => {
                 //
                 // Periodically refresh operations data when viewing that window.
@@ -858,7 +889,7 @@ impl App {
         // Session chat mode.
         //
         if self.nodes.session.is_some() {
-            self.handle_session_key(key).await;
+            self.handle_session_key(key);
             return;
         }
 
@@ -931,10 +962,7 @@ impl App {
             node_id: node.node_id.clone(),
             agent_name: agent.clone(),
             session_id: None,
-            messages: vec![ChatMessage {
-                role: ChatRole::System,
-                text: format!("Session with {} — type a message and press Enter", agent),
-            }],
+            messages: Vec::new(),
             input: String::new(),
             cursor_pos: 0,
             scroll_offset: 0,
@@ -943,7 +971,7 @@ impl App {
         self.nodes.detail_focus = false;
     }
 
-    async fn handle_session_key(&mut self, key: KeyEvent) {
+    fn handle_session_key(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('c') => {
@@ -971,117 +999,109 @@ impl App {
                 self.nodes.session = None;
             }
             KeyCode::Enter => {
-                let (input, node_id, agent_name, needs_create) = {
-                    let Some(ref mut session) = self.nodes.session else { return };
-                    let input = session.input.trim().to_string();
-                    if input.is_empty() || session.is_waiting {
-                        return;
-                    }
-                    session.messages.push(ChatMessage {
-                        role: ChatRole::User,
-                        text: input.clone(),
-                    });
-                    session.input.clear();
-                    session.cursor_pos = 0;
-                    session.is_waiting = true;
-                    session.scroll_offset = 0;
-                    let needs = session.session_id.is_none();
-                    (input, session.node_id.clone(), session.agent_name.clone(), needs)
-                };
-
-                use common::{SessionCommand, SessionContext, AgentCommand};
-
-                //
-                // Select agent and create session if needed.
-                //
-                if needs_create {
-                    let _ = self.client.send_command(
-                        &node_id,
-                        NodeCommand::Agent(AgentCommand::Select {
-                            short_name: agent_name.clone(),
-                        }),
-                    ).await;
-
-                    match self.client.send_command(
-                        &node_id,
-                        NodeCommand::Session(SessionCommand::Create {
-                            context: SessionContext::default(),
-                        }),
-                    ).await {
-                        Ok(resp) => {
-                            if let NodeCommandResult::Session(
-                                common::SessionCommandResult::Created { session_id }
-                            ) = resp.result {
-                                if let Some(ref mut session) = self.nodes.session {
-                                    session.session_id = Some(session_id.clone());
-                                    session.messages.push(ChatMessage {
-                                        role: ChatRole::System,
-                                        text: format!("Session created ({})", &session_id[..8]),
-                                    });
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            if let Some(ref mut session) = self.nodes.session {
-                                session.messages.push(ChatMessage {
-                                    role: ChatRole::System,
-                                    text: format!("Failed to create session: {}", e),
-                                });
-                                session.is_waiting = false;
-                            }
-                            return;
-                        }
-                    }
+                let Some(ref mut session) = self.nodes.session else { return };
+                let input = session.input.trim().to_string();
+                if input.is_empty() || session.is_waiting {
+                    return;
                 }
 
                 //
-                // Send prompt and wait for response.
+                // Show the user message immediately.
                 //
-                let tid = uuid::Uuid::new_v4().to_string();
-                match self.client.send_command(
-                    &node_id,
-                    NodeCommand::Session(SessionCommand::Prompt {
-                        text: input,
-                        transaction_id: tid,
-                    }),
-                ).await {
-                    Ok(resp) => {
-                        if let Some(ref mut session) = self.nodes.session {
+                session.messages.push(ChatMessage {
+                    role: ChatRole::User,
+                    text: input.clone(),
+                });
+                session.input.clear();
+                session.cursor_pos = 0;
+                session.is_waiting = true;
+                session.scroll_offset = 0;
+
+                let needs_create = session.session_id.is_none();
+                let node_id = session.node_id.clone();
+                let agent_name = session.agent_name.clone();
+
+                //
+                // Spawn background task for network calls.
+                // Results come back via SessionResponse events.
+                //
+                let client = self.client.clone();
+                let tx = self.event_tx.clone();
+
+                tokio::spawn(async move {
+                    use common::{SessionCommand, SessionContext, AgentCommand};
+                    use crate::event::{AppEvent, SessionResult};
+
+                    let Some(tx) = tx else { return };
+
+                    if needs_create {
+                        let _ = client.send_command(
+                            &node_id,
+                            NodeCommand::Agent(AgentCommand::Select {
+                                short_name: agent_name.clone(),
+                            }),
+                        ).await;
+
+                        match client.send_command(
+                            &node_id,
+                            NodeCommand::Session(SessionCommand::Create {
+                                context: SessionContext::default(),
+                            }),
+                        ).await {
+                            Ok(resp) => {
+                                if let NodeCommandResult::Session(
+                                    common::SessionCommandResult::Created { session_id }
+                                ) = resp.result {
+                                    let _ = tx.send(AppEvent::SessionResponse(
+                                        SessionResult::Created(session_id),
+                                    ));
+                                }
+                            }
+                            Err(e) => {
+                                let _ = tx.send(AppEvent::SessionResponse(
+                                    SessionResult::Error(format!("Session create failed: {}", e)),
+                                ));
+                                return;
+                            }
+                        }
+                    }
+
+                    let tid = uuid::Uuid::new_v4().to_string();
+                    match client.send_command(
+                        &node_id,
+                        NodeCommand::Session(SessionCommand::Prompt {
+                            text: input,
+                            transaction_id: tid,
+                        }),
+                    ).await {
+                        Ok(resp) => {
                             match resp.result {
                                 NodeCommandResult::Session(
                                     common::SessionCommandResult::PromptResponse { response, .. }
                                 ) => {
-                                    session.messages.push(ChatMessage {
-                                        role: ChatRole::Agent,
-                                        text: response,
-                                    });
+                                    let _ = tx.send(AppEvent::SessionResponse(
+                                        SessionResult::Response(response),
+                                    ));
                                 }
                                 NodeCommandResult::Error { message } => {
-                                    session.messages.push(ChatMessage {
-                                        role: ChatRole::System,
-                                        text: format!("Error: {}", message),
-                                    });
+                                    let _ = tx.send(AppEvent::SessionResponse(
+                                        SessionResult::Error(message),
+                                    ));
                                 }
                                 _ => {
-                                    session.messages.push(ChatMessage {
-                                        role: ChatRole::System,
-                                        text: "Unexpected response".to_string(),
-                                    });
+                                    let _ = tx.send(AppEvent::SessionResponse(
+                                        SessionResult::Error("Unexpected response".to_string()),
+                                    ));
                                 }
                             }
-                            session.is_waiting = false;
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AppEvent::SessionResponse(
+                                SessionResult::Error(format!("{}", e)),
+                            ));
                         }
                     }
-                    Err(e) => {
-                        if let Some(ref mut session) = self.nodes.session {
-                            session.messages.push(ChatMessage {
-                                role: ChatRole::System,
-                                text: format!("Error: {}", e),
-                            });
-                            session.is_waiting = false;
-                        }
-                    }
-                }
+                });
             }
             KeyCode::Char(c) => {
                 if let Some(ref mut session) = self.nodes.session {

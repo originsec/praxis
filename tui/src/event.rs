@@ -9,11 +9,19 @@ pub enum AppEvent {
     Terminal(Event),
     Orchestrator(ClientDirectMessage),
     StateUpdate(SystemState),
+    SessionResponse(SessionResult),
     Tick,
+}
+
+pub enum SessionResult {
+    Created(String),       // session_id
+    Response(String),      // agent response text
+    Error(String),         // error message
 }
 
 pub struct EventHandler {
     rx: mpsc::UnboundedReceiver<AppEvent>,
+    tx: mpsc::UnboundedSender<AppEvent>,
 }
 
 impl EventHandler {
@@ -47,8 +55,9 @@ impl EventHandler {
         });
 
         //
-        // Tick timer — polls system state every 500ms.
+        // Tick timer — polls system state every 100ms.
         //
+        let tx_for_app = tx.clone();
         let tx_tick = tx;
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
@@ -65,7 +74,11 @@ impl EventHandler {
             }
         });
 
-        Self { rx }
+        Self { rx, tx: tx_for_app }
+    }
+
+    pub fn sender(&self) -> mpsc::UnboundedSender<AppEvent> {
+        self.tx.clone()
     }
 
     pub async fn next(&mut self) -> Option<AppEvent> {
