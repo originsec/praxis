@@ -157,7 +157,21 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
                     Span::styled(wd.as_str(), Style::default().fg(DIM)),
                 ]));
             }
-            if agent.active_transaction_id.is_some() {
+            if let Some(ref prompt_text) = agent.active_prompt_text {
+                activity_lines.push(Line::from(Span::styled(
+                    "  \u{25cf} Session Prompt",
+                    Style::default().fg(Color::Rgb(180, 160, 60)),
+                )));
+                let short = if prompt_text.len() > 80 {
+                    format!("{}...", &prompt_text[..80])
+                } else {
+                    prompt_text.clone()
+                };
+                activity_lines.push(Line::from(Span::styled(
+                    format!("    {}", short),
+                    Style::default().fg(MUTED),
+                )));
+            } else if agent.active_transaction_id.is_some() {
                 activity_lines.push(Line::from(Span::styled(
                     "  \u{25cf} prompt executing...",
                     Style::default().fg(Color::Rgb(180, 160, 60)),

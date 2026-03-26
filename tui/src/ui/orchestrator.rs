@@ -305,9 +305,41 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
     }
     lines.push(Line::from(top_noise));
 
+    //
+    // Occasionally glitch random characters in the logo — electric zap effect.
+    //
+    let glitch_chars = ['\u{2588}', '\u{2591}', '\u{2592}', '\u{2593}', '/', '\\', '|', '_', '-'];
+
     for (i, line) in art.iter().enumerate() {
         let color = shades[i.min(shades.len() - 1)];
-        lines.push(Line::from(Span::styled(*line, Style::default().fg(color))));
+
+        //
+        // Every ~2 seconds, glitch a random row for a brief moment.
+        //
+        let glitch_phase = (t / 80) % 25;
+        let glitch_row = ((t / 80) % art.len() as u128) as usize;
+        let is_glitch_frame = glitch_phase < 2 && i == glitch_row;
+
+        if is_glitch_frame {
+            let chars: Vec<char> = line.chars().collect();
+            let mut spans: Vec<Span> = Vec::new();
+
+            for (ci, ch) in chars.iter().enumerate() {
+                let seed = (t.wrapping_mul(ci as u128 * 31 + 7)) % 20;
+                if seed < 3 && *ch != ' ' {
+                    let glitch_ch = glitch_chars[(seed as usize + ci) % glitch_chars.len()];
+                    spans.push(Span::styled(
+                        glitch_ch.to_string(),
+                        Style::default().fg(Color::Rgb(160, 255, 160)),
+                    ));
+                } else {
+                    spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
+                }
+            }
+            lines.push(Line::from(spans));
+        } else {
+            lines.push(Line::from(Span::styled(*line, Style::default().fg(color))));
+        }
     }
 
     //
