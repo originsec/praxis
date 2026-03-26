@@ -401,7 +401,9 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
 
     let mut spans = vec![Span::styled("\u{25b8} ", Style::default().fg(ACCENT))];
 
-    if session.is_waiting {
+    if session.session_id.is_none() {
+        spans.push(Span::styled("connecting...", Style::default().fg(DIM)));
+    } else if session.is_waiting {
         spans.push(Span::styled("^c to cancel", Style::default().fg(DIM)));
     } else {
         let pos = session.cursor_pos;

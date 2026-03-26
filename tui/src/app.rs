@@ -1055,7 +1055,7 @@ impl App {
             KeyCode::Enter => {
                 let Some(ref mut session) = self.nodes.session else { return };
                 let input = session.input.trim().to_string();
-                if input.is_empty() || session.is_waiting {
+                if input.is_empty() || session.is_waiting || session.session_id.is_none() {
                     return;
                 }
 
