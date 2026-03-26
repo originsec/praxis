@@ -646,6 +646,14 @@ impl Client {
         self.state.lock().await.current_chain.clone()
     }
 
+    pub async fn clear_all_ops(&self) -> Result<()> {
+        self.publish_signal(ClientSignalMessage::SemanticOpClear).await
+    }
+
+    pub async fn clear_all_chains(&self) -> Result<()> {
+        self.publish_signal(ClientSignalMessage::ChainExecutionClear).await
+    }
+
     pub async fn remove_chain_execution(&self, execution_id: String) -> Result<()> {
         let message = ClientSignalMessage::ChainExecutionRemove { execution_id };
         self.publish_signal(message).await

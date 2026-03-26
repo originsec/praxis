@@ -34,7 +34,6 @@ pub enum PopupKind {
     CommandPalette,
     ModelSelect,
     SaveSession,
-    RunTarget,
     #[allow(dead_code)]
     NewOp,
     #[allow(dead_code)]
@@ -48,7 +47,8 @@ pub struct ConfirmAction {
 
 pub enum ConfirmKind {
     DeleteOp(String), // full_name
-    Info,             // just dismiss, no action
+    ClearAllExecutions,
+    Info,
 }
 
 pub struct NewOpForm {
@@ -509,7 +509,7 @@ impl App {
                     return;
                 }
                 _ => {
-                    if matches!(popup.kind, PopupKind::ModelSelect | PopupKind::RunTarget) {
+                    if matches!(popup.kind, PopupKind::ModelSelect) {
                         self.handle_popup_key(key).await;
                         return;
                     }
@@ -1603,6 +1603,15 @@ impl App {
             {
                 self.cancel_selected_execution().await;
             }
+            KeyCode::Char('x')
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && self.operations.tab == OpsTab::Executions =>
+            {
+                self.confirm = Some(ConfirmAction {
+                    message: "Clear all executions?".to_string(),
+                    action: ConfirmKind::ClearAllExecutions,
+                });
+            }
             KeyCode::Esc => {
                 if !self.operations.filter.is_empty() {
                     self.operations.filter.clear();
@@ -1665,6 +1674,69 @@ impl App {
         }
 
         result
+    }
+
+    //
+    // Returns sorted (newest first) execution entries: (is_op, original_index).
+    //
+    pub fn sorted_executions(&self) -> Vec<(bool, usize)> {
+        let filter = self.operations.filter.to_lowercase();
+        let mut entries: Vec<(chrono::DateTime<chrono::Utc>, bool, usize)> = Vec::new();
+
+        for (i, op) in self.operations.operations.iter().enumerate() {
+            if !filter.is_empty()
+                && !op.spec.name.to_lowercase().contains(&filter)
+                && !op.agent_short_name.to_lowercase().contains(&filter)
+            {
+                continue;
+            }
+            entries.push((op.start_time, true, i));
+        }
+
+        for (i, exec) in self.operations.chain_executions.iter().enumerate() {
+            if !filter.is_empty()
+                && !exec.chain_name.to_lowercase().contains(&filter)
+                && !exec.agent_short_name.to_lowercase().contains(&filter)
+            {
+                continue;
+            }
+            entries.push((exec.started_at, false, i));
+        }
+
+        entries.sort_by(|a, b| b.0.cmp(&a.0));
+        entries.into_iter().map(|(_, is_op, idx)| (is_op, idx)).collect()
+    }
+
+    pub fn sorted_exec_static(
+        operations: &[common::SemanticOpUpdate],
+        chain_executions: &[common::ChainExecutionUpdate],
+        filter: &str,
+    ) -> Vec<(bool, usize)> {
+        let filter = filter.to_lowercase();
+        let mut entries: Vec<(chrono::DateTime<chrono::Utc>, bool, usize)> = Vec::new();
+
+        for (i, op) in operations.iter().enumerate() {
+            if !filter.is_empty()
+                && !op.spec.name.to_lowercase().contains(&filter)
+                && !op.agent_short_name.to_lowercase().contains(&filter)
+            {
+                continue;
+            }
+            entries.push((op.start_time, true, i));
+        }
+
+        for (i, exec) in chain_executions.iter().enumerate() {
+            if !filter.is_empty()
+                && !exec.chain_name.to_lowercase().contains(&filter)
+                && !exec.agent_short_name.to_lowercase().contains(&filter)
+            {
+                continue;
+            }
+            entries.push((exec.started_at, false, i));
+        }
+
+        entries.sort_by(|a, b| b.0.cmp(&a.0));
+        entries.into_iter().map(|(_, is_op, idx)| (is_op, idx)).collect()
     }
 
     fn ops_library_count(&self) -> usize {
@@ -1740,103 +1812,36 @@ impl App {
         });
     }
 
-    async fn execute_run_on_target(&mut self, target: &str) {
-        let parts: Vec<&str> = target.splitn(2, ':').collect();
-        if parts.len() != 2 {
-            return;
-        }
-        let (node_id, agent) = (parts[0].to_string(), parts[1].to_string());
-
-        let enabled_ops: Vec<_> = self
-            .operations
-            .op_definitions
-            .iter()
-            .filter(|d| !d.disabled)
-            .collect();
-        let enabled_chains: Vec<_> = self
-            .operations
-            .chain_definitions
-            .iter()
-            .filter(|c| !c.disabled)
-            .collect();
-
-        let idx = self.operations.library_selected;
-
-        if idx < enabled_ops.len() {
-            let op_name = enabled_ops[idx].full_name.clone();
-            if let Err(e) = self
-                .client
-                .run_semantic_op(node_id, agent, op_name, None)
-                .await
-            {
-                self.orchestrator
-                    .messages
-                    .push(ConversationEntry::Error(format!("Op run failed: {}", e)));
-            }
-        } else {
-            let chain_idx = idx - enabled_ops.len();
-            if chain_idx < enabled_chains.len() {
-                let chain_id = enabled_chains[chain_idx].id.clone();
-                if let Err(e) = self.client.run_chain(chain_id, node_id, agent, None).await {
-                    self.orchestrator
-                        .messages
-                        .push(ConversationEntry::Error(format!("Chain run failed: {}", e)));
-                }
-            }
-        }
-
-        //
-        // Switch to executions tab and refresh.
-        //
-        self.operations.tab = OpsTab::Executions;
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        self.operations.operations = self.client.get_operations().await;
-        self.operations.chain_executions = self.client.get_chain_executions().await;
-    }
 
     async fn cancel_selected_execution(&mut self) {
-        let total_ops = self.operations.operations.len();
-        let idx = self.operations.exec_selected;
+        let sorted = self.sorted_executions();
+        let Some(&(is_op, idx)) = sorted.get(self.operations.exec_selected) else { return };
 
-        if idx < total_ops {
+        if is_op {
             let op_id = self.operations.operations[idx].operation_id.clone();
             let _ = self.client.cancel_semantic_op(op_id).await;
         } else {
-            let chain_idx = idx - total_ops;
-            if chain_idx < self.operations.chain_executions.len() {
-                let exec_id = self.operations.chain_executions[chain_idx]
-                    .execution_id
-                    .clone();
-                let _ = self.client.cancel_chain(exec_id).await;
-            }
+            let exec_id = self.operations.chain_executions[idx].execution_id.clone();
+            let _ = self.client.cancel_chain(exec_id).await;
         }
     }
 
     async fn delete_selected_execution(&mut self) {
-        let total_ops = self.operations.operations.len();
-        let idx = self.operations.exec_selected;
+        let sorted = self.sorted_executions();
+        let Some(&(is_op, idx)) = sorted.get(self.operations.exec_selected) else { return };
 
-        if idx < total_ops {
+        if is_op {
             let op_id = self.operations.operations[idx].operation_id.clone();
             let _ = self.client.remove_semantic_op(op_id).await;
         } else {
-            let chain_idx = idx - total_ops;
-            if chain_idx < self.operations.chain_executions.len() {
-                let exec_id = self.operations.chain_executions[chain_idx]
-                    .execution_id
-                    .clone();
-                let _ = self.client.remove_chain_execution(exec_id).await;
-            }
+            let exec_id = self.operations.chain_executions[idx].execution_id.clone();
+            let _ = self.client.remove_chain_execution(exec_id).await;
         }
 
         self.operations.operations = self.client.get_operations().await;
         self.operations.chain_executions = self.client.get_chain_executions().await;
 
-        //
-        // Adjust selection if it now exceeds the list length.
-        //
-
-        let total = self.operations.operations.len() + self.operations.chain_executions.len();
+        let total = self.sorted_executions().len();
         if total == 0 {
             self.operations.exec_selected = 0;
         } else if self.operations.exec_selected >= total {
@@ -2126,6 +2131,15 @@ impl App {
                             self.operations.op_definitions =
                                 self.client.get_operation_definitions().await;
                         }
+                        ConfirmKind::ClearAllExecutions => {
+                            let _ = self.client.clear_all_ops().await;
+                            let _ = self.client.clear_all_chains().await;
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                            self.operations.operations = self.client.get_operations().await;
+                            self.operations.chain_executions =
+                                self.client.get_chain_executions().await;
+                            self.operations.exec_selected = 0;
+                        }
                         ConfirmKind::Info => {
                             // Just dismiss.
                         }
@@ -2383,10 +2397,6 @@ impl App {
                         PopupKind::ModelSelect => {
                             self.popup = None;
                             self.select_model(&value).await;
-                        }
-                        PopupKind::RunTarget => {
-                            self.popup = None;
-                            self.execute_run_on_target(&value).await;
                         }
                         PopupKind::SaveSession => {}
                         PopupKind::NewOp => {}

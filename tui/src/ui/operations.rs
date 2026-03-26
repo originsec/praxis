@@ -102,13 +102,32 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
             Line::from(spans)
         }
         OpsTab::Executions => {
-            let mut spans = vec![
-                Span::raw(" "),
-                Span::styled("^c", Style::default().fg(ACCENT)),
-                Span::styled(" cancel  ", Style::default().fg(MUTED)),
-                Span::styled("^d", Style::default().fg(ACCENT)),
-                Span::styled(" delete  ", Style::default().fg(MUTED)),
-            ];
+            let mut spans = vec![Span::raw(" ")];
+
+            //
+            // Show ^c only if selected item is running/queued.
+            //
+            let sorted = crate::app::App::sorted_exec_static(
+                &state.operations, &state.chain_executions, &state.filter,
+            );
+            let selected_active = sorted.get(state.exec_selected).map(|(is_op, idx)| {
+                if *is_op {
+                    state.operations.get(*idx)
+                        .is_some_and(|o| matches!(o.status, common::SemanticOpStatus::Running | common::SemanticOpStatus::Queued))
+                } else {
+                    state.chain_executions.get(*idx)
+                        .is_some_and(|c| matches!(c.status, common::ChainExecutionStatus::Running | common::ChainExecutionStatus::Queued))
+                }
+            }).unwrap_or(false);
+
+            if selected_active {
+                spans.push(Span::styled("^c", Style::default().fg(ACCENT)));
+                spans.push(Span::styled(" cancel  ", Style::default().fg(MUTED)));
+            }
+            spans.push(Span::styled("^d", Style::default().fg(ACCENT)));
+            spans.push(Span::styled(" delete  ", Style::default().fg(MUTED)));
+            spans.push(Span::styled("^x", Style::default().fg(ACCENT)));
+            spans.push(Span::styled(" clear all  ", Style::default().fg(MUTED)));
             if !state.filter.is_empty() {
                 spans.push(Span::styled("filter: ", Style::default().fg(DIM)));
                 spans.push(Span::styled(&state.filter, Style::default().fg(ACCENT)));
@@ -354,8 +373,8 @@ fn render_library_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
 
 fn render_executions(f: &mut Frame, area: Rect, state: &OperationsState) {
     let chunks = Layout::horizontal([
-        Constraint::Percentage(state.split_percent),
-        Constraint::Percentage(100 - state.split_percent),
+        Constraint::Percentage(60),
+        Constraint::Percentage(40),
     ])
     .split(area);
 
@@ -492,10 +511,11 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let total_ops = state.operations.len();
-    let total = total_ops + state.chain_executions.len();
+    let sorted = crate::app::App::sorted_exec_static(
+        &state.operations, &state.chain_executions, &state.filter,
+    );
 
-    if total == 0 || state.exec_selected >= total {
+    if sorted.is_empty() || state.exec_selected >= sorted.len() {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 " No execution selected",
@@ -509,8 +529,10 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
     let col = &state.collapsed;
     let mut lines: Vec<Line> = Vec::new();
 
-    if state.exec_selected < total_ops {
-        let op = &state.operations[state.exec_selected];
+    let (is_op, orig_idx) = sorted[state.exec_selected];
+
+    if is_op {
+        let op = &state.operations[orig_idx];
         let (status_str, status_color) = op_status_display(&op.status);
         let now = chrono::Utc::now();
         let duration = match op.end_time {
@@ -600,7 +622,7 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
             }
         }
     } else {
-        let exec = &state.chain_executions[state.exec_selected - total_ops];
+        let exec = &state.chain_executions[orig_idx];
         let (status_str, status_color) = chain_status_display(&exec.status);
         let now = chrono::Utc::now();
         let duration = match exec.ended_at {
