@@ -687,9 +687,7 @@ impl App {
                 }
                 KeyCode::Char('s') => {
                     self.active_window = Window::Settings;
-                    if !self.settings.loaded {
-                        self.load_settings().await;
-                    }
+                    self.load_settings().await;
                     return;
                 }
                 _ => {}
@@ -2927,6 +2925,50 @@ impl App {
         }
     }
 
+    fn is_text_editable_field(&self) -> bool {
+        let sel = self.settings.selected;
+        match self.settings.tab {
+            SettingsTab::Llm => {
+                let mc = self.settings.model_definitions.len();
+                // mc+2 = Orchestrator Max Tokens
+                sel == mc + 2
+            }
+            SettingsTab::Service => {
+                // 1 = MCP port, 3 = hunting row limit
+                sel == 1 || sel == 3
+            }
+            SettingsTab::About => false,
+        }
+    }
+
+    fn auto_enter_edit(&mut self) {
+        if self.is_text_editable_field() {
+            let val = self.current_field_value();
+            self.settings.editing = true;
+            self.settings.edit_buffer = val;
+        }
+    }
+
+    fn current_field_value(&self) -> String {
+        let sel = self.settings.selected;
+        match self.settings.tab {
+            SettingsTab::Llm => {
+                let mc = self.settings.model_definitions.len();
+                if sel == mc + 2 {
+                    self.settings.orchestrator_max_tokens.clone()
+                } else {
+                    String::new()
+                }
+            }
+            SettingsTab::Service => match sel {
+                1 => self.settings.mcp_port.clone(),
+                3 => self.settings.hunting_row_limit.clone(),
+                _ => String::new(),
+            },
+            SettingsTab::About => String::new(),
+        }
+    }
+
     async fn handle_settings_key(&mut self, key: KeyEvent) {
 
         //
@@ -2944,7 +2986,31 @@ impl App {
                     self.settings.editing = false;
                     self.apply_settings_edit(val).await;
                 }
-                KeyCode::Char(c) => {
+                KeyCode::Up => {
+                    let val = self.settings.edit_buffer.clone();
+                    self.settings.editing = false;
+                    self.apply_settings_edit(val).await;
+                    if self.settings.selected > 0 {
+                        self.settings.selected -= 1;
+                        self.auto_enter_edit();
+                    }
+                }
+                KeyCode::Down => {
+                    let val = self.settings.edit_buffer.clone();
+                    self.settings.editing = false;
+                    self.apply_settings_edit(val).await;
+                    let max = self.settings_item_count();
+                    if max > 0 && self.settings.selected < max - 1 {
+                        self.settings.selected += 1;
+                        self.auto_enter_edit();
+                    }
+                }
+                KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    let val = self.settings.edit_buffer.clone();
+                    self.settings.editing = false;
+                    self.apply_settings_edit(val).await;
+                }
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                     self.settings.edit_buffer.push(c);
                 }
                 KeyCode::Backspace => {
@@ -3035,12 +3101,14 @@ impl App {
             KeyCode::Up => {
                 if self.settings.selected > 0 {
                     self.settings.selected -= 1;
+                    self.auto_enter_edit();
                 }
             }
             KeyCode::Down => {
                 let max = self.settings_item_count();
                 if max > 0 && self.settings.selected < max - 1 {
                     self.settings.selected += 1;
+                    self.auto_enter_edit();
                 }
             }
             KeyCode::Enter => {
@@ -3058,9 +3126,6 @@ impl App {
                         action: ConfirmKind::DeleteModel(sel),
                     });
                 }
-            }
-            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.load_settings().await;
             }
             _ => {}
         }
