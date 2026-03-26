@@ -827,6 +827,19 @@ fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
     let visible_rows = screen.size().0 as usize;
     let cols = screen.size().1;
 
+    //
+    // Compute max_scroll: replay in a very tall terminal to find the
+    // true cursor position, which tells us total content lines.
+    //
+
+    if !term.raw_output.is_empty() {
+        let mut probe = vt100::Parser::new(10000, cols, 0);
+        probe.process(&term.raw_output);
+        let content_rows = probe.screen().cursor_position().0 as usize + 1;
+        let max = content_rows.saturating_sub(visible_rows);
+        term.max_scroll.set(max);
+    }
+
     let lines = if term.scroll_offset == 0 {
         render_vt100_screen(screen, true)
     } else {
@@ -940,15 +953,6 @@ fn render_terminal_scrollback(
     //
     let mut tall_parser = vt100::Parser::new(tall_rows, cols, 0);
     tall_parser.process(&term.raw_output);
-
-    //
-    // Compute max scroll from cursor position in the tall terminal.
-    // The cursor row indicates where content ends.
-    //
-
-    let cursor_row = tall_parser.screen().cursor_position().0 as usize;
-    let max_scroll = cursor_row.saturating_sub(visible_rows.saturating_sub(1));
-    term.max_scroll.set(max_scroll);
 
     let lines = render_vt100_screen(tall_parser.screen(), false);
     let visible_lines = slice_terminal_scrollback(&lines, visible_rows, term.scroll_offset);
