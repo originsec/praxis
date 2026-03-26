@@ -812,7 +812,7 @@ impl App {
                 };
                 let orch_label = "^o orchestrator";
                 let nodes_label = "^l nodes";
-                let ops_label = "^e ops";
+                let ops_label = "^p ops";
                 let settings_label = "^s settings";
                 let status_text = format!(
                     " {}  \u{00b7} {}  {}  {}  {} \u{00b7} ^q quit",
