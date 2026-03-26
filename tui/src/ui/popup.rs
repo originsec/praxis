@@ -24,35 +24,51 @@ pub fn render(f: &mut Frame, popup: &Popup) {
 }
 
 pub fn render_confirm(f: &mut Frame, confirm: &crate::app::ConfirmAction) {
+    let is_info = matches!(confirm.action, crate::app::ConfirmKind::Info);
     let width = (confirm.message.len() as u16 + 6)
         .min(f.area().width - 4)
         .max(30);
     let height = 5;
     let area = centered_rect_fixed(width, height, f.area());
 
+    let (title, border_color) = if is_info {
+        (" Error ", Color::Rgb(180, 60, 60))
+    } else {
+        (" Confirm ", Color::Rgb(180, 60, 60))
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Rgb(180, 60, 60)))
-        .title(" Confirm ")
-        .title_style(Style::default().fg(Color::Rgb(180, 60, 60)))
+        .border_style(Style::default().fg(border_color))
+        .title(title)
+        .title_style(Style::default().fg(border_color))
         .style(Style::default().bg(POPUP_BG));
 
     f.render_widget(Clear, area);
     f.render_widget(block.clone(), area);
 
     let inner = block.inner(area);
+    let hint_line = if is_info {
+        Line::from(Span::styled(
+            " press any key",
+            Style::default().fg(MUTED),
+        ))
+    } else {
+        Line::from(vec![
+            Span::styled(" y", Style::default().fg(Color::Rgb(180, 60, 60))),
+            Span::styled(" yes  ", Style::default().fg(MUTED)),
+            Span::styled("n", Style::default().fg(ACCENT)),
+            Span::styled(" no", Style::default().fg(MUTED)),
+        ])
+    };
+
     let lines = vec![
         Line::from(Span::styled(
             format!(" {}", confirm.message),
             Style::default().fg(TEXT),
         )),
         Line::from(""),
-        Line::from(vec![
-            Span::styled(" y", Style::default().fg(Color::Rgb(180, 60, 60))),
-            Span::styled(" yes  ", Style::default().fg(MUTED)),
-            Span::styled("n", Style::default().fg(ACCENT)),
-            Span::styled(" no", Style::default().fg(MUTED)),
-        ]),
+        hint_line,
     ];
 
     f.render_widget(Paragraph::new(lines), inner);
@@ -91,12 +107,11 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
     let mut lines: Vec<Line> = Vec::new();
     let modes = ["one-shot", "agent"];
 
-    let render_order = [4, 0, 1, 2, 3, 6, 5, 7, 8];
-    for &i in &render_order {
+    for i in 0..NewOpForm::field_count() {
         //
-        // Insert gaps: after Mode, before YOLO.
+        // Insert gaps: after Mode (0), before YOLO (7).
         //
-        if i == 0 || i == 7 {
+        if i == 1 || i == 7 {
             lines.push(Line::from(""));
         }
         let is_focused = i == form.focused_field;
@@ -114,11 +129,7 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
         let cursor = if is_focused { "\u{258f}" } else { "" };
 
         let value = match i {
-            0 => form.name.clone(),
-            1 => form.short_name.clone(),
-            2 => form.category.clone(),
-            3 => form.description.clone(),
-            4 => {
+            0 => {
                 //
                 // Mode toggle display.
                 //
@@ -137,8 +148,11 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
                 lines.push(Line::from(spans));
                 continue;
             }
-            5 => form.timeout.clone(),
-            6 => {
+            1 => form.name.clone(),
+            2 => form.short_name.clone(),
+            3 => form.category.clone(),
+            4 => form.description.clone(),
+            5 => {
                 //
                 // Only show iterations when mode is agent.
                 //
@@ -147,6 +161,7 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
                 }
                 form.iterations.clone()
             }
+            6 => form.timeout.clone(),
             7 => {
                 //
                 // YOLO toggle display.

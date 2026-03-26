@@ -69,15 +69,19 @@ impl NewOpForm {
         9
     }
 
+    //
+    // Field indices: 0=Mode, 1=Name, 2=Short Name, 3=Category,
+    // 4=Description, 5=Iterations, 6=Timeout, 7=YOLO, 8=Prompt
+    //
     pub fn field_label(idx: usize) -> &'static str {
         match idx {
-            0 => "Name",
-            1 => "Short Name",
-            2 => "Category",
-            3 => "Description",
-            4 => "Mode",
-            5 => "Timeout",
-            6 => "Iterations",
+            0 => "Mode",
+            1 => "Name",
+            2 => "Short Name",
+            3 => "Category",
+            4 => "Description",
+            5 => "Iterations",
+            6 => "Timeout",
             7 => "YOLO",
             8 => "Prompt",
             _ => "",
@@ -85,7 +89,7 @@ impl NewOpForm {
     }
 
     pub fn is_toggle(idx: usize) -> bool {
-        matches!(idx, 4 | 7)
+        matches!(idx, 0 | 7)
     }
 }
 
@@ -1850,7 +1854,7 @@ impl App {
             iterations: "10".to_string(),
             yolo: false,
             prompt: String::new(),
-            focused_field: 4, // Mode is first in visual order
+            focused_field: 0, // Mode is field 0
         });
     }
 
@@ -1904,11 +1908,11 @@ impl App {
         // Field 6 (iterations) is skipped when mode is one-shot.
         //
         let visual_order = |form: &NewOpForm| -> Vec<usize> {
-            let mut order = vec![4, 0, 1, 2, 3];
+            let mut order = vec![0, 1, 2, 3, 4];
             if form.mode == 1 {
-                order.push(6); // iterations only for agent mode
+                order.push(5); // iterations only for agent mode
             }
-            order.extend([5, 7, 8]);
+            order.extend([6, 7, 8]);
             order
         };
 
@@ -1938,19 +1942,19 @@ impl App {
                 //
                 if let Some(ref mut form) = self.new_op_form {
                     let idx = form.focused_field;
-                    if idx == 4 {
+                    if idx == 0 {
                         form.mode = (form.mode + 1) % 2;
                     } else if idx == 7 {
                         form.yolo = !form.yolo;
                     } else {
                         // Type space in text fields
                         match idx {
-                            0 => form.name.push(' '),
-                            1 => form.short_name.push(' '),
-                            2 => form.category.push(' '),
-                            3 => form.description.push(' '),
-                            5 => form.timeout.push(' '),
-                            6 => form.iterations.push(' '),
+                            1 => form.name.push(' '),
+                            2 => form.short_name.push(' '),
+                            3 => form.category.push(' '),
+                            4 => form.description.push(' '),
+                            5 => form.iterations.push(' '),
+                            6 => form.timeout.push(' '),
                             8 => form.prompt.push(' '),
                             _ => {}
                         }
@@ -1963,7 +1967,7 @@ impl App {
                 //
                 if let Some(ref mut form) = self.new_op_form {
                     let idx = form.focused_field;
-                    if idx == 4 {
+                    if idx == 0 {
                         form.mode = (form.mode + 1) % 2;
                     } else if idx == 7 {
                         form.yolo = !form.yolo;
@@ -2031,12 +2035,12 @@ impl App {
                 if let Some(ref mut form) = self.new_op_form {
                     if !NewOpForm::is_toggle(form.focused_field) {
                         match form.focused_field {
-                            0 => form.name.push(c),
-                            1 => form.short_name.push(c),
-                            2 => form.category.push(c),
-                            3 => form.description.push(c),
-                            5 => form.timeout.push(c),
-                            6 => form.iterations.push(c),
+                            1 => form.name.push(c),
+                            2 => form.short_name.push(c),
+                            3 => form.category.push(c),
+                            4 => form.description.push(c),
+                            5 => form.iterations.push(c),
+                            6 => form.timeout.push(c),
                             8 => form.prompt.push(c),
                             _ => {}
                         }
@@ -2046,23 +2050,23 @@ impl App {
             KeyCode::Backspace => {
                 if let Some(ref mut form) = self.new_op_form {
                     match form.focused_field {
-                        0 => {
+                        1 => {
                             form.name.pop();
                         }
-                        1 => {
+                        2 => {
                             form.short_name.pop();
                         }
-                        2 => {
+                        3 => {
                             form.category.pop();
                         }
-                        3 => {
+                        4 => {
                             form.description.pop();
                         }
                         5 => {
-                            form.timeout.pop();
+                            form.iterations.pop();
                         }
                         6 => {
-                            form.iterations.pop();
+                            form.timeout.pop();
                         }
                         8 => {
                             form.prompt.pop();
@@ -2097,6 +2101,12 @@ impl App {
 
     async fn handle_confirm_key(&mut self, key: KeyEvent) {
         match key.code {
+            _ if self.confirm.as_ref().is_some_and(|c| matches!(c.action, ConfirmKind::Info)) => {
+                //
+                // Info popup — any key dismisses.
+                //
+                self.confirm = None;
+            }
             KeyCode::Char('y') | KeyCode::Enter => {
                 if let Some(confirm) = self.confirm.take() {
                     match confirm.action {
