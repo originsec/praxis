@@ -938,32 +938,26 @@ fn render_terminal_scrollback(
     // Replay all output in a taller virtual terminal only when the backing
     // output, width, or requested history depth has changed.
     //
+    //
+    // Compute max_scroll using a large probe terminal to find true content height.
+    //
+
+    let probe_rows = 10000u16;
+    let mut probe = vt100::Parser::new(probe_rows, cols, 0);
+    probe.process(&term.raw_output);
+    let probe_screen = probe.screen();
+    let cursor_row = probe_screen.cursor_position().0 as usize;
+    let max = cursor_row.saturating_sub(visible_rows.saturating_sub(1));
+    term.max_scroll.set(max);
+
+    //
+    // Replay for display at the requested scroll depth.
+    //
+
     let mut tall_parser = vt100::Parser::new(tall_rows, cols, 0);
     tall_parser.process(&term.raw_output);
 
-    //
-    // Find the last non-empty row to determine actual content height,
-    // then compute max_scroll so the view stops at the first content line.
-    //
-
-    let tall_screen = tall_parser.screen();
-    let last_content_row = (0..tall_screen.size().0)
-        .rev()
-        .find(|&row| {
-            (0..tall_screen.size().1).any(|col| {
-                tall_screen
-                    .cell(row, col)
-                    .map(|c| !c.contents().is_empty() && c.contents() != " ")
-                    .unwrap_or(false)
-            })
-        })
-        .map(|r| r as usize + 1)
-        .unwrap_or(0);
-
-    let max = last_content_row.saturating_sub(visible_rows);
-    term.max_scroll.set(max);
-
-    let lines = render_vt100_screen(tall_screen, false);
+    let lines = render_vt100_screen(tall_parser.screen(), false);
     let visible_lines = slice_terminal_scrollback(&lines, visible_rows, term.scroll_offset);
 
     *term.scrollback_cache.borrow_mut() = Some(crate::app::TerminalScrollbackCache {
