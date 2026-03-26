@@ -130,9 +130,8 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
     f.render_widget(block, area);
 
     let chunks = Layout::vertical([
-        Constraint::Length(2), // node header
-        Constraint::Min(1),   // agents
-        Constraint::Length(4), // capabilities
+        Constraint::Length(3), // node header + capabilities
+        Constraint::Min(1),   // agents + active ops (scrollable)
     ])
     .split(inner);
 
@@ -145,6 +144,19 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
         &node.node_id
     };
 
+    //
+    // Capabilities inline with header.
+    //
+    let caps_str = if node.capabilities.is_empty() {
+        String::new()
+    } else {
+        let caps: Vec<String> = node.capabilities.iter()
+            .map(|c| format!("{:?}", c).to_lowercase())
+            .collect();
+        caps.join(", ")
+    };
+    let priv_str = if node.privileged { "privileged" } else { "" };
+
     let header_lines = vec![
         Line::from(vec![
             Span::styled(" ", Style::default()),
@@ -152,14 +164,20 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
                 node.machine_name.clone(),
                 Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                format!("  {}", short_id),
-                Style::default().fg(DIM),
-            ),
+            Span::styled(format!("  {}", short_id), Style::default().fg(DIM)),
         ]),
         Line::from(vec![
             Span::styled("  ", Style::default()),
             Span::styled(&node.os_details, Style::default().fg(MUTED)),
+        ]),
+        Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled(caps_str, Style::default().fg(DIM)),
+            if !priv_str.is_empty() {
+                Span::styled(format!("  {}", priv_str), Style::default().fg(Color::Rgb(180, 160, 60)))
+            } else {
+                Span::raw("")
+            },
         ]),
     ];
     f.render_widget(Paragraph::new(header_lines), chunks[0]);
@@ -227,70 +245,30 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
         }
     }
 
-    f.render_widget(
-        Paragraph::new(Text::from(agent_lines)).wrap(Wrap { trim: false }),
-        chunks[1],
-    );
-
-    //
-    // Capabilities.
-    //
-    let mut cap_lines: Vec<Line> = Vec::new();
-    cap_lines.push(Line::from(Span::styled(
-        " Capabilities",
-        Style::default().fg(ACCENT),
-    )));
-
-    if node.capabilities.is_empty() {
-        cap_lines.push(Line::from(Span::styled(
-            "  none",
-            Style::default().fg(DIM),
-        )));
-    } else {
-        let caps: Vec<String> = node
-            .capabilities
-            .iter()
-            .map(|c| format!("{:?}", c).to_lowercase())
-            .collect();
-        cap_lines.push(Line::from(Span::styled(
-            format!("  {}", caps.join(", ")),
-            Style::default().fg(MUTED),
-        )));
-    }
-
-    let priv_str = if node.privileged { "yes" } else { "no" };
-    cap_lines.push(Line::from(vec![
-        Span::styled("  privileged: ", Style::default().fg(MUTED)),
-        Span::styled(
-            priv_str,
-            Style::default().fg(if node.privileged {
-                Color::Rgb(180, 160, 60)
-            } else {
-                DIM
-            }),
-        ),
-    ]));
-
     //
     // Active session info.
     //
     if let Some(ref agent) = node.selected_agent {
         if let Some(ref sid) = agent.session_id {
-            cap_lines.push(Line::from(""));
-            cap_lines.push(Line::from(vec![
-                Span::styled("  session: ", Style::default().fg(MUTED)),
+            agent_lines.push(Line::from(""));
+            agent_lines.push(Line::from(Span::styled(
+                " Active Session",
+                Style::default().fg(ACCENT),
+            )));
+            agent_lines.push(Line::from(vec![
+                Span::styled("  ", Style::default()),
                 Span::styled(
                     &sid[..8.min(sid.len())],
                     Style::default().fg(Color::Rgb(100, 180, 100)),
                 ),
                 Span::styled(
-                    format!(" ({})", agent.short_name),
+                    format!("  agent: {}", agent.short_name),
                     Style::default().fg(DIM),
                 ),
             ]));
             if let Some(ref tid) = agent.active_transaction_id {
-                cap_lines.push(Line::from(vec![
-                    Span::styled("  active prompt: ", Style::default().fg(MUTED)),
+                agent_lines.push(Line::from(vec![
+                    Span::styled("  prompt: ", Style::default().fg(MUTED)),
                     Span::styled(
                         &tid[..8.min(tid.len())],
                         Style::default().fg(Color::Rgb(180, 160, 60)),
@@ -298,13 +276,6 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
                 ]));
             }
         }
-    }
-
-    if node.intercept_active {
-        cap_lines.push(Line::from(Span::styled(
-            "  intercept: active",
-            Style::default().fg(Color::Rgb(180, 160, 60)),
-        )));
     }
 
     //
@@ -316,8 +287,8 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
         .collect();
 
     if !node_ops.is_empty() {
-        cap_lines.push(Line::from(""));
-        cap_lines.push(Line::from(Span::styled(
+        agent_lines.push(Line::from(""));
+        agent_lines.push(Line::from(Span::styled(
             " Active Operations",
             Style::default().fg(ACCENT),
         )));
@@ -327,7 +298,7 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
                 common::SemanticOpStatus::Queued => ("\u{25cb}", Color::Rgb(100, 140, 180)),
                 _ => ("\u{25cb}", DIM),
             };
-            cap_lines.push(Line::from(vec![
+            agent_lines.push(Line::from(vec![
                 Span::styled(format!("  {} ", status_str), Style::default().fg(status_color)),
                 Span::styled(&op.spec.name, Style::default().fg(TEXT)),
                 Span::styled(
@@ -338,7 +309,18 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
         }
     }
 
-    f.render_widget(Paragraph::new(Text::from(cap_lines)), chunks[2]);
+    if node.intercept_active {
+        agent_lines.push(Line::from(""));
+        agent_lines.push(Line::from(Span::styled(
+            "  intercept: active",
+            Style::default().fg(Color::Rgb(180, 160, 60)),
+        )));
+    }
+
+    f.render_widget(
+        Paragraph::new(Text::from(agent_lines)).wrap(Wrap { trim: false }),
+        chunks[1],
+    );
 }
 
 fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionChat) {
