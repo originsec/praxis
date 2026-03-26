@@ -1915,7 +1915,7 @@ impl App {
             KeyCode::Esc => {
                 self.new_op_form = None;
             }
-            KeyCode::Down => {
+            KeyCode::Down | KeyCode::Tab => {
                 if let Some(ref mut form) = self.new_op_form {
                     let order = visual_order(form);
                     let pos = order.iter().position(|&f| f == form.focused_field).unwrap_or(0);
@@ -1923,7 +1923,7 @@ impl App {
                     form.focused_field = order[next];
                 }
             }
-            KeyCode::Up => {
+            KeyCode::Up | KeyCode::BackTab => {
                 if let Some(ref mut form) = self.new_op_form {
                     let order = visual_order(form);
                     let pos = order.iter().position(|&f| f == form.focused_field).unwrap_or(0);
