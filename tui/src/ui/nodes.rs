@@ -371,10 +371,12 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
 
     let mut lines: Vec<Line> = Vec::new();
 
-    for msg in &session.messages {
+    for (mi, msg) in session.messages.iter().enumerate() {
         match msg.role {
             ChatRole::User => {
-                lines.push(Line::from(""));
+                if mi > 0 {
+                    lines.push(Line::from(""));
+                }
                 lines.push(Line::from(vec![
                     Span::styled(
                         "\u{25b8} ",
