@@ -401,7 +401,10 @@ pub fn render_run_options(f: &mut Frame, area: Rect, opts: &crate::app::RunOptio
             Span::styled("  (all)", Style::default().fg(DIM))
         } else {
             let count = opts.nodes.iter().filter(|(_, _, s)| *s).count();
-            Span::styled(format!("  ({}/{})", count, opts.nodes.len()), Style::default().fg(DIM))
+            Span::styled(
+                format!("  ({}/{})", count, opts.nodes.len()),
+                Style::default().fg(DIM),
+            )
         },
     ]));
 
@@ -409,13 +412,19 @@ pub fn render_run_options(f: &mut Frame, area: Rect, opts: &crate::app::RunOptio
         let is_cursor = nodes_focused && i == opts.cursor;
         let check = if *selected { "[\u{2713}]" } else { "[ ]" };
         let style = if is_cursor {
-            Style::default().fg(TEXT).bg(Color::Rgb(35, 40, 35)).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(TEXT)
+                .bg(Color::Rgb(35, 40, 35))
+                .add_modifier(Modifier::BOLD)
         } else if *selected {
             Style::default().fg(TEXT)
         } else {
             Style::default().fg(DIM)
         };
-        lines.push(Line::from(Span::styled(format!("  {} {}", check, name), style)));
+        lines.push(Line::from(Span::styled(
+            format!("  {} {}", check, name),
+            style,
+        )));
     }
 
     //
@@ -435,7 +444,10 @@ pub fn render_run_options(f: &mut Frame, area: Rect, opts: &crate::app::RunOptio
             Span::styled("  (all)", Style::default().fg(DIM))
         } else {
             let count = opts.agents.iter().filter(|(_, s)| *s).count();
-            Span::styled(format!("  ({}/{})", count, opts.agents.len()), Style::default().fg(DIM))
+            Span::styled(
+                format!("  ({}/{})", count, opts.agents.len()),
+                Style::default().fg(DIM),
+            )
         },
     ]));
 
@@ -443,13 +455,19 @@ pub fn render_run_options(f: &mut Frame, area: Rect, opts: &crate::app::RunOptio
         let is_cursor = agents_focused && i == opts.cursor;
         let check = if *selected { "[\u{2713}]" } else { "[ ]" };
         let style = if is_cursor {
-            Style::default().fg(TEXT).bg(Color::Rgb(35, 40, 35)).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(TEXT)
+                .bg(Color::Rgb(35, 40, 35))
+                .add_modifier(Modifier::BOLD)
         } else if *selected {
             Style::default().fg(TEXT)
         } else {
             Style::default().fg(DIM)
         };
-        lines.push(Line::from(Span::styled(format!("  {} {}", check, name), style)));
+        lines.push(Line::from(Span::styled(
+            format!("  {} {}", check, name),
+            style,
+        )));
     }
 
     //
@@ -466,7 +484,9 @@ pub fn render_run_options(f: &mut Frame, area: Rect, opts: &crate::app::RunOptio
         let indicator = if opts.yolo {
             Span::styled(
                 " \u{25cf} enabled ",
-                Style::default().fg(Color::Black).bg(Color::Rgb(180, 160, 60)),
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Rgb(180, 160, 60)),
             )
         } else {
             Span::styled(" \u{25cb} disabled ", Style::default().fg(DIM))

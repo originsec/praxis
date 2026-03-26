@@ -82,22 +82,32 @@ fn render_tabs(f: &mut Frame, area: Rect, state: &OperationsState) {
 
 fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
     let hints = match state.tab {
-        OpsTab::Library => Line::from(vec![
-            Span::raw(" "),
-            Span::styled("enter", Style::default().fg(ACCENT)),
-            Span::styled(" execute  ", Style::default().fg(MUTED)),
-            Span::styled("n", Style::default().fg(ACCENT)),
-            Span::styled(" new  ", Style::default().fg(MUTED)),
-            Span::styled("d", Style::default().fg(ACCENT)),
-            Span::styled(" delete  ", Style::default().fg(MUTED)),
-            Span::styled("r", Style::default().fg(ACCENT)),
-            Span::styled(" refresh", Style::default().fg(MUTED)),
-        ]),
+        OpsTab::Library => {
+            let mut spans = vec![
+                Span::raw(" "),
+                Span::styled("enter", Style::default().fg(ACCENT)),
+                Span::styled(" execute  ", Style::default().fg(MUTED)),
+                Span::styled("^n", Style::default().fg(ACCENT)),
+                Span::styled(" new  ", Style::default().fg(MUTED)),
+                Span::styled("^d", Style::default().fg(ACCENT)),
+                Span::styled(" delete  ", Style::default().fg(MUTED)),
+                Span::styled("^r", Style::default().fg(ACCENT)),
+                Span::styled(" refresh  ", Style::default().fg(MUTED)),
+            ];
+            if !state.filter.is_empty() {
+                spans.push(Span::styled("filter: ", Style::default().fg(DIM)));
+                spans.push(Span::styled(&state.filter, Style::default().fg(ACCENT)));
+                spans.push(Span::styled("  esc clear", Style::default().fg(DIM)));
+            } else {
+                spans.push(Span::styled("type to filter", Style::default().fg(DIM)));
+            }
+            Line::from(spans)
+        }
         OpsTab::Executions => Line::from(vec![
             Span::raw(" "),
             Span::styled("c", Style::default().fg(ACCENT)),
             Span::styled(" cancel  ", Style::default().fg(MUTED)),
-            Span::styled("d", Style::default().fg(ACCENT)),
+            Span::styled("^d", Style::default().fg(ACCENT)),
             Span::styled(" delete  ", Style::default().fg(MUTED)),
             Span::styled("r", Style::default().fg(ACCENT)),
             Span::styled(" refresh", Style::default().fg(MUTED)),
@@ -131,10 +141,18 @@ fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsState) {
     ])
     .style(Style::default().fg(ACCENT));
 
+    let filter = state.filter.to_lowercase();
     let mut rows: Vec<Row> = Vec::new();
 
     for def in &state.op_definitions {
         if def.disabled {
+            continue;
+        }
+        if !filter.is_empty()
+            && !def.name.to_lowercase().contains(&filter)
+            && !def.category.to_lowercase().contains(&filter)
+            && !def.full_name.to_lowercase().contains(&filter)
+        {
             continue;
         }
         rows.push(Row::new(vec![
@@ -147,6 +165,12 @@ fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsState) {
 
     for chain in &state.chain_definitions {
         if chain.disabled {
+            continue;
+        }
+        if !filter.is_empty()
+            && !chain.name.to_lowercase().contains(&filter)
+            && !chain.category.to_lowercase().contains(&filter)
+        {
             continue;
         }
         rows.push(Row::new(vec![

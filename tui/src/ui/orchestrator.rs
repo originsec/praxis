@@ -231,6 +231,26 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     f.render_widget(paragraph, inner);
 }
 
+fn splash_visibility(state: &OrchestratorState) -> f32 {
+    let elapsed = state
+        .splash_started_at
+        .elapsed()
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    const SPLASH_TOTAL_MS: u64 = 3000;
+    const FADE_MS: u64 = 700;
+
+    if elapsed >= SPLASH_TOTAL_MS {
+        0.0
+    } else if elapsed <= SPLASH_TOTAL_MS.saturating_sub(FADE_MS) {
+        1.0
+    } else {
+        let fade_elapsed = elapsed - (SPLASH_TOTAL_MS - FADE_MS);
+        1.0 - (fade_elapsed as f32 / FADE_MS as f32)
+    }
+}
+
 fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
     let art: &[&str] = &[
         "██████╗ ██████╗  █████╗ ██╗  ██╗██╗███████╗",
@@ -250,10 +270,8 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
         Color::Rgb(45, 90, 45),
     ];
 
-    let t = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
+    let visibility = splash_visibility(_state);
+    let animation_fade = visibility.clamp(0.0, 1.0);
 
     let w = area.width as usize;
     let h = area.height as usize;
@@ -286,44 +304,73 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
     let mut lines: Vec<Line> = Vec::new();
     let mut bg: Vec<Option<BgCell>> = vec![None; w.saturating_mul(h)];
 
-    let scanline_y = if h > 0 { ((t / 45) as usize) % h } else { 0 };
+    if animation_fade > 0.0 {
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let scanline_y = if h > 0 { ((t / 45) as usize) % h } else { 0 };
+        let particle_count = (w.saturating_mul(h) / 22).clamp(24, 260);
 
-    let particle_count = (w.saturating_mul(h) / 22).clamp(24, 260);
-    for i in 0..particle_count {
-        let seed = mix(i as u64 * 0x9e37 + w as u64 * 131 + h as u64 * 17);
-        let drift_tick = (t / (110 + (seed % 260) as u128)) as i64;
-        let sway_tick = (t / (220 + ((seed >> 9) % 420) as u128)) as i64;
+        for i in 0..particle_count {
+            let seed = mix(i as u64 * 0x9e37 + w as u64 * 131 + h as u64 * 17);
+            let drift_tick = (t / (110 + (seed % 260) as u128)) as i64;
+            let sway_tick = (t / (220 + ((seed >> 9) % 420) as u128)) as i64;
 
-        let base_x = (seed % w.max(1) as u64) as i64;
-        let base_y = ((seed >> 16) % h.max(1) as u64) as i64;
-        let drift_x = (drift_tick * (((seed >> 24) % 3) as i64 - 1)).rem_euclid(w.max(1) as i64);
-        let drift_y = (drift_tick * (((seed >> 27) % 3) as i64 - 1)).rem_euclid(h.max(1) as i64);
-        let sway_x = ((sway_tick + ((seed >> 32) % 5) as i64).rem_euclid(5)) - 2;
-        let sway_y = ((sway_tick + ((seed >> 36) % 5) as i64).rem_euclid(3)) - 1;
+            let base_x = (seed % w.max(1) as u64) as i64;
+            let base_y = ((seed >> 16) % h.max(1) as u64) as i64;
+            let drift_x =
+                (drift_tick * (((seed >> 24) % 3) as i64 - 1)).rem_euclid(w.max(1) as i64);
+            let drift_y =
+                (drift_tick * (((seed >> 27) % 3) as i64 - 1)).rem_euclid(h.max(1) as i64);
+            let sway_x = ((sway_tick + ((seed >> 32) % 5) as i64).rem_euclid(5)) - 2;
+            let sway_y = ((sway_tick + ((seed >> 36) % 5) as i64).rem_euclid(3)) - 1;
 
-        let x = (base_x + drift_x + sway_x).rem_euclid(w.max(1) as i64) as usize;
-        let y = (base_y + drift_y + sway_y).rem_euclid(h.max(1) as i64) as usize;
-        let idx = y * w + x;
+            let x = (base_x + drift_x + sway_x).rem_euclid(w.max(1) as i64) as usize;
+            let y = (base_y + drift_y + sway_y).rem_euclid(h.max(1) as i64) as usize;
+            let idx = y * w + x;
 
-        let twinkle = ((t / (80 + ((seed >> 40) % 120) as u128)) as u64 + (seed >> 48)) % 9;
-        let near_scanline = y.abs_diff(scanline_y) <= 1;
-        let (color, priority) = if near_scanline || twinkle >= 7 {
-            (Color::Rgb(92, 156, 102), 3)
-        } else if twinkle >= 4 {
-            (Color::Rgb(42, 88, 50), 2)
-        } else {
-            (Color::Rgb(24, 52, 30), 1)
-        };
+            let twinkle = ((t / (80 + ((seed >> 40) % 120) as u128)) as u64 + (seed >> 48)) % 9;
+            let near_scanline = y.abs_diff(scanline_y) <= 1;
+            let (color, priority) = if near_scanline || twinkle >= 7 {
+                (
+                    Color::Rgb(
+                        (92.0 * animation_fade) as u8,
+                        (156.0 * animation_fade) as u8,
+                        (102.0 * animation_fade) as u8,
+                    ),
+                    3,
+                )
+            } else if twinkle >= 4 {
+                (
+                    Color::Rgb(
+                        (42.0 * animation_fade) as u8,
+                        (88.0 * animation_fade) as u8,
+                        (50.0 * animation_fade) as u8,
+                    ),
+                    2,
+                )
+            } else {
+                (
+                    Color::Rgb(
+                        (24.0 * animation_fade) as u8,
+                        (52.0 * animation_fade) as u8,
+                        (30.0 * animation_fade) as u8,
+                    ),
+                    1,
+                )
+            };
 
-        let ch = symbols[((seed >> 8) as usize + (t / 140) as usize) % symbols.len()];
-        let cell = BgCell {
-            ch,
-            color,
-            priority,
-        };
+            let ch = symbols[((seed >> 8) as usize + (t / 140) as usize) % symbols.len()];
+            let cell = BgCell {
+                ch,
+                color,
+                priority,
+            };
 
-        if bg[idx].map(|existing| existing.priority).unwrap_or(0) <= priority {
-            bg[idx] = Some(cell);
+            if bg[idx].map(|existing| existing.priority).unwrap_or(0) <= priority {
+                bg[idx] = Some(cell);
+            }
         }
     }
 

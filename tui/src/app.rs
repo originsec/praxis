@@ -10,7 +10,7 @@ use crossterm::event::{
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Window {
@@ -178,6 +178,7 @@ pub struct OrchestratorState {
     // Set by the renderer so scroll offset can be clamped.
     //
     pub max_scroll: Cell<u16>,
+    pub splash_started_at: SystemTime,
 }
 
 impl Default for OrchestratorState {
@@ -202,6 +203,7 @@ impl Default for OrchestratorState {
             history_index: None,
             saved_input: String::new(),
             max_scroll: Cell::new(0),
+            splash_started_at: SystemTime::now(),
         }
     }
 }
@@ -297,6 +299,7 @@ pub struct OperationsState {
     pub collapsed: CollapsedSections,
     pub split_percent: u16,
     pub dragging: bool,
+    pub filter: String,
 }
 
 #[derive(Default)]
@@ -329,6 +332,7 @@ impl Default for OperationsState {
             },
             split_percent: 40,
             dragging: false,
+            filter: String::new(),
         }
     }
 }
@@ -1576,39 +1580,91 @@ impl App {
                     self.operations.detail_scroll = 0;
                 }
             }
-            KeyCode::Char('n') => {
+            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if self.operations.tab == OpsTab::Library {
                     self.open_new_op_form();
                 }
             }
-            KeyCode::Char('d') => match self.operations.tab {
-                OpsTab::Library => self.delete_selected_op().await,
-                OpsTab::Executions => self.delete_selected_execution().await,
-            },
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                match self.operations.tab {
+                    OpsTab::Library => self.delete_selected_op().await,
+                    OpsTab::Executions => self.delete_selected_execution().await,
+                }
+            }
             KeyCode::Char('c') => {
                 if self.operations.tab == OpsTab::Executions {
                     self.cancel_selected_execution().await;
                 }
             }
-            KeyCode::Char('r') => {
+            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.refresh_operations().await;
+            }
+            KeyCode::Esc => {
+                if !self.operations.filter.is_empty() {
+                    self.operations.filter.clear();
+                    self.operations.library_selected = 0;
+                }
+            }
+            KeyCode::Backspace => {
+                if self.operations.tab == OpsTab::Library && !self.operations.filter.is_empty() {
+                    self.operations.filter.pop();
+                    self.operations.library_selected = 0;
+                }
+            }
+            KeyCode::Char(c) => {
+                //
+                // Regular typing filters the library list.
+                //
+                if self.operations.tab == OpsTab::Library && !self.operations.detail_focus {
+                    self.operations.filter.push(c);
+                    self.operations.library_selected = 0;
+                }
             }
             _ => {}
         }
     }
 
+    pub fn filtered_library(&self) -> Vec<(usize, bool)> {
+        //
+        // Returns (original_index, is_chain) for items matching the filter.
+        //
+        let filter = self.operations.filter.to_lowercase();
+        let mut result = Vec::new();
+        let mut idx = 0;
+
+        for def in &self.operations.op_definitions {
+            if def.disabled {
+                continue;
+            }
+            if filter.is_empty()
+                || def.name.to_lowercase().contains(&filter)
+                || def.category.to_lowercase().contains(&filter)
+                || def.full_name.to_lowercase().contains(&filter)
+            {
+                result.push((idx, false));
+            }
+            idx += 1;
+        }
+
+        let mut cidx = 0;
+        for chain in &self.operations.chain_definitions {
+            if chain.disabled {
+                continue;
+            }
+            if filter.is_empty()
+                || chain.name.to_lowercase().contains(&filter)
+                || chain.category.to_lowercase().contains(&filter)
+            {
+                result.push((cidx, true));
+            }
+            cidx += 1;
+        }
+
+        result
+    }
+
     fn ops_library_count(&self) -> usize {
-        self.operations
-            .op_definitions
-            .iter()
-            .filter(|d| !d.disabled)
-            .count()
-            + self
-                .operations
-                .chain_definitions
-                .iter()
-                .filter(|c| !c.disabled)
-                .count()
+        self.filtered_library().len()
     }
 
     fn open_run_target_popup(&mut self) {
