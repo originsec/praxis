@@ -175,15 +175,27 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
                     Style::default().fg(ACCENT),
                 )));
             } else {
-                for line in value.lines() {
+                //
+                // Split on \n but preserve trailing newline as empty line.
+                //
+                let split: Vec<&str> = value.split('\n').collect();
+                for line in &split {
                     lines.push(Line::from(Span::styled(line.to_string(), value_style)));
                 }
                 if is_focused {
-                    // Show cursor at end of last line
-                    if let Some(last) = lines.last_mut() {
+                    //
+                    // If value ends with \n, cursor goes on the new empty line.
+                    // Otherwise, append cursor to the last line.
+                    //
+                    if value.ends_with('\n') {
+                        lines.push(Line::from(Span::styled(
+                            cursor,
+                            Style::default().fg(ACCENT),
+                        )));
+                    } else if let Some(last) = lines.last_mut() {
                         let spans = vec![
                             Span::styled(
-                                value.lines().last().unwrap_or("").to_string(),
+                                split.last().unwrap_or(&"").to_string(),
                                 value_style,
                             ),
                             Span::styled(cursor, Style::default().fg(ACCENT)),
