@@ -48,6 +48,7 @@ pub struct ConfirmAction {
 
 pub enum ConfirmKind {
     DeleteOp(String), // full_name
+    Info,             // just dismiss, no action
 }
 
 pub struct NewOpForm {
@@ -1903,7 +1904,7 @@ impl App {
         // Field 6 (iterations) is skipped when mode is one-shot.
         //
         let visual_order = |form: &NewOpForm| -> Vec<usize> {
-            let mut order = vec![0, 1, 2, 3, 4];
+            let mut order = vec![4, 0, 1, 2, 3];
             if form.mode == 1 {
                 order.push(6); // iterations only for agent mode
             }
@@ -2014,27 +2015,15 @@ impl App {
                     //
                     if let Some(ref form) = self.new_op_form {
                         let mut missing = Vec::new();
-                        if form.name.is_empty() {
-                            missing.push("Name");
-                        }
-                        if form.short_name.is_empty() {
-                            missing.push("Short Name");
-                        }
-                        if form.category.is_empty() {
-                            missing.push("Category");
-                        }
-                        if form.prompt.is_empty() {
-                            missing.push("Prompt");
-                        }
-                        if form.timeout.is_empty() {
-                            missing.push("Timeout");
-                        }
-                        self.orchestrator
-                            .messages
-                            .push(ConversationEntry::Error(format!(
-                                "Missing fields: {}",
-                                missing.join(", ")
-                            )));
+                        if form.name.is_empty() { missing.push("Name"); }
+                        if form.short_name.is_empty() { missing.push("Short Name"); }
+                        if form.category.is_empty() { missing.push("Category"); }
+                        if form.prompt.is_empty() { missing.push("Prompt"); }
+                        if form.timeout.is_empty() { missing.push("Timeout"); }
+                        self.confirm = Some(ConfirmAction {
+                            message: format!("Required: {}", missing.join(", ")),
+                            action: ConfirmKind::Info,
+                        });
                     }
                 }
             }
@@ -2125,6 +2114,9 @@ impl App {
                             tokio::time::sleep(Duration::from_millis(300)).await;
                             self.operations.op_definitions =
                                 self.client.get_operation_definitions().await;
+                        }
+                        ConfirmKind::Info => {
+                            // Just dismiss.
                         }
                     }
                 }

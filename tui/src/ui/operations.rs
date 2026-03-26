@@ -358,6 +358,8 @@ fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
         Cell::from(""),
         Cell::from("ID"),
         Cell::from("Name"),
+        Cell::from("Node"),
+        Cell::from("Agent"),
         Cell::from("Status"),
         Cell::from("Duration"),
     ])
@@ -373,11 +375,14 @@ fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
             Some(end) => format_duration(end - op.start_time),
             None => format_duration(now - op.start_time),
         };
+        let node_short = &op.node_id[..8.min(op.node_id.len())];
 
         rows.push(Row::new(vec![
             Cell::from("O").style(Style::default().fg(OP_COLOR)),
             Cell::from(short_id.to_string()).style(Style::default().fg(MUTED)),
             Cell::from(op.spec.name.clone()).style(Style::default().fg(TEXT)),
+            Cell::from(node_short.to_string()).style(Style::default().fg(DIM)),
+            Cell::from(op.agent_short_name.clone()).style(Style::default().fg(DIM)),
             Cell::from(status_str).style(Style::default().fg(status_color)),
             Cell::from(duration).style(Style::default().fg(DIM)),
         ]));
@@ -390,11 +395,14 @@ fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
             Some(end) => format_duration(end - exec.started_at),
             None => format_duration(now - exec.started_at),
         };
+        let node_short = &exec.node_id[..8.min(exec.node_id.len())];
 
         rows.push(Row::new(vec![
             Cell::from("C").style(Style::default().fg(CHAIN_COLOR)),
             Cell::from(short_id.to_string()).style(Style::default().fg(MUTED)),
             Cell::from(exec.chain_name.clone()).style(Style::default().fg(TEXT)),
+            Cell::from(node_short.to_string()).style(Style::default().fg(DIM)),
+            Cell::from(exec.agent_short_name.clone()).style(Style::default().fg(DIM)),
             Cell::from(status_str).style(Style::default().fg(status_color)),
             Cell::from(duration).style(Style::default().fg(DIM)),
         ]));
@@ -403,7 +411,9 @@ fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
     let widths = [
         Constraint::Length(2),
         Constraint::Length(10),
-        Constraint::Min(12),
+        Constraint::Min(10),
+        Constraint::Length(10),
+        Constraint::Length(12),
         Constraint::Length(10),
         Constraint::Length(8),
     ];
