@@ -91,8 +91,6 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
                 Span::styled(" new  ", Style::default().fg(MUTED)),
                 Span::styled("^d", Style::default().fg(ACCENT)),
                 Span::styled(" delete  ", Style::default().fg(MUTED)),
-                Span::styled("^r", Style::default().fg(ACCENT)),
-                Span::styled(" refresh  ", Style::default().fg(MUTED)),
             ];
             if !state.filter.is_empty() {
                 spans.push(Span::styled("filter: ", Style::default().fg(DIM)));
@@ -105,12 +103,10 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
         }
         OpsTab::Executions => Line::from(vec![
             Span::raw(" "),
-            Span::styled("c", Style::default().fg(ACCENT)),
+            Span::styled("^c", Style::default().fg(ACCENT)),
             Span::styled(" cancel  ", Style::default().fg(MUTED)),
             Span::styled("^d", Style::default().fg(ACCENT)),
-            Span::styled(" delete  ", Style::default().fg(MUTED)),
-            Span::styled("r", Style::default().fg(ACCENT)),
-            Span::styled(" refresh", Style::default().fg(MUTED)),
+            Span::styled(" delete", Style::default().fg(MUTED)),
         ]),
     };
 
