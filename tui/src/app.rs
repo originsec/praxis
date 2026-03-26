@@ -411,10 +411,25 @@ pub struct ModelEditForm {
     pub api_key: String,
     pub model_name: String,
     pub editing_text: bool,        // true when typing in a text field
+    pub cursor_pos: usize,         // char-based cursor position in active field
     pub available_models: Vec<String>,
     pub model_dropdown_open: bool,
     pub model_dropdown_selected: usize,
     pub loading_models: bool,
+}
+
+impl ModelEditForm {
+    pub fn active_field(&self) -> &str {
+        match self.focused_field {
+            1 => &self.api_key,
+            2 => &self.model_name,
+            _ => "",
+        }
+    }
+
+    pub fn active_field_len(&self) -> usize {
+        self.active_field().chars().count()
+    }
 }
 
 impl Default for SettingsState {
@@ -3031,10 +3046,10 @@ impl App {
             KeyCode::Enter => {
                 self.activate_settings_item().await;
             }
-            KeyCode::Char('+') if self.settings.tab == SettingsTab::Llm => {
-                self.open_model_form(None);
-            }
-            KeyCode::Char('-') if self.settings.tab == SettingsTab::Llm => {
+            KeyCode::Char('d')
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && self.settings.tab == SettingsTab::Llm =>
+            {
                 let sel = self.settings.selected;
                 if sel < self.settings.model_definitions.len() {
                     let name = self.settings.model_definitions[sel].name.clone();
@@ -3190,6 +3205,7 @@ impl App {
             api_key,
             model_name,
             editing_text: false,
+            cursor_pos: 0,
             available_models: Vec::new(),
             model_dropdown_open: false,
             model_dropdown_selected: 0,
@@ -3261,20 +3277,71 @@ impl App {
                     form.editing_text = false;
                     if form.focused_field < 2 {
                         form.focused_field += 1;
+                        let len = form.active_field_len();
+                        form.cursor_pos = len;
                     }
+                }
+                KeyCode::Left => {
+                    if form.cursor_pos > 0 {
+                        form.cursor_pos -= 1;
+                    }
+                }
+                KeyCode::Right => {
+                    let len = form.active_field_len();
+                    if form.cursor_pos < len {
+                        form.cursor_pos += 1;
+                    }
+                }
+                KeyCode::Home => {
+                    form.cursor_pos = 0;
+                }
+                KeyCode::End => {
+                    form.cursor_pos = form.active_field_len();
                 }
                 KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    match form.focused_field {
-                        1 => form.api_key.push(c),
-                        2 => form.model_name.push(c),
-                        _ => {}
-                    }
+                    let pos = form.cursor_pos;
+                    let field = match form.focused_field {
+                        1 => &mut form.api_key,
+                        2 => &mut form.model_name,
+                        _ => { return; }
+                    };
+                    let byte_pos = field.char_indices()
+                        .nth(pos)
+                        .map(|(i, _)| i)
+                        .unwrap_or(field.len());
+                    field.insert(byte_pos, c);
+                    form.cursor_pos += 1;
                 }
                 KeyCode::Backspace => {
-                    match form.focused_field {
-                        1 => { form.api_key.pop(); }
-                        2 => { form.model_name.pop(); }
-                        _ => {}
+                    if form.cursor_pos > 0 {
+                        let pos = form.cursor_pos - 1;
+                        let field = match form.focused_field {
+                            1 => &mut form.api_key,
+                            2 => &mut form.model_name,
+                            _ => { return; }
+                        };
+                        let byte_pos = field.char_indices()
+                            .nth(pos)
+                            .map(|(i, _)| i)
+                            .unwrap_or(field.len());
+                        field.remove(byte_pos);
+                        form.cursor_pos -= 1;
+                    }
+                }
+                KeyCode::Delete => {
+                    let pos = form.cursor_pos;
+                    let field = match form.focused_field {
+                        1 => &mut form.api_key,
+                        2 => &mut form.model_name,
+                        _ => { return; }
+                    };
+                    let len = field.chars().count();
+                    if pos < len {
+                        let byte_pos = field.char_indices()
+                            .nth(pos)
+                            .map(|(i, _)| i)
+                            .unwrap_or(field.len());
+                        field.remove(byte_pos);
                     }
                 }
                 _ => {}
@@ -3333,10 +3400,12 @@ impl App {
                     1 => {
                         // API key — start editing.
                         form.editing_text = true;
+                        form.cursor_pos = form.api_key.chars().count();
                     }
                     2 => {
                         // Model name — start editing.
                         form.editing_text = true;
+                        form.cursor_pos = form.model_name.chars().count();
                     }
                     _ => {}
                 }

@@ -77,16 +77,6 @@ fn render_tabs(f: &mut Frame, area: Rect, state: &SettingsState) {
         Span::styled(" switch  ", Style::default().fg(MUTED)),
         Span::styled("^r", Style::default().fg(DIM)),
         Span::styled(" reload", Style::default().fg(MUTED)),
-        if state.tab == SettingsTab::Llm {
-            Span::styled("  +/- ", Style::default().fg(DIM))
-        } else {
-            Span::raw("")
-        },
-        if state.tab == SettingsTab::Llm {
-            Span::styled("add/remove", Style::default().fg(MUTED))
-        } else {
-            Span::raw("")
-        },
     ]);
 
     f.render_widget(Paragraph::new(line), area);
@@ -119,7 +109,7 @@ fn setting_row<'a>(
         Style::default().fg(MUTED)
     };
 
-    let cursor = if editing && selected { "\u{2588}" } else { "" };
+    let cursor = if editing && selected { "\u{258f}" } else { "" };
 
     Line::from(vec![
         Span::styled(if selected { "\u{25b8} " } else { "  " }, label_style),
@@ -177,7 +167,17 @@ fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
     // Model definitions section.
     //
 
-    lines.push(section_header("Model Definitions"));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            "Model Definitions",
+            Style::default()
+                .fg(Color::Rgb(160, 160, 160))
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("   ^d", Style::default().fg(DIM)),
+        Span::styled(" delete", Style::default().fg(MUTED)),
+    ]));
     lines.push(Line::raw(""));
 
     for (i, def) in state.model_definitions.iter().enumerate() {
@@ -441,15 +441,56 @@ fn render_model_dropdown(f: &mut Frame, area: Rect, state: &SettingsState) {
     f.render_widget(paragraph, inner);
 }
 
-fn scroll_field(text: &str, max_width: usize) -> String {
-    let char_count = text.chars().count();
-    if char_count <= max_width {
-        text.to_string()
-    } else {
-        let skip = char_count - max_width + 1; // +1 for ellipsis
-        let visible: String = text.chars().skip(skip).collect();
-        format!("\u{2026}{}", visible)
+//
+// Returns (before_cursor, after_cursor) text visible within max_width,
+// scrolled to keep the cursor visible. When not editing, cursor_pos
+// should be set to text length to show the tail.
+//
+
+fn scroll_field_parts(text: &str, cursor_pos: usize, max_width: usize) -> (String, String) {
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+
+    if len <= max_width {
+        let before: String = chars[..cursor_pos.min(len)].iter().collect();
+        let after: String = chars[cursor_pos.min(len)..].iter().collect();
+        return (before, after);
     }
+
+    //
+    // Need to scroll. Keep cursor visible within the window.
+    // Reserve 1 char for ellipsis on whichever side is truncated.
+    //
+
+    let visible = max_width.saturating_sub(1); // leave room for ellipsis
+    let cpos = cursor_pos.min(len);
+
+    // Determine the visible window start.
+    let start = if cpos <= visible {
+        0
+    } else {
+        cpos - visible
+    };
+
+    let end = (start + max_width).min(len);
+
+    let before: String = if start > 0 {
+        let mut s = String::from("\u{2026}");
+        s.extend(&chars[start + 1..cpos.min(end)]);
+        s
+    } else {
+        chars[..cpos.min(end)].iter().collect()
+    };
+
+    let after: String = if end < len {
+        let mut s: String = chars[cpos.min(end)..end.saturating_sub(1)].iter().collect();
+        s.push('\u{2026}');
+        s
+    } else {
+        chars[cpos.min(end)..end].iter().collect()
+    };
+
+    (before, after)
 }
 
 fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
@@ -490,7 +531,6 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
     f.render_widget(Clear, popup_area);
     f.render_widget(block, popup_area);
 
-    let cursor = "\u{2588}";
     let mut lines: Vec<Line> = Vec::new();
 
     //
@@ -519,70 +559,86 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
     //
 
     let field_max = inner.width.saturating_sub(16) as usize;
+    let edit_style = Style::default().fg(EDIT_FG).bg(Color::Rgb(50, 55, 50));
+    let cursor_style = Style::default().fg(ACCENT);
 
-    let key_sel = form.focused_field == 1;
-    let key_display = if form.api_key.is_empty() {
-        String::new()
-    } else if key_sel && form.editing_text {
-        scroll_field(&form.api_key, field_max)
-    } else {
-        //
-        // Mask all but last 4 characters.
-        //
-        let len = form.api_key.len();
-        let masked = if len <= 4 {
-            form.api_key.clone()
+    //
+    // Helper to build a text field line with cursor support.
+    //
+
+    let build_field = |label: &str,
+                       text: &str,
+                       selected: bool,
+                       editing: bool,
+                       cursor_pos: usize|
+     -> Line {
+        let sel_fg = if selected { ACCENT } else { TEXT };
+        let prefix = if selected { "\u{25b8} " } else { "  " };
+
+        if editing && selected {
+            let (before, after) =
+                scroll_field_parts(text, cursor_pos, field_max);
+            let spans = vec![
+                Span::styled(prefix, Style::default().fg(sel_fg)),
+                Span::styled(label.to_string(), Style::default().fg(sel_fg)),
+                Span::styled(before, edit_style),
+                Span::styled("\u{258f}", cursor_style),
+                Span::styled(after, edit_style),
+            ];
+            Line::from(spans)
         } else {
-            format!("{}{}", "\u{2022}".repeat(len - 4), &form.api_key[len - 4..])
-        };
-        scroll_field(&masked, field_max)
+            let (before, after) =
+                scroll_field_parts(text, text.chars().count(), field_max);
+            let display = format!("{}{}", before, after);
+            Line::from(vec![
+                Span::styled(prefix, Style::default().fg(sel_fg)),
+                Span::styled(label.to_string(), Style::default().fg(sel_fg)),
+                Span::styled(display, Style::default().fg(MUTED)),
+            ])
+        }
     };
 
-    let mut key_spans = vec![
-        Span::styled(
-            if key_sel { "\u{25b8} " } else { "  " },
-            Style::default().fg(if key_sel { ACCENT } else { TEXT }),
-        ),
-        Span::styled("API Key     ", Style::default().fg(if key_sel { ACCENT } else { TEXT })),
-        Span::styled(
-            key_display,
-            if key_sel && form.editing_text {
-                Style::default().fg(EDIT_FG).bg(Color::Rgb(50, 55, 50))
-            } else {
-                Style::default().fg(MUTED)
-            },
-        ),
-    ];
-    if key_sel && form.editing_text {
-        key_spans.push(Span::styled(cursor, Style::default().fg(ACCENT)));
-    }
-    lines.push(Line::from(key_spans));
+    //
+    // API key: mask when not editing.
+    //
+
+    let key_sel = form.focused_field == 1;
+    let key_text;
+    let key_display = if key_sel && form.editing_text {
+        &form.api_key
+    } else if form.api_key.is_empty() {
+        ""
+    } else {
+        let len = form.api_key.chars().count();
+        key_text = if len <= 4 {
+            form.api_key.clone()
+        } else {
+            let tail: String = form.api_key.chars().skip(len - 4).collect();
+            format!("{}{}", "\u{2022}".repeat(len - 4), tail)
+        };
+        &key_text
+    };
+
+    lines.push(build_field(
+        "API Key     ",
+        key_display,
+        key_sel,
+        form.editing_text,
+        form.cursor_pos,
+    ));
 
     //
     // Model name field.
     //
 
     let mod_sel = form.focused_field == 2;
-    let mod_display = scroll_field(&form.model_name, field_max);
-    let mut mod_spans = vec![
-        Span::styled(
-            if mod_sel { "\u{25b8} " } else { "  " },
-            Style::default().fg(if mod_sel { ACCENT } else { TEXT }),
-        ),
-        Span::styled("Model       ", Style::default().fg(if mod_sel { ACCENT } else { TEXT })),
-        Span::styled(
-            mod_display,
-            if mod_sel && form.editing_text {
-                Style::default().fg(EDIT_FG).bg(Color::Rgb(50, 55, 50))
-            } else {
-                Style::default().fg(MUTED)
-            },
-        ),
-    ];
-    if mod_sel && form.editing_text {
-        mod_spans.push(Span::styled(cursor, Style::default().fg(ACCENT)));
-    }
-    lines.push(Line::from(mod_spans));
+    lines.push(build_field(
+        "Model       ",
+        &form.model_name,
+        mod_sel,
+        form.editing_text,
+        form.cursor_pos,
+    ));
 
     lines.push(Line::raw(""));
 
