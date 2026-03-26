@@ -65,9 +65,9 @@ fn render_tabs(f: &mut Frame, area: Rect, state: &SettingsState) {
         Span::styled("  \u{2502}  ", Style::default().fg(DIM)),
         Span::styled(" About ", tab_style(SettingsTab::About)),
         Span::raw("      "),
-        Span::styled("Tab", Style::default().fg(DIM)),
+        Span::styled("tab", Style::default().fg(DIM)),
         Span::styled(" switch  ", Style::default().fg(MUTED)),
-        Span::styled("r", Style::default().fg(DIM)),
+        Span::styled("^r", Style::default().fg(DIM)),
         Span::styled(" reload", Style::default().fg(MUTED)),
     ]);
 

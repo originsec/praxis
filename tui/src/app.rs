@@ -2900,7 +2900,7 @@ impl App {
             KeyCode::Enter => {
                 self.activate_settings_item().await;
             }
-            KeyCode::Char('r') => {
+            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.load_settings().await;
             }
             _ => {}
