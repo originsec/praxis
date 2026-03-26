@@ -49,7 +49,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState) {
         } else {
             Style::default().fg(MUTED)
         };
-        let line = Line::from(Span::styled(msg.as_str(), style));
+        let line = Line::from(vec![Span::raw("  "), Span::styled(msg.as_str(), style)]);
         f.render_widget(Paragraph::new(line), chunks[3]);
     }
 }
@@ -442,11 +442,13 @@ fn render_model_dropdown(f: &mut Frame, area: Rect, state: &SettingsState) {
 }
 
 fn scroll_field(text: &str, max_width: usize) -> String {
-    if text.len() <= max_width {
+    let char_count = text.chars().count();
+    if char_count <= max_width {
         text.to_string()
     } else {
-        let start = text.len() - max_width;
-        format!("\u{2026}{}", &text[start + 1..])
+        let skip = char_count - max_width + 1; // +1 for ellipsis
+        let visible: String = text.chars().skip(skip).collect();
+        format!("\u{2026}{}", visible)
     }
 }
 

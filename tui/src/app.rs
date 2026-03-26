@@ -357,6 +357,7 @@ pub struct SettingsState {
     pub edit_buffer: String,
     pub loaded: bool,
     pub status_message: Option<String>,
+    pub status_message_at: Option<std::time::Instant>,
 
     //
     // LLM settings.
@@ -425,6 +426,7 @@ impl Default for SettingsState {
             edit_buffer: String::new(),
             loaded: false,
             status_message: None,
+            status_message_at: None,
             model_definitions: Vec::new(),
             model_form: None,
             orchestrator_model: String::new(),
@@ -557,6 +559,17 @@ impl App {
                         if !paths.is_empty() {
                             opts.working_dirs = paths;
                         }
+                    }
+                }
+
+                //
+                // Clear settings status message after 3 seconds.
+                //
+
+                if let Some(at) = self.settings.status_message_at {
+                    if at.elapsed() > Duration::from_secs(3) {
+                        self.settings.status_message = None;
+                        self.settings.status_message_at = None;
                     }
                 }
             }
@@ -2880,6 +2893,7 @@ impl App {
         } else {
             self.settings.status_message = Some("Saved".to_string());
         }
+        self.settings.status_message_at = Some(std::time::Instant::now());
     }
 
     fn settings_item_count(&self) -> usize {
