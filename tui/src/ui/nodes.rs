@@ -832,11 +832,13 @@ fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
         render_vt100_screen(screen, true)
     } else {
         //
-        // Create a tall virtual terminal and replay all output to recover
-        // scrollback history. The tall screen shows everything.
+        // Replay all output in a tall terminal. The cursor position in the
+        // tall terminal tells us where the live bottom is — the same row
+        // the user sees at scroll_offset=0. Scrolling up from there shows
+        // the history above.
         //
 
-        let tall_rows = (visible_rows + term.scroll_offset + 500) as u16;
+        let tall_rows = (visible_rows + term.scroll_offset) as u16;
         let mut tall_parser = vt100::Parser::new(tall_rows, cols, 0);
         tall_parser.process(&term.raw_output);
 
@@ -844,22 +846,21 @@ fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
         let all_lines = render_vt100_screen(tall_screen, false);
 
         //
-        // Find the last non-empty line in the tall screen to determine
-        // actual content height.
+        // The bottom `visible_rows` of the tall screen correspond to what
+        // the live terminal shows. Scrolling up N means showing the window
+        // ending N rows above that.
         //
 
-        let content_height = all_lines
-            .iter()
-            .rposition(|line| {
-                line.spans.iter().any(|s| s.content.trim().len() > 0)
-            })
-            .map(|i| i + 1)
-            .unwrap_or(0);
-
-        let end = content_height.saturating_sub(term.scroll_offset);
+        let total = all_lines.len();
+        let live_bottom = total;
+        let end = live_bottom.saturating_sub(term.scroll_offset);
         let start = end.saturating_sub(visible_rows);
 
-        all_lines[start..end.min(all_lines.len())].to_vec()
+        if start < end && end <= total {
+            all_lines[start..end].to_vec()
+        } else {
+            all_lines[..visible_rows.min(total)].to_vec()
+        }
     };
 
     let content_area = Rect {
