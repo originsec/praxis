@@ -1537,6 +1537,7 @@ impl App {
                     OpsTab::Library => OpsTab::Executions,
                     OpsTab::Executions => OpsTab::Library,
                 };
+                self.operations.filter.clear();
             }
             KeyCode::Up => match self.operations.tab {
                 OpsTab::Library => {
@@ -1606,21 +1607,21 @@ impl App {
                 if !self.operations.filter.is_empty() {
                     self.operations.filter.clear();
                     self.operations.library_selected = 0;
+                    self.operations.exec_selected = 0;
                 }
             }
             KeyCode::Backspace => {
-                if self.operations.tab == OpsTab::Library && !self.operations.filter.is_empty() {
+                if !self.operations.filter.is_empty() && !self.operations.detail_focus {
                     self.operations.filter.pop();
                     self.operations.library_selected = 0;
+                    self.operations.exec_selected = 0;
                 }
             }
             KeyCode::Char(c) => {
-                //
-                // Regular typing filters the library list.
-                //
-                if self.operations.tab == OpsTab::Library && !self.operations.detail_focus {
+                if !self.operations.detail_focus {
                     self.operations.filter.push(c);
                     self.operations.library_selected = 0;
+                    self.operations.exec_selected = 0;
                 }
             }
             _ => {}

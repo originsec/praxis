@@ -101,13 +101,23 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
             }
             Line::from(spans)
         }
-        OpsTab::Executions => Line::from(vec![
-            Span::raw(" "),
-            Span::styled("^c", Style::default().fg(ACCENT)),
-            Span::styled(" cancel  ", Style::default().fg(MUTED)),
-            Span::styled("^d", Style::default().fg(ACCENT)),
-            Span::styled(" delete", Style::default().fg(MUTED)),
-        ]),
+        OpsTab::Executions => {
+            let mut spans = vec![
+                Span::raw(" "),
+                Span::styled("^c", Style::default().fg(ACCENT)),
+                Span::styled(" cancel  ", Style::default().fg(MUTED)),
+                Span::styled("^d", Style::default().fg(ACCENT)),
+                Span::styled(" delete  ", Style::default().fg(MUTED)),
+            ];
+            if !state.filter.is_empty() {
+                spans.push(Span::styled("filter: ", Style::default().fg(DIM)));
+                spans.push(Span::styled(&state.filter, Style::default().fg(ACCENT)));
+                spans.push(Span::styled("  esc clear", Style::default().fg(DIM)));
+            } else {
+                spans.push(Span::styled("type to filter", Style::default().fg(DIM)));
+            }
+            Line::from(spans)
+        },
     };
 
     f.render_widget(Paragraph::new(hints), area);
@@ -356,64 +366,95 @@ fn render_executions(f: &mut Frame, area: Rect, state: &OperationsState) {
 fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
     let header = Row::new(vec![
         Cell::from(""),
-        Cell::from("ID"),
         Cell::from("Name"),
         Cell::from("Node"),
         Cell::from("Agent"),
         Cell::from("Status"),
+        Cell::from("Started"),
         Cell::from("Duration"),
     ])
     .style(Style::default().fg(ACCENT));
 
     let now = chrono::Utc::now();
-    let mut rows: Vec<Row> = Vec::new();
+    let filter = state.filter.to_lowercase();
 
-    for op in &state.operations {
-        let short_id = &op.operation_id[..8.min(op.operation_id.len())];
-        let (status_str, status_color) = op_status_display(&op.status);
-        let duration = match op.end_time {
-            Some(end) => format_duration(end - op.start_time),
-            None => format_duration(now - op.start_time),
-        };
-        let node_short = &op.node_id[..8.min(op.node_id.len())];
+    //
+    // Build a unified list of (start_time, is_op, index) sorted by time descending.
+    //
+    let mut entries: Vec<(chrono::DateTime<chrono::Utc>, bool, usize)> = Vec::new();
 
-        rows.push(Row::new(vec![
-            Cell::from("O").style(Style::default().fg(OP_COLOR)),
-            Cell::from(short_id.to_string()).style(Style::default().fg(MUTED)),
-            Cell::from(op.spec.name.clone()).style(Style::default().fg(TEXT)),
-            Cell::from(node_short.to_string()).style(Style::default().fg(DIM)),
-            Cell::from(op.agent_short_name.clone()).style(Style::default().fg(DIM)),
-            Cell::from(status_str).style(Style::default().fg(status_color)),
-            Cell::from(duration).style(Style::default().fg(DIM)),
-        ]));
+    for (i, op) in state.operations.iter().enumerate() {
+        if !filter.is_empty()
+            && !op.spec.name.to_lowercase().contains(&filter)
+            && !op.agent_short_name.to_lowercase().contains(&filter)
+        {
+            continue;
+        }
+        entries.push((op.start_time, true, i));
     }
 
-    for exec in &state.chain_executions {
-        let short_id = &exec.execution_id[..8.min(exec.execution_id.len())];
-        let (status_str, status_color) = chain_status_display(&exec.status);
-        let duration = match exec.ended_at {
-            Some(end) => format_duration(end - exec.started_at),
-            None => format_duration(now - exec.started_at),
-        };
-        let node_short = &exec.node_id[..8.min(exec.node_id.len())];
+    for (i, exec) in state.chain_executions.iter().enumerate() {
+        if !filter.is_empty()
+            && !exec.chain_name.to_lowercase().contains(&filter)
+            && !exec.agent_short_name.to_lowercase().contains(&filter)
+        {
+            continue;
+        }
+        entries.push((exec.started_at, false, i));
+    }
 
-        rows.push(Row::new(vec![
-            Cell::from("C").style(Style::default().fg(CHAIN_COLOR)),
-            Cell::from(short_id.to_string()).style(Style::default().fg(MUTED)),
-            Cell::from(exec.chain_name.clone()).style(Style::default().fg(TEXT)),
-            Cell::from(node_short.to_string()).style(Style::default().fg(DIM)),
-            Cell::from(exec.agent_short_name.clone()).style(Style::default().fg(DIM)),
-            Cell::from(status_str).style(Style::default().fg(status_color)),
-            Cell::from(duration).style(Style::default().fg(DIM)),
-        ]));
+    entries.sort_by(|a, b| b.0.cmp(&a.0)); // newest first
+
+    let mut rows: Vec<Row> = Vec::new();
+
+    for (_, is_op, idx) in &entries {
+        if *is_op {
+            let op = &state.operations[*idx];
+            let (status_str, status_color) = op_status_display(&op.status);
+            let duration = match op.end_time {
+                Some(end) => format_duration(end - op.start_time),
+                None => format_duration(now - op.start_time),
+            };
+            let started = op.start_time.format("%H:%M:%S").to_string();
+            let node_short = &op.node_id[..8.min(op.node_id.len())];
+
+            rows.push(Row::new(vec![
+                Cell::from("O").style(Style::default().fg(OP_COLOR)),
+                Cell::from(op.spec.name.clone()).style(Style::default().fg(TEXT)),
+                Cell::from(node_short.to_string()).style(Style::default().fg(DIM)),
+                Cell::from(op.agent_short_name.clone()).style(Style::default().fg(DIM)),
+                Cell::from(status_str).style(Style::default().fg(status_color)),
+                Cell::from(started).style(Style::default().fg(DIM)),
+                Cell::from(duration).style(Style::default().fg(DIM)),
+            ]));
+        } else {
+            let exec = &state.chain_executions[*idx];
+            let (status_str, status_color) = chain_status_display(&exec.status);
+            let duration = match exec.ended_at {
+                Some(end) => format_duration(end - exec.started_at),
+                None => format_duration(now - exec.started_at),
+            };
+            let started = exec.started_at.format("%H:%M:%S").to_string();
+            let node_short = &exec.node_id[..8.min(exec.node_id.len())];
+
+            rows.push(Row::new(vec![
+                Cell::from("C").style(Style::default().fg(CHAIN_COLOR)),
+                Cell::from(exec.chain_name.clone()).style(Style::default().fg(TEXT)),
+                Cell::from(node_short.to_string()).style(Style::default().fg(DIM)),
+                Cell::from(exec.agent_short_name.clone()).style(Style::default().fg(DIM)),
+                Cell::from(status_str).style(Style::default().fg(status_color)),
+                Cell::from(started).style(Style::default().fg(DIM)),
+                Cell::from(duration).style(Style::default().fg(DIM)),
+            ]));
+        }
     }
 
     let widths = [
         Constraint::Length(2),
-        Constraint::Length(10),
         Constraint::Min(10),
         Constraint::Length(10),
         Constraint::Length(12),
+        Constraint::Length(10),
         Constraint::Length(10),
         Constraint::Length(8),
     ];
