@@ -175,7 +175,7 @@ fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
             lines.push(Line::from(vec![
                 Span::styled("\u{25b8} ", Style::default().fg(ACCENT)),
                 Span::styled(
-                    format!("{:<28}", format!("[{}] {}", i + 1, field_label)),
+                    format!("{}: ", field_label),
                     Style::default().fg(ACCENT),
                 ),
                 Span::styled(
@@ -197,22 +197,16 @@ fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
                 " \u{2713}"
             };
 
+            let sel_style = if selected {
+                Style::default().fg(ACCENT)
+            } else {
+                Style::default().fg(TEXT)
+            };
+
             lines.push(Line::from(vec![
                 Span::styled(
                     if selected { "\u{25b8} " } else { "  " },
-                    if selected {
-                        Style::default().fg(ACCENT)
-                    } else {
-                        Style::default().fg(TEXT)
-                    },
-                ),
-                Span::styled(
-                    format!("{:<28}", format!("[{}]", i + 1)),
-                    if selected {
-                        Style::default().fg(ACCENT)
-                    } else {
-                        Style::default().fg(TEXT)
-                    },
+                    sel_style,
                 ),
                 Span::styled(
                     display,

@@ -2766,6 +2766,7 @@ impl App {
                     .cloned()
                     .unwrap_or_default();
                 s.model_definitions = serde_json::from_str(&defs_json).unwrap_or_default();
+                s.model_definitions.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
                 s.orchestrator_model = config
                     .get("llm_feature_orchestrator")
