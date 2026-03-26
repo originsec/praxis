@@ -17,6 +17,7 @@ pub enum Window {
     Orchestrator,
     Nodes,
     Operations,
+    Settings,
 }
 
 //
@@ -121,6 +122,7 @@ pub struct App {
     pub orchestrator: OrchestratorState,
     pub nodes: NodesState,
     pub operations: OperationsState,
+    pub settings: SettingsState,
     pub client: Arc<Client>,
     pub should_quit: bool,
     pub connected: bool,
@@ -340,6 +342,78 @@ impl Default for OperationsState {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum SettingsTab {
+    Llm,
+    Service,
+    About,
+}
+
+pub struct SettingsState {
+    pub tab: SettingsTab,
+    pub selected: usize,
+    pub editing: bool,
+    pub edit_buffer: String,
+    pub loaded: bool,
+    pub status_message: Option<String>,
+
+    //
+    // LLM settings.
+    //
+
+    pub model_definitions: Vec<ModelDef>,
+    pub model_edit_index: Option<usize>,
+    pub model_edit_field: usize, // 0=provider, 1=model, 2=apiKey
+    pub orchestrator_model: String,
+    pub orchestrator_max_tokens: String,
+    pub semantic_ops_model: String,
+    pub semantic_parser_model: String,
+    pub traffic_parser_model: String,
+
+    //
+    // Service settings.
+    //
+
+    pub mcp_enabled: bool,
+    pub mcp_port: String,
+    pub logging_enabled: bool,
+    pub hunting_row_limit: String,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct ModelDef {
+    pub name: String,
+    pub provider: String,
+    pub model: String,
+    #[serde(rename = "apiKey", default)]
+    pub api_key: String,
+}
+
+impl Default for SettingsState {
+    fn default() -> Self {
+        Self {
+            tab: SettingsTab::Llm,
+            selected: 0,
+            editing: false,
+            edit_buffer: String::new(),
+            loaded: false,
+            status_message: None,
+            model_definitions: Vec::new(),
+            model_edit_index: None,
+            model_edit_field: 0,
+            orchestrator_model: String::new(),
+            orchestrator_max_tokens: "25000".to_string(),
+            semantic_ops_model: String::new(),
+            semantic_parser_model: String::new(),
+            traffic_parser_model: String::new(),
+            mcp_enabled: true,
+            mcp_port: "8585".to_string(),
+            logging_enabled: false,
+            hunting_row_limit: "10000000".to_string(),
+        }
+    }
+}
+
 impl App {
     pub fn new(client: Arc<Client>) -> Self {
         Self {
@@ -347,6 +421,7 @@ impl App {
             orchestrator: OrchestratorState::default(),
             nodes: NodesState::default(),
             operations: OperationsState::default(),
+            settings: SettingsState::default(),
             client,
             should_quit: false,
             connected: true,
@@ -537,6 +612,13 @@ impl App {
                     self.refresh_operations().await;
                     return;
                 }
+                KeyCode::Char('s') => {
+                    self.active_window = Window::Settings;
+                    if !self.settings.loaded {
+                        self.load_settings().await;
+                    }
+                    return;
+                }
                 _ => {}
             }
         }
@@ -545,6 +627,7 @@ impl App {
             Window::Orchestrator => self.handle_orchestrator_key(key).await,
             Window::Nodes => self.handle_nodes_key(key).await,
             Window::Operations => self.handle_operations_key(key).await,
+            Window::Settings => self.handle_settings_key(key).await,
         }
     }
 
@@ -2654,6 +2737,419 @@ impl App {
             self.nodes.selected = self.nodes.nodes.len() - 1;
         }
         self.connected = true;
+    }
+
+    //
+    // Settings window.
+    //
+
+    async fn load_settings(&mut self) {
+        let keys = vec![
+            "llm_model_definitions".to_string(),
+            "llm_feature_orchestrator".to_string(),
+            "llm_orchestrator_max_tokens".to_string(),
+            "llm_feature_semantic_ops".to_string(),
+            "llm_feature_semantic_parser".to_string(),
+            "llm_feature_traffic_parser".to_string(),
+            "mcp_server_enabled".to_string(),
+            "mcp_server_port".to_string(),
+            "application_logs_enabled".to_string(),
+            "hunting_query_row_limit".to_string(),
+        ];
+
+        match self.client.get_config(keys).await {
+            Ok(config) => {
+                let s = &mut self.settings;
+
+                let defs_json = config
+                    .get("llm_model_definitions")
+                    .cloned()
+                    .unwrap_or_default();
+                s.model_definitions = serde_json::from_str(&defs_json).unwrap_or_default();
+
+                s.orchestrator_model = config
+                    .get("llm_feature_orchestrator")
+                    .cloned()
+                    .unwrap_or_default();
+                s.orchestrator_max_tokens = config
+                    .get("llm_orchestrator_max_tokens")
+                    .cloned()
+                    .unwrap_or("25000".to_string());
+                s.semantic_ops_model = config
+                    .get("llm_feature_semantic_ops")
+                    .cloned()
+                    .unwrap_or_default();
+                s.semantic_parser_model = config
+                    .get("llm_feature_semantic_parser")
+                    .cloned()
+                    .unwrap_or_default();
+                s.traffic_parser_model = config
+                    .get("llm_feature_traffic_parser")
+                    .cloned()
+                    .unwrap_or_default();
+                s.mcp_enabled = config
+                    .get("mcp_server_enabled")
+                    .map(|v| v != "false" && v != "0" && v != "no")
+                    .unwrap_or(true);
+                s.mcp_port = config
+                    .get("mcp_server_port")
+                    .cloned()
+                    .unwrap_or("8585".to_string());
+                s.logging_enabled = config
+                    .get("application_logs_enabled")
+                    .map(|v| v == "true" || v == "1" || v == "yes")
+                    .unwrap_or(false);
+                s.hunting_row_limit = config
+                    .get("hunting_query_row_limit")
+                    .cloned()
+                    .unwrap_or("10000000".to_string());
+
+                s.loaded = true;
+                s.status_message = None;
+            }
+            Err(e) => {
+                self.settings.status_message =
+                    Some(format!("Failed to load settings: {}", e));
+            }
+        }
+    }
+
+    async fn save_setting(&mut self, key: &str, value: &str) {
+        let mut values = HashMap::new();
+        values.insert(key.to_string(), value.to_string());
+        if let Err(e) = self.client.set_config(values).await {
+            self.settings.status_message = Some(format!("Save failed: {}", e));
+        } else {
+            self.settings.status_message = Some("Saved".to_string());
+        }
+    }
+
+    fn settings_item_count(&self) -> usize {
+        match self.settings.tab {
+            SettingsTab::Llm => {
+                //
+                // Items: one row per model definition, then feature assignments
+                // and max tokens.
+                // Layout: [models...] + add_model + orchestrator + max_tokens +
+                //         semantic_ops + semantic_parser + traffic_parser
+                //
+                self.settings.model_definitions.len() + 6
+            }
+            SettingsTab::Service => 4, // mcp_enabled, mcp_port, logging, hunting_row_limit
+            SettingsTab::About => 0,
+        }
+    }
+
+    async fn handle_settings_key(&mut self, key: KeyEvent) {
+
+        //
+        // If editing a field, capture input.
+        //
+
+        if self.settings.editing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.settings.editing = false;
+                    self.settings.edit_buffer.clear();
+                }
+                KeyCode::Enter => {
+                    let val = self.settings.edit_buffer.clone();
+                    self.settings.editing = false;
+                    self.apply_settings_edit(val).await;
+                }
+                KeyCode::Char(c) => {
+                    self.settings.edit_buffer.push(c);
+                }
+                KeyCode::Backspace => {
+                    self.settings.edit_buffer.pop();
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        //
+        // If editing a model definition inline.
+        //
+
+        if self.settings.model_edit_index.is_some() {
+            self.handle_model_edit_key(key).await;
+            return;
+        }
+
+        match key.code {
+            KeyCode::Tab | KeyCode::BackTab => {
+                self.settings.tab = match self.settings.tab {
+                    SettingsTab::Llm => SettingsTab::Service,
+                    SettingsTab::Service => SettingsTab::About,
+                    SettingsTab::About => SettingsTab::Llm,
+                };
+                self.settings.selected = 0;
+            }
+            KeyCode::Up => {
+                if self.settings.selected > 0 {
+                    self.settings.selected -= 1;
+                }
+            }
+            KeyCode::Down => {
+                let max = self.settings_item_count();
+                if max > 0 && self.settings.selected < max - 1 {
+                    self.settings.selected += 1;
+                }
+            }
+            KeyCode::Enter => {
+                self.activate_settings_item().await;
+            }
+            KeyCode::Char('r') => {
+                self.load_settings().await;
+            }
+            _ => {}
+        }
+    }
+
+    async fn activate_settings_item(&mut self) {
+        let sel = self.settings.selected;
+        match self.settings.tab {
+            SettingsTab::Llm => {
+                let model_count = self.settings.model_definitions.len();
+                if sel < model_count {
+                    //
+                    // Edit existing model definition.
+                    //
+                    self.settings.model_edit_index = Some(sel);
+                    self.settings.model_edit_field = 0;
+                    let def = &self.settings.model_definitions[sel];
+                    self.settings.edit_buffer = def.provider.clone();
+                    self.settings.editing = true;
+                } else {
+                    let idx = sel - model_count;
+                    match idx {
+                        0 => {
+                            //
+                            // Add new model.
+                            //
+                            self.settings.model_definitions.push(ModelDef {
+                                name: String::new(),
+                                provider: String::new(),
+                                model: String::new(),
+                                api_key: String::new(),
+                            });
+                            let new_idx = self.settings.model_definitions.len() - 1;
+                            self.settings.model_edit_index = Some(new_idx);
+                            self.settings.model_edit_field = 0;
+                            self.settings.edit_buffer.clear();
+                            self.settings.editing = true;
+                        }
+                        1 => {
+                            // Orchestrator model — open edit.
+                            self.settings.editing = true;
+                            self.settings.edit_buffer =
+                                self.settings.orchestrator_model.clone();
+                        }
+                        2 => {
+                            // Max tokens.
+                            self.settings.editing = true;
+                            self.settings.edit_buffer =
+                                self.settings.orchestrator_max_tokens.clone();
+                        }
+                        3 => {
+                            // Semantic ops model.
+                            self.settings.editing = true;
+                            self.settings.edit_buffer =
+                                self.settings.semantic_ops_model.clone();
+                        }
+                        4 => {
+                            // Semantic parser model.
+                            self.settings.editing = true;
+                            self.settings.edit_buffer =
+                                self.settings.semantic_parser_model.clone();
+                        }
+                        5 => {
+                            // Traffic parser model.
+                            self.settings.editing = true;
+                            self.settings.edit_buffer =
+                                self.settings.traffic_parser_model.clone();
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            SettingsTab::Service => {
+                match sel {
+                    0 => {
+                        // Toggle MCP enabled.
+                        self.settings.mcp_enabled = !self.settings.mcp_enabled;
+                        let val = if self.settings.mcp_enabled {
+                            "true"
+                        } else {
+                            "false"
+                        };
+                        self.save_setting("mcp_server_enabled", val).await;
+                    }
+                    1 => {
+                        // Edit MCP port.
+                        self.settings.editing = true;
+                        self.settings.edit_buffer = self.settings.mcp_port.clone();
+                    }
+                    2 => {
+                        // Toggle logging enabled.
+                        self.settings.logging_enabled = !self.settings.logging_enabled;
+                        let val = if self.settings.logging_enabled {
+                            "true"
+                        } else {
+                            "false"
+                        };
+                        self.save_setting("application_logs_enabled", val).await;
+                    }
+                    3 => {
+                        // Edit hunting row limit.
+                        self.settings.editing = true;
+                        self.settings.edit_buffer =
+                            self.settings.hunting_row_limit.clone();
+                    }
+                    _ => {}
+                }
+            }
+            SettingsTab::About => {}
+        }
+    }
+
+    async fn apply_settings_edit(&mut self, val: String) {
+        let sel = self.settings.selected;
+        match self.settings.tab {
+            SettingsTab::Llm => {
+                let model_count = self.settings.model_definitions.len();
+                if sel < model_count {
+                    // Model edit is handled by handle_model_edit_key.
+                } else {
+                    let idx = sel - model_count;
+                    match idx {
+                        1 => {
+                            self.settings.orchestrator_model = val.clone();
+                            self.save_setting("llm_feature_orchestrator", &val).await;
+                        }
+                        2 => {
+                            self.settings.orchestrator_max_tokens = val.clone();
+                            self.save_setting("llm_orchestrator_max_tokens", &val)
+                                .await;
+                        }
+                        3 => {
+                            self.settings.semantic_ops_model = val.clone();
+                            self.save_setting("llm_feature_semantic_ops", &val).await;
+                        }
+                        4 => {
+                            self.settings.semantic_parser_model = val.clone();
+                            self.save_setting("llm_feature_semantic_parser", &val)
+                                .await;
+                        }
+                        5 => {
+                            self.settings.traffic_parser_model = val.clone();
+                            self.save_setting("llm_feature_traffic_parser", &val)
+                                .await;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            SettingsTab::Service => match sel {
+                1 => {
+                    self.settings.mcp_port = val.clone();
+                    self.save_setting("mcp_server_port", &val).await;
+                }
+                3 => {
+                    self.settings.hunting_row_limit = val.clone();
+                    self.save_setting("hunting_query_row_limit", &val).await;
+                }
+                _ => {}
+            },
+            SettingsTab::About => {}
+        }
+    }
+
+    async fn handle_model_edit_key(&mut self, key: KeyEvent) {
+        let idx = match self.settings.model_edit_index {
+            Some(i) => i,
+            None => return,
+        };
+
+        if self.settings.editing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.settings.editing = false;
+                    self.settings.model_edit_index = None;
+                    self.settings.edit_buffer.clear();
+                }
+                KeyCode::Enter | KeyCode::Tab => {
+                    //
+                    // Save current field, advance to next.
+                    //
+                    let val = self.settings.edit_buffer.clone();
+                    if let Some(def) = self.settings.model_definitions.get_mut(idx) {
+                        match self.settings.model_edit_field {
+                            0 => def.provider = val,
+                            1 => def.model = val,
+                            2 => def.api_key = val,
+                            _ => {}
+                        }
+                    }
+
+                    if self.settings.model_edit_field < 2 {
+                        self.settings.model_edit_field += 1;
+                        if let Some(def) = self.settings.model_definitions.get(idx) {
+                            self.settings.edit_buffer = match self.settings.model_edit_field {
+                                1 => def.model.clone(),
+                                2 => def.api_key.clone(),
+                                _ => String::new(),
+                            };
+                        }
+                    } else {
+                        //
+                        // All fields done — update name and save.
+                        //
+                        if let Some(def) = self.settings.model_definitions.get_mut(idx) {
+                            def.name =
+                                format!("{}::{}", def.provider, def.model);
+                        }
+                        self.settings.editing = false;
+                        self.settings.model_edit_index = None;
+                        self.settings.edit_buffer.clear();
+                        self.save_model_definitions().await;
+                    }
+                }
+                KeyCode::Char(c) => {
+                    self.settings.edit_buffer.push(c);
+                }
+                KeyCode::Backspace => {
+                    self.settings.edit_buffer.pop();
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        //
+        // Model edit mode but not editing a field — shouldn't normally happen.
+        //
+        self.settings.model_edit_index = None;
+    }
+
+    async fn save_model_definitions(&mut self) {
+        //
+        // Remove any empty (incomplete) definitions.
+        //
+        self.settings
+            .model_definitions
+            .retain(|d| !d.provider.is_empty() && !d.model.is_empty());
+
+        match serde_json::to_string(&self.settings.model_definitions) {
+            Ok(json) => {
+                self.save_setting("llm_model_definitions", &json).await;
+            }
+            Err(e) => {
+                self.settings.status_message =
+                    Some(format!("Failed to serialize models: {}", e));
+            }
+        }
     }
 }
 

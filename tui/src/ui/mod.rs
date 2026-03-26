@@ -2,6 +2,7 @@ pub mod nodes;
 pub mod operations;
 pub mod orchestrator;
 pub mod popup;
+pub mod settings;
 pub mod status_bar;
 
 use crate::app::{App, Window};
@@ -47,6 +48,7 @@ pub fn render(f: &mut Frame, app: &App) {
                 operations::render(f, chunks[1], &app.operations);
             }
         }
+        Window::Settings => settings::render(f, chunks[1], &app.settings),
     }
 
     status_bar::render(f, chunks[2], app);

@@ -37,6 +37,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         active_label("^l nodes", app.active_window == Window::Nodes),
         Span::raw("  "),
         active_label("^e ops", app.active_window == Window::Operations),
+        Span::raw("  "),
+        active_label("^s settings", app.active_window == Window::Settings),
         sep.clone(),
         Span::styled("^q quit", Style::default().fg(DIM)),
         if app.active_window == Window::Orchestrator {
