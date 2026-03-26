@@ -12,6 +12,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::mpsc;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Window {
@@ -127,6 +128,8 @@ pub struct App {
     pub operations: OperationsState,
     pub settings: SettingsState,
     pub client: Arc<Client>,
+    pub rabbitmq_url: String,
+    pub client_id: String,
     pub should_quit: bool,
     pub connected: bool,
     pub popup: Option<Popup>,
@@ -223,6 +226,7 @@ pub struct NodesState {
     pub dragging: bool,
     pub session: Option<SessionChat>,
     pub session_options: Option<SessionOptions>,
+    pub terminal_opening: bool,
     pub terminal: Option<TerminalState>,
     pub detail_focus: bool,
     pub agent_selected: usize,
@@ -236,6 +240,7 @@ pub struct TerminalState {
     pub max_scroll: Cell<usize>,
     pub raw_output: Vec<u8>,
     pub scrollback_cache: RefCell<Option<TerminalScrollbackCache>>,
+    pub writer_tx: mpsc::UnboundedSender<TerminalRequest>,
 }
 
 pub struct TerminalScrollbackCache {
@@ -243,6 +248,12 @@ pub struct TerminalScrollbackCache {
     pub tall_rows: u16,
     pub raw_len: usize,
     pub lines: Vec<ratatui::text::Line<'static>>,
+}
+
+pub enum TerminalRequest {
+    Write(Vec<u8>),
+    Resize { rows: u16, cols: u16 },
+    Close,
 }
 
 pub struct SessionOptions {
@@ -290,6 +301,7 @@ impl Default for NodesState {
             dragging: false,
             session: None,
             session_options: None,
+            terminal_opening: false,
             terminal: None,
             detail_focus: false,
             agent_selected: 0,
@@ -328,6 +340,7 @@ pub struct OperationsState {
     pub split_percent: u16,
     pub dragging: bool,
     pub filter: String,
+    pub last_live_duration_redraw: std::time::Instant,
 }
 
 #[derive(Default)]
@@ -361,6 +374,7 @@ impl Default for OperationsState {
             split_percent: 40,
             dragging: false,
             filter: String::new(),
+            last_live_duration_redraw: std::time::Instant::now(),
         }
     }
 }
@@ -406,6 +420,13 @@ pub struct SettingsState {
     pub dropdown_open: bool,
     pub dropdown_selected: usize,
     pub dropdown_field: usize, // which feature field (1-5) the dropdown is for
+
+    //
+    // Connection info (read-only, set at startup).
+    //
+
+    pub rabbitmq_url: String,
+    pub client_id: String,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -479,19 +500,27 @@ impl Default for SettingsState {
             dropdown_open: false,
             dropdown_selected: 0,
             dropdown_field: 0,
+            rabbitmq_url: String::new(),
+            client_id: String::new(),
         }
     }
 }
 
 impl App {
-    pub fn new(client: Arc<Client>) -> Self {
+    pub fn new(client: Arc<Client>, rabbitmq_url: String, client_id: String) -> Self {
         Self {
             active_window: Window::Orchestrator,
             orchestrator: OrchestratorState::default(),
             nodes: NodesState::default(),
             operations: OperationsState::default(),
-            settings: SettingsState::default(),
+            settings: SettingsState {
+                rabbitmq_url: rabbitmq_url.clone(),
+                client_id: client_id.clone(),
+                ..SettingsState::default()
+            },
             client,
+            rabbitmq_url,
+            client_id,
             should_quit: false,
             connected: true,
             popup: None,
@@ -531,14 +560,18 @@ impl App {
         self.orchestrator.session_active = true;
     }
 
-    pub async fn handle_event(&mut self, event: AppEvent) {
+    pub async fn handle_event(&mut self, event: AppEvent) -> bool {
         match event {
             AppEvent::Terminal(Event::Key(key))
                 if key.kind == crossterm::event::KeyEventKind::Press =>
             {
                 self.handle_key(key).await;
+                true
             }
-            AppEvent::Terminal(Event::Mouse(mouse)) => self.handle_mouse(mouse).await,
+            AppEvent::Terminal(Event::Mouse(mouse)) => {
+                self.handle_mouse(mouse).await;
+                true
+            }
             AppEvent::Terminal(Event::Resize(new_cols, new_rows)) => {
                 if let Some(ref mut term) = self.nodes.terminal {
                     //
@@ -548,12 +581,18 @@ impl App {
                     let rows = new_rows.saturating_sub(8);
                     term.parser.set_size(rows, cols);
                     *term.scrollback_cache.borrow_mut() = None;
-                    let node_id = term.node_id.clone();
-                    let _ = self.client.send_terminal_resize(&node_id, rows, cols).await;
+                    let _ = term.writer_tx.send(TerminalRequest::Resize { rows, cols });
                 }
+                true
             }
-            AppEvent::Orchestrator(msg) => self.handle_orchestrator_event(msg),
-            AppEvent::StateUpdate(state) => self.handle_state_update(state),
+            AppEvent::Orchestrator(msg) => {
+                self.handle_orchestrator_event(msg);
+                true
+            }
+            AppEvent::StateUpdate(state) => {
+                self.handle_state_update(state);
+                true
+            }
             AppEvent::OperationsRefreshed {
                 op_definitions,
                 chain_definitions,
@@ -564,6 +603,34 @@ impl App {
                 self.operations.chain_definitions = chain_definitions;
                 self.operations.operations = operations;
                 self.operations.chain_executions = chain_executions;
+                true
+            }
+            AppEvent::LibraryRefreshed {
+                op_definitions,
+                chain_definitions,
+            } => {
+                self.operations.op_definitions = op_definitions;
+                self.operations.chain_definitions = chain_definitions;
+                true
+            }
+            AppEvent::ExecutionListsRefreshed {
+                operations,
+                chain_executions,
+                reset_selection,
+            } => {
+                self.operations.operations = operations;
+                self.operations.chain_executions = chain_executions;
+
+                let total = self.sorted_executions().len();
+                if total == 0 {
+                    self.operations.exec_selected = 0;
+                } else if reset_selection {
+                    self.operations.exec_selected = 0;
+                } else if self.operations.exec_selected >= total {
+                    self.operations.exec_selected = total - 1;
+                }
+
+                true
             }
             AppEvent::SessionResponse(result) => {
                 use crate::event::SessionResult;
@@ -583,7 +650,7 @@ impl App {
                             if session.active_transaction_id.as_deref()
                                 != Some(transaction_id.as_str())
                             {
-                                return;
+                                return false;
                             }
                             session.messages.push(ChatMessage {
                                 role: ChatRole::Agent,
@@ -597,7 +664,7 @@ impl App {
                             if session.active_transaction_id.as_deref()
                                 != Some(transaction_id.as_str())
                             {
-                                return;
+                                return false;
                             }
                             session.messages.push(ChatMessage {
                                 role: ChatRole::System,
@@ -616,6 +683,34 @@ impl App {
                         }
                     }
                 }
+                true
+            }
+            AppEvent::TerminalCreated {
+                node_id,
+                terminal_id,
+            } => {
+                self.nodes.terminal_opening = false;
+                let (cols, rows) = Self::terminal_content_size();
+                let writer_tx = Self::spawn_terminal_writer(self.client.clone(), node_id.clone());
+                let _ = writer_tx.send(TerminalRequest::Resize { rows, cols });
+                self.nodes.terminal = Some(TerminalState {
+                    node_id,
+                    terminal_id: Some(terminal_id),
+                    parser: vt100::Parser::new(rows, cols, 0),
+                    scroll_offset: 0,
+                    max_scroll: Cell::new(usize::MAX),
+                    raw_output: Vec::new(),
+                    scrollback_cache: RefCell::new(None),
+                    writer_tx,
+                });
+                true
+            }
+            AppEvent::TerminalCreateFailed(message) => {
+                self.nodes.terminal_opening = false;
+                self.orchestrator
+                    .messages
+                    .push(ConversationEntry::Error(message));
+                true
             }
             AppEvent::TerminalOutput(output) => {
                 if let Some(ref mut term) = self.nodes.terminal {
@@ -625,6 +720,7 @@ impl App {
                         *term.scrollback_cache.borrow_mut() = None;
                     }
                 }
+                true
             }
             AppEvent::Tick => {
                 //
@@ -638,13 +734,19 @@ impl App {
                 static REFRESH_COUNTER: std::sync::atomic::AtomicU32 =
                     std::sync::atomic::AtomicU32::new(0);
                 let count = REFRESH_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if count % 30 == 0 {
-                    // Every ~3 seconds (30 * 100ms tick)
-                    let _ = self.client.request_semantic_op_list().await;
-                    let _ = self.client.request_chain_execution_list().await;
+                if self.active_window == Window::Operations
+                    && self.operations.tab == OpsTab::Executions
+                    && count % 24 == 0
+                {
+                    // Every ~3 seconds (24 * 125ms tick)
+                    self.refresh_execution_lists_after(Duration::ZERO, false);
                 }
-                self.operations.operations = self.client.get_operations().await;
-                self.operations.chain_executions = self.client.get_chain_executions().await;
+
+                let mut redraw = self.is_animating();
+                if self.should_redraw_live_execution_durations() {
+                    redraw = true;
+                    self.operations.last_live_duration_redraw = std::time::Instant::now();
+                }
 
                 //
                 // Refresh session options working dirs from recon cache.
@@ -654,6 +756,7 @@ impl App {
                         let paths = self.client.get_cached_project_paths().await;
                         if !paths.is_empty() {
                             opts.working_dirs = paths;
+                            redraw = true;
                         }
                     }
                 }
@@ -666,11 +769,43 @@ impl App {
                     if at.elapsed() > Duration::from_secs(3) {
                         self.settings.status_message = None;
                         self.settings.status_message_at = None;
+                        redraw = true;
                     }
                 }
+                redraw
             }
-            _ => {}
+            _ => false,
         }
+    }
+
+    fn is_animating(&self) -> bool {
+        self.orchestrator.is_streaming
+            || self
+                .nodes
+                .session
+                .as_ref()
+                .is_some_and(|session| session.is_waiting)
+    }
+
+    fn has_live_execution_timers(&self) -> bool {
+        self.operations.operations.iter().any(|op| {
+            matches!(
+                op.status,
+                common::SemanticOpStatus::Running | common::SemanticOpStatus::Queued
+            )
+        }) || self.operations.chain_executions.iter().any(|exec| {
+            matches!(
+                exec.status,
+                common::ChainExecutionStatus::Running | common::ChainExecutionStatus::Queued
+            )
+        })
+    }
+
+    fn should_redraw_live_execution_durations(&self) -> bool {
+        self.active_window == Window::Operations
+            && self.operations.tab == OpsTab::Executions
+            && self.has_live_execution_timers()
+            && self.operations.last_live_duration_redraw.elapsed() >= Duration::from_secs(1)
     }
 
     async fn handle_key(&mut self, key: KeyEvent) {
@@ -1405,7 +1540,7 @@ impl App {
                             .capabilities
                             .contains(&common::NodeCapability::Terminal)
                     {
-                        self.open_terminal().await;
+                        self.open_terminal();
                     }
                 }
             }
@@ -1425,55 +1560,76 @@ impl App {
         (cols, rows)
     }
 
-    async fn open_terminal(&mut self) {
+    fn spawn_terminal_writer(
+        client: Arc<Client>,
+        node_id: String,
+    ) -> mpsc::UnboundedSender<TerminalRequest> {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            while let Some(request) = rx.recv().await {
+                match request {
+                    TerminalRequest::Write(data) => {
+                        let _ = client.send_terminal_input(&node_id, data).await;
+                    }
+                    TerminalRequest::Resize { rows, cols } => {
+                        let _ = client.send_terminal_resize(&node_id, rows, cols).await;
+                    }
+                    TerminalRequest::Close => {
+                        let _ = client.send_terminal_close(&node_id).await;
+                        break;
+                    }
+                }
+            }
+        });
+        tx
+    }
+
+    fn open_terminal(&mut self) {
+        if self.nodes.terminal.is_some() || self.nodes.terminal_opening {
+            return;
+        }
         let node = match self.nodes.nodes.get(self.nodes.selected) {
             Some(n) => n,
             None => return,
         };
         let node_id = node.node_id.clone();
+        self.nodes.terminal_opening = true;
+        let client = self.client.clone();
+        let tx = self.event_tx.clone();
 
-        //
-        // Create terminal session on the node.
-        //
+        tokio::spawn(async move {
+            let Some(tx) = tx else { return };
+            let result = client
+                .send_command(
+                    &node_id,
+                    NodeCommand::Terminal(common::TerminalCommand::Create),
+                )
+                .await;
 
-        let result = self
-            .client
-            .send_command(
-                &node_id,
-                NodeCommand::Terminal(common::TerminalCommand::Create),
-            )
-            .await;
-
-        match result {
-            Ok(resp) => {
-                if let NodeCommandResult::Terminal(common::TerminalCommandResult::Created {
-                    terminal_id,
-                }) = resp.result
-                {
-                    let (cols, rows) = Self::terminal_content_size();
-
-                    let _ = self.client.send_terminal_resize(&node_id, rows, cols).await;
-
-                    self.nodes.terminal = Some(TerminalState {
-                        node_id: node_id.clone(),
-                        terminal_id: Some(terminal_id),
-                        parser: vt100::Parser::new(rows, cols, 0),
-                        scroll_offset: 0,
-                        max_scroll: Cell::new(usize::MAX),
-                        raw_output: Vec::new(),
-                        scrollback_cache: RefCell::new(None),
-                    });
+            match result {
+                Ok(resp) => {
+                    if let NodeCommandResult::Terminal(common::TerminalCommandResult::Created {
+                        terminal_id,
+                    }) = resp.result
+                    {
+                        let _ = tx.send(AppEvent::TerminalCreated {
+                            node_id,
+                            terminal_id,
+                        });
+                    } else {
+                        let _ = tx.send(AppEvent::TerminalCreateFailed(
+                            "Failed to open terminal: unexpected response".to_string(),
+                        ));
+                    }
                 }
-            }
-            Err(e) => {
-                self.orchestrator
-                    .messages
-                    .push(ConversationEntry::Error(format!(
+                Err(e) => {
+                    let _ = tx.send(AppEvent::TerminalCreateFailed(format!(
                         "Failed to open terminal: {}",
                         e
                     )));
+                }
             }
-        }
+        });
     }
 
     async fn handle_terminal_key(&mut self, key: KeyEvent) {
@@ -1482,7 +1638,7 @@ impl App {
         //
 
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('t') {
-            self.close_terminal().await;
+            self.close_terminal();
             return;
         }
 
@@ -1527,17 +1683,16 @@ impl App {
         };
 
         if let Some(ref term) = self.nodes.terminal {
-            let node_id = term.node_id.clone();
-            let _ = self.client.send_terminal_input(&node_id, data).await;
+            let _ = term.writer_tx.send(TerminalRequest::Write(data));
         }
     }
 
-    async fn close_terminal(&mut self) {
+    fn close_terminal(&mut self) {
         if let Some(ref term) = self.nodes.terminal {
-            let node_id = term.node_id.clone();
-            let _ = self.client.send_terminal_close(&node_id).await;
+            let _ = term.writer_tx.send(TerminalRequest::Close);
         }
         self.nodes.terminal = None;
+        self.nodes.terminal_opening = false;
     }
 
     fn start_session_with_selected_agent(&mut self) {
@@ -2020,6 +2175,57 @@ impl App {
         });
     }
 
+    fn refresh_library_after(&self, delay: Duration) {
+        let client = self.client.clone();
+        let tx = self.event_tx.clone();
+
+        tokio::spawn(async move {
+            let Some(tx) = tx else { return };
+
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+
+            let _ = client.request_op_def_list().await;
+            let _ = client.request_chain_list().await;
+            tokio::time::sleep(Duration::from_millis(300)).await;
+
+            let op_definitions = client.get_operation_definitions().await;
+            let chain_definitions = client.get_chain_definitions().await;
+
+            let _ = tx.send(AppEvent::LibraryRefreshed {
+                op_definitions,
+                chain_definitions,
+            });
+        });
+    }
+
+    fn refresh_execution_lists_after(&self, delay: Duration, reset_selection: bool) {
+        let client = self.client.clone();
+        let tx = self.event_tx.clone();
+
+        tokio::spawn(async move {
+            let Some(tx) = tx else { return };
+
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+
+            let _ = client.request_semantic_op_list().await;
+            let _ = client.request_chain_execution_list().await;
+            tokio::time::sleep(Duration::from_millis(300)).await;
+
+            let operations = client.get_operations().await;
+            let chain_executions = client.get_chain_executions().await;
+
+            let _ = tx.send(AppEvent::ExecutionListsRefreshed {
+                operations,
+                chain_executions,
+                reset_selection,
+            });
+        });
+    }
+
     async fn handle_operations_key(&mut self, key: KeyEvent) {
         //
         // When detail pane is focused, handle scroll and section toggles.
@@ -2457,10 +2663,7 @@ impl App {
         //
         // Refresh definitions.
         //
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        let _ = self.client.request_op_def_list().await;
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        self.operations.op_definitions = self.client.get_operation_definitions().await;
+        self.refresh_library_after(Duration::from_millis(300));
     }
 
     async fn handle_new_op_form_key(&mut self, key: KeyEvent) {
@@ -2708,20 +2911,13 @@ impl App {
                                         e
                                     )));
                             }
-                            tokio::time::sleep(Duration::from_millis(300)).await;
-                            let _ = self.client.request_op_def_list().await;
-                            tokio::time::sleep(Duration::from_millis(300)).await;
-                            self.operations.op_definitions =
-                                self.client.get_operation_definitions().await;
+                            self.refresh_library_after(Duration::from_millis(300));
                         }
                         ConfirmKind::ClearAllExecutions => {
                             let _ = self.client.clear_all_ops().await;
                             let _ = self.client.clear_all_chains().await;
-                            tokio::time::sleep(Duration::from_millis(300)).await;
-                            self.operations.operations = self.client.get_operations().await;
-                            self.operations.chain_executions =
-                                self.client.get_chain_executions().await;
                             self.operations.exec_selected = 0;
+                            self.refresh_execution_lists_after(Duration::from_millis(300), true);
                         }
                         ConfirmKind::ResetNode(node_id) => {
                             let _ = self.client.reset_node(&node_id).await;
@@ -2871,9 +3067,7 @@ impl App {
                     }
 
                     self.operations.tab = OpsTab::Executions;
-                    tokio::time::sleep(Duration::from_millis(500)).await;
-                    self.operations.operations = self.client.get_operations().await;
-                    self.operations.chain_executions = self.client.get_chain_executions().await;
+                    self.refresh_execution_lists_after(Duration::from_millis(500), false);
                 }
             }
             _ => {}

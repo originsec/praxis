@@ -16,7 +16,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState) {
     let chunks = Layout::vertical([
         Constraint::Length(1), // tabs
         Constraint::Length(1), // spacer
-        Constraint::Min(1),   // content
+        Constraint::Min(1),    // content
         Constraint::Length(1), // status
     ])
     .split(area);
@@ -57,9 +57,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState) {
 fn render_tabs(f: &mut Frame, area: Rect, state: &SettingsState) {
     let tab_style = |tab: SettingsTab| -> Style {
         if state.tab == tab {
-            Style::default()
-                .fg(ACCENT)
-                .add_modifier(Modifier::BOLD)
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(MUTED)
         }
@@ -204,10 +202,7 @@ fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(
-                if selected { "\u{25b8} " } else { "  " },
-                sel_style,
-            ),
+            Span::styled(if selected { "\u{25b8} " } else { "  " }, sel_style),
             Span::styled(
                 display,
                 if selected {
@@ -300,7 +295,11 @@ fn render_service(f: &mut Frame, area: Rect, state: &SettingsState) {
     lines.push(section_header("MCP Server"));
     lines.push(Line::raw(""));
 
-    lines.push(toggle_row("MCP Server", state.mcp_enabled, state.selected == 0));
+    lines.push(toggle_row(
+        "MCP Server",
+        state.mcp_enabled,
+        state.selected == 0,
+    ));
     lines.push(setting_row(
         "MCP Port",
         &state.mcp_port,
@@ -326,6 +325,21 @@ fn render_service(f: &mut Frame, area: Rect, state: &SettingsState) {
         &state.edit_buffer,
     ));
 
+    lines.push(Line::raw(""));
+    lines.push(section_header("Connection"));
+    lines.push(Line::raw(""));
+
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled("RabbitMQ     ", Style::default().fg(TEXT)),
+        Span::styled(&state.rabbitmq_url, Style::default().fg(MUTED)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled("Client ID    ", Style::default().fg(TEXT)),
+        Span::styled(&state.client_id, Style::default().fg(MUTED)),
+    ]));
+
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);
 }
@@ -336,7 +350,10 @@ fn render_about(f: &mut Frame, area: Rect, _state: &SettingsState) {
     let lines = vec![
         Line::raw(""),
         Line::from(vec![
-            Span::styled("Origin", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Origin",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(
                 " is an endpoint security company building protection for the semantic era of",
                 Style::default().fg(TEXT),
@@ -356,7 +373,10 @@ fn render_about(f: &mut Frame, area: Rect, _state: &SettingsState) {
         )),
         Line::raw(""),
         Line::from(vec![
-            Span::styled("Praxis", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Praxis",
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(
                 " is Origin's experimental research platform for exploring the adversarial",
                 Style::default().fg(TEXT),
@@ -383,7 +403,10 @@ fn render_about(f: &mut Frame, area: Rect, _state: &SettingsState) {
         Line::from(vec![
             Span::styled("originhq.com", Style::default().fg(ACCENT)),
             Span::styled("   ", Style::default().fg(DIM)),
-            Span::styled("praxis.originhq.com", Style::default().fg(Color::Rgb(180, 130, 220))),
+            Span::styled(
+                "praxis.originhq.com",
+                Style::default().fg(Color::Rgb(180, 130, 220)),
+            ),
         ]),
     ];
 
@@ -398,12 +421,7 @@ fn render_model_dropdown(f: &mut Frame, area: Rect, state: &SettingsState) {
     }
 
     let height = (items.len() as u16 + 2).min(area.height.saturating_sub(4));
-    let width = items
-        .iter()
-        .map(|d| d.name.len())
-        .max()
-        .unwrap_or(20) as u16
-        + 6;
+    let width = items.iter().map(|d| d.name.len()).max().unwrap_or(20) as u16 + 6;
     let width = width.min(area.width.saturating_sub(4));
 
     //
@@ -468,11 +486,7 @@ fn scroll_field_parts(text: &str, cursor_pos: usize, max_width: usize) -> (Strin
     let cpos = cursor_pos.min(len);
 
     // Determine the visible window start.
-    let start = if cpos <= visible {
-        0
-    } else {
-        cpos - visible
-    };
+    let start = if cpos <= visible { 0 } else { cpos - visible };
 
     let end = (start + max_width).min(len);
 
@@ -545,7 +559,10 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
             if prov_sel { "\u{25b8} " } else { "  " },
             Style::default().fg(if prov_sel { ACCENT } else { TEXT }),
         ),
-        Span::styled("Provider    ", Style::default().fg(if prov_sel { ACCENT } else { TEXT })),
+        Span::styled(
+            "Provider    ",
+            Style::default().fg(if prov_sel { ACCENT } else { TEXT }),
+        ),
         Span::styled(
             format!("\u{25c2} {} \u{25b8}", provider_name),
             if prov_sel {
@@ -568,37 +585,31 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
     // Helper to build a text field line with cursor support.
     //
 
-    let build_field = |label: &str,
-                       text: &str,
-                       selected: bool,
-                       editing: bool,
-                       cursor_pos: usize|
-     -> Line {
-        let sel_fg = if selected { ACCENT } else { TEXT };
-        let prefix = if selected { "\u{25b8} " } else { "  " };
+    let build_field =
+        |label: &str, text: &str, selected: bool, editing: bool, cursor_pos: usize| -> Line {
+            let sel_fg = if selected { ACCENT } else { TEXT };
+            let prefix = if selected { "\u{25b8} " } else { "  " };
 
-        if editing && selected {
-            let (before, after) =
-                scroll_field_parts(text, cursor_pos, field_max);
-            let spans = vec![
-                Span::styled(prefix, Style::default().fg(sel_fg)),
-                Span::styled(label.to_string(), Style::default().fg(sel_fg)),
-                Span::styled(before, edit_style),
-                Span::styled("\u{258f}", cursor_style),
-                Span::styled(after, edit_style),
-            ];
-            Line::from(spans)
-        } else {
-            let (before, after) =
-                scroll_field_parts(text, text.chars().count(), field_max);
-            let display = format!("{}{}", before, after);
-            Line::from(vec![
-                Span::styled(prefix, Style::default().fg(sel_fg)),
-                Span::styled(label.to_string(), Style::default().fg(sel_fg)),
-                Span::styled(display, Style::default().fg(MUTED)),
-            ])
-        }
-    };
+            if editing && selected {
+                let (before, after) = scroll_field_parts(text, cursor_pos, field_max);
+                let spans = vec![
+                    Span::styled(prefix, Style::default().fg(sel_fg)),
+                    Span::styled(label.to_string(), Style::default().fg(sel_fg)),
+                    Span::styled(before, edit_style),
+                    Span::styled("\u{258f}", cursor_style),
+                    Span::styled(after, edit_style),
+                ];
+                Line::from(spans)
+            } else {
+                let (before, after) = scroll_field_parts(text, text.chars().count(), field_max);
+                let display = format!("{}{}", before, after);
+                Line::from(vec![
+                    Span::styled(prefix, Style::default().fg(sel_fg)),
+                    Span::styled(label.to_string(), Style::default().fg(sel_fg)),
+                    Span::styled(display, Style::default().fg(MUTED)),
+                ])
+            }
+        };
 
     //
     // API key: mask when not editing.
