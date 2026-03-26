@@ -238,7 +238,7 @@ fn splash_visibility(state: &OrchestratorState) -> f32 {
         .unwrap_or_default()
         .as_millis() as u64;
 
-    const SPLASH_TOTAL_MS: u64 = 3000;
+    const SPLASH_TOTAL_MS: u64 = 2000;
     const FADE_MS: u64 = 700;
 
     if elapsed >= SPLASH_TOTAL_MS {
