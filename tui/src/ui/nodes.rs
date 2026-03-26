@@ -129,9 +129,87 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
     let inner = block.inner(area);
     f.render_widget(block, area);
 
+    //
+    // Build activity lines first to determine if section is needed.
+    //
+    let mut activity_lines: Vec<Line> = Vec::new();
+
+    if let Some(ref agent) = node.selected_agent {
+        if let Some(ref sid) = agent.session_id {
+            activity_lines.push(Line::from(Span::styled(
+                " Active Session",
+                Style::default().fg(ACCENT),
+            )));
+            activity_lines.push(Line::from(vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    &sid[..8.min(sid.len())],
+                    Style::default().fg(Color::Rgb(100, 180, 100)),
+                ),
+                Span::styled(
+                    format!("  agent: {}", agent.short_name),
+                    Style::default().fg(DIM),
+                ),
+            ]));
+            if let Some(ref tid) = agent.active_transaction_id {
+                activity_lines.push(Line::from(vec![
+                    Span::styled("  prompt: ", Style::default().fg(MUTED)),
+                    Span::styled(
+                        &tid[..8.min(tid.len())],
+                        Style::default().fg(Color::Rgb(180, 160, 60)),
+                    ),
+                ]));
+            }
+        }
+    }
+
+    let node_ops: Vec<_> = ops.iter()
+        .filter(|o| o.node_id == node.node_id)
+        .filter(|o| matches!(o.status, common::SemanticOpStatus::Running | common::SemanticOpStatus::Queued))
+        .collect();
+
+    if !node_ops.is_empty() {
+        if !activity_lines.is_empty() {
+            activity_lines.push(Line::from(""));
+        }
+        activity_lines.push(Line::from(Span::styled(
+            " Active Operations",
+            Style::default().fg(ACCENT),
+        )));
+        for op in &node_ops {
+            let (status_str, status_color) = match op.status {
+                common::SemanticOpStatus::Running => ("\u{25cf}", Color::Rgb(180, 160, 60)),
+                common::SemanticOpStatus::Queued => ("\u{25cb}", Color::Rgb(100, 140, 180)),
+                _ => ("\u{25cb}", DIM),
+            };
+            activity_lines.push(Line::from(vec![
+                Span::styled(format!("  {} ", status_str), Style::default().fg(status_color)),
+                Span::styled(&op.spec.name, Style::default().fg(TEXT)),
+                Span::styled(
+                    format!("  ({})", &op.operation_id[..8.min(op.operation_id.len())]),
+                    Style::default().fg(DIM),
+                ),
+            ]));
+        }
+    }
+
+    if node.intercept_active {
+        activity_lines.push(Line::from(Span::styled(
+            "  intercept: active",
+            Style::default().fg(Color::Rgb(180, 160, 60)),
+        )));
+    }
+
+    let activity_height = if activity_lines.is_empty() {
+        0
+    } else {
+        (activity_lines.len() as u16 + 1).min(10) // +1 for spacing
+    };
+
     let chunks = Layout::vertical([
-        Constraint::Length(3), // node header + capabilities
-        Constraint::Min(1),   // agents + active ops (scrollable)
+        Constraint::Length(3),               // node header + capabilities
+        Constraint::Min(1),                  // agents
+        Constraint::Length(activity_height), // activity (0 if none)
     ])
     .split(inner);
 
@@ -245,82 +323,20 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
         }
     }
 
-    //
-    // Active session info.
-    //
-    if let Some(ref agent) = node.selected_agent {
-        if let Some(ref sid) = agent.session_id {
-            agent_lines.push(Line::from(""));
-            agent_lines.push(Line::from(Span::styled(
-                " Active Session",
-                Style::default().fg(ACCENT),
-            )));
-            agent_lines.push(Line::from(vec![
-                Span::styled("  ", Style::default()),
-                Span::styled(
-                    &sid[..8.min(sid.len())],
-                    Style::default().fg(Color::Rgb(100, 180, 100)),
-                ),
-                Span::styled(
-                    format!("  agent: {}", agent.short_name),
-                    Style::default().fg(DIM),
-                ),
-            ]));
-            if let Some(ref tid) = agent.active_transaction_id {
-                agent_lines.push(Line::from(vec![
-                    Span::styled("  prompt: ", Style::default().fg(MUTED)),
-                    Span::styled(
-                        &tid[..8.min(tid.len())],
-                        Style::default().fg(Color::Rgb(180, 160, 60)),
-                    ),
-                ]));
-            }
-        }
-    }
-
-    //
-    // Active operations on this node.
-    //
-    let node_ops: Vec<_> = ops.iter()
-        .filter(|o| o.node_id == node.node_id)
-        .filter(|o| matches!(o.status, common::SemanticOpStatus::Running | common::SemanticOpStatus::Queued))
-        .collect();
-
-    if !node_ops.is_empty() {
-        agent_lines.push(Line::from(""));
-        agent_lines.push(Line::from(Span::styled(
-            " Active Operations",
-            Style::default().fg(ACCENT),
-        )));
-        for op in &node_ops {
-            let (status_str, status_color) = match op.status {
-                common::SemanticOpStatus::Running => ("\u{25cf}", Color::Rgb(180, 160, 60)),
-                common::SemanticOpStatus::Queued => ("\u{25cb}", Color::Rgb(100, 140, 180)),
-                _ => ("\u{25cb}", DIM),
-            };
-            agent_lines.push(Line::from(vec![
-                Span::styled(format!("  {} ", status_str), Style::default().fg(status_color)),
-                Span::styled(&op.spec.name, Style::default().fg(TEXT)),
-                Span::styled(
-                    format!("  ({})", &op.operation_id[..8.min(op.operation_id.len())]),
-                    Style::default().fg(DIM),
-                ),
-            ]));
-        }
-    }
-
-    if node.intercept_active {
-        agent_lines.push(Line::from(""));
-        agent_lines.push(Line::from(Span::styled(
-            "  intercept: active",
-            Style::default().fg(Color::Rgb(180, 160, 60)),
-        )));
-    }
-
     f.render_widget(
         Paragraph::new(Text::from(agent_lines)).wrap(Wrap { trim: false }),
         chunks[1],
     );
+
+    //
+    // Activity section — only rendered when there's something active.
+    //
+    if !activity_lines.is_empty() {
+        f.render_widget(
+            Paragraph::new(Text::from(activity_lines)).wrap(Wrap { trim: false }),
+            chunks[2],
+        );
+    }
 }
 
 fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionChat) {
