@@ -226,19 +226,22 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
     //
     // Bottom hints.
     //
-    let hints = Line::from(vec![
+    let mut hint_spans = vec![
         Span::raw(" "),
         Span::styled("\u{2191}\u{2193}", Style::default().fg(ACCENT)),
         Span::styled(" fields  ", Style::default().fg(MUTED)),
         Span::styled("space/\u{2190}\u{2192}", Style::default().fg(ACCENT)),
         Span::styled(" toggle  ", Style::default().fg(MUTED)),
-        Span::styled("enter", Style::default().fg(ACCENT)),
-        Span::styled(" create  ", Style::default().fg(MUTED)),
-        Span::styled("shift+enter", Style::default().fg(ACCENT)),
-        Span::styled(" newline  ", Style::default().fg(MUTED)),
+        Span::styled("^s", Style::default().fg(ACCENT)),
+        Span::styled(" save  ", Style::default().fg(MUTED)),
         Span::styled("esc", Style::default().fg(ACCENT)),
         Span::styled(" cancel", Style::default().fg(MUTED)),
-    ]);
+    ];
+    if form.focused_field == 8 {
+        hint_spans.push(Span::styled("  shift+enter", Style::default().fg(ACCENT)));
+        hint_spans.push(Span::styled(" newline", Style::default().fg(MUTED)));
+    }
+    let hints = Line::from(hint_spans);
     f.render_widget(Paragraph::new(hints), chunks[2]);
 }
 

@@ -81,6 +81,8 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
                 Span::styled(" execute  ", Style::default().fg(MUTED)),
                 Span::styled("^n", Style::default().fg(ACCENT)),
                 Span::styled(" new  ", Style::default().fg(MUTED)),
+                Span::styled("^e", Style::default().fg(ACCENT)),
+                Span::styled(" edit  ", Style::default().fg(MUTED)),
                 Span::styled("^d", Style::default().fg(ACCENT)),
                 Span::styled(" delete  ", Style::default().fg(MUTED)),
             ];
@@ -832,6 +834,108 @@ fn section_header_line(label: &str, collapsed: bool, focused: bool) -> Vec<Line<
             Span::styled(label.to_string(), style),
         ]),
     ]
+}
+
+pub fn execution_detail_section_at_row(
+    state: &OperationsState,
+    detail_width: u16,
+    visual_row: u16,
+) -> Option<usize> {
+    let sorted = App::sorted_exec_static(&state.operations, &state.chain_executions, &state.filter);
+    let &(is_op, orig_idx) = sorted.get(state.exec_selected)?;
+    if !is_op || detail_width == 0 {
+        return None;
+    }
+
+    let op = &state.operations[orig_idx];
+    let (status_str, _status_color) = op_status_display(&op.status);
+    let now = chrono::Utc::now();
+    let duration = match op.end_time {
+        Some(end) => format_duration(end - op.start_time),
+        None => format_duration(now - op.start_time),
+    };
+    let short_id = &op.operation_id[..8.min(op.operation_id.len())];
+
+    let mut row = 0u16;
+
+    let title_line = Line::from(format!(" Op: {}", op.spec.name));
+    row = row.saturating_add(visual_line_height(&title_line, detail_width));
+
+    let mut status_spans = vec![
+        Span::raw(" Status: "),
+        Span::raw(status_str),
+        Span::raw("  Agent: "),
+        Span::raw(op.agent_short_name.clone()),
+        Span::raw("  Mode: "),
+        Span::raw(op.spec.mode.clone()),
+        Span::raw("  Duration: "),
+        Span::raw(duration),
+        Span::raw(format!("  {}", short_id)),
+    ];
+
+    if let Some(ref result) = op.result {
+        let short_result = if result.len() > 40 {
+            format!("{}...", &result[..40])
+        } else {
+            result.replace('\n', " ")
+        };
+        status_spans.push(Span::raw("  Result: "));
+        status_spans.push(Span::raw(short_result));
+    }
+
+    let status_line = Line::from(status_spans);
+    row = row.saturating_add(visual_line_height(&status_line, detail_width));
+
+    if let Some(ref summary) = op.summary {
+        row = row.saturating_add(1);
+        if visual_row == row {
+            return Some(1);
+        }
+        row = row.saturating_add(1);
+        if !state.collapsed.sections[1] {
+            for line in crate::markdown::render(summary, "  ") {
+                row = row.saturating_add(visual_line_height(&line, detail_width));
+            }
+        }
+    }
+
+    if !op.spec.operation_prompt.is_empty() {
+        row = row.saturating_add(1);
+        if visual_row == row {
+            return Some(2);
+        }
+        row = row.saturating_add(1);
+        if !state.collapsed.sections[2] {
+            for line in op.spec.operation_prompt.lines() {
+                let line = Line::from(format!("  {}", line));
+                row = row.saturating_add(visual_line_height(&line, detail_width));
+            }
+        }
+    }
+
+    if let Some(ref output) = op.output {
+        if !output.is_empty() {
+            row = row.saturating_add(1);
+            if visual_row == row {
+                return Some(3);
+            }
+            if !state.collapsed.sections[3] {
+                row = row.saturating_add(1);
+                for line in output.lines() {
+                    let line = Line::from(format!("  {}", line));
+                    row = row.saturating_add(visual_line_height(&line, detail_width));
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn visual_line_height(line: &Line<'_>, width: u16) -> u16 {
+    let width = usize::from(width.max(1));
+    let line_width = line.width().max(1);
+    ((line_width - 1) / width + 1) as u16
 }
 
 fn op_status_display(status: &SemanticOpStatus) -> (&'static str, Color) {

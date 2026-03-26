@@ -518,6 +518,17 @@ impl App {
             AppEvent::Terminal(Event::Mouse(mouse)) => self.handle_mouse(mouse).await,
             AppEvent::Orchestrator(msg) => self.handle_orchestrator_event(msg),
             AppEvent::StateUpdate(state) => self.handle_state_update(state),
+            AppEvent::OperationsRefreshed {
+                op_definitions,
+                chain_definitions,
+                operations,
+                chain_executions,
+            } => {
+                self.operations.op_definitions = op_definitions;
+                self.operations.chain_definitions = chain_definitions;
+                self.operations.operations = operations;
+                self.operations.chain_executions = chain_executions;
+            }
             AppEvent::SessionResponse(result) => {
                 use crate::event::SessionResult;
                 if let Some(ref mut session) = self.nodes.session {
@@ -706,9 +717,12 @@ impl App {
                     return;
                 }
                 KeyCode::Char('e') => {
-                    self.active_window = Window::Operations;
-                    self.refresh_operations().await;
-                    return;
+                    if self.active_window != Window::Operations {
+                        self.active_window = Window::Operations;
+                        self.refresh_operations();
+                        return;
+                    }
+                    // Fall through to per-window handler for ^e edit.
                 }
                 KeyCode::Char('s') => {
                     self.active_window = Window::Settings;
@@ -820,7 +834,7 @@ impl App {
 
                 if col >= ops_pos && col < ops_pos + ops_label.len() as u16 {
                     self.active_window = Window::Operations;
-                    self.refresh_operations().await;
+                    self.refresh_operations();
                 } else if col >= settings_pos && col < settings_pos + settings_label.len() as u16 {
                     self.active_window = Window::Settings;
                     self.load_settings().await;
@@ -1741,21 +1755,35 @@ impl App {
         }
     }
 
-    async fn refresh_operations(&mut self) {
-        let _ = self.client.request_op_def_list().await;
-        let _ = self.client.request_semantic_op_list().await;
-        let _ = self.client.request_chain_list().await;
-        let _ = self.client.request_chain_execution_list().await;
+    fn refresh_operations(&self) {
+        let client = self.client.clone();
+        let tx = self.event_tx.clone();
 
-        //
-        // Brief delay then fetch cached results.
-        //
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        tokio::spawn(async move {
+            let Some(tx) = tx else { return };
 
-        self.operations.op_definitions = self.client.get_operation_definitions().await;
-        self.operations.chain_definitions = self.client.get_chain_definitions().await;
-        self.operations.operations = self.client.get_operations().await;
-        self.operations.chain_executions = self.client.get_chain_executions().await;
+            let _ = client.request_op_def_list().await;
+            let _ = client.request_semantic_op_list().await;
+            let _ = client.request_chain_list().await;
+            let _ = client.request_chain_execution_list().await;
+
+            //
+            // Brief delay then fetch cached results.
+            //
+            tokio::time::sleep(Duration::from_millis(300)).await;
+
+            let op_definitions = client.get_operation_definitions().await;
+            let chain_definitions = client.get_chain_definitions().await;
+            let operations = client.get_operations().await;
+            let chain_executions = client.get_chain_executions().await;
+
+            let _ = tx.send(AppEvent::OperationsRefreshed {
+                op_definitions,
+                chain_definitions,
+                operations,
+                chain_executions,
+            });
+        });
     }
 
     async fn handle_operations_key(&mut self, key: KeyEvent) {
@@ -1855,6 +1883,11 @@ impl App {
             KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if self.operations.tab == OpsTab::Library {
                     self.open_new_op_form();
+                }
+            }
+            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if self.operations.tab == OpsTab::Library {
+                    self.edit_selected_op();
                 }
             }
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -2106,6 +2139,28 @@ impl App {
         }
     }
 
+    fn edit_selected_op(&mut self) {
+        let filtered = self.filtered_library();
+        if let Some(&(idx, is_chain)) = filtered.get(self.operations.library_selected) {
+            if is_chain {
+                return; // Can't edit chains this way.
+            }
+            let def = &self.operations.op_definitions[idx];
+            self.new_op_form = Some(NewOpForm {
+                name: def.name.clone(),
+                short_name: def.short_name.clone(),
+                category: def.category.clone(),
+                description: def.description.clone(),
+                mode: if def.mode == "agent" { 1 } else { 0 },
+                timeout: def.timeout.to_string(),
+                iterations: def.agent_iterations.to_string(),
+                yolo: def.yolo_mode,
+                prompt: def.operation_prompt.clone(),
+                focused_field: 0,
+            });
+        }
+    }
+
     fn open_new_op_form(&mut self) {
         self.new_op_form = Some(NewOpForm {
             name: String::new(),
@@ -2262,7 +2317,18 @@ impl App {
             }
             KeyCode::Enter => {
                 //
-                // Validate mandatory fields and submit.
+                // Enter moves to next field (same as Down/Tab).
+                //
+                if let Some(ref mut form) = self.new_op_form {
+                    let order = visual_order(form);
+                    let pos = order.iter().position(|&f| f == form.focused_field).unwrap_or(0);
+                    let next = (pos + 1) % order.len();
+                    form.focused_field = order[next];
+                }
+            }
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                //
+                // ^s validates and submits.
                 //
                 let valid = if let Some(ref form) = self.new_op_form {
                     !form.name.is_empty()
@@ -2277,9 +2343,6 @@ impl App {
                 if valid {
                     self.submit_new_op().await;
                 } else {
-                    //
-                    // Show which fields are missing.
-                    //
                     if let Some(ref form) = self.new_op_form {
                         let mut missing = Vec::new();
                         if form.name.is_empty() { missing.push("Name"); }
@@ -2294,7 +2357,7 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char(c) => {
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if let Some(ref mut form) = self.new_op_form {
                     if !NewOpForm::is_toggle(form.focused_field) {
                         match form.focused_field {
