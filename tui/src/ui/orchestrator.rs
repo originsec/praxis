@@ -304,78 +304,99 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
         let source_y = (logo_y as f32 + 2.5).min(h.saturating_sub(1) as f32);
 
         //
-        // Rays grow outward over 2s with ease-out cubic, then hold.
+        // Rays emanate from P, rotate slowly, fade with distance and time.
         //
-        let growth = (elapsed_ms / 2000.0).clamp(0.0, 1.0);
-        let eased = 1.0 - (1.0 - growth).powi(3);
-        let max_len = (w.max(h) as f32 * 0.9).max(20.0);
-        let reach = max_len * eased;
-        let wave = elapsed_ms / 100.0;
+        let rotation = elapsed_ms / 600.0;
+        let max_len = 28.0_f32;
         let ray_count = 16usize;
 
+        //
+        // Glyphs by distance: bright core -> beam body -> wispy tail.
+        //
+        let core_glyphs: &[char] = &['█', '▓', '◆', '✦'];
+        let beam_glyphs: &[char] = &['▒', '═', '║', '╱', '╲'];
+        let tail_glyphs: &[char] = &['░', '·', '∙', ':', '˙'];
+
         for ray_idx in 0..ray_count {
-            let angle = (ray_idx as f32 / ray_count as f32) * std::f32::consts::TAU;
+            let base_angle = (ray_idx as f32 / ray_count as f32) * std::f32::consts::TAU;
+            let angle = base_angle + rotation;
             let dir_x = angle.cos();
-            let dir_y = angle.sin() * 0.5; // terminal aspect ratio correction
+            let dir_y = angle.sin() * 0.5; // terminal aspect ratio
 
             let mut step = 1.5_f32;
-            while step <= reach {
+            while step <= max_len {
                 let x = source_x + dir_x * step;
                 let y = source_y + dir_y * step;
                 let px = x.round() as i32;
                 let py = y.round() as i32;
 
                 if px < 0 || py < 0 || px >= w as i32 || py >= h as i32 {
-                    step += 0.8;
+                    step += 0.7;
                     continue;
                 }
 
                 let idx = py as usize * w + px as usize;
-                let dist_norm = step / max_len;
-                let falloff = (1.0 - dist_norm).clamp(0.0, 1.0).powf(0.55);
+                let progress = step / max_len;
+                let falloff = (1.0 - progress).clamp(0.0, 1.0).powf(0.45);
 
                 //
-                // Bright tip at the leading edge of each growing ray.
+                // Shimmer wave that crawls outward along each ray.
                 //
-                let tip_dist = (step - reach).abs();
-                let tip = if tip_dist < 3.0 {
-                    (1.0 - tip_dist / 3.0) * 0.35
-                } else {
-                    0.0
-                };
+                let shimmer = ((step * 0.9 - elapsed_ms / 80.0 + ray_idx as f32 * 0.7)
+                    .sin()
+                    * 0.5
+                    + 0.5)
+                    * 0.25;
 
-                //
-                // Shimmer: sine-wave sparkle travelling outward.
-                //
-                let shimmer =
-                    ((step * 0.7 - wave + ray_idx as f32 * 1.3).sin() * 0.5 + 0.5) * 0.2;
-
-                let brightness = (falloff + tip + shimmer).clamp(0.0, 1.0) * animation_fade;
-                if brightness < 0.06 {
-                    step += 0.8;
+                let brightness = (falloff + shimmer).clamp(0.0, 1.0) * animation_fade;
+                if brightness < 0.05 {
+                    step += 0.7;
                     continue;
                 }
 
-                let ch = if tip_dist < 1.5 && brightness > 0.55 {
-                    '*'
-                } else if brightness > 0.75 {
-                    '+'
-                } else if dir_x.abs() > 0.85 {
-                    '-'
-                } else if dir_y.abs() > 0.55 {
-                    '|'
-                } else if dir_x.signum() == dir_y.signum() {
-                    '\\'
+                let step_hash = ((step * 7.3 + ray_idx as f32 * 13.1) as u32) as usize;
+
+                let ch = if progress < 0.15 {
+                    core_glyphs[step_hash % core_glyphs.len()]
+                } else if progress < 0.55 {
+                    let bi = step_hash % beam_glyphs.len();
+                    if dir_x.abs() > 0.8 {
+                        beam_glyphs[1] // ═
+                    } else if dir_y.abs() > 0.6 {
+                        beam_glyphs[2] // ║
+                    } else if dir_x.signum() == dir_y.signum() {
+                        beam_glyphs[4] // ╲
+                    } else {
+                        beam_glyphs[3] // ╱
+                    }
                 } else {
-                    '/'
+                    tail_glyphs[step_hash % tail_glyphs.len()]
                 };
 
-                let priority = if brightness > 0.6 { 7 } else { 5 };
-                let color = Color::Rgb(
-                    (150.0 * brightness).min(255.0) as u8,
-                    (240.0 * brightness).min(255.0) as u8,
-                    (140.0 * brightness).min(255.0) as u8,
-                );
+                let priority = if progress < 0.15 { 8 } else if progress < 0.55 { 6 } else { 4 };
+
+                //
+                // Color shifts from bright white-green core to dim green tail.
+                //
+                let color = if progress < 0.15 {
+                    Color::Rgb(
+                        (200.0 * brightness).min(255.0) as u8,
+                        (255.0 * brightness).min(255.0) as u8,
+                        (200.0 * brightness).min(255.0) as u8,
+                    )
+                } else if progress < 0.55 {
+                    Color::Rgb(
+                        (130.0 * brightness).min(255.0) as u8,
+                        (220.0 * brightness).min(255.0) as u8,
+                        (120.0 * brightness).min(255.0) as u8,
+                    )
+                } else {
+                    Color::Rgb(
+                        (70.0 * brightness).min(255.0) as u8,
+                        (140.0 * brightness).min(255.0) as u8,
+                        (70.0 * brightness).min(255.0) as u8,
+                    )
+                };
 
                 if bg[idx].map(|e| e.priority).unwrap_or(0) <= priority {
                     bg[idx] = Some(BgCell { ch, color, priority });
