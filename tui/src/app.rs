@@ -792,9 +792,10 @@ impl App {
 
         if self.nodes.terminal.is_some() && self.active_window == Window::Nodes {
             if let Some(ref mut term) = self.nodes.terminal {
+                let max_scroll = term.raw_output.iter().filter(|&&b| b == b'\n').count();
                 match mouse.kind {
                     MouseEventKind::ScrollUp => {
-                        term.scroll_offset = term.scroll_offset.saturating_add(3);
+                        term.scroll_offset = (term.scroll_offset + 3).min(max_scroll);
                     }
                     MouseEventKind::ScrollDown => {
                         term.scroll_offset = term.scroll_offset.saturating_sub(3);
