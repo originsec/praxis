@@ -276,6 +276,42 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState) {
         ),
     ]));
 
+    //
+    // Active session info.
+    //
+    if let Some(ref agent) = node.selected_agent {
+        if let Some(ref sid) = agent.session_id {
+            cap_lines.push(Line::from(""));
+            cap_lines.push(Line::from(vec![
+                Span::styled("  session: ", Style::default().fg(MUTED)),
+                Span::styled(
+                    &sid[..8.min(sid.len())],
+                    Style::default().fg(Color::Rgb(100, 180, 100)),
+                ),
+                Span::styled(
+                    format!(" ({})", agent.short_name),
+                    Style::default().fg(DIM),
+                ),
+            ]));
+            if let Some(ref tid) = agent.active_transaction_id {
+                cap_lines.push(Line::from(vec![
+                    Span::styled("  active prompt: ", Style::default().fg(MUTED)),
+                    Span::styled(
+                        &tid[..8.min(tid.len())],
+                        Style::default().fg(Color::Rgb(180, 160, 60)),
+                    ),
+                ]));
+            }
+        }
+    }
+
+    if node.intercept_active {
+        cap_lines.push(Line::from(Span::styled(
+            "  intercept: active",
+            Style::default().fg(Color::Rgb(180, 160, 60)),
+        )));
+    }
+
     f.render_widget(Paragraph::new(Text::from(cap_lines)), chunks[2]);
 }
 

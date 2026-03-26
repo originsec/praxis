@@ -601,6 +601,18 @@ impl Client {
         self.publish_signal(message).await
     }
 
+    pub async fn request_chain_def(&self, chain_id: &str) -> Result<()> {
+        let message = ClientSignalMessage::ChainGet {
+            client_id: self.client_id.clone(),
+            chain_id: chain_id.to_string(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn get_current_chain(&self) -> Option<ChainDefinitionFull> {
+        self.state.lock().await.current_chain.clone()
+    }
+
     pub async fn remove_chain_execution(&self, execution_id: String) -> Result<()> {
         let message = ClientSignalMessage::ChainExecutionRemove { execution_id };
         self.publish_signal(message).await

@@ -550,6 +550,56 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         }
 
         //
+        // Chain flow graph (horizontal ASCII representation).
+        //
+        if !exec.elements.is_empty() {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(" Flow", Style::default().fg(ACCENT))));
+
+            let mut elements: Vec<_> = exec.elements.iter().collect();
+            elements.sort_by_key(|(_, el)| el.started_at);
+
+            //
+            // Build a compact flow line: [Type] ──> [Type] ──> ...
+            //
+            let mut flow_spans: Vec<Span<'static>> = Vec::new();
+            flow_spans.push(Span::raw("  "));
+
+            for (i, (_, el)) in elements.iter().enumerate() {
+                let (icon, color) = element_status_display(&el.status);
+                let type_name = match &el.config {
+                    Some(common::ElementConfig::Trigger) => "Trigger".to_string(),
+                    Some(common::ElementConfig::Operation { operation_name, .. }) => {
+                        let short = operation_name.split("::").last().unwrap_or(operation_name);
+                        format!("Op:{}", short)
+                    }
+                    Some(common::ElementConfig::Transform { .. }) => "Transform".to_string(),
+                    Some(common::ElementConfig::GenericPrompt { prompt, .. }) => {
+                        let short = if prompt.len() > 12 { &prompt[..12] } else { prompt };
+                        format!("\"{}\"", short)
+                    }
+                    Some(common::ElementConfig::Memory { key, .. }) => format!("Mem:{}", key),
+                    Some(common::ElementConfig::Loop { max_iterations, .. }) => format!("Loop:{}", max_iterations),
+                    Some(common::ElementConfig::Tool { tool_name, .. }) => format!("Tool:{}", tool_name),
+                    Some(common::ElementConfig::Payload { .. }) => "Payload".to_string(),
+                    Some(common::ElementConfig::Termination) => "End".to_string(),
+                    None => "?".to_string(),
+                };
+
+                if i > 0 {
+                    flow_spans.push(Span::styled(" \u{2500}\u{25b8} ", Style::default().fg(DIM)));
+                }
+
+                flow_spans.push(Span::styled(
+                    format!("{} {}", icon, type_name),
+                    Style::default().fg(color),
+                ));
+            }
+
+            lines.push(Line::from(flow_spans));
+        }
+
+        //
         // Execution steps (elements) with full detail.
         //
         if !exec.elements.is_empty() {

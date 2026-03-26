@@ -1036,13 +1036,47 @@ impl App {
             match key.code {
                 KeyCode::Char('c') => {
                     //
-                    // Cancel waiting or close session.
+                    // Cancel active transaction or close session.
                     //
-                    if let Some(ref session) = self.nodes.session {
-                        if !session.is_waiting {
+                    if let Some(ref mut session) = self.nodes.session {
+                        if session.is_waiting {
+                            //
+                            // Send CancelTransaction to abort the active prompt.
+                            //
+                            let client = self.client.clone();
+                            let node_id = session.node_id.clone();
+                            tokio::spawn(async move {
+                                use common::SessionCommand;
+                                let _ = client.send_command(
+                                    &node_id,
+                                    NodeCommand::Session(SessionCommand::CancelTransaction {
+                                        transaction_id: String::new(),
+                                        force: false,
+                                    }),
+                                ).await;
+                            });
+                            session.is_waiting = false;
+                            session.messages.push(ChatMessage {
+                                role: ChatRole::System,
+                                text: "Cancelled".to_string(),
+                            });
+                        } else {
+                            //
+                            // Not waiting — close session.
+                            //
+                            let client = self.client.clone();
+                            let node_id = session.node_id.clone();
+                            if session.session_id.is_some() {
+                                tokio::spawn(async move {
+                                    use common::SessionCommand;
+                                    let _ = client.send_command(
+                                        &node_id,
+                                        NodeCommand::Session(SessionCommand::Close),
+                                    ).await;
+                                });
+                            }
                             self.nodes.session = None;
                         }
-                        // TODO: cancel transaction
                     }
                     return;
                 }
