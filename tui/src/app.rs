@@ -3361,12 +3361,14 @@ impl App {
                 let form = self.settings.model_form.as_mut().unwrap();
                 if form.focused_field > 0 {
                     form.focused_field -= 1;
+                    Self::sync_model_form_edit(form);
                 }
             }
             KeyCode::Down | KeyCode::Tab => {
                 let form = self.settings.model_form.as_mut().unwrap();
                 if form.focused_field < 2 {
                     form.focused_field += 1;
+                    Self::sync_model_form_edit(form);
                 }
             }
             KeyCode::Left => {
@@ -3391,23 +3393,9 @@ impl App {
             }
             KeyCode::Enter => {
                 let form = self.settings.model_form.as_mut().unwrap();
-                match form.focused_field {
-                    0 => {
-                        // Provider field — cycle is done with left/right.
-                        // Enter moves to next field.
-                        form.focused_field = 1;
-                    }
-                    1 => {
-                        // API key — start editing.
-                        form.editing_text = true;
-                        form.cursor_pos = form.api_key.chars().count();
-                    }
-                    2 => {
-                        // Model name — start editing.
-                        form.editing_text = true;
-                        form.cursor_pos = form.model_name.chars().count();
-                    }
-                    _ => {}
+                if form.focused_field == 0 {
+                    form.focused_field = 1;
+                    Self::sync_model_form_edit(form);
                 }
             }
             KeyCode::Char('l')
@@ -3461,6 +3449,22 @@ impl App {
             Err(e) => {
                 self.settings.status_message =
                     Some(format!("Failed to load models: {}", e));
+            }
+        }
+    }
+
+    fn sync_model_form_edit(form: &mut ModelEditForm) {
+        match form.focused_field {
+            1 => {
+                form.editing_text = true;
+                form.cursor_pos = form.api_key.chars().count();
+            }
+            2 => {
+                form.editing_text = true;
+                form.cursor_pos = form.model_name.chars().count();
+            }
+            _ => {
+                form.editing_text = false;
             }
         }
     }

@@ -551,7 +551,7 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
         Span::styled(
             format!("\u{25c2} {} \u{25b8}", provider_name),
             if prov_sel {
-                Style::default().fg(EDIT_FG).bg(Color::Rgb(50, 55, 50))
+                Style::default().fg(EDIT_FG)
             } else {
                 Style::default().fg(MUTED)
             },
