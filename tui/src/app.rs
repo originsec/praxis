@@ -7,6 +7,7 @@ use common::{
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
+use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -237,6 +238,7 @@ pub struct SessionChat {
     pub node_id: String,
     pub agent_name: String,
     pub session_id: Option<String>,
+    pub active_transaction_id: Option<String>,
     pub messages: Vec<ChatMessage>,
     pub input: String,
     pub cursor_pos: usize,
@@ -513,7 +515,7 @@ impl App {
             AppEvent::Terminal(Event::Key(key)) if key.kind == crossterm::event::KeyEventKind::Press => {
                 self.handle_key(key).await;
             }
-            AppEvent::Terminal(Event::Mouse(mouse)) => self.handle_mouse(mouse),
+            AppEvent::Terminal(Event::Mouse(mouse)) => self.handle_mouse(mouse).await,
             AppEvent::Orchestrator(msg) => self.handle_orchestrator_event(msg),
             AppEvent::StateUpdate(state) => self.handle_state_update(state),
             AppEvent::SessionResponse(result) => {
@@ -527,13 +529,35 @@ impl App {
                                 text: format!("Session created ({})", &sid[..8.min(sid.len())]),
                             });
                         }
-                        SessionResult::Response(text) => {
+                        SessionResult::Response {
+                            transaction_id,
+                            text,
+                        } => {
+                            if session.active_transaction_id.as_deref()
+                                != Some(transaction_id.as_str())
+                            {
+                                return;
+                            }
                             session.messages.push(ChatMessage {
                                 role: ChatRole::Agent,
                                 text,
                             });
                             session.is_waiting = false;
+                            session.active_transaction_id = None;
                             session.scroll_offset = 0;
+                        }
+                        SessionResult::Cancelled(transaction_id) => {
+                            if session.active_transaction_id.as_deref()
+                                != Some(transaction_id.as_str())
+                            {
+                                return;
+                            }
+                            session.messages.push(ChatMessage {
+                                role: ChatRole::System,
+                                text: "Cancelled".to_string(),
+                            });
+                            session.is_waiting = false;
+                            session.active_transaction_id = None;
                         }
                         SessionResult::Error(msg) => {
                             session.messages.push(ChatMessage {
@@ -541,6 +565,7 @@ impl App {
                                 text: format!("Error: {}", msg),
                             });
                             session.is_waiting = false;
+                            session.active_transaction_id = None;
                         }
                     }
                 }
@@ -702,9 +727,22 @@ impl App {
         }
     }
 
-    fn handle_mouse(&mut self, mouse: MouseEvent) {
+    async fn handle_mouse(&mut self, mouse: MouseEvent) {
         let h = self.terminal_width;
         let term_h = crossterm::terminal::size().map(|(_, h)| h).unwrap_or(40);
+        let terminal_area = Rect::new(0, 0, h, term_h);
+        let inner_area = terminal_area.inner(Margin {
+            vertical: 1,
+            horizontal: 2,
+        });
+        let frame_chunks = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
+        .split(inner_area);
+        let content_area = frame_chunks[1];
+        let status_area = frame_chunks[2];
 
         match mouse.kind {
             MouseEventKind::ScrollUp => {
@@ -750,33 +788,45 @@ impl App {
         }
 
         //
-        // Status bar clicks — last row.
+        // Status bar clicks.
         //
-        if mouse.row >= term_h.saturating_sub(1) {
+        if mouse.row == status_area.y {
             if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
                 let col = mouse.column;
-                //
-                // Approximate positions of status bar items.
-                //
-                if col < 30 {
-                    // node count area — ignore
-                } else if col < 50 {
-                    // first item region
-                }
-                // Check text positions for ^o, ^l, ^e
-                // Simpler: use column ranges based on typical layout
+                let node_count = self.nodes.nodes.len();
+                let node_text = if node_count == 1 {
+                    "1 node".to_string()
+                } else {
+                    format!("{} nodes", node_count)
+                };
+                let orch_label = "^o orchestrator";
+                let nodes_label = "^l nodes";
+                let ops_label = "^e ops";
+                let settings_label = "^s settings";
                 let status_text = format!(
-                    " 0 nodes  \u{00b7} ^o orchestrator  ^l nodes  ^e ops  \u{00b7} ^q quit"
+                    " {}  \u{00b7} {}  {}  {}  {} \u{00b7} ^q quit",
+                    node_text,
+                    orch_label,
+                    nodes_label,
+                    ops_label,
+                    settings_label
                 );
-                let orch_pos = status_text.find("^o").unwrap_or(999) as u16;
-                let nodes_pos = status_text.find("^l").unwrap_or(999) as u16;
-                let ops_pos = status_text.find("^e").unwrap_or(999) as u16;
+                let orch_pos = status_area.x + status_text.find(orch_label).unwrap_or(999) as u16;
+                let nodes_pos =
+                    status_area.x + status_text.find(nodes_label).unwrap_or(999) as u16;
+                let ops_pos = status_area.x + status_text.find(ops_label).unwrap_or(999) as u16;
+                let settings_pos =
+                    status_area.x + status_text.find(settings_label).unwrap_or(999) as u16;
 
-                if col >= ops_pos && col < ops_pos + 7 {
+                if col >= ops_pos && col < ops_pos + ops_label.len() as u16 {
                     self.active_window = Window::Operations;
-                } else if col >= nodes_pos && col < nodes_pos + 9 {
+                    self.refresh_operations().await;
+                } else if col >= settings_pos && col < settings_pos + settings_label.len() as u16 {
+                    self.active_window = Window::Settings;
+                    self.load_settings().await;
+                } else if col >= nodes_pos && col < nodes_pos + nodes_label.len() as u16 {
                     self.active_window = Window::Nodes;
-                } else if col >= orch_pos && col < orch_pos + 16 {
+                } else if col >= orch_pos && col < orch_pos + orch_label.len() as u16 {
                     self.active_window = Window::Orchestrator;
                 }
                 return;
@@ -787,33 +837,56 @@ impl App {
         // Operations window tab clicks and list clicks.
         //
         if self.active_window == Window::Operations {
+            let ops_chunks = Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(1),
+                Constraint::Length(1),
+            ])
+            .split(content_area);
+            let tabs_area = ops_chunks[0];
+            let main_area = ops_chunks[2];
+            let split = match self.operations.tab {
+                OpsTab::Library => Layout::horizontal([
+                    Constraint::Percentage(self.operations.split_percent),
+                    Constraint::Percentage(100 - self.operations.split_percent),
+                ])
+                .split(main_area),
+                OpsTab::Executions => Layout::horizontal([
+                    Constraint::Percentage(60),
+                    Constraint::Percentage(40),
+                ])
+                .split(main_area),
+            };
+            let list_area = split[0];
+            let detail_area = split[1];
+            let detail_inner = Rect::new(
+                detail_area.x.saturating_add(1),
+                detail_area.y.saturating_add(1),
+                detail_area.width.saturating_sub(2),
+                detail_area.height.saturating_sub(2),
+            );
+
             match mouse.kind {
                 MouseEventKind::Down(MouseButton::Left) => {
-                    //
-                    // Tab bar is at row 1 (after header row 0).
-                    //
-                    if mouse.row <= 2 {
-                        if mouse.column < 20 {
+                    if mouse.row == tabs_area.y {
+                        let rel_col = mouse.column.saturating_sub(tabs_area.x);
+                        if rel_col < 20 {
                             self.operations.tab = OpsTab::Library;
-                        } else if mouse.column < 40 {
+                        } else if rel_col < 40 {
                             self.operations.tab = OpsTab::Executions;
                         }
                         return;
                     }
 
-                    //
-                    // List item click — rows start at ~4 (tabs + separator + header).
-                    //
-                    let list_start_row = 4u16;
-                    if mouse.row >= list_start_row {
-                        let clicked_idx = (mouse.row - list_start_row) as usize;
-                        let border_x =
-                            (h as u32 * self.operations.split_percent as u32 / 100) as u16;
-
-                        if mouse.column < border_x {
-                            //
-                            // Left pane click.
-                            //
+                    if mouse.column >= list_area.x
+                        && mouse.column < list_area.x.saturating_add(list_area.width)
+                    {
+                        let list_start_row = list_area.y.saturating_add(2);
+                        if mouse.row >= list_start_row
+                            && mouse.row < list_area.y.saturating_add(list_area.height)
+                        {
+                            let clicked_idx = (mouse.row - list_start_row) as usize;
                             match self.operations.tab {
                                 OpsTab::Library => {
                                     let total = self.ops_library_count();
@@ -823,8 +896,7 @@ impl App {
                                     }
                                 }
                                 OpsTab::Executions => {
-                                    let total = self.operations.operations.len()
-                                        + self.operations.chain_executions.len();
+                                    let total = self.sorted_executions().len();
                                     if clicked_idx < total {
                                         self.operations.exec_selected = clicked_idx;
                                         self.operations.detail_scroll = 0;
@@ -832,23 +904,55 @@ impl App {
                                     }
                                 }
                             }
-                        } else {
-                            //
-                            // Right pane (detail) click — focus it.
-                            //
-                            self.operations.detail_focus = true;
                         }
+                        return;
+                    }
+
+                    if mouse.column >= detail_area.x
+                        && mouse.column < detail_area.x.saturating_add(detail_area.width)
+                        && mouse.row >= detail_area.y
+                        && mouse.row < detail_area.y.saturating_add(detail_area.height)
+                    {
+                        self.operations.detail_focus = true;
+
+                        if self.operations.tab == OpsTab::Executions
+                            && mouse.column >= detail_inner.x
+                            && mouse.column < detail_inner.x.saturating_add(detail_inner.width)
+                            && mouse.row >= detail_inner.y
+                            && mouse.row < detail_inner.y.saturating_add(detail_inner.height)
+                        {
+                            let visual_row = mouse
+                                .row
+                                .saturating_sub(detail_inner.y)
+                                .saturating_add(self.operations.detail_scroll);
+                            if let Some(section_idx) =
+                                crate::ui::operations::execution_detail_section_at_row(
+                                    &self.operations,
+                                    detail_inner.width,
+                                    visual_row,
+                                )
+                            {
+                                self.operations.collapsed.focused_section = section_idx;
+                                if section_idx < self.operations.collapsed.sections.len() {
+                                    self.operations.collapsed.sections[section_idx] =
+                                        !self.operations.collapsed.sections[section_idx];
+                                }
+                            }
+                        }
+                        return;
                     }
 
                     //
                     // Pane border drag start.
                     //
-                    let border_x = (h as u32 * self.operations.split_percent as u32 / 100) as u16;
-                    if mouse.column >= border_x.saturating_sub(1)
-                        && mouse.column <= border_x + 1
-                        && mouse.row > 2
-                    {
-                        self.operations.dragging = true;
+                    if self.operations.tab == OpsTab::Library {
+                        let border_x = list_area.x.saturating_add(list_area.width);
+                        if mouse.column >= border_x.saturating_sub(1)
+                            && mouse.column <= border_x + 1
+                            && mouse.row >= main_area.y
+                        {
+                            self.operations.dragging = true;
+                        }
                     }
                 }
                 MouseEventKind::Drag(MouseButton::Left) => {
@@ -1294,6 +1398,7 @@ impl App {
             node_id: node_id.clone(),
             agent_name: agent.clone(),
             session_id: None,
+            active_transaction_id: None,
             messages: Vec::new(),
             input: String::new(),
             cursor_pos: 0,
@@ -1368,27 +1473,60 @@ impl App {
                     //
                     if let Some(ref mut session) = self.nodes.session {
                         if session.is_waiting {
-                            //
-                            // Send CancelTransaction to abort the active prompt.
-                            //
+                            let Some(transaction_id) = session.active_transaction_id.clone() else {
+                                return;
+                            };
                             let client = self.client.clone();
                             let node_id = session.node_id.clone();
+                            let tx = self.event_tx.clone();
                             tokio::spawn(async move {
+                                use crate::event::{AppEvent, SessionResult};
                                 use common::SessionCommand;
-                                let _ = client
+                                let Some(tx) = tx else { return };
+
+                                match client
                                     .send_command(
                                         &node_id,
                                         NodeCommand::Session(SessionCommand::CancelTransaction {
-                                            transaction_id: String::new(),
+                                            transaction_id: transaction_id.clone(),
                                             force: false,
                                         }),
                                     )
-                                    .await;
+                                    .await
+                                {
+                                    Ok(resp) => match resp.result {
+                                        NodeCommandResult::Session(
+                                            common::SessionCommandResult::TransactionCancelled {
+                                                transaction_id,
+                                            },
+                                        ) => {
+                                            let _ = tx.send(AppEvent::SessionResponse(
+                                                SessionResult::Cancelled(transaction_id),
+                                            ));
+                                        }
+                                        NodeCommandResult::Error { message } => {
+                                            let _ = tx.send(AppEvent::SessionResponse(
+                                                SessionResult::Error(message),
+                                            ));
+                                        }
+                                        _ => {
+                                            let _ = tx.send(AppEvent::SessionResponse(
+                                                SessionResult::Error(
+                                                    "Unexpected response".to_string(),
+                                                ),
+                                            ));
+                                        }
+                                    },
+                                    Err(e) => {
+                                        let _ = tx.send(AppEvent::SessionResponse(
+                                            SessionResult::Error(format!("{}", e)),
+                                        ));
+                                    }
+                                }
                             });
-                            session.is_waiting = false;
                             session.messages.push(ChatMessage {
                                 role: ChatRole::System,
-                                text: "Cancelled".to_string(),
+                                text: "Cancelling...".to_string(),
                             });
                         } else {
                             //
@@ -1457,11 +1595,11 @@ impl App {
                 session.input.clear();
                 session.cursor_pos = 0;
                 session.is_waiting = true;
+                session.active_transaction_id = Some(uuid::Uuid::new_v4().to_string());
                 session.scroll_offset = 0;
 
-                let needs_create = session.session_id.is_none();
                 let node_id = session.node_id.clone();
-                let agent_name = session.agent_name.clone();
+                let transaction_id = session.active_transaction_id.clone().unwrap_or_default();
 
                 //
                 // Spawn background task for network calls.
@@ -1472,65 +1610,40 @@ impl App {
 
                 tokio::spawn(async move {
                     use crate::event::{AppEvent, SessionResult};
-                    use common::{AgentCommand, SessionCommand, SessionContext};
+                    use common::SessionCommand;
 
                     let Some(tx) = tx else { return };
-
-                    if needs_create {
-                        let _ = client
-                            .send_command(
-                                &node_id,
-                                NodeCommand::Agent(AgentCommand::Select {
-                                    short_name: agent_name.clone(),
-                                }),
-                            )
-                            .await;
-
-                        match client
-                            .send_command(
-                                &node_id,
-                                NodeCommand::Session(SessionCommand::Create {
-                                    context: SessionContext::default(),
-                                }),
-                            )
-                            .await
-                        {
-                            Ok(resp) => {
-                                if let NodeCommandResult::Session(
-                                    common::SessionCommandResult::Created { session_id },
-                                ) = resp.result
-                                {
-                                    let _ = tx.send(AppEvent::SessionResponse(
-                                        SessionResult::Created(session_id),
-                                    ));
-                                }
-                            }
-                            Err(e) => {
-                                let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error(
-                                    format!("Session create failed: {}", e),
-                                )));
-                                return;
-                            }
-                        }
-                    }
-
-                    let tid = uuid::Uuid::new_v4().to_string();
                     match client
                         .send_command(
                             &node_id,
                             NodeCommand::Session(SessionCommand::Prompt {
                                 text: input,
-                                transaction_id: tid,
+                                transaction_id: transaction_id.clone(),
                             }),
                         )
                         .await
                     {
                         Ok(resp) => match resp.result {
                             NodeCommandResult::Session(
-                                common::SessionCommandResult::PromptResponse { response, .. },
+                                common::SessionCommandResult::PromptResponse {
+                                    transaction_id,
+                                    response,
+                                },
                             ) => {
                                 let _ = tx.send(AppEvent::SessionResponse(
-                                    SessionResult::Response(response),
+                                    SessionResult::Response {
+                                        transaction_id,
+                                        text: response,
+                                    },
+                                ));
+                            }
+                            NodeCommandResult::Session(
+                                common::SessionCommandResult::TransactionCancelled {
+                                    transaction_id,
+                                },
+                            ) => {
+                                let _ = tx.send(AppEvent::SessionResponse(
+                                    SessionResult::Cancelled(transaction_id),
                                 ));
                             }
                             NodeCommandResult::Error { message } => {
@@ -1714,8 +1827,7 @@ impl App {
                     }
                 }
                 OpsTab::Executions => {
-                    let total =
-                        self.operations.operations.len() + self.operations.chain_executions.len();
+                    let total = self.sorted_executions().len();
                     if self.operations.exec_selected + 1 < total {
                         self.operations.exec_selected += 1;
                         self.operations.detail_scroll = 0;
@@ -1795,11 +1907,22 @@ impl App {
         //
         // Returns (original_index, is_chain) for items matching the filter.
         //
-        let filter = self.operations.filter.to_lowercase();
-        let mut result = Vec::new();
-        let mut idx = 0;
+        Self::filtered_library_static(
+            &self.operations.op_definitions,
+            &self.operations.chain_definitions,
+            &self.operations.filter,
+        )
+    }
 
-        for def in &self.operations.op_definitions {
+    pub fn filtered_library_static(
+        op_definitions: &[common::OperationDefinitionInfo],
+        chain_definitions: &[common::ChainDefinitionInfo],
+        filter: &str,
+    ) -> Vec<(usize, bool)> {
+        let filter = filter.to_lowercase();
+        let mut result = Vec::new();
+
+        for (idx, def) in op_definitions.iter().enumerate() {
             if def.disabled {
                 continue;
             }
@@ -1810,11 +1933,9 @@ impl App {
             {
                 result.push((idx, false));
             }
-            idx += 1;
         }
 
-        let mut cidx = 0;
-        for chain in &self.operations.chain_definitions {
+        for (idx, chain) in chain_definitions.iter().enumerate() {
             if chain.disabled {
                 continue;
             }
@@ -1822,9 +1943,8 @@ impl App {
                 || chain.name.to_lowercase().contains(&filter)
                 || chain.category.to_lowercase().contains(&filter)
             {
-                result.push((cidx, true));
+                result.push((idx, true));
             }
-            cidx += 1;
         }
 
         result
@@ -1898,33 +2018,16 @@ impl App {
     }
 
     fn open_run_target_popup(&mut self) {
-        let enabled_ops: Vec<_> = self
-            .operations
-            .op_definitions
-            .iter()
-            .filter(|d| !d.disabled)
-            .collect();
-        let enabled_chains: Vec<_> = self
-            .operations
-            .chain_definitions
-            .iter()
-            .filter(|c| !c.disabled)
-            .collect();
-
-        let idx = self.operations.library_selected;
-        let (op_name, is_chain, chain_id) = if idx < enabled_ops.len() {
-            (enabled_ops[idx].full_name.clone(), false, None)
+        let filtered = self.filtered_library();
+        let Some(&(idx, is_chain)) = filtered.get(self.operations.library_selected) else {
+            return;
+        };
+        let (op_name, chain_id) = if is_chain {
+            let chain = &self.operations.chain_definitions[idx];
+            (chain.name.clone(), Some(chain.id.clone()))
         } else {
-            let ci = idx - enabled_ops.len();
-            if ci < enabled_chains.len() {
-                (
-                    enabled_chains[ci].name.clone(),
-                    true,
-                    Some(enabled_chains[ci].id.clone()),
-                )
-            } else {
-                return;
-            }
+            let op = &self.operations.op_definitions[idx];
+            (op.full_name.clone(), None)
         };
 
         //
@@ -2240,18 +2343,15 @@ impl App {
     }
 
     async fn delete_selected_op(&mut self) {
-        let enabled_ops: Vec<_> = self
-            .operations
-            .op_definitions
-            .iter()
-            .filter(|d| !d.disabled)
-            .collect();
+        let filtered = self.filtered_library();
+        let Some(&(idx, is_chain)) = filtered.get(self.operations.library_selected) else {
+            return;
+        };
 
-        let idx = self.operations.library_selected;
-
-        if idx < enabled_ops.len() {
-            let full_name = enabled_ops[idx].full_name.clone();
-            let name = enabled_ops[idx].name.clone();
+        if !is_chain {
+            let op = &self.operations.op_definitions[idx];
+            let full_name = op.full_name.clone();
+            let name = op.name.clone();
             self.confirm = Some(ConfirmAction {
                 message: format!("Delete operation \"{}\" ({})?", name, full_name),
                 action: ConfirmKind::DeleteOp(full_name),
@@ -2326,10 +2426,11 @@ impl App {
             }
             KeyCode::Tab => {
                 //
-                // Tab cycles sections: nodes → agents → yolo.
+                // Tab cycles visible sections only.
                 //
                 if let Some(ref mut opts) = self.run_options {
-                    opts.focused_section = (opts.focused_section + 1) % 3;
+                    let section_count = if opts.is_chain { 2 } else { 3 };
+                    opts.focused_section = (opts.focused_section + 1) % section_count;
                     opts.cursor = 0;
                 }
             }
@@ -2337,11 +2438,20 @@ impl App {
                 if let Some(ref mut opts) = self.run_options {
                     if opts.cursor > 0 {
                         opts.cursor -= 1;
+                    } else if opts.focused_section > 0 {
+                        opts.focused_section -= 1;
+                        let prev_max = match opts.focused_section {
+                            0 => opts.nodes.len(),
+                            1 => opts.agents.len(),
+                            _ => 1,
+                        };
+                        opts.cursor = prev_max.saturating_sub(1);
                     }
                 }
             }
             KeyCode::Down => {
                 if let Some(ref mut opts) = self.run_options {
+                    let section_count = if opts.is_chain { 2 } else { 3 };
                     let max = match opts.focused_section {
                         0 => opts.nodes.len(),
                         1 => opts.agents.len(),
@@ -2349,6 +2459,9 @@ impl App {
                     };
                     if opts.cursor + 1 < max {
                         opts.cursor += 1;
+                    } else if opts.focused_section + 1 < section_count {
+                        opts.focused_section += 1;
+                        opts.cursor = 0;
                     }
                 }
             }
