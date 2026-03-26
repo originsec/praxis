@@ -136,7 +136,7 @@ Praxis supports four methods for routing traffic through the proxy. Each has tra
 
 Most interception methods (VPN, Hosts, TPROXY) require the node to be running with elevated privileges (root on Linux/macOS, administrator on Windows). The Proxy method can work without elevated privileges.
 
-Nodes report their privilege status automatically. In the web UI, the intercept Enable button is disabled on non-privileged nodes — you must restart the node with elevated privileges before enabling interception. The CLI `node list` command shows a `[privileged]` tag for nodes running as root/admin.
+Nodes report their privilege status automatically. In the web UI, the intercept Enable button is disabled on non-privileged nodes — you must restart the node with elevated privileges before enabling interception. Privileged nodes display a **ROOT** badge in the Nodes window.
 
 ## Enabling Interception
 

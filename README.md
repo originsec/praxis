@@ -88,17 +88,19 @@ We recommend low-latency providers (for example **Groq** or **Cerebras**) for pa
 
 ## CLI
 
-The Praxis CLI (`praxis_cli`) provides an interactive REPL for controlling the Praxis network from the command line.
+The Praxis CLI (`praxis_cli`) provides a full-featured interactive terminal UI and a non-interactive command surface.
 
-```
-praxis [b3bf7460:claudecode *] ❯ session prompt "list all files"
-```
+Running `praxis_cli` with no arguments launches the terminal UI with four main windows:
+- **Orchestrator** (`Ctrl+O`) — LLM-powered conversation interface with tool execution and plan tracking
+- **Nodes** (`Ctrl+L`) — node/agent management, session chat, and PTY terminal access
+- **Operations** (`Ctrl+P`) — operation library, chain definitions, and live execution tracking
+- **Settings** (`Ctrl+S`) — LLM provider management and service configuration
 
-Features:
-- **Interactive REPL** with selection state — select a node and agent once, then run commands without repeating `-n`/`-a` flags
-- **Tab completion** for node IDs, agent names, operation names, and short IDs
-- **One-shot mode** via `-C "command"` for scripting
-- **MCP server mode** via `--mcp` for integration with Claude Code, Cursor, and other AI assistants
+Non-interactive commands are also available for scripting:
+```bash
+praxis_cli -C "node list"
+praxis_cli session create --node abc123 --yolo
+```
 
 See [CLI documentation](https://originsec.github.io/praxis/usage/cli.html) for the full reference.
 
@@ -122,7 +124,8 @@ Full documentation is available at **[originsec.github.io/praxis](https://origin
 - [Reconnaissance](https://originsec.github.io/praxis/usage/recon.html) - Tool and configuration discovery
 - [Sessions](https://originsec.github.io/praxis/usage/sessions.html) - Interactive agent sessions
 - [Agent Connectors](https://originsec.github.io/praxis/connectors/overview.html) - Supported agents and adding new ones
-- [CLI](https://originsec.github.io/praxis/usage/cli.html) - Interactive REPL, one-shot mode, MCP integration
+- [CLI](https://originsec.github.io/praxis/usage/cli.html) - Terminal UI and non-interactive commands
+- [MCP Server](https://originsec.github.io/praxis/usage/mcp.html) - AI agent integration via Model Context Protocol
 - [Interception](https://originsec.github.io/praxis/usage/interception.html) - Traffic capture setup and options
 - [Architecture](https://originsec.github.io/praxis/architecture/overview.html) - How it all fits together
 

@@ -57,21 +57,12 @@ Semantic recon requires the **Semantic Parser** LLM to be configured. Choose a m
 
 After running recon, the results are stored in the service database. You can query specific sections without re-running recon:
 
-**CLI (REPL or one-shot):**
-```bash
-agent recon list                  # all stored recon details
-agent recon list sessions         # just sessions
-agent recon list tools            # MCP servers, skills, internal tools
-agent recon list projects         # project paths
-agent recon list configs          # config items
-agent recon list --agent codex    # specify agent explicitly
-```
-
 **MCP tools:**
-- `recon_sessions` - list sessions (requires node + agent params)
-- `recon_projects` - list project paths
-- `recon_tools` - list MCP servers, skills, and internal tools
-- `recon_configs` - list config items
+- `recon_list` - list stored recon data (section: all/sessions/tools/projects/configs)
+- `recon_config_read` - read config file content
+- `recon_session_read` - read session file content
+- `recon_config_grep` - grep config files with regex
+- `recon_session_grep` - grep session files with regex
 
 These are useful for quick lookups and for AI agents that need to browse specific recon data without triggering a full scan.
 

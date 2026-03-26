@@ -1,13 +1,12 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use common::{
     AgentCommand as NodeAgentCommand, AgentCommandResult, AgentFileType as NodeFileType,
     NodeCommand as NodeCmd, NodeCommandResult,
 };
-use serde_json::json;
 
-use crate::client::CliClient;
-use crate::output::{format_short_id, print_error, print_header, print_json, print_success, OutputFormat};
+use crate::client::Client;
+use crate::output::{format_short_id, print_header, print_success};
 
 #[derive(Subcommand)]
 pub enum AgentCommand {
@@ -60,6 +59,7 @@ pub enum AgentConfigCommand {
         #[arg(long)]
         line_end: Option<usize>,
     },
+
     /// Write config content to a file
     Write {
         #[arg(short, long)]
@@ -67,6 +67,7 @@ pub enum AgentConfigCommand {
         path: String,
         contents: String,
     },
+
     /// Grep config content in a file with regex
     Grep {
         #[arg(short, long)]
@@ -88,6 +89,7 @@ pub enum AgentSessionCommand {
         #[arg(long)]
         line_end: Option<usize>,
     },
+
     /// Grep session content with regex
     Grep {
         #[arg(short, long)]
@@ -97,28 +99,69 @@ pub enum AgentSessionCommand {
     },
 }
 
-pub async fn execute(client: &mut CliClient, command: AgentCommand, output: &OutputFormat) -> Result<()> {
+pub async fn execute(client: &Client, command: AgentCommand) -> Result<()> {
     match command {
-        AgentCommand::List { node } => list_agents(client, &node, output).await,
-        AgentCommand::Select { node, short_name } => select_agent(client, &node, &short_name, output).await,
-        AgentCommand::Update { node } => update_agent(client, &node, output).await,
+        AgentCommand::List { node } => list_agents(client, &node).await,
+        AgentCommand::Select { node, short_name } => select_agent(client, &node, &short_name).await,
+        AgentCommand::Update { node } => update_agent(client, &node).await,
         AgentCommand::Config { command } => match command {
-            AgentConfigCommand::Read { node, path, line_start, line_end } => {
-                read_file(client, &node, NodeFileType::Config, &path, line_start, line_end, output).await
+            AgentConfigCommand::Read {
+                node,
+                path,
+                line_start,
+                line_end,
+            } => {
+                read_file(
+                    client,
+                    &node,
+                    NodeFileType::Config,
+                    &path,
+                    line_start,
+                    line_end,
+                )
+                .await
             }
-            AgentConfigCommand::Write { node, path, contents } => {
-                write_file(client, &node, NodeFileType::Config, &path, &contents, output).await
-            }
-            AgentConfigCommand::Grep { node, path, pattern } => {
-                grep_file(client, &node, NodeFileType::Config, &path, &pattern, output).await
-            }
+            AgentConfigCommand::Write {
+                node,
+                path,
+                contents,
+            } => write_file(client, &node, NodeFileType::Config, &path, &contents).await,
+            AgentConfigCommand::Grep {
+                node,
+                path,
+                pattern,
+            } => grep_file(client, &node, NodeFileType::Config, &path, &pattern).await,
         },
         AgentCommand::Session { command } => match command {
-            AgentSessionCommand::Read { node, session_file, line_start, line_end } => {
-                read_file(client, &node, NodeFileType::Session, &session_file, line_start, line_end, output).await
+            AgentSessionCommand::Read {
+                node,
+                session_file,
+                line_start,
+                line_end,
+            } => {
+                read_file(
+                    client,
+                    &node,
+                    NodeFileType::Session,
+                    &session_file,
+                    line_start,
+                    line_end,
+                )
+                .await
             }
-            AgentSessionCommand::Grep { node, session_file, pattern } => {
-                grep_file(client, &node, NodeFileType::Session, &session_file, &pattern, output).await
+            AgentSessionCommand::Grep {
+                node,
+                session_file,
+                pattern,
+            } => {
+                grep_file(
+                    client,
+                    &node,
+                    NodeFileType::Session,
+                    &session_file,
+                    &pattern,
+                )
+                .await
             }
         },
     }
@@ -126,113 +169,114 @@ pub async fn execute(client: &mut CliClient, command: AgentCommand, output: &Out
 
 fn find_node_id(state: &common::SystemState, prefix: &str) -> Option<String> {
     let search = prefix.to_lowercase();
-    state.nodes.iter()
-        .find(|n| n.node_id.to_lowercase().starts_with(&search))
-        .map(|n| n.node_id.clone())
+    state
+        .nodes
+        .iter()
+        .find(|node| node.node_id.to_lowercase().starts_with(&search))
+        .map(|node| node.node_id.clone())
 }
 
-async fn list_agents(client: &CliClient, node_prefix: &str, output: &OutputFormat) -> Result<()> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+async fn list_agents(client: &Client, node_prefix: &str) -> Result<()> {
+    let state = client
+        .get_state()
+        .await
+        .ok_or_else(|| anyhow!("No state available"))?;
 
-    let node = state.nodes.iter()
-        .find(|n| n.node_id.to_lowercase().starts_with(&node_prefix.to_lowercase()))
+    let node = state
+        .nodes
+        .iter()
+        .find(|node| {
+            node.node_id
+                .to_lowercase()
+                .starts_with(&node_prefix.to_lowercase())
+        })
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
     if node.discovered_agents.is_empty() {
-        match output {
-            OutputFormat::Json => print_json(&json!({"agents": [], "count": 0})),
-            OutputFormat::Text => print_error("No agents discovered on this node"),
-        }
+        println!("No agents discovered on this node");
         return Ok(());
     }
 
-    match output {
-        OutputFormat::Json => {
-            let agents: Vec<_> = node.discovered_agents.iter().map(|a| {
-                json!({
-                    "short_name": a.short_name,
-                    "name": a.name,
-                    "available": a.available,
-                    "version": a.version
-                })
-            }).collect();
-            print_json(&json!({"agents": agents, "count": agents.len()}));
-        }
-        OutputFormat::Text => {
-            print_header(&format!("Agents on {} ({})", format_short_id(&node.node_id), node.machine_name));
-            println!();
-            for agent in &node.discovered_agents {
-                let version_suffix = agent.version.as_deref().map(|v| format!(" {}", v)).unwrap_or_default();
-                println!("  {} - {}{}", agent.short_name, agent.name, version_suffix);
-            }
-            println!();
-            print_success(&format!("{} agent(s) discovered", node.discovered_agents.len()));
-        }
+    print_header(&format!(
+        "Agents on {} ({})",
+        format_short_id(&node.node_id),
+        node.machine_name
+    ));
+    println!();
+
+    for agent in &node.discovered_agents {
+        let version = agent
+            .version
+            .as_deref()
+            .map(|version| format!(" {}", version))
+            .unwrap_or_default();
+        println!("  {} - {}{}", agent.short_name, agent.name, version);
     }
 
+    println!();
+    print_success(&format!(
+        "{} agent(s) discovered",
+        node.discovered_agents.len()
+    ));
     Ok(())
 }
 
-async fn select_agent(client: &CliClient, node_prefix: &str, short_name: &str, output: &OutputFormat) -> Result<()> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
-    let node_id = find_node_id(&state, node_prefix).ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+async fn select_agent(client: &Client, node_prefix: &str, short_name: &str) -> Result<()> {
+    let state = client
+        .get_state()
+        .await
+        .ok_or_else(|| anyhow!("No state available"))?;
+    let node_id = find_node_id(&state, node_prefix)
+        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
-    let cmd = NodeCmd::Agent(NodeAgentCommand::Select { short_name: short_name.to_string() });
+    let cmd = NodeCmd::Agent(NodeAgentCommand::Select {
+        short_name: short_name.to_string(),
+    });
     let response = client.send_command(&node_id, cmd).await?;
 
     match response.result {
         NodeCommandResult::Agent(AgentCommandResult::Selected { short_name }) => {
-            match output {
-                OutputFormat::Json => print_json(&json!({"status": "success", "short_name": short_name})),
-                OutputFormat::Text => print_success(&format!("Selected agent: {}", short_name)),
-            }
+            print_success(&format!("Selected agent: {}", short_name));
             Ok(())
         }
-        NodeCommandResult::Error { message } => {
-            if matches!(output, OutputFormat::Json) {
-                print_json(&json!({"status": "error", "message": message}));
-            }
-            Err(anyhow!("{}", message))
-        }
+        NodeCommandResult::Error { message } => Err(anyhow!(message)),
         _ => Err(anyhow!("Unexpected response")),
     }
 }
 
-async fn update_agent(client: &CliClient, node_prefix: &str, output: &OutputFormat) -> Result<()> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
-    let node_id = find_node_id(&state, node_prefix).ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+async fn update_agent(client: &Client, node_prefix: &str) -> Result<()> {
+    let state = client
+        .get_state()
+        .await
+        .ok_or_else(|| anyhow!("No state available"))?;
+    let node_id = find_node_id(&state, node_prefix)
+        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
     let cmd = NodeCmd::Agent(NodeAgentCommand::Update);
     let response = client.send_command(&node_id, cmd).await?;
 
     match response.result {
         NodeCommandResult::Agent(AgentCommandResult::UpdateSent) => {
-            match output {
-                OutputFormat::Json => print_json(&json!({"status": "success", "message": "Update request sent"})),
-                OutputFormat::Text => print_success("Update request sent"),
-            }
+            print_success("Update request sent");
             Ok(())
         }
-        NodeCommandResult::Error { message } => {
-            if matches!(output, OutputFormat::Json) {
-                print_json(&json!({"status": "error", "message": message}));
-            }
-            Err(anyhow!("{}", message))
-        }
+        NodeCommandResult::Error { message } => Err(anyhow!(message)),
         _ => Err(anyhow!("Unexpected response")),
     }
 }
 
 async fn read_file(
-    client: &CliClient,
+    client: &Client,
     node_prefix: &str,
     file_type: NodeFileType,
     path: &str,
     line_start: Option<usize>,
     line_end: Option<usize>,
-    output: &OutputFormat,
 ) -> Result<()> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let state = client
+        .get_state()
+        .await
+        .ok_or_else(|| anyhow!("No state available"))?;
     let node_id = find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
@@ -246,67 +290,51 @@ async fn read_file(
 
     match response.result {
         NodeCommandResult::Agent(AgentCommandResult::ReadFileResult {
-            file_type: result_file_type,
+            file_type,
             path,
             content,
             line_start,
             line_end,
             error,
         }) => {
-            match output {
-                OutputFormat::Json => {
-                    print_json(&json!({
-                        "file_type": format!("{:?}", result_file_type),
-                        "path": path,
-                        "content": content,
-                        "line_start": line_start,
-                        "line_end": line_end,
-                        "error": error
-                    }));
-                }
-                OutputFormat::Text => {
-                    if let Some(error) = error {
-                        return Err(anyhow!(error));
-                    }
-                    let title = match result_file_type {
-                        NodeFileType::Config => "Config Content",
-                        NodeFileType::Session => "Session Content",
-                    };
-                    print_header(title);
-                    println!();
-                    println!("  Path: {}", path);
-                    if line_start.is_some() || line_end.is_some() {
-                        println!("  Lines: {:?}..{:?}", line_start, line_end);
-                    }
-                    println!();
-                    if let Some(content) = content {
-                        println!("{}", content);
-                    }
-                    println!();
-                    print_success("Read complete");
-                }
+            if let Some(error) = error {
+                return Err(anyhow!(error));
             }
+
+            let title = match file_type {
+                NodeFileType::Config => "Config Content",
+                NodeFileType::Session => "Session Content",
+            };
+            print_header(title);
+            println!();
+            println!("  Path: {}", path);
+            if line_start.is_some() || line_end.is_some() {
+                println!("  Lines: {:?}..{:?}", line_start, line_end);
+            }
+            println!();
+            if let Some(content) = content {
+                println!("{}", content);
+            }
+            println!();
+            print_success("Read complete");
             Ok(())
         }
-        NodeCommandResult::Error { message } => {
-            if matches!(output, OutputFormat::Json) {
-                print_json(&json!({"status": "error", "message": message}));
-            }
-            Err(anyhow!("{}", message))
-        }
+        NodeCommandResult::Error { message } => Err(anyhow!(message)),
         _ => Err(anyhow!("Unexpected response")),
     }
 }
 
 async fn write_file(
-    client: &CliClient,
+    client: &Client,
     node_prefix: &str,
     file_type: NodeFileType,
     path: &str,
     contents: &str,
-    output: &OutputFormat,
 ) -> Result<()> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let state = client
+        .get_state()
+        .await
+        .ok_or_else(|| anyhow!("No state available"))?;
     let node_id = find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
@@ -319,50 +347,31 @@ async fn write_file(
 
     match response.result {
         NodeCommandResult::Agent(AgentCommandResult::WriteFileResult {
-            file_type: result_file_type,
-            path,
-            success,
-            error,
+            success, error, ..
         }) => {
-            match output {
-                OutputFormat::Json => {
-                    print_json(&json!({
-                        "file_type": format!("{:?}", result_file_type),
-                        "path": path,
-                        "success": success,
-                        "error": error
-                    }));
-                }
-                OutputFormat::Text => {
-                    if success {
-                        print_success("Write complete");
-                    } else {
-                        let msg = error.unwrap_or_else(|| "Write failed".to_string());
-                        return Err(anyhow!(msg));
-                    }
-                }
+            if success {
+                print_success("Write complete");
+                Ok(())
+            } else {
+                Err(anyhow!(error.unwrap_or_else(|| "Write failed".to_string())))
             }
-            Ok(())
         }
-        NodeCommandResult::Error { message } => {
-            if matches!(output, OutputFormat::Json) {
-                print_json(&json!({"status": "error", "message": message}));
-            }
-            Err(anyhow!("{}", message))
-        }
+        NodeCommandResult::Error { message } => Err(anyhow!(message)),
         _ => Err(anyhow!("Unexpected response")),
     }
 }
 
 async fn grep_file(
-    client: &CliClient,
+    client: &Client,
     node_prefix: &str,
     file_type: NodeFileType,
     path: &str,
     pattern: &str,
-    output: &OutputFormat,
 ) -> Result<()> {
-    let state = client.get_state().await.ok_or_else(|| anyhow!("No state available"))?;
+    let state = client
+        .get_state()
+        .await
+        .ok_or_else(|| anyhow!("No state available"))?;
     let node_id = find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
@@ -375,65 +384,41 @@ async fn grep_file(
 
     match response.result {
         NodeCommandResult::Agent(AgentCommandResult::GrepFilesResult {
-            file_type: result_file_type,
+            file_type,
             pattern,
             results,
             ..
         }) => {
+            let title = match file_type {
+                NodeFileType::Config => "Config Grep Results",
+                NodeFileType::Session => "Session Grep Results",
+            };
             let entry = results.first();
-            match output {
-                OutputFormat::Json => {
-                    let (matches, error) = match entry {
-                        Some(r) => (&r.matches, &r.error),
-                        None => {
-                            static EMPTY: Vec<common::GrepMatch> = Vec::new();
-                            (&EMPTY, &None)
-                        }
-                    };
-                    print_json(&json!({
-                        "file_type": format!("{:?}", result_file_type),
-                        "path": path,
-                        "pattern": pattern,
-                        "matches": matches,
-                        "match_count": matches.len(),
-                        "error": error
-                    }));
-                }
-                OutputFormat::Text => {
-                    if let Some(r) = entry {
-                        if let Some(error) = &r.error {
-                            return Err(anyhow!("{}", error));
-                        }
-                    }
-                    let title = match result_file_type {
-                        NodeFileType::Config => "Config Grep Results",
-                        NodeFileType::Session => "Session Grep Results",
-                    };
-                    print_header(title);
-                    println!();
-                    println!("  Path: {}", path);
-                    println!("  Pattern: {}", pattern);
-                    if let Some(r) = entry {
-                        println!("  Matches: {}", r.matches.len());
-                        println!();
-                        for m in &r.matches {
-                            println!("  {:>6}: {}", m.line_number, m.line_content);
-                        }
-                    } else {
-                        println!("  Matches: 0");
-                    }
-                    println!();
-                    print_success("Grep complete");
+
+            if let Some(result) = entry {
+                if let Some(error) = &result.error {
+                    return Err(anyhow!(error.clone()));
                 }
             }
+
+            print_header(title);
+            println!();
+            println!("  Path: {}", path);
+            println!("  Pattern: {}", pattern);
+            if let Some(result) = entry {
+                println!("  Matches: {}", result.matches.len());
+                println!();
+                for matched in &result.matches {
+                    println!("  {:>6}: {}", matched.line_number, matched.line_content);
+                }
+            } else {
+                println!("  Matches: 0");
+            }
+            println!();
+            print_success("Grep complete");
             Ok(())
         }
-        NodeCommandResult::Error { message } => {
-            if matches!(output, OutputFormat::Json) {
-                print_json(&json!({"status": "error", "message": message}));
-            }
-            Err(anyhow!("{}", message))
-        }
+        NodeCommandResult::Error { message } => Err(anyhow!(message)),
         _ => Err(anyhow!("Unexpected response")),
     }
 }

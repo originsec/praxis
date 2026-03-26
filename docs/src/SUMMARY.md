@@ -19,6 +19,7 @@
 - [Orchestrator](./usage/orchestrator.md)
 - [Semantic Operations](./usage/semantic-operations.md)
 - [Toolkit](./usage/toolkit.md)
+- [MCP Server](./usage/mcp.md)
 - [CLI](./usage/cli.md)
 
 # Agent Connectors

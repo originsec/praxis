@@ -81,45 +81,6 @@ check_docker() {
     echo ""
 }
 
-setup_files() {
-    local raw_url="https://raw.githubusercontent.com/$PRAXIS_REPO/$PRAXIS_VERSION"
-
-    info "Setting up Praxis $PRAXIS_VERSION in $PRAXIS_DIR..."
-    mkdir -p "$PRAXIS_DIR"
-    cd "$PRAXIS_DIR"
-
-    info "Downloading Docker configuration..."
-    curl -fsSL "$raw_url/Dockerfile" -o Dockerfile
-    curl -fsSL "$raw_url/docker-compose.yml" -o docker-compose.yml
-    curl -fsSL "$raw_url/.dockerignore" -o .dockerignore
-
-    #
-    # Download source for build context.
-    #
-    info "Downloading Praxis source..."
-    curl -fsSL "$raw_url/Cargo.toml" -o Cargo.toml
-    curl -fsSL "$raw_url/Cargo.lock" -o Cargo.lock
-
-    for dir in common node semantic_parser semantic_ops service web; do
-        mkdir -p "$dir"
-        #
-        # Download directory contents via GitHub API.
-        #
-        curl -fsSL "https://api.github.com/repos/$PRAXIS_REPO/contents/$dir?ref=$PRAXIS_VERSION" | \
-            grep '"download_url"' | \
-            sed 's/.*"download_url": "\([^"]*\)".*/\1/' | \
-            while read -r url; do
-                if [ -n "$url" ] && [ "$url" != "null" ]; then
-                    filename=$(basename "$url")
-                    curl -fsSL "$url" -o "$dir/$filename" 2>/dev/null || true
-                fi
-            done
-    done
-
-    success "Downloaded configuration files"
-    echo ""
-}
-
 clone_repo() {
     info "Setting up Praxis $PRAXIS_VERSION in $PRAXIS_DIR..."
 
