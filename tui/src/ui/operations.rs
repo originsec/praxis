@@ -17,11 +17,10 @@ const STATUS_FAIL: Color = Color::Rgb(160, 60, 60);
 const STATUS_QUEUED: Color = Color::Rgb(100, 140, 180);
 const CHAIN_COLOR: Color = Color::Rgb(80, 180, 180);
 const OP_COLOR: Color = Color::Rgb(160, 120, 200);
-const TAB_ACTIVE_BG: Color = Color::Rgb(40, 42, 40);
 
 pub fn render(f: &mut Frame, area: Rect, state: &OperationsState) {
     let chunks = Layout::vertical([
-        Constraint::Length(2), // tabs
+        Constraint::Length(1), // tabs
         Constraint::Min(1),    // content
         Constraint::Length(1), // hints
     ])
@@ -46,37 +45,31 @@ fn render_tabs(f: &mut Frame, area: Rect, state: &OperationsState) {
             .count();
     let exec_count = state.operations.len() + state.chain_executions.len();
 
-    let lib_style = if state.tab == OpsTab::Library {
-        Style::default()
-            .fg(ACCENT)
-            .bg(TAB_ACTIVE_BG)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(MUTED)
-    };
-    let exec_style = if state.tab == OpsTab::Executions {
-        Style::default()
-            .fg(ACCENT)
-            .bg(TAB_ACTIVE_BG)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(MUTED)
+    let tab_style = |active: bool| -> Style {
+        if active {
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(MUTED)
+        }
     };
 
     let tabs = Line::from(vec![
         Span::raw("  "),
-        Span::styled(format!(" Library {} ", lib_count), lib_style),
-        Span::raw("  "),
-        Span::styled(format!(" Executions {} ", exec_count), exec_style),
-        Span::styled("  (tab)", Style::default().fg(DIM)),
+        Span::styled(
+            format!(" Library {} ", lib_count),
+            tab_style(state.tab == OpsTab::Library),
+        ),
+        Span::styled("  \u{2502}  ", Style::default().fg(DIM)),
+        Span::styled(
+            format!(" Executions {} ", exec_count),
+            tab_style(state.tab == OpsTab::Executions),
+        ),
+        Span::raw("      "),
+        Span::styled("tab", Style::default().fg(DIM)),
+        Span::styled(" switch", Style::default().fg(MUTED)),
     ]);
 
-    let sep = Line::from(Span::styled(
-        "\u{2500}".repeat(area.width as usize),
-        Style::default().fg(DIM),
-    ));
-
-    let paragraph = Paragraph::new(vec![tabs, sep]);
+    let paragraph = Paragraph::new(tabs);
     f.render_widget(paragraph, area);
 }
 

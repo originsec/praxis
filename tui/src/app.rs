@@ -49,6 +49,7 @@ pub struct ConfirmAction {
 pub enum ConfirmKind {
     DeleteOp(String), // full_name
     ClearAllExecutions,
+    DeleteModel(usize), // index into model_definitions
     Info,
 }
 
@@ -362,8 +363,7 @@ pub struct SettingsState {
     //
 
     pub model_definitions: Vec<ModelDef>,
-    pub model_edit_index: Option<usize>,
-    pub model_edit_field: usize, // 0=provider, 1=model, 2=apiKey
+    pub model_form: Option<ModelEditForm>,
     pub orchestrator_model: String,
     pub orchestrator_max_tokens: String,
     pub semantic_ops_model: String,
@@ -397,6 +397,19 @@ pub struct ModelDef {
     pub api_key: String,
 }
 
+pub struct ModelEditForm {
+    pub edit_index: Option<usize>, // None = adding new, Some(i) = editing existing
+    pub focused_field: usize,      // 0=provider, 1=apiKey, 2=model
+    pub provider_idx: usize,       // index into Provider::all()
+    pub api_key: String,
+    pub model_name: String,
+    pub editing_text: bool,        // true when typing in a text field
+    pub available_models: Vec<String>,
+    pub model_dropdown_open: bool,
+    pub model_dropdown_selected: usize,
+    pub loading_models: bool,
+}
+
 impl Default for SettingsState {
     fn default() -> Self {
         Self {
@@ -407,8 +420,7 @@ impl Default for SettingsState {
             loaded: false,
             status_message: None,
             model_definitions: Vec::new(),
-            model_edit_index: None,
-            model_edit_field: 0,
+            model_form: None,
             orchestrator_model: String::new(),
             orchestrator_max_tokens: "25000".to_string(),
             semantic_ops_model: String::new(),
@@ -2234,6 +2246,18 @@ impl App {
                                 self.client.get_chain_executions().await;
                             self.operations.exec_selected = 0;
                         }
+                        ConfirmKind::DeleteModel(idx) => {
+                            if idx < self.settings.model_definitions.len() {
+                                self.settings.model_definitions.remove(idx);
+                                self.save_model_definitions().await;
+                                if self.settings.selected > 0 {
+                                    self.settings.selected =
+                                        self.settings.selected.min(
+                                            self.settings.model_definitions.len().saturating_sub(1),
+                                        );
+                                }
+                            }
+                        }
                         ConfirmKind::Info => {
                             // Just dismiss.
                         }
@@ -2940,11 +2964,11 @@ impl App {
         }
 
         //
-        // If editing a model definition inline.
+        // If model edit form is open, delegate to it.
         //
 
-        if self.settings.model_edit_index.is_some() {
-            self.handle_model_edit_key(key).await;
+        if self.settings.model_form.is_some() {
+            self.handle_model_form_key(key).await;
             return;
         }
 
@@ -2971,6 +2995,19 @@ impl App {
             KeyCode::Enter => {
                 self.activate_settings_item().await;
             }
+            KeyCode::Char('+') if self.settings.tab == SettingsTab::Llm => {
+                self.open_model_form(None);
+            }
+            KeyCode::Char('-') if self.settings.tab == SettingsTab::Llm => {
+                let sel = self.settings.selected;
+                if sel < self.settings.model_definitions.len() {
+                    let name = self.settings.model_definitions[sel].name.clone();
+                    self.confirm = Some(ConfirmAction {
+                        message: format!("Delete model '{}'?", name),
+                        action: ConfirmKind::DeleteModel(sel),
+                    });
+                }
+            }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.load_settings().await;
             }
@@ -2984,32 +3021,12 @@ impl App {
             SettingsTab::Llm => {
                 let model_count = self.settings.model_definitions.len();
                 if sel < model_count {
-                    //
-                    // Edit existing model definition.
-                    //
-                    self.settings.model_edit_index = Some(sel);
-                    self.settings.model_edit_field = 0;
-                    let def = &self.settings.model_definitions[sel];
-                    self.settings.edit_buffer = def.provider.clone();
-                    self.settings.editing = true;
+                    self.open_model_form(Some(sel));
                 } else {
                     let idx = sel - model_count;
                     match idx {
                         0 => {
-                            //
-                            // Add new model.
-                            //
-                            self.settings.model_definitions.push(ModelDef {
-                                name: String::new(),
-                                provider: String::new(),
-                                model: String::new(),
-                                api_key: String::new(),
-                            });
-                            let new_idx = self.settings.model_definitions.len() - 1;
-                            self.settings.model_edit_index = Some(new_idx);
-                            self.settings.model_edit_field = 0;
-                            self.settings.edit_buffer.clear();
-                            self.settings.editing = true;
+                            self.open_model_form(None);
                         }
                         1 | 3 | 4 | 5 => {
                             //
@@ -3116,61 +3133,66 @@ impl App {
         }
     }
 
-    async fn handle_model_edit_key(&mut self, key: KeyEvent) {
-        let idx = match self.settings.model_edit_index {
-            Some(i) => i,
+    fn open_model_form(&mut self, edit_index: Option<usize>) {
+        let providers = common::Provider::all();
+        let (provider_idx, api_key, model_name) = match edit_index {
+            Some(idx) => {
+                let def = &self.settings.model_definitions[idx];
+                let pidx = providers
+                    .iter()
+                    .position(|p| p.as_str() == def.provider)
+                    .unwrap_or(0);
+                (pidx, def.api_key.clone(), def.model.clone())
+            }
+            None => (0, String::new(), String::new()),
+        };
+
+        self.settings.model_form = Some(ModelEditForm {
+            edit_index,
+            focused_field: 0,
+            provider_idx,
+            api_key,
+            model_name,
+            editing_text: false,
+            available_models: Vec::new(),
+            model_dropdown_open: false,
+            model_dropdown_selected: 0,
+            loading_models: false,
+        });
+    }
+
+    async fn handle_model_form_key(&mut self, key: KeyEvent) {
+        let form = match self.settings.model_form.as_mut() {
+            Some(f) => f,
             None => return,
         };
 
-        if self.settings.editing {
+        //
+        // Model name dropdown navigation.
+        //
+
+        if form.model_dropdown_open {
             match key.code {
                 KeyCode::Esc => {
-                    self.settings.editing = false;
-                    self.settings.model_edit_index = None;
-                    self.settings.edit_buffer.clear();
+                    form.model_dropdown_open = false;
                 }
-                KeyCode::Enter | KeyCode::Tab => {
-                    //
-                    // Save current field, advance to next.
-                    //
-                    let val = self.settings.edit_buffer.clone();
-                    if let Some(def) = self.settings.model_definitions.get_mut(idx) {
-                        match self.settings.model_edit_field {
-                            0 => def.provider = val,
-                            1 => def.model = val,
-                            2 => def.api_key = val,
-                            _ => {}
-                        }
-                    }
-
-                    if self.settings.model_edit_field < 2 {
-                        self.settings.model_edit_field += 1;
-                        if let Some(def) = self.settings.model_definitions.get(idx) {
-                            self.settings.edit_buffer = match self.settings.model_edit_field {
-                                1 => def.model.clone(),
-                                2 => def.api_key.clone(),
-                                _ => String::new(),
-                            };
-                        }
-                    } else {
-                        //
-                        // All fields done — update name and save.
-                        //
-                        if let Some(def) = self.settings.model_definitions.get_mut(idx) {
-                            def.name =
-                                format!("{}::{}", def.provider, def.model);
-                        }
-                        self.settings.editing = false;
-                        self.settings.model_edit_index = None;
-                        self.settings.edit_buffer.clear();
-                        self.save_model_definitions().await;
+                KeyCode::Up => {
+                    if form.model_dropdown_selected > 0 {
+                        form.model_dropdown_selected -= 1;
                     }
                 }
-                KeyCode::Char(c) => {
-                    self.settings.edit_buffer.push(c);
+                KeyCode::Down => {
+                    if !form.available_models.is_empty()
+                        && form.model_dropdown_selected < form.available_models.len() - 1
+                    {
+                        form.model_dropdown_selected += 1;
+                    }
                 }
-                KeyCode::Backspace => {
-                    self.settings.edit_buffer.pop();
+                KeyCode::Enter => {
+                    if let Some(name) = form.available_models.get(form.model_dropdown_selected) {
+                        form.model_name = name.clone();
+                    }
+                    form.model_dropdown_open = false;
                 }
                 _ => {}
             }
@@ -3178,9 +3200,191 @@ impl App {
         }
 
         //
-        // Model edit mode but not editing a field — shouldn't normally happen.
+        // Text editing mode for api_key or model_name fields.
         //
-        self.settings.model_edit_index = None;
+
+        if form.editing_text {
+            match key.code {
+                KeyCode::Esc => {
+                    form.editing_text = false;
+                }
+                KeyCode::Enter | KeyCode::Tab => {
+                    form.editing_text = false;
+                    if form.focused_field < 2 {
+                        form.focused_field += 1;
+                    }
+                }
+                KeyCode::Char(c) => {
+                    match form.focused_field {
+                        1 => form.api_key.push(c),
+                        2 => form.model_name.push(c),
+                        _ => {}
+                    }
+                }
+                KeyCode::Backspace => {
+                    match form.focused_field {
+                        1 => { form.api_key.pop(); }
+                        2 => { form.model_name.pop(); }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        //
+        // Normal form navigation.
+        //
+
+        match key.code {
+            KeyCode::Esc => {
+                self.settings.model_form = None;
+            }
+            KeyCode::Up | KeyCode::BackTab => {
+                let form = self.settings.model_form.as_mut().unwrap();
+                if form.focused_field > 0 {
+                    form.focused_field -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Tab => {
+                let form = self.settings.model_form.as_mut().unwrap();
+                if form.focused_field < 2 {
+                    form.focused_field += 1;
+                }
+            }
+            KeyCode::Left => {
+                let form = self.settings.model_form.as_mut().unwrap();
+                if form.focused_field == 0 {
+                    let providers = common::Provider::all();
+                    if form.provider_idx > 0 {
+                        form.provider_idx -= 1;
+                    } else {
+                        form.provider_idx = providers.len() - 1;
+                    }
+                    form.available_models.clear();
+                }
+            }
+            KeyCode::Right => {
+                let form = self.settings.model_form.as_mut().unwrap();
+                if form.focused_field == 0 {
+                    let providers = common::Provider::all();
+                    form.provider_idx = (form.provider_idx + 1) % providers.len();
+                    form.available_models.clear();
+                }
+            }
+            KeyCode::Enter => {
+                let form = self.settings.model_form.as_mut().unwrap();
+                match form.focused_field {
+                    0 => {
+                        // Provider field — cycle is done with left/right.
+                        // Enter moves to next field.
+                        form.focused_field = 1;
+                    }
+                    1 => {
+                        // API key — start editing.
+                        form.editing_text = true;
+                    }
+                    2 => {
+                        // Model name — start editing or save.
+                        if form.model_name.is_empty() {
+                            form.editing_text = true;
+                        } else {
+                            // Save and close.
+                            self.save_model_form().await;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                //
+                // Load models from provider API.
+                //
+
+                let form = self.settings.model_form.as_mut().unwrap();
+                let providers = common::Provider::all();
+                let provider = providers[form.provider_idx].as_str().to_string();
+                let api_key = form.api_key.clone();
+
+                if api_key.is_empty() {
+                    self.settings.status_message =
+                        Some("Enter an API key first".to_string());
+                    return;
+                }
+
+                form.loading_models = true;
+                let result =
+                    common::ai::fetch_models_for_provider(&provider, &api_key).await;
+
+                let form = self.settings.model_form.as_mut().unwrap();
+                form.loading_models = false;
+
+                match result {
+                    Ok(models) => {
+                        if models.is_empty() {
+                            self.settings.status_message =
+                                Some("No models returned".to_string());
+                        } else {
+                            let form = self.settings.model_form.as_mut().unwrap();
+                            form.available_models = models;
+                            form.model_dropdown_selected = 0;
+                            form.model_dropdown_open = true;
+                        }
+                    }
+                    Err(e) => {
+                        self.settings.status_message =
+                            Some(format!("Failed to load models: {}", e));
+                    }
+                }
+            }
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Save shortcut.
+                self.save_model_form().await;
+            }
+            _ => {}
+        }
+    }
+
+    async fn save_model_form(&mut self) {
+        let form = match self.settings.model_form.take() {
+            Some(f) => f,
+            None => return,
+        };
+
+        let providers = common::Provider::all();
+        let provider_str = providers[form.provider_idx].as_str().to_string();
+
+        if form.model_name.is_empty() {
+            self.settings.status_message = Some("Model name is required".to_string());
+            self.settings.model_form = Some(form);
+            return;
+        }
+
+        let name = format!("{}::{}", provider_str, form.model_name);
+        let def = ModelDef {
+            name,
+            provider: provider_str,
+            model: form.model_name,
+            api_key: form.api_key,
+        };
+
+        match form.edit_index {
+            Some(idx) => {
+                if idx < self.settings.model_definitions.len() {
+                    self.settings.model_definitions[idx] = def;
+                }
+            }
+            None => {
+                self.settings.model_definitions.push(def);
+            }
+        }
+
+        self.settings
+            .model_definitions
+            .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+        self.save_model_definitions().await;
     }
 
     async fn save_model_definitions(&mut self) {

@@ -1,4 +1,4 @@
-use crate::app::{SettingsState, SettingsTab};
+use crate::app::{ModelEditForm, SettingsState, SettingsTab};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -39,6 +39,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState) {
         render_model_dropdown(f, area, state);
     }
 
+    if let Some(ref form) = state.model_form {
+        render_model_form(f, area, form);
+    }
+
     if let Some(ref msg) = state.status_message {
         let style = if msg.starts_with("Failed") || msg.starts_with("Save failed") {
             Style::default().fg(Color::Rgb(180, 60, 60))
@@ -73,6 +77,16 @@ fn render_tabs(f: &mut Frame, area: Rect, state: &SettingsState) {
         Span::styled(" switch  ", Style::default().fg(MUTED)),
         Span::styled("^r", Style::default().fg(DIM)),
         Span::styled(" reload", Style::default().fg(MUTED)),
+        if state.tab == SettingsTab::Llm {
+            Span::styled("  +/- ", Style::default().fg(DIM))
+        } else {
+            Span::raw("")
+        },
+        if state.tab == SettingsTab::Llm {
+            Span::styled("add/remove", Style::default().fg(MUTED))
+        } else {
+            Span::raw("")
+        },
     ]);
 
     f.render_widget(Paragraph::new(line), area);
@@ -169,60 +183,39 @@ fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
     for (i, def) in state.model_definitions.iter().enumerate() {
         let selected = state.selected == i;
 
-        if state.model_edit_index == Some(i) && state.editing {
-            let field_label = match state.model_edit_field {
-                0 => "provider",
-                1 => "model",
-                2 => "apiKey",
-                _ => "",
-            };
-            lines.push(Line::from(vec![
-                Span::styled("\u{25b8} ", Style::default().fg(ACCENT)),
-                Span::styled(
-                    format!("{}: ", field_label),
-                    Style::default().fg(ACCENT),
-                ),
-                Span::styled(
-                    state.edit_buffer.clone(),
-                    Style::default().fg(EDIT_FG).bg(Color::Rgb(50, 55, 50)),
-                ),
-                Span::styled("\u{2588}", Style::default().fg(ACCENT)),
-            ]));
+        let display = if def.name.is_empty() {
+            format!("{}::{}", def.provider, def.model)
         } else {
-            let display = if def.name.is_empty() {
-                format!("{}::{}", def.provider, def.model)
-            } else {
-                def.name.clone()
-            };
+            def.name.clone()
+        };
 
-            let api_hint = if def.api_key.is_empty() {
-                " (no key)"
-            } else {
-                " \u{2713}"
-            };
+        let api_hint = if def.api_key.is_empty() {
+            " (no key)"
+        } else {
+            " \u{2713}"
+        };
 
-            let sel_style = if selected {
-                Style::default().fg(ACCENT)
-            } else {
-                Style::default().fg(TEXT)
-            };
+        let sel_style = if selected {
+            Style::default().fg(ACCENT)
+        } else {
+            Style::default().fg(TEXT)
+        };
 
-            lines.push(Line::from(vec![
-                Span::styled(
-                    if selected { "\u{25b8} " } else { "  " },
-                    sel_style,
-                ),
-                Span::styled(
-                    display,
-                    if selected {
-                        Style::default().fg(TEXT).bg(HIGHLIGHT_BG)
-                    } else {
-                        Style::default().fg(MUTED)
-                    },
-                ),
-                Span::styled(api_hint, Style::default().fg(DIM)),
-            ]));
-        }
+        lines.push(Line::from(vec![
+            Span::styled(
+                if selected { "\u{25b8} " } else { "  " },
+                sel_style,
+            ),
+            Span::styled(
+                display,
+                if selected {
+                    Style::default().fg(TEXT).bg(HIGHLIGHT_BG)
+                } else {
+                    Style::default().fg(MUTED)
+                },
+            ),
+            Span::styled(api_hint, Style::default().fg(DIM)),
+        ]));
     }
 
     //
@@ -339,22 +332,60 @@ fn render_about(f: &mut Frame, area: Rect, _state: &SettingsState) {
     let version = env!("CARGO_PKG_VERSION");
 
     let lines = vec![
-        section_header("Praxis"),
         Line::raw(""),
         Line::from(vec![
-            Span::raw("  "),
-            Span::styled("Version    ", Style::default().fg(TEXT)),
-            Span::styled(version, Style::default().fg(MUTED)),
+            Span::styled("Origin", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " is an endpoint security company building protection for the semantic era of",
+                Style::default().fg(TEXT),
+            ),
         ]),
+        Line::from(Span::styled(
+            "computing. As AI agents become integral to enterprise workflows, Origin provides",
+            Style::default().fg(TEXT),
+        )),
+        Line::from(Span::styled(
+            "the visibility and control organizations need to safely grant agents the",
+            Style::default().fg(TEXT),
+        )),
+        Line::from(Span::styled(
+            "permissions they require.",
+            Style::default().fg(TEXT),
+        )),
+        Line::raw(""),
         Line::from(vec![
-            Span::raw("  "),
-            Span::styled("By         ", Style::default().fg(TEXT)),
-            Span::styled("[\u{00d8}] Origin", Style::default().fg(ACCENT)),
+            Span::styled("Praxis", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " is Origin's experimental research platform for exploring the adversarial",
+                Style::default().fg(TEXT),
+            ),
+        ]),
+        Line::from(Span::styled(
+            "boundaries of legitimate semantic tools. By understanding how computer-use agents",
+            Style::default().fg(TEXT),
+        )),
+        Line::from(Span::styled(
+            "and their underlying capabilities can be leveraged offensively, we build better",
+            Style::default().fg(TEXT),
+        )),
+        Line::from(Span::styled(
+            "defenses for the endpoints they operate on.",
+            Style::default().fg(TEXT),
+        )),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("Version  ", Style::default().fg(MUTED)),
+            Span::styled(version, Style::default().fg(TEXT)),
+        ]),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("originhq.com", Style::default().fg(ACCENT)),
+            Span::styled("   ", Style::default().fg(DIM)),
+            Span::styled("praxis.originhq.com", Style::default().fg(Color::Rgb(180, 130, 220))),
         ]),
     ];
 
-    let block = Block::default().borders(Borders::NONE);
-    let paragraph = Paragraph::new(lines).block(block);
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);
 }
 
@@ -403,6 +434,174 @@ fn render_model_dropdown(f: &mut Frame, area: Rect, state: &SettingsState) {
             format!("{}{}", prefix, def.name),
             style,
         )));
+    }
+
+    let paragraph = Paragraph::new(lines);
+    f.render_widget(paragraph, inner);
+}
+
+fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
+    let providers = common::ai::Provider::all();
+    let provider_name = providers
+        .get(form.provider_idx)
+        .map(|p| p.display_name())
+        .unwrap_or("?");
+
+    let height = if form.model_dropdown_open {
+        (12 + form.available_models.len() as u16).min(area.height.saturating_sub(4))
+    } else {
+        12
+    };
+    let width = 60u16.min(area.width.saturating_sub(4));
+
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    let popup_area = Rect::new(x, y, width, height);
+
+    let title = if form.edit_index.is_some() {
+        " Edit Model "
+    } else {
+        " Add Model "
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(ACCENT))
+        .title(title);
+
+    let inner = block.inner(popup_area);
+    f.render_widget(Clear, popup_area);
+    f.render_widget(block, popup_area);
+
+    let cursor = "\u{2588}";
+    let mut lines: Vec<Line> = Vec::new();
+
+    //
+    // Provider field (arrows to cycle).
+    //
+
+    let prov_sel = form.focused_field == 0;
+    lines.push(Line::from(vec![
+        Span::styled(
+            if prov_sel { "\u{25b8} " } else { "  " },
+            Style::default().fg(if prov_sel { ACCENT } else { TEXT }),
+        ),
+        Span::styled("Provider    ", Style::default().fg(if prov_sel { ACCENT } else { TEXT })),
+        Span::styled(
+            format!("\u{25c2} {} \u{25b8}", provider_name),
+            if prov_sel {
+                Style::default().fg(EDIT_FG).bg(Color::Rgb(50, 55, 50))
+            } else {
+                Style::default().fg(MUTED)
+            },
+        ),
+    ]));
+
+    //
+    // API key field.
+    //
+
+    let key_sel = form.focused_field == 1;
+    let key_display = if form.api_key.is_empty() {
+        String::new()
+    } else {
+        //
+        // Mask all but last 4 characters.
+        //
+        let len = form.api_key.len();
+        if len <= 4 || (key_sel && form.editing_text) {
+            form.api_key.clone()
+        } else {
+            format!("{}{}", "\u{2022}".repeat(len - 4), &form.api_key[len - 4..])
+        }
+    };
+
+    let mut key_spans = vec![
+        Span::styled(
+            if key_sel { "\u{25b8} " } else { "  " },
+            Style::default().fg(if key_sel { ACCENT } else { TEXT }),
+        ),
+        Span::styled("API Key     ", Style::default().fg(if key_sel { ACCENT } else { TEXT })),
+        Span::styled(
+            key_display,
+            if key_sel && form.editing_text {
+                Style::default().fg(EDIT_FG).bg(Color::Rgb(50, 55, 50))
+            } else {
+                Style::default().fg(MUTED)
+            },
+        ),
+    ];
+    if key_sel && form.editing_text {
+        key_spans.push(Span::styled(cursor, Style::default().fg(ACCENT)));
+    }
+    lines.push(Line::from(key_spans));
+
+    //
+    // Model name field.
+    //
+
+    let mod_sel = form.focused_field == 2;
+    let mut mod_spans = vec![
+        Span::styled(
+            if mod_sel { "\u{25b8} " } else { "  " },
+            Style::default().fg(if mod_sel { ACCENT } else { TEXT }),
+        ),
+        Span::styled("Model       ", Style::default().fg(if mod_sel { ACCENT } else { TEXT })),
+        Span::styled(
+            form.model_name.clone(),
+            if mod_sel && form.editing_text {
+                Style::default().fg(EDIT_FG).bg(Color::Rgb(50, 55, 50))
+            } else {
+                Style::default().fg(MUTED)
+            },
+        ),
+    ];
+    if mod_sel && form.editing_text {
+        mod_spans.push(Span::styled(cursor, Style::default().fg(ACCENT)));
+    }
+    lines.push(Line::from(mod_spans));
+
+    lines.push(Line::raw(""));
+
+    //
+    // Hints.
+    //
+
+    lines.push(Line::from(vec![
+        Span::styled("  ^l", Style::default().fg(DIM)),
+        Span::styled(" load models  ", Style::default().fg(MUTED)),
+        Span::styled("^s", Style::default().fg(DIM)),
+        Span::styled(" save  ", Style::default().fg(MUTED)),
+        Span::styled("esc", Style::default().fg(DIM)),
+        Span::styled(" cancel", Style::default().fg(MUTED)),
+    ]));
+
+    if form.loading_models {
+        lines.push(Line::from(Span::styled(
+            "  Loading models...",
+            Style::default().fg(MUTED),
+        )));
+    }
+
+    //
+    // Model dropdown if open.
+    //
+
+    if form.model_dropdown_open && !form.available_models.is_empty() {
+        lines.push(Line::raw(""));
+        for (i, name) in form.available_models.iter().enumerate() {
+            let selected = i == form.model_dropdown_selected;
+            let style = if selected {
+                Style::default().fg(ACCENT).bg(HIGHLIGHT_BG)
+            } else {
+                Style::default().fg(TEXT)
+            };
+            let prefix = if selected { "  \u{25b8} " } else { "    " };
+            lines.push(Line::from(Span::styled(
+                format!("{}{}", prefix, name),
+                style,
+            )));
+        }
     }
 
     let paragraph = Paragraph::new(lines);
