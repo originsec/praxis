@@ -285,160 +285,103 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
         priority: u8,
     }
 
-    fn mix(seed: u64) -> u64 {
-        let mut z = seed.wrapping_add(0x9e3779b97f4a7c15);
-        z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
-        z ^ (z >> 31)
-    }
-
     let mut lines: Vec<Line> = Vec::new();
     let mut bg: Vec<Option<BgCell>> = vec![None; w.saturating_mul(h)];
 
     if animation_fade > 0.0 {
-        let t = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        let elapsed_ms = _state
+            .splash_started_at
+            .elapsed()
             .unwrap_or_default()
-            .as_millis();
-        let logo_x = w.saturating_sub(art[0].len()) / 2;
-        let source_x = (logo_x as f32 + 3.0).min(w.saturating_sub(1) as f32);
-        let source_y = (logo_y as f32 + 2.0).min(h.saturating_sub(1) as f32);
-        let rotation = t as f32 / 480.0;
-        let pulse = ((t as f32 / 190.0).sin() * 0.5 + 0.5) * 0.22 + 0.78;
-        let ray_count = 10usize;
-        let max_len = (w.max(h) as f32 * 1.1).max(18.0);
+            .as_millis() as f32;
+
+        //
+        // Source: center of the P in PRAXIS.
+        //
+        let art_display_w = art[0].chars().count();
+        let logo_x_px = w.saturating_sub(art_display_w) / 2;
+        let source_x = (logo_x_px as f32 + 3.0).min(w.saturating_sub(1) as f32);
+        let source_y = (logo_y as f32 + 2.5).min(h.saturating_sub(1) as f32);
+
+        //
+        // Rays grow outward over 2s with ease-out cubic, then hold.
+        //
+        let growth = (elapsed_ms / 2000.0).clamp(0.0, 1.0);
+        let eased = 1.0 - (1.0 - growth).powi(3);
+        let max_len = (w.max(h) as f32 * 0.9).max(20.0);
+        let reach = max_len * eased;
+        let wave = elapsed_ms / 100.0;
+        let ray_count = 16usize;
 
         for ray_idx in 0..ray_count {
-            let base_angle = (ray_idx as f32 / ray_count as f32) * std::f32::consts::TAU;
-            let angle = base_angle + rotation;
+            let angle = (ray_idx as f32 / ray_count as f32) * std::f32::consts::TAU;
             let dir_x = angle.cos();
-            let dir_y = angle.sin();
-            let perp_x = -dir_y;
-            let perp_y = dir_x;
-            let thickness = if ray_idx % 2 == 0 { 1 } else { 2 };
+            let dir_y = angle.sin() * 0.5; // terminal aspect ratio correction
 
-            let mut step = 0.0_f32;
-            while step <= max_len {
-                let progress = step / max_len;
+            let mut step = 1.5_f32;
+            while step <= reach {
                 let x = source_x + dir_x * step;
                 let y = source_y + dir_y * step;
+                let px = x.round() as i32;
+                let py = y.round() as i32;
 
-                let beam = (1.0 - progress).clamp(0.0, 1.0).powf(0.34);
-                let ripple = (((step / 2.6) - rotation * 3.2 + ray_idx as f32 * 0.7).sin() * 0.5
-                    + 0.5)
-                    * 0.25
-                    + 0.75;
-                let glow = beam * ripple * pulse * animation_fade;
-
-                if glow >= 0.08 {
-                    let line_ch = if dir_x.abs() > 0.92 {
-                        '-'
-                    } else if dir_y.abs() > 0.92 {
-                        '|'
-                    } else if dir_x.signum() == dir_y.signum() {
-                        '\\'
-                    } else {
-                        '/'
-                    };
-
-                    let (base_ch, priority, color) = if glow > 0.72 {
-                        (
-                            if (step as i32) % 6 == 0 { '*' } else { line_ch },
-                            6,
-                            Color::Rgb(
-                                (170.0 * glow).min(255.0) as u8,
-                                (235.0 * glow).min(255.0) as u8,
-                                (150.0 * glow).min(255.0) as u8,
-                            ),
-                        )
-                    } else {
-                        (
-                            line_ch,
-                            5,
-                            Color::Rgb(
-                                (90.0 * glow).min(255.0) as u8,
-                                (165.0 * glow).min(255.0) as u8,
-                                (92.0 * glow).min(255.0) as u8,
-                            ),
-                        )
-                    };
-
-                    for offset in -thickness..=thickness {
-                        let px = (x + perp_x * offset as f32 * 0.45).round() as i32;
-                        let py = (y + perp_y * offset as f32 * 0.45).round() as i32;
-
-                        if px < 0 || py < 0 || px >= w as i32 || py >= h as i32 {
-                            continue;
-                        }
-
-                        let idx = py as usize * w + px as usize;
-                        let ch = if offset == 0 { base_ch } else { '.' };
-                        let cell = BgCell {
-                            ch,
-                            color,
-                            priority,
-                        };
-                        if bg[idx].map(|existing| existing.priority).unwrap_or(0) <= priority {
-                            bg[idx] = Some(cell);
-                        }
-                    }
-                }
-
-                step += 0.9;
-            }
-        }
-
-        for orbit_idx in 0..6usize {
-            let orbit_angle = rotation * 1.8 + (orbit_idx as f32 / 6.0) * std::f32::consts::TAU;
-            let radius = 1.5 + orbit_idx as f32 * 0.85;
-            let px = (source_x + orbit_angle.cos() * radius).round() as i32;
-            let py = (source_y + orbit_angle.sin() * radius).round() as i32;
-
-            if px < 0 || py < 0 || px >= w as i32 || py >= h as i32 {
-                continue;
-            }
-
-            let intensity =
-                ((((t / 45) as u64 + orbit_idx as u64 * 17) % 100) as f32 / 100.0) * animation_fade;
-
-            bg[py as usize * w + px as usize] = Some(BgCell {
-                ch: if intensity > 0.72 { '*' } else { '+' },
-                color: Color::Rgb(
-                    (140.0 * intensity).min(255.0) as u8,
-                    (230.0 * intensity).min(255.0) as u8,
-                    (135.0 * intensity).min(255.0) as u8,
-                ),
-                priority: 6,
-            });
-        }
-
-        let halo_rows = 5usize;
-        let halo_cols = 10usize;
-        for halo_y in 0..halo_rows {
-            for halo_x in 0..halo_cols {
-                let x = logo_x.saturating_add(halo_x);
-                let y = logo_y.saturating_add(halo_y);
-                if x >= w || y >= h {
+                if px < 0 || py < 0 || px >= w as i32 || py >= h as i32 {
+                    step += 0.8;
                     continue;
                 }
-                let idx = y * w + x;
-                let dx = halo_x as f32 - 2.0;
-                let dy = halo_y as f32 - 2.0;
-                let halo = (1.0 - ((dx * dx + dy * dy).sqrt() / 5.5)).clamp(0.0, 1.0)
-                    * pulse
-                    * animation_fade;
-                if halo < 0.1 {
+
+                let idx = py as usize * w + px as usize;
+                let dist_norm = step / max_len;
+                let falloff = (1.0 - dist_norm).clamp(0.0, 1.0).powf(0.55);
+
+                //
+                // Bright tip at the leading edge of each growing ray.
+                //
+                let tip_dist = (step - reach).abs();
+                let tip = if tip_dist < 3.0 {
+                    (1.0 - tip_dist / 3.0) * 0.35
+                } else {
+                    0.0
+                };
+
+                //
+                // Shimmer: sine-wave sparkle travelling outward.
+                //
+                let shimmer =
+                    ((step * 0.7 - wave + ray_idx as f32 * 1.3).sin() * 0.5 + 0.5) * 0.2;
+
+                let brightness = (falloff + tip + shimmer).clamp(0.0, 1.0) * animation_fade;
+                if brightness < 0.06 {
+                    step += 0.8;
                     continue;
                 }
-                bg[idx] = Some(BgCell {
-                    ch: if halo > 0.75 { '*' } else { '.' },
-                    color: Color::Rgb(
-                        (160.0 * halo).min(255.0) as u8,
-                        (245.0 * halo).min(255.0) as u8,
-                        (150.0 * halo).min(255.0) as u8,
-                    ),
-                    priority: 6,
-                });
+
+                let ch = if tip_dist < 1.5 && brightness > 0.55 {
+                    '*'
+                } else if brightness > 0.75 {
+                    '+'
+                } else if dir_x.abs() > 0.85 {
+                    '-'
+                } else if dir_y.abs() > 0.55 {
+                    '|'
+                } else if dir_x.signum() == dir_y.signum() {
+                    '\\'
+                } else {
+                    '/'
+                };
+
+                let priority = if brightness > 0.6 { 7 } else { 5 };
+                let color = Color::Rgb(
+                    (150.0 * brightness).min(255.0) as u8,
+                    (240.0 * brightness).min(255.0) as u8,
+                    (140.0 * brightness).min(255.0) as u8,
+                );
+
+                if bg[idx].map(|e| e.priority).unwrap_or(0) <= priority {
+                    bg[idx] = Some(BgCell { ch, color, priority });
+                }
+
+                step += 0.8;
             }
         }
     }

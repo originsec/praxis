@@ -213,8 +213,10 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
         Span::styled(" fields  ", Style::default().fg(MUTED)),
         Span::styled("space/\u{2190}\u{2192}", Style::default().fg(ACCENT)),
         Span::styled(" toggle  ", Style::default().fg(MUTED)),
-        Span::styled("^enter", Style::default().fg(ACCENT)),
+        Span::styled("enter", Style::default().fg(ACCENT)),
         Span::styled(" create  ", Style::default().fg(MUTED)),
+        Span::styled("shift+enter", Style::default().fg(ACCENT)),
+        Span::styled(" newline  ", Style::default().fg(MUTED)),
         Span::styled("esc", Style::default().fg(ACCENT)),
         Span::styled(" cancel", Style::default().fg(MUTED)),
     ]);

@@ -1969,22 +1969,17 @@ impl App {
                     }
                 }
             }
-            KeyCode::Enter => {
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
                 //
-                // On Prompt field, Enter adds a newline.
-                // On other fields or with Ctrl, submit the form.
+                // Shift+Enter adds newline in prompt field.
                 //
-                let is_prompt = self.new_op_form.as_ref()
-                    .map(|f| f.focused_field == 8)
-                    .unwrap_or(false);
-
-                if is_prompt && !key.modifiers.contains(KeyModifiers::CONTROL) {
-                    if let Some(ref mut form) = self.new_op_form {
+                if let Some(ref mut form) = self.new_op_form {
+                    if form.focused_field == 8 {
                         form.prompt.push('\n');
                     }
-                    return;
                 }
-
+            }
+            KeyCode::Enter => {
                 //
                 // Validate mandatory fields and submit.
                 //
