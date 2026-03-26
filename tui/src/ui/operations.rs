@@ -1,4 +1,4 @@
-use crate::app::{OperationsState, OpsTab};
+use crate::app::{App, OperationsState, OpsTab};
 use common::{ChainExecutionStatus, SemanticOpStatus};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -158,44 +158,31 @@ fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsState) {
     ])
     .style(Style::default().fg(ACCENT));
 
-    let filter = state.filter.to_lowercase();
     let mut rows: Vec<Row> = Vec::new();
 
-    for def in &state.op_definitions {
-        if def.disabled {
-            continue;
+    for (idx, is_chain) in App::filtered_library_static(
+        &state.op_definitions,
+        &state.chain_definitions,
+        &state.filter,
+    ) {
+        if is_chain {
+            let chain = &state.chain_definitions[idx];
+            rows.push(Row::new(vec![
+                Cell::from("C").style(Style::default().fg(CHAIN_COLOR)),
+                Cell::from(chain.name.clone()).style(Style::default().fg(TEXT)),
+                Cell::from(chain.category.clone()).style(Style::default().fg(DIM)),
+                Cell::from(format!("{} elements", chain.element_count))
+                    .style(Style::default().fg(DIM)),
+            ]));
+        } else {
+            let def = &state.op_definitions[idx];
+            rows.push(Row::new(vec![
+                Cell::from("O").style(Style::default().fg(OP_COLOR)),
+                Cell::from(def.name.clone()).style(Style::default().fg(TEXT)),
+                Cell::from(def.category.clone()).style(Style::default().fg(DIM)),
+                Cell::from(def.mode.clone()).style(Style::default().fg(DIM)),
+            ]));
         }
-        if !filter.is_empty()
-            && !def.name.to_lowercase().contains(&filter)
-            && !def.category.to_lowercase().contains(&filter)
-            && !def.full_name.to_lowercase().contains(&filter)
-        {
-            continue;
-        }
-        rows.push(Row::new(vec![
-            Cell::from("O").style(Style::default().fg(OP_COLOR)),
-            Cell::from(def.name.clone()).style(Style::default().fg(TEXT)),
-            Cell::from(def.category.clone()).style(Style::default().fg(DIM)),
-            Cell::from(def.mode.clone()).style(Style::default().fg(DIM)),
-        ]));
-    }
-
-    for chain in &state.chain_definitions {
-        if chain.disabled {
-            continue;
-        }
-        if !filter.is_empty()
-            && !chain.name.to_lowercase().contains(&filter)
-            && !chain.category.to_lowercase().contains(&filter)
-        {
-            continue;
-        }
-        rows.push(Row::new(vec![
-            Cell::from("C").style(Style::default().fg(CHAIN_COLOR)),
-            Cell::from(chain.name.clone()).style(Style::default().fg(TEXT)),
-            Cell::from(chain.category.clone()).style(Style::default().fg(DIM)),
-            Cell::from(format!("{} elements", chain.element_count)).style(Style::default().fg(DIM)),
-        ]));
     }
 
     let widths = [
@@ -232,85 +219,78 @@ fn render_library_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let enabled_ops: Vec<_> = state
-        .op_definitions
-        .iter()
-        .filter(|d| !d.disabled)
-        .collect();
-    let enabled_chains: Vec<_> = state
-        .chain_definitions
-        .iter()
-        .filter(|c| !c.disabled)
-        .collect();
-    let idx = state.library_selected;
-
     let mut lines: Vec<Line> = Vec::new();
 
-    if idx < enabled_ops.len() {
-        let def = &enabled_ops[idx];
-        lines.push(Line::from(Span::styled(
-            format!(" {}", def.name),
-            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
-        )));
-        lines.push(Line::from(Span::styled(
-            format!(" {}", def.full_name),
-            Style::default().fg(DIM),
-        )));
-        lines.push(Line::from(""));
-        if !def.description.is_empty() {
+    let filtered = App::filtered_library_static(
+        &state.op_definitions,
+        &state.chain_definitions,
+        &state.filter,
+    );
+
+    if let Some(&(idx, is_chain)) = filtered.get(state.library_selected) {
+        if !is_chain {
+            let def = &state.op_definitions[idx];
             lines.push(Line::from(Span::styled(
-                format!(" {}", def.description),
-                Style::default().fg(MUTED),
+                format!(" {}", def.name),
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+            )));
+            lines.push(Line::from(Span::styled(
+                format!(" {}", def.full_name),
+                Style::default().fg(DIM),
             )));
             lines.push(Line::from(""));
-        }
-        lines.push(Line::from(vec![
-            Span::styled(" Mode: ", Style::default().fg(DIM)),
-            Span::styled(&def.mode, Style::default().fg(TEXT)),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled(" Timeout: ", Style::default().fg(DIM)),
-            Span::styled(format!("{}s", def.timeout), Style::default().fg(TEXT)),
-        ]));
-        if def.mode == "agent" {
-            lines.push(Line::from(vec![
-                Span::styled(" Iterations: ", Style::default().fg(DIM)),
-                Span::styled(
-                    format!("{}", def.agent_iterations),
-                    Style::default().fg(TEXT),
-                ),
-            ]));
-        }
-        lines.push(Line::from(vec![
-            Span::styled(" YOLO: ", Style::default().fg(DIM)),
-            Span::styled(
-                if def.yolo_mode { "yes" } else { "no" },
-                Style::default().fg(if def.yolo_mode { STATUS_RUNNING } else { DIM }),
-            ),
-        ]));
-        if let Some(ref model) = def.model_ref {
-            lines.push(Line::from(vec![
-                Span::styled(" Model: ", Style::default().fg(DIM)),
-                Span::styled(model.as_str(), Style::default().fg(TEXT)),
-            ]));
-        }
-        if !def.operation_prompt.is_empty() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                " Prompt",
-                Style::default().fg(ACCENT),
-            )));
-            for line in def.operation_prompt.lines().take(10) {
+            if !def.description.is_empty() {
                 lines.push(Line::from(Span::styled(
-                    format!(" {}", line),
+                    format!(" {}", def.description),
                     Style::default().fg(MUTED),
                 )));
+                lines.push(Line::from(""));
             }
-        }
-    } else {
-        let chain_idx = idx - enabled_ops.len();
-        if chain_idx < enabled_chains.len() {
-            let chain = &enabled_chains[chain_idx];
+            lines.push(Line::from(vec![
+                Span::styled(" Mode: ", Style::default().fg(DIM)),
+                Span::styled(&def.mode, Style::default().fg(TEXT)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled(" Timeout: ", Style::default().fg(DIM)),
+                Span::styled(format!("{}s", def.timeout), Style::default().fg(TEXT)),
+            ]));
+            if def.mode == "agent" {
+                lines.push(Line::from(vec![
+                    Span::styled(" Iterations: ", Style::default().fg(DIM)),
+                    Span::styled(
+                        format!("{}", def.agent_iterations),
+                        Style::default().fg(TEXT),
+                    ),
+                ]));
+            }
+            lines.push(Line::from(vec![
+                Span::styled(" YOLO: ", Style::default().fg(DIM)),
+                Span::styled(
+                    if def.yolo_mode { "yes" } else { "no" },
+                    Style::default().fg(if def.yolo_mode { STATUS_RUNNING } else { DIM }),
+                ),
+            ]));
+            if let Some(ref model) = def.model_ref {
+                lines.push(Line::from(vec![
+                    Span::styled(" Model: ", Style::default().fg(DIM)),
+                    Span::styled(model.as_str(), Style::default().fg(TEXT)),
+                ]));
+            }
+            if !def.operation_prompt.is_empty() {
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    " Prompt",
+                    Style::default().fg(ACCENT),
+                )));
+                for line in def.operation_prompt.lines().take(10) {
+                    lines.push(Line::from(Span::styled(
+                        format!(" {}", line),
+                        Style::default().fg(MUTED),
+                    )));
+                }
+            }
+        } else {
+            let chain = &state.chain_definitions[idx];
             lines.push(Line::from(Span::styled(
                 format!(" {}", chain.name),
                 Style::default()
@@ -345,12 +325,12 @@ fn render_library_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
                     Span::styled(format!("{}s", timeout), Style::default().fg(TEXT)),
                 ]));
             }
-        } else {
-            lines.push(Line::from(Span::styled(
-                " No item selected",
-                Style::default().fg(DIM),
-            )));
         }
+    } else {
+        lines.push(Line::from(Span::styled(
+            " No item selected",
+            Style::default().fg(DIM),
+        )));
     }
 
     f.render_widget(
@@ -387,40 +367,13 @@ fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
     .style(Style::default().fg(ACCENT));
 
     let now = chrono::Utc::now();
-    let filter = state.filter.to_lowercase();
-
-    //
-    // Build a unified list of (start_time, is_op, index) sorted by time descending.
-    //
-    let mut entries: Vec<(chrono::DateTime<chrono::Utc>, bool, usize)> = Vec::new();
-
-    for (i, op) in state.operations.iter().enumerate() {
-        if !filter.is_empty()
-            && !op.spec.name.to_lowercase().contains(&filter)
-            && !op.agent_short_name.to_lowercase().contains(&filter)
-        {
-            continue;
-        }
-        entries.push((op.start_time, true, i));
-    }
-
-    for (i, exec) in state.chain_executions.iter().enumerate() {
-        if !filter.is_empty()
-            && !exec.chain_name.to_lowercase().contains(&filter)
-            && !exec.agent_short_name.to_lowercase().contains(&filter)
-        {
-            continue;
-        }
-        entries.push((exec.started_at, false, i));
-    }
-
-    entries.sort_by(|a, b| b.0.cmp(&a.0)); // newest first
+    let entries = App::sorted_exec_static(&state.operations, &state.chain_executions, &state.filter);
 
     let mut rows: Vec<Row> = Vec::new();
 
-    for (_, is_op, idx) in &entries {
-        if *is_op {
-            let op = &state.operations[*idx];
+    for (is_op, idx) in entries {
+        if is_op {
+            let op = &state.operations[idx];
             let (status_str, status_color) = op_status_display(&op.status);
             let duration = match op.end_time {
                 Some(end) => format_duration(end - op.start_time),
@@ -439,7 +392,7 @@ fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
                 Cell::from(duration).style(Style::default().fg(DIM)),
             ]));
         } else {
-            let exec = &state.chain_executions[*idx];
+            let exec = &state.chain_executions[idx];
             let (status_str, status_color) = chain_status_display(&exec.status);
             let duration = match exec.ended_at {
                 Some(end) => format_duration(end - exec.started_at),
