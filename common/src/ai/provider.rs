@@ -14,6 +14,7 @@ pub enum Provider {
     MiniMax,
     Moonshot,
     FireworksAI,
+    OpenRouter,
 }
 
 impl Provider {
@@ -31,6 +32,7 @@ impl Provider {
             Provider::MiniMax => "minimax",
             Provider::Moonshot => "moonshot",
             Provider::FireworksAI => "fireworksai",
+            Provider::OpenRouter => "openrouter",
         }
     }
 
@@ -48,6 +50,7 @@ impl Provider {
             "minimax" => Some(Provider::MiniMax),
             "moonshot" => Some(Provider::Moonshot),
             "fireworksai" | "fireworks" => Some(Provider::FireworksAI),
+            "openrouter" => Some(Provider::OpenRouter),
             _ => None,
         }
     }
@@ -66,6 +69,7 @@ impl Provider {
             Provider::MiniMax,
             Provider::Moonshot,
             Provider::FireworksAI,
+            Provider::OpenRouter,
         ]
     }
 
@@ -83,6 +87,7 @@ impl Provider {
             Provider::MiniMax => "MiniMax",
             Provider::Moonshot => "Moonshot AI",
             Provider::FireworksAI => "Fireworks AI",
+            Provider::OpenRouter => "OpenRouter",
         }
     }
 
@@ -100,6 +105,7 @@ impl Provider {
             Provider::MiniMax => "https://api.minimax.io/v1",
             Provider::Moonshot => "https://api.moonshot.ai/v1",
             Provider::FireworksAI => "https://api.fireworks.ai/inference/v1",
+            Provider::OpenRouter => "https://openrouter.ai/api/v1",
         }
     }
 
@@ -116,6 +122,7 @@ impl Provider {
                 | Provider::MiniMax
                 | Provider::Moonshot
                 | Provider::FireworksAI
+                | Provider::OpenRouter
         )
     }
 }

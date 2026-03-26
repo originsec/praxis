@@ -111,6 +111,7 @@ Then update the port in **Settings** > **MCP Server** to match. The SSE endpoint
 | `nvidia` | NVIDIA | `NVIDIA_API_KEY` |
 | `fireworksai` | Fireworks AI | `FIREWORKS_API_KEY` |
 | `minimax` | MiniMax | `MINIMAX_API_KEY` |
+| `openrouter` | OpenRouter | `OPENROUTER_API_KEY` |
 | `ollama` | Ollama (local) | (none) |
 
 ### Model Reference Format
