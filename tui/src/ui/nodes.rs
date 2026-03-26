@@ -31,11 +31,7 @@ pub fn render(
     if let Some(ref session) = state.session {
         render_session_chat(f, area, session);
     } else {
-        let outer = Layout::vertical([
-            Constraint::Min(1),
-            Constraint::Length(1),
-        ])
-        .split(area);
+        let outer = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
 
         let chunks = Layout::horizontal([
             Constraint::Percentage(state.split_percent),
@@ -765,7 +761,9 @@ fn render_session_options(f: &mut Frame, area: Rect, opts: &SessionOptions) {
 fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
     let chunks = Layout::vertical([
         Constraint::Length(1), // header
+        Constraint::Length(1), // top padding
         Constraint::Min(1),    // terminal content
+        Constraint::Length(1), // bottom padding
         Constraint::Length(1), // hints
     ])
     .split(area);
@@ -775,7 +773,10 @@ fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
     //
 
     let header = Line::from(vec![
-        Span::styled("  \u{2335} Terminal  ", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "  \u{2335} Terminal  ",
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(
             term.node_id[..8.min(term.node_id.len())].to_string(),
             Style::default().fg(DIM),
@@ -830,8 +831,14 @@ fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
         lines.push(Line::from(spans));
     }
 
+    let content_area = Rect {
+        x: chunks[2].x + 3,
+        width: chunks[2].width.saturating_sub(3),
+        ..chunks[2]
+    };
+
     let paragraph = Paragraph::new(lines);
-    f.render_widget(paragraph, chunks[1]);
+    f.render_widget(paragraph, content_area);
 
     //
     // Hints.
@@ -841,7 +848,7 @@ fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
         Span::styled("  ^t", Style::default().fg(ACCENT)),
         Span::styled(" close terminal", Style::default().fg(MUTED)),
     ]);
-    f.render_widget(Paragraph::new(hints), chunks[2]);
+    f.render_widget(Paragraph::new(hints), chunks[4]);
 }
 
 fn vt100_fg_to_ratatui(color: vt100::Color) -> Color {

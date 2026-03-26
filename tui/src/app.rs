@@ -528,9 +528,13 @@ impl App {
                 self.handle_key(key).await;
             }
             AppEvent::Terminal(Event::Mouse(mouse)) => self.handle_mouse(mouse).await,
-            AppEvent::Terminal(Event::Resize(_, _)) => {
+            AppEvent::Terminal(Event::Resize(new_cols, new_rows)) => {
                 if let Some(ref mut term) = self.nodes.terminal {
-                    let (cols, rows) = Self::terminal_content_size();
+                    //
+                    // 8 rows for padding/chrome, 7 cols for padding/inset.
+                    //
+                    let cols = new_cols.saturating_sub(7);
+                    let rows = new_rows.saturating_sub(8);
                     term.parser.set_size(rows, cols);
                     let node_id = term.node_id.clone();
                     let _ = self.client.send_terminal_resize(&node_id, rows, cols).await;
@@ -657,9 +661,10 @@ impl App {
 
     async fn handle_key(&mut self, key: KeyEvent) {
         //
-        // Terminal mode intercepts all keys except ^q.
+        // Terminal mode intercepts all keys except ^q when Nodes window active.
+        // From other windows, ^t switches back to the open terminal.
         //
-        if self.nodes.terminal.is_some() {
+        if self.nodes.terminal.is_some() && self.active_window == Window::Nodes {
             if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('q') {
                 self.should_quit = true;
                 return;
@@ -764,6 +769,13 @@ impl App {
                     self.active_window = Window::Settings;
                     self.load_settings().await;
                     return;
+                }
+                KeyCode::Char('t') => {
+                    if self.nodes.terminal.is_some() {
+                        self.active_window = Window::Nodes;
+                        return;
+                    }
+                    // Fall through to per-window handler.
                 }
                 _ => {}
             }
@@ -1401,11 +1413,11 @@ impl App {
         let (term_cols, term_rows) = crossterm::terminal::size().unwrap_or((80, 24));
         //
         // Subtract: 2 vertical padding + 1 header bar + 1 status bar
-        //           + 1 terminal header + 1 terminal hints = 6 rows
-        //           4 horizontal padding
+        //           + 1 terminal header + 1 top pad + 1 bottom pad + 1 hints = 8 rows
+        //           4 horizontal padding + 3 left inset = 7 cols
         //
-        let cols = term_cols.saturating_sub(4);
-        let rows = term_rows.saturating_sub(6);
+        let cols = term_cols.saturating_sub(7);
+        let rows = term_rows.saturating_sub(8);
         (cols, rows)
     }
 
