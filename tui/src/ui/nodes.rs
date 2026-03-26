@@ -827,19 +827,6 @@ fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
     let visible_rows = screen.size().0 as usize;
     let cols = screen.size().1;
 
-    //
-    // Compute max_scroll: replay in a very tall terminal to find the
-    // true cursor position, which tells us total content lines.
-    //
-
-    if !term.raw_output.is_empty() {
-        let mut probe = vt100::Parser::new(10000, cols, 0);
-        probe.process(&term.raw_output);
-        let content_rows = probe.screen().cursor_position().0 as usize + 1;
-        let max = content_rows.saturating_sub(visible_rows);
-        term.max_scroll.set(max);
-    }
-
     let lines = if term.scroll_offset == 0 {
         render_vt100_screen(screen, true)
     } else {
@@ -954,7 +941,29 @@ fn render_terminal_scrollback(
     let mut tall_parser = vt100::Parser::new(tall_rows, cols, 0);
     tall_parser.process(&term.raw_output);
 
-    let lines = render_vt100_screen(tall_parser.screen(), false);
+    //
+    // Find the last non-empty row to determine actual content height,
+    // then compute max_scroll so the view stops at the first content line.
+    //
+
+    let tall_screen = tall_parser.screen();
+    let last_content_row = (0..tall_screen.size().0)
+        .rev()
+        .find(|&row| {
+            (0..tall_screen.size().1).any(|col| {
+                tall_screen
+                    .cell(row, col)
+                    .map(|c| !c.contents().is_empty() && c.contents() != " ")
+                    .unwrap_or(false)
+            })
+        })
+        .map(|r| r as usize + 1)
+        .unwrap_or(0);
+
+    let max = last_content_row.saturating_sub(visible_rows);
+    term.max_scroll.set(max);
+
+    let lines = render_vt100_screen(tall_screen, false);
     let visible_lines = slice_terminal_scrollback(&lines, visible_rows, term.scroll_offset);
 
     *term.scrollback_cache.borrow_mut() = Some(crate::app::TerminalScrollbackCache {
