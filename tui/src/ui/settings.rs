@@ -167,7 +167,8 @@ fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
     // Model definitions section.
     //
 
-    lines.push(Line::from(vec![
+    let on_model_def = state.selected < model_count;
+    let mut header_spans = vec![
         Span::raw("  "),
         Span::styled(
             "Model Definitions",
@@ -175,9 +176,12 @@ fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
                 .fg(Color::Rgb(160, 160, 160))
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("   ^d", Style::default().fg(DIM)),
-        Span::styled(" delete", Style::default().fg(MUTED)),
-    ]));
+    ];
+    if on_model_def {
+        header_spans.push(Span::styled("   ^d", Style::default().fg(DIM)));
+        header_spans.push(Span::styled(" delete", Style::default().fg(MUTED)));
+    }
+    lines.push(Line::from(header_spans));
     lines.push(Line::raw(""));
 
     for (i, def) in state.model_definitions.iter().enumerate() {
