@@ -268,98 +268,77 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
         Color::Rgb(45, 90, 45),
     ];
 
-    //
-    // Static noise particles around the logo — random electric zaps.
-    //
     let t = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
-    let art_width = art.first().map(|l| l.chars().count()).unwrap_or(44);
 
-    let noise_chars = [' ', ' ', ' ', ' ', ' ', ' ', '\u{00b7}', '\u{2022}', '\u{2219}', '*'];
-    let noise_colors = [
-        Color::Rgb(35, 55, 35),
-        Color::Rgb(50, 80, 50),
-        Color::Rgb(70, 120, 70),
-        Color::Rgb(100, 180, 100),
-        Color::Rgb(130, 220, 130),
+    //
+    // Glitch animation — frequent, obvious character distortion.
+    // Every few frames, random rows get shifted, corrupted, or
+    // have characters replaced with block/line chars.
+    //
+    let glitch_chars: &[char] = &[
+        '\u{2588}', '\u{2591}', '\u{2592}', '\u{2593}',
+        '/', '\\', '|', '_', '#', '@', '!',
     ];
 
     //
-    // Noise line above logo.
+    // Glitch cycles: ~800ms period, active for ~200ms.
     //
-    let mut top_noise: Vec<Span> = Vec::new();
-    for col in 0..art_width + 4 {
-        let seed = (t / 100).wrapping_mul(col as u128 * 37 + 7) % 100;
-        if seed < 8 {
-            let ch_idx = (seed as usize) % noise_chars.len();
-            let c_idx = ((t / 80 + col as u128 * 13) % noise_colors.len() as u128) as usize;
-            top_noise.push(Span::styled(
-                noise_chars[ch_idx].to_string(),
-                Style::default().fg(noise_colors[c_idx]),
-            ));
-        } else {
-            top_noise.push(Span::raw(" "));
-        }
-    }
-    lines.push(Line::from(top_noise));
+    let cycle = (t / 100) % 8;
+    let is_glitching = cycle < 2;
 
     //
-    // Occasionally glitch random characters in the logo — electric zap effect.
+    // Which rows to glitch (changes each cycle).
     //
-    let glitch_chars = ['\u{2588}', '\u{2591}', '\u{2592}', '\u{2593}', '/', '\\', '|', '_', '-'];
+    let glitch_seed = (t / 100) as usize;
 
     for (i, line) in art.iter().enumerate() {
         let color = shades[i.min(shades.len() - 1)];
 
         //
-        // Every ~2 seconds, glitch a random row for a brief moment.
+        // Determine if this row should glitch.
         //
-        let glitch_phase = (t / 80) % 25;
-        let glitch_row = ((t / 80) % art.len() as u128) as usize;
-        let is_glitch_frame = glitch_phase < 2 && i == glitch_row;
+        let row_glitch = is_glitching
+            && ((glitch_seed.wrapping_mul(i * 7 + 3)) % 3 == 0);
 
-        if is_glitch_frame {
+        if row_glitch {
             let chars: Vec<char> = line.chars().collect();
             let mut spans: Vec<Span> = Vec::new();
 
+            //
+            // Horizontal shift — offset some chars to the right.
+            //
+            let shift = (glitch_seed.wrapping_mul(i + 1) % 4) as i32 - 1;
+
             for (ci, ch) in chars.iter().enumerate() {
-                let seed = (t.wrapping_mul(ci as u128 * 31 + 7)) % 20;
-                if seed < 3 && *ch != ' ' {
-                    let glitch_ch = glitch_chars[(seed as usize + ci) % glitch_chars.len()];
+                let glitch_this = (glitch_seed.wrapping_mul(ci * 13 + i * 7)) % 8 < 4;
+
+                if glitch_this && *ch != ' ' {
+                    let gi = (glitch_seed + ci + i) % glitch_chars.len();
                     spans.push(Span::styled(
-                        glitch_ch.to_string(),
-                        Style::default().fg(Color::Rgb(160, 255, 160)),
+                        glitch_chars[gi].to_string(),
+                        Style::default().fg(Color::Rgb(180, 255, 180)),
                     ));
+                } else if shift > 0 && ci < shift as usize {
+                    spans.push(Span::raw(" "));
                 } else {
-                    spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
+                    spans.push(Span::styled(
+                        ch.to_string(),
+                        Style::default().fg(color),
+                    ));
                 }
             }
+
             lines.push(Line::from(spans));
         } else {
-            lines.push(Line::from(Span::styled(*line, Style::default().fg(color))));
+            lines.push(Line::from(Span::styled(
+                *line,
+                Style::default().fg(color),
+            )));
         }
     }
-
-    //
-    // Noise line below logo.
-    //
-    let mut bottom_noise: Vec<Span> = Vec::new();
-    for col in 0..art_width + 4 {
-        let seed = (t / 100).wrapping_mul(col as u128 * 53 + 11) % 100;
-        if seed < 8 {
-            let ch_idx = (seed as usize) % noise_chars.len();
-            let c_idx = ((t / 80 + col as u128 * 17) % noise_colors.len() as u128) as usize;
-            bottom_noise.push(Span::styled(
-                noise_chars[ch_idx].to_string(),
-                Style::default().fg(noise_colors[c_idx]),
-            ));
-        } else {
-            bottom_noise.push(Span::raw(" "));
-        }
-    }
-    lines.push(Line::from(bottom_noise));
 
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
