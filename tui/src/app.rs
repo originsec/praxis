@@ -396,8 +396,17 @@ impl App {
                 // Periodically refresh operations data when viewing that window.
                 //
                 //
-                // Always keep operations data fresh for both Ops and Nodes views.
+                // Always keep operations data fresh. Periodically
+                // re-request the full list to catch ops started by
+                // other clients (e.g. orchestrator tool calls).
                 //
+                static REFRESH_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                let count = REFRESH_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if count % 30 == 0 {
+                    // Every ~3 seconds (30 * 100ms tick)
+                    let _ = self.client.request_semantic_op_list().await;
+                    let _ = self.client.request_chain_execution_list().await;
+                }
                 self.operations.operations = self.client.get_operations().await;
                 self.operations.chain_executions = self.client.get_chain_executions().await;
 
