@@ -42,13 +42,44 @@ pub fn render(
         render_node_list(f, chunks[0], state);
         render_node_detail(f, chunks[1], state, ops, chains);
 
-        let hints = Line::from(vec![
-            Span::raw(" "),
-            Span::styled("^r", Style::default().fg(ACCENT)),
-            Span::styled(" reset  ", Style::default().fg(MUTED)),
-            Span::styled("^t", Style::default().fg(ACCENT)),
-            Span::styled(" terminal", Style::default().fg(MUTED)),
-        ]);
+        let has_terminal = state
+            .nodes
+            .get(state.selected)
+            .map(|n| {
+                n.capabilities.is_empty()
+                    || n.capabilities
+                        .contains(&common::NodeCapability::Terminal)
+            })
+            .unwrap_or(false);
+
+        let mut hint_spans = vec![Span::raw(" ")];
+
+        if state.detail_focus {
+            let has_session = state
+                .nodes
+                .get(state.selected)
+                .map(|n| {
+                    n.capabilities.is_empty()
+                        || n.capabilities.contains(&common::NodeCapability::Session)
+                })
+                .unwrap_or(false);
+            if has_session {
+                hint_spans.push(Span::styled("enter", Style::default().fg(ACCENT)));
+                hint_spans.push(Span::styled(" session  ", Style::default().fg(MUTED)));
+            }
+        } else {
+            hint_spans.push(Span::styled("enter", Style::default().fg(ACCENT)));
+            hint_spans.push(Span::styled(" select  ", Style::default().fg(MUTED)));
+        }
+
+        hint_spans.push(Span::styled("^r", Style::default().fg(ACCENT)));
+        hint_spans.push(Span::styled(" reset", Style::default().fg(MUTED)));
+
+        if has_terminal {
+            hint_spans.push(Span::styled("  ^t", Style::default().fg(ACCENT)));
+            hint_spans.push(Span::styled(" terminal", Style::default().fg(MUTED)));
+        }
+        let hints = Line::from(hint_spans);
         f.render_widget(Paragraph::new(hints), outer[1]);
     }
 }
@@ -789,47 +820,100 @@ fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
     //
 
     let screen = term.parser.screen();
-    let cursor_pos = screen.cursor_position();
-    let mut lines: Vec<Line> = Vec::new();
+    let visible_rows = screen.size().0 as usize;
 
-    for row in 0..screen.size().0 {
-        let mut spans: Vec<Span> = Vec::new();
-        let mut col = 0u16;
-        while col < screen.size().1 {
-            let cell = screen.cell(row, col).unwrap();
-            let ch = cell.contents();
-            let display = if ch.is_empty() { " " } else { &ch };
+    //
+    // Build the live screen lines.
+    //
 
-            let is_cursor = row == cursor_pos.0 && col == cursor_pos.1;
+    let build_screen_lines = |show_cursor: bool| -> Vec<Line<'static>> {
+        let cursor_pos = screen.cursor_position();
+        let mut lines: Vec<Line> = Vec::new();
+        for row in 0..screen.size().0 {
+            let mut spans: Vec<Span> = Vec::new();
+            for col in 0..screen.size().1 {
+                let cell = screen.cell(row, col).unwrap();
+                let ch = cell.contents();
+                let display = if ch.is_empty() { " " } else { &ch };
 
-            let fg = vt100_fg_to_ratatui(cell.fgcolor());
-            let bg = vt100_bg_to_ratatui(cell.bgcolor());
+                let is_cursor =
+                    show_cursor && row == cursor_pos.0 && col == cursor_pos.1;
 
-            let mut style = if is_cursor {
-                Style::default().fg(super::BG).bg(ACCENT)
-            } else {
-                let mut s = Style::default().fg(fg);
-                if bg != super::BG {
-                    s = s.bg(bg);
+                let fg = vt100_fg_to_color(cell.fgcolor());
+                let bg = vt100_bg_to_color(cell.bgcolor());
+
+                let mut style = if is_cursor {
+                    Style::default().fg(super::BG).bg(ACCENT)
+                } else {
+                    let mut s = Style::default().fg(fg);
+                    if bg != super::BG {
+                        s = s.bg(bg);
+                    }
+                    s
+                };
+
+                if cell.bold() {
+                    style = style.add_modifier(Modifier::BOLD);
                 }
-                s
-            };
+                if cell.underline() {
+                    style = style.add_modifier(Modifier::UNDERLINED);
+                }
+                if cell.inverse() && !is_cursor {
+                    style = style.add_modifier(Modifier::REVERSED);
+                }
 
-            if cell.bold() {
-                style = style.add_modifier(Modifier::BOLD);
+                spans.push(Span::styled(display.to_string(), style));
             }
-            if cell.underline() {
-                style = style.add_modifier(Modifier::UNDERLINED);
-            }
-            if cell.inverse() && !is_cursor {
-                style = style.add_modifier(Modifier::REVERSED);
-            }
-
-            spans.push(Span::styled(display.to_string(), style));
-            col += 1;
+            lines.push(Line::from(spans));
         }
-        lines.push(Line::from(spans));
-    }
+        lines
+    };
+
+    let lines = if term.scroll_offset == 0 {
+        build_screen_lines(true)
+    } else {
+        //
+        // Scrollback mode: combine history lines with live screen, then
+        // take a window ending scroll_offset lines above the bottom.
+        //
+
+        let history_len = term.scrollback_lines.len();
+        let screen_lines = build_screen_lines(false);
+
+        //
+        // Build a combined view: [scrollback_lines...] + [screen_lines]
+        // We want to show a window of visible_rows lines, ending at
+        // (total - scroll_offset).
+        //
+
+        let total = history_len + visible_rows;
+        let end = total.saturating_sub(term.scroll_offset);
+        let start = end.saturating_sub(visible_rows);
+
+        let mut result: Vec<Line> = Vec::new();
+        for i in start..end {
+            if i < history_len {
+                //
+                // From scrollback history.
+                //
+                let row = &term.scrollback_lines[i];
+                let spans: Vec<Span> = row
+                    .iter()
+                    .map(|(text, style)| Span::styled(text.clone(), *style))
+                    .collect();
+                result.push(Line::from(spans));
+            } else {
+                //
+                // From live screen.
+                //
+                let screen_idx = i - history_len;
+                if screen_idx < screen_lines.len() {
+                    result.push(screen_lines[screen_idx].clone());
+                }
+            }
+        }
+        result
+    };
 
     let content_area = Rect {
         x: chunks[2].x + 3,
@@ -844,14 +928,21 @@ fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
     // Hints.
     //
 
-    let hints = Line::from(vec![
+    let mut hint_spans = vec![
         Span::styled("  ^t", Style::default().fg(ACCENT)),
         Span::styled(" close terminal", Style::default().fg(MUTED)),
-    ]);
+    ];
+    if term.scroll_offset > 0 {
+        hint_spans.push(Span::styled(
+            format!("   [scrollback: -{}]", term.scroll_offset),
+            Style::default().fg(DIM),
+        ));
+    }
+    let hints = Line::from(hint_spans);
     f.render_widget(Paragraph::new(hints), chunks[4]);
 }
 
-fn vt100_fg_to_ratatui(color: vt100::Color) -> Color {
+pub fn vt100_fg_to_color(color: vt100::Color) -> Color {
     match color {
         vt100::Color::Default => Color::Rgb(180, 180, 180),
         vt100::Color::Idx(i) => Color::Indexed(i),
@@ -859,7 +950,7 @@ fn vt100_fg_to_ratatui(color: vt100::Color) -> Color {
     }
 }
 
-fn vt100_bg_to_ratatui(color: vt100::Color) -> Color {
+pub fn vt100_bg_to_color(color: vt100::Color) -> Color {
     match color {
         vt100::Color::Default => super::BG,
         vt100::Color::Idx(i) => Color::Indexed(i),

@@ -232,6 +232,8 @@ pub struct TerminalState {
     pub node_id: String,
     pub terminal_id: Option<String>,
     pub parser: vt100::Parser,
+    pub scroll_offset: usize,
+    pub scrollback_lines: Vec<Vec<(String, ratatui::style::Style)>>,
 }
 
 pub struct SessionOptions {
@@ -608,7 +610,51 @@ impl App {
             AppEvent::TerminalOutput(output) => {
                 if let Some(ref mut term) = self.nodes.terminal {
                     if term.terminal_id.as_deref() == Some(&output.terminal_id) {
+                        //
+                        // Snapshot visible rows before processing so we can
+                        // capture any that scroll off into our scrollback buffer.
+                        //
+
+                        let old_scrollback = term.parser.screen().scrollback();
+                        let screen = term.parser.screen();
+                        let rows = screen.size().0;
+                        let cols = screen.size().1;
+                        let mut snapshot: Vec<Vec<(String, ratatui::style::Style)>> = Vec::new();
+                        for row in 0..rows {
+                            let mut cells = Vec::new();
+                            for col in 0..cols {
+                                if let Some(cell) = screen.cell(row, col) {
+                                    let ch = cell.contents();
+                                    let display = if ch.is_empty() {
+                                        " ".to_string()
+                                    } else {
+                                        ch.to_string()
+                                    };
+                                    let fg = crate::ui::nodes::vt100_fg_to_color(cell.fgcolor());
+                                    let bg = crate::ui::nodes::vt100_bg_to_color(cell.bgcolor());
+                                    let mut style = ratatui::style::Style::default().fg(fg);
+                                    if bg != crate::ui::BG {
+                                        style = style.bg(bg);
+                                    }
+                                    if cell.bold() {
+                                        style = style.add_modifier(ratatui::style::Modifier::BOLD);
+                                    }
+                                    cells.push((display, style));
+                                }
+                            }
+                            snapshot.push(cells);
+                        }
+
                         term.parser.process(&output.data);
+
+                        let new_scrollback = term.parser.screen().scrollback();
+                        let scrolled = new_scrollback.saturating_sub(old_scrollback);
+                        if scrolled > 0 {
+                            let take = scrolled.min(snapshot.len());
+                            for i in 0..take {
+                                term.scrollback_lines.push(snapshot[i].clone());
+                            }
+                        }
                     }
                 }
             }
@@ -787,26 +833,15 @@ impl App {
         // Terminal mode: forward scroll as escape sequences.
         //
 
-        if self.nodes.terminal.is_some() {
-            if let Some(ref term) = self.nodes.terminal {
-                let node_id = term.node_id.clone();
+        if self.nodes.terminal.is_some() && self.active_window == Window::Nodes {
+            if let Some(ref mut term) = self.nodes.terminal {
                 match mouse.kind {
                     MouseEventKind::ScrollUp => {
-                        // Send scroll-up (typically 3 lines of Up arrow)
-                        for _ in 0..3 {
-                            let _ = self
-                                .client
-                                .send_terminal_input(&node_id, b"\x1b[A".to_vec())
-                                .await;
-                        }
+                        let max = term.scrollback_lines.len();
+                        term.scroll_offset = (term.scroll_offset + 3).min(max);
                     }
                     MouseEventKind::ScrollDown => {
-                        for _ in 0..3 {
-                            let _ = self
-                                .client
-                                .send_terminal_input(&node_id, b"\x1b[B".to_vec())
-                                .await;
-                        }
+                        term.scroll_offset = term.scroll_offset.saturating_sub(3);
                     }
                     _ => {}
                 }
@@ -1396,7 +1431,13 @@ impl App {
                 }
             }
             KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.open_terminal().await;
+                if let Some(node) = self.nodes.nodes.get(self.nodes.selected) {
+                    if node.capabilities.is_empty()
+                        || node.capabilities.contains(&common::NodeCapability::Terminal)
+                    {
+                        self.open_terminal().await;
+                    }
+                }
             }
             _ => {}
         }
@@ -1447,6 +1488,8 @@ impl App {
                         node_id: node_id.clone(),
                         terminal_id: Some(terminal_id),
                         parser: vt100::Parser::new(rows, cols, 0),
+                        scroll_offset: 0,
+                        scrollback_lines: Vec::new(),
                     });
                 }
             }
@@ -1469,6 +1512,14 @@ impl App {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('t') {
             self.close_terminal().await;
             return;
+        }
+
+        //
+        // Any keypress snaps back to live view.
+        //
+
+        if let Some(ref mut term) = self.nodes.terminal {
+            term.scroll_offset = 0;
         }
 
         //
@@ -1522,6 +1573,16 @@ impl App {
             Some(n) => n,
             None => return,
         };
+
+        //
+        // Only allow sessions on nodes with Session capability.
+        //
+
+        if !node.capabilities.is_empty()
+            && !node.capabilities.contains(&common::NodeCapability::Session)
+        {
+            return;
+        }
 
         let agent = match node.discovered_agents.get(self.nodes.agent_selected) {
             Some(a) => a.short_name.clone(),
