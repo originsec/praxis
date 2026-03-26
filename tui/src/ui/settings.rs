@@ -441,6 +441,15 @@ fn render_model_dropdown(f: &mut Frame, area: Rect, state: &SettingsState) {
     f.render_widget(paragraph, inner);
 }
 
+fn scroll_field(text: &str, max_width: usize) -> String {
+    if text.len() <= max_width {
+        text.to_string()
+    } else {
+        let start = text.len() - max_width;
+        format!("\u{2026}{}", &text[start + 1..])
+    }
+}
+
 fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
     let providers = crate::app::sorted_providers();
     let provider_name = providers
@@ -507,19 +516,24 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
     // API key field.
     //
 
+    let field_max = inner.width.saturating_sub(16) as usize;
+
     let key_sel = form.focused_field == 1;
     let key_display = if form.api_key.is_empty() {
         String::new()
+    } else if key_sel && form.editing_text {
+        scroll_field(&form.api_key, field_max)
     } else {
         //
         // Mask all but last 4 characters.
         //
         let len = form.api_key.len();
-        if len <= 4 || (key_sel && form.editing_text) {
+        let masked = if len <= 4 {
             form.api_key.clone()
         } else {
             format!("{}{}", "\u{2022}".repeat(len - 4), &form.api_key[len - 4..])
-        }
+        };
+        scroll_field(&masked, field_max)
     };
 
     let mut key_spans = vec![
@@ -547,6 +561,7 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
     //
 
     let mod_sel = form.focused_field == 2;
+    let mod_display = scroll_field(&form.model_name, field_max);
     let mut mod_spans = vec![
         Span::styled(
             if mod_sel { "\u{25b8} " } else { "  " },
@@ -554,7 +569,7 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
         ),
         Span::styled("Model       ", Style::default().fg(if mod_sel { ACCENT } else { TEXT })),
         Span::styled(
-            form.model_name.clone(),
+            mod_display,
             if mod_sel && form.editing_text {
                 Style::default().fg(EDIT_FG).bg(Color::Rgb(50, 55, 50))
             } else {
