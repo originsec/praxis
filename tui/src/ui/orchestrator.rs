@@ -296,12 +296,12 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
             .as_millis() as f32;
 
         //
-        // Source: center of the P in PRAXIS.
+        // Source: center of the PRAXIS logo.
         //
         let art_display_w = art[0].chars().count();
         let logo_x_px = w.saturating_sub(art_display_w) / 2;
-        let source_x = (logo_x_px as f32 + 3.0).min(w.saturating_sub(1) as f32);
-        let source_y = (logo_y as f32 + 2.5).min(h.saturating_sub(1) as f32);
+        let source_x = (logo_x_px as f32 + art_display_w as f32 / 2.0).min(w.saturating_sub(1) as f32);
+        let source_y = (logo_y as f32 + art_h as f32 / 2.0).min(h.saturating_sub(1) as f32);
 
         //
         // Rays emanate from P, rotate slowly, fade with distance and time.

@@ -386,7 +386,9 @@ impl App {
 
     pub async fn handle_event(&mut self, event: AppEvent) {
         match event {
-            AppEvent::Terminal(Event::Key(key)) => self.handle_key(key).await,
+            AppEvent::Terminal(Event::Key(key)) if key.kind == crossterm::event::KeyEventKind::Press => {
+                self.handle_key(key).await;
+            }
             AppEvent::Terminal(Event::Mouse(mouse)) => self.handle_mouse(mouse),
             AppEvent::Orchestrator(msg) => self.handle_orchestrator_event(msg),
             AppEvent::StateUpdate(state) => self.handle_state_update(state),
