@@ -716,13 +716,10 @@ impl App {
                     self.active_window = Window::Nodes;
                     return;
                 }
-                KeyCode::Char('e') => {
-                    if self.active_window != Window::Operations {
-                        self.active_window = Window::Operations;
-                        self.refresh_operations();
-                        return;
-                    }
-                    // Fall through to per-window handler for ^e edit.
+                KeyCode::Char('p') => {
+                    self.active_window = Window::Operations;
+                    self.refresh_operations();
+                    return;
                 }
                 KeyCode::Char('s') => {
                     self.active_window = Window::Settings;
