@@ -1,5 +1,8 @@
 use crate::client::Client;
-use common::{ClientDirectMessage, SystemState};
+use common::{
+    ChainDefinitionInfo, ChainExecutionUpdate, ClientDirectMessage, OperationDefinitionInfo,
+    SemanticOpUpdate, SystemState,
+};
 use crossterm::event::{Event, EventStream};
 use futures_util::StreamExt;
 use std::sync::Arc;
@@ -9,14 +12,24 @@ pub enum AppEvent {
     Terminal(Event),
     Orchestrator(ClientDirectMessage),
     StateUpdate(SystemState),
+    OperationsRefreshed {
+        op_definitions: Vec<OperationDefinitionInfo>,
+        chain_definitions: Vec<ChainDefinitionInfo>,
+        operations: Vec<SemanticOpUpdate>,
+        chain_executions: Vec<ChainExecutionUpdate>,
+    },
     SessionResponse(SessionResult),
     Tick,
 }
 
 pub enum SessionResult {
-    Created(String),  // session_id
-    Response(String), // agent response text
-    Error(String),    // error message
+    Created(String), // session_id
+    Response {
+        transaction_id: String,
+        text: String,
+    },
+    Cancelled(String), // transaction_id
+    Error(String),     // error message
 }
 
 pub struct EventHandler {
