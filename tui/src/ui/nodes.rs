@@ -533,9 +533,12 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
                 ]));
             }
             ChatRole::Agent => {
-                lines.push(Line::from(""));
-                let md_lines = crate::markdown::render(&msg.text, "");
-                lines.extend(md_lines);
+                let trimmed = msg.text.trim();
+                if !trimmed.is_empty() {
+                    lines.push(Line::from(""));
+                    let md_lines = crate::markdown::render(trimmed, "");
+                    lines.extend(md_lines);
+                }
             }
             ChatRole::System => {
                 lines.push(Line::from(Span::styled(

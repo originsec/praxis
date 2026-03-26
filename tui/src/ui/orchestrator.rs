@@ -130,6 +130,7 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                         ThinkSegment::Visible(text) => {
                             let trimmed = text.trim();
                             if !trimmed.is_empty() {
+                                lines.push(Line::from(""));
                                 let md_lines = markdown::render(trimmed, "");
                                 lines.extend(md_lines);
                             }
