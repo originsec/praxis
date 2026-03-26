@@ -1591,10 +1591,8 @@ impl App {
                     OpsTab::Executions => self.delete_selected_execution().await,
                 }
             }
-            KeyCode::Char('c') => {
-                if self.operations.tab == OpsTab::Executions {
-                    self.cancel_selected_execution().await;
-                }
+            KeyCode::Char('c') if self.operations.tab == OpsTab::Executions => {
+                self.cancel_selected_execution().await;
             }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.refresh_operations().await;

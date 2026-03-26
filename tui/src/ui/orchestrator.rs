@@ -278,15 +278,6 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
     let art_h = art.len();
     let logo_y = h.saturating_sub(art_h + 3) / 2;
 
-    //
-    // Sparse glyph field, closer to the web splash screen than matrix rain.
-    //
-    let symbols: &[char] = &[
-        '\u{0394}', '\u{03A8}', '\u{03A9}', '\u{03A3}', '\u{03B8}', '\u{03BB}', '\u{03C6}',
-        '\u{00B5}', '\u{00D8}', '\u{03C0}', '$', '#', '&', '@', '!', '?', '1', '0', '\u{25A0}',
-        '\u{25B2}', '\u{2302}', '\u{00A7}',
-    ];
-
     #[derive(Clone, Copy)]
     struct BgCell {
         ch: char,
@@ -309,67 +300,164 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis();
-        let scanline_y = if h > 0 { ((t / 45) as usize) % h } else { 0 };
-        let particle_count = (w.saturating_mul(h) / 22).clamp(24, 260);
+        let logo_x = w.saturating_sub(art[0].len()) / 2;
+        let source_x = (logo_x + 4).min(w.saturating_sub(1)) as f32;
+        let source_y = (logo_y + 2).min(h.saturating_sub(1)) as f32;
+        let phase = t as f32 / 220.0;
+        let pulse = ((t as f32 / 180.0).sin() * 0.5 + 0.5) * 0.35 + 0.65;
+        let max_dist = ((w * w + h * h) as f32).sqrt().max(1.0);
 
-        for i in 0..particle_count {
-            let seed = mix(i as u64 * 0x9e37 + w as u64 * 131 + h as u64 * 17);
-            let drift_tick = (t / (110 + (seed % 260) as u128)) as i64;
-            let sway_tick = (t / (220 + ((seed >> 9) % 420) as u128)) as i64;
+        for row in 0..h {
+            for col in 0..w {
+                let idx = row * w + col;
+                let dx = col as f32 - source_x;
+                let dy = row as f32 - source_y;
+                let dist = (dx * dx + dy * dy).sqrt();
 
-            let base_x = (seed % w.max(1) as u64) as i64;
-            let base_y = ((seed >> 16) % h.max(1) as u64) as i64;
-            let drift_x =
-                (drift_tick * (((seed >> 24) % 3) as i64 - 1)).rem_euclid(w.max(1) as i64);
-            let drift_y =
-                (drift_tick * (((seed >> 27) % 3) as i64 - 1)).rem_euclid(h.max(1) as i64);
-            let sway_x = ((sway_tick + ((seed >> 32) % 5) as i64).rem_euclid(5)) - 2;
-            let sway_y = ((sway_tick + ((seed >> 36) % 5) as i64).rem_euclid(3)) - 1;
+                if dist < 1.0 {
+                    continue;
+                }
 
-            let x = (base_x + drift_x + sway_x).rem_euclid(w.max(1) as i64) as usize;
-            let y = (base_y + drift_y + sway_y).rem_euclid(h.max(1) as i64) as usize;
+                let angle = dy.atan2(dx);
+                let mut ray_strength = 0.0_f32;
+
+                for ray_idx in 0..7 {
+                    let seeded = mix(ray_idx as u64 * 97 + w as u64 * 11 + h as u64 * 7);
+                    let base_angle = -0.85
+                        + ray_idx as f32 * 0.33
+                        + ((seeded & 0xff) as f32 / 255.0 - 0.5) * 0.18;
+                    let sweep =
+                        ((phase * (0.35 + ray_idx as f32 * 0.04)) + ray_idx as f32).sin() * 0.14;
+                    let target_angle = base_angle + sweep;
+                    let angle_delta = ((angle - target_angle) + std::f32::consts::PI)
+                        .rem_euclid(std::f32::consts::TAU)
+                        - std::f32::consts::PI;
+                    let width = 0.08 + ((seeded >> 8) & 0xff) as f32 / 255.0 * 0.08;
+                    let alignment = (1.0 - (angle_delta.abs() / width)).clamp(0.0, 1.0);
+                    let reach = 1.0 - (dist / max_dist).powf(0.72);
+                    let band = (((dist / 2.8) - phase * (0.9 + ray_idx as f32 * 0.08)).sin() * 0.5
+                        + 0.5)
+                        .powf(1.8);
+                    ray_strength = ray_strength.max(alignment * reach * (0.45 + band * 0.55));
+                }
+
+                let corona = (1.0 - (dist / 9.0)).clamp(0.0, 1.0).powf(1.6) * pulse;
+                let glow = ray_strength.max(corona) * animation_fade;
+
+                if glow < 0.08 {
+                    continue;
+                }
+
+                let (ch, priority, color) = if glow > 0.78 {
+                    (
+                        '*',
+                        4,
+                        Color::Rgb(
+                            (170.0 * glow).min(255.0) as u8,
+                            (240.0 * glow).min(255.0) as u8,
+                            (150.0 * glow).min(255.0) as u8,
+                        ),
+                    )
+                } else if glow > 0.52 {
+                    (
+                        '+',
+                        3,
+                        Color::Rgb(
+                            (120.0 * glow).min(255.0) as u8,
+                            (200.0 * glow).min(255.0) as u8,
+                            (110.0 * glow).min(255.0) as u8,
+                        ),
+                    )
+                } else if glow > 0.3 {
+                    (
+                        ':',
+                        2,
+                        Color::Rgb(
+                            (78.0 * glow).min(255.0) as u8,
+                            (145.0 * glow).min(255.0) as u8,
+                            (82.0 * glow).min(255.0) as u8,
+                        ),
+                    )
+                } else {
+                    (
+                        '.',
+                        1,
+                        Color::Rgb(
+                            (42.0 * glow).min(255.0) as u8,
+                            (88.0 * glow).min(255.0) as u8,
+                            (48.0 * glow).min(255.0) as u8,
+                        ),
+                    )
+                };
+
+                let cell = BgCell {
+                    ch,
+                    color,
+                    priority,
+                };
+                if bg[idx].map(|existing| existing.priority).unwrap_or(0) <= priority {
+                    bg[idx] = Some(cell);
+                }
+            }
+        }
+
+        let spark_count = (w.saturating_mul(h) / 90).clamp(10, 40);
+        for i in 0..spark_count {
+            let seed = mix(i as u64 * 0x9e37 + w as u64 * 19 + h as u64 * 13);
+            let travel = ((t / (60 + (seed % 70) as u128)) as i64) + (seed >> 17) as i64;
+            let x = (source_x as i64 + travel * (2 + ((seed >> 9) % 3) as i64))
+                .rem_euclid(w.max(1) as i64) as usize;
+            let y = (source_y as i64
+                + ((travel / 2) * (((seed >> 13) % 3) as i64 - 1))
+                + ((seed >> 21) % h.max(1) as u64) as i64)
+                .rem_euclid(h.max(1) as i64) as usize;
             let idx = y * w + x;
+            let intensity = ((((t / 70) as u64 + seed) % 100) as f32 / 100.0) * animation_fade;
 
-            let twinkle = ((t / (80 + ((seed >> 40) % 120) as u128)) as u64 + (seed >> 48)) % 9;
-            let near_scanline = y.abs_diff(scanline_y) <= 1;
-            let (color, priority) = if near_scanline || twinkle >= 7 {
-                (
-                    Color::Rgb(
-                        (92.0 * animation_fade) as u8,
-                        (156.0 * animation_fade) as u8,
-                        (102.0 * animation_fade) as u8,
-                    ),
-                    3,
-                )
-            } else if twinkle >= 4 {
-                (
-                    Color::Rgb(
-                        (42.0 * animation_fade) as u8,
-                        (88.0 * animation_fade) as u8,
-                        (50.0 * animation_fade) as u8,
-                    ),
-                    2,
-                )
-            } else {
-                (
-                    Color::Rgb(
-                        (24.0 * animation_fade) as u8,
-                        (52.0 * animation_fade) as u8,
-                        (30.0 * animation_fade) as u8,
-                    ),
-                    1,
-                )
-            };
+            if intensity < 0.45 {
+                continue;
+            }
 
-            let ch = symbols[((seed >> 8) as usize + (t / 140) as usize) % symbols.len()];
             let cell = BgCell {
-                ch,
-                color,
-                priority,
+                ch: if intensity > 0.75 { '*' } else { '.' },
+                color: Color::Rgb(
+                    (150.0 * intensity).min(255.0) as u8,
+                    (230.0 * intensity).min(255.0) as u8,
+                    (140.0 * intensity).min(255.0) as u8,
+                ),
+                priority: 5,
             };
 
-            if bg[idx].map(|existing| existing.priority).unwrap_or(0) <= priority {
-                bg[idx] = Some(cell);
+            bg[idx] = Some(cell);
+        }
+
+        let halo_rows = 5usize;
+        let halo_cols = 10usize;
+        for halo_y in 0..halo_rows {
+            for halo_x in 0..halo_cols {
+                let x = logo_x.saturating_add(halo_x);
+                let y = logo_y.saturating_add(halo_y);
+                if x >= w || y >= h {
+                    continue;
+                }
+                let idx = y * w + x;
+                let dx = halo_x as f32 - 2.0;
+                let dy = halo_y as f32 - 2.0;
+                let halo = (1.0 - ((dx * dx + dy * dy).sqrt() / 5.5)).clamp(0.0, 1.0)
+                    * pulse
+                    * animation_fade;
+                if halo < 0.1 {
+                    continue;
+                }
+                bg[idx] = Some(BgCell {
+                    ch: if halo > 0.75 { '*' } else { '.' },
+                    color: Color::Rgb(
+                        (160.0 * halo).min(255.0) as u8,
+                        (245.0 * halo).min(255.0) as u8,
+                        (150.0 * halo).min(255.0) as u8,
+                    ),
+                    priority: 6,
+                });
             }
         }
     }
