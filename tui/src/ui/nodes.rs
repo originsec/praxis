@@ -285,10 +285,8 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
         Constraint::Length(1),  // header
         Constraint::Length(1),  // separator
         Constraint::Min(1),    // messages
-        Constraint::Length(1),  // spacer
         Constraint::Length(3), // input
         Constraint::Length(1), // hints
-        Constraint::Length(1), // spacer
     ])
     .split(area);
 
@@ -395,9 +393,9 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
     // Input.
     //
     let input_area = Rect {
-        x: chunks[5].x + 2,
-        width: chunks[5].width.saturating_sub(4),
-        ..chunks[5]
+        x: chunks[4].x + 2,
+        width: chunks[4].width.saturating_sub(4),
+        ..chunks[4]
     };
 
     let input_style = if session.is_waiting {
@@ -440,5 +438,5 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
         Span::styled("esc", Style::default().fg(ACCENT)),
         Span::styled(" close session", Style::default().fg(MUTED)),
     ]);
-    f.render_widget(Paragraph::new(hints), chunks[6]);
+    f.render_widget(Paragraph::new(hints), chunks[5]);
 }
