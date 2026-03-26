@@ -18,13 +18,15 @@ pub fn render(f: &mut Frame, popup: &Popup) {
         PopupKind::CommandPalette => render_command_palette(f, popup),
         PopupKind::SaveSession => render_save_session(f, popup),
         PopupKind::RunTarget => render_list_select(f, popup, " Select Target "),
-        PopupKind::NewOp => {} // rendered separately via new_op_form
+        PopupKind::NewOp => {}   // rendered separately via new_op_form
         PopupKind::Confirm => {} // rendered separately via confirm
     }
 }
 
 pub fn render_confirm(f: &mut Frame, confirm: &crate::app::ConfirmAction) {
-    let width = (confirm.message.len() as u16 + 6).min(f.area().width - 4).max(30);
+    let width = (confirm.message.len() as u16 + 6)
+        .min(f.area().width - 4)
+        .max(30);
     let height = 5;
     let area = centered_rect_fixed(width, height, f.area());
 
@@ -60,9 +62,9 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
     use crate::app::NewOpForm;
 
     let chunks = ratatui::layout::Layout::vertical([
-        ratatui::layout::Constraint::Length(2),  // title
-        ratatui::layout::Constraint::Min(1),     // fields
-        ratatui::layout::Constraint::Length(1),   // hints
+        ratatui::layout::Constraint::Length(2), // title
+        ratatui::layout::Constraint::Min(1),    // fields
+        ratatui::layout::Constraint::Length(1), // hints
     ])
     .split(area);
 
@@ -71,7 +73,9 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
     //
     let title = Paragraph::new(Line::from(Span::styled(
         " New Operation",
-        Style::default().fg(TEXT).add_modifier(ratatui::style::Modifier::BOLD),
+        Style::default()
+            .fg(TEXT)
+            .add_modifier(ratatui::style::Modifier::BOLD),
     )));
     f.render_widget(title, chunks[0]);
 
@@ -120,10 +124,7 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
                             Style::default().fg(Color::Black).bg(ACCENT),
                         ));
                     } else {
-                        spans.push(Span::styled(
-                            format!(" {} ", m),
-                            Style::default().fg(DIM),
-                        ));
+                        spans.push(Span::styled(format!(" {} ", m), Style::default().fg(DIM)));
                     }
                     spans.push(Span::raw(" "));
                 }
@@ -148,14 +149,16 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
                 // YOLO toggle display.
                 //
                 let indicator = if form.yolo {
-                    Span::styled(" \u{25cf} true ", Style::default().fg(Color::Black).bg(Color::Rgb(180, 160, 60)))
+                    Span::styled(
+                        " \u{25cf} true ",
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(Color::Rgb(180, 160, 60)),
+                    )
                 } else {
                     Span::styled(" \u{25cb} false ", Style::default().fg(DIM))
                 };
-                let mut spans = vec![
-                    Span::styled(format!("{}: ", label), label_style),
-                    indicator,
-                ];
+                let mut spans = vec![Span::styled(format!("{}: ", label), label_style), indicator];
                 if is_focused {
                     spans.push(Span::styled("  (tab)", Style::default().fg(DIM)));
                 }
@@ -328,14 +331,8 @@ fn render_list(
         .iter()
         .map(|(_, item)| {
             let line = Line::from(vec![
-                Span::styled(
-                    format!(" {}", item.label),
-                    Style::default().fg(TEXT),
-                ),
-                Span::styled(
-                    format!("  {}", item.description),
-                    Style::default().fg(DIM),
-                ),
+                Span::styled(format!(" {}", item.label), Style::default().fg(TEXT)),
+                Span::styled(format!("  {}", item.description), Style::default().fg(DIM)),
             ]);
             ListItem::new(line)
         })
@@ -354,6 +351,150 @@ fn render_list(
     }
 
     f.render_stateful_widget(list, area, &mut list_state);
+}
+
+pub fn render_run_options(f: &mut Frame, area: Rect, opts: &crate::app::RunOptions) {
+    let chunks = ratatui::layout::Layout::vertical([
+        ratatui::layout::Constraint::Length(2),
+        ratatui::layout::Constraint::Min(1),
+        ratatui::layout::Constraint::Length(1),
+    ])
+    .split(area);
+
+    //
+    // Title.
+    //
+    let title_text = if opts.is_chain {
+        format!(" Run Chain: {}", opts.op_name)
+    } else {
+        format!(" Run Operation: {}", opts.op_name)
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            title_text,
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ))),
+        chunks[0],
+    );
+
+    let inner = ratatui::layout::Rect {
+        x: chunks[1].x + 2,
+        width: chunks[1].width.saturating_sub(4),
+        ..chunks[1]
+    };
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    //
+    // Target Nodes — multi-select.
+    //
+    let nodes_focused = opts.focused_section == 0;
+    let nodes_label = if nodes_focused {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(MUTED)
+    };
+    let all_nodes_selected = opts.nodes.iter().all(|(_, _, s)| *s);
+    lines.push(Line::from(vec![
+        Span::styled("Target Nodes", nodes_label),
+        if all_nodes_selected {
+            Span::styled("  (all)", Style::default().fg(DIM))
+        } else {
+            let count = opts.nodes.iter().filter(|(_, _, s)| *s).count();
+            Span::styled(format!("  ({}/{})", count, opts.nodes.len()), Style::default().fg(DIM))
+        },
+    ]));
+
+    for (i, (_, name, selected)) in opts.nodes.iter().enumerate() {
+        let is_cursor = nodes_focused && i == opts.cursor;
+        let check = if *selected { "[\u{2713}]" } else { "[ ]" };
+        let style = if is_cursor {
+            Style::default().fg(TEXT).bg(Color::Rgb(35, 40, 35)).add_modifier(Modifier::BOLD)
+        } else if *selected {
+            Style::default().fg(TEXT)
+        } else {
+            Style::default().fg(DIM)
+        };
+        lines.push(Line::from(Span::styled(format!("  {} {}", check, name), style)));
+    }
+
+    //
+    // Target Agents — multi-select.
+    //
+    lines.push(Line::from(""));
+    let agents_focused = opts.focused_section == 1;
+    let agents_label = if agents_focused {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(MUTED)
+    };
+    let all_agents_selected = opts.agents.iter().all(|(_, s)| *s);
+    lines.push(Line::from(vec![
+        Span::styled("Target Agents", agents_label),
+        if all_agents_selected {
+            Span::styled("  (all)", Style::default().fg(DIM))
+        } else {
+            let count = opts.agents.iter().filter(|(_, s)| *s).count();
+            Span::styled(format!("  ({}/{})", count, opts.agents.len()), Style::default().fg(DIM))
+        },
+    ]));
+
+    for (i, (name, selected)) in opts.agents.iter().enumerate() {
+        let is_cursor = agents_focused && i == opts.cursor;
+        let check = if *selected { "[\u{2713}]" } else { "[ ]" };
+        let style = if is_cursor {
+            Style::default().fg(TEXT).bg(Color::Rgb(35, 40, 35)).add_modifier(Modifier::BOLD)
+        } else if *selected {
+            Style::default().fg(TEXT)
+        } else {
+            Style::default().fg(DIM)
+        };
+        lines.push(Line::from(Span::styled(format!("  {} {}", check, name), style)));
+    }
+
+    //
+    // YOLO mode (only for ops, not chains).
+    //
+    if !opts.is_chain {
+        lines.push(Line::from(""));
+        let yolo_focused = opts.focused_section == 2;
+        let yolo_label = if yolo_focused {
+            Style::default().fg(ACCENT)
+        } else {
+            Style::default().fg(MUTED)
+        };
+        let indicator = if opts.yolo {
+            Span::styled(
+                " \u{25cf} enabled ",
+                Style::default().fg(Color::Black).bg(Color::Rgb(180, 160, 60)),
+            )
+        } else {
+            Span::styled(" \u{25cb} disabled ", Style::default().fg(DIM))
+        };
+        lines.push(Line::from(vec![
+            Span::styled("YOLO Mode: ", yolo_label),
+            indicator,
+        ]));
+    }
+
+    f.render_widget(Paragraph::new(lines), inner);
+
+    //
+    // Hints.
+    //
+    let hints = Line::from(vec![
+        Span::styled("  \u{2191}\u{2193}", Style::default().fg(ACCENT)),
+        Span::styled(" navigate  ", Style::default().fg(MUTED)),
+        Span::styled("space", Style::default().fg(ACCENT)),
+        Span::styled(" toggle  ", Style::default().fg(MUTED)),
+        Span::styled("tab", Style::default().fg(ACCENT)),
+        Span::styled(" section  ", Style::default().fg(MUTED)),
+        Span::styled("enter", Style::default().fg(ACCENT)),
+        Span::styled(" run  ", Style::default().fg(MUTED)),
+        Span::styled("esc", Style::default().fg(ACCENT)),
+        Span::styled(" cancel", Style::default().fg(MUTED)),
+    ]);
+    f.render_widget(Paragraph::new(hints), chunks[2]);
 }
 
 fn centered_rect_fixed(width: u16, height: u16, area: Rect) -> Rect {

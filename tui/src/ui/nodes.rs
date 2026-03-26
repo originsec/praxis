@@ -1,4 +1,4 @@
-use crate::app::{NodesState, ChatRole, SessionOptions};
+use crate::app::{ChatRole, NodesState, SessionOptions};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -11,7 +11,13 @@ const MUTED: Color = Color::Rgb(120, 120, 120);
 const TEXT: Color = Color::Rgb(180, 180, 180);
 const HIGHLIGHT_BG: Color = Color::Rgb(35, 35, 40);
 
-pub fn render(f: &mut Frame, area: Rect, state: &NodesState, ops: &[common::SemanticOpUpdate], chains: &[common::ChainExecutionUpdate]) {
+pub fn render(
+    f: &mut Frame,
+    area: Rect,
+    state: &NodesState,
+    ops: &[common::SemanticOpUpdate],
+    chains: &[common::ChainExecutionUpdate],
+) {
     if let Some(ref opts) = state.session_options {
         render_session_options(f, area, opts);
         return;
@@ -104,7 +110,13 @@ fn render_node_list(f: &mut Frame, area: Rect, state: &NodesState) {
     f.render_stateful_widget(table, area, &mut table_state);
 }
 
-fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[common::SemanticOpUpdate], chains: &[common::ChainExecutionUpdate]) {
+fn render_node_detail(
+    f: &mut Frame,
+    area: Rect,
+    state: &NodesState,
+    ops: &[common::SemanticOpUpdate],
+    chains: &[common::ChainExecutionUpdate],
+) {
     let border_style = if state.detail_focus {
         Style::default().fg(ACCENT)
     } else {
@@ -143,7 +155,10 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
             activity_lines.push(Line::from(vec![
                 Span::styled("  agent: ", Style::default().fg(MUTED)),
                 Span::styled(&agent.short_name, Style::default().fg(TEXT)),
-                Span::styled(format!("  ({})", &sid[..8.min(sid.len())]), Style::default().fg(DIM)),
+                Span::styled(
+                    format!("  ({})", &sid[..8.min(sid.len())]),
+                    Style::default().fg(DIM),
+                ),
             ]));
             if agent.yolo_mode {
                 activity_lines.push(Line::from(Span::styled(
@@ -180,9 +195,15 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
         }
     }
 
-    let node_ops: Vec<_> = ops.iter()
+    let node_ops: Vec<_> = ops
+        .iter()
         .filter(|o| o.node_id == node.node_id)
-        .filter(|o| matches!(o.status, common::SemanticOpStatus::Running | common::SemanticOpStatus::Queued))
+        .filter(|o| {
+            matches!(
+                o.status,
+                common::SemanticOpStatus::Running | common::SemanticOpStatus::Queued
+            )
+        })
         .collect();
 
     if !node_ops.is_empty() {
@@ -200,7 +221,10 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
                 _ => ("\u{25cb}", DIM),
             };
             activity_lines.push(Line::from(vec![
-                Span::styled(format!("  {} ", status_str), Style::default().fg(status_color)),
+                Span::styled(
+                    format!("  {} ", status_str),
+                    Style::default().fg(status_color),
+                ),
                 Span::styled(&op.spec.name, Style::default().fg(TEXT)),
                 Span::styled(
                     format!("  {} / {}", op.agent_short_name, op.spec.mode),
@@ -211,11 +235,17 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
             // Show last line of streaming output if available.
             //
             if let Some(ref output) = op.output {
-                let last_line = output.lines().rev()
+                let last_line = output
+                    .lines()
+                    .rev()
                     .find(|l| !l.trim().is_empty())
                     .unwrap_or("");
                 if !last_line.is_empty() {
-                    let short = if last_line.len() > 60 { &last_line[..60] } else { last_line };
+                    let short = if last_line.len() > 60 {
+                        &last_line[..60]
+                    } else {
+                        last_line
+                    };
                     activity_lines.push(Line::from(Span::styled(
                         format!("    {}", short),
                         Style::default().fg(MUTED),
@@ -228,9 +258,15 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
     //
     // Active chain executions on this node.
     //
-    let node_chains: Vec<_> = chains.iter()
+    let node_chains: Vec<_> = chains
+        .iter()
         .filter(|c| c.node_id == node.node_id)
-        .filter(|c| matches!(c.status, common::ChainExecutionStatus::Running | common::ChainExecutionStatus::Queued))
+        .filter(|c| {
+            matches!(
+                c.status,
+                common::ChainExecutionStatus::Running | common::ChainExecutionStatus::Queued
+            )
+        })
         .collect();
 
     if !node_chains.is_empty() {
@@ -247,14 +283,22 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
                 common::ChainExecutionStatus::Queued => ("\u{25cb}", Color::Rgb(100, 140, 180)),
                 _ => ("\u{25cb}", DIM),
             };
-            let done = chain.elements.values()
+            let done = chain
+                .elements
+                .values()
                 .filter(|e| matches!(e.status, common::ElementExecutionStatus::Completed { .. }))
                 .count();
             let total = chain.elements.len();
             activity_lines.push(Line::from(vec![
-                Span::styled(format!("  {} ", status_str), Style::default().fg(status_color)),
+                Span::styled(
+                    format!("  {} ", status_str),
+                    Style::default().fg(status_color),
+                ),
                 Span::styled(&chain.chain_name, Style::default().fg(TEXT)),
-                Span::styled(format!("  {}/{} elements", done, total), Style::default().fg(DIM)),
+                Span::styled(
+                    format!("  {}/{} elements", done, total),
+                    Style::default().fg(DIM),
+                ),
             ]));
         }
     }
@@ -294,7 +338,9 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
     let caps_str = if node.capabilities.is_empty() {
         String::new()
     } else {
-        let caps: Vec<String> = node.capabilities.iter()
+        let caps: Vec<String> = node
+            .capabilities
+            .iter()
             .map(|c| format!("{:?}", c).to_lowercase())
             .collect();
         caps.join(", ")
@@ -318,7 +364,10 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
             Span::styled("  ", Style::default()),
             Span::styled(caps_str, Style::default().fg(DIM)),
             if !priv_str.is_empty() {
-                Span::styled(format!("  {}", priv_str), Style::default().fg(Color::Rgb(180, 160, 60)))
+                Span::styled(
+                    format!("  {}", priv_str),
+                    Style::default().fg(Color::Rgb(180, 160, 60)),
+                )
             } else {
                 Span::raw("")
             },
@@ -337,16 +386,10 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
     )));
 
     if node.discovered_agents.is_empty() {
-        agent_lines.push(Line::from(Span::styled(
-            "  none",
-            Style::default().fg(DIM),
-        )));
+        agent_lines.push(Line::from(Span::styled("  none", Style::default().fg(DIM))));
     } else {
         for (idx, agent) in node.discovered_agents.iter().enumerate() {
-            let version = agent
-                .version
-                .as_deref()
-                .unwrap_or("unknown");
+            let version = agent.version.as_deref().unwrap_or("unknown");
 
             let status_indicator = if agent.available {
                 Span::styled("\u{25cf} ", Style::default().fg(Color::Rgb(80, 160, 80)))
@@ -360,7 +403,9 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
             //
             // Green bg + dark text when agent has an active session.
             //
-            let has_session = node.selected_agent.as_ref()
+            let has_session = node
+                .selected_agent
+                .as_ref()
                 .is_some_and(|s| s.short_name == agent.short_name && s.session_id.is_some());
 
             let is_cursor = state.detail_focus && idx == state.agent_selected;
@@ -405,8 +450,8 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
 
 fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionChat) {
     let chunks = Layout::vertical([
-        Constraint::Length(1),  // header
-        Constraint::Length(1),  // separator
+        Constraint::Length(1), // header
+        Constraint::Length(1), // separator
         Constraint::Min(1),    // messages
         Constraint::Length(3), // input
         Constraint::Length(1), // hints
@@ -418,13 +463,19 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
     //
     let header = Line::from(vec![
         Span::styled("  Session: ", Style::default().fg(MUTED)),
-        Span::styled(&session.agent_name, Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            &session.agent_name,
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(
             format!("  @ {}", &session.node_id[..8.min(session.node_id.len())]),
             Style::default().fg(DIM),
         ),
         if let Some(ref sid) = session.session_id {
-            Span::styled(format!("  ({})", &sid[..8.min(sid.len())]), Style::default().fg(DIM))
+            Span::styled(
+                format!("  ({})", &sid[..8.min(sid.len())]),
+                Style::default().fg(DIM),
+            )
         } else {
             Span::styled("  (connecting...)", Style::default().fg(DIM))
         },
@@ -576,7 +627,7 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
 fn render_session_options(f: &mut Frame, area: Rect, opts: &SessionOptions) {
     let chunks = Layout::vertical([
         Constraint::Length(2), // title
-        Constraint::Min(1),   // options
+        Constraint::Min(1),    // options
         Constraint::Length(1), // hints
     ])
     .split(area);
@@ -617,7 +668,9 @@ fn render_session_options(f: &mut Frame, area: Rect, opts: &SessionOptions) {
     let yolo_indicator = if opts.yolo {
         Span::styled(
             " \u{25cf} enabled ",
-            Style::default().fg(Color::Black).bg(Color::Rgb(180, 160, 60)),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Rgb(180, 160, 60)),
         )
     } else {
         Span::styled(" \u{25cb} disabled ", Style::default().fg(DIM))
@@ -635,7 +688,10 @@ fn render_session_options(f: &mut Frame, area: Rect, opts: &SessionOptions) {
     lines.push(Line::from(""));
     let dir_label_style = Style::default().fg(ACCENT);
 
-    lines.push(Line::from(Span::styled("Working Directory:", dir_label_style)));
+    lines.push(Line::from(Span::styled(
+        "Working Directory:",
+        dir_label_style,
+    )));
 
     let mut dir_options = vec!["Default".to_string()];
     dir_options.extend(opts.working_dirs.iter().cloned());
@@ -643,13 +699,19 @@ fn render_session_options(f: &mut Frame, area: Rect, opts: &SessionOptions) {
     for (i, dir) in dir_options.iter().enumerate() {
         let is_selected = i == opts.selected_dir;
         let style = if is_selected {
-            Style::default().fg(TEXT).bg(Color::Rgb(35, 40, 35)).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(TEXT)
+                .bg(Color::Rgb(35, 40, 35))
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(DIM)
         };
 
         let marker = if is_selected { " \u{25b8} " } else { "   " };
-        lines.push(Line::from(Span::styled(format!("{}{}", marker, dir), style)));
+        lines.push(Line::from(Span::styled(
+            format!("{}{}", marker, dir),
+            style,
+        )));
     }
 
     if opts.working_dirs.is_empty() {

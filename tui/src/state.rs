@@ -10,8 +10,8 @@ pub struct CliState {
 
 impl CliState {
     fn state_file() -> Result<PathBuf> {
-        let home = dirs::home_dir()
-            .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+        let home =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
         Ok(home.join(".praxis").join("cli.json"))
     }
 

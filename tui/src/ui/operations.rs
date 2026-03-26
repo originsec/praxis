@@ -1,5 +1,5 @@
 use crate::app::{OperationsState, OpsTab};
-use common::{SemanticOpStatus, ChainExecutionStatus};
+use common::{ChainExecutionStatus, SemanticOpStatus};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -22,7 +22,7 @@ const TAB_ACTIVE_BG: Color = Color::Rgb(40, 42, 40);
 pub fn render(f: &mut Frame, area: Rect, state: &OperationsState) {
     let chunks = Layout::vertical([
         Constraint::Length(2), // tabs
-        Constraint::Min(1),   // content
+        Constraint::Min(1),    // content
         Constraint::Length(1), // hints
     ])
     .split(area);
@@ -39,16 +39,26 @@ pub fn render(f: &mut Frame, area: Rect, state: &OperationsState) {
 
 fn render_tabs(f: &mut Frame, area: Rect, state: &OperationsState) {
     let lib_count = state.op_definitions.iter().filter(|d| !d.disabled).count()
-        + state.chain_definitions.iter().filter(|c| !c.disabled).count();
+        + state
+            .chain_definitions
+            .iter()
+            .filter(|c| !c.disabled)
+            .count();
     let exec_count = state.operations.len() + state.chain_executions.len();
 
     let lib_style = if state.tab == OpsTab::Library {
-        Style::default().fg(ACCENT).bg(TAB_ACTIVE_BG).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(ACCENT)
+            .bg(TAB_ACTIVE_BG)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(MUTED)
     };
     let exec_style = if state.tab == OpsTab::Executions {
-        Style::default().fg(ACCENT).bg(TAB_ACTIVE_BG).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(ACCENT)
+            .bg(TAB_ACTIVE_BG)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(MUTED)
     };
@@ -181,8 +191,16 @@ fn render_library_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let enabled_ops: Vec<_> = state.op_definitions.iter().filter(|d| !d.disabled).collect();
-    let enabled_chains: Vec<_> = state.chain_definitions.iter().filter(|c| !c.disabled).collect();
+    let enabled_ops: Vec<_> = state
+        .op_definitions
+        .iter()
+        .filter(|d| !d.disabled)
+        .collect();
+    let enabled_chains: Vec<_> = state
+        .chain_definitions
+        .iter()
+        .filter(|c| !c.disabled)
+        .collect();
     let idx = state.library_selected;
 
     let mut lines: Vec<Line> = Vec::new();
@@ -216,7 +234,10 @@ fn render_library_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         if def.mode == "agent" {
             lines.push(Line::from(vec![
                 Span::styled(" Iterations: ", Style::default().fg(DIM)),
-                Span::styled(format!("{}", def.agent_iterations), Style::default().fg(TEXT)),
+                Span::styled(
+                    format!("{}", def.agent_iterations),
+                    Style::default().fg(TEXT),
+                ),
             ]));
         }
         lines.push(Line::from(vec![
@@ -234,7 +255,10 @@ fn render_library_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         }
         if !def.operation_prompt.is_empty() {
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(" Prompt", Style::default().fg(ACCENT))));
+            lines.push(Line::from(Span::styled(
+                " Prompt",
+                Style::default().fg(ACCENT),
+            )));
             for line in def.operation_prompt.lines().take(10) {
                 lines.push(Line::from(Span::styled(
                     format!(" {}", line),
@@ -248,7 +272,9 @@ fn render_library_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
             let chain = &enabled_chains[chain_idx];
             lines.push(Line::from(Span::styled(
                 format!(" {}", chain.name),
-                Style::default().fg(CHAIN_COLOR).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(CHAIN_COLOR)
+                    .add_modifier(Modifier::BOLD),
             )));
             lines.push(Line::from(""));
             if !chain.description.is_empty() {
@@ -260,11 +286,17 @@ fn render_library_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
             }
             lines.push(Line::from(vec![
                 Span::styled(" Elements: ", Style::default().fg(DIM)),
-                Span::styled(format!("{}", chain.element_count), Style::default().fg(TEXT)),
+                Span::styled(
+                    format!("{}", chain.element_count),
+                    Style::default().fg(TEXT),
+                ),
             ]));
             lines.push(Line::from(vec![
                 Span::styled(" Operations: ", Style::default().fg(DIM)),
-                Span::styled(format!("{}", chain.operation_count), Style::default().fg(TEXT)),
+                Span::styled(
+                    format!("{}", chain.operation_count),
+                    Style::default().fg(TEXT),
+                ),
             ]));
             if let Some(timeout) = chain.timeout {
                 lines.push(Line::from(vec![
@@ -394,7 +426,10 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
 
     if total == 0 || state.exec_selected >= total {
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(" No execution selected", Style::default().fg(DIM)))),
+            Paragraph::new(Line::from(Span::styled(
+                " No execution selected",
+                Style::default().fg(DIM),
+            ))),
             inner,
         );
         return;
@@ -464,7 +499,10 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
             lines.extend(section_header_line("Prompt", col.sections[2], focused));
             if !col.sections[2] {
                 for line in op.spec.operation_prompt.lines() {
-                    lines.push(Line::from(Span::styled(format!("  {}", line), Style::default().fg(MUTED))));
+                    lines.push(Line::from(Span::styled(
+                        format!("  {}", line),
+                        Style::default().fg(MUTED),
+                    )));
                 }
             }
         }
@@ -500,7 +538,9 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         };
         let short_id = &exec.execution_id[..8.min(exec.execution_id.len())];
         let started = exec.started_at.format("%H:%M:%S").to_string();
-        let ended = exec.ended_at.map(|e| e.format("%H:%M:%S").to_string())
+        let ended = exec
+            .ended_at
+            .map(|e| e.format("%H:%M:%S").to_string())
             .unwrap_or_else(|| "...".to_string());
 
         //
@@ -508,7 +548,9 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         //
         lines.push(Line::from(Span::styled(
             format!(" Chain: {}", exec.chain_name),
-            Style::default().fg(CHAIN_COLOR).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(CHAIN_COLOR)
+                .add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(vec![
             Span::styled(" Status: ", Style::default().fg(DIM)),
@@ -523,7 +565,11 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         lines.push(Line::from(vec![
             Span::styled(" Node: ", Style::default().fg(DIM)),
             Span::styled(
-                format!("{} / {}", &exec.node_id[..8.min(exec.node_id.len())], exec.agent_short_name),
+                format!(
+                    "{} / {}",
+                    &exec.node_id[..8.min(exec.node_id.len())],
+                    exec.agent_short_name
+                ),
                 Style::default().fg(TEXT),
             ),
             Span::styled(format!("  {}", short_id), Style::default().fg(DIM)),
@@ -535,7 +581,11 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         if !exec.outputs.is_empty() {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                format!(" Final Output  {} output{}", exec.outputs.len(), if exec.outputs.len() == 1 { "" } else { "s" }),
+                format!(
+                    " Final Output  {} output{}",
+                    exec.outputs.len(),
+                    if exec.outputs.len() == 1 { "" } else { "s" }
+                ),
                 Style::default().fg(ACCENT),
             )));
             for (_key, val) in &exec.outputs {
@@ -553,7 +603,10 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         //
         if !exec.elements.is_empty() {
             lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(" Flow", Style::default().fg(ACCENT))));
+            lines.push(Line::from(Span::styled(
+                " Flow",
+                Style::default().fg(ACCENT),
+            )));
 
             let mut elements: Vec<_> = exec.elements.iter().collect();
             elements.sort_by_key(|(_, el)| el.started_at);
@@ -574,12 +627,20 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
                     }
                     Some(common::ElementConfig::Transform { .. }) => "Transform".to_string(),
                     Some(common::ElementConfig::GenericPrompt { prompt, .. }) => {
-                        let short = if prompt.len() > 12 { &prompt[..12] } else { prompt };
+                        let short = if prompt.len() > 12 {
+                            &prompt[..12]
+                        } else {
+                            prompt
+                        };
                         format!("\"{}\"", short)
                     }
                     Some(common::ElementConfig::Memory { key, .. }) => format!("Mem:{}", key),
-                    Some(common::ElementConfig::Loop { max_iterations, .. }) => format!("Loop:{}", max_iterations),
-                    Some(common::ElementConfig::Tool { tool_name, .. }) => format!("Tool:{}", tool_name),
+                    Some(common::ElementConfig::Loop { max_iterations, .. }) => {
+                        format!("Loop:{}", max_iterations)
+                    }
+                    Some(common::ElementConfig::Tool { tool_name, .. }) => {
+                        format!("Tool:{}", tool_name)
+                    }
                     Some(common::ElementConfig::Payload { .. }) => "Payload".to_string(),
                     Some(common::ElementConfig::Termination) => "End".to_string(),
                     None => "?".to_string(),
@@ -622,7 +683,11 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
                     Some(common::ElementConfig::Trigger) => "Trigger",
                     Some(common::ElementConfig::Operation { operation_name, .. }) => {
                         // Can't return borrowed &str from format, use static
-                        if operation_name.is_empty() { "Operation" } else { "Operation" }
+                        if operation_name.is_empty() {
+                            "Operation"
+                        } else {
+                            "Operation"
+                        }
                     }
                     Some(common::ElementConfig::Transform { .. }) => "Transform",
                     Some(common::ElementConfig::GenericPrompt { .. }) => "Prompt",
@@ -651,14 +716,22 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
                         )));
                     }
                     Some(common::ElementConfig::GenericPrompt { prompt, .. }) => {
-                        let short = if prompt.len() > 60 { &prompt[..60] } else { prompt };
+                        let short = if prompt.len() > 60 {
+                            &prompt[..60]
+                        } else {
+                            prompt
+                        };
                         lines.push(Line::from(Span::styled(
                             format!("    \"{}\"", short),
                             Style::default().fg(MUTED),
                         )));
                     }
                     Some(common::ElementConfig::Transform { prompt, .. }) => {
-                        let short = if prompt.len() > 60 { &prompt[..60] } else { prompt };
+                        let short = if prompt.len() > 60 {
+                            &prompt[..60]
+                        } else {
+                            prompt
+                        };
                         lines.push(Line::from(Span::styled(
                             format!("    \"{}\"", short),
                             Style::default().fg(MUTED),
@@ -696,7 +769,6 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         }
     }
 
-
     let paragraph = Paragraph::new(Text::from(lines))
         .wrap(Wrap { trim: false })
         .scroll((state.detail_scroll, 0));
@@ -707,7 +779,10 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
 fn section_header_line(label: &str, collapsed: bool, focused: bool) -> Vec<Line<'static>> {
     let arrow = if collapsed { "\u{25b8}" } else { "\u{25be}" };
     let style = if focused {
-        Style::default().fg(TEXT).bg(Color::Rgb(35, 40, 35)).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(TEXT)
+            .bg(Color::Rgb(35, 40, 35))
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(ACCENT)
     };

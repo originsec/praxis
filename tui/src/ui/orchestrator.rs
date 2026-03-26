@@ -86,15 +86,11 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                 lines.push(Line::from(vec![
                     Span::styled(
                         "\u{25b8} ",
-                        Style::default()
-                            .fg(TEXT)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(
                         text.clone(),
-                        Style::default()
-                            .fg(TEXT)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
                     ),
                 ]));
             }
@@ -181,15 +177,15 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 
             let pending_count = state.pending_tools.len();
             let label = if pending_count > 0 {
-                format!(
-                    "{} {} ({})",
-                    spinner_char, tool_name, pending_count + 1
-                )
+                format!("{} {} ({})", spinner_char, tool_name, pending_count + 1)
             } else {
                 format!("{} {}", spinner_char, tool_name)
             };
             lines.push(Line::from(Span::styled(label, Style::default().fg(MUTED))));
-        } else if !matches!(state.messages.last(), Some(ConversationEntry::AssistantText(_))) {
+        } else if !matches!(
+            state.messages.last(),
+            Some(ConversationEntry::AssistantText(_))
+        ) {
             let frame_idx = (std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -265,16 +261,71 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
     let logo_y = h.saturating_sub(art_h + 3) / 2;
 
     //
-    // Floating symbols — scattered across the entire area, drifting down.
+    // Sparse glyph field, closer to the web splash screen than matrix rain.
     //
     let symbols: &[char] = &[
-        '\u{0394}', '\u{03A8}', '\u{03A9}', '\u{03A3}', '\u{03B8}',
-        '\u{03BB}', '\u{03C6}', '\u{00B5}', '\u{00D8}', '\u{03C0}',
-        '$', '#', '&', '@', '!', '?', '1', '0',
-        '\u{25A0}', '\u{25B2}', '\u{2302}', '\u{00A7}',
+        '\u{0394}', '\u{03A8}', '\u{03A9}', '\u{03A3}', '\u{03B8}', '\u{03BB}', '\u{03C6}',
+        '\u{00B5}', '\u{00D8}', '\u{03C0}', '$', '#', '&', '@', '!', '?', '1', '0', '\u{25A0}',
+        '\u{25B2}', '\u{2302}', '\u{00A7}',
     ];
 
+    #[derive(Clone, Copy)]
+    struct BgCell {
+        ch: char,
+        color: Color,
+        priority: u8,
+    }
+
+    fn mix(seed: u64) -> u64 {
+        let mut z = seed.wrapping_add(0x9e3779b97f4a7c15);
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+        z ^ (z >> 31)
+    }
+
     let mut lines: Vec<Line> = Vec::new();
+    let mut bg: Vec<Option<BgCell>> = vec![None; w.saturating_mul(h)];
+
+    let scanline_y = if h > 0 { ((t / 45) as usize) % h } else { 0 };
+
+    let particle_count = (w.saturating_mul(h) / 22).clamp(24, 260);
+    for i in 0..particle_count {
+        let seed = mix(i as u64 * 0x9e37 + w as u64 * 131 + h as u64 * 17);
+        let drift_tick = (t / (110 + (seed % 260) as u128)) as i64;
+        let sway_tick = (t / (220 + ((seed >> 9) % 420) as u128)) as i64;
+
+        let base_x = (seed % w.max(1) as u64) as i64;
+        let base_y = ((seed >> 16) % h.max(1) as u64) as i64;
+        let drift_x = (drift_tick * (((seed >> 24) % 3) as i64 - 1)).rem_euclid(w.max(1) as i64);
+        let drift_y = (drift_tick * (((seed >> 27) % 3) as i64 - 1)).rem_euclid(h.max(1) as i64);
+        let sway_x = ((sway_tick + ((seed >> 32) % 5) as i64).rem_euclid(5)) - 2;
+        let sway_y = ((sway_tick + ((seed >> 36) % 5) as i64).rem_euclid(3)) - 1;
+
+        let x = (base_x + drift_x + sway_x).rem_euclid(w.max(1) as i64) as usize;
+        let y = (base_y + drift_y + sway_y).rem_euclid(h.max(1) as i64) as usize;
+        let idx = y * w + x;
+
+        let twinkle = ((t / (80 + ((seed >> 40) % 120) as u128)) as u64 + (seed >> 48)) % 9;
+        let near_scanline = y.abs_diff(scanline_y) <= 1;
+        let (color, priority) = if near_scanline || twinkle >= 7 {
+            (Color::Rgb(92, 156, 102), 3)
+        } else if twinkle >= 4 {
+            (Color::Rgb(42, 88, 50), 2)
+        } else {
+            (Color::Rgb(24, 52, 30), 1)
+        };
+
+        let ch = symbols[((seed >> 8) as usize + (t / 140) as usize) % symbols.len()];
+        let cell = BgCell {
+            ch,
+            color,
+            priority,
+        };
+
+        if bg[idx].map(|existing| existing.priority).unwrap_or(0) <= priority {
+            bg[idx] = Some(cell);
+        }
+    }
 
     for row in 0..h {
         //
@@ -303,45 +354,15 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
         }
 
         //
-        // Floating symbol rows.
+        // Background glyph rows.
         //
         let mut spans: Vec<Span> = Vec::new();
 
         for col in 0..w {
-            //
-            // Each cell has a pseudo-random "stream" that falls down.
-            // Use column as seed, time drives the vertical position.
-            //
-            let stream_seed = (col as u128).wrapping_mul(71).wrapping_add(37);
-            let speed = (stream_seed % 4) + 1;
-            let y_pos = ((t / (speed * 100)).wrapping_add(stream_seed)) % (h as u128 * 2);
-
-            let is_active = y_pos == row as u128;
-            let is_trail = y_pos > 0 && (y_pos - 1) == row as u128;
-            let is_faint = y_pos > 1 && (y_pos - 2) == row as u128;
-
-            //
-            // ~25% of columns have active streams for denser rain.
-            //
-            let has_stream = stream_seed % 4 == 0;
-
-            if has_stream && is_active {
-                let si = ((t / 80).wrapping_add(col as u128 * 13)) as usize % symbols.len();
+            if let Some(cell) = bg[row * w + col] {
                 spans.push(Span::styled(
-                    symbols[si].to_string(),
-                    Style::default().fg(Color::Rgb(100, 200, 100)),
-                ));
-            } else if has_stream && is_trail {
-                let si = ((t / 80).wrapping_add(col as u128 * 13 + 5)) as usize % symbols.len();
-                spans.push(Span::styled(
-                    symbols[si].to_string(),
-                    Style::default().fg(Color::Rgb(50, 100, 50)),
-                ));
-            } else if has_stream && is_faint {
-                let si = ((t / 80).wrapping_add(col as u128 * 13 + 10)) as usize % symbols.len();
-                spans.push(Span::styled(
-                    symbols[si].to_string(),
-                    Style::default().fg(Color::Rgb(30, 55, 30)),
+                    cell.ch.to_string(),
+                    Style::default().fg(cell.color),
                 ));
             } else {
                 spans.push(Span::raw(" "));
@@ -351,8 +372,7 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
         lines.push(Line::from(spans));
     }
 
-    let paragraph = Paragraph::new(Text::from(lines))
-        .alignment(ratatui::layout::Alignment::Center);
+    let paragraph = Paragraph::new(Text::from(lines)).alignment(ratatui::layout::Alignment::Center);
 
     f.render_widget(paragraph, area);
 }
@@ -361,7 +381,6 @@ enum ThinkSegment {
     Thinking(String),
     Visible(String),
 }
-
 
 fn split_think_segments(raw: &str) -> Vec<ThinkSegment> {
     let mut segments = Vec::new();
@@ -420,8 +439,16 @@ fn build_tool_summary(tools: &[crate::app::ToolCall]) -> Vec<Line<'static>> {
         .collect();
 
     let icon_color = if failures == 0 { TOOL_OK } else { TOOL_FAIL };
-    let icon = if failures == 0 { "\u{2713}" } else { "\u{2717}" };
-    let label = if total == 1 { "tool call" } else { "tool calls" };
+    let icon = if failures == 0 {
+        "\u{2713}"
+    } else {
+        "\u{2717}"
+    };
+    let label = if total == 1 {
+        "tool call"
+    } else {
+        "tool calls"
+    };
 
     let mut spans = vec![
         Span::styled(format!("{} ", icon), Style::default().fg(icon_color)),
@@ -471,11 +498,9 @@ fn render_plan_widget(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     for step in &plan.steps {
         let (icon, icon_color, text_style) = match step.status {
             common::PlanStepStatus::Done => ("\u{2713}", PLAN_DONE, Style::default().fg(DIM)),
-            common::PlanStepStatus::InProgress => (
-                "\u{25cf}",
-                PLAN_ACTIVE,
-                Style::default().fg(TEXT),
-            ),
+            common::PlanStepStatus::InProgress => {
+                ("\u{25cf}", PLAN_ACTIVE, Style::default().fg(TEXT))
+            }
             common::PlanStepStatus::NotStarted => ("\u{25cb}", DIM, Style::default().fg(DIM)),
         };
         lines.push(Line::from(vec![
@@ -497,16 +522,17 @@ fn render_plan_widget(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 
 fn render_model_info(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     let line = match (&state.provider, &state.model) {
-        (Some(provider), Some(model)) => Line::from(vec![
-            Span::styled(format!("{} / {} ", provider, model), Style::default().fg(MUTED)),
-        ]),
-        _ => Line::from(vec![
-            Span::styled("No session ", Style::default().fg(MUTED)),
-        ]),
+        (Some(provider), Some(model)) => Line::from(vec![Span::styled(
+            format!("{} / {} ", provider, model),
+            Style::default().fg(MUTED),
+        )]),
+        _ => Line::from(vec![Span::styled(
+            "No session ",
+            Style::default().fg(MUTED),
+        )]),
     };
 
-    let paragraph = Paragraph::new(line)
-        .alignment(ratatui::layout::Alignment::Right);
+    let paragraph = Paragraph::new(line).alignment(ratatui::layout::Alignment::Right);
 
     f.render_widget(paragraph, area);
 }
@@ -540,10 +566,7 @@ fn render_input(f: &mut Frame, area: Rect, state: &OrchestratorState) {
         //
         // Cursor: thin bar in accent green.
         //
-        spans.push(Span::styled(
-            "\u{258f}",
-            Style::default().fg(ACCENT),
-        ));
+        spans.push(Span::styled("\u{258f}", Style::default().fg(ACCENT)));
 
         if !after.is_empty() {
             spans.push(Span::styled(after.to_string(), input_style));
@@ -569,10 +592,7 @@ fn render_tokens(f: &mut Frame, area: Rect, state: &OrchestratorState) {
         "  tokens: -".to_string()
     };
 
-    let paragraph = Paragraph::new(Line::from(Span::styled(
-        text,
-        Style::default().fg(DIM),
-    )));
+    let paragraph = Paragraph::new(Line::from(Span::styled(text, Style::default().fg(DIM))));
 
     f.render_widget(paragraph, area);
 }

@@ -9,8 +9,8 @@ use anyhow::Result;
 use app::App;
 use clap::Parser;
 use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
-    event::{EnableMouseCapture, DisableMouseCapture},
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use event::EventHandler;
@@ -101,7 +101,11 @@ async fn main() -> Result<()> {
     // Restore terminal.
     //
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
 
     //
     // Graceful disconnect — only possible if we have sole ownership.

@@ -60,27 +60,21 @@ pub fn render(content: &str, indent: &str) -> Vec<Line<'static>> {
         if raw_line.starts_with("### ") {
             lines.push(Line::from(Span::styled(
                 format!("{}{}", indent, &raw_line[4..]),
-                Style::default()
-                    .fg(ACCENT)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             )));
             continue;
         }
         if raw_line.starts_with("## ") {
             lines.push(Line::from(Span::styled(
                 format!("{}{}", indent, &raw_line[3..]),
-                Style::default()
-                    .fg(ACCENT)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             )));
             continue;
         }
         if raw_line.starts_with("# ") {
             lines.push(Line::from(Span::styled(
                 format!("{}{}", indent, &raw_line[2..]),
-                Style::default()
-                    .fg(ACCENT)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
             )));
             continue;
         }
@@ -138,7 +132,12 @@ fn flush_table(rows: &mut Vec<String>, lines: &mut Vec<Line<'static>>, indent: &
     let mut parsed: Vec<(Vec<String>, bool)> = Vec::new(); // (cells, is_separator)
     for row in rows.iter() {
         let trimmed = row.trim();
-        if trimmed.contains("---") && !trimmed.contains(' ') || trimmed.chars().all(|c| c == '|' || c == '-' || c == ':' || c == ' ') && trimmed.contains("---") {
+        if trimmed.contains("---") && !trimmed.contains(' ')
+            || trimmed
+                .chars()
+                .all(|c| c == '|' || c == '-' || c == ':' || c == ' ')
+                && trimmed.contains("---")
+        {
             parsed.push((Vec::new(), true));
         } else {
             let cells: Vec<String> = trimmed
@@ -204,15 +203,8 @@ fn flush_table(rows: &mut Vec<String>, lines: &mut Vec<Line<'static>>, indent: &
             for w in &col_widths {
                 parts.push("\u{2500}".repeat(w + 2));
             }
-            let sep_line = format!(
-                "{}\u{251c}{}\u{2524}",
-                indent,
-                parts.join("\u{253c}")
-            );
-            lines.push(Line::from(Span::styled(
-                sep_line,
-                Style::default().fg(DIM),
-            )));
+            let sep_line = format!("{}\u{251c}{}\u{2524}", indent, parts.join("\u{253c}"));
+            lines.push(Line::from(Span::styled(sep_line, Style::default().fg(DIM))));
             header_done = true;
             continue;
         }
@@ -220,17 +212,17 @@ fn flush_table(rows: &mut Vec<String>, lines: &mut Vec<Line<'static>>, indent: &
         let is_header = !header_done;
 
         let mut spans: Vec<Span<'static>> = Vec::new();
-        spans.push(Span::styled(format!("{}\u{2502} ", indent), Style::default().fg(DIM)));
+        spans.push(Span::styled(
+            format!("{}\u{2502} ", indent),
+            Style::default().fg(DIM),
+        ));
 
         for (i, width) in col_widths.iter().enumerate() {
             if i > 0 {
                 spans.push(Span::styled(" \u{2502} ", Style::default().fg(DIM)));
             }
 
-            let cell_text = cells
-                .get(i)
-                .map(|s| s.as_str())
-                .unwrap_or("");
+            let cell_text = cells.get(i).map(|s| s.as_str()).unwrap_or("");
 
             if is_header {
                 let padded = format!("{:<width$}", cell_text, width = width);
@@ -280,7 +272,11 @@ fn parse_inline(text: &str, prefix: &str) -> Vec<Span<'static>> {
         if ch == '*' && chars.peek() == Some(&'*') {
             chars.next();
             if !current.is_empty() {
-                let pfx = if first { prefix.to_string() } else { String::new() };
+                let pfx = if first {
+                    prefix.to_string()
+                } else {
+                    String::new()
+                };
                 first = false;
                 spans.push(Span::styled(
                     format!("{}{}", pfx, current),
@@ -297,13 +293,15 @@ fn parse_inline(text: &str, prefix: &str) -> Vec<Span<'static>> {
                 }
                 bold_text.push(bc);
             }
-            let pfx = if first { prefix.to_string() } else { String::new() };
+            let pfx = if first {
+                prefix.to_string()
+            } else {
+                String::new()
+            };
             first = false;
             spans.push(Span::styled(
                 format!("{}{}", pfx, bold_text),
-                Style::default()
-                    .fg(TEXT)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
             ));
             continue;
         }
@@ -313,7 +311,11 @@ fn parse_inline(text: &str, prefix: &str) -> Vec<Span<'static>> {
         //
         if ch == '`' {
             if !current.is_empty() {
-                let pfx = if first { prefix.to_string() } else { String::new() };
+                let pfx = if first {
+                    prefix.to_string()
+                } else {
+                    String::new()
+                };
                 first = false;
                 spans.push(Span::styled(
                     format!("{}{}", pfx, current),
@@ -340,7 +342,11 @@ fn parse_inline(text: &str, prefix: &str) -> Vec<Span<'static>> {
     }
 
     if !current.is_empty() || spans.is_empty() {
-        let pfx = if first { prefix.to_string() } else { String::new() };
+        let pfx = if first {
+            prefix.to_string()
+        } else {
+            String::new()
+        };
         spans.push(Span::styled(
             format!("{}{}", pfx, current),
             Style::default().fg(if current.is_empty() { DIM } else { TEXT }),

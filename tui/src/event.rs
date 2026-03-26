@@ -14,9 +14,9 @@ pub enum AppEvent {
 }
 
 pub enum SessionResult {
-    Created(String),       // session_id
-    Response(String),      // agent response text
-    Error(String),         // error message
+    Created(String),  // session_id
+    Response(String), // agent response text
+    Error(String),    // error message
 }
 
 pub struct EventHandler {

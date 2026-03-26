@@ -1,12 +1,16 @@
 use crate::client::Client;
 use crate::event::AppEvent;
-use common::{ClientDirectMessage, NodeCommand, NodeCommandResult, NodeState, OrchestratorPlan, SystemState};
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use chrono::Utc;
+use common::{
+    ClientDirectMessage, NodeCommand, NodeCommandResult, NodeState, OrchestratorPlan, SystemState,
+};
+use crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use chrono::Utc;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Window {
@@ -51,7 +55,7 @@ pub struct NewOpForm {
     pub short_name: String,
     pub category: String,
     pub description: String,
-    pub mode: usize,         // 0=one-shot, 1=agent
+    pub mode: usize, // 0=one-shot, 1=agent
     pub timeout: String,
     pub iterations: String,
     pub yolo: bool,
@@ -60,7 +64,9 @@ pub struct NewOpForm {
 }
 
 impl NewOpForm {
-    pub fn field_count() -> usize { 9 }
+    pub fn field_count() -> usize {
+        9
+    }
 
     pub fn field_label(idx: usize) -> &'static str {
         match idx {
@@ -96,7 +102,10 @@ impl Popup {
             .enumerate()
             .filter(|(_, item)| {
                 self.filter.is_empty()
-                    || item.label.to_lowercase().contains(&self.filter.to_lowercase())
+                    || item
+                        .label
+                        .to_lowercase()
+                        .contains(&self.filter.to_lowercase())
             })
             .collect()
     }
@@ -112,6 +121,7 @@ pub struct App {
     pub connected: bool,
     pub popup: Option<Popup>,
     pub new_op_form: Option<NewOpForm>,
+    pub run_options: Option<RunOptions>,
     pub confirm: Option<ConfirmAction>,
     pub terminal_width: u16,
     pub event_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::event::AppEvent>>,
@@ -263,6 +273,17 @@ pub enum OpsTab {
     Executions,
 }
 
+pub struct RunOptions {
+    pub op_name: String,
+    pub is_chain: bool,
+    pub chain_id: Option<String>,
+    pub nodes: Vec<(String, String, bool)>, // (node_id, machine_name, selected)
+    pub agents: Vec<(String, bool)>,        // (agent_short_name, selected)
+    pub yolo: bool,
+    pub focused_section: u8, // 0=nodes, 1=agents, 2=yolo
+    pub cursor: usize,
+}
+
 pub struct OperationsState {
     pub tab: OpsTab,
     pub op_definitions: Vec<common::OperationDefinitionInfo>,
@@ -280,12 +301,14 @@ pub struct OperationsState {
 
 #[derive(Default)]
 pub struct CollapsedSections {
-    pub sections: Vec<bool>,  // indexed by section order
+    pub sections: Vec<bool>, // indexed by section order
     pub focused_section: usize,
 }
 
 impl CollapsedSections {
-    pub fn section_count() -> usize { 5 }
+    pub fn section_count() -> usize {
+        5
+    }
 }
 
 impl Default for OperationsState {
@@ -322,6 +345,7 @@ impl App {
             connected: true,
             popup: None,
             new_op_form: None,
+            run_options: None,
             confirm: None,
             terminal_width: 0,
             event_tx: None,
@@ -400,7 +424,8 @@ impl App {
                 // re-request the full list to catch ops started by
                 // other clients (e.g. orchestrator tool calls).
                 //
-                static REFRESH_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                static REFRESH_COUNTER: std::sync::atomic::AtomicU32 =
+                    std::sync::atomic::AtomicU32::new(0);
                 let count = REFRESH_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if count % 30 == 0 {
                     // Every ~3 seconds (30 * 100ms tick)
@@ -432,6 +457,14 @@ impl App {
         //
         if self.confirm.is_some() {
             self.handle_confirm_key(key).await;
+            return;
+        }
+
+        //
+        // Run options form intercepts all keys.
+        //
+        if self.run_options.is_some() {
+            self.handle_run_options_key(key).await;
             return;
         }
 
@@ -611,7 +644,8 @@ impl App {
                     let list_start_row = 4u16;
                     if mouse.row >= list_start_row {
                         let clicked_idx = (mouse.row - list_start_row) as usize;
-                        let border_x = (h as u32 * self.operations.split_percent as u32 / 100) as u16;
+                        let border_x =
+                            (h as u32 * self.operations.split_percent as u32 / 100) as u16;
 
                         if mouse.column < border_x {
                             //
@@ -674,8 +708,7 @@ impl App {
         if self.active_window == Window::Nodes {
             match mouse.kind {
                 MouseEventKind::Down(MouseButton::Left) => {
-                    let border_x =
-                        (h as u32 * self.nodes.split_percent as u32 / 100) as u16;
+                    let border_x = (h as u32 * self.nodes.split_percent as u32 / 100) as u16;
 
                     //
                     // List item click.
@@ -691,9 +724,7 @@ impl App {
                     //
                     // Drag start.
                     //
-                    if mouse.column >= border_x.saturating_sub(1)
-                        && mouse.column <= border_x + 1
-                    {
+                    if mouse.column >= border_x.saturating_sub(1) && mouse.column <= border_x + 1 {
                         self.nodes.dragging = true;
                     }
                 }
@@ -772,11 +803,7 @@ impl App {
                     let prompt_id = format!("{}", self.orchestrator.prompt_seq);
                     self.orchestrator.prompt_seq += 1;
 
-                    if let Err(e) = self
-                        .client
-                        .send_orchestrator_prompt(prompt_id, input)
-                        .await
-                    {
+                    if let Err(e) = self.client.send_orchestrator_prompt(prompt_id, input).await {
                         self.orchestrator
                             .messages
                             .push(ConversationEntry::Error(format!("Send failed: {}", e)));
@@ -828,7 +855,11 @@ impl App {
                             }
                         }
                     } else {
-                        if self.popup.as_ref().is_some_and(|p| matches!(p.kind, PopupKind::CommandPalette)) {
+                        if self
+                            .popup
+                            .as_ref()
+                            .is_some_and(|p| matches!(p.kind, PopupKind::CommandPalette))
+                        {
                             self.popup = None;
                         }
                     }
@@ -878,8 +909,7 @@ impl App {
                 if let Some(idx) = self.orchestrator.history_index {
                     if idx + 1 < self.orchestrator.history.len() {
                         self.orchestrator.history_index = Some(idx + 1);
-                        self.orchestrator.input =
-                            self.orchestrator.history[idx + 1].clone();
+                        self.orchestrator.input = self.orchestrator.history[idx + 1].clone();
                         self.orchestrator.cursor_pos = self.orchestrator.input.len();
                     } else {
                         self.orchestrator.history_index = None;
@@ -962,7 +992,9 @@ impl App {
                     }
                 }
                 KeyCode::Down => {
-                    let agent_count = self.nodes.nodes
+                    let agent_count = self
+                        .nodes
+                        .nodes
                         .get(self.nodes.selected)
                         .map(|n| n.discovered_agents.len())
                         .unwrap_or(0);
@@ -1118,40 +1150,47 @@ impl App {
         let tx = self.event_tx.clone();
 
         tokio::spawn(async move {
-            use common::{SessionCommand, SessionContext, AgentCommand};
             use crate::event::{AppEvent, SessionResult};
+            use common::{AgentCommand, SessionCommand, SessionContext};
 
             let Some(tx) = tx else { return };
 
-            let _ = client.send_command(
-                &node_id,
-                NodeCommand::Agent(AgentCommand::Select {
-                    short_name: agent.clone(),
-                }),
-            ).await;
+            let _ = client
+                .send_command(
+                    &node_id,
+                    NodeCommand::Agent(AgentCommand::Select {
+                        short_name: agent.clone(),
+                    }),
+                )
+                .await;
 
-            match client.send_command(
-                &node_id,
-                NodeCommand::Session(SessionCommand::Create {
-                    context: SessionContext {
-                        working_dir,
-                        yolo_mode: yolo,
-                    },
-                }),
-            ).await {
+            match client
+                .send_command(
+                    &node_id,
+                    NodeCommand::Session(SessionCommand::Create {
+                        context: SessionContext {
+                            working_dir,
+                            yolo_mode: yolo,
+                        },
+                    }),
+                )
+                .await
+            {
                 Ok(resp) => {
-                    if let NodeCommandResult::Session(
-                        common::SessionCommandResult::Created { session_id }
-                    ) = resp.result {
-                        let _ = tx.send(AppEvent::SessionResponse(
-                            SessionResult::Created(session_id),
-                        ));
+                    if let NodeCommandResult::Session(common::SessionCommandResult::Created {
+                        session_id,
+                    }) = resp.result
+                    {
+                        let _ = tx.send(AppEvent::SessionResponse(SessionResult::Created(
+                            session_id,
+                        )));
                     }
                 }
                 Err(e) => {
-                    let _ = tx.send(AppEvent::SessionResponse(
-                        SessionResult::Error(format!("Session create failed: {}", e)),
-                    ));
+                    let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error(format!(
+                        "Session create failed: {}",
+                        e
+                    ))));
                 }
             }
         });
@@ -1173,13 +1212,15 @@ impl App {
                             let node_id = session.node_id.clone();
                             tokio::spawn(async move {
                                 use common::SessionCommand;
-                                let _ = client.send_command(
-                                    &node_id,
-                                    NodeCommand::Session(SessionCommand::CancelTransaction {
-                                        transaction_id: String::new(),
-                                        force: false,
-                                    }),
-                                ).await;
+                                let _ = client
+                                    .send_command(
+                                        &node_id,
+                                        NodeCommand::Session(SessionCommand::CancelTransaction {
+                                            transaction_id: String::new(),
+                                            force: false,
+                                        }),
+                                    )
+                                    .await;
                             });
                             session.is_waiting = false;
                             session.messages.push(ChatMessage {
@@ -1195,10 +1236,12 @@ impl App {
                             if session.session_id.is_some() {
                                 tokio::spawn(async move {
                                     use common::SessionCommand;
-                                    let _ = client.send_command(
-                                        &node_id,
-                                        NodeCommand::Session(SessionCommand::Close),
-                                    ).await;
+                                    let _ = client
+                                        .send_command(
+                                            &node_id,
+                                            NodeCommand::Session(SessionCommand::Close),
+                                        )
+                                        .await;
                                 });
                             }
                             self.nodes.session = None;
@@ -1221,17 +1264,18 @@ impl App {
                         let node_id = session.node_id.clone();
                         tokio::spawn(async move {
                             use common::SessionCommand;
-                            let _ = client.send_command(
-                                &node_id,
-                                NodeCommand::Session(SessionCommand::Close),
-                            ).await;
+                            let _ = client
+                                .send_command(&node_id, NodeCommand::Session(SessionCommand::Close))
+                                .await;
                         });
                     }
                 }
                 self.nodes.session = None;
             }
             KeyCode::Enter => {
-                let Some(ref mut session) = self.nodes.session else { return };
+                let Some(ref mut session) = self.nodes.session else {
+                    return;
+                };
                 let input = session.input.trim().to_string();
                 if input.is_empty() || session.is_waiting || session.session_id.is_none() {
                     return;
@@ -1264,76 +1308,82 @@ impl App {
                 let tx = self.event_tx.clone();
 
                 tokio::spawn(async move {
-                    use common::{SessionCommand, SessionContext, AgentCommand};
                     use crate::event::{AppEvent, SessionResult};
+                    use common::{AgentCommand, SessionCommand, SessionContext};
 
                     let Some(tx) = tx else { return };
 
                     if needs_create {
-                        let _ = client.send_command(
-                            &node_id,
-                            NodeCommand::Agent(AgentCommand::Select {
-                                short_name: agent_name.clone(),
-                            }),
-                        ).await;
+                        let _ = client
+                            .send_command(
+                                &node_id,
+                                NodeCommand::Agent(AgentCommand::Select {
+                                    short_name: agent_name.clone(),
+                                }),
+                            )
+                            .await;
 
-                        match client.send_command(
-                            &node_id,
-                            NodeCommand::Session(SessionCommand::Create {
-                                context: SessionContext::default(),
-                            }),
-                        ).await {
+                        match client
+                            .send_command(
+                                &node_id,
+                                NodeCommand::Session(SessionCommand::Create {
+                                    context: SessionContext::default(),
+                                }),
+                            )
+                            .await
+                        {
                             Ok(resp) => {
                                 if let NodeCommandResult::Session(
-                                    common::SessionCommandResult::Created { session_id }
-                                ) = resp.result {
+                                    common::SessionCommandResult::Created { session_id },
+                                ) = resp.result
+                                {
                                     let _ = tx.send(AppEvent::SessionResponse(
                                         SessionResult::Created(session_id),
                                     ));
                                 }
                             }
                             Err(e) => {
-                                let _ = tx.send(AppEvent::SessionResponse(
-                                    SessionResult::Error(format!("Session create failed: {}", e)),
-                                ));
+                                let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error(
+                                    format!("Session create failed: {}", e),
+                                )));
                                 return;
                             }
                         }
                     }
 
                     let tid = uuid::Uuid::new_v4().to_string();
-                    match client.send_command(
-                        &node_id,
-                        NodeCommand::Session(SessionCommand::Prompt {
-                            text: input,
-                            transaction_id: tid,
-                        }),
-                    ).await {
-                        Ok(resp) => {
-                            match resp.result {
-                                NodeCommandResult::Session(
-                                    common::SessionCommandResult::PromptResponse { response, .. }
-                                ) => {
-                                    let _ = tx.send(AppEvent::SessionResponse(
-                                        SessionResult::Response(response),
-                                    ));
-                                }
-                                NodeCommandResult::Error { message } => {
-                                    let _ = tx.send(AppEvent::SessionResponse(
-                                        SessionResult::Error(message),
-                                    ));
-                                }
-                                _ => {
-                                    let _ = tx.send(AppEvent::SessionResponse(
-                                        SessionResult::Error("Unexpected response".to_string()),
-                                    ));
-                                }
+                    match client
+                        .send_command(
+                            &node_id,
+                            NodeCommand::Session(SessionCommand::Prompt {
+                                text: input,
+                                transaction_id: tid,
+                            }),
+                        )
+                        .await
+                    {
+                        Ok(resp) => match resp.result {
+                            NodeCommandResult::Session(
+                                common::SessionCommandResult::PromptResponse { response, .. },
+                            ) => {
+                                let _ = tx.send(AppEvent::SessionResponse(
+                                    SessionResult::Response(response),
+                                ));
                             }
-                        }
+                            NodeCommandResult::Error { message } => {
+                                let _ = tx
+                                    .send(AppEvent::SessionResponse(SessionResult::Error(message)));
+                            }
+                            _ => {
+                                let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error(
+                                    "Unexpected response".to_string(),
+                                )));
+                            }
+                        },
                         Err(e) => {
-                            let _ = tx.send(AppEvent::SessionResponse(
-                                SessionResult::Error(format!("{}", e)),
-                            ));
+                            let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error(
+                                format!("{}", e),
+                            )));
                         }
                     }
                 });
@@ -1500,8 +1550,8 @@ impl App {
                     }
                 }
                 OpsTab::Executions => {
-                    let total = self.operations.operations.len()
-                        + self.operations.chain_executions.len();
+                    let total =
+                        self.operations.operations.len() + self.operations.chain_executions.len();
                     if self.operations.exec_selected + 1 < total {
                         self.operations.exec_selected += 1;
                         self.operations.detail_scroll = 0;
@@ -1548,42 +1598,85 @@ impl App {
     }
 
     fn ops_library_count(&self) -> usize {
-        self.operations.op_definitions.iter().filter(|d| !d.disabled).count()
-            + self.operations.chain_definitions.iter().filter(|c| !c.disabled).count()
+        self.operations
+            .op_definitions
+            .iter()
+            .filter(|d| !d.disabled)
+            .count()
+            + self
+                .operations
+                .chain_definitions
+                .iter()
+                .filter(|c| !c.disabled)
+                .count()
     }
 
     fn open_run_target_popup(&mut self) {
+        let enabled_ops: Vec<_> = self
+            .operations
+            .op_definitions
+            .iter()
+            .filter(|d| !d.disabled)
+            .collect();
+        let enabled_chains: Vec<_> = self
+            .operations
+            .chain_definitions
+            .iter()
+            .filter(|c| !c.disabled)
+            .collect();
+
+        let idx = self.operations.library_selected;
+        let (op_name, is_chain, chain_id) = if idx < enabled_ops.len() {
+            (enabled_ops[idx].full_name.clone(), false, None)
+        } else {
+            let ci = idx - enabled_ops.len();
+            if ci < enabled_chains.len() {
+                (
+                    enabled_chains[ci].name.clone(),
+                    true,
+                    Some(enabled_chains[ci].id.clone()),
+                )
+            } else {
+                return;
+            }
+        };
+
         //
-        // Build node/agent items for the targeting popup.
+        // Build node list — all selected by default.
         //
-        let mut items: Vec<PopupItem> = Vec::new();
+        let nodes: Vec<_> = self
+            .nodes
+            .nodes
+            .iter()
+            .map(|n| (n.node_id.clone(), n.machine_name.clone(), true))
+            .collect();
+
+        //
+        // Build unique agent list — all selected by default.
+        //
+        let mut agent_names: Vec<String> = Vec::new();
         for node in &self.nodes.nodes {
             for agent in &node.discovered_agents {
-                if !agent.available {
-                    continue;
+                if agent.available && !agent_names.contains(&agent.short_name) {
+                    agent_names.push(agent.short_name.clone());
                 }
-                let short_id = if node.node_id.len() >= 8 {
-                    &node.node_id[..8]
-                } else {
-                    &node.node_id
-                };
-                items.push(PopupItem {
-                    label: format!("{} / {}", node.machine_name, agent.short_name),
-                    value: format!("{}:{}", node.node_id, agent.short_name),
-                    description: format!("{} ({})", short_id, node.os_details),
-                });
             }
         }
+        let agents: Vec<_> = agent_names.into_iter().map(|a| (a, true)).collect();
 
-        if items.is_empty() {
+        if nodes.is_empty() || agents.is_empty() {
             return;
         }
 
-        self.popup = Some(Popup {
-            kind: PopupKind::RunTarget,
-            items,
-            filter: String::new(),
-            selected: 0,
+        self.run_options = Some(RunOptions {
+            op_name,
+            is_chain,
+            chain_id,
+            nodes,
+            agents,
+            yolo: false,
+            focused_section: 0,
+            cursor: 0,
         });
     }
 
@@ -1594,11 +1687,15 @@ impl App {
         }
         let (node_id, agent) = (parts[0].to_string(), parts[1].to_string());
 
-        let enabled_ops: Vec<_> = self.operations.op_definitions
+        let enabled_ops: Vec<_> = self
+            .operations
+            .op_definitions
             .iter()
             .filter(|d| !d.disabled)
             .collect();
-        let enabled_chains: Vec<_> = self.operations.chain_definitions
+        let enabled_chains: Vec<_> = self
+            .operations
+            .chain_definitions
             .iter()
             .filter(|c| !c.disabled)
             .collect();
@@ -1607,9 +1704,11 @@ impl App {
 
         if idx < enabled_ops.len() {
             let op_name = enabled_ops[idx].full_name.clone();
-            if let Err(e) = self.client.run_semantic_op(
-                node_id, agent, op_name, None,
-            ).await {
+            if let Err(e) = self
+                .client
+                .run_semantic_op(node_id, agent, op_name, None)
+                .await
+            {
                 self.orchestrator
                     .messages
                     .push(ConversationEntry::Error(format!("Op run failed: {}", e)));
@@ -1618,9 +1717,7 @@ impl App {
             let chain_idx = idx - enabled_ops.len();
             if chain_idx < enabled_chains.len() {
                 let chain_id = enabled_chains[chain_idx].id.clone();
-                if let Err(e) = self.client.run_chain(
-                    chain_id, node_id, agent, None,
-                ).await {
+                if let Err(e) = self.client.run_chain(chain_id, node_id, agent, None).await {
                     self.orchestrator
                         .messages
                         .push(ConversationEntry::Error(format!("Chain run failed: {}", e)));
@@ -1647,7 +1744,9 @@ impl App {
         } else {
             let chain_idx = idx - total_ops;
             if chain_idx < self.operations.chain_executions.len() {
-                let exec_id = self.operations.chain_executions[chain_idx].execution_id.clone();
+                let exec_id = self.operations.chain_executions[chain_idx]
+                    .execution_id
+                    .clone();
                 let _ = self.client.cancel_chain(exec_id).await;
             }
         }
@@ -1663,7 +1762,9 @@ impl App {
         } else {
             let chain_idx = idx - total_ops;
             if chain_idx < self.operations.chain_executions.len() {
-                let exec_id = self.operations.chain_executions[chain_idx].execution_id.clone();
+                let exec_id = self.operations.chain_executions[chain_idx]
+                    .execution_id
+                    .clone();
                 let _ = self.client.remove_chain_execution(exec_id).await;
             }
         }
@@ -1675,8 +1776,7 @@ impl App {
         // Adjust selection if it now exceeds the list length.
         //
 
-        let total = self.operations.operations.len()
-            + self.operations.chain_executions.len();
+        let total = self.operations.operations.len() + self.operations.chain_executions.len();
         if total == 0 {
             self.operations.exec_selected = 0;
         } else if self.operations.exec_selected >= total {
@@ -1804,14 +1904,27 @@ impl App {
                     //
                     if let Some(ref form) = self.new_op_form {
                         let mut missing = Vec::new();
-                        if form.name.is_empty() { missing.push("Name"); }
-                        if form.short_name.is_empty() { missing.push("Short Name"); }
-                        if form.category.is_empty() { missing.push("Category"); }
-                        if form.prompt.is_empty() { missing.push("Prompt"); }
-                        if form.timeout.is_empty() { missing.push("Timeout"); }
-                        self.orchestrator.messages.push(
-                            ConversationEntry::Error(format!("Missing fields: {}", missing.join(", ")))
-                        );
+                        if form.name.is_empty() {
+                            missing.push("Name");
+                        }
+                        if form.short_name.is_empty() {
+                            missing.push("Short Name");
+                        }
+                        if form.category.is_empty() {
+                            missing.push("Category");
+                        }
+                        if form.prompt.is_empty() {
+                            missing.push("Prompt");
+                        }
+                        if form.timeout.is_empty() {
+                            missing.push("Timeout");
+                        }
+                        self.orchestrator
+                            .messages
+                            .push(ConversationEntry::Error(format!(
+                                "Missing fields: {}",
+                                missing.join(", ")
+                            )));
                     }
                 }
             }
@@ -1834,13 +1947,27 @@ impl App {
             KeyCode::Backspace => {
                 if let Some(ref mut form) = self.new_op_form {
                     match form.focused_field {
-                        0 => { form.name.pop(); }
-                        1 => { form.short_name.pop(); }
-                        2 => { form.category.pop(); }
-                        3 => { form.description.pop(); }
-                        5 => { form.timeout.pop(); }
-                        6 => { form.iterations.pop(); }
-                        8 => { form.prompt.pop(); }
+                        0 => {
+                            form.name.pop();
+                        }
+                        1 => {
+                            form.short_name.pop();
+                        }
+                        2 => {
+                            form.category.pop();
+                        }
+                        3 => {
+                            form.description.pop();
+                        }
+                        5 => {
+                            form.timeout.pop();
+                        }
+                        6 => {
+                            form.iterations.pop();
+                        }
+                        8 => {
+                            form.prompt.pop();
+                        }
                         _ => {}
                     }
                 }
@@ -1849,9 +1976,10 @@ impl App {
         }
     }
 
-
     async fn delete_selected_op(&mut self) {
-        let enabled_ops: Vec<_> = self.operations.op_definitions
+        let enabled_ops: Vec<_> = self
+            .operations
+            .op_definitions
             .iter()
             .filter(|d| !d.disabled)
             .collect();
@@ -1877,18 +2005,139 @@ impl App {
                             if let Err(e) = self.client.delete_op_def(full_name).await {
                                 self.orchestrator
                                     .messages
-                                    .push(ConversationEntry::Error(format!("Delete failed: {}", e)));
+                                    .push(ConversationEntry::Error(format!(
+                                        "Delete failed: {}",
+                                        e
+                                    )));
                             }
                             tokio::time::sleep(Duration::from_millis(300)).await;
                             let _ = self.client.request_op_def_list().await;
                             tokio::time::sleep(Duration::from_millis(300)).await;
-                            self.operations.op_definitions = self.client.get_operation_definitions().await;
+                            self.operations.op_definitions =
+                                self.client.get_operation_definitions().await;
                         }
                     }
                 }
             }
             KeyCode::Char('n') | KeyCode::Esc => {
                 self.confirm = None;
+            }
+            _ => {}
+        }
+    }
+
+    async fn handle_run_options_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.run_options = None;
+            }
+            KeyCode::Tab => {
+                //
+                // Tab cycles sections: nodes → agents → yolo.
+                //
+                if let Some(ref mut opts) = self.run_options {
+                    opts.focused_section = (opts.focused_section + 1) % 3;
+                    opts.cursor = 0;
+                }
+            }
+            KeyCode::Up => {
+                if let Some(ref mut opts) = self.run_options {
+                    if opts.cursor > 0 {
+                        opts.cursor -= 1;
+                    }
+                }
+            }
+            KeyCode::Down => {
+                if let Some(ref mut opts) = self.run_options {
+                    let max = match opts.focused_section {
+                        0 => opts.nodes.len(),
+                        1 => opts.agents.len(),
+                        _ => 1,
+                    };
+                    if opts.cursor + 1 < max {
+                        opts.cursor += 1;
+                    }
+                }
+            }
+            KeyCode::Char(' ') => {
+                //
+                // Space toggles selection of current item.
+                //
+                if let Some(ref mut opts) = self.run_options {
+                    match opts.focused_section {
+                        0 => {
+                            if let Some(n) = opts.nodes.get_mut(opts.cursor) {
+                                n.2 = !n.2;
+                            }
+                        }
+                        1 => {
+                            if let Some(a) = opts.agents.get_mut(opts.cursor) {
+                                a.1 = !a.1;
+                            }
+                        }
+                        2 => opts.yolo = !opts.yolo,
+                        _ => {}
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                //
+                // Execute with selected targets.
+                //
+                if let Some(opts) = self.run_options.take() {
+                    let selected_nodes: Vec<String> = opts
+                        .nodes
+                        .iter()
+                        .filter(|(_, _, sel)| *sel)
+                        .map(|(id, _, _)| id.clone())
+                        .collect();
+                    let selected_agents: Vec<String> = opts
+                        .agents
+                        .iter()
+                        .filter(|(_, sel)| *sel)
+                        .map(|(name, _)| name.clone())
+                        .collect();
+
+                    if selected_nodes.is_empty() || selected_agents.is_empty() {
+                        return;
+                    }
+
+                    //
+                    // Run on each selected node/agent combination.
+                    //
+                    for node_id in &selected_nodes {
+                        for agent in &selected_agents {
+                            if opts.is_chain {
+                                if let Some(ref chain_id) = opts.chain_id {
+                                    let _ = self
+                                        .client
+                                        .run_chain(
+                                            chain_id.clone(),
+                                            node_id.clone(),
+                                            agent.clone(),
+                                            None,
+                                        )
+                                        .await;
+                                }
+                            } else {
+                                let _ = self
+                                    .client
+                                    .run_semantic_op(
+                                        node_id.clone(),
+                                        agent.clone(),
+                                        opts.op_name.clone(),
+                                        None,
+                                    )
+                                    .await;
+                            }
+                        }
+                    }
+
+                    self.operations.tab = OpsTab::Executions;
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                    self.operations.operations = self.client.get_operations().await;
+                    self.operations.chain_executions = self.client.get_chain_executions().await;
+                }
             }
             _ => {}
         }
@@ -1937,8 +2186,14 @@ impl App {
             }
         };
 
-        let defs_json = config.get("llm_model_definitions").cloned().unwrap_or_default();
-        let current = config.get("llm_feature_orchestrator").cloned().unwrap_or_default();
+        let defs_json = config
+            .get("llm_model_definitions")
+            .cloned()
+            .unwrap_or_default();
+        let current = config
+            .get("llm_feature_orchestrator")
+            .cloned()
+            .unwrap_or_default();
 
         #[derive(serde::Deserialize)]
         struct ModelDef {
@@ -1950,11 +2205,9 @@ impl App {
         let defs: Vec<ModelDef> = serde_json::from_str(&defs_json).unwrap_or_default();
 
         if defs.is_empty() {
-            self.orchestrator
-                .messages
-                .push(ConversationEntry::Error(
-                    "No models configured. Configure models in Settings.".to_string(),
-                ));
+            self.orchestrator.messages.push(ConversationEntry::Error(
+                "No models configured. Configure models in Settings.".to_string(),
+            ));
             return;
         }
 
@@ -1967,10 +2220,7 @@ impl App {
             })
             .collect();
 
-        let selected = items
-            .iter()
-            .position(|i| i.value == current)
-            .unwrap_or(0);
+        let selected = items.iter().position(|i| i.value == current).unwrap_or(0);
 
         self.popup = Some(Popup {
             kind: PopupKind::ModelSelect,
@@ -2232,7 +2482,9 @@ impl App {
             ClientDirectMessage::OrchestratorToolExecuted { name, success, .. } => {
                 if name != "report_plan" {
                     self.orchestrator.active_tool = None;
-                    self.orchestrator.pending_tools.push(ToolCall { name, success });
+                    self.orchestrator
+                        .pending_tools
+                        .push(ToolCall { name, success });
                 }
             }
             ClientDirectMessage::OrchestratorPlanUpdated { plan, .. } => {
@@ -2310,4 +2562,3 @@ fn strip_think_tags(content: &str) -> String {
 // Extract visible content from a streaming chunk, properly handling
 // <think>...</think> blocks that may span multiple deltas.
 //
-

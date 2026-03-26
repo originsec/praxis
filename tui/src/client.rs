@@ -1,21 +1,20 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use common::{
-    client_queue_name, publish_json, CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE,
-    ClientBroadcastMessage, ClientDirectMessage, ClientRegistration, ClientSignalMessage,
-    SystemState, SemanticOpUpdate, OperationDefinitionInfo, ChainDefinitionInfo,
-    ChainExecutionUpdate, ChainDefinitionFull, NodeCommand, NodeCommandResult,
-    CommandRequest, CommandResponse,
+    CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE, ChainDefinitionFull, ChainDefinitionInfo,
+    ChainExecutionUpdate, ClientBroadcastMessage, ClientDirectMessage, ClientRegistration,
+    ClientSignalMessage, CommandRequest, CommandResponse, NodeCommand, NodeCommandResult,
+    OperationDefinitionInfo, SemanticOpUpdate, SystemState, client_queue_name, publish_json,
 };
-use std::collections::HashMap;
 use futures_util::StreamExt;
 use lapin::{
+    Channel, Connection, ConnectionProperties, ExchangeKind,
     options::{
         BasicAckOptions, BasicConsumeOptions, ExchangeDeclareOptions, QueueBindOptions,
         QueueDeclareOptions,
     },
     types::FieldTable,
-    Channel, Connection, ConnectionProperties, ExchangeKind,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -122,11 +121,7 @@ impl Client {
         Ok(client)
     }
 
-    async fn start_consuming(
-        &mut self,
-        client_queue: &str,
-        broadcast_queue: &str,
-    ) -> Result<()> {
+    async fn start_consuming(&mut self, client_queue: &str, broadcast_queue: &str) -> Result<()> {
         let state = Arc::clone(&self.state);
         let channel = self.channel.clone();
         let client_queue = client_queue.to_string();
@@ -218,7 +213,11 @@ impl Client {
                 state.pending_semantic_op = Some(operation_id);
             }
             ClientDirectMessage::SemanticOpUpdate(update) => {
-                if let Some(idx) = state.operations.iter().position(|o| o.operation_id == update.operation_id) {
+                if let Some(idx) = state
+                    .operations
+                    .iter()
+                    .position(|o| o.operation_id == update.operation_id)
+                {
                     state.operations[idx] = update;
                 } else {
                     state.operations.push(update);
@@ -237,7 +236,11 @@ impl Client {
                 state.current_chain = chain;
             }
             ClientDirectMessage::ChainExecutionUpdate(exec) => {
-                if let Some(idx) = state.chain_executions.iter().position(|e| e.execution_id == exec.execution_id) {
+                if let Some(idx) = state
+                    .chain_executions
+                    .iter()
+                    .position(|e| e.execution_id == exec.execution_id)
+                {
                     state.chain_executions[idx] = exec;
                 } else {
                     state.chain_executions.push(exec);
@@ -251,14 +254,14 @@ impl Client {
             // Forward orchestrator events to subscriber if present.
             //
             msg @ (ClientDirectMessage::OrchestratorStarted { .. }
-                | ClientDirectMessage::OrchestratorContent { .. }
-                | ClientDirectMessage::OrchestratorToolExecuting { .. }
-                | ClientDirectMessage::OrchestratorToolExecuted { .. }
-                | ClientDirectMessage::OrchestratorPlanUpdated { .. }
-                | ClientDirectMessage::OrchestratorDone { .. }
-                | ClientDirectMessage::OrchestratorStopped
-                | ClientDirectMessage::OrchestratorError { .. }
-                | ClientDirectMessage::OrchestratorTokenUsage { .. }) => {
+            | ClientDirectMessage::OrchestratorContent { .. }
+            | ClientDirectMessage::OrchestratorToolExecuting { .. }
+            | ClientDirectMessage::OrchestratorToolExecuted { .. }
+            | ClientDirectMessage::OrchestratorPlanUpdated { .. }
+            | ClientDirectMessage::OrchestratorDone { .. }
+            | ClientDirectMessage::OrchestratorStopped
+            | ClientDirectMessage::OrchestratorError { .. }
+            | ClientDirectMessage::OrchestratorTokenUsage { .. }) => {
                 if let Some(ref tx) = state.orchestrator_event_tx {
                     let _ = tx.send(msg);
                 }
@@ -280,14 +283,22 @@ impl Client {
                 state.system_state = Some(system_state);
             }
             ClientBroadcastMessage::SemanticOpUpdate(update) => {
-                if let Some(idx) = state.operations.iter().position(|o| o.operation_id == update.operation_id) {
+                if let Some(idx) = state
+                    .operations
+                    .iter()
+                    .position(|o| o.operation_id == update.operation_id)
+                {
                     state.operations[idx] = update;
                 } else {
                     state.operations.push(update);
                 }
             }
             ClientBroadcastMessage::ChainExecutionUpdate(exec) => {
-                if let Some(idx) = state.chain_executions.iter().position(|e| e.execution_id == exec.execution_id) {
+                if let Some(idx) = state
+                    .chain_executions
+                    .iter()
+                    .position(|e| e.execution_id == exec.execution_id)
+                {
                     state.chain_executions[idx] = exec;
                 } else {
                     state.chain_executions.push(exec);
@@ -359,11 +370,7 @@ impl Client {
         self.publish_signal(message).await
     }
 
-    pub async fn send_orchestrator_prompt(
-        &self,
-        prompt_id: String,
-        prompt: String,
-    ) -> Result<()> {
+    pub async fn send_orchestrator_prompt(&self, prompt_id: String, prompt: String) -> Result<()> {
         let message = ClientSignalMessage::OrchestratorPrompt {
             client_id: self.client_id.clone(),
             prompt_id,
@@ -426,7 +433,11 @@ impl Client {
     // Operation methods.
     //
 
-    pub async fn send_command(&self, node_id: &str, command: NodeCommand) -> Result<CommandResponse> {
+    pub async fn send_command(
+        &self,
+        node_id: &str,
+        command: NodeCommand,
+    ) -> Result<CommandResponse> {
         let command_id = uuid::Uuid::new_v4().to_string();
 
         {
@@ -441,7 +452,8 @@ impl Client {
             command,
         };
 
-        self.publish_signal(ClientSignalMessage::Command(request)).await?;
+        self.publish_signal(ClientSignalMessage::Command(request))
+            .await?;
 
         let poll_interval = Duration::from_millis(250);
         let max_polls = 2400; // 10 minutes
