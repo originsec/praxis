@@ -129,6 +129,10 @@ pub fn create_ai_client(provider: Provider, api_key: String) -> Result<AiClient>
             api_key,
             "https://api.fireworks.ai/inference/v1".to_string(),
         ))),
+        Provider::OpenRouter => Ok(AiClient::OpenAI(OpenAIClient::with_base_url(
+            api_key,
+            "https://openrouter.ai/api/v1".to_string(),
+        ))),
     }
 }
 
