@@ -176,31 +176,18 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
                 )));
             } else {
                 //
-                // Split on \n but preserve trailing newline as empty line.
+                // Split on \n. Render each line, with cursor on the last.
                 //
                 let split: Vec<&str> = value.split('\n').collect();
-                for line in &split {
-                    lines.push(Line::from(Span::styled(line.to_string(), value_style)));
-                }
-                if is_focused {
-                    //
-                    // If value ends with \n, cursor goes on the new empty line.
-                    // Otherwise, append cursor to the last line.
-                    //
-                    if value.ends_with('\n') {
-                        lines.push(Line::from(Span::styled(
-                            cursor,
-                            Style::default().fg(ACCENT),
-                        )));
-                    } else if let Some(last) = lines.last_mut() {
-                        let spans = vec![
-                            Span::styled(
-                                split.last().unwrap_or(&"").to_string(),
-                                value_style,
-                            ),
+                let last_idx = split.len() - 1;
+                for (li, line) in split.iter().enumerate() {
+                    if li == last_idx && is_focused {
+                        lines.push(Line::from(vec![
+                            Span::styled(line.to_string(), value_style),
                             Span::styled(cursor, Style::default().fg(ACCENT)),
-                        ];
-                        *last = Line::from(spans);
+                        ]));
+                    } else {
+                        lines.push(Line::from(Span::styled(line.to_string(), value_style)));
                     }
                 }
             }
