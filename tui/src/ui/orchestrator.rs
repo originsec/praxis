@@ -269,76 +269,65 @@ fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
     ];
 
     //
-    // Animated scanning border — a bright dot travels around the logo.
+    // Static noise particles around the logo — random electric zaps.
     //
     let t = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
     let art_width = art.first().map(|l| l.chars().count()).unwrap_or(44);
-    let perimeter = (art_width + art.len()) * 2;
-    let scan_pos = ((t / 60) % perimeter as u128) as usize;
+
+    let noise_chars = [' ', ' ', ' ', ' ', ' ', ' ', '\u{00b7}', '\u{2022}', '\u{2219}', '*'];
+    let noise_colors = [
+        Color::Rgb(35, 55, 35),
+        Color::Rgb(50, 80, 50),
+        Color::Rgb(70, 120, 70),
+        Color::Rgb(100, 180, 100),
+        Color::Rgb(130, 220, 130),
+    ];
 
     //
-    // Top border with scanning dot.
+    // Noise line above logo.
     //
-    let mut top_border: Vec<Span> = Vec::new();
-    for col in 0..art_width {
-        let is_scan = scan_pos == col;
-        let near = scan_pos.abs_diff(col) <= 2;
-        let ch = if is_scan { "\u{2584}" } else { "\u{2500}" };
-        let color = if is_scan {
-            Color::Rgb(130, 220, 130)
-        } else if near {
-            Color::Rgb(80, 150, 80)
+    let mut top_noise: Vec<Span> = Vec::new();
+    for col in 0..art_width + 4 {
+        let seed = (t / 100).wrapping_mul(col as u128 * 37 + 7) % 100;
+        if seed < 8 {
+            let ch_idx = (seed as usize) % noise_chars.len();
+            let c_idx = ((t / 80 + col as u128 * 13) % noise_colors.len() as u128) as usize;
+            top_noise.push(Span::styled(
+                noise_chars[ch_idx].to_string(),
+                Style::default().fg(noise_colors[c_idx]),
+            ));
         } else {
-            Color::Rgb(35, 55, 35)
-        };
-        top_border.push(Span::styled(ch, Style::default().fg(color)));
+            top_noise.push(Span::raw(" "));
+        }
     }
-    lines.push(Line::from(top_border));
+    lines.push(Line::from(top_noise));
 
     for (i, line) in art.iter().enumerate() {
         let color = shades[i.min(shades.len() - 1)];
-        //
-        // Left/right border dots.
-        //
-        let left_pos = art_width + art.len() + (art_width - 1) + (art.len() - 1 - i);
-        let right_pos = art_width + i;
-        let left_scan = scan_pos.abs_diff(left_pos) <= 1;
-        let right_scan = scan_pos.abs_diff(right_pos) <= 1;
-
-        let left_ch = if left_scan { "\u{2588}" } else { "\u{2502}" };
-        let right_ch = if right_scan { "\u{2588}" } else { "\u{2502}" };
-        let left_color = if left_scan { Color::Rgb(130, 220, 130) } else { Color::Rgb(35, 55, 35) };
-        let right_color = if right_scan { Color::Rgb(130, 220, 130) } else { Color::Rgb(35, 55, 35) };
-
-        let mut spans = vec![Span::styled(left_ch, Style::default().fg(left_color))];
-        spans.push(Span::styled(*line, Style::default().fg(color)));
-        spans.push(Span::styled(right_ch, Style::default().fg(right_color)));
-        lines.push(Line::from(spans));
+        lines.push(Line::from(Span::styled(*line, Style::default().fg(color))));
     }
 
     //
-    // Bottom border with scanning dot.
+    // Noise line below logo.
     //
-    let bottom_start = art_width + art.len();
-    let mut bottom_border: Vec<Span> = Vec::new();
-    for col in 0..art_width {
-        let pos = bottom_start + col;
-        let is_scan = scan_pos == pos;
-        let near = scan_pos.abs_diff(pos) <= 2;
-        let ch = if is_scan { "\u{2580}" } else { "\u{2500}" };
-        let color = if is_scan {
-            Color::Rgb(130, 220, 130)
-        } else if near {
-            Color::Rgb(80, 150, 80)
+    let mut bottom_noise: Vec<Span> = Vec::new();
+    for col in 0..art_width + 4 {
+        let seed = (t / 100).wrapping_mul(col as u128 * 53 + 11) % 100;
+        if seed < 8 {
+            let ch_idx = (seed as usize) % noise_chars.len();
+            let c_idx = ((t / 80 + col as u128 * 17) % noise_colors.len() as u128) as usize;
+            bottom_noise.push(Span::styled(
+                noise_chars[ch_idx].to_string(),
+                Style::default().fg(noise_colors[c_idx]),
+            ));
         } else {
-            Color::Rgb(35, 55, 35)
-        };
-        bottom_border.push(Span::styled(ch, Style::default().fg(color)));
+            bottom_noise.push(Span::raw(" "));
+        }
     }
-    lines.push(Line::from(bottom_border));
+    lines.push(Line::from(bottom_noise));
 
     lines.push(Line::from(""));
     lines.push(Line::from(vec![

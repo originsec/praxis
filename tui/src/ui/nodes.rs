@@ -141,24 +141,27 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
                 Style::default().fg(ACCENT),
             )));
             activity_lines.push(Line::from(vec![
-                Span::styled("  ", Style::default()),
-                Span::styled(
-                    &sid[..8.min(sid.len())],
-                    Style::default().fg(Color::Rgb(100, 180, 100)),
-                ),
-                Span::styled(
-                    format!("  agent: {}", agent.short_name),
-                    Style::default().fg(DIM),
-                ),
+                Span::styled("  agent: ", Style::default().fg(MUTED)),
+                Span::styled(&agent.short_name, Style::default().fg(TEXT)),
+                Span::styled(format!("  ({})", &sid[..8.min(sid.len())]), Style::default().fg(DIM)),
             ]));
-            if let Some(ref tid) = agent.active_transaction_id {
+            if agent.yolo_mode {
+                activity_lines.push(Line::from(Span::styled(
+                    "  YOLO mode enabled",
+                    Style::default().fg(Color::Rgb(180, 160, 60)),
+                )));
+            }
+            if let Some(ref wd) = agent.working_dir {
                 activity_lines.push(Line::from(vec![
-                    Span::styled("  prompt: ", Style::default().fg(MUTED)),
-                    Span::styled(
-                        &tid[..8.min(tid.len())],
-                        Style::default().fg(Color::Rgb(180, 160, 60)),
-                    ),
+                    Span::styled("  dir: ", Style::default().fg(MUTED)),
+                    Span::styled(wd.as_str(), Style::default().fg(DIM)),
                 ]));
+            }
+            if agent.active_transaction_id.is_some() {
+                activity_lines.push(Line::from(Span::styled(
+                    "  \u{25cf} prompt executing...",
+                    Style::default().fg(Color::Rgb(180, 160, 60)),
+                )));
             }
         }
     }
@@ -186,10 +189,25 @@ fn render_node_detail(f: &mut Frame, area: Rect, state: &NodesState, ops: &[comm
                 Span::styled(format!("  {} ", status_str), Style::default().fg(status_color)),
                 Span::styled(&op.spec.name, Style::default().fg(TEXT)),
                 Span::styled(
-                    format!("  ({})", &op.operation_id[..8.min(op.operation_id.len())]),
+                    format!("  {} / {}", op.agent_short_name, op.spec.mode),
                     Style::default().fg(DIM),
                 ),
             ]));
+            //
+            // Show last line of streaming output if available.
+            //
+            if let Some(ref output) = op.output {
+                let last_line = output.lines().rev()
+                    .find(|l| !l.trim().is_empty())
+                    .unwrap_or("");
+                if !last_line.is_empty() {
+                    let short = if last_line.len() > 60 { &last_line[..60] } else { last_line };
+                    activity_lines.push(Line::from(Span::styled(
+                        format!("    {}", short),
+                        Style::default().fg(MUTED),
+                    )));
+                }
+            }
         }
     }
 
