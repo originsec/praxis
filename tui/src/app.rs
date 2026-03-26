@@ -233,7 +233,7 @@ pub struct TerminalState {
     pub terminal_id: Option<String>,
     pub parser: vt100::Parser,
     pub scroll_offset: usize,
-    pub scrollback_lines: Vec<Vec<(String, ratatui::style::Style)>>,
+    pub raw_output: Vec<u8>,
 }
 
 pub struct SessionOptions {
@@ -610,51 +610,8 @@ impl App {
             AppEvent::TerminalOutput(output) => {
                 if let Some(ref mut term) = self.nodes.terminal {
                     if term.terminal_id.as_deref() == Some(&output.terminal_id) {
-                        //
-                        // Snapshot visible rows before processing so we can
-                        // capture any that scroll off into our scrollback buffer.
-                        //
-
-                        let old_scrollback = term.parser.screen().scrollback();
-                        let screen = term.parser.screen();
-                        let rows = screen.size().0;
-                        let cols = screen.size().1;
-                        let mut snapshot: Vec<Vec<(String, ratatui::style::Style)>> = Vec::new();
-                        for row in 0..rows {
-                            let mut cells = Vec::new();
-                            for col in 0..cols {
-                                if let Some(cell) = screen.cell(row, col) {
-                                    let ch = cell.contents();
-                                    let display = if ch.is_empty() {
-                                        " ".to_string()
-                                    } else {
-                                        ch.to_string()
-                                    };
-                                    let fg = crate::ui::nodes::vt100_fg_to_color(cell.fgcolor());
-                                    let bg = crate::ui::nodes::vt100_bg_to_color(cell.bgcolor());
-                                    let mut style = ratatui::style::Style::default().fg(fg);
-                                    if bg != crate::ui::BG {
-                                        style = style.bg(bg);
-                                    }
-                                    if cell.bold() {
-                                        style = style.add_modifier(ratatui::style::Modifier::BOLD);
-                                    }
-                                    cells.push((display, style));
-                                }
-                            }
-                            snapshot.push(cells);
-                        }
-
+                        term.raw_output.extend_from_slice(&output.data);
                         term.parser.process(&output.data);
-
-                        let new_scrollback = term.parser.screen().scrollback();
-                        let scrolled = new_scrollback.saturating_sub(old_scrollback);
-                        if scrolled > 0 {
-                            let take = scrolled.min(snapshot.len());
-                            for i in 0..take {
-                                term.scrollback_lines.push(snapshot[i].clone());
-                            }
-                        }
                     }
                 }
             }
@@ -837,8 +794,7 @@ impl App {
             if let Some(ref mut term) = self.nodes.terminal {
                 match mouse.kind {
                     MouseEventKind::ScrollUp => {
-                        let max = term.scrollback_lines.len();
-                        term.scroll_offset = (term.scroll_offset + 3).min(max);
+                        term.scroll_offset = term.scroll_offset.saturating_add(3);
                     }
                     MouseEventKind::ScrollDown => {
                         term.scroll_offset = term.scroll_offset.saturating_sub(3);
@@ -1487,9 +1443,9 @@ impl App {
                     self.nodes.terminal = Some(TerminalState {
                         node_id: node_id.clone(),
                         terminal_id: Some(terminal_id),
-                        parser: vt100::Parser::new(rows, cols, 10000),
+                        parser: vt100::Parser::new(rows, cols, 0),
                         scroll_offset: 0,
-                        scrollback_lines: Vec::new(),
+                        raw_output: Vec::new(),
                     });
                 }
             }

@@ -819,100 +819,47 @@ fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
     // Render terminal screen from vt100 parser.
     //
 
+    //
+    // When scrolled, replay raw output through a taller virtual terminal
+    // to see the history. When live (scroll_offset=0), use the main parser.
+    //
+
     let screen = term.parser.screen();
     let visible_rows = screen.size().0 as usize;
-
-    //
-    // Build the live screen lines.
-    //
-
-    let build_screen_lines = |show_cursor: bool| -> Vec<Line<'static>> {
-        let cursor_pos = screen.cursor_position();
-        let mut lines: Vec<Line> = Vec::new();
-        for row in 0..screen.size().0 {
-            let mut spans: Vec<Span> = Vec::new();
-            for col in 0..screen.size().1 {
-                let cell = screen.cell(row, col).unwrap();
-                let ch = cell.contents();
-                let display = if ch.is_empty() { " " } else { &ch };
-
-                let is_cursor =
-                    show_cursor && row == cursor_pos.0 && col == cursor_pos.1;
-
-                let fg = vt100_fg_to_color(cell.fgcolor());
-                let bg = vt100_bg_to_color(cell.bgcolor());
-
-                let mut style = if is_cursor {
-                    Style::default().fg(super::BG).bg(ACCENT)
-                } else {
-                    let mut s = Style::default().fg(fg);
-                    if bg != super::BG {
-                        s = s.bg(bg);
-                    }
-                    s
-                };
-
-                if cell.bold() {
-                    style = style.add_modifier(Modifier::BOLD);
-                }
-                if cell.underline() {
-                    style = style.add_modifier(Modifier::UNDERLINED);
-                }
-                if cell.inverse() && !is_cursor {
-                    style = style.add_modifier(Modifier::REVERSED);
-                }
-
-                spans.push(Span::styled(display.to_string(), style));
-            }
-            lines.push(Line::from(spans));
-        }
-        lines
-    };
+    let cols = screen.size().1;
 
     let lines = if term.scroll_offset == 0 {
-        build_screen_lines(true)
+        render_vt100_screen(screen, true)
     } else {
         //
-        // Scrollback mode: combine history lines with live screen, then
-        // take a window ending scroll_offset lines above the bottom.
+        // Create a tall virtual terminal and replay all output to recover
+        // scrollback history. The tall screen shows everything.
         //
 
-        let history_len = term.scrollback_lines.len();
-        let screen_lines = build_screen_lines(false);
+        let tall_rows = (visible_rows + term.scroll_offset + 500) as u16;
+        let mut tall_parser = vt100::Parser::new(tall_rows, cols, 0);
+        tall_parser.process(&term.raw_output);
+
+        let tall_screen = tall_parser.screen();
+        let all_lines = render_vt100_screen(tall_screen, false);
 
         //
-        // Build a combined view: [scrollback_lines...] + [screen_lines]
-        // We want to show a window of visible_rows lines, ending at
-        // (total - scroll_offset).
+        // Find the last non-empty line in the tall screen to determine
+        // actual content height.
         //
 
-        let total = history_len + visible_rows;
-        let end = total.saturating_sub(term.scroll_offset);
+        let content_height = all_lines
+            .iter()
+            .rposition(|line| {
+                line.spans.iter().any(|s| s.content.trim().len() > 0)
+            })
+            .map(|i| i + 1)
+            .unwrap_or(0);
+
+        let end = content_height.saturating_sub(term.scroll_offset);
         let start = end.saturating_sub(visible_rows);
 
-        let mut result: Vec<Line> = Vec::new();
-        for i in start..end {
-            if i < history_len {
-                //
-                // From scrollback history.
-                //
-                let row = &term.scrollback_lines[i];
-                let spans: Vec<Span> = row
-                    .iter()
-                    .map(|(text, style)| Span::styled(text.clone(), *style))
-                    .collect();
-                result.push(Line::from(spans));
-            } else {
-                //
-                // From live screen.
-                //
-                let screen_idx = i - history_len;
-                if screen_idx < screen_lines.len() {
-                    result.push(screen_lines[screen_idx].clone());
-                }
-            }
-        }
-        result
+        all_lines[start..end.min(all_lines.len())].to_vec()
     };
 
     let content_area = Rect {
@@ -930,16 +877,60 @@ fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
 
     let mut hint_spans = vec![
         Span::styled("  ^t", Style::default().fg(ACCENT)),
-        Span::styled(" close terminal", Style::default().fg(MUTED)),
+        Span::styled(" close  ", Style::default().fg(MUTED)),
+        Span::styled("scroll", Style::default().fg(ACCENT)),
+        Span::styled(" history", Style::default().fg(MUTED)),
     ];
     if term.scroll_offset > 0 {
         hint_spans.push(Span::styled(
-            format!("   [scrollback: -{}]", term.scroll_offset),
+            format!("   [-{}]", term.scroll_offset),
             Style::default().fg(DIM),
         ));
     }
     let hints = Line::from(hint_spans);
     f.render_widget(Paragraph::new(hints), chunks[4]);
+}
+
+fn render_vt100_screen(screen: &vt100::Screen, show_cursor: bool) -> Vec<Line<'static>> {
+    let cursor_pos = screen.cursor_position();
+    let mut lines: Vec<Line> = Vec::new();
+    for row in 0..screen.size().0 {
+        let mut spans: Vec<Span> = Vec::new();
+        for col in 0..screen.size().1 {
+            let cell = screen.cell(row, col).unwrap();
+            let ch = cell.contents();
+            let display = if ch.is_empty() { " " } else { &ch };
+
+            let is_cursor = show_cursor && row == cursor_pos.0 && col == cursor_pos.1;
+
+            let fg = vt100_fg_to_color(cell.fgcolor());
+            let bg = vt100_bg_to_color(cell.bgcolor());
+
+            let mut style = if is_cursor {
+                Style::default().fg(super::BG).bg(ACCENT)
+            } else {
+                let mut s = Style::default().fg(fg);
+                if bg != super::BG {
+                    s = s.bg(bg);
+                }
+                s
+            };
+
+            if cell.bold() {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            if cell.underline() {
+                style = style.add_modifier(Modifier::UNDERLINED);
+            }
+            if cell.inverse() && !is_cursor {
+                style = style.add_modifier(Modifier::REVERSED);
+            }
+
+            spans.push(Span::styled(display.to_string(), style));
+        }
+        lines.push(Line::from(spans));
+    }
+    lines
 }
 
 pub fn vt100_fg_to_color(color: vt100::Color) -> Color {
