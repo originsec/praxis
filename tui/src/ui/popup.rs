@@ -128,9 +128,6 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
                     }
                     spans.push(Span::raw(" "));
                 }
-                if is_focused {
-                    spans.push(Span::styled("  (space)", Style::default().fg(DIM)));
-                }
                 lines.push(Line::from(spans));
                 continue;
             }
@@ -158,10 +155,7 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
                 } else {
                     Span::styled(" \u{25cb} false ", Style::default().fg(DIM))
                 };
-                let mut spans = vec![Span::styled(format!("{}: ", label), label_style), indicator];
-                if is_focused {
-                    spans.push(Span::styled("  (space)", Style::default().fg(DIM)));
-                }
+                let spans = vec![Span::styled(format!("{}: ", label), label_style), indicator];
                 lines.push(Line::from(spans));
                 continue;
             }
@@ -217,9 +211,9 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
         Span::raw(" "),
         Span::styled("\u{2191}\u{2193}", Style::default().fg(ACCENT)),
         Span::styled(" fields  ", Style::default().fg(MUTED)),
-        Span::styled("space", Style::default().fg(ACCENT)),
+        Span::styled("space/\u{2190}\u{2192}", Style::default().fg(ACCENT)),
         Span::styled(" toggle  ", Style::default().fg(MUTED)),
-        Span::styled("enter", Style::default().fg(ACCENT)),
+        Span::styled("^enter", Style::default().fg(ACCENT)),
         Span::styled(" create  ", Style::default().fg(MUTED)),
         Span::styled("esc", Style::default().fg(ACCENT)),
         Span::styled(" cancel", Style::default().fg(MUTED)),

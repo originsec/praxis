@@ -1956,14 +1956,35 @@ impl App {
                     }
                 }
             }
-            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            KeyCode::Left | KeyCode::Right => {
+                //
+                // Left/Right toggles Mode and YOLO.
+                //
                 if let Some(ref mut form) = self.new_op_form {
-                    if form.focused_field == 8 {
-                        form.prompt.push('\n');
+                    let idx = form.focused_field;
+                    if idx == 4 {
+                        form.mode = (form.mode + 1) % 2;
+                    } else if idx == 7 {
+                        form.yolo = !form.yolo;
                     }
                 }
             }
             KeyCode::Enter => {
+                //
+                // On Prompt field, Enter adds a newline.
+                // On other fields or with Ctrl, submit the form.
+                //
+                let is_prompt = self.new_op_form.as_ref()
+                    .map(|f| f.focused_field == 8)
+                    .unwrap_or(false);
+
+                if is_prompt && !key.modifiers.contains(KeyModifiers::CONTROL) {
+                    if let Some(ref mut form) = self.new_op_form {
+                        form.prompt.push('\n');
+                    }
+                    return;
+                }
+
                 //
                 // Validate mandatory fields and submit.
                 //
