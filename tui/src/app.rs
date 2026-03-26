@@ -1971,9 +1971,12 @@ impl App {
                     }
                 }
             }
-            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            KeyCode::Enter
+                if key.modifiers.contains(KeyModifiers::SHIFT)
+                    || key.modifiers.contains(KeyModifiers::ALT) =>
+            {
                 //
-                // Shift+Enter adds newline in prompt field.
+                // Shift+Enter or Alt+Enter adds newline in prompt field.
                 //
                 if let Some(ref mut form) = self.new_op_form {
                     if form.focused_field == 8 {
