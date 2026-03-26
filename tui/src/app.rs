@@ -213,6 +213,9 @@ pub struct SessionChat {
     pub cursor_pos: usize,
     pub scroll_offset: u16,
     pub is_waiting: bool,
+    pub history: Vec<String>,
+    pub history_index: Option<usize>,
+    pub saved_input: String,
 }
 
 pub struct ChatMessage {
@@ -979,6 +982,9 @@ impl App {
             cursor_pos: 0,
             scroll_offset: 0,
             is_waiting: false,
+            history: Vec::new(),
+            history_index: None,
+            saved_input: String::new(),
         });
         self.nodes.detail_focus = false;
 
@@ -1047,9 +1053,21 @@ impl App {
         match key.code {
             KeyCode::Esc => {
                 //
-                // Close session. The actual session_close command
-                // is sent asynchronously.
+                // Close session and send session_close command.
                 //
+                if let Some(ref session) = self.nodes.session {
+                    if session.session_id.is_some() {
+                        let client = self.client.clone();
+                        let node_id = session.node_id.clone();
+                        tokio::spawn(async move {
+                            use common::SessionCommand;
+                            let _ = client.send_command(
+                                &node_id,
+                                NodeCommand::Session(SessionCommand::Close),
+                            ).await;
+                        });
+                    }
+                }
                 self.nodes.session = None;
             }
             KeyCode::Enter => {
@@ -1060,8 +1078,11 @@ impl App {
                 }
 
                 //
-                // Show the user message immediately.
+                // Save to history and show message immediately.
                 //
+                session.history.push(input.clone());
+                session.history_index = None;
+
                 session.messages.push(ChatMessage {
                     role: ChatRole::User,
                     text: input.clone(),
@@ -1182,6 +1203,41 @@ impl App {
                 if let Some(ref mut session) = self.nodes.session {
                     if session.cursor_pos < session.input.len() {
                         session.cursor_pos += 1;
+                    }
+                }
+            }
+            KeyCode::Up => {
+                if let Some(ref mut session) = self.nodes.session {
+                    let hist_len = session.history.len();
+                    if hist_len > 0 {
+                        match session.history_index {
+                            None => {
+                                session.saved_input = session.input.clone();
+                                session.history_index = Some(hist_len - 1);
+                            }
+                            Some(idx) if idx > 0 => {
+                                session.history_index = Some(idx - 1);
+                            }
+                            _ => {}
+                        }
+                        if let Some(idx) = session.history_index {
+                            session.input = session.history[idx].clone();
+                            session.cursor_pos = session.input.len();
+                        }
+                    }
+                }
+            }
+            KeyCode::Down => {
+                if let Some(ref mut session) = self.nodes.session {
+                    if let Some(idx) = session.history_index {
+                        if idx + 1 < session.history.len() {
+                            session.history_index = Some(idx + 1);
+                            session.input = session.history[idx + 1].clone();
+                        } else {
+                            session.history_index = None;
+                            session.input = session.saved_input.clone();
+                        }
+                        session.cursor_pos = session.input.len();
                     }
                 }
             }
