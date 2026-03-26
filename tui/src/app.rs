@@ -1487,7 +1487,7 @@ impl App {
                     self.nodes.terminal = Some(TerminalState {
                         node_id: node_id.clone(),
                         terminal_id: Some(terminal_id),
-                        parser: vt100::Parser::new(rows, cols, 0),
+                        parser: vt100::Parser::new(rows, cols, 10000),
                         scroll_offset: 0,
                         scrollback_lines: Vec::new(),
                     });
