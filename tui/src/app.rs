@@ -3226,6 +3226,19 @@ impl App {
         //
 
         if form.editing_text {
+
+            //
+            // ^l on model field loads available models from provider API.
+            //
+
+            if form.focused_field == 2
+                && key.code == KeyCode::Char('l')
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                self.load_provider_models().await;
+                return;
+            }
+
             match key.code {
                 KeyCode::Esc => {
                     form.editing_text = false;
@@ -3236,7 +3249,7 @@ impl App {
                         form.focused_field += 1;
                     }
                 }
-                KeyCode::Char(c) => {
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                     match form.focused_field {
                         1 => form.api_key.push(c),
                         2 => form.model_name.push(c),
@@ -3314,52 +3327,58 @@ impl App {
                     _ => {}
                 }
             }
-            KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                //
-                // Load models from provider API.
-                //
-
-                let form = self.settings.model_form.as_mut().unwrap();
-                let providers = sorted_providers();
-                let provider = providers[form.provider_idx].as_str().to_string();
-                let api_key = form.api_key.clone();
-
-                if api_key.is_empty() {
-                    self.settings.status_message =
-                        Some("Enter an API key first".to_string());
-                    return;
-                }
-
-                form.loading_models = true;
-                let result =
-                    common::ai::fetch_models_for_provider(&provider, &api_key).await;
-
-                let form = self.settings.model_form.as_mut().unwrap();
-                form.loading_models = false;
-
-                match result {
-                    Ok(models) => {
-                        if models.is_empty() {
-                            self.settings.status_message =
-                                Some("No models returned".to_string());
-                        } else {
-                            let form = self.settings.model_form.as_mut().unwrap();
-                            form.available_models = models;
-                            form.model_dropdown_selected = 0;
-                            form.model_dropdown_open = true;
-                        }
-                    }
-                    Err(e) => {
-                        self.settings.status_message =
-                            Some(format!("Failed to load models: {}", e));
-                    }
-                }
+            KeyCode::Char('l')
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && form.focused_field == 2 =>
+            {
+                self.load_provider_models().await;
             }
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 // Save shortcut.
                 self.save_model_form().await;
             }
             _ => {}
+        }
+    }
+
+    async fn load_provider_models(&mut self) {
+        let form = match self.settings.model_form.as_mut() {
+            Some(f) => f,
+            None => return,
+        };
+
+        let providers = sorted_providers();
+        let provider = providers[form.provider_idx].as_str().to_string();
+        let api_key = form.api_key.clone();
+
+        if api_key.is_empty() {
+            self.settings.status_message = Some("Enter an API key first".to_string());
+            return;
+        }
+
+        form.loading_models = true;
+        let result = common::ai::fetch_models_for_provider(&provider, &api_key).await;
+
+        let form = match self.settings.model_form.as_mut() {
+            Some(f) => f,
+            None => return,
+        };
+        form.loading_models = false;
+
+        match result {
+            Ok(models) => {
+                if models.is_empty() {
+                    self.settings.status_message = Some("No models returned".to_string());
+                } else {
+                    form.available_models = models;
+                    form.model_dropdown_selected = 0;
+                    form.model_dropdown_open = true;
+                }
+            }
+            Err(e) => {
+                self.settings.status_message =
+                    Some(format!("Failed to load models: {}", e));
+            }
         }
     }
 

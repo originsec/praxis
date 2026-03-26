@@ -148,7 +148,7 @@ fn toggle_row(label: &str, enabled: bool, selected: bool) -> Line<'_> {
         )
     };
 
-    let bg = if selected { HIGHLIGHT_BG } else { Color::Reset };
+    let bg = if selected { HIGHLIGHT_BG } else { super::BG };
 
     Line::from(vec![
         Span::styled(if selected { "\u{25b8} " } else { "  " }, label_style),
@@ -569,14 +569,17 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
     // Hints.
     //
 
-    lines.push(Line::from(vec![
-        Span::styled("  ^l", Style::default().fg(DIM)),
-        Span::styled(" load models  ", Style::default().fg(MUTED)),
-        Span::styled("^s", Style::default().fg(DIM)),
+    let mut hints = vec![
+        Span::styled("  ^s", Style::default().fg(DIM)),
         Span::styled(" save  ", Style::default().fg(MUTED)),
         Span::styled("esc", Style::default().fg(DIM)),
         Span::styled(" cancel", Style::default().fg(MUTED)),
-    ]));
+    ];
+    if form.focused_field == 2 && form.editing_text {
+        hints.insert(0, Span::styled(" load models  ", Style::default().fg(MUTED)));
+        hints.insert(0, Span::styled("  ^l", Style::default().fg(DIM)));
+    }
+    lines.push(Line::from(hints));
 
     if form.loading_models {
         lines.push(Line::from(Span::styled(
