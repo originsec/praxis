@@ -28,7 +28,7 @@ tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5.0"
 walkdir = "2"
-common = { path = "../common" }
+common = { package = "praxis_common", path = "../common" }
 portable-pty = "0.8"
 rmcp = { version = "0.8", features = ["client", "transport-child-process"] }
 # Traffic interception dependencies

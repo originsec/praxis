@@ -11,7 +11,7 @@ name = "praxis_cli"
 path = "src/main.rs"
 
 [dependencies]
-common = { path = "../common" }
+common = { package = "praxis_common", path = "../common" }
 tokio = { version = "1", features = ["full"] }
 lapin = "2.5"
 clap = { version = "4", features = ["derive", "env"] }

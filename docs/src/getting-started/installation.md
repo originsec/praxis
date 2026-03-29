@@ -20,22 +20,50 @@ irm https://praxis.originhq.com/docker.ps1 | iex
 
 This clones the latest release, builds with Docker Compose, and starts everything.
 
+### Prerequisites
+
+RabbitMQ must be running before starting Praxis. If you're not using Docker (which includes RabbitMQ), install and start it separately:
+
+```bash
+# Linux
+sudo systemctl start rabbitmq-server
+
+# macOS (Homebrew)
+brew services start rabbitmq
+```
+
 ### Native Install (Linux/macOS)
 
 ```bash
 curl -fsSL https://praxis.originhq.com/install.sh | bash
 ```
 
-This installs Rust if needed, builds from source, and sets up binaries in `~/.praxis/bin/`:
-- `praxis_service` - backend service
-- `praxis_web` - web server + frontend
-- `praxis_node` - node agent
-- `praxis_cli` - command-line interface
+This installs Rust if needed, builds from source, and sets up:
+- `~/.praxis/bin/praxis_service` - backend service
+- `~/.praxis/bin/praxis_web` - web server + frontend
+- `~/.praxis/bin/praxis_cli` - command-line interface
+- `~/.praxis/bin/nodes/<platform>/praxis_node` - node agent
+- Systemd user services (Linux) for automatic startup
+- PATH is configured automatically
 
 ### Native Install (Windows)
 
 ```powershell
 irm https://praxis.originhq.com/install.ps1 | iex
+```
+
+### Removing
+
+To uninstall Praxis (stops services, removes binaries, config, and PATH entries):
+
+```bash
+# Linux/macOS
+curl -fsSL https://praxis.originhq.com/install.sh | bash -s -- --remove
+```
+
+```powershell
+# Windows
+irm https://praxis.originhq.com/install.ps1 | iex -- --remove
 ```
 
 ### Pinning a Specific Version
@@ -100,8 +128,8 @@ To add a macOS node binary to Docker downloads, provide it explicitly (optional)
 cargo build --release -p praxis_node
 
 # Put it in a local directory
-mkdir -p ~/.praxis/bin/nodes
-cp target/release/praxis_node ~/.praxis/bin/nodes/praxis_node_macos_arm64
+mkdir -p ~/.praxis/bin/nodes/macos-arm64
+cp target/release/praxis_node ~/.praxis/bin/nodes/macos-arm64/praxis_node
 ```
 
 Then mount it and enable multi-directory lookup:
@@ -181,15 +209,29 @@ docker run -d --name rabbitmq \
   rabbitmq:3-management
 ```
 
-Then start the service and web components (in separate terminals or backgrounded):
+Then start the service and web components:
 
 ```bash
-# Terminal 1: Service
-./target/release/praxis_service
-
-# Terminal 2: Web
-./target/release/praxis_web
+./target/release/praxis_service &
+./target/release/praxis_web &
 ```
+
+If you used the install script on Linux, the service and web components are managed via systemd user services:
+
+```bash
+# Start/stop
+systemctl --user start praxis
+systemctl --user stop praxis
+
+# Check status
+systemctl --user status praxis
+
+# View logs
+journalctl --user -u praxis-service
+journalctl --user -u praxis-web
+```
+
+Praxis starts automatically on login. Edit `~/.config/praxis/env` to configure the RabbitMQ URL and other environment variables.
 
 ## Getting Node Binaries
 
