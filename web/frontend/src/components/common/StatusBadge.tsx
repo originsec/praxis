@@ -26,19 +26,6 @@ export function StatusBadge({ status, label, showDot = true }: StatusBadgeProps)
 }
 
 //
-// Helper to determine node status based on last update time.
-//
-export function getNodeStatus(lastUpdate: string): 'online' | 'warning' | 'offline' {
-  const lastUpdateTime = new Date(lastUpdate).getTime();
-  const now = Date.now();
-  const diffSeconds = (now - lastUpdateTime) / 1000;
-
-  if (diffSeconds < 60) return 'online';
-  if (diffSeconds < 120) return 'warning';
-  return 'offline';
-}
-
-//
 // Helper for operation status.
 //
 export function getOperationStatusColor(

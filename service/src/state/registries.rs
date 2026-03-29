@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use common::{NodeCapability, NodeInformationUpdate, NodeRegistration, NodeState, SystemState};
+use common::{NodeCapability, NodeInformationUpdate, NodeRegistration, NodeState, NodeStatus, SystemState};
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 
@@ -125,9 +125,11 @@ impl NodeRegistry {
 
     /// Build a SystemState from the current registry
     pub async fn build_system_state(&self) -> SystemState {
+        let now = Utc::now();
         let agents = self.agents.read().await;
         let nodes: Vec<NodeState> = agents.values().map(|node| {
             let update = node.last_update.as_ref();
+            let age_seconds = (now - node.last_update_received).num_seconds();
             NodeState {
                 node_id: node.id.clone(),
                 node_type: node.node_type.clone(),
@@ -139,6 +141,7 @@ impl NodeRegistry {
                 intercept_active: node.intercept_active,
                 intercept_supported: node.intercept_supported,
                 last_update: node.last_update_received,
+                status: NodeStatus::from_age_seconds(age_seconds),
                 active_terminal_id: update.and_then(|u| u.active_terminal_id.clone()),
                 privileged: node.privileged,
             }

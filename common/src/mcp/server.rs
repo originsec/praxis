@@ -123,7 +123,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
 
     // ── Node Management ──────────────────────────────────────────────────
 
-    #[tool(description = "List all connected nodes in the Praxis network")]
+    #[tool(description = "List all connected nodes in the Praxis network. Each node includes a status field: 'online' (responding normally), 'warning' (node may not be available — recent communication lost), or 'offline' (node is not available).")]
     async fn node_list(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let guard = acquire_client!(self);
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
@@ -136,6 +136,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
                 "node_id_short": &n.node_id[..8.min(n.node_id.len())],
                 "hostname": n.machine_name,
                 "os": n.os_details,
+                "status": n.status,
                 "agent_count": n.discovered_agents.len(),
                 "privileged": n.privileged
             })
@@ -161,7 +162,8 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         json_result(json!({
             "node_id": node.node_id,
             "hostname": node.machine_name,
-            "os": node.os_details
+            "os": node.os_details,
+            "status": node.status
         }))
     }
 

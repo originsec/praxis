@@ -2665,6 +2665,27 @@ pub enum NodeSignalMessage {
 // System State - Used for client updates.
 //
 
+/// Connectivity status of a node, derived server-side from last update time.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum NodeStatus {
+    Online,
+    Warning,
+    Offline,
+}
+
+impl NodeStatus {
+    pub fn from_age_seconds(age: i64) -> Self {
+        if age < 60 {
+            NodeStatus::Online
+        } else if age < 120 {
+            NodeStatus::Warning
+        } else {
+            NodeStatus::Offline
+        }
+    }
+}
+
 /// Complete state of a node as seen by the server
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeState {
@@ -2681,12 +2702,19 @@ pub struct NodeState {
     #[serde(default)]
     pub intercept_supported: bool,
     pub last_update: chrono::DateTime<chrono::Utc>,
+    /// Connectivity status, set by the service
+    #[serde(default = "default_node_status")]
+    pub status: NodeStatus,
     /// Active terminal session ID (if any)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_terminal_id: Option<String>,
     /// Whether the node is running with elevated privileges (root/admin)
     #[serde(default)]
     pub privileged: bool,
+}
+
+fn default_node_status() -> NodeStatus {
+    NodeStatus::Offline
 }
 
 /// Complete system state broadcast to clients

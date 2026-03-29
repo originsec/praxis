@@ -5,8 +5,6 @@ import { CommandTopBar } from '../components/command/CommandTopBar';
 import { NodeCard } from '../components/command/NodeCard';
 import { OrchestratorPanel } from '../components/command/OrchestratorPanel';
 import { ActivityBar } from '../components/command/ActivityBar';
-import { getNodeStatus } from '../components/common/StatusBadge';
-
 const ORCHESTRATOR_PANEL_KEY = 'commandCenter.orchestratorOpen';
 
 export function CommandCenter() {
@@ -42,9 +40,9 @@ export function CommandCenter() {
   const sortedNodes = useMemo(() => {
     const nodes = state.systemState?.nodes ?? [];
     return [...nodes].sort((a, b) => {
-      const statusOrder = { online: 0, warning: 1, offline: 2 };
-      const aStatus = statusOrder[getNodeStatus(a.last_update)];
-      const bStatus = statusOrder[getNodeStatus(b.last_update)];
+      const statusOrder: Record<string, number> = { online: 0, warning: 1, offline: 2 };
+      const aStatus = statusOrder[a.status] ?? 2;
+      const bStatus = statusOrder[b.status] ?? 2;
       if (aStatus !== bStatus) return aStatus - bStatus;
       return (a.machine_name || '').localeCompare(b.machine_name || '');
     });
