@@ -167,7 +167,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         }))
     }
 
-    #[tool(description = "Reset a node: cancel all operations, close sessions, and re-register")]
+    #[tool(description = "Reset a node. WARNING: This is destructive — cancels all running/queued operations, closes active sessions, and forces the node to re-register. Use when a node is in a bad state (stuck operations, unresponsive sessions) or to recover from warning/offline status.")]
     async fn node_reset(
         &self,
         Parameters(params): Parameters<NodePrefixParams>,
