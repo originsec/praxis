@@ -2,9 +2,9 @@ use anyhow::{Result, anyhow};
 use common::{
     CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE, ChainDefinitionFull, ChainDefinitionInfo,
     ChainExecutionUpdate, ClientBroadcastMessage, ClientDirectMessage, ClientRegistration,
-    ClientSignalMessage, CommandRequest, CommandResponse, NodeCommand, NodeCommandResult,
-    OperationDefinitionInfo, SemanticOpUpdate, SystemState, TerminalOutput, client_queue_name,
-    publish_json,
+    ClientSignalMessage, CommandRequest, CommandResponse, LuaAgentScriptInfo, NodeCommand,
+    NodeCommandResult, OperationDefinitionInfo, SemanticOpUpdate, SystemState, TerminalOutput,
+    client_queue_name, publish_json,
 };
 use futures_util::StreamExt;
 use lapin::{
@@ -42,6 +42,7 @@ struct ClientState {
     chain_executions: Vec<ChainExecutionUpdate>,
     current_chain: Option<ChainDefinitionFull>,
     pending_semantic_op: Option<String>,
+    lua_agent_scripts: Vec<LuaAgentScriptInfo>,
 }
 
 impl Client {
@@ -275,6 +276,17 @@ impl Client {
                 if let Some(ref tx) = state.terminal_output_tx {
                     let _ = tx.send(output);
                 }
+            }
+
+            ClientDirectMessage::LuaAgentScriptListResponse { scripts } => {
+                state.lua_agent_scripts = scripts;
+            }
+            ClientDirectMessage::LuaAgentScriptAdded { .. }
+            | ClientDirectMessage::LuaAgentScriptUpdated { .. }
+            | ClientDirectMessage::LuaAgentScriptDeleted { .. }
+            | ClientDirectMessage::LuaAgentScriptDefaultsReset { .. }
+            | ClientDirectMessage::LuaAgentScriptDisabledToggled { .. } => {
+                // Trigger a re-fetch handled by the app layer.
             }
 
             _ => {}
@@ -731,6 +743,73 @@ impl Client {
 
     pub async fn remove_chain_execution(&self, execution_id: String) -> Result<()> {
         let message = ClientSignalMessage::ChainExecutionRemove { execution_id };
+        self.publish_signal(message).await
+    }
+
+    //
+    // Lua agent script methods.
+    //
+
+    pub async fn request_lua_agent_scripts(&self) -> Result<()> {
+        let message = ClientSignalMessage::LuaAgentScriptList {
+            client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn get_lua_agent_scripts(&self) -> Vec<LuaAgentScriptInfo> {
+        self.state.lock().await.lua_agent_scripts.clone()
+    }
+
+    pub async fn add_lua_agent_script(&self, name: String, script: String) -> Result<()> {
+        let message = ClientSignalMessage::LuaAgentScriptAdd {
+            client_id: self.client_id.clone(),
+            name,
+            script,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn update_lua_agent_script(
+        &self,
+        script_id: String,
+        name: String,
+        script: String,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::LuaAgentScriptUpdate {
+            client_id: self.client_id.clone(),
+            script_id,
+            name,
+            script,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn delete_lua_agent_script(&self, script_id: String) -> Result<()> {
+        let message = ClientSignalMessage::LuaAgentScriptDelete {
+            client_id: self.client_id.clone(),
+            script_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn toggle_lua_agent_script_disabled(
+        &self,
+        script_id: String,
+        disabled: bool,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::LuaAgentScriptToggleDisabled {
+            client_id: self.client_id.clone(),
+            script_id,
+            disabled,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn reset_lua_agent_script_defaults(&self) -> Result<()> {
+        let message = ClientSignalMessage::LuaAgentScriptResetDefaults {
+            client_id: self.client_id.clone(),
+        };
         self.publish_signal(message).await
     }
 }

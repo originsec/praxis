@@ -997,14 +997,14 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
 
     let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy()).collect();
     if let Some(input) = &spec.stdin {
-        common::log_info!(
+        common::log_debug!(
             "command: {} {} (stdin: {})",
             cmd.get_program().to_string_lossy(),
             args.join(" "),
             input.replace('\n', " | ")
         );
     } else {
-        common::log_info!(
+        common::log_debug!(
             "command: {} {}",
             cmd.get_program().to_string_lossy(),
             args.join(" ")
@@ -1037,7 +1037,7 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
                         } else {
                             stdout.clone()
                         };
-                        common::log_info!("command output:\n{}", preview);
+                        common::log_debug!("command output:\n{}", preview);
                     } else {
                         common::log_warn!(
                             "command failed (status {}): {}",

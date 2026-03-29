@@ -136,7 +136,7 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
           {selectedAgent && (
             <div className="px-3 py-1 border-b border-subtle bg-[var(--bg-tertiary)] text-[9px] text-muted flex items-center gap-3 flex-shrink-0">
               {selectedAgent.process_name && <span>{selectedAgent.process_name}</span>}
-              <span className="font-mono">{sessionId?.slice(0, 10)}...</span>
+              <span className="font-mono truncate">{sessionId}</span>
               {selectedAgent.working_dir && <span className="truncate">{selectedAgent.working_dir}</span>}
             </div>
           )}

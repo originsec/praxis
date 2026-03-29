@@ -51,8 +51,10 @@ pub struct ConfirmAction {
 pub enum ConfirmKind {
     DeleteOp(String), // full_name
     ClearAllExecutions,
-    DeleteModel(usize), // index into model_definitions
-    ResetNode(String),  // node_id
+    DeleteModel(usize),        // index into model_definitions
+    DeleteAgentScript(String), // script_id
+    ResetAgentScripts,
+    ResetNode(String), // node_id
     Info,
 }
 
@@ -128,8 +130,6 @@ pub struct App {
     pub operations: OperationsState,
     pub settings: SettingsState,
     pub client: Arc<Client>,
-    pub rabbitmq_url: String,
-    pub client_id: String,
     pub should_quit: bool,
     pub connected: bool,
     pub popup: Option<Popup>,
@@ -138,6 +138,9 @@ pub struct App {
     pub confirm: Option<ConfirmAction>,
     pub terminal_width: u16,
     pub event_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::event::AppEvent>>,
+    pub needs_full_redraw: bool,
+    pub terminal_paused: Arc<std::sync::atomic::AtomicBool>,
+    pub terminal_resume: Arc<tokio::sync::Notify>,
 }
 
 //
@@ -382,6 +385,7 @@ impl Default for OperationsState {
 #[derive(Clone, Copy, PartialEq)]
 pub enum SettingsTab {
     Llm,
+    Agents,
     Service,
     About,
 }
@@ -420,6 +424,12 @@ pub struct SettingsState {
     pub dropdown_open: bool,
     pub dropdown_selected: usize,
     pub dropdown_field: usize, // which feature field (1-5) the dropdown is for
+
+    //
+    // Agent scripts.
+    //
+    pub agent_scripts: Vec<common::LuaAgentScriptInfo>,
+    pub agent_scripts_loaded: bool,
 
     //
     // Connection info (read-only, set at startup).
@@ -497,6 +507,8 @@ impl Default for SettingsState {
             mcp_port: "8585".to_string(),
             logging_enabled: false,
             hunting_row_limit: "10000000".to_string(),
+            agent_scripts: Vec::new(),
+            agent_scripts_loaded: false,
             dropdown_open: false,
             dropdown_selected: 0,
             dropdown_field: 0,
@@ -519,8 +531,6 @@ impl App {
                 ..SettingsState::default()
             },
             client,
-            rabbitmq_url,
-            client_id,
             should_quit: false,
             connected: true,
             popup: None,
@@ -529,6 +539,9 @@ impl App {
             confirm: None,
             terminal_width: 0,
             event_tx: None,
+            needs_full_redraw: false,
+            terminal_paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            terminal_resume: Arc::new(tokio::sync::Notify::new()),
         }
     }
 
@@ -758,6 +771,21 @@ impl App {
                             opts.working_dirs = paths;
                             redraw = true;
                         }
+                    }
+                }
+
+                //
+                // Poll for agent script list response.
+                //
+
+                if self.active_window == Window::Settings
+                    && self.settings.tab == SettingsTab::Agents
+                    && !self.settings.agent_scripts_loaded
+                {
+                    let scripts = self.client.get_lua_agent_scripts().await;
+                    if !scripts.is_empty() {
+                        self.poll_agent_scripts(scripts);
+                        redraw = true;
                     }
                 }
 
@@ -1643,7 +1671,28 @@ impl App {
         }
 
         //
-        // Any keypress snaps back to live view.
+        // Scroll keys navigate the scrollback buffer instead of being
+        // forwarded to the remote PTY.
+        //
+
+        if matches!(key.code, KeyCode::PageUp | KeyCode::PageDown) {
+            if let Some(ref mut term) = self.nodes.terminal {
+                match key.code {
+                    KeyCode::PageUp => {
+                        let max = term.max_scroll.get();
+                        term.scroll_offset = (term.scroll_offset + 10).min(max);
+                    }
+                    KeyCode::PageDown => {
+                        term.scroll_offset = term.scroll_offset.saturating_sub(10);
+                    }
+                    _ => {}
+                }
+            }
+            return;
+        }
+
+        //
+        // Any other keypress snaps back to live view.
         //
 
         if let Some(ref mut term) = self.nodes.terminal {
@@ -1677,8 +1726,6 @@ impl App {
             KeyCode::Home => b"\x1b[H".to_vec(),
             KeyCode::End => b"\x1b[F".to_vec(),
             KeyCode::Delete => b"\x1b[3~".to_vec(),
-            KeyCode::PageUp => b"\x1b[5~".to_vec(),
-            KeyCode::PageDown => b"\x1b[6~".to_vec(),
             _ => return,
         };
 
@@ -2933,6 +2980,16 @@ impl App {
                                 }
                             }
                         }
+                        ConfirmKind::DeleteAgentScript(script_id) => {
+                            let _ = self.client.delete_lua_agent_script(script_id).await;
+                            self.settings.agent_scripts_loaded = false;
+                            self.load_agent_scripts().await;
+                        }
+                        ConfirmKind::ResetAgentScripts => {
+                            let _ = self.client.reset_lua_agent_script_defaults().await;
+                            self.settings.agent_scripts_loaded = false;
+                            self.load_agent_scripts().await;
+                        }
                         ConfirmKind::Info => {
                             // Just dismiss.
                         }
@@ -3536,6 +3593,162 @@ impl App {
         }
     }
 
+    async fn load_agent_scripts(&mut self) {
+        if let Err(e) = self.client.request_lua_agent_scripts().await {
+            self.settings.status_message = Some(format!("Failed to request scripts: {}", e));
+        }
+    }
+
+    fn poll_agent_scripts(&mut self, scripts: Vec<common::LuaAgentScriptInfo>) {
+        let mut scripts = scripts;
+        scripts.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        self.settings.agent_scripts = scripts;
+        self.settings.agent_scripts_loaded = true;
+    }
+
+    async fn edit_agent_script_in_editor(&mut self, existing: Option<common::LuaAgentScriptInfo>) {
+        use std::io::Write;
+
+        let editor = std::env::var("VISUAL")
+            .or_else(|_| std::env::var("EDITOR"))
+            .unwrap_or_else(|_| {
+                if cfg!(windows) { "notepad".to_string() }
+                else { "vi".to_string() }
+            });
+
+        let extension = ".lua";
+        let prefix = existing.as_ref().map(|s| s.name.as_str()).unwrap_or("new_agent");
+        let tmp = match tempfile::Builder::new()
+            .prefix(prefix)
+            .suffix(extension)
+            .tempfile()
+        {
+            Ok(f) => f,
+            Err(e) => {
+                self.settings.status_message = Some(format!("Failed to create temp file: {}", e));
+                self.settings.status_message_at = Some(std::time::Instant::now());
+                return;
+            }
+        };
+
+        if let Some(ref script) = existing {
+            if let Err(e) = tmp.as_file().write_all(script.script.as_bytes()) {
+                self.settings.status_message = Some(format!("Failed to write temp file: {}", e));
+                self.settings.status_message_at = Some(std::time::Instant::now());
+                return;
+            }
+        }
+
+        let path = tmp.path().to_path_buf();
+
+        //
+        // Pause the event reader and suspend the terminal so the editor
+        // can take over stdin/stdout without interference.
+        //
+
+        self.terminal_paused.store(true, std::sync::atomic::Ordering::Relaxed);
+        crossterm::terminal::disable_raw_mode().ok();
+        crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen).ok();
+
+        let status = std::process::Command::new(&editor)
+            .arg(&path)
+            .status();
+
+        crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::EnterAlternateScreen,
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
+        ).ok();
+        crossterm::terminal::enable_raw_mode().ok();
+        self.terminal_paused.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.terminal_resume.notify_one();
+
+        //
+        // Drain any buffered terminal events so stale keypresses from the
+        // editor (e.g. the Enter from :q!) don't get processed by the TUI.
+        //
+
+        while crossterm::event::poll(std::time::Duration::from_millis(50)).unwrap_or(false) {
+            let _ = crossterm::event::read();
+        }
+
+        self.needs_full_redraw = true;
+
+        match status {
+            Ok(s) if s.success() => {
+                match std::fs::read_to_string(&path) {
+                    Ok(content) if content.trim().is_empty() => {
+                        self.settings.status_message = Some("Empty file — not saved".to_string());
+                    }
+                    Ok(content) => {
+                        let result = if let Some(ref script) = existing {
+                            self.client
+                                .update_lua_agent_script(
+                                    script.id.clone(),
+                                    script.name.clone(),
+                                    content,
+                                )
+                                .await
+                        } else {
+                            //
+                            // Derive name from filename stem of the temp file,
+                            // or ask user. For simplicity, derive from content.
+                            //
+                            let name = Self::derive_agent_script_name(&path);
+                            self.client.add_lua_agent_script(name, content).await
+                        };
+                        match result {
+                            Ok(_) => {
+                                self.settings.status_message = Some("Saved".to_string());
+                                self.settings.agent_scripts_loaded = false;
+                                self.load_agent_scripts().await;
+                            }
+                            Err(e) => {
+                                self.settings.status_message =
+                                    Some(format!("Upload failed: {}", e));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.settings.status_message = Some(format!("Failed to read file: {}", e));
+                    }
+                }
+            }
+            Ok(_) => {
+                self.settings.status_message = Some("Editor exited with error".to_string());
+            }
+            Err(e) => {
+                self.settings.status_message = Some(format!("Failed to launch editor '{}': {}", editor, e));
+            }
+        }
+        self.settings.status_message_at = Some(std::time::Instant::now());
+    }
+
+    fn derive_agent_script_name(path: &std::path::Path) -> String {
+        //
+        // Try to extract an agent_name from the Lua source. Fall back to
+        // the filename stem (without the random suffix tempfile adds).
+        //
+
+        if let Ok(content) = std::fs::read_to_string(path) {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("agent_name") {
+                    let rest = rest.trim_start().trim_start_matches('=').trim();
+                    let name = rest.trim_matches('"').trim_matches('\'').trim_matches(',');
+                    if !name.is_empty() {
+                        return name.to_string();
+                    }
+                }
+            }
+        }
+
+        path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("new_agent")
+            .to_string()
+    }
+
     async fn save_setting(&mut self, key: &str, value: &str) {
         let mut values = HashMap::new();
         values.insert(key.to_string(), value.to_string());
@@ -3558,6 +3771,10 @@ impl App {
                 //
                 self.settings.model_definitions.len() + 6
             }
+            SettingsTab::Agents => {
+                // Scripts list + "Add new" + "Reset defaults"
+                self.settings.agent_scripts.len() + 2
+            }
             SettingsTab::Service => 4, // mcp_enabled, mcp_port, logging, hunting_row_limit
             SettingsTab::About => 0,
         }
@@ -3571,6 +3788,7 @@ impl App {
                 // mc+2 = Orchestrator Max Tokens
                 sel == mc + 2
             }
+            SettingsTab::Agents => false,
             SettingsTab::Service => {
                 // 1 = MCP port, 3 = hunting row limit
                 sel == 1 || sel == 3
@@ -3598,6 +3816,7 @@ impl App {
                     String::new()
                 }
             }
+            SettingsTab::Agents => String::new(),
             SettingsTab::Service => match sel {
                 1 => self.settings.mcp_port.clone(),
                 3 => self.settings.hunting_row_limit.clone(),
@@ -3724,13 +3943,29 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Tab | KeyCode::BackTab => {
+            KeyCode::Tab => {
                 self.settings.tab = match self.settings.tab {
-                    SettingsTab::Llm => SettingsTab::Service,
+                    SettingsTab::Llm => SettingsTab::Agents,
+                    SettingsTab::Agents => SettingsTab::Service,
                     SettingsTab::Service => SettingsTab::About,
                     SettingsTab::About => SettingsTab::Llm,
                 };
                 self.settings.selected = 0;
+                if self.settings.tab == SettingsTab::Agents && !self.settings.agent_scripts_loaded {
+                    self.load_agent_scripts().await;
+                }
+            }
+            KeyCode::BackTab => {
+                self.settings.tab = match self.settings.tab {
+                    SettingsTab::Llm => SettingsTab::About,
+                    SettingsTab::Agents => SettingsTab::Llm,
+                    SettingsTab::Service => SettingsTab::Agents,
+                    SettingsTab::About => SettingsTab::Service,
+                };
+                self.settings.selected = 0;
+                if self.settings.tab == SettingsTab::Agents && !self.settings.agent_scripts_loaded {
+                    self.load_agent_scripts().await;
+                }
             }
             KeyCode::Up => {
                 if self.settings.selected > 0 {
@@ -3758,6 +3993,32 @@ impl App {
                     self.confirm = Some(ConfirmAction {
                         message: format!("Delete model '{}'?", name),
                         action: ConfirmKind::DeleteModel(sel),
+                    });
+                }
+            }
+            KeyCode::Char(' ') if self.settings.tab == SettingsTab::Agents => {
+                let sel = self.settings.selected;
+                if sel < self.settings.agent_scripts.len() {
+                    let script = &self.settings.agent_scripts[sel];
+                    let id = script.id.clone();
+                    let new_disabled = !script.disabled;
+                    let _ = self.client.toggle_lua_agent_script_disabled(id, new_disabled).await;
+                    self.settings.agent_scripts_loaded = false;
+                    self.load_agent_scripts().await;
+                }
+            }
+            KeyCode::Char('d')
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && self.settings.tab == SettingsTab::Agents =>
+            {
+                let sel = self.settings.selected;
+                if sel < self.settings.agent_scripts.len() {
+                    let script = &self.settings.agent_scripts[sel];
+                    let name = script.name.clone();
+                    let id = script.id.clone();
+                    self.confirm = Some(ConfirmAction {
+                        message: format!("Delete agent script '{}'?", name),
+                        action: ConfirmKind::DeleteAgentScript(id),
                     });
                 }
             }
@@ -3804,6 +4065,32 @@ impl App {
                             self.settings.editing = true;
                             self.settings.edit_buffer =
                                 self.settings.orchestrator_max_tokens.clone();
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            SettingsTab::Agents => {
+                let script_count = self.settings.agent_scripts.len();
+                if sel < script_count {
+                    //
+                    // Edit existing script — open in external editor.
+                    //
+                    let script = self.settings.agent_scripts[sel].clone();
+                    self.edit_agent_script_in_editor(Some(script)).await;
+                } else {
+                    let idx = sel - script_count;
+                    match idx {
+                        0 => {
+                            // Add new script.
+                            self.edit_agent_script_in_editor(None).await;
+                        }
+                        1 => {
+                            // Reset defaults.
+                            self.confirm = Some(ConfirmAction {
+                                message: "Reset all agent scripts to built-in defaults?".to_string(),
+                                action: ConfirmKind::ResetAgentScripts,
+                            });
                         }
                         _ => {}
                     }
@@ -3877,6 +4164,7 @@ impl App {
                 }
                 _ => {}
             },
+            SettingsTab::Agents => {}
             SettingsTab::About => {}
         }
     }

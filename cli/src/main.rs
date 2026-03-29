@@ -190,11 +190,21 @@ async fn run_tui(rabbitmq_url: &str, timeout: u64) -> Result<()> {
 
     let mut app = App::new(client.clone(), rabbitmq_url.to_string(), client_id);
     app.init().await;
-    let mut events = EventHandler::new(client.clone());
+    let mut events = EventHandler::new(
+        client.clone(),
+        app.terminal_paused.clone(),
+        app.terminal_resume.clone(),
+    );
     app.event_tx = Some(events.sender());
     let mut should_draw = true;
 
     loop {
+        if app.needs_full_redraw {
+            app.needs_full_redraw = false;
+            terminal.clear()?;
+            should_draw = true;
+        }
+
         if should_draw {
             terminal.draw(|f| {
                 app.terminal_width = f.area().width;
