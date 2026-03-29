@@ -5,8 +5,8 @@ use crate::mcp::McpClient;
 use crate::{
     AgentCommand, AgentCommandResult, AgentFileType, AgentTool, ChainDefinitionFull,
     ChainDefinitionInfo, ChainExecutionUpdate, ChainTriggerInfo, ConfigItem, GrepFileEntry,
-    McpServer, NodeCommand, NodeCommandResult, OperationDefinitionInfo, SemanticOpUpdate,
-    SessionItem, SystemState, TargetSpec, TriggerConfig,
+    McpServer, NodeCommand, NodeCommandResult, OperationDefinitionInfo, SemanticOperationSpec,
+    SemanticOpUpdate, SessionItem, SystemState, TargetSpec, TriggerConfig,
 };
 
 //
@@ -133,6 +133,56 @@ pub async fn get_definition(
         "No operation or chain found matching '{}'. Use op_available to see definitions.",
         name
     ))
+}
+
+//
+// Create or update an operation definition. Returns the full_name of the
+// created/updated definition.
+//
+
+pub async fn op_create(
+    client: &(impl McpClient + Sync),
+    spec: SemanticOperationSpec,
+    category: &str,
+    short_name: &str,
+) -> Result<String> {
+    client.create_op_def(spec, category, short_name).await
+}
+
+//
+// Delete an operation definition by full name or short name.
+//
+
+pub async fn op_delete(
+    client: &(impl McpClient + Sync),
+    name: &str,
+) -> Result<String> {
+
+    //
+    // Resolve to full_name if a short name or display name was given.
+    //
+
+    client.request_op_def_list().await?;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let ops = client.get_operation_definitions().await;
+    let full_name = ops
+        .iter()
+        .find(|d| {
+            d.full_name == name
+                || d.short_name == name
+                || d.name == name
+        })
+        .map(|d| d.full_name.clone())
+        .ok_or_else(|| {
+            anyhow!(
+                "No operation definition found matching '{}'. Use op_available to list definitions.",
+                name
+            )
+        })?;
+
+    client.delete_op_def(&full_name).await?;
+    Ok(full_name)
 }
 
 //

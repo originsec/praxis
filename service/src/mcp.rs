@@ -45,6 +45,8 @@ struct ClientState {
     pending_semantic_ops: HashMap<String, Option<String>>,
     pending_traffic_search: Option<(Vec<InterceptedTrafficEntry>, usize)>,
     pending_recon_get: Option<Option<ReconResult>>,
+    pending_op_def_add: Option<Result<String, String>>,
+    pending_op_def_delete: Option<Result<String, String>>,
     operations: Vec<SemanticOpUpdate>,
     operation_definitions: Vec<OperationDefinitionInfo>,
     chain_definitions: Vec<ChainDefinitionInfo>,
@@ -275,6 +277,24 @@ impl ServiceMcpClient {
             }
             ClientDirectMessage::ChainTriggerDeleted { trigger_id } => {
                 state.chain_triggers.retain(|t| t.id != trigger_id);
+            }
+            ClientDirectMessage::OpDefAdded { full_name } => {
+                state.pending_op_def_add = Some(Ok(full_name));
+            }
+            ClientDirectMessage::OpDefDeleted { full_name, success } => {
+                if success {
+                    state.pending_op_def_delete = Some(Ok(full_name));
+                } else {
+                    state.pending_op_def_delete = Some(Err(format!("Failed to delete '{}'", full_name)));
+                }
+            }
+            ClientDirectMessage::OpDefError { message } => {
+                if state.pending_op_def_add.is_none() {
+                    state.pending_op_def_add = Some(Err(message.clone()));
+                }
+                if state.pending_op_def_delete.is_none() {
+                    state.pending_op_def_delete = Some(Err(message));
+                }
             }
             _ => {}
         }
@@ -633,6 +653,82 @@ impl McpClient for ServiceMcpClient {
             target_spec: None,
         };
         self.publish_signal(message).await
+    }
+
+    async fn create_op_def(
+        &self,
+        spec: common::SemanticOperationSpec,
+        category: &str,
+        short_name: &str,
+    ) -> Result<String> {
+        {
+            let mut state = self.state.lock().await;
+            state.pending_op_def_add = None;
+        }
+
+        //
+        // Build JSON content matching OperationDefinition::from_json format.
+        //
+
+        let json_content = serde_json::to_string(&serde_json::json!({
+            "item_type": "operation",
+            "name": spec.name,
+            "short_name": short_name,
+            "category": category,
+            "description": spec.description,
+            "agent_info": spec.agent_info,
+            "timeout": spec.timeout,
+            "operation_prompt": spec.operation_prompt,
+            "mode": spec.mode,
+            "agent_iterations": spec.agent_iterations,
+            "yolo_mode": spec.yolo_mode,
+            "model_ref": spec.model_ref,
+        })).map_err(|e| anyhow!("Failed to serialize op definition: {}", e))?;
+
+        let message = ClientSignalMessage::OpDefAdd {
+            client_id: self.client_id.clone(),
+            content: json_content,
+        };
+        self.publish_signal(message).await?;
+
+        let poll_interval = Duration::from_millis(100);
+        let max_polls = 50;
+
+        for _ in 0..max_polls {
+            tokio::time::sleep(poll_interval).await;
+            let mut state = self.state.lock().await;
+            if let Some(result) = state.pending_op_def_add.take() {
+                return result.map_err(|e| anyhow!(e));
+            }
+        }
+
+        Err(anyhow!("Timeout waiting for operation definition to be created"))
+    }
+
+    async fn delete_op_def(&self, full_name: &str) -> Result<()> {
+        {
+            let mut state = self.state.lock().await;
+            state.pending_op_def_delete = None;
+        }
+
+        let message = ClientSignalMessage::OpDefDelete {
+            client_id: self.client_id.clone(),
+            full_name: full_name.to_string(),
+        };
+        self.publish_signal(message).await?;
+
+        let poll_interval = Duration::from_millis(100);
+        let max_polls = 50;
+
+        for _ in 0..max_polls {
+            tokio::time::sleep(poll_interval).await;
+            let mut state = self.state.lock().await;
+            if let Some(result) = state.pending_op_def_delete.take() {
+                return result.map(|_| ()).map_err(|e| anyhow!(e));
+            }
+        }
+
+        Err(anyhow!("Timeout waiting for operation definition to be deleted"))
     }
 
     async fn reset_node(&self, node_id: &str) -> Result<()> {
