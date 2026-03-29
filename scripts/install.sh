@@ -12,7 +12,7 @@ PRAXIS_BIN="$PRAXIS_HOME/bin"
 PRAXIS_REPO="originsec/praxis"
 PRAXIS_VERSION="${PRAXIS_VERSION:-}"
 NODE_PLATFORM=""
-NODE_FILENAME=""
+PATH_UPDATED=0
 NODE_SUBDIR=""
 
 # Colors
@@ -50,27 +50,22 @@ detect_node_platform() {
     case "$os" in
         Linux)
             NODE_PLATFORM="linux"
-            NODE_FILENAME="praxis_node_linux"
             NODE_SUBDIR="linux"
             ;;
         Darwin)
             if [[ "$arch" == "arm64" || "$arch" == "aarch64" ]]; then
                 NODE_PLATFORM="macos-arm64"
-                NODE_FILENAME="praxis_node_macos_arm64"
                 NODE_SUBDIR="macos-arm64"
             elif [[ "$arch" == "x86_64" ]]; then
                 NODE_PLATFORM="macos-x86_64"
-                NODE_FILENAME="praxis_node_macos_x86_64"
                 NODE_SUBDIR="macos-x86_64"
             else
                 NODE_PLATFORM="macos"
-                NODE_FILENAME="praxis_node_macos"
                 NODE_SUBDIR="macos"
             fi
             ;;
         *)
             NODE_PLATFORM="linux"
-            NODE_FILENAME="praxis_node_linux"
             NODE_SUBDIR="linux"
             warn "Unknown OS '$os' - defaulting node platform to Linux."
             ;;
@@ -145,7 +140,9 @@ check_prerequisites() {
 
     # Install cross if Docker is available
     if [[ "$HAS_DOCKER" == true ]]; then
-        if ! has_cmd cross; then
+        CARGO_BIN_DIR="${CARGO_HOME:-$HOME/.cargo}/bin"
+        CROSS_BIN="$CARGO_BIN_DIR/cross"
+        if ! has_cmd cross && [[ ! -x "$CROSS_BIN" ]]; then
             info "Installing cross for Windows builds..."
             cargo install cross --git https://github.com/cross-rs/cross
             success "Installed cross"
@@ -155,6 +152,63 @@ check_prerequisites() {
     fi
 
     echo ""
+}
+
+detect_shell_rc() {
+    local shell_name
+    shell_name="$(basename "${SHELL:-/bin/sh}")"
+    local os
+    os="$(uname -s)"
+
+    case "$shell_name" in
+        zsh)
+            if [[ "$os" == "Darwin" ]]; then
+                echo "$HOME/.zprofile"
+            else
+                echo "$HOME/.zshrc"
+            fi
+            ;;
+        bash)
+            if [[ "$os" == "Darwin" ]] && [[ -f "$HOME/.bash_profile" ]]; then
+                echo "$HOME/.bash_profile"
+            else
+                echo "$HOME/.bashrc"
+            fi
+            ;;
+        fish)
+            echo "$HOME/.config/fish/config.fish"
+            ;;
+        *)
+            echo "$HOME/.profile"
+            ;;
+    esac
+}
+
+update_shell_path() {
+    local shell_rc
+    shell_rc="$(detect_shell_rc)"
+    local shell_name
+    shell_name="$(basename "${SHELL:-/bin/sh}")"
+
+    local path_line
+    if [[ "$shell_name" == "fish" ]]; then
+        path_line="fish_add_path $PRAXIS_BIN"
+    else
+        path_line="export PATH=\"\$PATH:$PRAXIS_BIN\""
+    fi
+
+    mkdir -p "$(dirname "$shell_rc")"
+
+    if [[ -f "$shell_rc" ]] && grep -Fq "$PRAXIS_BIN" "$shell_rc"; then
+        success "PATH already configured in $shell_rc"
+    else
+        info "Adding $PRAXIS_BIN to PATH in $shell_rc"
+        printf "\n# Praxis\n%s\n" "$path_line" >> "$shell_rc"
+        PATH_UPDATED=1
+        success "Updated $shell_rc"
+    fi
+
+    export PATH="$PATH:$PRAXIS_BIN"
 }
 
 install_praxis() {
@@ -173,89 +227,115 @@ install_praxis() {
     cargo install --git "$repo_url" --tag "$PRAXIS_VERSION" --root "$PRAXIS_HOME" praxis_service praxis_web praxis_cli
     success "Installed praxis_service, praxis_web, and praxis_cli"
 
-    info "Installing praxis_node ($NODE_PLATFORM)..."
-    cargo install --git "$repo_url" --tag "$PRAXIS_VERSION" --root "$PRAXIS_HOME" praxis_node
-    mv "$PRAXIS_BIN/praxis_node" "$PRAXIS_BIN/nodes/$NODE_SUBDIR/praxis_node"
-    cp "$PRAXIS_BIN/nodes/$NODE_SUBDIR/praxis_node" "$PRAXIS_BIN/nodes/$NODE_FILENAME"
-    success "Installed praxis_node ($NODE_PLATFORM)"
+    local node_version_file="$PRAXIS_BIN/nodes/$NODE_SUBDIR/.praxis_node_version"
+    if [[ -f "$PRAXIS_BIN/nodes/$NODE_SUBDIR/praxis_node" ]] && \
+       [[ -f "$node_version_file" ]] && [[ "$(cat "$node_version_file")" == "$PRAXIS_VERSION" ]]; then
+        success "praxis_node ($NODE_PLATFORM) $PRAXIS_VERSION already installed, skipping"
+    else
+        info "Installing praxis_node ($NODE_PLATFORM)..."
+        cargo install --git "$repo_url" --tag "$PRAXIS_VERSION" --root "$PRAXIS_HOME" praxis_node
+        mv "$PRAXIS_BIN/praxis_node" "$PRAXIS_BIN/nodes/$NODE_SUBDIR/praxis_node"
+        echo "$PRAXIS_VERSION" > "$node_version_file"
+        success "Installed praxis_node ($NODE_PLATFORM)"
+    fi
 
     if [[ "$HAS_DOCKER" == true ]]; then
-        info "Installing praxis_node (Windows) via cross..."
+        WINDOWS_VERSION_FILE="$PRAXIS_BIN/nodes/windows/.praxis_node_version"
+        if [[ -f "$PRAXIS_BIN/nodes/windows/praxis_node.exe" ]] && \
+           [[ -f "$WINDOWS_VERSION_FILE" ]] && [[ "$(cat "$WINDOWS_VERSION_FILE")" == "$PRAXIS_VERSION" ]]; then
+            success "praxis_node (Windows) $PRAXIS_VERSION already installed, skipping"
+        else
+            info "Installing praxis_node (Windows) via cross..."
 
-        TEMP_DIR=$(mktemp -d)
-        git clone --depth 1 --branch "$PRAXIS_VERSION" "$repo_url" "$TEMP_DIR/praxis"
+            TEMP_DIR=$(mktemp -d)
+            git clone --depth 1 --branch "$PRAXIS_VERSION" "$repo_url" "$TEMP_DIR/praxis"
 
-        pushd "$TEMP_DIR/praxis" > /dev/null
-        cross build --release --target x86_64-pc-windows-gnu -p praxis_node
+            pushd "$TEMP_DIR/praxis" > /dev/null
+            "$CROSS_BIN" build --release --target x86_64-pc-windows-gnu -p praxis_node
 
-        cp target/x86_64-pc-windows-gnu/release/praxis_node.exe "$PRAXIS_BIN/nodes/windows/"
-        cp target/x86_64-pc-windows-gnu/release/praxis_node.exe "$PRAXIS_BIN/nodes/praxis_node_windows.exe"
-        popd > /dev/null
+            cp target/x86_64-pc-windows-gnu/release/praxis_node.exe "$PRAXIS_BIN/nodes/windows/"
+            popd > /dev/null
 
-        rm -rf "$TEMP_DIR"
-        success "Installed praxis_node (Windows)"
+            rm -rf "$TEMP_DIR"
+            echo "$PRAXIS_VERSION" > "$WINDOWS_VERSION_FILE"
+            success "Installed praxis_node (Windows)"
+        fi
     fi
 
     echo ""
 }
 
-install_runner() {
-    info "Installing runner script..."
+install_services() {
+    info "Installing systemd user services..."
 
-    cat > "$PRAXIS_BIN/praxis.sh" << 'RUNNER_EOF'
-#!/usr/bin/env bash
-#
-# Praxis Runner
-# Starts both praxis_service and praxis_web
-#
+    local systemd_dir="$HOME/.config/systemd/user"
+    local env_dir="$HOME/.config/praxis"
+    mkdir -p "$systemd_dir"
+    mkdir -p "$env_dir"
 
-set -e
+    #
+    # Environment file with defaults if it doesn't already exist.
+    #
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEFAULT_RABBITMQ_URL="amqp://guest:guest@localhost:5672"
-RABBITMQ_URL="${1:-${PRAXIS_RABBITMQ_URL:-$DEFAULT_RABBITMQ_URL}}"
+    if [[ ! -f "$env_dir/env" ]]; then
+        cat > "$env_dir/env" << EOF
+PRAXIS_RABBITMQ_URL=amqp://guest:guest@localhost:5672
+EOF
+        success "Created $env_dir/env"
+    else
+        success "Environment file already exists at $env_dir/env"
+    fi
 
-export PRAXIS_RABBITMQ_URL="$RABBITMQ_URL"
+    cat > "$systemd_dir/praxis-service.service" << EOF
+[Unit]
+Description=Praxis Service
+PartOf=praxis.service
 
-SERVICE_PID=""
-WEB_PID=""
+[Service]
+Type=simple
+ExecStart=$PRAXIS_BIN/praxis_service
+EnvironmentFile=$env_dir/env
+Restart=on-failure
+RestartSec=3
 
-cleanup() {
-    echo ""
-    echo "Shutting down Praxis..."
-    [[ -n "$WEB_PID" ]] && kill "$WEB_PID" 2>/dev/null && wait "$WEB_PID" 2>/dev/null
-    [[ -n "$SERVICE_PID" ]] && kill "$SERVICE_PID" 2>/dev/null && wait "$SERVICE_PID" 2>/dev/null
-    echo "Praxis stopped."
-    exit 0
-}
+[Install]
+WantedBy=praxis.service
+EOF
 
-trap cleanup EXIT INT TERM
+    cat > "$systemd_dir/praxis-web.service" << EOF
+[Unit]
+Description=Praxis Web
+After=praxis-service.service
+PartOf=praxis.service
 
-echo "Starting Praxis..."
-echo "  RabbitMQ: $RABBITMQ_URL"
-echo ""
+[Service]
+Type=simple
+ExecStart=$PRAXIS_BIN/praxis_web
+EnvironmentFile=$env_dir/env
+Restart=on-failure
+RestartSec=3
 
-"$SCRIPT_DIR/praxis_service" &
-SERVICE_PID=$!
-sleep 1
+[Install]
+WantedBy=praxis.service
+EOF
 
-if ! kill -0 "$SERVICE_PID" 2>/dev/null; then
-    echo "Error: praxis_service failed to start"
-    exit 1
-fi
+    cat > "$systemd_dir/praxis.service" << EOF
+[Unit]
+Description=Praxis
+Wants=praxis-service.service praxis-web.service
 
-"$SCRIPT_DIR/praxis_web" &
-WEB_PID=$!
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
 
-echo "Praxis running. Press Ctrl+C to stop."
-echo "  Web UI: http://localhost:8080"
-echo ""
+[Install]
+WantedBy=default.target
+EOF
 
-wait "$SERVICE_PID" "$WEB_PID"
-RUNNER_EOF
-
-    chmod +x "$PRAXIS_BIN/praxis.sh"
-    success "Installed praxis.sh runner"
+    systemctl --user daemon-reload
+    systemctl --user enable praxis.service
+    success "Installed and enabled systemd user services"
     echo ""
 }
 
@@ -271,38 +351,140 @@ print_summary() {
     echo "  $PRAXIS_BIN/praxis_service"
     echo "  $PRAXIS_BIN/praxis_web"
     echo "  $PRAXIS_BIN/praxis_cli"
-    echo "  $PRAXIS_BIN/praxis.sh"
     echo ""
     echo "Node agents:"
     echo "  $PRAXIS_BIN/nodes/$NODE_SUBDIR/praxis_node"
-    echo "  $PRAXIS_BIN/nodes/$NODE_FILENAME"
     if [[ "$HAS_DOCKER" == true ]]; then
         echo "  $PRAXIS_BIN/nodes/windows/praxis_node.exe"
-        echo "  $PRAXIS_BIN/nodes/praxis_node_windows.exe"
     fi
     echo ""
-    echo -e "${YELLOW}Add to your PATH:${NC}"
+    echo "Config:"
+    echo "  ~/.config/praxis/env"
     echo ""
-    echo "  export PATH=\"\$PATH:$PRAXIS_BIN\""
-    echo ""
-    echo "Add this to your ~/.bashrc or ~/.zshrc:"
-    echo ""
-    echo "  echo 'export PATH=\"\$PATH:$PRAXIS_BIN\"' >> ~/.bashrc"
-    echo ""
+    if [[ "$PATH_UPDATED" -eq 1 ]]; then
+        echo -e "${YELLOW}PATH updated. Restart your shell or run:${NC}"
+        echo ""
+        echo "  source $(detect_shell_rc)"
+        echo ""
+    fi
     echo -e "${CYAN}Usage:${NC}"
-    echo "  praxis.sh                    # Start with default RabbitMQ"
-    echo "  praxis.sh amqp://host:5672   # Start with custom RabbitMQ"
+    echo "  systemctl --user start praxis              # Start Praxis"
+    echo "  systemctl --user stop praxis               # Stop Praxis"
+    echo "  systemctl --user status praxis             # Check status"
+    echo "  journalctl --user -u praxis-service     # Service logs"
+    echo "  journalctl --user -u praxis-web         # Web logs"
+    echo ""
+    echo "  Praxis starts automatically on login."
+    echo "  Edit ~/.config/praxis/env to configure RabbitMQ URL."
     echo ""
     echo "Web UI: http://localhost:8080"
+    echo ""
+
+    #
+    # Check if RabbitMQ is reachable by parsing the configured URL.
+    #
+
+    local rabbitmq_url=""
+    local env_file="$HOME/.config/praxis/env"
+    if [[ -f "$env_file" ]]; then
+        rabbitmq_url=$(grep -oP 'PRAXIS_RABBITMQ_URL=\K.*' "$env_file" 2>/dev/null || true)
+    fi
+    rabbitmq_url="${rabbitmq_url:-amqp://guest:guest@localhost:5672}"
+
+    local rabbitmq_host rabbitmq_port
+    rabbitmq_host=$(echo "$rabbitmq_url" | sed -E 's|amqps?://(([^@]+)@)?([^:/?]+).*|\3|')
+    rabbitmq_port=$(echo "$rabbitmq_url" | sed -E 's|.*:([0-9]+)(/.*)?$|\1|')
+    rabbitmq_host="${rabbitmq_host:-localhost}"
+    rabbitmq_port="${rabbitmq_port:-5672}"
+
+    if (echo > /dev/tcp/"$rabbitmq_host"/"$rabbitmq_port") 2>/dev/null; then
+        success "RabbitMQ is reachable at $rabbitmq_host:$rabbitmq_port"
+    else
+        warn "RabbitMQ does not appear to be running at $rabbitmq_host:$rabbitmq_port"
+        echo "  Praxis requires RabbitMQ. Start it before launching Praxis:"
+        echo ""
+        echo "    sudo systemctl start rabbitmq-server"
+        echo ""
+    fi
+}
+
+remove_praxis() {
+    info "Removing Praxis..."
+
+    #
+    # Stop and disable systemd services.
+    #
+
+    if systemctl --user is-active praxis.service &>/dev/null; then
+        info "Stopping services..."
+        systemctl --user stop praxis.service
+    fi
+
+    local systemd_dir="$HOME/.config/systemd/user"
+    local units=("praxis.service" "praxis-service.service" "praxis-web.service")
+
+    for unit in "${units[@]}"; do
+        if [[ -f "$systemd_dir/$unit" ]]; then
+            systemctl --user disable "$unit" 2>/dev/null || true
+            rm -f "$systemd_dir/$unit"
+        fi
+    done
+
+    systemctl --user daemon-reload 2>/dev/null || true
+    success "Removed systemd services"
+
+    #
+    # Remove binaries.
+    #
+
+    if [[ -d "$PRAXIS_HOME" ]]; then
+        rm -rf "$PRAXIS_HOME"
+        success "Removed $PRAXIS_HOME"
+    fi
+
+    #
+    # Remove config.
+    #
+
+    local env_dir="$HOME/.config/praxis"
+    if [[ -d "$env_dir" ]]; then
+        rm -rf "$env_dir"
+        success "Removed $env_dir"
+    fi
+
+    #
+    # Remove PATH entry from shell rc.
+    #
+
+    local shell_rc
+    shell_rc="$(detect_shell_rc)"
+
+    if [[ -f "$shell_rc" ]] && grep -Fq "$PRAXIS_BIN" "$shell_rc"; then
+        local tmp
+        tmp=$(mktemp)
+        grep -v "$PRAXIS_BIN" "$shell_rc" | grep -v "^# Praxis$" > "$tmp"
+        mv "$tmp" "$shell_rc"
+        success "Removed PATH entry from $shell_rc"
+    fi
+
+    echo ""
+    success "Praxis has been removed."
     echo ""
 }
 
 main() {
     print_banner
+
+    if [[ "${1:-}" == "--remove" ]]; then
+        remove_praxis
+        exit 0
+    fi
+
     get_latest_version
     check_prerequisites
     install_praxis
-    install_runner
+    install_services
+    update_shell_path
     print_summary
 }
 

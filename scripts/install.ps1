@@ -131,10 +131,16 @@ function Install-Praxis {
     cargo install --git $repoUrl --tag $script:PraxisVersion --root $PraxisHome praxis_service praxis_web praxis_cli
     Write-Success "Installed praxis_service, praxis_web, and praxis_cli"
 
-    Write-Info "Installing praxis_node..."
-    cargo install --git $repoUrl --tag $script:PraxisVersion --root $PraxisHome praxis_node
-    Move-Item -Force "$PraxisBin\praxis_node.exe" "$PraxisNodes\"
-    Write-Success "Installed praxis_node"
+    $nodeVersionFile = "$PraxisNodes\.praxis_node_version"
+    if ((Test-Path "$PraxisNodes\praxis_node.exe") -and (Test-Path $nodeVersionFile) -and ((Get-Content $nodeVersionFile) -eq $script:PraxisVersion)) {
+        Write-Success "praxis_node (Windows) $($script:PraxisVersion) already installed, skipping"
+    } else {
+        Write-Info "Installing praxis_node..."
+        cargo install --git $repoUrl --tag $script:PraxisVersion --root $PraxisHome praxis_node
+        Move-Item -Force "$PraxisBin\praxis_node.exe" "$PraxisNodes\"
+        $script:PraxisVersion | Out-File -FilePath $nodeVersionFile -Encoding UTF8 -NoNewline
+        Write-Success "Installed praxis_node"
+    }
 
     Write-Host ""
 }
@@ -216,6 +222,23 @@ finally {
     Write-Host ""
 }
 
+$script:PathUpdated = $false
+
+function Update-ShellPath {
+    $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+    if ($currentPath -and $currentPath.Contains($PraxisBin)) {
+        Write-Success "PATH already configured"
+    } else {
+        Write-Info "Adding $PraxisBin to user PATH..."
+        $newPath = if ($currentPath) { "$currentPath;$PraxisBin" } else { $PraxisBin }
+        [Environment]::SetEnvironmentVariable("PATH", $newPath, "User")
+        $env:PATH = "$env:PATH;$PraxisBin"
+        $script:PathUpdated = $true
+        Write-Success "Updated user PATH"
+    }
+    Write-Host ""
+}
+
 function Print-Summary {
     Write-Host ""
     Write-Host "==============================================" -ForegroundColor Green
@@ -233,26 +256,95 @@ function Print-Summary {
     Write-Host "Node agent:"
     Write-Host "  $PraxisNodes\praxis_node.exe"
     Write-Host ""
-    Write-Host "Add to your PATH:" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "  `$env:PATH += `";$PraxisBin`""
-    Write-Host ""
-    Write-Host "To make permanent, run (as Administrator):"
-    Write-Host ""
-    Write-Host "  [Environment]::SetEnvironmentVariable('PATH', `$env:PATH + ';$PraxisBin', 'User')"
-    Write-Host ""
+    if ($script:PathUpdated) {
+        Write-Host "PATH updated. Restart your terminal for changes to take effect." -ForegroundColor Yellow
+        Write-Host ""
+    }
     Write-Host "Usage:" -ForegroundColor Cyan
     Write-Host "  .\praxis.ps1                                  # Default RabbitMQ"
     Write-Host "  .\praxis.ps1 -RabbitMqUrl amqp://host:5672    # Custom RabbitMQ"
     Write-Host ""
     Write-Host "Web UI: http://localhost:8080"
     Write-Host ""
+
+    #
+    # Check if RabbitMQ is reachable by parsing the configured URL.
+    #
+
+    $rabbitmqUrl = $env:PRAXIS_RABBITMQ_URL
+    if (-not $rabbitmqUrl) { $rabbitmqUrl = "amqp://guest:guest@localhost:5672" }
+
+    $rabbitmqHost = "localhost"
+    $rabbitmqPort = 5672
+    if ($rabbitmqUrl -match 'amqps?://(?:[^@]+@)?([^:/?]+):(\d+)') {
+        $rabbitmqHost = $Matches[1]
+        $rabbitmqPort = [int]$Matches[2]
+    } elseif ($rabbitmqUrl -match 'amqps?://(?:[^@]+@)?([^:/?]+)') {
+        $rabbitmqHost = $Matches[1]
+    }
+
+    try {
+        $tcp = New-Object System.Net.Sockets.TcpClient
+        $tcp.Connect($rabbitmqHost, $rabbitmqPort)
+        $tcp.Close()
+        Write-Success "RabbitMQ is reachable at ${rabbitmqHost}:${rabbitmqPort}"
+    } catch {
+        Write-Warn "RabbitMQ does not appear to be running at ${rabbitmqHost}:${rabbitmqPort}"
+        Write-Host "  Praxis requires RabbitMQ. Install and start it before launching Praxis."
+        Write-Host ""
+    }
+}
+
+function Remove-Praxis {
+    Write-Info "Removing Praxis..."
+
+    #
+    # Stop running processes.
+    #
+
+    $praxisProcesses = Get-Process -Name "praxis_service", "praxis_web", "praxis_node", "praxis_cli" -ErrorAction SilentlyContinue
+    if ($praxisProcesses) {
+        Write-Info "Stopping running processes..."
+        $praxisProcesses | Stop-Process -Force
+        Write-Success "Stopped processes"
+    }
+
+    #
+    # Remove binaries.
+    #
+
+    if (Test-Path $PraxisHome) {
+        Remove-Item -Recurse -Force $PraxisHome
+        Write-Success "Removed $PraxisHome"
+    }
+
+    #
+    # Remove PATH entry.
+    #
+
+    $currentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+    if ($currentPath -and $currentPath.Contains($PraxisBin)) {
+        $newPath = ($currentPath -split ";" | Where-Object { $_ -ne $PraxisBin }) -join ";"
+        [Environment]::SetEnvironmentVariable("PATH", $newPath, "User")
+        Write-Success "Removed PATH entry"
+    }
+
+    Write-Host ""
+    Write-Success "Praxis has been removed."
+    Write-Host ""
 }
 
 # Main
 Print-Banner
+
+if ($args -contains "--remove") {
+    Remove-Praxis
+    exit 0
+}
+
 Get-LatestVersion
 Check-Prerequisites
 Install-Praxis
 Install-Runner
+Update-ShellPath
 Print-Summary
