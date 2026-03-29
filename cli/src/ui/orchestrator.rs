@@ -574,7 +574,7 @@ fn render_model_info(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     };
 
     let line = Line::from(vec![
-        Span::styled("^e/c-a-e", Style::default().fg(DIM)),
+        Span::styled("^e/^!e", Style::default().fg(DIM)),
         Span::styled(" tools  ", Style::default().fg(MUTED)),
         Span::styled("^w", Style::default().fg(DIM)),
         Span::styled(" save   ", Style::default().fg(MUTED)),
