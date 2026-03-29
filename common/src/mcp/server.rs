@@ -869,57 +869,6 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         json_result(json!({ "status": "success", "message": message }))
     }
 
-    #[tool(description = "Create a new operation definition in the op library. WARNING: This persists to the library — use responsibly. For throwaway parallel tasks, delete the op after use. Getting the operation_prompt wrong can cause unintended agent behavior on target systems. The operation will be available to all consumers via op_available/op_run immediately after creation.")]
-    async fn op_create(
-        &self,
-        Parameters(params): Parameters<OpCreateParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
-
-        let spec = crate::SemanticOperationSpec {
-            name: params.name.clone(),
-            description: params.description.clone(),
-            agent_info: params.agent_info,
-            timeout: params.timeout,
-            operation_prompt: params.operation_prompt,
-            mode: params.mode.clone(),
-            agent_iterations: params.agent_iterations,
-            yolo_mode: params.yolo_mode,
-            model_ref: None,
-        };
-
-        let full_name = super::ops::op_create(client, spec, &params.category, &params.short_name)
-            .await.map_err(mcp_err)?;
-
-        json_result(json!({
-            "status": "success",
-            "full_name": full_name,
-            "name": params.name,
-            "category": params.category,
-            "mode": params.mode,
-            "message": "Operation definition created. Use op_run to execute it."
-        }))
-    }
-
-    #[tool(description = "Delete an operation definition from the op library. WARNING: This permanently removes the definition. Running instances are not affected, but the op can no longer be queued. Use this to clean up temporary ops after parallel execution.")]
-    async fn op_delete(
-        &self,
-        Parameters(params): Parameters<OpDeleteParams>,
-    ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let guard = acquire_client!(self);
-        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
-
-        let full_name = super::ops::op_delete(client, &params.name)
-            .await.map_err(mcp_err)?;
-
-        json_result(json!({
-            "status": "success",
-            "full_name": full_name,
-            "message": "Operation definition deleted"
-        }))
-    }
-
     #[tool(description = "List running/tracked operations and chain executions")]
     async fn op_list(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let guard = acquire_client!(self);
