@@ -9,6 +9,7 @@ license=('Apache-2.0')
 depends=('rabbitmq' 'gcc-libs' 'glibc')
 makedepends=('cargo' 'npm' 'git')
 backup=('etc/praxis/env')
+options=('!lto')
 install=praxis.install
 source=(
     "$pkgname-$pkgver.tar.gz::https://github.com/originsec/praxis/archive/v$pkgver.tar.gz"
@@ -39,6 +40,12 @@ build() {
     cd "$pkgname-$pkgver"
     export RUSTUP_TOOLCHAIN=stable
     export CARGO_TARGET_DIR=target
+    export SQLITE3_NO_PKG_CONFIG=1
+
+    # Bundled C libraries (ring, mlua-sys) are compiled by the cc crate which
+    # inherits CFLAGS. GCC LTO objects aren't compatible with rust-lld.
+    unset CFLAGS CXXFLAGS LDFLAGS LTOFLAGS
+
     cargo build --frozen --release -p praxis_service -p praxis_web -p praxis_cli -p praxis_node
 }
 
