@@ -541,6 +541,7 @@ async fn listen_to_queues(
             _ = reset_token.cancelled() => {
                 common::log_info!("Reset signal received, tearing down...");
 
+                crate::agent_connectors::lua::runtime::signal_reset();
                 transaction_manager.cancel_all();
 
                 {
