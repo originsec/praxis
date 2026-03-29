@@ -186,6 +186,7 @@ async fn async_main() {
                 break;
             }
             Ok(runtime::RuntimeExit::Reset) => {
+                crate::agent_connectors::lua::runtime::clear_reset();
                 common::log_info!("Node reset, re-registering immediately...");
                 continue;
             }

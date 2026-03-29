@@ -1,5 +1,5 @@
 pub mod cdp;
-mod runtime;
+pub mod runtime;
 mod session;
 mod uia;
 

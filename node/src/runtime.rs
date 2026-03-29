@@ -494,53 +494,12 @@ async fn listen_to_queues(
     // Run initial fingerprint after registry rebuild, then send first update.
     //
 
-    {
-        let agents = registry.read().await.get_all();
-        let mut cache = fingerprint_cache.write().await;
-        for agent in &agents {
-            let available = agent.do_fingerprint().await;
-            cache.insert(agent.short_name().to_string(), available);
-        }
-    }
+    fingerprint_all_agents(&registry, &fingerprint_cache).await;
 
     if let Err(e) = send_node_information_update(
         &channel, &node_id, &registry, &selected_agent, &node_state, &transaction_manager, &fingerprint_cache,
     ).await {
         common::log_error!("Failed to send initial information update: {}", e);
-    }
-
-    //
-    // Background fingerprint task: re-fingerprints all agents every 30
-    // seconds to keep the cache fresh.
-    //
-
-    {
-        let registry = registry.clone();
-        let cache = fingerprint_cache.clone();
-        let stop = reset_token.clone();
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            interval.tick().await; // consume immediate first tick
-            loop {
-                tokio::select! {
-                    _ = stop.cancelled() => break,
-                    _ = interval.tick() => {}
-                }
-                let agents = registry.read().await.get_all();
-                let mut new_cache = std::collections::HashMap::new();
-                for agent in &agents {
-                    if stop.is_cancelled() {
-                        break;
-                    }
-                    let available = agent.do_fingerprint().await;
-                    new_cache.insert(agent.short_name().to_string(), available);
-                }
-                if !stop.is_cancelled() {
-                    *cache.write().await = new_cache;
-                }
-            }
-        });
     }
 
     common::log_info!(
@@ -582,6 +541,7 @@ async fn listen_to_queues(
             _ = reset_token.cancelled() => {
                 common::log_info!("Reset signal received, tearing down...");
 
+                crate::agent_connectors::lua::runtime::signal_reset();
                 transaction_manager.cancel_all();
 
                 {
@@ -695,13 +655,7 @@ async fn listen_to_queues(
                                             &factory,
                                         )
                                         .await;
-                                        {
-                                            let agents = registry.read().await.get_all();
-                                            let mut cache = fingerprint_cache.write().await;
-                                            for agent in &agents {
-                                                cache.insert(agent.short_name().to_string(), agent.do_fingerprint().await);
-                                            }
-                                        }
+                                        fingerprint_all_agents(&registry, &fingerprint_cache).await;
                                         if let Err(e) = send_node_information_update(
                                             &channel, &node_id, &registry, &selected_agent, &node_state, &transaction_manager, &fingerprint_cache,
                                         ).await {
@@ -711,9 +665,9 @@ async fn listen_to_queues(
                                 }
                                 NodeDirectMessage::Command(cmd_request) => {
                                     common::log_info!(
-                                        "Received command {} type={:?}",
+                                        "Received command {} type={}",
                                         cmd_request.command_id,
-                                        std::mem::discriminant(&cmd_request.command)
+                                        cmd_request.command
                                     );
                                     tokio::select! {
                                         _ = reset_token.cancelled() => {}
@@ -780,17 +734,7 @@ async fn handle_broadcast_message(
 ) {
     match message {
         NodeBroadcastMessage::NodeInformationUpdateRequest => {
-            //
-            // Service requested an update — fingerprint inline and update cache.
-            //
-            {
-                let agents = registry.read().await.get_all();
-                let mut cache = fingerprint_cache.write().await;
-                for agent in &agents {
-                    cache.insert(agent.short_name().to_string(), agent.do_fingerprint().await);
-                }
-            }
-
+            fingerprint_all_agents(registry, fingerprint_cache).await;
             if let Err(e) =
                 send_node_information_update(channel, node_id, registry, selected_agent, node_state, transaction_manager, fingerprint_cache)
                     .await
@@ -806,7 +750,7 @@ async fn handle_broadcast_message(
         }
         NodeBroadcastMessage::EventLoggingSet { enabled } => {
             common::logging::set_event_log_enabled(enabled);
-            common::log_info!(
+            common::log_debug!(
                 "Event logging {} by service broadcast",
                 if enabled { "enabled" } else { "disabled" }
             );
@@ -829,17 +773,7 @@ async fn handle_broadcast_message(
                 )
                 .await;
 
-                //
-                // Re-fingerprint after registry rebuild since agents are new instances.
-                //
-                {
-                    let agents = registry.read().await.get_all();
-                    let mut cache = fingerprint_cache.write().await;
-                    for agent in &agents {
-                        cache.insert(agent.short_name().to_string(), agent.do_fingerprint().await);
-                    }
-                }
-
+                fingerprint_all_agents(registry, fingerprint_cache).await;
                 if let Err(e) = send_node_information_update(
                     channel, node_id, registry, selected_agent, node_state, transaction_manager, fingerprint_cache,
                 )
@@ -1098,13 +1032,7 @@ async fn handle_command(
         if let Some(scripts) = pending_registry_update.take() {
             common::log_info!("Executing queued registry update after session close");
             handle_agent_registry_update(scripts, registry, selected_agent, factory).await;
-            {
-                let agents = registry.read().await.get_all();
-                let mut cache = fingerprint_cache.write().await;
-                for agent in &agents {
-                    cache.insert(agent.short_name().to_string(), agent.do_fingerprint().await);
-                }
-            }
+            fingerprint_all_agents(registry, &fingerprint_cache).await;
             if let Err(e) = send_node_information_update(
                 channel, node_id, registry, selected_agent, node_state, transaction_manager, &fingerprint_cache,
             )
@@ -1114,6 +1042,30 @@ async fn handle_command(
             }
         }
     }
+}
+
+async fn fingerprint_all_agents(
+    registry: &Arc<RwLock<AgentRegistry>>,
+    fingerprint_cache: &Arc<tokio::sync::RwLock<std::collections::HashMap<String, bool>>>,
+) {
+    let agents = registry.read().await.get_all();
+    let mut cache = fingerprint_cache.write().await;
+    let mut available_names: Vec<&str> = Vec::new();
+
+    for agent in &agents {
+        let available = agent.do_fingerprint().await;
+        cache.insert(agent.short_name().to_string(), available);
+        if available {
+            available_names.push(agent.short_name());
+        }
+    }
+
+    common::log_info!(
+        "Fingerprinted {} agents, {} available: [{}]",
+        agents.len(),
+        available_names.len(),
+        available_names.join(", ")
+    );
 }
 
 async fn send_node_information_update(
@@ -1127,7 +1079,6 @@ async fn send_node_information_update(
 ) -> anyhow::Result<()> {
     //
     // Get all agents and use the fingerprint cache for availability.
-    // The cache is updated by the background fingerprint task.
     //
 
     let agents = registry.read().await.get_all();

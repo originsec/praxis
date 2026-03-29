@@ -31,6 +31,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState) {
 
     match state.tab {
         SettingsTab::Llm => render_llm(f, content, state),
+        SettingsTab::Agents => render_agents(f, content, state),
         SettingsTab::Service => render_service(f, content, state),
         SettingsTab::About => render_about(f, content, state),
     }
@@ -66,6 +67,8 @@ fn render_tabs(f: &mut Frame, area: Rect, state: &SettingsState) {
     let line = Line::from(vec![
         Span::raw("  "),
         Span::styled(" LLM ", tab_style(SettingsTab::Llm)),
+        Span::styled("  \u{2502}  ", Style::default().fg(DIM)),
+        Span::styled(" Agents ", tab_style(SettingsTab::Agents)),
         Span::styled("  \u{2502}  ", Style::default().fg(DIM)),
         Span::styled(" Service ", tab_style(SettingsTab::Service)),
         Span::styled("  \u{2502}  ", Style::default().fg(DIM)),
@@ -284,6 +287,135 @@ fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
         state.editing,
         &state.edit_buffer,
     ));
+
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+    f.render_widget(paragraph, area);
+}
+
+fn render_agents(f: &mut Frame, area: Rect, state: &SettingsState) {
+    let mut lines: Vec<Line> = Vec::new();
+    let script_count = state.agent_scripts.len();
+
+    let on_script = state.selected < script_count;
+    let mut header_spans = vec![
+        Span::raw("  "),
+        Span::styled(
+            "Lua Agent Connector Scripts",
+            Style::default()
+                .fg(Color::Rgb(160, 160, 160))
+                .add_modifier(Modifier::BOLD),
+        ),
+    ];
+    if on_script {
+        header_spans.push(Span::styled("   space", Style::default().fg(DIM)));
+        header_spans.push(Span::styled(" toggle enablement  ", Style::default().fg(MUTED)));
+        header_spans.push(Span::styled("^d", Style::default().fg(DIM)));
+        header_spans.push(Span::styled(" delete", Style::default().fg(MUTED)));
+    }
+    lines.push(Line::from(header_spans));
+    lines.push(Line::raw(""));
+
+    if !state.agent_scripts_loaded {
+        lines.push(Line::from(Span::styled(
+            "  Loading...",
+            Style::default().fg(MUTED),
+        )));
+    } else if script_count == 0 {
+        lines.push(Line::from(Span::styled(
+            "  No agent scripts",
+            Style::default().fg(MUTED),
+        )));
+    }
+
+    for (i, script) in state.agent_scripts.iter().enumerate() {
+        let selected = state.selected == i;
+        let sel_style = if selected {
+            Style::default().fg(ACCENT)
+        } else {
+            Style::default().fg(TEXT)
+        };
+
+        let name_style = if script.disabled {
+            Style::default().fg(DIM)
+        } else if selected {
+            Style::default().fg(TEXT).bg(HIGHLIGHT_BG)
+        } else {
+            Style::default().fg(MUTED)
+        };
+
+        let mut spans = vec![
+            Span::styled(if selected { "\u{25b8} " } else { "  " }, sel_style),
+            Span::styled(script.name.clone(), name_style),
+        ];
+
+        if script.is_builtin {
+            spans.push(Span::styled(
+                " builtin",
+                Style::default().fg(Color::Rgb(80, 180, 180)),
+            ));
+        }
+
+        if script.disabled {
+            spans.push(Span::styled(
+                " disabled",
+                Style::default().fg(Color::Rgb(160, 80, 80)),
+            ));
+        }
+
+        lines.push(Line::from(spans));
+    }
+
+    //
+    // Action rows.
+    //
+
+    lines.push(Line::raw(""));
+
+    let add_sel = state.selected == script_count;
+    lines.push(Line::from(vec![
+        Span::styled(
+            if add_sel { "\u{25b8} " } else { "  " },
+            if add_sel {
+                Style::default().fg(ACCENT)
+            } else {
+                Style::default().fg(DIM)
+            },
+        ),
+        Span::styled(
+            "+ New agent script",
+            if add_sel {
+                Style::default().fg(ACCENT)
+            } else {
+                Style::default().fg(DIM)
+            },
+        ),
+    ]));
+
+    let reset_sel = state.selected == script_count + 1;
+    lines.push(Line::from(vec![
+        Span::styled(
+            if reset_sel { "\u{25b8} " } else { "  " },
+            if reset_sel {
+                Style::default().fg(ACCENT)
+            } else {
+                Style::default().fg(DIM)
+            },
+        ),
+        Span::styled(
+            "\u{21bb} Reset to defaults",
+            if reset_sel {
+                Style::default().fg(Color::Rgb(220, 160, 60))
+            } else {
+                Style::default().fg(DIM)
+            },
+        ),
+    ]));
+
+    lines.push(Line::raw(""));
+    lines.push(Line::from(vec![
+        Span::styled("  enter", Style::default().fg(DIM)),
+        Span::styled(" edit in $EDITOR", Style::default().fg(MUTED)),
+    ]));
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);
@@ -544,6 +676,7 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
         .style(Style::default().bg(super::BG));
 
     let inner = block.inner(popup_area);
+    form.model_dropdown_inner_h.set(inner.height as usize);
     f.render_widget(Clear, popup_area);
     f.render_widget(block, popup_area);
 
@@ -679,11 +812,26 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
     }
 
     //
-    // Model dropdown if open.
+    // Model dropdown if open — rendered as a separate scrollable region
+    // below the fixed header so scrolling doesn't push the form fields
+    // off screen.
     //
 
     if form.model_dropdown_open && !form.available_models.is_empty() {
         lines.push(Line::raw(""));
+        let header_h = lines.len() as u16;
+
+        let header_area = Rect { height: header_h, ..inner };
+        f.render_widget(Paragraph::new(lines), header_area);
+
+        let dropdown_area = Rect {
+            y: inner.y + header_h,
+            height: inner.height.saturating_sub(header_h),
+            ..inner
+        };
+        form.model_dropdown_inner_h.set(dropdown_area.height as usize);
+
+        let mut dropdown_lines: Vec<Line> = Vec::new();
         for (i, name) in form.available_models.iter().enumerate() {
             let selected = i == form.model_dropdown_selected;
             let style = if selected {
@@ -692,13 +840,16 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
                 Style::default().fg(TEXT)
             };
             let prefix = if selected { "  \u{25b8} " } else { "    " };
-            lines.push(Line::from(Span::styled(
+            dropdown_lines.push(Line::from(Span::styled(
                 format!("{}{}", prefix, name),
                 style,
             )));
         }
-    }
 
-    let paragraph = Paragraph::new(lines);
-    f.render_widget(paragraph, inner);
+        let scroll_y = form.model_dropdown_scroll as u16;
+        let paragraph = Paragraph::new(dropdown_lines).scroll((scroll_y, 0));
+        f.render_widget(paragraph, dropdown_area);
+    } else {
+        f.render_widget(Paragraph::new(lines), inner);
+    }
 }

@@ -613,6 +613,65 @@ pub enum NodeCommand {
     AgentRegistry(AgentRegistryCommand),
 }
 
+impl std::fmt::Display for NodeCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NodeCommand::Agent(cmd) => {
+                let variant = match cmd {
+                    AgentCommand::Update => "Update",
+                    AgentCommand::Select { .. } => "Select",
+                    AgentCommand::Recon => "Recon",
+                    AgentCommand::ReconSemantic => "ReconSemantic",
+                    AgentCommand::ReadFile { .. } => "ReadFile",
+                    AgentCommand::WriteFile { .. } => "WriteFile",
+                    AgentCommand::GrepFiles { .. } => "GrepFiles",
+                    AgentCommand::WriteSessionContent { .. } => "WriteSessionContent",
+                };
+                write!(f, "Agent::{variant}")
+            }
+            NodeCommand::Session(cmd) => {
+                let variant = match cmd {
+                    SessionCommand::Create { .. } => "Create",
+                    SessionCommand::Close => "Close",
+                    SessionCommand::Prompt { .. } => "Prompt",
+                    SessionCommand::CancelTransaction { .. } => "CancelTransaction",
+                };
+                write!(f, "Session::{variant}")
+            }
+            NodeCommand::Intercept(cmd) => {
+                let variant = match cmd {
+                    InterceptCommand::Enable { .. } => "Enable",
+                    InterceptCommand::Disable => "Disable",
+                };
+                write!(f, "Intercept::{variant}")
+            }
+            NodeCommand::Terminal(cmd) => {
+                let variant = match cmd {
+                    TerminalCommand::Create => "Create",
+                    TerminalCommand::Write { .. } => "Write",
+                    TerminalCommand::Resize { .. } => "Resize",
+                    TerminalCommand::Close => "Close",
+                    TerminalCommand::Replay => "Replay",
+                };
+                write!(f, "Terminal::{variant}")
+            }
+            NodeCommand::Config(cmd) => {
+                let variant = match cmd {
+                    ConfigCommand::SetReportInterval { .. } => "SetReportInterval",
+                };
+                write!(f, "Config::{variant}")
+            }
+            NodeCommand::AgentRegistry(cmd) => {
+                let variant = match cmd {
+                    AgentRegistryCommand::Update { .. } => "Update",
+                    AgentRegistryCommand::List => "List",
+                };
+                write!(f, "AgentRegistry::{variant}")
+            }
+        }
+    }
+}
+
 impl NodeCommand {
     pub fn required_capability(&self) -> Option<NodeCapability> {
         match self {
@@ -2606,6 +2665,27 @@ pub enum NodeSignalMessage {
 // System State - Used for client updates.
 //
 
+/// Connectivity status of a node, derived server-side from last update time.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum NodeStatus {
+    Online,
+    Warning,
+    Offline,
+}
+
+impl NodeStatus {
+    pub fn from_age_seconds(age: i64) -> Self {
+        if age < 60 {
+            NodeStatus::Online
+        } else if age < 120 {
+            NodeStatus::Warning
+        } else {
+            NodeStatus::Offline
+        }
+    }
+}
+
 /// Complete state of a node as seen by the server
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NodeState {
@@ -2622,12 +2702,19 @@ pub struct NodeState {
     #[serde(default)]
     pub intercept_supported: bool,
     pub last_update: chrono::DateTime<chrono::Utc>,
+    /// Connectivity status, set by the service
+    #[serde(default = "default_node_status")]
+    pub status: NodeStatus,
     /// Active terminal session ID (if any)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_terminal_id: Option<String>,
     /// Whether the node is running with elevated privileges (root/admin)
     #[serde(default)]
     pub privileged: bool,
+}
+
+fn default_node_status() -> NodeStatus {
+    NodeStatus::Offline
 }
 
 /// Complete system state broadcast to clients

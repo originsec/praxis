@@ -94,8 +94,6 @@ fn render_node_list(f: &mut Frame, area: Rect, state: &NodesState) {
     ])
     .style(Style::default().fg(ACCENT));
 
-    let now = chrono::Utc::now();
-
     let rows: Vec<Row> = state
         .nodes
         .iter()
@@ -106,13 +104,10 @@ fn render_node_list(f: &mut Frame, area: Rect, state: &NodesState) {
                 &node.node_id
             };
 
-            let age_seconds = (now - node.last_update).num_seconds();
-            let (status, status_color) = if age_seconds < 60 {
-                ("active", Color::Rgb(80, 160, 80))
-            } else if age_seconds < 120 {
-                ("warning", Color::Rgb(180, 160, 60))
-            } else {
-                ("inactive", Color::Rgb(160, 60, 60))
+            let (status, status_color) = match node.status {
+                common::NodeStatus::Online => ("active", Color::Rgb(80, 160, 80)),
+                common::NodeStatus::Warning => ("warning", Color::Rgb(180, 160, 60)),
+                common::NodeStatus::Offline => ("inactive", Color::Rgb(160, 60, 60)),
             };
 
             let agent_count = node.discovered_agents.len().to_string();

@@ -123,7 +123,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
 
     // ── Node Management ──────────────────────────────────────────────────
 
-    #[tool(description = "List all connected nodes in the Praxis network")]
+    #[tool(description = "List all connected nodes in the Praxis network. Each node includes a status field: 'online' (responding normally), 'warning' (node may not be available — recent communication lost), or 'offline' (node is not available).")]
     async fn node_list(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         let guard = acquire_client!(self);
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
@@ -136,6 +136,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
                 "node_id_short": &n.node_id[..8.min(n.node_id.len())],
                 "hostname": n.machine_name,
                 "os": n.os_details,
+                "status": n.status,
                 "agent_count": n.discovered_agents.len(),
                 "privileged": n.privileged
             })
@@ -161,11 +162,12 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         json_result(json!({
             "node_id": node.node_id,
             "hostname": node.machine_name,
-            "os": node.os_details
+            "os": node.os_details,
+            "status": node.status
         }))
     }
 
-    #[tool(description = "Reset a node: cancel all operations, close sessions, and re-register")]
+    #[tool(description = "Reset a node. WARNING: This is destructive — cancels all running/queued operations, closes active sessions, and forces the node to re-register. Use when a node is in a bad state (stuck operations, unresponsive sessions) or to recover from warning/offline status.")]
     async fn node_reset(
         &self,
         Parameters(params): Parameters<NodePrefixParams>,
@@ -867,6 +869,57 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         };
 
         json_result(json!({ "status": "success", "message": message }))
+    }
+
+    #[tool(description = "Create a new operation definition in the op library. WARNING: This persists to the library — use responsibly. For throwaway parallel tasks, delete the op after use. Getting the operation_prompt wrong can cause unintended agent behavior on target systems. The operation will be available to all consumers via op_available/op_run immediately after creation.")]
+    async fn op_create(
+        &self,
+        Parameters(params): Parameters<OpCreateParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+
+        let spec = crate::SemanticOperationSpec {
+            name: params.name.clone(),
+            description: params.description.clone(),
+            agent_info: params.agent_info,
+            timeout: params.timeout,
+            operation_prompt: params.operation_prompt,
+            mode: params.mode.clone(),
+            agent_iterations: params.agent_iterations,
+            yolo_mode: params.yolo_mode,
+            model_ref: None,
+        };
+
+        let full_name = super::ops::op_create(client, spec, &params.category, &params.short_name)
+            .await.map_err(mcp_err)?;
+
+        json_result(json!({
+            "status": "success",
+            "full_name": full_name,
+            "name": params.name,
+            "category": params.category,
+            "mode": params.mode,
+            "message": "Operation definition created. Use op_run to execute it."
+        }))
+    }
+
+    #[tool(description = "Delete an operation definition from the op library. WARNING: This permanently removes the definition. Running instances are not affected, but the op can no longer be queued. Use this to clean up temporary ops after parallel execution.")]
+    async fn op_delete(
+        &self,
+        Parameters(params): Parameters<OpDeleteParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let guard = acquire_client!(self);
+        let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
+
+        let full_name = super::ops::op_delete(client, &params.name)
+            .await.map_err(mcp_err)?;
+
+        json_result(json!({
+            "status": "success",
+            "full_name": full_name,
+            "message": "Operation definition deleted"
+        }))
     }
 
     #[tool(description = "List running/tracked operations and chain executions")]

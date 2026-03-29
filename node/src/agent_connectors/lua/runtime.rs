@@ -15,6 +15,37 @@ static COMMAND_HANDLES: Lazy<std::sync::Mutex<HashMap<String, Arc<AtomicU32>>>> 
     Lazy::new(|| std::sync::Mutex::new(HashMap::new()));
 
 //
+// Global reset flag. When set, all Lua VM execution is interrupted via
+// set_hook and all blocking command waits are aborted.
+//
+
+static RESET_FLAG: AtomicBool = AtomicBool::new(false);
+
+pub fn signal_reset() {
+    RESET_FLAG.store(true, Ordering::SeqCst);
+    abort_all_commands();
+}
+
+pub fn clear_reset() {
+    RESET_FLAG.store(false, Ordering::SeqCst);
+}
+
+fn is_reset() -> bool {
+    RESET_FLAG.load(Ordering::SeqCst)
+}
+
+fn abort_all_commands() {
+    let map = COMMAND_HANDLES.lock().unwrap();
+    for cell in map.values() {
+        let pid = cell.load(Ordering::SeqCst);
+        if pid != 0 {
+            crate::utils::terminate_process_tree(pid);
+            cell.store(0, Ordering::SeqCst);
+        }
+    }
+}
+
+//
 // Cancellation registry for long-running Lua operations (e.g. transact poll
 // loops). Keyed by an arbitrary string (typically cdp_handle). Set from Rust
 // (abort_transaction/close), checked from Lua via praxis.is_cancelled(key).
@@ -70,6 +101,24 @@ struct CommandSpec {
 
 pub fn create_vm(script: &str) -> Result<Lua> {
     let lua = Lua::new();
+
+    //
+    // Install a hook that fires every 1000 Lua instructions. When the global
+    // reset flag is set, the hook returns an error which unwinds the Lua call
+    // stack and returns control to Rust.
+    //
+
+    lua.set_hook(
+        mlua::HookTriggers::new().every_nth_instruction(1000),
+        |_lua, _debug| {
+            if is_reset() {
+                Err(mlua::Error::RuntimeError("reset signal received".into()))
+            } else {
+                Ok(mlua::VmState::Continue)
+            }
+        },
+    );
+
     install_shared_api(&lua)?;
     install_shared_libraries(&lua)?;
     let value: Value = lua.load(script).eval().map_err(lua_error)?;
@@ -997,14 +1046,14 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
 
     let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy()).collect();
     if let Some(input) = &spec.stdin {
-        common::log_info!(
+        common::log_debug!(
             "command: {} {} (stdin: {})",
             cmd.get_program().to_string_lossy(),
             args.join(" "),
             input.replace('\n', " | ")
         );
     } else {
-        common::log_info!(
+        common::log_debug!(
             "command: {} {}",
             cmd.get_program().to_string_lossy(),
             args.join(" ")
@@ -1022,7 +1071,24 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
                 }
             }
 
-            let output = child.wait_with_output();
+            //
+            // Poll child process with reset flag checks so we can abort
+            // promptly when a reset signal arrives.
+            //
+
+            let output = loop {
+                if is_reset() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    pid_cell.store(0, Ordering::SeqCst);
+                    return Err(anyhow!("reset signal received"));
+                }
+                match child.try_wait() {
+                    Ok(Some(_status)) => break child.wait_with_output(),
+                    Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                    Err(e) => break Err(e),
+                }
+            };
             pid_cell.store(0, Ordering::SeqCst);
             match output {
                 Ok(output) => {
@@ -1037,7 +1103,7 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
                         } else {
                             stdout.clone()
                         };
-                        common::log_info!("command output:\n{}", preview);
+                        common::log_debug!("command output:\n{}", preview);
                     } else {
                         common::log_warn!(
                             "command failed (status {}): {}",

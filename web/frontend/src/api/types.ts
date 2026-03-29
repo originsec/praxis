@@ -15,6 +15,10 @@ export interface NodeState {
   //
   last_update: string;
   //
+  // Connectivity status, set by the service.
+  //
+  status: 'online' | 'warning' | 'offline';
+  //
   // Active terminal session ID (if any).
   //
   active_terminal_id?: string | null;

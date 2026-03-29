@@ -23,7 +23,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { StatusBadge, getNodeStatus } from '../common/StatusBadge';
+import { StatusBadge } from '../common/StatusBadge';
 import { RunModal, type RunItem } from '../common/RunModal';
 import { Modal } from '../common/Modal';
 import { ReconModal } from './ReconModal';
@@ -384,7 +384,7 @@ export function NodeCard({ node }: NodeCardProps) {
   const isWindowsNode = node.os_details.toLowerCase().includes('windows');
   const isLinuxNode = node.os_details.toLowerCase().includes('linux');
 
-  const status = getNodeStatus(node.last_update);
+  const status = node.status;
   const agents = node.discovered_agents;
   const visibleAgents = agentsExpanded ? agents : agents.slice(0, 3);
   const hasHiddenAgents = agents.length > 3 && !agentsExpanded;

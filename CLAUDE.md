@@ -70,6 +70,15 @@
 - But look through entire docs/src to locate any areas that may need updates
 - Don't make changes to CLAUDE.md unless specifically instructed to
 
+## Pull Requests
+
+- PR descriptions must be excellent and comprehensive — they are the primary record of what changed and why.
+- Group changes by area/theme with `###` subheadings (e.g. "MCP Server", "Node Runtime", "TUI", "Web Frontend").
+- Each item should explain **what** changed and **why**, not just list files. Use bold for key items.
+- Include a test plan with a checklist of verification steps.
+- Look at ALL commits in the branch (not just the latest) to ensure nothing is missed.
+- Keep the PR title short (under 70 characters); put detail in the body.
+
 ## Release Process
 
 - **Do not initiate any release steps unless explicitly asked to.**

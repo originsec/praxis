@@ -131,7 +131,8 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                             let trimmed = text.trim();
                             if !trimmed.is_empty() {
                                 lines.push(Line::from(""));
-                                let md_lines = markdown::render(trimmed, "");
+                                let content = strip_wrapping_backticks(trimmed);
+                                let md_lines = markdown::render(&content, "");
                                 lines.extend(md_lines);
                             }
                         }
@@ -139,7 +140,7 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                 }
             }
             ConversationEntry::ToolGroup(tools) => {
-                lines.extend(build_tool_summary(tools));
+                lines.extend(build_tool_summary(tools, state.tools_expanded, state.tools_full));
             }
             ConversationEntry::Info(msg) => {
                 lines.push(Line::from(""));
@@ -317,7 +318,7 @@ fn split_think_segments(raw: &str) -> Vec<ThinkSegment> {
     segments
 }
 
-fn build_tool_summary(tools: &[crate::app::ToolCall]) -> Vec<Line<'static>> {
+fn build_tool_summary(tools: &[crate::app::ToolCall], expanded: bool, full: bool) -> Vec<Line<'static>> {
     let total = tools.len();
     let failures = tools.iter().filter(|t| !t.success).count();
 
@@ -353,6 +354,8 @@ fn build_tool_summary(tools: &[crate::app::ToolCall]) -> Vec<Line<'static>> {
         "tool calls"
     };
 
+    let chevron = if expanded { "\u{25be}" } else { "\u{25b8}" };
+
     let mut spans = vec![
         Span::styled(format!("{} ", icon), Style::default().fg(icon_color)),
         Span::styled(format!("{} {} ", total, label), Style::default().fg(MUTED)),
@@ -366,7 +369,148 @@ fn build_tool_summary(tools: &[crate::app::ToolCall]) -> Vec<Line<'static>> {
         ));
     }
 
-    vec![Line::from(spans)]
+    spans.push(Span::styled(
+        format!("  {}", chevron),
+        Style::default().fg(DIM),
+    ));
+
+    let mut lines = vec![Line::from(spans)];
+
+    if expanded {
+        for tool in tools {
+            let (tool_icon, tool_color) = if tool.success {
+                ("\u{2713}", TOOL_OK)
+            } else {
+                ("\u{2717}", TOOL_FAIL)
+            };
+
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    format!("{} ", tool_icon),
+                    Style::default().fg(tool_color),
+                ),
+                Span::styled(
+                    tool.name.clone(),
+                    Style::default().fg(if tool.success { TEXT } else { TOOL_FAIL }),
+                ),
+            ]));
+
+            //
+            // Show input parameters and result. Multi-line content is shown
+            // with each line indented under the tool name.
+            //
+
+            let max_in = if full { usize::MAX } else { 5 };
+            let max_out = if full { usize::MAX } else { 20 };
+
+            if let Some(ref input) = tool.input {
+                let input_lines = compact_multiline(input, max_in, 200);
+                for (i, iline) in input_lines.iter().enumerate() {
+                    let prefix = if i == 0 { "in  " } else { "    " };
+                    lines.push(Line::from(vec![
+                        Span::styled("      ", Style::default()),
+                        Span::styled(prefix, Style::default().fg(DIM)),
+                        Span::styled(iline.clone(), Style::default().fg(MUTED)),
+                    ]));
+                }
+            }
+
+            if let Some(ref result) = tool.result {
+                let result_lines = compact_multiline(result, max_out, 200);
+                let label_style = if tool.success { DIM } else { TOOL_FAIL };
+                let text_style = if tool.success { MUTED } else { TOOL_FAIL };
+                for (i, rline) in result_lines.iter().enumerate() {
+                    let prefix = if i == 0 {
+                        if tool.success { "out " } else { "err " }
+                    } else {
+                        "    "
+                    };
+                    lines.push(Line::from(vec![
+                        Span::styled("      ", Style::default()),
+                        Span::styled(prefix, Style::default().fg(label_style)),
+                        Span::styled(rline.clone(), Style::default().fg(text_style)),
+                    ]));
+                }
+            }
+        }
+    }
+
+    lines
+}
+
+//
+// Strip wrapping triple-backtick fences when the entire message is enclosed
+// in a single code block, so it renders as markdown instead of a code block.
+//
+
+fn strip_wrapping_backticks(s: &str) -> String {
+    let trimmed = s.trim();
+    if !trimmed.starts_with("```") {
+        return s.to_string();
+    }
+
+    let first_newline = match trimmed.find('\n') {
+        Some(pos) => pos,
+        None => return s.to_string(),
+    };
+
+    let after_open = trimmed[first_newline + 1..].trim_end();
+    if after_open.ends_with("```") {
+        let inner = &after_open[..after_open.len() - 3];
+        if !inner.contains("\n```") {
+            return inner.trim().to_string();
+        }
+    }
+
+    s.to_string()
+}
+
+fn truncate_line(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        let mut end = max;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}\u{2026}", &s[..end])
+    }
+}
+
+//
+// Show up to max_lines of multi-line text, truncating each line.
+//
+
+fn compact_multiline(s: &str, max_lines: usize, max_width: usize) -> Vec<String> {
+    //
+    // Try to re-format as pretty JSON with 2-space indent. Fall back to
+    // the raw text if it isn't valid JSON.
+    //
+
+    let formatted = if let Ok(value) = serde_json::from_str::<serde_json::Value>(s.trim()) {
+        serde_json::to_string_pretty(&value).unwrap_or_else(|_| s.to_string())
+    } else {
+        s.to_string()
+    };
+
+    let content_lines: Vec<&str> = formatted.lines()
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+
+    let total = content_lines.len();
+    let mut result = Vec::new();
+
+    let show = total.min(max_lines);
+    for line in &content_lines[..show] {
+        result.push(truncate_line(line, max_width));
+    }
+
+    if total > max_lines {
+        result.push(format!("\u{2026} ({} more lines)", total - max_lines));
+    }
+
+    result
 }
 
 fn render_plan_widget(f: &mut Frame, area: Rect, state: &OrchestratorState) {
@@ -424,19 +568,23 @@ fn render_plan_widget(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 }
 
 fn render_model_info(f: &mut Frame, area: Rect, state: &OrchestratorState) {
-    let line = match (&state.provider, &state.model) {
-        (Some(provider), Some(model)) => Line::from(vec![Span::styled(
-            format!("{} / {} ", provider, model),
-            Style::default().fg(MUTED),
-        )]),
-        _ => Line::from(vec![Span::styled(
-            "No session ",
-            Style::default().fg(MUTED),
-        )]),
+    let model_text = match (&state.provider, &state.model) {
+        (Some(provider), Some(model)) => format!("{} / {}", provider, model),
+        _ => "No session".to_string(),
     };
 
-    let paragraph = Paragraph::new(line).alignment(ratatui::layout::Alignment::Right);
+    let line = Line::from(vec![
+        Span::styled("^e/^!e", Style::default().fg(DIM)),
+        Span::styled(" tools  ", Style::default().fg(MUTED)),
+        Span::styled("^w", Style::default().fg(DIM)),
+        Span::styled(" save   ", Style::default().fg(MUTED)),
+        Span::styled(
+            format!("{} ", model_text),
+            Style::default().fg(MUTED),
+        ),
+    ]);
 
+    let paragraph = Paragraph::new(line).alignment(ratatui::layout::Alignment::Right);
     f.render_widget(paragraph, area);
 }
 

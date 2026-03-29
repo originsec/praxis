@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use crate::{
     ChainDefinitionFull, ChainDefinitionInfo, ChainExecutionUpdate, ChainTriggerInfo,
     CommandResponse, InterceptedTrafficEntry, NodeCommand, OperationDefinitionInfo,
-    ReconResult, SemanticOpUpdate, SystemState, TargetSpec, TrafficSearchFilters,
-    TriggerConfig,
+    ReconResult, SemanticOpUpdate, SemanticOperationSpec, SystemState, TargetSpec,
+    TrafficSearchFilters, TriggerConfig,
 };
 
 //
@@ -107,6 +107,12 @@ pub trait McpClient: Send + Sync {
 
     /// Toggle a chain trigger's enabled state.
     async fn toggle_chain_trigger(&self, trigger_id: String, enabled: bool) -> Result<()>;
+
+    /// Create or update an operation definition.
+    async fn create_op_def(&self, spec: SemanticOperationSpec, category: &str, short_name: &str) -> Result<String>;
+
+    /// Delete an operation definition by full name (category::short_name).
+    async fn delete_op_def(&self, full_name: &str) -> Result<()>;
 
     /// Reset a node (cancel all operations, tear down state, re-register).
     async fn reset_node(&self, node_id: &str) -> Result<()>;

@@ -6,7 +6,8 @@ use common::{
 use crossterm::event::{Event, EventStream};
 use futures_util::StreamExt;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::{mpsc, Notify};
 
 pub enum AppEvent {
     Terminal(Event),
@@ -53,18 +54,39 @@ pub struct EventHandler {
 }
 
 impl EventHandler {
-    pub fn new(client: Arc<Client>) -> Self {
+    pub fn new(
+        client: Arc<Client>,
+        terminal_paused: Arc<AtomicBool>,
+        terminal_resume: Arc<Notify>,
+    ) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
 
         //
-        // Terminal events from crossterm.
+        // Terminal events from crossterm. The reader suspends when
+        // terminal_paused is set (e.g. while an external editor is open)
+        // so it doesn't steal stdin from the child process.
         //
         let tx_term = tx.clone();
+        let paused_clone = terminal_paused.clone();
+        let resume_clone = terminal_resume.clone();
         tokio::spawn(async move {
             let mut reader = EventStream::new();
-            while let Some(Ok(event)) = reader.next().await {
-                if tx_term.send(AppEvent::Terminal(event)).is_err() {
-                    break;
+            loop {
+                if paused_clone.load(Ordering::Relaxed) {
+                    resume_clone.notified().await;
+                    continue;
+                }
+                match reader.next().await {
+                    Some(Ok(event)) => {
+                        if paused_clone.load(Ordering::Relaxed) {
+                            continue;
+                        }
+                        if tx_term.send(AppEvent::Terminal(event)).is_err() {
+                            break;
+                        }
+                    }
+                    Some(Err(_)) => continue,
+                    None => break,
                 }
             }
         });
