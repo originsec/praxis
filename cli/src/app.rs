@@ -469,6 +469,8 @@ pub struct ModelEditForm {
     pub available_models: Vec<String>,
     pub model_dropdown_open: bool,
     pub model_dropdown_selected: usize,
+    pub model_dropdown_scroll: usize,
+    pub model_dropdown_inner_h: std::cell::Cell<usize>,
     pub loading_models: bool,
 }
 
@@ -4194,6 +4196,8 @@ impl App {
             available_models: Vec::new(),
             model_dropdown_open: false,
             model_dropdown_selected: 0,
+            model_dropdown_scroll: 0,
+            model_dropdown_inner_h: std::cell::Cell::new(0),
             loading_models: false,
         });
     }
@@ -4230,10 +4234,29 @@ impl App {
                         form.model_name = name.clone();
                     }
                     form.model_dropdown_open = false;
+                    form.model_dropdown_scroll = 0;
                     form.cursor_pos = form.model_name.chars().count();
                 }
                 _ => {}
             }
+
+            //
+            // Keep the selected model visible in the dropdown. Replicate
+            // the popup size calculation from the render function so the
+            // scroll window matches exactly.
+            //
+
+            let visible = form.model_dropdown_inner_h.get();
+            if visible > 0 {
+                let sel = form.model_dropdown_selected;
+                let scroll = &mut form.model_dropdown_scroll;
+                if sel < *scroll {
+                    *scroll = sel;
+                } else if sel >= *scroll + visible {
+                    *scroll = sel - visible + 1;
+                }
+            }
+
             return;
         }
 

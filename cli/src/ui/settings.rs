@@ -676,6 +676,7 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
         .style(Style::default().bg(super::BG));
 
     let inner = block.inner(popup_area);
+    form.model_dropdown_inner_h.set(inner.height as usize);
     f.render_widget(Clear, popup_area);
     f.render_widget(block, popup_area);
 
@@ -811,11 +812,26 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
     }
 
     //
-    // Model dropdown if open.
+    // Model dropdown if open — rendered as a separate scrollable region
+    // below the fixed header so scrolling doesn't push the form fields
+    // off screen.
     //
 
     if form.model_dropdown_open && !form.available_models.is_empty() {
         lines.push(Line::raw(""));
+        let header_h = lines.len() as u16;
+
+        let header_area = Rect { height: header_h, ..inner };
+        f.render_widget(Paragraph::new(lines), header_area);
+
+        let dropdown_area = Rect {
+            y: inner.y + header_h,
+            height: inner.height.saturating_sub(header_h),
+            ..inner
+        };
+        form.model_dropdown_inner_h.set(dropdown_area.height as usize);
+
+        let mut dropdown_lines: Vec<Line> = Vec::new();
         for (i, name) in form.available_models.iter().enumerate() {
             let selected = i == form.model_dropdown_selected;
             let style = if selected {
@@ -824,13 +840,16 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
                 Style::default().fg(TEXT)
             };
             let prefix = if selected { "  \u{25b8} " } else { "    " };
-            lines.push(Line::from(Span::styled(
+            dropdown_lines.push(Line::from(Span::styled(
                 format!("{}{}", prefix, name),
                 style,
             )));
         }
-    }
 
-    let paragraph = Paragraph::new(lines);
-    f.render_widget(paragraph, inner);
+        let scroll_y = form.model_dropdown_scroll as u16;
+        let paragraph = Paragraph::new(dropdown_lines).scroll((scroll_y, 0));
+        f.render_widget(paragraph, dropdown_area);
+    } else {
+        f.render_widget(Paragraph::new(lines), inner);
+    }
 }
