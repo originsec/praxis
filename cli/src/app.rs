@@ -160,6 +160,10 @@ pub enum ConversationEntry {
 pub struct ToolCall {
     pub name: String,
     pub success: bool,
+    pub input: Option<String>,
+    #[allow(dead_code)]
+    pub display: Option<String>,
+    pub result: Option<String>,
 }
 
 pub struct OrchestratorState {
@@ -181,7 +185,14 @@ pub struct OrchestratorState {
     //
     pub pending_tools: Vec<ToolCall>,
     pub active_tool: Option<String>,
+    pub active_tool_input: Option<String>,
     pub current_plan: Option<OrchestratorPlan>,
+
+    //
+    // Tool group display: collapsed, expanded (names), or full (with details).
+    //
+    pub tools_expanded: bool,
+    pub tools_full: bool,
 
     //
     // Command history.
@@ -213,7 +224,10 @@ impl Default for OrchestratorState {
             session_active: false,
             pending_tools: Vec::new(),
             active_tool: None,
+            active_tool_input: None,
             current_plan: None,
+            tools_expanded: false,
+            tools_full: false,
             history: Vec::new(),
             history_index: None,
             saved_input: String::new(),
@@ -1276,6 +1290,20 @@ impl App {
                 }
                 KeyCode::Char('w') => {
                     self.open_save_session();
+                    return;
+                }
+                KeyCode::Char('e') => {
+                    if key.modifiers.contains(KeyModifiers::ALT) {
+                        self.orchestrator.tools_full = !self.orchestrator.tools_full;
+                        if self.orchestrator.tools_full {
+                            self.orchestrator.tools_expanded = true;
+                        }
+                    } else {
+                        self.orchestrator.tools_expanded = !self.orchestrator.tools_expanded;
+                        if !self.orchestrator.tools_expanded {
+                            self.orchestrator.tools_full = false;
+                        }
+                    }
                     return;
                 }
                 _ => {}
@@ -3460,17 +3488,23 @@ impl App {
                     }
                 }
             }
-            ClientDirectMessage::OrchestratorToolExecuting { name, .. } => {
+            ClientDirectMessage::OrchestratorToolExecuting { name, input, .. } => {
                 if name != "report_plan" {
                     self.orchestrator.active_tool = Some(name);
+                    self.orchestrator.active_tool_input = input;
                 }
             }
-            ClientDirectMessage::OrchestratorToolExecuted { name, success, .. } => {
+            ClientDirectMessage::OrchestratorToolExecuted { name, success, display, result, .. } => {
                 if name != "report_plan" {
+                    let input = self.orchestrator.active_tool_input.take();
                     self.orchestrator.active_tool = None;
-                    self.orchestrator
-                        .pending_tools
-                        .push(ToolCall { name, success });
+                    self.orchestrator.pending_tools.push(ToolCall {
+                        name,
+                        success,
+                        input,
+                        display: if display.is_empty() { None } else { Some(display) },
+                        result: if result.is_empty() { None } else { Some(result) },
+                    });
                 }
             }
             ClientDirectMessage::OrchestratorPlanUpdated { plan, .. } => {
