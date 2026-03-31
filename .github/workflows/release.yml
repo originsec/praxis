@@ -69,99 +69,32 @@ jobs:
 
   update-aur:
     needs: release
-    if: always() && needs.release.result == 'success'
-    continue-on-error: true
     runs-on: ubuntu-latest
-    container:
-      image: archlinux
-      options: --privileged
-    permissions:
-      contents: write
 
     steps:
-      - name: Install dependencies
-        run: pacman -Sy --noconfirm git curl openssh
-
-      - uses: actions/checkout@v4
+      - name: Checkout AUR repo
+        uses: actions/checkout@v4
         with:
-          ref: main
-          fetch-depth: 0
+          repository: originsec/praxis-aur
+          token: ${{ secrets.AUR_REPO_TOKEN }}
 
-      - name: Update AUR files
+      - name: Update version
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           SHA256=$(curl -sL "https://github.com/originsec/praxis/archive/${GITHUB_REF_NAME}.tar.gz" | sha256sum | cut -d' ' -f1)
 
-          cd pkg/aur/praxis
           sed -i "s/^pkgver=.*/pkgver=${VERSION}/" PKGBUILD
           sed -i "0,/^    '[a-f0-9]\{64\}'/{s/^    '[a-f0-9]\{64\}'/    '${SHA256}'/}" PKGBUILD
+
           sed -i "s/pkgver = .*/pkgver = ${VERSION}/" .SRCINFO
           sed -i "s|source = praxis-.*\.tar\.gz::.*|source = praxis-${VERSION}.tar.gz::https://github.com/originsec/praxis/archive/v${VERSION}.tar.gz|" .SRCINFO
           sed -i "0,/sha256sums = [a-f0-9]\{64\}/{s/sha256sums = [a-f0-9]\{64\}/sha256sums = ${SHA256}/}" .SRCINFO
 
-      - name: Commit to praxis repo
+      - name: Commit and push
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          git config --global --add safe.directory "$PWD"
-          git config user.name "David Kaplan"
-          git config user.email "davkaplan@gmail.com"
-          git add pkg/aur/praxis/PKGBUILD pkg/aur/praxis/.SRCINFO
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Update AUR package to v${VERSION}"
-            git push
-          fi
-
-      - name: Configure SSH for AUR
-        env:
-          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
-        run: |
-          mkdir -p /github/home/.ssh /root/.ssh
-          printf '%s\n' "${AUR_SSH_KEY}" > /github/home/.ssh/aur
-          chmod 600 /github/home/.ssh/aur
-          ssh-keyscan -t ed25519,rsa aur.archlinux.org > /github/home/.ssh/known_hosts 2>/dev/null
-          chmod 600 /github/home/.ssh/known_hosts
-          cat > /github/home/.ssh/config <<'EOF'
-          Host aur.archlinux.org
-            User aur
-            IdentityFile /github/home/.ssh/aur
-            IdentitiesOnly yes
-            StrictHostKeyChecking yes
-            UserKnownHostsFile /github/home/.ssh/known_hosts
-            GlobalKnownHostsFile /dev/null
-            ConnectTimeout 20
-            ServerAliveInterval 15
-            ServerAliveCountMax 3
-          EOF
-          chmod 600 /github/home/.ssh/config
-          cp /github/home/.ssh/known_hosts /root/.ssh/known_hosts
-          cp /github/home/.ssh/config /root/.ssh/config
-          chmod 600 /root/.ssh/known_hosts /root/.ssh/config
-
-      - name: Push to AUR
-        run: |
-          git config --global user.name "David Kaplan"
-          git config --global user.email "davkaplan@gmail.com"
-          git config --global --add safe.directory "$PWD"
-
-          export GIT_SSH_COMMAND="ssh -F /github/home/.ssh/config -vvv"
-
-          git clone ssh://aur@aur.archlinux.org/praxis.git /tmp/aur-push
-          cp pkg/aur/praxis/PKGBUILD pkg/aur/praxis/.SRCINFO /tmp/aur-push/
-          cp pkg/aur/praxis/*.service pkg/aur/praxis/*.conf /tmp/aur-push/
-          cp pkg/aur/praxis/*.env pkg/aur/praxis/*.install /tmp/aur-push/
-          cd /tmp/aur-push
-          git add -A
-          if git diff --cached --quiet; then
-            echo "AUR already up to date"
-            exit 0
-          fi
-          VERSION="${GITHUB_REF_NAME#v}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add PKGBUILD .SRCINFO
           git commit -m "Update to v${VERSION}"
-          for i in 1 2 3 4 5; do
-            git push && echo "Pushed to AUR" && exit 0
-            echo "AUR push failed, retry $i"
-            sleep $((i * 15))
-          done
-          exit 1
+          git push
