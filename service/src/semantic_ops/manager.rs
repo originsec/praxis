@@ -649,27 +649,34 @@ impl SemanticOpsManager {
         let _ = database.append_output(&operation_id, &format!("Setting up session for agent '{}' on node {}...\n", agent_short_name, &node_id[..8.min(node_id.len())])).await;
 
         //
+        // Execute the operation steps. Early failures break out of the block
+        // so the dequeue logic below always runs.
+        //
+        'exec: {
+
+        //
+        // Clean up any lingering session from a previous operation. The close
+        // command is queued on the same RabbitMQ node queue, so it will be
+        // processed before the subsequent select_agent command.
+        //
+        let _ = crate::semantic_ops::executor::close_session(&node_id, &rabbitmq_channel).await;
+
+        //
         // Step 1: Select the agent.
         //
         if let Err(e) = crate::semantic_ops::executor::select_agent(&node_id, &agent_short_name, &rabbitmq_channel, response_tracker.clone()).await {
             let _ = database.update_status(&operation_id, SemanticOpStatus::Failed, Some(Utc::now()), None, Some(format!("Failed to select agent: {}", e))).await;
-            //
-            // Clean up and continue to next op.
-            //
-            running.write().unwrap().remove(&node_id);
-            op_to_node.write().unwrap().remove(&operation_id);
-            return;
+            break 'exec;
         }
         let _ = database.append_output(&operation_id, &format!("Agent '{}' selected.\n", agent_short_name)).await;
 
         //
         // Step 2: Create session (with YOLO mode from operation spec and working directory).
         //
-        if let Err(e) = crate::semantic_ops::executor::create_session(&node_id, spec.yolo_mode, working_dir.clone(), &rabbitmq_channel, response_tracker.clone()).await {
+        let prompt_timeout_secs = Some(config.read().await.get_prompt_timeout_secs());
+        if let Err(e) = crate::semantic_ops::executor::create_session(&node_id, spec.yolo_mode, working_dir.clone(), prompt_timeout_secs, &rabbitmq_channel, response_tracker.clone()).await {
             let _ = database.update_status(&operation_id, SemanticOpStatus::Failed, Some(Utc::now()), None, Some(format!("Failed to create session: {}", e))).await;
-            running.write().unwrap().remove(&node_id);
-            op_to_node.write().unwrap().remove(&operation_id);
-            return;
+            break 'exec;
         }
         let _ = database.append_output(&operation_id, "Session created.\n").await;
 
@@ -684,6 +691,7 @@ impl SemanticOpsManager {
                 &node_id,
                 &spec,
                 working_dir.clone(),
+                prompt_timeout_secs,
                 &config,
                 &rabbitmq_channel,
                 response_tracker.clone(),
@@ -702,6 +710,7 @@ impl SemanticOpsManager {
                 &node_id,
                 &spec,
                 working_dir.clone(),
+                prompt_timeout_secs,
                 &rabbitmq_channel,
                 response_tracker.clone(),
                 database.clone(),
@@ -744,6 +753,8 @@ impl SemanticOpsManager {
         };
 
         let _ = database.update_status(&operation_id, status, Some(Utc::now()), summary_text, result_text).await;
+
+        } // 'exec
 
         //
         // Release node lock before cleanup/dequeue so the next op can acquire it.
