@@ -115,14 +115,20 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                                 }
                                 if first {
                                     lines.push(Line::from(vec![
-                                        Span::styled("\u{00b7} ", Style::default().fg(DIM)),
-                                        Span::styled(line.to_string(), Style::default().fg(DIM)),
+                                        Span::styled(
+                                            "\u{00b7} ",
+                                            Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
+                                        ),
+                                        Span::styled(
+                                            line.to_string(),
+                                            Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
+                                        ),
                                     ]));
                                     first = false;
                                 } else {
                                     lines.push(Line::from(Span::styled(
                                         format!("  {}", line),
-                                        Style::default().fg(DIM),
+                                        Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
                                     )));
                                 }
                             }
@@ -183,10 +189,7 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                 format!("{} {}", spinner_char, tool_name)
             };
             lines.push(Line::from(Span::styled(label, Style::default().fg(MUTED))));
-        } else if !matches!(
-            state.messages.last(),
-            Some(ConversationEntry::AssistantText(_))
-        ) {
+        } else if !has_streaming_visible_text(&state.messages) {
             let frame_idx = (std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -318,6 +321,15 @@ fn split_think_segments(raw: &str) -> Vec<ThinkSegment> {
     segments
 }
 
+fn has_streaming_visible_text(messages: &[ConversationEntry]) -> bool {
+    messages.iter().rev().any(|entry| match entry {
+        ConversationEntry::AssistantText(raw) => split_think_segments(raw).iter().any(|seg| {
+            matches!(seg, ThinkSegment::Visible(text) if !text.trim().is_empty())
+        }),
+        _ => false,
+    })
+}
+
 fn build_tool_summary(tools: &[crate::app::ToolCall], expanded: bool, full: bool) -> Vec<Line<'static>> {
     let total = tools.len();
     let failures = tools.iter().filter(|t| !t.success).count();
@@ -408,11 +420,7 @@ fn build_tool_summary(tools: &[crate::app::ToolCall], expanded: bool, full: bool
                 let input_lines = compact_multiline(input, max_in, 200);
                 for (i, iline) in input_lines.iter().enumerate() {
                     let prefix = if i == 0 { "in  " } else { "    " };
-                    lines.push(Line::from(vec![
-                        Span::styled("      ", Style::default()),
-                        Span::styled(prefix, Style::default().fg(DIM)),
-                        Span::styled(iline.clone(), Style::default().fg(MUTED)),
-                    ]));
+                    lines.push(build_compact_output_line(prefix, iline, DIM, MUTED));
                 }
             }
 
@@ -426,11 +434,12 @@ fn build_tool_summary(tools: &[crate::app::ToolCall], expanded: bool, full: bool
                     } else {
                         "    "
                     };
-                    lines.push(Line::from(vec![
-                        Span::styled("      ", Style::default()),
-                        Span::styled(prefix, Style::default().fg(label_style)),
-                        Span::styled(rline.clone(), Style::default().fg(text_style)),
-                    ]));
+                    lines.push(build_compact_output_line(
+                        prefix,
+                        rline,
+                        label_style,
+                        text_style,
+                    ));
                 }
             }
         }
@@ -507,10 +516,41 @@ fn compact_multiline(s: &str, max_lines: usize, max_width: usize) -> Vec<String>
     }
 
     if total > max_lines {
-        result.push(format!("\u{2026} ({} more lines)", total - max_lines));
+        result.push(format!(
+            "\u{2026} ({} more lines)   ^!e to show all",
+            total - max_lines
+        ));
     }
 
     result
+}
+
+fn build_compact_output_line(
+    prefix: &str,
+    line: &str,
+    label_color: Color,
+    text_color: Color,
+) -> Line<'static> {
+    let truncation_suffix = "^!e to show all";
+
+    if let Some((head, _)) = line.split_once("   ^!e to show all") {
+        Line::from(vec![
+            Span::styled("      ", Style::default()),
+            Span::styled(prefix.to_string(), Style::default().fg(label_color)),
+            Span::styled(head.to_string(), Style::default().fg(DIM)),
+            Span::styled("   ", Style::default().fg(DIM)),
+            Span::styled(
+                truncation_suffix,
+                Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
+            ),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("      ", Style::default()),
+            Span::styled(prefix.to_string(), Style::default().fg(label_color)),
+            Span::styled(line.to_string(), Style::default().fg(text_color)),
+        ])
+    }
 }
 
 fn render_plan_widget(f: &mut Frame, area: Rect, state: &OrchestratorState) {
