@@ -23,6 +23,10 @@ pub enum SessionCommand {
         /// Project/working directory path
         #[arg(short, long)]
         project: Option<String>,
+
+        /// Prompt timeout in seconds
+        #[arg(short = 'T', long)]
+        timeout: Option<u64>,
     },
 
     /// Send a prompt to the session
@@ -49,7 +53,8 @@ pub async fn execute(client: &Client, command: SessionCommand) -> Result<()> {
             node,
             yolo,
             project,
-        } => create_session(client, &node, yolo, project).await,
+            timeout,
+        } => create_session(client, &node, yolo, project, timeout).await,
         SessionCommand::Prompt { node, text } => send_prompt(client, &node, &text).await,
         SessionCommand::Close { node } => close_session(client, &node).await,
     }
@@ -69,6 +74,7 @@ async fn create_session(
     node_prefix: &str,
     yolo: bool,
     project: Option<String>,
+    timeout: Option<u64>,
 ) -> Result<()> {
     let state = client
         .get_state()
@@ -77,9 +83,23 @@ async fn create_session(
     let node_id = find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
+    //
+    // Use explicit timeout if provided, otherwise fetch from service config.
+    //
+
+    let prompt_timeout_secs = match timeout {
+        Some(t) => Some(t),
+        None => client
+            .get_config(vec!["prompt_timeout_secs".to_string()])
+            .await
+            .ok()
+            .and_then(|cfg| cfg.get("prompt_timeout_secs").and_then(|v| v.parse().ok())),
+    };
+
     let context = SessionContext {
         working_dir: project.clone(),
         yolo_mode: yolo,
+        prompt_timeout_secs,
     };
 
     let cmd = NodeCmd::Session(NodeSessionCommand::Create { context });

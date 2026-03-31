@@ -275,6 +275,7 @@ local function do_fingerprint()
       "-NoProfile", "-Command",
       "Get-AppxPackage -Name 'Microsoft.MicrosoftOfficeHub' | Select-Object -First 1 -ExpandProperty InstallLocation"
     },
+    timeout_secs = 10,
   })
 
   if result and result.success then

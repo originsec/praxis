@@ -533,6 +533,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
                 context: SessionContext {
                     working_dir: params.project.clone(),
                     yolo_mode: params.yolo,
+                    prompt_timeout_secs: None,
                 },
             }))
             .await.map_err(mcp_err)?;

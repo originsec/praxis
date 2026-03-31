@@ -880,6 +880,7 @@ impl AgentChatManager {
         let context = SessionContext {
             working_dir: None,
             yolo_mode,
+            prompt_timeout_secs: None,
         };
         let create_message = NodeDirectMessage::Command(CommandRequest {
             command_id: create_cmd_id.clone(),

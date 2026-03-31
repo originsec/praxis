@@ -31,6 +31,10 @@ pub const MCP_SERVER_PORT: &str = "mcp_server_port";
 /// Default MCP server port
 pub const MCP_SERVER_DEFAULT_PORT: u16 = 8585;
 
+/// Prompt timeout in seconds (how long a single agent prompt can run)
+pub const PROMPT_TIMEOUT_SECS: &str = "prompt_timeout_secs";
+pub const PROMPT_TIMEOUT_SECS_DEFAULT: u64 = 600;
+
 /// A model definition stored in config
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -149,6 +153,13 @@ impl ServiceConfig {
         self.get(MCP_SERVER_PORT)
             .and_then(|s| s.parse().ok())
             .unwrap_or(MCP_SERVER_DEFAULT_PORT)
+    }
+
+    /// Get the prompt timeout in seconds
+    pub fn get_prompt_timeout_secs(&self) -> u64 {
+        self.get(PROMPT_TIMEOUT_SECS)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(PROMPT_TIMEOUT_SECS_DEFAULT)
     }
 
 }

@@ -11,7 +11,7 @@ local INTERCEPT_DOMAINS = {
 }
 
 local function verify_binary(path)
-  local result = praxis.command_run({ program = path, args = { "--version" } })
+  local result = praxis.command_run({ program = path, args = { "--version" }, timeout_secs = 10 })
   if result.success then
     local version = (result.stdout or ""):match("(%d[%d%.%-a-zA-Z]*)")
     return true, version
@@ -45,6 +45,7 @@ local function check_user_logged_in(cursor_agent_path, working_dir)
     program = cursor_agent_path,
     args = { "status" },
     cwd = working_dir,
+    timeout_secs = 10,
   })
   if result.success then
     return (result.stdout or ""):find("Logged in") ~= nil
@@ -230,6 +231,7 @@ local function run_create_session(ctx)
     process_path = pp,
     working_dir = working_dir,
     yolo_mode = ctx.yolo_mode == true,
+    prompt_timeout_secs = ctx.prompt_timeout_secs,
     chat_id = chat_id,
   }
 end
@@ -262,6 +264,7 @@ local function run_session_transact(state, prompt)
     spec.cwd = wd
   end
 
+  spec.timeout_secs = state.prompt_timeout_secs or 1800
   local result = praxis.command_run_handle(spec, state.handle)
   if not result.success then
     error("Cursor command failed: " .. tostring(result.stderr or "unknown error"))

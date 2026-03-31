@@ -431,6 +431,7 @@ pub struct SettingsState {
     pub mcp_port: String,
     pub logging_enabled: bool,
     pub hunting_row_limit: String,
+    pub prompt_timeout_secs: String,
 
     //
     // Model select dropdown for feature assignments.
@@ -523,6 +524,7 @@ impl Default for SettingsState {
             mcp_port: "8585".to_string(),
             logging_enabled: false,
             hunting_row_limit: "10000000".to_string(),
+            prompt_timeout_secs: "600".to_string(),
             agent_scripts: Vec::new(),
             agent_scripts_loaded: false,
             dropdown_open: false,
@@ -1904,6 +1906,12 @@ impl App {
 
             let Some(tx) = tx else { return };
 
+            let prompt_timeout_secs = client
+                .get_config(vec!["prompt_timeout_secs".to_string()])
+                .await
+                .ok()
+                .and_then(|cfg| cfg.get("prompt_timeout_secs").and_then(|v| v.parse::<u64>().ok()));
+
             let _ = client
                 .send_command(
                     &node_id,
@@ -1920,6 +1928,7 @@ impl App {
                         context: SessionContext {
                             working_dir,
                             yolo_mode: yolo,
+                            prompt_timeout_secs,
                         },
                     }),
                 )
@@ -2288,12 +2297,34 @@ impl App {
                 tokio::time::sleep(delay).await;
             }
 
+            let initial_operations = client.get_operations().await;
+            let initial_chain_executions = client.get_chain_executions().await;
+            let initial_operations_snapshot =
+                serde_json::to_string(&initial_operations).unwrap_or_default();
+            let initial_chain_snapshot =
+                serde_json::to_string(&initial_chain_executions).unwrap_or_default();
+
             let _ = client.request_semantic_op_list().await;
             let _ = client.request_chain_execution_list().await;
-            tokio::time::sleep(Duration::from_millis(300)).await;
 
-            let operations = client.get_operations().await;
-            let chain_executions = client.get_chain_executions().await;
+            let mut operations = initial_operations.clone();
+            let mut chain_executions = initial_chain_executions.clone();
+
+            for _ in 0..20 {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+
+                operations = client.get_operations().await;
+                chain_executions = client.get_chain_executions().await;
+
+                let operations_snapshot = serde_json::to_string(&operations).unwrap_or_default();
+                let chain_snapshot = serde_json::to_string(&chain_executions).unwrap_or_default();
+
+                if operations_snapshot != initial_operations_snapshot
+                    || chain_snapshot != initial_chain_snapshot
+                {
+                    break;
+                }
+            }
 
             let _ = tx.send(AppEvent::ExecutionListsRefreshed {
                 operations,
@@ -2640,6 +2671,24 @@ impl App {
         }
     }
 
+    fn is_finished_semantic_op(status: &common::SemanticOpStatus) -> bool {
+        matches!(
+            status,
+            common::SemanticOpStatus::Completed
+                | common::SemanticOpStatus::Failed
+                | common::SemanticOpStatus::Cancelled
+        )
+    }
+
+    fn is_finished_chain_execution(status: &common::ChainExecutionStatus) -> bool {
+        matches!(
+            status,
+            common::ChainExecutionStatus::Completed
+                | common::ChainExecutionStatus::Failed
+                | common::ChainExecutionStatus::Cancelled
+        )
+    }
+
     async fn delete_selected_execution(&mut self) {
         let sorted = self.sorted_executions();
         let Some(&(is_op, idx)) = sorted.get(self.operations.exec_selected) else {
@@ -2649,13 +2698,12 @@ impl App {
         if is_op {
             let op_id = self.operations.operations[idx].operation_id.clone();
             let _ = self.client.remove_semantic_op(op_id).await;
+            self.operations.operations.remove(idx);
         } else {
             let exec_id = self.operations.chain_executions[idx].execution_id.clone();
             let _ = self.client.remove_chain_execution(exec_id).await;
+            self.operations.chain_executions.remove(idx);
         }
-
-        self.operations.operations = self.client.get_operations().await;
-        self.operations.chain_executions = self.client.get_chain_executions().await;
 
         let total = self.sorted_executions().len();
         if total == 0 {
@@ -2663,6 +2711,8 @@ impl App {
         } else if self.operations.exec_selected >= total {
             self.operations.exec_selected = total - 1;
         }
+
+        self.refresh_execution_lists_after(Duration::from_millis(300), false);
     }
 
     fn edit_selected_op(&mut self) {
@@ -2993,6 +3043,12 @@ impl App {
                         ConfirmKind::ClearAllExecutions => {
                             let _ = self.client.clear_all_ops().await;
                             let _ = self.client.clear_all_chains().await;
+                            self.operations
+                                .operations
+                                .retain(|op| !Self::is_finished_semantic_op(&op.status));
+                            self.operations
+                                .chain_executions
+                                .retain(|exec| !Self::is_finished_chain_execution(&exec.status));
                             self.operations.exec_selected = 0;
                             self.refresh_execution_lists_after(Duration::from_millis(300), true);
                         }
@@ -3569,6 +3625,7 @@ impl App {
             "mcp_server_port".to_string(),
             "application_logs_enabled".to_string(),
             "hunting_query_row_limit".to_string(),
+            "prompt_timeout_secs".to_string(),
         ];
 
         match self.client.get_config(keys).await {
@@ -3619,6 +3676,10 @@ impl App {
                     .get("hunting_query_row_limit")
                     .cloned()
                     .unwrap_or("10000000".to_string());
+                s.prompt_timeout_secs = config
+                    .get("prompt_timeout_secs")
+                    .cloned()
+                    .unwrap_or("600".to_string());
 
                 s.loaded = true;
                 s.status_message = None;
@@ -3811,7 +3872,7 @@ impl App {
                 // Scripts list + "Add new" + "Reset defaults"
                 self.settings.agent_scripts.len() + 2
             }
-            SettingsTab::Service => 4, // mcp_enabled, mcp_port, logging, hunting_row_limit
+            SettingsTab::Service => 5, // mcp_enabled, mcp_port, logging, hunting_row_limit, prompt_timeout_secs
             SettingsTab::About => 0,
         }
     }
@@ -3826,8 +3887,8 @@ impl App {
             }
             SettingsTab::Agents => false,
             SettingsTab::Service => {
-                // 1 = MCP port, 3 = hunting row limit
-                sel == 1 || sel == 3
+                // 1 = MCP port, 3 = hunting row limit, 4 = prompt timeout
+                sel == 1 || sel == 3 || sel == 4
             }
             SettingsTab::About => false,
         }
@@ -3856,6 +3917,7 @@ impl App {
             SettingsTab::Service => match sel {
                 1 => self.settings.mcp_port.clone(),
                 3 => self.settings.hunting_row_limit.clone(),
+                4 => self.settings.prompt_timeout_secs.clone(),
                 _ => String::new(),
             },
             SettingsTab::About => String::new(),
@@ -4164,6 +4226,11 @@ impl App {
                         self.settings.editing = true;
                         self.settings.edit_buffer = self.settings.hunting_row_limit.clone();
                     }
+                    4 => {
+                        // Edit prompt timeout.
+                        self.settings.editing = true;
+                        self.settings.edit_buffer = self.settings.prompt_timeout_secs.clone();
+                    }
                     _ => {}
                 }
             }
@@ -4197,6 +4264,10 @@ impl App {
                 3 => {
                     self.settings.hunting_row_limit = val.clone();
                     self.save_setting("hunting_query_row_limit", &val).await;
+                }
+                4 => {
+                    self.settings.prompt_timeout_secs = val.clone();
+                    self.save_setting("prompt_timeout_secs", &val).await;
                 }
                 _ => {}
             },

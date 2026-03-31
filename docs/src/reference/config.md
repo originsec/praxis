@@ -78,6 +78,12 @@ Access via **Settings** > **LLM Providers** in the web UI.
 | `llm.orchestrator.model` | `claude-sonnet-4-20250514` | Model for Orchestrator |
 | `llm.orchestrator.api_key` | (encrypted) | API key for provider |
 
+### Prompt Timeout
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `prompt_timeout_secs` | `600` | Maximum time in seconds a single agent prompt can run before the agent process is killed. Applies to all sessions unless overridden per-session. |
+
 ### MCP Server Settings
 
 Access via **Settings** > **MCP Server** in the web UI.

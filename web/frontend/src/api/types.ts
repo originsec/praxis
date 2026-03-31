@@ -113,6 +113,7 @@ export interface SessionItem {
 export interface SessionContext {
   working_dir?: string;
   yolo_mode?: boolean;
+  prompt_timeout_secs?: number | null;
 }
 
 //

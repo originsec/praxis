@@ -601,8 +601,9 @@ impl ChainExecutor {
                         .and_then(|sg| sg.working_dir.clone())
                         .or_else(|| working_dir.clone());
 
+                    let prompt_timeout_secs = Some(config.read().await.get_prompt_timeout_secs());
                     active_session = Some(
-                        create_session(&node_id, yolo_mode, session_working_dir, &rabbitmq_channel, response_tracker.clone())
+                        create_session(&node_id, yolo_mode, session_working_dir, prompt_timeout_secs, &rabbitmq_channel, response_tracker.clone())
                             .await
                             .context("Failed to create session for session group")?,
                     );
@@ -895,6 +896,7 @@ impl ChainExecutor {
                             &rabbitmq_channel,
                             response_tracker.clone(),
                             database.clone(),
+                            &config,
                         ) => {
                             (result, None, None)
                         }
@@ -1170,11 +1172,13 @@ impl ChainExecutor {
         // has no completion signal so semantic_success is always None.
         //
         let (op_result, semantic_success): (Result<(String, String)>, Option<bool>) = if spec.mode == "agent" {
+            let prompt_timeout_secs = Some(config.read().await.get_prompt_timeout_secs());
             match execute_agent_mode(
                 &op_id,
                 node_id,
                 &spec,
                 working_dir.clone(),
+                prompt_timeout_secs,
                 config,
                 rabbitmq_channel,
                 response_tracker.clone(),
@@ -1188,11 +1192,13 @@ impl ChainExecutor {
                 Err(e) => (Err(e), None),
             }
         } else {
+            let prompt_timeout_secs = Some(config.read().await.get_prompt_timeout_secs());
             let result = execute_one_shot(
                 &op_id,
                 node_id,
                 &spec,
                 working_dir.clone(),
+                prompt_timeout_secs,
                 rabbitmq_channel,
                 response_tracker.clone(),
                 database.clone(),
@@ -1274,6 +1280,7 @@ impl ChainExecutor {
         rabbitmq_channel: &Channel,
         response_tracker: Arc<ResponseTracker>,
         database: Arc<Database>,
+        config: &Arc<TokioRwLock<ServiceConfig>>,
     ) -> Result<String> {
         let prompt_to_send = if active_session.is_some() {
             if is_first_in_session {
@@ -1310,18 +1317,21 @@ impl ChainExecutor {
         let session_yolo = session_group.as_ref().map(|sg| sg.yolo_mode).unwrap_or(false);
 
         if needs_temp_session {
-            let _temp_session = create_session(node_id, session_yolo, working_dir.clone(), rabbitmq_channel, response_tracker.clone())
+            let prompt_timeout_secs = Some(config.read().await.get_prompt_timeout_secs());
+            let _temp_session = create_session(node_id, session_yolo, working_dir.clone(), prompt_timeout_secs, rabbitmq_channel, response_tracker.clone())
                 .await
                 .context("Failed to create temp session for generic prompt")?;
         }
 
         let (_op_cancel_tx, op_cancel_rx) = oneshot::channel::<()>();
 
+        let prompt_timeout_secs = Some(config.read().await.get_prompt_timeout_secs());
         let result = execute_one_shot(
             &op_id,
             node_id,
             &spec,
             working_dir.clone(),
+            prompt_timeout_secs,
             rabbitmq_channel,
             response_tracker.clone(),
             database.clone(),

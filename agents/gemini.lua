@@ -13,7 +13,7 @@ local function is_session_file(name)
 end
 
 local function verify_binary(path)
-  local result = praxis.command_run({ program = path, args = { "--version" } })
+  local result = praxis.command_run({ program = path, args = { "--version" }, timeout_secs = 10 })
   if result.success then
     local version = (result.stdout or ""):match("(%d[%d%.%-a-zA-Z]*)")
     return true, version
@@ -271,6 +271,7 @@ local function run_create_session(ctx)
     process_path = ctx.process_path,
     working_dir = working_dir,
     yolo_mode = ctx.yolo_mode == true,
+    prompt_timeout_secs = ctx.prompt_timeout_secs,
     external_session_id = nil,
   }
 end
@@ -292,6 +293,7 @@ local function run_session_transact(state, prompt)
     stdin = prompt,
   }
 
+  spec.timeout_secs = state.prompt_timeout_secs or 1800
   local result = praxis.command_run_handle(spec, state.handle)
   if not result.success then
     error("Gemini command failed: " .. tostring(result.stderr or "unknown error"))
@@ -316,6 +318,7 @@ local function run_session_close(state)
       program = state.process_path,
       args = { "--delete-session", state.external_session_id },
       cwd = state.working_dir,
+      timeout_secs = 10,
     }
     pcall(praxis.command_run, spec)
   end

@@ -495,6 +495,9 @@ pub struct SessionContext {
     /// YOLO mode - skip permission prompts and auto-approve actions
     #[serde(default)]
     pub yolo_mode: bool,
+    /// Prompt timeout in seconds. If None, agents use their own default.
+    #[serde(default)]
+    pub prompt_timeout_secs: Option<u64>,
 }
 
 /// Session-related commands (requires an agent to be selected)

@@ -1240,6 +1240,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       switch (message.type) {
         case 'connected':
           dispatch({ type: 'SET_CONNECTED', connected: true, clientId: message.client_id, version: message.version });
+          wsClient.send({ type: 'config_get', keys: ['prompt_timeout_secs'] });
           break;
         case 'state_update':
           //
@@ -1282,7 +1283,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           //
           // Refresh centralized logging state after a config update.
           //
-          wsClient.send({ type: 'config_get', keys: ['application_logs_enabled'] });
+          wsClient.send({ type: 'config_get', keys: ['application_logs_enabled', 'prompt_timeout_secs'] });
           break;
         case 'op_def_list':
           dispatch({ type: 'SET_OPERATION_DEFS', definitions: message.definitions });

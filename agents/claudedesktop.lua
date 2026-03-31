@@ -43,6 +43,7 @@ local function verify_binary(path)
   local result = praxis.command_run({
     program = "powershell",
     args = { "-NoProfile", "-Command", "(Get-Item '" .. path .. "').VersionInfo.ProductVersion" },
+    timeout_secs = 10,
   })
   if result.success then
     local version = (result.stdout or ""):match("(%d[%d%.%-a-zA-Z]*)")

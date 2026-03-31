@@ -38,6 +38,8 @@ Sessions can be created with context:
 
 **Working Directory** - The directory where the agent operates. This affects file paths and command execution. When running semantic operations or chains from an agent with an active session, the session's working directory is used.
 
+**Prompt Timeout** - Maximum time in seconds a single prompt can run before the agent process is killed. Defaults to the service-wide `prompt_timeout_secs` setting (600 seconds). Can be overridden per-session using the `--timeout` (`-T`) flag in the CLI.
+
 **Session ID** - A unique identifier for tracking the session. Used internally for message routing.
 
 ## What Happens During a Session

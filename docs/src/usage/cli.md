@@ -68,7 +68,7 @@ Operation and chain management with two tabs:
 
 Configuration management:
 - **LLM** — model definitions, provider selection, API keys, and feature assignment (orchestrator, semantic ops, semantic parser, traffic parser)
-- **Service** — MCP server toggle, MCP port, logging, hunting row limits
+- **Service** — MCP server toggle, MCP port, logging, hunting row limits, prompt timeout
 - **About** — connection info
 
 ### Global Keybindings
@@ -125,7 +125,7 @@ agent session grep --node <prefix> <file> <pattern>   # Grep session file
 
 **Session Management:**
 ```bash
-session create --node <prefix> [--yolo] [--project <path>]
+session create --node <prefix> [--yolo] [--project <path>] [--timeout <secs>]
 session prompt --node <prefix> <text>
 session close --node <prefix>
 ```

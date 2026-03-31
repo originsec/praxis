@@ -456,6 +456,13 @@ fn render_service(f: &mut Frame, area: Rect, state: &SettingsState) {
         state.editing,
         &state.edit_buffer,
     ));
+    lines.push(setting_row(
+        "Prompt Timeout (secs)",
+        &state.prompt_timeout_secs,
+        state.selected == 4,
+        state.editing,
+        &state.edit_buffer,
+    ));
 
     lines.push(Line::raw(""));
     lines.push(section_header("Connection"));

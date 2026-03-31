@@ -104,6 +104,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [mcpServerEnabled, setMcpServerEnabled] = useState(true);
   const [mcpServerPort, setMcpServerPort] = useState('8585');
+  const [promptTimeoutSecs, setPromptTimeoutSecs] = useState('600');
   const [nodeDownloads, setNodeDownloads] = useState<NodeDownloadInfo[]>([]);
   const [isLoadingDownloads, setIsLoadingDownloads] = useState(false);
 
@@ -138,6 +139,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       'hunting_query_row_limit',
       'mcp_server_enabled',
       'mcp_server_port',
+      'prompt_timeout_secs',
     ]);
   }, [state.connected, getConfig]);
 
@@ -217,6 +219,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       setMcpServerEnabled(true);
     }
     setMcpServerPort(cfg.mcp_server_port || '8585');
+    setPromptTimeoutSecs(cfg.prompt_timeout_secs || '600');
   }, [state.config]);
 
   //
@@ -1133,6 +1136,26 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                     className={`w-28 ${inputCls}`}
                   />
                   <span className="text-[10px] text-muted">per table</span>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-subtle">
+                <h4 className="text-xs font-semibold text-highlight mb-1">Prompt Timeout</h4>
+                <p className="text-[10px] text-muted mb-2">Maximum time for LLM prompt execution</p>
+
+                <div className="flex items-center gap-2">
+                  <label className="text-[10px] text-muted">Prompt Timeout (secs)</label>
+                  <input
+                    type="number"
+                    value={promptTimeoutSecs}
+                    onChange={e => setPromptTimeoutSecs(e.target.value)}
+                    onBlur={() => {
+                      const n = parseInt(promptTimeoutSecs, 10);
+                      if (n > 0) setConfig({ prompt_timeout_secs: promptTimeoutSecs });
+                    }}
+                    min="1"
+                    className={`w-28 ${inputCls}`}
+                  />
                 </div>
               </div>
 
