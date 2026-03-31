@@ -131,18 +131,31 @@ pub async fn handle_session_command(
 
     match cmd {
         SessionCommand::Create { context } => {
-            match agent.create_session(&context) {
-                Some(session) => {
-                    let session_id = session.session_id().to_string();
-                    common::log_info!(
-                        "Created session: {} (yolo_mode={}, working_dir={:?})",
-                        session_id, context.yolo_mode, context.working_dir
-                    );
+            let agent = agent.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                agent.create_session(&context)
+                    .map(|session| {
+                        let session_id = session.session_id().to_string();
+                        common::log_info!(
+                            "Created session: {} (yolo_mode={}, working_dir={:?})",
+                            session_id, context.yolo_mode, context.working_dir
+                        );
+                        session_id
+                    })
+            }).await;
+
+            match result {
+                Ok(Some(session_id)) => {
                     NodeCommandResult::Session(SessionCommandResult::Created { session_id })
                 }
-                None => {
+                Ok(None) => {
                     NodeCommandResult::Error {
                         message: "Failed to create session".to_string(),
+                    }
+                }
+                Err(e) => {
+                    NodeCommandResult::Error {
+                        message: format!("Session creation task panicked: {}", e),
                     }
                 }
             }
@@ -157,8 +170,12 @@ pub async fn handle_session_command(
                     transaction_manager.cancel_all_for_session(session.session_id(), true);
                 }
 
-                agent.close_session();
-                common::log_info!("Closed session for agent {}", agent.short_name());
+                let agent_name = agent.short_name().to_string();
+                let agent = agent.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    agent.close_session();
+                }).await;
+                common::log_info!("Closed session for agent {}", agent_name);
                 NodeCommandResult::Session(SessionCommandResult::Closed)
             } else {
                 NodeCommandResult::Error {

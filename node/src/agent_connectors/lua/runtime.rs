@@ -91,6 +91,7 @@ struct CommandSpec {
     stdin: Option<String>,
     #[serde(default)]
     env: HashMap<String, String>,
+    timeout_secs: Option<u64>,
 }
 
 //
@@ -255,6 +256,7 @@ pub fn vm_create_session(
     let ctx_json = json!({
         "working_dir": context.working_dir,
         "yolo_mode": context.yolo_mode,
+        "prompt_timeout_secs": context.prompt_timeout_secs,
         "process_path": process_path,
     });
     let ctx = lua.to_value(&ctx_json).map_err(lua_error)?;
@@ -1068,34 +1070,125 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
                 if let Some(mut stdin_pipe) = child.stdin.take() {
                     use std::io::Write;
                     let _ = stdin_pipe.write_all(input.as_bytes());
+                    let _ = stdin_pipe.flush();
                 }
             }
 
             //
-            // Poll child process with reset flag checks so we can abort
-            // promptly when a reset signal arrives.
+            // Read stdout/stderr on background threads to prevent deadlock.
+            // If the child produces enough output to fill the pipe buffer
+            // (~64KB), it will block on write. We must drain the pipes
+            // concurrently with waiting for exit.
             //
 
-            let output = loop {
+            let stdout_pipe = child.stdout.take();
+            let stderr_pipe = child.stderr.take();
+
+            let stdout_thread = std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                if let Some(mut pipe) = stdout_pipe {
+                    use std::io::Read;
+                    let _ = pipe.read_to_end(&mut buf);
+                }
+                buf
+            });
+
+            let stderr_thread = std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                if let Some(mut pipe) = stderr_pipe {
+                    use std::io::Read;
+                    let _ = pipe.read_to_end(&mut buf);
+                }
+                buf
+            });
+
+            //
+            // Poll child process with reset and timeout checks so we can
+            // abort promptly when a reset signal arrives or the command
+            // exceeds its time limit.
+            //
+
+            let deadline = spec.timeout_secs.map(|s| {
+                std::time::Instant::now() + std::time::Duration::from_secs(s)
+            });
+
+            let status = loop {
                 if is_reset() {
                     let _ = child.kill();
                     let _ = child.wait();
                     pid_cell.store(0, Ordering::SeqCst);
                     return Err(anyhow!("reset signal received"));
                 }
+                if let Some(dl) = deadline {
+                    if std::time::Instant::now() >= dl {
+                        common::log_warn!(
+                            "command timed out after {}s: {}",
+                            spec.timeout_secs.unwrap_or(0),
+                            spec.program
+                        );
+                        crate::utils::terminate_process_tree(child.id());
+                        let _ = child.wait();
+                        pid_cell.store(0, Ordering::SeqCst);
+                        break Ok(None);
+                    }
+                }
                 match child.try_wait() {
-                    Ok(Some(_status)) => break child.wait_with_output(),
+                    Ok(Some(status)) => break Ok(Some(status)),
                     Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
                     Err(e) => break Err(e),
                 }
             };
             pid_cell.store(0, Ordering::SeqCst);
-            match output {
-                Ok(output) => {
-                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-                    if output.status.success() {
+            //
+            // Join reader threads with a timeout. Grandchild processes that
+            // inherited pipe FDs can keep them open after the child exits,
+            // blocking read_to_end indefinitely.
+            //
+
+            let join_deadline = std::time::Instant::now()
+                + std::time::Duration::from_secs(5);
+
+            let stdout_bytes = loop {
+                if stdout_thread.is_finished() {
+                    break stdout_thread.join().unwrap_or_default();
+                }
+                if std::time::Instant::now() >= join_deadline {
+                    common::log_warn!("stdout reader thread timed out, output may be incomplete");
+                    break Vec::new();
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            };
+
+            let stderr_bytes = loop {
+                if stderr_thread.is_finished() {
+                    break stderr_thread.join().unwrap_or_default();
+                }
+                if std::time::Instant::now() >= join_deadline {
+                    common::log_warn!("stderr reader thread timed out, output may be incomplete");
+                    break Vec::new();
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            };
+
+            match status {
+                Ok(None) => {
+                    json!({
+                        "success": false,
+                        "status": -1,
+                        "stdout": String::from_utf8_lossy(&stdout_bytes).to_string(),
+                        "stderr": format!(
+                            "command timed out after {}s",
+                            spec.timeout_secs.unwrap_or(0)
+                        ),
+                        "timed_out": true
+                    })
+                }
+                Ok(Some(status)) => {
+                    let stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
+                    let stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
+
+                    if status.success() {
                         let preview = if stdout.len() > 2000 {
                             let mut end = 2000;
                             while end > 0 && !stdout.is_char_boundary(end) { end -= 1; }
@@ -1107,14 +1200,14 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
                     } else {
                         common::log_warn!(
                             "command failed (status {}): {}",
-                            output.status.code().unwrap_or(-1),
+                            status.code().unwrap_or(-1),
                             if stderr.is_empty() { &stdout } else { &stderr }
                         );
                     }
 
                     json!({
-                        "success": output.status.success(),
-                        "status": output.status.code().unwrap_or_default(),
+                        "success": status.success(),
+                        "status": status.code().unwrap_or_default(),
                         "stdout": stdout,
                         "stderr": stderr
                     })

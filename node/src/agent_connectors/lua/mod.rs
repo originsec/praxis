@@ -103,15 +103,41 @@ impl Agent for LuaAgent {
     }
 
     async fn do_fingerprint(&self) -> bool {
-        let lua = self.vm.lock().unwrap();
-        let available = match runtime::vm_fingerprint_details(&lua) {
-            Ok(details) => {
+        let vm = Arc::clone(&self.vm);
+        let short_name = self.short_name.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let lua = match vm.try_lock() {
+                Ok(lua) => lua,
+                Err(_) => {
+                    common::log_warn!(
+                        "Lua VM busy for '{}', skipping fingerprint",
+                        short_name
+                    );
+                    return None;
+                }
+            };
+            Some(runtime::vm_fingerprint_details(&lua))
+        }).await;
+
+        let available = match result {
+            Ok(Some(Ok(details))) => {
                 *self.fingerprint_process_path.write().unwrap() = details.process_path;
                 *self.fingerprint_version.write().unwrap() = details.version;
                 details.available
             }
-            Err(e) => {
+            Ok(Some(Err(e))) => {
                 common::log_error!("Lua fingerprint failed for '{}': {}", self.short_name, e);
+                false
+            }
+            Ok(None) => {
+                //
+                // VM was busy. Return last known fingerprint result if we have
+                // one, otherwise report unavailable.
+                //
+                self.fingerprint_at.read().unwrap().is_some()
+            }
+            Err(e) => {
+                common::log_error!("Lua fingerprint task panicked for '{}': {}", self.short_name, e);
                 false
             }
         };
@@ -126,8 +152,8 @@ impl Agent for LuaAgent {
     fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>> {
         let process_path = self.fingerprint_process_path.read().unwrap().clone();
         common::log_info!(
-            "Lua agent '{}': create_session (process_path={:?}, working_dir={:?}, yolo={})",
-            self.short_name, process_path, context.working_dir, context.yolo_mode
+            "Lua agent '{}': create_session (process_path={:?}, working_dir={:?}, yolo={}, prompt_timeout={:?})",
+            self.short_name, process_path, context.working_dir, context.yolo_mode, context.prompt_timeout_secs
         );
         match LuaAgentSession::new(
             Arc::clone(&self.vm),
@@ -164,7 +190,10 @@ impl Agent for LuaAgent {
 
     fn read_session_content(&self, session_file: &str) -> Option<String> {
         if self.has_read_session_content {
-            let lua = self.vm.lock().unwrap();
+            let lua = match self.vm.try_lock() {
+                Ok(lua) => lua,
+                Err(_) => return std::fs::read_to_string(session_file).ok(),
+            };
             match runtime::vm_read_session_content(&lua, session_file) {
                 Ok(content) => return content,
                 Err(e) => {
@@ -205,18 +234,37 @@ impl AgentIntercept for LuaAgent {
 impl AgentRecon for LuaAgent {
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
         if is_semantic {
-            self.close_session();
+            let session = self.session.write().unwrap().take();
+            if let Some(session) = session {
+                let _ = tokio::task::spawn_blocking(move || {
+                    session.close();
+                }).await;
+            }
         }
 
-        let mut result = {
-            let process_path = self.fingerprint_process_path.read().unwrap().clone();
-            let lua = self.vm.lock().unwrap();
-            match runtime::vm_recon(&lua, is_semantic, process_path.as_deref()) {
-                Ok(result) => result,
-                Err(e) => {
-                    common::log_error!("Lua recon failed for '{}': {}", self.short_name, e);
+        let vm = Arc::clone(&self.vm);
+        let process_path = self.fingerprint_process_path.read().unwrap().clone();
+        let short_name = self.short_name.clone();
+
+        let mut result = match tokio::task::spawn_blocking(move || {
+            let lua = match vm.try_lock() {
+                Ok(lua) => lua,
+                Err(_) => {
+                    common::log_warn!("Lua VM busy for '{}', skipping recon", short_name);
                     return None;
                 }
+            };
+            Some(runtime::vm_recon(&lua, is_semantic, process_path.as_deref()))
+        }).await {
+            Ok(Some(Ok(result))) => result,
+            Ok(Some(Err(e))) => {
+                common::log_error!("Lua recon failed for '{}': {}", self.short_name, e);
+                return None;
+            }
+            Ok(None) => return None,
+            Err(e) => {
+                common::log_error!("Lua recon task panicked for '{}': {}", self.short_name, e);
+                return None;
             }
         };
 

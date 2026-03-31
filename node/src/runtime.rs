@@ -514,11 +514,34 @@ async fn listen_to_queues(
                 common::log_info!("Shutdown signal received, cleaning up...");
 
                 //
+                // Cancel all pending transactions and close the active session
+                // so child processes are killed before the runtime exits.
+                //
+
+                crate::agent_connectors::lua::runtime::signal_reset();
+                transaction_manager.cancel_all();
+
+                {
+                    let locked = selected_agent.lock().unwrap();
+                    if let Some(agent) = locked.as_ref() {
+                        if agent.has_session() {
+                            let agent = agent.clone();
+                            drop(locked);
+                            let _ = tokio::task::spawn_blocking(move || {
+                                agent.close_session();
+                            }).await;
+                        }
+                    }
+                }
+
+                //
                 // Disable intercept to restore system settings.
                 //
 
                 {
                     let mut state = node_state.write().await;
+                    state.terminal_manager.close_all();
+
                     if state.intercept_manager.is_enabled() {
                         common::log_info!("Disabling intercept and restoring system settings...");
                         if let Err(e) = state.intercept_manager.disable().await {
@@ -548,7 +571,11 @@ async fn listen_to_queues(
                     let locked = selected_agent.lock().unwrap();
                     if let Some(agent) = locked.as_ref() {
                         if agent.has_session() {
-                            agent.close_session();
+                            let agent = agent.clone();
+                            drop(locked);
+                            let _ = tokio::task::spawn_blocking(move || {
+                                agent.close_session();
+                            }).await;
                         }
                     }
                 }
@@ -828,7 +855,7 @@ async fn handle_command(
                     selected_short
                 );
             }
-            let result = handle_agent_command(cmd, registry, selected_agent).await;
+            let result = handle_agent_command(cmd, registry, selected_agent, transaction_manager).await;
 
             //
             // If this was a recon command, also send the result to the service for persistence.

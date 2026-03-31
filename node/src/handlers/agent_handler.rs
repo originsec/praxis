@@ -206,6 +206,7 @@ pub async fn handle_agent_command(
     cmd: AgentCommand,
     registry: &Arc<RwLock<AgentRegistry>>,
     selected_agent: &Arc<Mutex<Option<Arc<dyn Agent>>>>,
+    transaction_manager: &Arc<super::TransactionManager>,
 ) -> NodeCommandResult {
     match cmd {
         AgentCommand::Update => {
@@ -308,17 +309,22 @@ pub async fn handle_agent_command(
         }
         AgentCommand::Select { short_name } => {
             //
-            // Check if the requested agent is already selected - if so, just
-            // return success.
+            // Close any existing session first. This cancels pending
+            // transactions and releases the VM lock so fingerprint can
+            // proceed without blocking.
             //
             {
-                let locked = selected_agent.lock().unwrap();
-                if let Some(current) = locked.as_ref() {
-                    if current.short_name() == short_name {
-                        return NodeCommandResult::Agent(AgentCommandResult::Selected {
-                            short_name,
-                        });
+                let prev_agent = {
+                    let locked = selected_agent.lock().unwrap();
+                    locked.clone()
+                };
+                if let Some(prev) = prev_agent {
+                    if let Some(session) = prev.get_session() {
+                        transaction_manager.cancel_all_for_session(session.session_id(), true);
                     }
+                    let _ = tokio::task::spawn_blocking(move || {
+                        prev.close_session();
+                    }).await;
                 }
             }
 
@@ -336,15 +342,8 @@ pub async fn handle_agent_command(
                         };
                     }
 
-                    //
-                    // Close any existing session on the previously selected
-                    // agent.
-                    //
                     {
                         let mut locked = selected_agent.lock().unwrap();
-                        if let Some(prev_agent) = locked.as_ref() {
-                            prev_agent.close_session();
-                        }
                         *locked = Some(agent.clone());
                     }
 
