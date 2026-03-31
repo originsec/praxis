@@ -267,12 +267,12 @@ local function run_session_transact(state, prompt)
     program = state.process_path,
     args = args,
     stdin = prompt,
+    timeout_secs = state.prompt_timeout_secs or 1800,
   }
   if type(wd) == "string" and wd ~= "" then
     spec.cwd = wd
   end
 
-  spec.timeout_secs = state.prompt_timeout_secs or 1800
   local result = praxis.command_run_handle(spec, state.handle)
   if not result.success then
     error("Codex command failed: " .. tostring(result.stderr or "unknown error"))

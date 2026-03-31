@@ -193,9 +193,9 @@ local function run_session_transact(state, prompt)
     program = state.process_path,
     args = args,
     cwd = state.working_dir,
+    timeout_secs = state.prompt_timeout_secs or 1800,
   }
 
-  spec.timeout_secs = state.prompt_timeout_secs or 1800
   local result = praxis.command_run_handle(spec, state.handle)
   if not result.success then
     error("Droid command failed: " .. tostring(result.stderr or "unknown error"))

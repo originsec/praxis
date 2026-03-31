@@ -291,9 +291,9 @@ local function run_session_transact(state, prompt)
     args = args,
     cwd = state.working_dir,
     stdin = prompt,
+    timeout_secs = state.prompt_timeout_secs or 1800,
   }
 
-  spec.timeout_secs = state.prompt_timeout_secs or 1800
   local result = praxis.command_run_handle(spec, state.handle)
   if not result.success then
     error("Gemini command failed: " .. tostring(result.stderr or "unknown error"))
