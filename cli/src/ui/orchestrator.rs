@@ -189,7 +189,7 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                 format!("{} {}", spinner_char, tool_name)
             };
             lines.push(Line::from(Span::styled(label, Style::default().fg(MUTED))));
-        } else if !has_streaming_visible_text(&state.messages) {
+        } else if !last_message_has_visible_assistant_text(&state.messages) {
             let frame_idx = (std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -321,13 +321,13 @@ fn split_think_segments(raw: &str) -> Vec<ThinkSegment> {
     segments
 }
 
-fn has_streaming_visible_text(messages: &[ConversationEntry]) -> bool {
-    messages.iter().rev().any(|entry| match entry {
-        ConversationEntry::AssistantText(raw) => split_think_segments(raw).iter().any(|seg| {
-            matches!(seg, ThinkSegment::Visible(text) if !text.trim().is_empty())
-        }),
+fn last_message_has_visible_assistant_text(messages: &[ConversationEntry]) -> bool {
+    match messages.last() {
+        Some(ConversationEntry::AssistantText(raw)) => split_think_segments(raw)
+            .iter()
+            .any(|seg| matches!(seg, ThinkSegment::Visible(text) if !text.trim().is_empty())),
         _ => false,
-    })
+    }
 }
 
 fn build_tool_summary(tools: &[crate::app::ToolCall], expanded: bool, full: bool) -> Vec<Line<'static>> {
