@@ -3465,7 +3465,9 @@ name = "praxis_service"
 version = "0.9.16"
 dependencies = [
  "anyhow",
+ "async-stream",
  "async-trait",
+ "axum",
  "base64",
  "chrono",
  "dirs",
@@ -3483,6 +3485,7 @@ dependencies = [
  "similar",
  "sqlx",
  "tokio",
+ "tokio-tungstenite 0.24.0",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
@@ -5244,7 +5247,9 @@ checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
 dependencies = [
  "futures-util",
  "log",
+ "native-tls",
  "tokio",
+ "tokio-native-tls",
  "tungstenite 0.24.0",
 ]
 
@@ -5476,6 +5481,7 @@ dependencies = [
  "http",
  "httparse",
  "log",
+ "native-tls",
  "rand 0.8.5",
  "sha1",
  "thiserror 1.0.69",

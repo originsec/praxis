@@ -1,6 +1,7 @@
 //! Praxis Service - Orchestration service for the Praxis framework
 
 mod banner;
+mod claude_bridge;
 mod config;
 mod conversions;
 mod database;
@@ -582,6 +583,30 @@ async fn run_main_loop() -> Result<()> {
     }
 
     //
+    // Start Claude bridge managers if enabled in config.
+    //
+
+    let ccrv1_manager = Arc::new(claude_bridge::CcrV1Manager::new());
+    let ccrv2_manager = Arc::new(claude_bridge::CcrV2Manager::new());
+    {
+        let config = service_config.read().await;
+        if config.is_claude_ccrv1_enabled() {
+            let port = config.get_claude_ccrv1_port();
+            let url = rabbitmq_url();
+            if let Err(e) = ccrv1_manager.start(&url, port, node_registry.clone()).await {
+                common::log_error!("Failed to start Claude CCRv1 bridge: {}", e);
+            }
+        }
+        if config.is_claude_ccrv2_enabled() {
+            let port = config.get_claude_ccrv2_port();
+            let url = rabbitmq_url();
+            if let Err(e) = ccrv2_manager.start(&url, port, node_registry.clone()).await {
+                common::log_error!("Failed to start Claude CCRv2 bridge: {}", e);
+            }
+        }
+    }
+
+    //
     // Initialize and start the trigger engine.
     //
     let trigger_engine = Arc::new(trigger_engine::TriggerEngine::new(
@@ -617,6 +642,8 @@ async fn run_main_loop() -> Result<()> {
         orchestrator_manager,
         toolkit_manager,
         mcp_manager,
+        ccrv1_manager,
+        ccrv2_manager,
         trigger_engine: Some(trigger_engine.clone()),
         publish_channel,
         client_publish_channel,

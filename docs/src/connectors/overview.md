@@ -18,6 +18,7 @@ A connector handles four main capabilities:
 
 | Connector | Agent | Platform | Session Mode | Type |
 |-----------|-------|----------|--------------|------|
+| [`claude-bridge`](./claude-bridge.md) | Claude Code (inbound) | Any | CCRv1 (WS) / CCRv2 (HTTP+SSE) | Native |
 | [`claudecode`](./claude-code.md) | Claude Code CLI | Linux, Windows | CLI (PTY) | Lua |
 | [`claudedesktop`](./claude-desktop.md) | Claude Desktop | Windows only | DevTools (Electron) | Lua |
 | [`codex`](./codex.md) | Codex CLI (OpenAI) | Linux, Windows | CLI | Lua |

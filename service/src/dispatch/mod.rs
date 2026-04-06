@@ -14,6 +14,7 @@ use crate::agent_chat::AgentChatManager;
 use crate::config::ServiceConfig;
 use crate::database::Database;
 use crate::handlers::{ClientMessageHandler, NodeMessageHandler};
+use crate::claude_bridge::{CcrV1Manager, CcrV2Manager};
 use crate::mcp::McpServerManager;
 use crate::orchestrator::OrchestratorManager;
 use crate::semantic_ops::{ChainExecutor, NodeExecLock, ResponseTracker, SemanticOpsManager};
@@ -40,6 +41,8 @@ pub struct ServiceContext {
     pub orchestrator_manager: Arc<OrchestratorManager>,
     pub toolkit_manager: Arc<ToolkitManager>,
     pub mcp_manager: Arc<McpServerManager>,
+    pub ccrv1_manager: Arc<CcrV1Manager>,
+    pub ccrv2_manager: Arc<CcrV2Manager>,
     pub trigger_engine: Option<Arc<TriggerEngine>>,
 
     //

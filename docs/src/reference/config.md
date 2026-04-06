@@ -84,6 +84,19 @@ Access via **Settings** > **LLM Providers** in the web UI.
 |-----|---------|-------------|
 | `prompt_timeout_secs` | `600` | Maximum time in seconds a single agent prompt can run before the agent process is killed. Applies to all sessions unless overridden per-session. |
 
+### Claude Bridge Settings
+
+Access via **Settings** > **Claude Bridge** in the web UI.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `claude_ccrv1_enabled` | `false` | Enable the CCRv1 (WebSocket) bridge listener |
+| `claude_ccrv1_port` | `8586` | Port for CCRv1 WebSocket connections |
+| `claude_ccrv2_enabled` | `false` | Enable the CCRv2 (HTTP+SSE) bridge listener |
+| `claude_ccrv2_port` | `8587` | Port for CCRv2 HTTP connections |
+
+The Claude Bridge allows Claude Code to connect directly to the service as a virtual node, without deploying a full Praxis node. See [Claude Bridge](../connectors/claude-bridge.md) for protocol details and setup instructions.
+
 ### MCP Server Settings
 
 Access via **Settings** > **MCP Server** in the web UI.
@@ -313,6 +326,8 @@ For production and multi-instance deployments, use PostgreSQL. See [Database Con
 | Web UI | 8080 | HTTP |
 | WebSocket | 8080 | WS |
 | MCP SSE Server | 8585 | HTTP |
+| Claude Bridge CCRv1 | 8586 | WS |
+| Claude Bridge CCRv2 | 8587 | HTTP |
 | RabbitMQ | 5672 | AMQP |
 | RabbitMQ Management | 15672 | HTTP |
 | PostgreSQL | 5432 | TCP |

@@ -105,6 +105,10 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [mcpServerEnabled, setMcpServerEnabled] = useState(true);
   const [mcpServerPort, setMcpServerPort] = useState('8585');
   const [promptTimeoutSecs, setPromptTimeoutSecs] = useState('600');
+  const [ccrV1Enabled, setCcrV1Enabled] = useState(false);
+  const [ccrV1Port, setCcrV1Port] = useState('8586');
+  const [ccrV2Enabled, setCcrV2Enabled] = useState(false);
+  const [ccrV2Port, setCcrV2Port] = useState('8587');
   const [nodeDownloads, setNodeDownloads] = useState<NodeDownloadInfo[]>([]);
   const [isLoadingDownloads, setIsLoadingDownloads] = useState(false);
 
@@ -140,6 +144,10 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       'mcp_server_enabled',
       'mcp_server_port',
       'prompt_timeout_secs',
+      'claude_ccrv1_enabled',
+      'claude_ccrv1_port',
+      'claude_ccrv2_enabled',
+      'claude_ccrv2_port',
     ]);
   }, [state.connected, getConfig]);
 
@@ -220,6 +228,21 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     }
     setMcpServerPort(cfg.mcp_server_port || '8585');
     setPromptTimeoutSecs(cfg.prompt_timeout_secs || '600');
+
+    if (cfg.claude_ccrv1_enabled) {
+      const v = cfg.claude_ccrv1_enabled.toLowerCase();
+      setCcrV1Enabled(!(v === 'false' || v === '0' || v === 'no'));
+    } else {
+      setCcrV1Enabled(false);
+    }
+    setCcrV1Port(cfg.claude_ccrv1_port || '8586');
+    if (cfg.claude_ccrv2_enabled) {
+      const v = cfg.claude_ccrv2_enabled.toLowerCase();
+      setCcrV2Enabled(!(v === 'false' || v === '0' || v === 'no'));
+    } else {
+      setCcrV2Enabled(false);
+    }
+    setCcrV2Port(cfg.claude_ccrv2_port || '8587');
   }, [state.config]);
 
   //
@@ -374,6 +397,32 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     const port = parseInt(mcpServerPort, 10);
     if (port > 0 && port < 65536) {
       setConfig({ mcp_server_port: mcpServerPort });
+    }
+  };
+
+  const handleCcrV1Toggle = () => {
+    const next = !ccrV1Enabled;
+    setCcrV1Enabled(next);
+    setConfig({ claude_ccrv1_enabled: next ? 'true' : 'false' });
+  };
+
+  const handleCcrV1PortSave = () => {
+    const port = parseInt(ccrV1Port, 10);
+    if (port > 0 && port < 65536) {
+      setConfig({ claude_ccrv1_port: ccrV1Port });
+    }
+  };
+
+  const handleCcrV2Toggle = () => {
+    const next = !ccrV2Enabled;
+    setCcrV2Enabled(next);
+    setConfig({ claude_ccrv2_enabled: next ? 'true' : 'false' });
+  };
+
+  const handleCcrV2PortSave = () => {
+    const port = parseInt(ccrV2Port, 10);
+    if (port > 0 && port < 65536) {
+      setConfig({ claude_ccrv2_port: ccrV2Port });
     }
   };
 
@@ -1094,6 +1143,63 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                       <span className="text-[10px] text-muted font-mono">http://localhost:{mcpServerPort}/sse</span>
                     </div>
                   )}
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-subtle">
+                <h4 className="text-xs font-semibold text-highlight mb-1">Claude Bridge</h4>
+                <p className="text-[10px] text-muted mb-2">Bridge protocols for Claude SDK connections</p>
+
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <button onClick={handleCcrV1Toggle} className="flex items-center gap-1.5 text-xs text-muted hover:text-highlight transition-colors">
+                      {ccrV1Enabled
+                        ? <CircleCheck size={14} className="text-[var(--accent-success)]" />
+                        : <Circle size={14} className="text-[var(--text-secondary)]" />}
+                      <span>CCRv1 (WebSocket) {ccrV1Enabled ? 'Enabled' : 'Disabled'}</span>
+                    </button>
+
+                    {ccrV1Enabled && (
+                      <div className="flex items-center gap-2 pl-5">
+                        <label className="text-[10px] text-muted">Port</label>
+                        <input
+                          type="number"
+                          value={ccrV1Port}
+                          onChange={e => setCcrV1Port(e.target.value)}
+                          onBlur={handleCcrV1PortSave}
+                          min="1"
+                          max="65535"
+                          className={`w-20 ${inputCls}`}
+                        />
+                        <span className="text-[10px] text-muted font-mono">ws://localhost:{ccrV1Port}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <button onClick={handleCcrV2Toggle} className="flex items-center gap-1.5 text-xs text-muted hover:text-highlight transition-colors">
+                      {ccrV2Enabled
+                        ? <CircleCheck size={14} className="text-[var(--accent-success)]" />
+                        : <Circle size={14} className="text-[var(--text-secondary)]" />}
+                      <span>CCRv2 (HTTP/SSE) {ccrV2Enabled ? 'Enabled' : 'Disabled'}</span>
+                    </button>
+
+                    {ccrV2Enabled && (
+                      <div className="flex items-center gap-2 pl-5">
+                        <label className="text-[10px] text-muted">Port</label>
+                        <input
+                          type="number"
+                          value={ccrV2Port}
+                          onChange={e => setCcrV2Port(e.target.value)}
+                          onBlur={handleCcrV2PortSave}
+                          min="1"
+                          max="65535"
+                          className={`w-20 ${inputCls}`}
+                        />
+                        <span className="text-[10px] text-muted font-mono">http://localhost:{ccrV2Port}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 

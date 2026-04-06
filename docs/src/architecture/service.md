@@ -344,6 +344,20 @@ A "Reset Defaults" operation clears all scripts and re-inserts the embedded defa
 
 Agent version information (extracted during fingerprinting) is included in the `DiscoveredAgent` data reported by nodes and displayed in the web UI.
 
+## Claude Bridge
+
+The service can optionally run Claude Bridge listeners that accept inbound connections from Claude Code instances. Each connection creates a virtual node with an active session, allowing Claude to be controlled through Praxis without deploying a full node.
+
+Two protocol versions are supported:
+
+**CCRv1** - WebSocket listener with bidirectional NDJSON. Simpler protocol, fewer requirements on the Claude side.
+
+**CCRv2** - HTTP server with SSE for server-to-client messages and POST for client-to-server messages. Includes epoch-based versioning and heartbeat-based disconnect detection.
+
+Both bridges are managed by dedicated manager structs (`CcrV1Manager`, `CcrV2Manager`) that start and stop based on configuration changes. When enabled, they bind to their configured ports and accept connections. Each connection runs a `BridgeSession` that handles the protocol handshake, registers a virtual node via RabbitMQ, and relays messages between the Claude worker and the Praxis service.
+
+Bridge nodes only support the Session capability. They do not support interception, recon, or terminal access. See [Claude Bridge](../connectors/claude-bridge.md) for protocol details and operator setup.
+
 ## Startup Sequence
 
 1. Load configuration from database
@@ -354,8 +368,9 @@ Agent version information (extracted during fingerprinting) is included in the `
 6. Initialize semantic ops manager
 7. Initialize chain executor
 8. Initialize trigger engine and start scheduler
-9. Request node re-registration (broadcast)
-10. Begin processing messages
+9. Start Claude Bridge listeners (if enabled)
+10. Request node re-registration (broadcast)
+11. Begin processing messages
 
 ## Error Handling
 

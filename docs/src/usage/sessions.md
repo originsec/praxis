@@ -78,6 +78,18 @@ Semantic operations always create their own dedicated sessions. When an operatio
 
 **Warning**: Running an operation will implicitly end any open interactive session you have with that agent. Interactive sessions and operation sessions should not be expected to run concurrently - an agent supports one session at a time.
 
+## Bridge Sessions
+
+When Claude Code connects to Praxis via the [Claude Bridge](../connectors/claude-bridge.md), a session is created automatically as part of the connection. Bridge sessions differ from regular sessions:
+
+- The session starts immediately when Claude connects (no manual creation needed)
+- Permissions are always bypassed (YOLO mode) since the bridge sets `bypassPermissions` during handshake
+- Only one prompt can be in-flight at a time
+- Closing the session sends an `end_session` request to Claude and terminates the connection
+- The virtual node is deregistered when the session ends
+
+Bridge sessions are otherwise used the same way -- you can send prompts, run operations, and include them in chains.
+
 ## Multiple Sessions
 
 Each agent can have one active session at a time. To work with a different agent:

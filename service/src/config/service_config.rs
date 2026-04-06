@@ -35,6 +35,34 @@ pub const MCP_SERVER_DEFAULT_PORT: u16 = 8585;
 pub const PROMPT_TIMEOUT_SECS: &str = "prompt_timeout_secs";
 pub const PROMPT_TIMEOUT_SECS_DEFAULT: u64 = 600;
 
+/// Claude bridge configuration keys
+pub const CLAUDE_CCRV1_ENABLED: &str = "claude_ccrv1_enabled";
+pub const CLAUDE_CCRV1_PORT: &str = "claude_ccrv1_port";
+pub const CLAUDE_CCRV2_ENABLED: &str = "claude_ccrv2_enabled";
+pub const CLAUDE_CCRV2_PORT: &str = "claude_ccrv2_port";
+
+/// Default Claude bridge ports
+pub const CLAUDE_CCRV1_DEFAULT_PORT: u16 = 8586;
+pub const CLAUDE_CCRV2_DEFAULT_PORT: u16 = 8587;
+
+/// All recognized config keys for validation purposes.
+pub const KNOWN_CONFIG_KEYS: &[&str] = &[
+    LLM_MODEL_DEFINITIONS,
+    LLM_FEATURE_SEMANTIC_PARSER,
+    LLM_FEATURE_TRAFFIC_PARSER,
+    LLM_FEATURE_SEMANTIC_OPS,
+    LLM_FEATURE_ORCHESTRATOR,
+    APPLICATION_LOGS_ENABLED,
+    HUNTING_QUERY_ROW_LIMIT,
+    MCP_SERVER_ENABLED,
+    MCP_SERVER_PORT,
+    PROMPT_TIMEOUT_SECS,
+    CLAUDE_CCRV1_ENABLED,
+    CLAUDE_CCRV1_PORT,
+    CLAUDE_CCRV2_ENABLED,
+    CLAUDE_CCRV2_PORT,
+];
+
 /// A model definition stored in config
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -160,6 +188,26 @@ impl ServiceConfig {
         self.get(PROMPT_TIMEOUT_SECS)
             .and_then(|s| s.parse().ok())
             .unwrap_or(PROMPT_TIMEOUT_SECS_DEFAULT)
+    }
+
+    pub fn is_claude_ccrv1_enabled(&self) -> bool {
+        self.get_bool(CLAUDE_CCRV1_ENABLED, false)
+    }
+
+    pub fn get_claude_ccrv1_port(&self) -> u16 {
+        self.get(CLAUDE_CCRV1_PORT)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(CLAUDE_CCRV1_DEFAULT_PORT)
+    }
+
+    pub fn is_claude_ccrv2_enabled(&self) -> bool {
+        self.get_bool(CLAUDE_CCRV2_ENABLED, false)
+    }
+
+    pub fn get_claude_ccrv2_port(&self) -> u16 {
+        self.get(CLAUDE_CCRV2_PORT)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(CLAUDE_CCRV2_DEFAULT_PORT)
     }
 
 }

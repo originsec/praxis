@@ -34,7 +34,10 @@ dirs = "5.0"
 hostname = "0.4"
 rmcp = { version = "0.8", features = ["server", "transport-sse-server", "client", "transport-sse-client-reqwest", "schemars"] }
 async-trait = "0.1"
+async-stream = "0.3"
+axum = { version = "0.8", features = ["json"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 base64 = "0.22"
 nom = "7"
 similar = "2.6"
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }

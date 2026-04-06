@@ -8,7 +8,11 @@ use common::{
     CLIENT_BROADCAST_EXCHANGE, NODE_BROADCAST_EXCHANGE,
 };
 
-use crate::config::service_config::{APPLICATION_LOGS_ENABLED, MCP_SERVER_ENABLED, MCP_SERVER_PORT};
+use crate::config::service_config::{
+    APPLICATION_LOGS_ENABLED, CLAUDE_CCRV1_ENABLED, CLAUDE_CCRV1_PORT,
+    CLAUDE_CCRV2_ENABLED, CLAUDE_CCRV2_PORT, KNOWN_CONFIG_KEYS,
+    MCP_SERVER_ENABLED, MCP_SERVER_PORT,
+};
 use crate::conversions::{to_common as convert_chain_element, to_database as convert_msg_chain_element};
 use crate::database::{self, OperationDefinition};
 use crate::messaging::{broadcast_state_to_clients, send_to_client, send_to_node};
@@ -726,7 +730,12 @@ async fn handle_config_set(
         let mut save_error = None;
         let mut event_logging_enabled: Option<bool> = None;
         let mut mcp_server_changed = false;
+        let mut ccrv1_changed = false;
+        let mut ccrv2_changed = false;
         for (key, value) in values {
+            if !KNOWN_CONFIG_KEYS.contains(&key.as_str()) {
+                common::log_warn!("Setting unrecognized config key: '{}'", key);
+            }
             if key == APPLICATION_LOGS_ENABLED {
                 let normalized = value.to_lowercase();
                 let enabled = !(normalized == "false" || normalized == "0" || normalized == "no");
@@ -734,6 +743,12 @@ async fn handle_config_set(
             }
             if key == MCP_SERVER_ENABLED || key == MCP_SERVER_PORT {
                 mcp_server_changed = true;
+            }
+            if key == CLAUDE_CCRV1_ENABLED || key == CLAUDE_CCRV1_PORT {
+                ccrv1_changed = true;
+            }
+            if key == CLAUDE_CCRV2_ENABLED || key == CLAUDE_CCRV2_PORT {
+                ccrv2_changed = true;
             }
             if let Err(e) = config.set(key, value).await {
                 save_error = Some(e);
@@ -776,6 +791,40 @@ async fn handle_config_set(
                 } else {
                     common::log_info!("MCP server config changed, stopping server");
                     ctx.mcp_manager.stop().await;
+                }
+            }
+
+            //
+            // Handle Claude CCRv1 bridge start/stop if enabled/port changed.
+            //
+            if ccrv1_changed {
+                if config.is_claude_ccrv1_enabled() {
+                    let port = config.get_claude_ccrv1_port();
+                    let url = common::rabbitmq_url();
+                    common::log_info!("Claude CCRv1 config changed, starting on port {}", port);
+                    if let Err(e) = ctx.ccrv1_manager.start(&url, port, ctx.node_registry.clone()).await {
+                        common::log_error!("Failed to start Claude CCRv1 bridge: {}", e);
+                    }
+                } else {
+                    common::log_info!("Claude CCRv1 config changed, stopping bridge");
+                    ctx.ccrv1_manager.stop();
+                }
+            }
+
+            //
+            // Handle Claude CCRv2 bridge start/stop if enabled/port changed.
+            //
+            if ccrv2_changed {
+                if config.is_claude_ccrv2_enabled() {
+                    let port = config.get_claude_ccrv2_port();
+                    let url = common::rabbitmq_url();
+                    common::log_info!("Claude CCRv2 config changed, starting on port {}", port);
+                    if let Err(e) = ctx.ccrv2_manager.start(&url, port, ctx.node_registry.clone()).await {
+                        common::log_error!("Failed to start Claude CCRv2 bridge: {}", e);
+                    }
+                } else {
+                    common::log_info!("Claude CCRv2 config changed, stopping bridge");
+                    ctx.ccrv2_manager.stop();
                 }
             }
         }

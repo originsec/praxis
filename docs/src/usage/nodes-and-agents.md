@@ -37,6 +37,17 @@ Privileged nodes display a **ROOT** badge in the web UI and CLI. Some features �
 
 In the web UI, the left sidebar shows all connected nodes. Click a node to select it. The main panel then shows that node's details and agents.
 
+### Bridge Nodes
+
+In addition to deployed nodes, Praxis supports **bridge nodes** -- virtual nodes created when Claude Code connects directly to the service using the Claude Bridge. Bridge nodes appear in the UI alongside regular nodes but have some differences:
+
+- They only support sessions (no interception, recon, or terminal)
+- They are ephemeral -- they disappear when Claude disconnects
+- Sessions are automatically active in YOLO mode
+- The node type shows as `claude-ccrv1` or `claude-ccrv2`
+
+Bridge nodes are created by enabling the Claude Bridge in Settings and launching Claude Code with the appropriate environment variables. See [Claude Bridge](../connectors/claude-bridge.md) for setup details.
+
 ### Removing Nodes
 
 If a node disconnects and you want to remove it from the list, click the remove button. This clears the node from the service's tracking. If the node reconnects, it will appear again.
@@ -111,14 +122,14 @@ The service periodically requests updates from nodes. You can also:
 
 Different agents support different features:
 
-| Feature | Claude Code | Claude Desktop | Codex | Gemini | M365 Copilot |
-|---------|-------------|----------------|-------|--------|--------------|
-| Static Recon | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Semantic Recon | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Sessions | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Config Editing | ✓ | ✓ | ✓ | ✓ | - |
-| MCP Discovery | ✓ | ✓ | ✓ | ✓ | - |
-| Traffic Intercept | ✓ | ✓ | - | ✓ | ✓ |
+| Feature | Claude Code | Claude Bridge | Claude Desktop | Codex | Gemini | M365 Copilot |
+|---------|-------------|---------------|----------------|-------|--------|--------------|
+| Static Recon | ✓ | - | ✓ | ✓ | ✓ | ✓ |
+| Semantic Recon | ✓ | - | ✓ | ✓ | ✓ | ✓ |
+| Sessions | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Config Editing | ✓ | - | ✓ | ✓ | ✓ | - |
+| MCP Discovery | ✓ | - | ✓ | ✓ | ✓ | - |
+| Traffic Intercept | ✓ | - | ✓ | - | ✓ | ✓ |
 
 ## Troubleshooting
 
