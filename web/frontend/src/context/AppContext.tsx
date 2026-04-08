@@ -1239,6 +1239,7 @@ interface AppContextValue {
   //
   addAgentSessionMessage: (sessionId: string, message: AgentSessionMessage) => void;
   clearAgentSessionMessages: (sessionId: string) => void;
+  clearAgentSessionStreaming: (nodeId: string) => void;
   //
   // Chain operations.
   //
@@ -1894,6 +1895,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'AGENT_SESSION_CLEAR_MESSAGES', sessionId });
   }, []);
 
+  const clearAgentSessionStreaming = useCallback((nodeId: string) => {
+    dispatch({ type: 'AGENT_SESSION_STREAMING_CLEAR', nodeId });
+  }, []);
+
   //
   // Chain operations.
   //
@@ -2161,6 +2166,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     clearInterceptRuleError,
     addAgentSessionMessage,
     clearAgentSessionMessages,
+    clearAgentSessionStreaming,
     //
     // Chain operations.
     //

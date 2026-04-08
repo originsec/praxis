@@ -16,7 +16,7 @@ interface AgentSessionModalProps {
 }
 
 export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: AgentSessionModalProps) {
-  const { state, sendCommand, addAgentSessionMessage } = useApp();
+  const { state, sendCommand, addAgentSessionMessage, clearAgentSessionStreaming } = useApp();
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -64,6 +64,7 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
     const text = input.trim();
     setInput('');
     setIsLoading(true);
+    clearAgentSessionStreaming(nodeId);
 
     addAgentSessionMessage(sessionId, {
       role: 'user',
@@ -92,6 +93,7 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
       }
     } finally {
       setIsLoading(false);
+      clearAgentSessionStreaming(nodeId);
       inputRef.current?.focus();
     }
   };
