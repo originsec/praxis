@@ -459,6 +459,7 @@ impl AcpClient {
     }
 
     pub fn close(&mut self) {
+        tracing::debug!("ACP client closing subprocess");
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
