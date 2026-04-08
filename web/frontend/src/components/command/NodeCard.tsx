@@ -345,7 +345,7 @@ export function NodeCard({ node }: NodeCardProps) {
     try {
       await handleSelectAgent(shortName);
       await sendCommand(node.node_id, {
-        Session: { Create: { context: { yolo_mode: yoloMode, working_dir: workingDir, prompt_timeout_secs: state.config.prompt_timeout_secs ? parseInt(state.config.prompt_timeout_secs, 10) : null } } },
+        Session: { Create: { context: { yolo_mode: yoloMode, working_dir: workingDir, prompt_timeout_secs: state.config.prompt_timeout_secs ? parseInt(state.config.prompt_timeout_secs, 10) : null, interactive: true } } },
       });
       setShowSessionModal({ agentShortName: shortName });
     } finally {

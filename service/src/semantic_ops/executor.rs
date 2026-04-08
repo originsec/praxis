@@ -131,6 +131,7 @@ pub async fn create_session(
         working_dir,
         yolo_mode,
         prompt_timeout_secs,
+        interactive: false,
     };
 
     let request = CommandRequest {

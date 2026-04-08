@@ -110,6 +110,7 @@ impl AcpClient {
         update_tx: &tokio::sync::mpsc::UnboundedSender<SessionUpdateKind>,
         permission_rx: &std::sync::mpsc::Receiver<(String, PermissionDecision)>,
         yolo: bool,
+        interactive: bool,
         cancel_flag: &AtomicBool,
     ) -> Result<String> {
         let session_id = self
@@ -190,6 +191,8 @@ impl AcpClient {
                                 update_tx,
                                 permission_rx,
                                 yolo,
+                                interactive,
+                                cancel_flag,
                             )?;
                         }
                     }
@@ -282,6 +285,8 @@ impl AcpClient {
         update_tx: &tokio::sync::mpsc::UnboundedSender<SessionUpdateKind>,
         permission_rx: &std::sync::mpsc::Receiver<(String, PermissionDecision)>,
         yolo: bool,
+        interactive: bool,
+        cancel_flag: &AtomicBool,
     ) -> Result<()> {
         let perm: PermissionRequestParams = serde_json::from_value(params)
             .context("Failed to parse permission request")?;
@@ -293,10 +298,6 @@ impl AcpClient {
             .raw_input
             .map(|v| v.to_string())
             .unwrap_or_default();
-
-        //
-        // Find the "allow always" option, or fall back to the first allow-like option.
-        //
 
         let allow_always_id = perm
             .options
@@ -319,7 +320,7 @@ impl AcpClient {
 
         if yolo {
             //
-            // Auto-approve with "allow always" if available, otherwise "allow once".
+            // Yolo: auto-approve with "allow always".
             //
 
             let option_id = allow_always_id
@@ -329,9 +330,18 @@ impl AcpClient {
             if let Some(id) = request_id {
                 self.send_permission_response(id, &option_id)?;
             }
+        } else if !interactive {
+            //
+            // Non-interactive, non-yolo: auto-deny immediately.
+            //
+
+            let option_id = deny_id.unwrap_or_default();
+            if let Some(id) = request_id {
+                self.send_permission_response(id, &option_id)?;
+            }
         } else {
             //
-            // Forward to client and wait for user decision.
+            // Interactive, non-yolo: forward to client and wait for user decision.
             //
 
             let _ = update_tx.send(SessionUpdateKind::PermissionRequest {
@@ -341,12 +351,27 @@ impl AcpClient {
             });
 
             //
-            // Block until we get a response or timeout (60s).
+            // Poll with short intervals so cancellation can interrupt the wait.
             //
 
-            let decision = permission_rx
-                .recv_timeout(std::time::Duration::from_secs(60))
-                .unwrap_or((tool_call_id.clone(), PermissionDecision::Deny));
+            let mut decision = (tool_call_id.clone(), PermissionDecision::Deny);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            loop {
+                match permission_rx.recv_timeout(std::time::Duration::from_millis(250)) {
+                    Ok(d) => {
+                        decision = d;
+                        break;
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        if cancel_flag.load(Ordering::Relaxed)
+                            || std::time::Instant::now() >= deadline
+                        {
+                            break;
+                        }
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            }
 
             let option_id = match decision.1 {
                 PermissionDecision::AllowAlways => {

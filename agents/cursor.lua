@@ -510,12 +510,13 @@ return {
       process_path = pp,
       working_dir = working_dir,
       yolo_mode = ctx.yolo_mode == true,
+      interactive = ctx.interactive == true,
       prompt_timeout_secs = ctx.prompt_timeout_secs,
     }
   end,
 
   session_transact = function(_ctx, state, prompt)
-    local response = praxis.acp_prompt(state.acp_handle, prompt, state.yolo_mode or false)
+    local response = praxis.acp_prompt(state.acp_handle, prompt, state.yolo_mode or false, state.interactive or false)
     return {
       response = response,
       state = state,

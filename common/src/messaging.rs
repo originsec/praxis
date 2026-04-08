@@ -498,6 +498,11 @@ pub struct SessionContext {
     /// Prompt timeout in seconds. If None, agents use their own default.
     #[serde(default)]
     pub prompt_timeout_secs: Option<u64>,
+    /// Interactive session — a human can respond to permission requests.
+    /// Non-interactive sessions (e.g. orchestrator-driven) auto-deny
+    /// permissions unless yolo_mode is enabled. Default: false.
+    #[serde(default)]
+    pub interactive: bool,
 }
 
 /// Session-related commands (requires an agent to be selected)

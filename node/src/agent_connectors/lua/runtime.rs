@@ -257,6 +257,7 @@ pub fn vm_create_session(
         "working_dir": context.working_dir,
         "yolo_mode": context.yolo_mode,
         "prompt_timeout_secs": context.prompt_timeout_secs,
+        "interactive": context.interactive,
         "process_path": process_path,
     });
     let ctx = lua.to_value(&ctx_json).map_err(lua_error)?;
@@ -708,7 +709,7 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
     praxis
         .set(
             "acp_prompt",
-            lua.create_function(|_, (handle, prompt, yolo): (String, String, bool)| {
+            lua.create_function(|_, (handle, prompt, yolo, interactive): (String, String, bool, bool)| {
                 //
                 // Retrieve channels from the global registries. These are set up
                 // by the session handler before calling transact().
@@ -748,7 +749,7 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
                 let cancel_flag = std::sync::atomic::AtomicBool::new(false);
 
                 crate::acp::with_client(&handle, |client| {
-                    client.send_prompt(&prompt, &update_tx, &permission_rx, yolo, &cancel_flag)
+                    client.send_prompt(&prompt, &update_tx, &permission_rx, yolo, interactive, &cancel_flag)
                 })
                 .ok_or_else(|| mlua::Error::RuntimeError(format!("ACP handle '{}' not found", handle)))?
                 .map_err(|e| mlua::Error::RuntimeError(format!("ACP prompt failed: {}", e)))

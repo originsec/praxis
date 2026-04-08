@@ -2042,6 +2042,7 @@ impl App {
                             working_dir,
                             yolo_mode: yolo,
                             prompt_timeout_secs,
+                            interactive: true,
                         },
                     }),
                 )
