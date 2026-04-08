@@ -137,6 +137,7 @@ impl AcpClient {
         };
 
         let prompt_id = self.next_id;
+        tracing::debug!("ACP session/prompt id={} session={}", prompt_id, session_id);
         self.send_request_no_wait(
             "session/prompt",
             Some(serde_json::to_value(params)?),
@@ -166,6 +167,11 @@ impl AcpClient {
                 }
             };
 
+            tracing::debug!(
+                "ACP recv: id={:?} method={:?} has_result={} has_error={}",
+                msg.id, msg.method, msg.result.is_some(), msg.error.is_some()
+            );
+
             //
             // Response to our prompt request — we're done.
             //
@@ -174,6 +180,7 @@ impl AcpClient {
                 if let Some(err) = msg.error {
                     bail!("ACP prompt failed: {}", err);
                 }
+                tracing::debug!("ACP prompt complete, assembled {} bytes", assembled_text.len());
                 break;
             }
 
@@ -182,6 +189,7 @@ impl AcpClient {
             //
 
             if let Some(method) = &msg.method {
+                tracing::debug!("ACP notification: {}", method);
                 match method.as_str() {
                     "session/update" => {
                         if let Some(params) = msg.params {
