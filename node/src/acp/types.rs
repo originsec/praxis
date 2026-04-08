@@ -107,7 +107,6 @@ pub struct ClientCapabilities {}
 #[serde(rename_all = "camelCase")]
 pub struct SessionNewParams {
     pub cwd: String,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers: Vec<Value>,
 }
 
