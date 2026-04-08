@@ -154,9 +154,9 @@ pub struct SessionUpdateContent {
     #[serde(default)]
     #[allow(dead_code)]
     pub role: Option<String>,
-    #[serde(default)]
+    /// Content can be a single block or an array of blocks depending on agent.
+    #[serde(default, deserialize_with = "deserialize_content_blocks")]
     pub content: Option<Vec<ContentBlock>>,
-    /// For tool_call updates.
     #[serde(default)]
     pub tool_call_id: Option<String>,
     #[serde(default)]
@@ -166,6 +166,30 @@ pub struct SessionUpdateContent {
     #[serde(default)]
     #[allow(dead_code)]
     pub session_update: Option<String>,
+}
+
+fn deserialize_content_blocks<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<ContentBlock>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value: Option<Value> = Option::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(Value::Array(arr)) => {
+            let blocks: Vec<ContentBlock> = arr
+                .into_iter()
+                .filter_map(|v| serde_json::from_value(v).ok())
+                .collect();
+            Ok(Some(blocks))
+        }
+        Some(obj @ Value::Object(_)) => match serde_json::from_value::<ContentBlock>(obj) {
+            Ok(block) => Ok(Some(vec![block])),
+            Err(_) => Ok(None),
+        },
+        _ => Ok(None),
+    }
 }
 
 #[derive(Debug, Deserialize)]
