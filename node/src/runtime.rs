@@ -915,11 +915,19 @@ async fn handle_command(
                     //
 
                     let streaming = session.supports_streaming();
+                    common::log_debug!(
+                        "Prompt streaming={} for transaction {}",
+                        streaming, transaction_id
+                    );
                     if streaming {
                         if let Some(acp_handle) = session.as_any()
                             .downcast_ref::<crate::agent_connectors::lua::LuaAgentSession>()
                             .and_then(|s| s.acp_handle())
                         {
+                            common::log_debug!(
+                                "Registering ACP channels for handle '{}' transaction '{}'",
+                                acp_handle, transaction_id
+                            );
                             let (update_tx, mut update_rx) =
                                 tokio::sync::mpsc::unbounded_channel::<common::SessionUpdateKind>();
                             let (perm_tx, perm_rx) =

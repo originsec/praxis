@@ -93,6 +93,7 @@ impl AgentSession for LuaAgentSession {
         //
 
         if let Some(handle) = state.get("acp_handle").and_then(|v| v.as_str()) {
+            common::log_debug!("Closing ACP client for handle '{}'", handle);
             crate::acp::cleanup_channels(handle);
             if let Some(mut client) = crate::acp::remove_client(handle) {
                 client.close();

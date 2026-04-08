@@ -717,6 +717,10 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
 
                 let update_tx = crate::acp::take_update_sender(&handle);
                 let permission_rx = crate::acp::take_permission_receiver(&handle);
+                tracing::debug!(
+                    "acp_prompt: handle='{}' has_update_tx={} has_permission_rx={}",
+                    handle, update_tx.is_some(), permission_rx.is_some()
+                );
 
                 //
                 // If no channels are registered (CLI-mode fallback or misconfigured),
