@@ -241,6 +241,7 @@ pub struct PermissionOption {
     pub option_id: String,
     /// Cursor uses "name", spec uses "label".
     #[serde(alias = "label")]
+    #[allow(dead_code)]
     pub name: String,
 }
 
