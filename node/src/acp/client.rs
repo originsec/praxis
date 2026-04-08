@@ -236,7 +236,10 @@ impl AcpClient {
         assembled_text: &mut String,
         update_tx: &tokio::sync::mpsc::UnboundedSender<SessionUpdateKind>,
     ) {
-        let Ok(update_params) = serde_json::from_value::<SessionUpdateParams>(params) else {
+        tracing::debug!("ACP session/update raw: {}", params);
+
+        let Ok(update_params) = serde_json::from_value::<SessionUpdateParams>(params.clone()) else {
+            tracing::warn!("ACP session/update: failed to parse params: {}", params);
             return;
         };
 
