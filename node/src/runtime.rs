@@ -941,6 +941,10 @@ async fn handle_command(
 
                             tokio::spawn(async move {
                                 while let Some(update) = update_rx.recv().await {
+                                    common::log_debug!(
+                                        "Forwarding session update for transaction {}",
+                                        fwd_transaction_id
+                                    );
                                     let session_update = common::SessionUpdate {
                                         node_id: fwd_node_id.clone(),
                                         client_id: fwd_client_id.clone(),
@@ -952,6 +956,7 @@ async fn handle_command(
                                         common::log_error!("Failed to forward session update: {}", e);
                                     }
                                 }
+                                common::log_debug!("Session update forwarder ended for {}", fwd_transaction_id);
                             });
                         }
                     }
