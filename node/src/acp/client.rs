@@ -308,6 +308,7 @@ impl AcpClient {
         interactive: bool,
         cancel_flag: &AtomicBool,
     ) -> Result<()> {
+        tracing::debug!("ACP permission request raw: {}", params);
         let perm: PermissionRequestParams = serde_json::from_value(params)
             .context("Failed to parse permission request")?;
 
@@ -364,6 +365,10 @@ impl AcpClient {
             // Interactive, non-yolo: forward to client and wait for user decision.
             //
 
+            tracing::debug!(
+                "ACP permission: forwarding to client (tool={}, interactive={})",
+                tool_name, interactive
+            );
             let _ = update_tx.send(SessionUpdateKind::PermissionRequest {
                 permission_id: tool_call_id.clone(),
                 tool_name: tool_name.clone(),

@@ -100,6 +100,7 @@ async fn create_session(
         working_dir: project.clone(),
         yolo_mode: yolo,
         prompt_timeout_secs,
+        interactive: false,
     };
 
     let cmd = NodeCmd::Session(NodeSessionCommand::Create { context });
