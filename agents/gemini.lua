@@ -474,7 +474,7 @@ return {
 
     local acp_handle = praxis.acp_start({
       program = pp,
-      args = { "--experimental-acp" },
+      args = { "--acp" },
       cwd = working_dir or "",
     })
 
