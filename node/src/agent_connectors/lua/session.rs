@@ -35,13 +35,41 @@ impl LuaAgentSession {
     }
 }
 
+impl LuaAgentSession {
+    fn is_acp(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .get("acp_handle")
+            .and_then(|v| v.as_str())
+            .is_some()
+    }
+
+    pub fn acp_handle(&self) -> Option<String> {
+        self.state
+            .lock()
+            .unwrap()
+            .get("acp_handle")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+    }
+}
+
 impl AgentSession for LuaAgentSession {
     fn session_id(&self) -> &Uuid {
         &self.internal_id
     }
 
     fn mode(&self) -> AgentMode {
-        AgentMode::Cli
+        if self.is_acp() {
+            AgentMode::Acp
+        } else {
+            AgentMode::Cli
+        }
+    }
+
+    fn supports_streaming(&self) -> bool {
+        self.is_acp()
     }
 
     fn transact(&self, prompt: &str) -> Result<String> {
@@ -59,6 +87,17 @@ impl AgentSession for LuaAgentSession {
             return;
         }
         let state = self.state.lock().unwrap().clone();
+
+        //
+        // Clean up ACP client if this is an ACP session.
+        //
+
+        if let Some(handle) = state.get("acp_handle").and_then(|v| v.as_str()) {
+            crate::acp::cleanup_channels(handle);
+            if let Some(mut client) = crate::acp::remove_client(handle) {
+                client.close();
+            }
+        }
 
         //
         // Signal cancellation BEFORE acquiring the VM lock. If transact() is
@@ -92,6 +131,16 @@ impl AgentSession for LuaAgentSession {
 
     fn abort_transaction(&self) -> bool {
         let state = self.state.lock().unwrap().clone();
+
+        //
+        // ACP agents: send cancel, then fall through to process kill.
+        //
+
+        if let Some(handle) = state.get("acp_handle").and_then(|v| v.as_str()) {
+            let _ = crate::acp::with_client(handle, |client| {
+                let _ = client.cancel();
+            });
+        }
 
         //
         // CLI agents: terminate via command handle.

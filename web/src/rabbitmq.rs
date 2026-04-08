@@ -1317,6 +1317,13 @@ impl RabbitMqClient {
             ClientDirectMessage::AgentChatError { message } => {
                 self.state.broadcast(ServerMessage::AgentChatError { message });
             }
+
+            //
+            // Session streaming updates (ACP agent sessions).
+            //
+            ClientDirectMessage::SessionUpdate(update) => {
+                self.state.broadcast(ServerMessage::SessionUpdate { update });
+            }
         }
 
         Ok(())

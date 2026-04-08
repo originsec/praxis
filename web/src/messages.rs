@@ -393,6 +393,10 @@ pub enum ServerMessage {
     TerminalOutput {
         output: TerminalOutput,
     },
+    /// Session streaming update from an ACP agent
+    SessionUpdate {
+        update: common::SessionUpdate,
+    },
     /// Semantic operation update
     SemanticOpUpdate {
         update: SemanticOpUpdate,

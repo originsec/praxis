@@ -523,6 +523,12 @@ pub enum SessionCommand {
         #[serde(default)]
         force: bool,
     },
+    /// Respond to a permission request from an ACP agent session
+    PermissionResponse {
+        transaction_id: TransactionId,
+        permission_id: String,
+        decision: PermissionDecision,
+    },
 }
 
 /// Method of interception
@@ -638,6 +644,7 @@ impl std::fmt::Display for NodeCommand {
                     SessionCommand::Close => "Close",
                     SessionCommand::Prompt { .. } => "Prompt",
                     SessionCommand::CancelTransaction { .. } => "CancelTransaction",
+                    SessionCommand::PermissionResponse { .. } => "PermissionResponse",
                 };
                 write!(f, "Session::{variant}")
             }
@@ -766,6 +773,60 @@ pub enum SessionCommandResult {
     TransactionCancelled {
         transaction_id: TransactionId,
     },
+    /// Permission response was delivered to the agent
+    PermissionDelivered {
+        transaction_id: TransactionId,
+    },
+}
+
+//
+// Session streaming types — used for real-time updates during ACP agent
+// transactions. Flows: Node → Service → Client.
+//
+
+/// Streaming event emitted by the node during an active session transaction.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SessionUpdate {
+    pub node_id: String,
+    pub client_id: String,
+    pub transaction_id: TransactionId,
+    pub update: SessionUpdateKind,
+}
+
+/// The kind of streaming update from an ACP agent session.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum SessionUpdateKind {
+    /// Incremental text output from the agent.
+    TextChunk { text: String },
+    /// Agent is invoking a tool.
+    ToolCall {
+        tool_name: String,
+        tool_id: String,
+        input: String,
+    },
+    /// Result of a tool invocation.
+    ToolResult {
+        tool_id: String,
+        output: String,
+        is_error: bool,
+    },
+    /// Agent is requesting permission to perform an action.
+    PermissionRequest {
+        permission_id: String,
+        tool_name: String,
+        tool_input: String,
+    },
+    /// Agent status change (e.g. "thinking", "tool_use").
+    AgentStatus { status: String },
+    /// Error from the agent.
+    Error { message: String },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum PermissionDecision {
+    Allow,
+    AllowAlways,
+    Deny,
 }
 
 /// Result of an intercept command
@@ -2009,6 +2070,7 @@ pub enum ClientSignalMessage {
         client_id: String,
         session_id: Option<String>,
     },
+
 }
 
 /// Messages broadcast from server to all clients via CLIENT_BROADCAST_EXCHANGE
@@ -2035,6 +2097,8 @@ pub enum ClientDirectMessage {
     CommandResponse(CommandResponse),
     StateUpdate(SystemState),
     TerminalOutput(TerminalOutput),
+    /// Streaming session update from an ACP agent transaction
+    SessionUpdate(SessionUpdate),
 
     //
     // Semantic operations responses.
@@ -2662,6 +2726,8 @@ pub enum NodeSignalMessage {
         recon_result: ReconResult,
         is_semantic: bool,
     },
+    /// Streaming session update from an ACP agent transaction
+    SessionUpdate(SessionUpdate),
 }
 
 //

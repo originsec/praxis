@@ -43,6 +43,7 @@ struct ClientState {
     current_chain: Option<ChainDefinitionFull>,
     pending_semantic_op: Option<String>,
     lua_agent_scripts: Vec<LuaAgentScriptInfo>,
+    session_update_tx: Option<tokio::sync::mpsc::UnboundedSender<common::SessionUpdate>>,
 }
 
 impl Client {
@@ -287,6 +288,12 @@ impl Client {
             | ClientDirectMessage::LuaAgentScriptDefaultsReset { .. }
             | ClientDirectMessage::LuaAgentScriptDisabledToggled { .. } => {
                 // Trigger a re-fetch handled by the app layer.
+            }
+
+            ClientDirectMessage::SessionUpdate(update) => {
+                if let Some(ref tx) = state.session_update_tx {
+                    let _ = tx.send(update);
+                }
             }
 
             _ => {}
@@ -580,6 +587,17 @@ impl Client {
         let state = self.state.clone();
         tokio::spawn(async move {
             state.lock().await.terminal_output_tx = Some(tx);
+        });
+        rx
+    }
+
+    pub fn subscribe_session_updates(
+        &self,
+    ) -> tokio::sync::mpsc::UnboundedReceiver<common::SessionUpdate> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            state.lock().await.session_update_tx = Some(tx);
         });
         rx
     }

@@ -211,6 +211,15 @@ interface AppState {
   //
   agentSessionMessages: Record<string, AgentSessionMessage[]>;
   //
+  // Session streaming state for ACP agents.
+  //
+  agentSessionStreaming: Record<string, {
+    content: string;
+    toolCalls: Array<{ toolName: string; toolId: string; input: string; output?: string; isError?: boolean }>;
+    pendingPermission: { permissionId: string; toolName: string; toolInput: string } | null;
+    agentStatus: string | null;
+  }>;
+  //
   // Recently accessed node IDs (most recent first).
   //
   recentlyAccessedNodeIds: string[];
@@ -241,6 +250,7 @@ function createInitialState(): AppState {
     luaAgentScripts: [],
     payloads: [],
     agentSessionMessages: {},
+    agentSessionStreaming: {},
     recentlyAccessedNodeIds: loadRecentNodes(MAX_RECENT_NODES),
   };
 }
@@ -296,6 +306,9 @@ type Action =
   //
   | { type: 'AGENT_SESSION_ADD_MESSAGE'; sessionId: string; message: AgentSessionMessage }
   | { type: 'AGENT_SESSION_CLEAR_MESSAGES'; sessionId: string }
+  | { type: 'AGENT_SESSION_STREAMING_UPDATE'; nodeId: string; transactionId: string; update: import('../api/types').SessionUpdateKind }
+  | { type: 'AGENT_SESSION_STREAMING_COMPLETE'; nodeId: string; transactionId: string }
+  | { type: 'AGENT_SESSION_STREAMING_CLEAR'; nodeId: string }
   //
   // Chain actions.
   //
@@ -735,6 +748,82 @@ function reduceAgentSessions(state: AppState, action: Action): AppState | null {
         ...state,
         agentSessionMessages: rest,
       };
+    }
+    case 'AGENT_SESSION_STREAMING_UPDATE': {
+      const key = action.nodeId;
+      const existing = state.agentSessionStreaming[key] || {
+        content: '',
+        toolCalls: [],
+        pendingPermission: null,
+        agentStatus: null,
+      };
+      const update = action.update;
+
+      if ('TextChunk' in update) {
+        return {
+          ...state,
+          agentSessionStreaming: {
+            ...state.agentSessionStreaming,
+            [key]: { ...existing, content: existing.content + update.TextChunk.text },
+          },
+        };
+      } else if ('ToolCall' in update) {
+        return {
+          ...state,
+          agentSessionStreaming: {
+            ...state.agentSessionStreaming,
+            [key]: {
+              ...existing,
+              toolCalls: [...existing.toolCalls, {
+                toolName: update.ToolCall.tool_name,
+                toolId: update.ToolCall.tool_id,
+                input: update.ToolCall.input,
+              }],
+            },
+          },
+        };
+      } else if ('ToolResult' in update) {
+        const updatedCalls = existing.toolCalls.map(tc =>
+          tc.toolId === update.ToolResult.tool_id
+            ? { ...tc, output: update.ToolResult.output, isError: update.ToolResult.is_error }
+            : tc
+        );
+        return {
+          ...state,
+          agentSessionStreaming: {
+            ...state.agentSessionStreaming,
+            [key]: { ...existing, toolCalls: updatedCalls },
+          },
+        };
+      } else if ('PermissionRequest' in update) {
+        return {
+          ...state,
+          agentSessionStreaming: {
+            ...state.agentSessionStreaming,
+            [key]: {
+              ...existing,
+              pendingPermission: {
+                permissionId: update.PermissionRequest.permission_id,
+                toolName: update.PermissionRequest.tool_name,
+                toolInput: update.PermissionRequest.tool_input,
+              },
+            },
+          },
+        };
+      } else if ('AgentStatus' in update) {
+        return {
+          ...state,
+          agentSessionStreaming: {
+            ...state.agentSessionStreaming,
+            [key]: { ...existing, agentStatus: update.AgentStatus.status },
+          },
+        };
+      }
+      return state;
+    }
+    case 'AGENT_SESSION_STREAMING_CLEAR': {
+      const { [action.nodeId]: _, ...rest } = state.agentSessionStreaming;
+      return { ...state, agentSessionStreaming: rest };
     }
     default:
       return null;
@@ -1535,6 +1624,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
           break;
         case 'agent_chat_error':
           dispatch({ type: 'AGENT_CHAT_ERROR', message: message.message });
+          break;
+
+        //
+        // Session streaming updates (ACP agent sessions).
+        //
+        case 'session_update':
+          dispatch({
+            type: 'AGENT_SESSION_STREAMING_UPDATE',
+            nodeId: message.update.node_id,
+            transactionId: message.update.transaction_id,
+            update: message.update.update,
+          });
           break;
       }
     };

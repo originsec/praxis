@@ -598,11 +598,107 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
             / 100) as usize
             % 10;
         let spinners = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            format!("{}", spinners[frame_idx]),
-            Style::default().fg(MUTED),
-        )));
+
+        //
+        // Streaming content from ACP agents.
+        //
+
+        if !session.streaming_content.is_empty() {
+            let md_lines = crate::markdown::render(session.streaming_content.trim(), "");
+            lines.extend(md_lines);
+        }
+
+        //
+        // Tool calls in progress.
+        //
+
+        for tc in &session.tool_calls {
+            let status = if tc.output.is_some() {
+                if tc.is_error {
+                    Span::styled(" ✗", Style::default().fg(Color::Rgb(200, 80, 80)))
+                } else {
+                    Span::styled(" ✓", Style::default().fg(Color::Rgb(80, 200, 80)))
+                }
+            } else {
+                Span::styled(
+                    format!(" {}", spinners[frame_idx]),
+                    Style::default().fg(MUTED),
+                )
+            };
+            lines.push(Line::from(vec![
+                Span::styled("  \u{2502} ", Style::default().fg(DIM)),
+                Span::styled(
+                    &tc.tool_name,
+                    Style::default().fg(Color::Rgb(180, 160, 60)),
+                ),
+                status,
+            ]));
+        }
+
+        //
+        // Permission prompt.
+        //
+
+        if let Some(ref perm) = session.pending_permission {
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "  \u{26a0} ",
+                    Style::default().fg(Color::Rgb(200, 180, 60)),
+                ),
+                Span::styled(
+                    &perm.tool_name,
+                    Style::default()
+                        .fg(Color::Rgb(200, 180, 60))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" wants to run:", Style::default().fg(MUTED)),
+            ]));
+            let truncated = if perm.tool_input.len() > 120 {
+                format!("{}...", &perm.tool_input[..117])
+            } else {
+                perm.tool_input.clone()
+            };
+            lines.push(Line::from(Span::styled(
+                format!("    {}", truncated),
+                Style::default().fg(DIM),
+            )));
+            lines.push(Line::from(vec![
+                Span::styled("    [", Style::default().fg(DIM)),
+                Span::styled("a", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled("]llow  [", Style::default().fg(DIM)),
+                Span::styled("l", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled("]always  [", Style::default().fg(DIM)),
+                Span::styled("d", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled("]eny", Style::default().fg(DIM)),
+            ]));
+        }
+
+        //
+        // Status / spinner line.
+        //
+
+        if session.streaming_content.is_empty() && session.pending_permission.is_none() {
+            let status_text = session
+                .agent_status
+                .as_deref()
+                .unwrap_or("thinking");
+            lines.push(Line::from(Span::styled(
+                format!("{} {}", spinners[frame_idx], status_text),
+                Style::default().fg(MUTED),
+            )));
+        } else if session.pending_permission.is_none() {
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "{} {}",
+                    spinners[frame_idx],
+                    session.agent_status.as_deref().unwrap_or("streaming")
+                ),
+                Style::default().fg(MUTED),
+            )));
+        }
     }
 
     let total_lines = lines.len() as u16;

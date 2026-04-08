@@ -909,6 +909,54 @@ async fn handle_command(
                     );
 
                     //
+                    // If the session supports streaming (ACP mode), set up
+                    // channels for forwarding updates and receiving permission
+                    // decisions.
+                    //
+
+                    let streaming = session.supports_streaming();
+                    if streaming {
+                        if let Some(acp_handle) = session.as_any()
+                            .downcast_ref::<crate::agent_connectors::lua::LuaAgentSession>()
+                            .and_then(|s| s.acp_handle())
+                        {
+                            let (update_tx, mut update_rx) =
+                                tokio::sync::mpsc::unbounded_channel::<common::SessionUpdateKind>();
+                            let (perm_tx, perm_rx) =
+                                std::sync::mpsc::channel::<(String, common::PermissionDecision)>();
+
+                            crate::acp::register_update_sender(&acp_handle, update_tx);
+                            crate::acp::register_permission_receiver(&acp_handle, perm_rx);
+                            transaction_manager.set_permission_tx(&transaction_id, perm_tx);
+
+                            //
+                            // Spawn update forwarder: reads from the update channel
+                            // and publishes SessionUpdate messages to the service.
+                            //
+
+                            let fwd_channel = channel.clone();
+                            let fwd_node_id = node_id.to_string();
+                            let fwd_client_id = request.client_id.clone();
+                            let fwd_transaction_id = transaction_id.clone();
+
+                            tokio::spawn(async move {
+                                while let Some(update) = update_rx.recv().await {
+                                    let session_update = common::SessionUpdate {
+                                        node_id: fwd_node_id.clone(),
+                                        client_id: fwd_client_id.clone(),
+                                        transaction_id: fwd_transaction_id.clone(),
+                                        update,
+                                    };
+                                    let message = NodeSignalMessage::SessionUpdate(session_update);
+                                    if let Err(e) = publish_json(&fwd_channel, NODE_SIGNAL_QUEUE, &message).await {
+                                        common::log_error!("Failed to forward session update: {}", e);
+                                    }
+                                }
+                            });
+                        }
+                    }
+
+                    //
                     // Signal the main loop to broadcast state now that the
                     // transaction is registered with the active prompt.
                     //

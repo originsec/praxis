@@ -1,7 +1,7 @@
 use crate::client::Client;
 use common::{
     ChainDefinitionInfo, ChainExecutionUpdate, ClientDirectMessage, OperationDefinitionInfo,
-    SemanticOpUpdate, SystemState, TerminalOutput,
+    SemanticOpUpdate, SessionUpdate, SystemState, TerminalOutput,
 };
 use crossterm::event::{Event, EventStream};
 use futures_util::StreamExt;
@@ -35,6 +35,7 @@ pub enum AppEvent {
     },
     TerminalCreateFailed(String),
     TerminalOutput(TerminalOutput),
+    SessionStreamUpdate(SessionUpdate),
     Tick,
 }
 
@@ -112,6 +113,19 @@ impl EventHandler {
         tokio::spawn(async move {
             while let Some(output) = term_rx.recv().await {
                 if tx_term_out.send(AppEvent::TerminalOutput(output)).is_err() {
+                    break;
+                }
+            }
+        });
+
+        //
+        // Session streaming updates from ACP agent sessions.
+        //
+        let tx_session = tx.clone();
+        let mut session_rx = client.subscribe_session_updates();
+        tokio::spawn(async move {
+            while let Some(update) = session_rx.recv().await {
+                if tx_session.send(AppEvent::SessionStreamUpdate(update)).is_err() {
                     break;
                 }
             }

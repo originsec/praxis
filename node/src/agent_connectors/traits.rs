@@ -14,6 +14,7 @@ pub enum AgentMode {
     UIAutomation,
     DevTools,
     Cli,
+    Acp,
 }
 
 //
@@ -34,6 +35,9 @@ pub trait AgentSession: Send + Sync {
     fn mode(&self) -> AgentMode;
     fn transact(&self, prompt: &str) -> Result<String>;
     fn close(&self);
+    fn supports_streaming(&self) -> bool {
+        false
+    }
 
     //
     // Abort any in-progress transaction by killing the underlying process.

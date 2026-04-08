@@ -296,6 +296,27 @@ pub struct SessionChat {
     pub saved_input: String,
     pub yolo: bool,
     pub working_dir: Option<String>,
+    pub streaming_content: String,
+    pub agent_status: Option<String>,
+    pub pending_permission: Option<PendingPermission>,
+    pub tool_calls: Vec<ToolCallEntry>,
+}
+
+#[allow(dead_code)]
+pub struct PendingPermission {
+    pub permission_id: String,
+    pub tool_name: String,
+    pub tool_input: String,
+}
+
+pub struct ToolCallEntry {
+    #[allow(dead_code)]
+    pub tool_name: String,
+    pub tool_id: String,
+    #[allow(dead_code)]
+    pub input: String,
+    pub output: Option<String>,
+    pub is_error: bool,
 }
 
 pub struct ChatMessage {
@@ -695,13 +716,28 @@ impl App {
                             {
                                 return false;
                             }
+
+                            //
+                            // Use streaming content if we accumulated any,
+                            // otherwise use the final response text.
+                            //
+
+                            let final_text = if !session.streaming_content.is_empty() {
+                                std::mem::take(&mut session.streaming_content)
+                            } else {
+                                text
+                            };
+
                             session.messages.push(ChatMessage {
                                 role: ChatRole::Agent,
-                                text,
+                                text: final_text,
                             });
                             session.is_waiting = false;
                             session.active_transaction_id = None;
                             session.scroll_offset = 0;
+                            session.agent_status = None;
+                            session.pending_permission = None;
+                            session.tool_calls.clear();
                         }
                         SessionResult::Cancelled(transaction_id) => {
                             if session.active_transaction_id.as_deref()
@@ -723,6 +759,67 @@ impl App {
                             });
                             session.is_waiting = false;
                             session.active_transaction_id = None;
+                        }
+                    }
+                }
+                true
+            }
+            AppEvent::SessionStreamUpdate(update) => {
+                if let Some(ref mut session) = self.nodes.session {
+                    if session.node_id != update.node_id {
+                        return false;
+                    }
+                    use common::SessionUpdateKind;
+                    match update.update {
+                        SessionUpdateKind::TextChunk { text } => {
+                            session.streaming_content.push_str(&text);
+                        }
+                        SessionUpdateKind::ToolCall {
+                            tool_name,
+                            tool_id,
+                            input,
+                        } => {
+                            session.tool_calls.push(ToolCallEntry {
+                                tool_name,
+                                tool_id,
+                                input,
+                                output: None,
+                                is_error: false,
+                            });
+                        }
+                        SessionUpdateKind::ToolResult {
+                            tool_id,
+                            output,
+                            is_error,
+                        } => {
+                            if let Some(tc) = session
+                                .tool_calls
+                                .iter_mut()
+                                .find(|t| t.tool_id == tool_id)
+                            {
+                                tc.output = Some(output);
+                                tc.is_error = is_error;
+                            }
+                        }
+                        SessionUpdateKind::PermissionRequest {
+                            permission_id,
+                            tool_name,
+                            tool_input,
+                        } => {
+                            session.pending_permission = Some(PendingPermission {
+                                permission_id,
+                                tool_name,
+                                tool_input,
+                            });
+                        }
+                        SessionUpdateKind::AgentStatus { status } => {
+                            session.agent_status = Some(status);
+                        }
+                        SessionUpdateKind::Error { message } => {
+                            session.messages.push(ChatMessage {
+                                role: ChatRole::System,
+                                text: format!("Agent error: {}", message),
+                            });
                         }
                     }
                 }
@@ -1904,6 +2001,10 @@ impl App {
             saved_input: String::new(),
             yolo,
             working_dir: working_dir.clone(),
+            streaming_content: String::new(),
+            agent_status: None,
+            pending_permission: None,
+            tool_calls: Vec::new(),
         });
 
         //
@@ -2167,6 +2268,42 @@ impl App {
             }
             KeyCode::Char(c) => {
                 if let Some(ref mut session) = self.nodes.session {
+                    //
+                    // Permission response shortcuts when a permission is pending.
+                    //
+
+                    if session.pending_permission.is_some() && session.is_waiting {
+                        let decision = match c {
+                            'a' | 'A' => Some(common::PermissionDecision::Allow),
+                            'l' | 'L' => Some(common::PermissionDecision::AllowAlways),
+                            'd' | 'D' => Some(common::PermissionDecision::Deny),
+                            _ => None,
+                        };
+                        if let Some(decision) = decision {
+                            let perm = session.pending_permission.take().unwrap();
+                            let client = self.client.clone();
+                            let node_id = session.node_id.clone();
+                            let transaction_id =
+                                session.active_transaction_id.clone().unwrap_or_default();
+                            let permission_id = perm.permission_id.clone();
+                            tokio::spawn(async move {
+                                let _ = client
+                                    .send_command(
+                                        &node_id,
+                                        common::NodeCommand::Session(
+                                            common::SessionCommand::PermissionResponse {
+                                                transaction_id,
+                                                permission_id,
+                                                decision,
+                                            },
+                                        ),
+                                    )
+                                    .await;
+                            });
+                            return;
+                        }
+                    }
+
                     session.input.insert(session.cursor_pos, c);
                     session.cursor_pos += 1;
                 }
