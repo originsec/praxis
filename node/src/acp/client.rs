@@ -312,7 +312,7 @@ impl AcpClient {
         let perm: PermissionRequestParams = serde_json::from_value(params)
             .context("Failed to parse permission request")?;
 
-        let tool_name = perm.tool_call.name.clone();
+        let tool_name = perm.tool_call.display_name().to_string();
         let tool_call_id = perm.tool_call.tool_call_id.clone();
         let tool_input = perm
             .tool_call
@@ -323,21 +323,21 @@ impl AcpClient {
         let allow_always_id = perm
             .options
             .iter()
-            .find(|o| o.id.contains("always"))
-            .or_else(|| perm.options.iter().find(|o| o.id.contains("allow")))
-            .map(|o| o.id.clone());
+            .find(|o| o.option_id.contains("always"))
+            .or_else(|| perm.options.iter().find(|o| o.option_id.contains("allow")))
+            .map(|o| o.option_id.clone());
 
         let allow_once_id = perm
             .options
             .iter()
-            .find(|o| o.id.contains("allow") && !o.id.contains("always"))
-            .map(|o| o.id.clone());
+            .find(|o| o.option_id.contains("allow") && !o.option_id.contains("always"))
+            .map(|o| o.option_id.clone());
 
         let deny_id = perm
             .options
             .iter()
-            .find(|o| o.id.contains("deny") || o.id.contains("reject"))
-            .map(|o| o.id.clone());
+            .find(|o| o.option_id.contains("deny") || o.option_id.contains("reject"))
+            .map(|o| o.option_id.clone());
 
         if yolo {
             //
@@ -346,7 +346,7 @@ impl AcpClient {
 
             let option_id = allow_always_id
                 .or(allow_once_id)
-                .unwrap_or_else(|| perm.options.first().map(|o| o.id.clone()).unwrap_or_default());
+                .unwrap_or_else(|| perm.options.first().map(|o| o.option_id.clone()).unwrap_or_default());
 
             if let Some(id) = request_id {
                 self.send_permission_response(id, &option_id)?;

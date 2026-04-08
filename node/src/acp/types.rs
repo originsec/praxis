@@ -215,16 +215,33 @@ pub struct PermissionRequestParams {
 #[serde(rename_all = "camelCase")]
 pub struct PermissionToolCall {
     pub tool_call_id: String,
-    pub name: String,
+    /// Some agents use "name", others use "title".
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
     #[serde(default)]
     pub raw_input: Option<Value>,
 }
 
+impl PermissionToolCall {
+    pub fn display_name(&self) -> &str {
+        self.title
+            .as_deref()
+            .or(self.name.as_deref())
+            .unwrap_or("unknown")
+    }
+}
+
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PermissionOption {
-    pub id: String,
-    #[allow(dead_code)]
-    pub label: String,
+    /// Cursor uses "optionId", spec uses "id".
+    #[serde(alias = "id")]
+    pub option_id: String,
+    /// Cursor uses "name", spec uses "label".
+    #[serde(alias = "label")]
+    pub name: String,
 }
 
 //
