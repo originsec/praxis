@@ -4,6 +4,7 @@ use serde_json::Value;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use super::types::*;
 
@@ -13,6 +14,7 @@ pub struct AcpClient {
     reader: BufReader<ChildStdout>,
     next_id: u64,
     session_id: Option<String>,
+    cancelled: Arc<AtomicBool>,
 }
 
 impl AcpClient {
@@ -44,6 +46,7 @@ impl AcpClient {
             reader: BufReader::new(stdout),
             next_id: 1,
             session_id: None,
+            cancelled: Arc::new(AtomicBool::new(false)),
         };
 
         client.initialize()?;
@@ -447,8 +450,9 @@ impl AcpClient {
     //
 
     pub fn cancel(&mut self) -> Result<()> {
+        self.cancelled.store(true, Ordering::SeqCst);
         if let Some(session_id) = self.session_id.clone() {
-            self.send_cancel(&session_id)?;
+            let _ = self.send_cancel(&session_id);
         }
         Ok(())
     }
@@ -464,6 +468,7 @@ impl AcpClient {
     }
 
     pub fn close(&mut self) {
+        self.cancelled.store(true, Ordering::SeqCst);
         tracing::debug!("ACP client closing subprocess");
         let _ = self.child.kill();
         let _ = self.child.wait();
