@@ -215,6 +215,7 @@ interface AppState {
   //
   agentSessionStreaming: Record<string, {
     content: string;
+    transactionId: string;
     toolCalls: Array<{ toolName: string; toolId: string; input: string; output?: string; isError?: boolean }>;
     pendingPermission: { permissionId: string; toolName: string; toolInput: string } | null;
     agentStatus: string | null;
@@ -753,6 +754,7 @@ function reduceAgentSessions(state: AppState, action: Action): AppState | null {
       const key = action.nodeId;
       const existing = state.agentSessionStreaming[key] || {
         content: '',
+        transactionId: action.transactionId,
         toolCalls: [],
         pendingPermission: null,
         agentStatus: null,

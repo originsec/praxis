@@ -35,19 +35,25 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
   const pendingPermission = streaming?.pendingPermission || null;
   const agentStatus = streaming?.agentStatus || null;
   const toolCalls = streaming?.toolCalls || [];
+  const streamingTransactionId = streaming?.transactionId || '';
+
+  const [permissionSent, setPermissionSent] = useState<string | null>(null);
 
   const handlePermissionResponse = useCallback((decision: PermissionDecision) => {
-    if (!pendingPermission) return;
+    if (!pendingPermission || !streamingTransactionId) return;
+    setPermissionSent(pendingPermission.permissionId);
     sendCommand(nodeId, {
       Session: {
         PermissionResponse: {
-          transaction_id: '', // filled by node from pending transaction
+          transaction_id: streamingTransactionId,
           permission_id: pendingPermission.permissionId,
           decision,
         },
       },
     });
-  }, [nodeId, pendingPermission, sendCommand]);
+  }, [nodeId, pendingPermission, streamingTransactionId, sendCommand]);
+
+  const showPermission = pendingPermission && permissionSent !== pendingPermission.permissionId;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -65,6 +71,7 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
     setInput('');
     setIsLoading(true);
     clearAgentSessionStreaming(nodeId);
+    setPermissionSent(null);
 
     addAgentSessionMessage(sessionId, {
       role: 'user',
@@ -216,7 +223,7 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
                     </div>
                   )}
 
-                  {pendingPermission && (
+                  {showPermission && pendingPermission && (
                     <div className="mt-1.5 p-1.5 bg-[var(--accent-warning)]/10 border border-[var(--accent-warning)]/30">
                       <div className="flex items-center gap-1 text-[10px] text-[var(--accent-warning)] mb-1">
                         <ShieldAlert size={10} />
