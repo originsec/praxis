@@ -66,6 +66,10 @@ impl AcpClient {
             bail!("ACP initialize failed: {}", err);
         }
 
+        if let Some(ref result) = response.result {
+            tracing::debug!("ACP initialize result: {}", result);
+        }
+
         Ok(())
     }
 
@@ -79,10 +83,15 @@ impl AcpClient {
             mcp_servers: vec![],
         };
 
-        let response =
-            self.send_request("session/new", Some(serde_json::to_value(params)?))?;
+        let params_json = serde_json::to_value(&params)?;
+        tracing::debug!("ACP session/new request: {}", params_json);
 
-        if let Some(err) = response.error {
+        let response = self.send_request("session/new", Some(params_json))?;
+
+        if let Some(err) = &response.error {
+            if let Some(ref data) = err.data {
+                tracing::error!("ACP session/new error data: {}", data);
+            }
             bail!("ACP session/new failed: {}", err);
         }
 
