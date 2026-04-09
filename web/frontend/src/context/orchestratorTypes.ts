@@ -34,6 +34,7 @@ export interface OrchestratorState {
   currentPlan: OrchestratorPlan | null;
   isLoading: boolean;
   streamingContent: string;
+  hadToolCall: boolean;
   currentToolExecutions: OrchestratorToolExecution[];
   tokenUsage: OrchestratorTokenUsage | null;
   currentPromptId: string | null;

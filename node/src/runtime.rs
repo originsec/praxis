@@ -936,6 +936,7 @@ async fn handle_command(
                             crate::acp::register_update_sender(&acp_handle, update_tx);
                             crate::acp::register_permission_receiver(&acp_handle, perm_rx);
                             transaction_manager.set_permission_tx(&transaction_id, perm_tx);
+                            transaction_manager.set_acp_handle(&transaction_id, acp_handle.clone());
 
                             //
                             // Spawn update forwarder: reads from the update channel

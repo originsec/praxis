@@ -95,6 +95,24 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
               content: sessionResult.PromptResponse.response,
               timestamp: new Date(),
             });
+          } else if (typeof sessionResult === 'object' && 'TransactionCancelled' in sessionResult) {
+            //
+            // Save any streamed content before clearing.
+            //
+
+            const partial = state.agentSessionStreaming[nodeId]?.content || '';
+            if (partial) {
+              addAgentSessionMessage(sessionId, {
+                role: 'assistant',
+                content: partial,
+                timestamp: new Date(),
+              });
+            }
+            addAgentSessionMessage(sessionId, {
+              role: 'user',
+              content: 'Cancelled',
+              timestamp: new Date(),
+            });
           }
         }
       }
@@ -211,12 +229,28 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
                   {toolCalls.length > 0 && (
                     <div className="mt-1 space-y-0.5">
                       {toolCalls.map((tc, i) => (
-                        <div key={i} className="text-[9px] text-muted font-mono bg-[var(--bg-primary)] px-1.5 py-0.5">
-                          <span className="text-[var(--accent-warning)]">{tc.toolName}</span>
-                          {tc.output !== undefined && (
-                            <span className={tc.isError ? ' text-[var(--accent-error)]' : ' text-[var(--accent-success)]'}>
-                              {' '}{tc.isError ? '(error)' : '(done)'}
-                            </span>
+                        <div key={i} className="text-[9px] font-mono bg-[var(--bg-primary)] px-1.5 py-0.5">
+                          <div>
+                            <span className="text-[var(--accent-warning)]">{tc.toolName}</span>
+                            {tc.output !== undefined && (
+                              <span className={tc.isError ? ' text-[var(--accent-error)]' : ' text-[var(--accent-success)]'}>
+                                {' '}{tc.isError ? '✗' : '✓'}
+                              </span>
+                            )}
+                            {tc.output === undefined && (
+                              <Loader2 size={8} className="inline ml-1 animate-spin text-muted" />
+                            )}
+                          </div>
+                          {tc.input && tc.input !== '{}' && (
+                            <div className="text-muted truncate mt-0.5" title={tc.input}>
+                              {tc.input.length > 120 ? tc.input.slice(0, 117) + '...' : tc.input}
+                            </div>
+                          )}
+                          {tc.output !== undefined && tc.output && (
+                            <div className={`mt-0.5 whitespace-pre-wrap break-all ${tc.isError ? 'text-[var(--accent-error)]' : 'text-muted'}`}
+                              style={{ maxHeight: '4em', overflow: 'hidden' }}>
+                              {tc.output.length > 200 ? tc.output.slice(0, 197) + '...' : tc.output}
+                            </div>
                           )}
                         </div>
                       ))}

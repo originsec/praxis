@@ -52,8 +52,9 @@ impl JsonRpcNotification {
 pub struct JsonRpcMessage {
     #[allow(dead_code)]
     pub jsonrpc: Option<String>,
-    /// Present on responses and agent-initiated requests.
-    pub id: Option<u64>,
+    /// Present on responses and agent-initiated requests. Can be a number or
+    /// string depending on the agent.
+    pub id: Option<Value>,
     /// Present on requests and notifications.
     pub method: Option<String>,
     /// Present on successful responses.
@@ -62,6 +63,15 @@ pub struct JsonRpcMessage {
     pub error: Option<JsonRpcError>,
     /// Present on requests/notifications.
     pub params: Option<Value>,
+}
+
+impl JsonRpcMessage {
+    pub fn id_matches(&self, expected: u64) -> bool {
+        match &self.id {
+            Some(Value::Number(n)) => n.as_u64() == Some(expected),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -164,8 +174,15 @@ pub struct SessionUpdateContent {
     #[serde(default)]
     pub tool_input: Option<Value>,
     #[serde(default)]
-    #[allow(dead_code)]
     pub session_update: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub raw_input: Option<Value>,
+    #[serde(default)]
+    pub raw_output: Option<Value>,
 }
 
 fn deserialize_content_blocks<'de, D>(

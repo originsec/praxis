@@ -42,6 +42,7 @@ export function loadPersistedOrchestratorState(initial: OrchestratorState): Orch
           isStarting: false,
           isLoading: false,
           streamingContent: '',
+          hadToolCall: false,
           currentToolExecutions: [],
         };
       }

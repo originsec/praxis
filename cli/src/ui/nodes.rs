@@ -605,6 +605,43 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
                 Span::styled(&tc.tool_name, Style::default().fg(STATUS_RUNNING)),
                 status,
             ]));
+
+            //
+            // Show tool input if non-empty.
+            //
+
+            if !tc.input.is_empty() && tc.input != "{}" {
+                let display_input = if tc.input.len() > 200 {
+                    format!("{}...", &tc.input[..197])
+                } else {
+                    tc.input.clone()
+                };
+                lines.push(Line::from(Span::styled(
+                    format!("  \u{2502}   {}", display_input),
+                    Style::default().fg(DIM),
+                )));
+            }
+
+            //
+            // Show tool output if completed.
+            //
+
+            if let Some(ref output) = tc.output {
+                if !output.is_empty() {
+                    let color = if tc.is_error { STATUS_FAIL } else { DIM };
+                    let truncated = if output.len() > 200 {
+                        format!("{}...", &output[..197])
+                    } else {
+                        output.clone()
+                    };
+                    for line in truncated.lines().take(3) {
+                        lines.push(Line::from(Span::styled(
+                            format!("  \u{2502}   {}", line),
+                            Style::default().fg(color),
+                        )));
+                    }
+                }
+            }
         }
 
         //

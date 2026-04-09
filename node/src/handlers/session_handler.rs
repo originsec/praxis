@@ -16,6 +16,7 @@ struct PendingTransaction {
     session: Arc<dyn AgentSession>,
     prompt_text: String,
     permission_tx: Option<std::sync::mpsc::Sender<(String, PermissionDecision)>>,
+    acp_handle: Option<String>,
 }
 
 /// Manages pending transactions for async operations
@@ -45,6 +46,7 @@ impl TransactionManager {
                 session,
                 prompt_text,
                 permission_tx: None,
+                acp_handle: None,
             },
         );
         rx
@@ -59,6 +61,19 @@ impl TransactionManager {
             if force {
                 pending.session.abort_transaction();
             }
+
+            //
+            // Signal the ACP client's cancel flag so read_message unblocks.
+            //
+
+            if let Some(ref handle) = pending.acp_handle {
+                if force {
+                    crate::acp::cancel_client(handle);
+                } else {
+                    crate::acp::signal_cancel(handle);
+                }
+            }
+
             let _ = pending.cancel_tx.send(());
             true
         } else {
@@ -94,6 +109,13 @@ impl TransactionManager {
                 if force {
                     p.session.abort_transaction();
                 }
+                if let Some(ref handle) = p.acp_handle {
+                    if force {
+                        crate::acp::cancel_client(handle);
+                    } else {
+                        crate::acp::signal_cancel(handle);
+                    }
+                }
                 let _ = p.cancel_tx.send(());
             }
         }
@@ -109,6 +131,9 @@ impl TransactionManager {
         for (tid, p) in pending.drain() {
             common::log_info!("Cancelling transaction {} for node reset", tid);
             p.session.abort_transaction();
+            if let Some(ref handle) = p.acp_handle {
+                crate::acp::cancel_client(handle);
+            }
             let _ = p.cancel_tx.send(());
         }
     }
@@ -150,6 +175,17 @@ impl TransactionManager {
         let mut pending = self.pending.lock().unwrap();
         if let Some(p) = pending.get_mut(transaction_id) {
             p.permission_tx = Some(tx);
+        }
+    }
+
+    pub fn set_acp_handle(
+        &self,
+        transaction_id: &TransactionId,
+        handle: String,
+    ) {
+        let mut pending = self.pending.lock().unwrap();
+        if let Some(p) = pending.get_mut(transaction_id) {
+            p.acp_handle = Some(handle);
         }
     }
 }

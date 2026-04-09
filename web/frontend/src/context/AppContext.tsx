@@ -67,6 +67,7 @@ const initialOrchestratorState: OrchestratorState = {
   currentPlan: null,
   isLoading: false,
   streamingContent: '',
+  hadToolCall: false,
   currentToolExecutions: [],
   tokenUsage: null,
   currentPromptId: null,
@@ -219,6 +220,7 @@ interface AppState {
     toolCalls: Array<{ toolName: string; toolId: string; input: string; output?: string; isError?: boolean }>;
     pendingPermission: { permissionId: string; toolName: string; toolInput: string } | null;
     agentStatus: string | null;
+    hadToolCall: boolean;
   }>;
   //
   // Recently accessed node IDs (most recent first).
@@ -471,16 +473,22 @@ function reduceOrchestrator(state: AppState, action: Action): AppState | null {
           }],
           isLoading: true,
           streamingContent: '',
+          hadToolCall: false,
           currentToolExecutions: [],
           currentPromptId: action.promptId,
         },
       };
     case 'ORCHESTRATOR_ADD_CONTENT': {
+      const orch = state.orchestrator;
+      const needsSep = orch.hadToolCall && orch.streamingContent.length > 0
+        && !orch.streamingContent.endsWith('\n\n');
+      const prefix = needsSep ? '\n\n' : '';
       return {
         ...state,
         orchestrator: {
-          ...state.orchestrator,
-          streamingContent: state.orchestrator.streamingContent + action.content,
+          ...orch,
+          streamingContent: orch.streamingContent + prefix + action.content,
+          hadToolCall: false,
         },
       };
     }
@@ -489,6 +497,7 @@ function reduceOrchestrator(state: AppState, action: Action): AppState | null {
         ...state,
         orchestrator: {
           ...state.orchestrator,
+          hadToolCall: true,
           currentToolExecutions: [...state.orchestrator.currentToolExecutions, {
             name: action.name,
             display: 'Executing...',
@@ -758,15 +767,20 @@ function reduceAgentSessions(state: AppState, action: Action): AppState | null {
         toolCalls: [],
         pendingPermission: null,
         agentStatus: null,
+        hadToolCall: false,
       };
       const update = action.update;
 
       if ('TextChunk' in update) {
+        const needsSeparator = existing.hadToolCall
+          && existing.content.length > 0
+          && !existing.content.endsWith('\n\n');
+        const prefix = needsSeparator ? '\n\n' : '';
         return {
           ...state,
           agentSessionStreaming: {
             ...state.agentSessionStreaming,
-            [key]: { ...existing, content: existing.content + update.TextChunk.text },
+            [key]: { ...existing, content: existing.content + prefix + update.TextChunk.text, hadToolCall: false },
           },
         };
       } else if ('ToolCall' in update) {
@@ -776,6 +790,7 @@ function reduceAgentSessions(state: AppState, action: Action): AppState | null {
             ...state.agentSessionStreaming,
             [key]: {
               ...existing,
+              hadToolCall: true,
               toolCalls: [...existing.toolCalls, {
                 toolName: update.ToolCall.tool_name,
                 toolId: update.ToolCall.tool_id,
