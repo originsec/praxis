@@ -426,7 +426,7 @@ impl AcpClient {
             "id": request_id,
             "result": {
                 "outcome": {
-                    "type": "selected",
+                    "outcome": "selected",
                     "optionId": option_id,
                 }
             }
