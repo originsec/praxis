@@ -1,9 +1,11 @@
+pub mod common;
 pub mod nodes;
 pub mod operations;
 pub mod orchestrator;
 pub mod popup;
 pub mod settings;
 pub mod status_bar;
+pub mod theme;
 
 use crate::app::{App, Window};
 use ratatui::Frame;
@@ -11,10 +13,9 @@ use ratatui::layout::{Alignment, Constraint, Layout, Margin};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
+use theme::{ACCENT, DIM};
 
-pub const BG: Color = Color::Rgb(25, 25, 30);
-const ACCENT: Color = Color::Rgb(100, 180, 100);
-const DIM: Color = Color::Rgb(80, 80, 80);
+pub use theme::BG;
 
 pub fn render(f: &mut Frame, app: &App) {
     f.render_widget(Block::default().style(Style::default().bg(BG)), f.area());

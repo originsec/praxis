@@ -1,20 +1,15 @@
 use crate::app::{App, OperationsState, OpsTab};
+use crate::ui::common::{focused_titled_panel, short_id, titled_panel};
+use crate::ui::theme::{
+    ACCENT, DIM, MUTED, PANEL_HIGHLIGHT_BG, POPUP_HIGHLIGHT_BG, STATUS_DONE, STATUS_FAIL,
+    STATUS_QUEUED, STATUS_RUNNING, TEXT,
+};
 use common::{ChainExecutionStatus, SemanticOpStatus};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap};
-
-const ACCENT: Color = Color::Rgb(100, 180, 100);
-const DIM: Color = Color::Rgb(80, 80, 80);
-const MUTED: Color = Color::Rgb(120, 120, 120);
-const TEXT: Color = Color::Rgb(180, 180, 180);
-const HIGHLIGHT_BG: Color = Color::Rgb(35, 35, 40);
-const STATUS_RUNNING: Color = Color::Rgb(180, 160, 60);
-const STATUS_DONE: Color = Color::Rgb(80, 160, 80);
-const STATUS_FAIL: Color = Color::Rgb(160, 60, 60);
-const STATUS_QUEUED: Color = Color::Rgb(100, 140, 180);
+use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 const CHAIN_COLOR: Color = Color::Rgb(80, 180, 180);
 const OP_COLOR: Color = Color::Rgb(160, 120, 200);
 
@@ -211,14 +206,8 @@ fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsState) {
 
     let table = Table::new(rows, widths)
         .header(header)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(DIM))
-                .title_style(Style::default().fg(MUTED))
-                .title(" Operations & Chains "),
-        )
-        .row_highlight_style(Style::default().bg(HIGHLIGHT_BG));
+        .block(titled_panel(" Operations & Chains "))
+        .row_highlight_style(Style::default().bg(PANEL_HIGHLIGHT_BG));
 
     let mut table_state = TableState::default();
     table_state.select(Some(state.library_selected));
@@ -227,11 +216,7 @@ fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsState) {
 }
 
 fn render_library_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(DIM))
-        .title_style(Style::default().fg(MUTED))
-        .title(" Detail ");
+    let block = titled_panel(" Detail ");
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -395,7 +380,7 @@ fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
                 None => format_duration(now - op.start_time),
             };
             let started = op.start_time.format("%H:%M:%S").to_string();
-            let node_short = &op.node_id[..8.min(op.node_id.len())];
+            let node_short = short_id(&op.node_id);
 
             rows.push(Row::new(vec![
                 Cell::from("O").style(Style::default().fg(OP_COLOR)),
@@ -414,7 +399,7 @@ fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
                 None => format_duration(now - exec.started_at),
             };
             let started = exec.started_at.format("%H:%M:%S").to_string();
-            let node_short = &exec.node_id[..8.min(exec.node_id.len())];
+            let node_short = short_id(&exec.node_id);
 
             rows.push(Row::new(vec![
                 Cell::from("C").style(Style::default().fg(CHAIN_COLOR)),
@@ -440,14 +425,8 @@ fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
 
     let table = Table::new(rows, widths)
         .header(header)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(DIM))
-                .title_style(Style::default().fg(MUTED))
-                .title(" Executions "),
-        )
-        .row_highlight_style(Style::default().bg(HIGHLIGHT_BG));
+        .block(titled_panel(" Executions "))
+        .row_highlight_style(Style::default().bg(PANEL_HIGHLIGHT_BG));
 
     let mut table_state = TableState::default();
     table_state.select(Some(state.exec_selected));
@@ -456,17 +435,7 @@ fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
 }
 
 fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
-    let border_style = if state.detail_focus {
-        Style::default().fg(ACCENT)
-    } else {
-        Style::default().fg(DIM)
-    };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(border_style)
-        .title_style(Style::default().fg(MUTED))
-        .title(" Detail ");
+    let block = focused_titled_panel(" Detail ", state.detail_focus);
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -501,7 +470,7 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
             Some(end) => format_duration(end - op.start_time),
             None => format_duration(now - op.start_time),
         };
-        let short_id = &op.operation_id[..8.min(op.operation_id.len())];
+        let op_short_id = short_id(&op.operation_id);
 
         //
         // Header: name and status bar.
@@ -519,7 +488,7 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
             Span::styled(&op.spec.mode, Style::default().fg(TEXT)),
             Span::styled("  Duration: ", Style::default().fg(DIM)),
             Span::styled(duration.clone(), Style::default().fg(ACCENT)),
-            Span::styled(format!("  {}", short_id), Style::default().fg(DIM)),
+            Span::styled(format!("  {}", op_short_id), Style::default().fg(DIM)),
         ];
 
         if let Some(ref result) = op.result {
@@ -591,7 +560,7 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
             Some(end) => format_duration(end - exec.started_at),
             None => format_duration(now - exec.started_at),
         };
-        let short_id = &exec.execution_id[..8.min(exec.execution_id.len())];
+        let exec_short_id = short_id(&exec.execution_id);
         let started = exec.started_at.format("%H:%M:%S").to_string();
         let ended = exec
             .ended_at
@@ -620,14 +589,10 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         lines.push(Line::from(vec![
             Span::styled(" Node: ", Style::default().fg(DIM)),
             Span::styled(
-                format!(
-                    "{} / {}",
-                    &exec.node_id[..8.min(exec.node_id.len())],
-                    exec.agent_short_name
-                ),
+                format!("{} / {}", short_id(&exec.node_id), exec.agent_short_name),
                 Style::default().fg(TEXT),
             ),
-            Span::styled(format!("  {}", short_id), Style::default().fg(DIM)),
+            Span::styled(format!("  {}", exec_short_id), Style::default().fg(DIM)),
         ]));
 
         //
@@ -836,7 +801,7 @@ fn section_header_line(label: &str, collapsed: bool, focused: bool) -> Vec<Line<
     let style = if focused {
         Style::default()
             .fg(TEXT)
-            .bg(Color::Rgb(35, 40, 35))
+            .bg(POPUP_HIGHLIGHT_BG)
             .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(ACCENT)
@@ -869,7 +834,7 @@ pub fn execution_detail_section_at_row(
         Some(end) => format_duration(end - op.start_time),
         None => format_duration(now - op.start_time),
     };
-    let short_id = &op.operation_id[..8.min(op.operation_id.len())];
+    let op_short_id = short_id(&op.operation_id);
 
     let mut row = 0u16;
 
@@ -885,7 +850,7 @@ pub fn execution_detail_section_at_row(
         Span::raw(op.spec.mode.clone()),
         Span::raw("  Duration: "),
         Span::raw(duration),
-        Span::raw(format!("  {}", short_id)),
+        Span::raw(format!("  {}", op_short_id)),
     ];
 
     if let Some(ref result) = op.result {

@@ -1,15 +1,10 @@
 use crate::app::{ModelEditForm, SettingsState, SettingsTab};
+use crate::ui::theme::{ACCENT, BG, DIM, MUTED, POPUP_HIGHLIGHT_BG, SETTINGS_HIGHLIGHT_BG, TEXT};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
-
-const ACCENT: Color = Color::Rgb(100, 180, 100);
-const DIM: Color = Color::Rgb(80, 80, 80);
-const MUTED: Color = Color::Rgb(120, 120, 120);
-const TEXT: Color = Color::Rgb(180, 180, 180);
-const HIGHLIGHT_BG: Color = Color::Rgb(40, 50, 40);
 const EDIT_FG: Color = Color::Rgb(220, 220, 220);
 
 pub fn render(f: &mut Frame, area: Rect, state: &SettingsState) {
@@ -137,7 +132,7 @@ fn toggle_row(label: &str, enabled: bool, selected: bool) -> Line<'_> {
         )
     };
 
-    let bg = if selected { HIGHLIGHT_BG } else { super::BG };
+    let bg = if selected { SETTINGS_HIGHLIGHT_BG } else { BG };
 
     Line::from(vec![
         Span::styled(if selected { "\u{25b8} " } else { "  " }, label_style),
@@ -209,7 +204,7 @@ fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
             Span::styled(
                 display,
                 if selected {
-                    Style::default().fg(TEXT).bg(HIGHLIGHT_BG)
+                    Style::default().fg(TEXT).bg(SETTINGS_HIGHLIGHT_BG)
                 } else {
                     Style::default().fg(MUTED)
                 },
@@ -308,7 +303,10 @@ fn render_agents(f: &mut Frame, area: Rect, state: &SettingsState) {
     ];
     if on_script {
         header_spans.push(Span::styled("   space", Style::default().fg(DIM)));
-        header_spans.push(Span::styled(" toggle enablement  ", Style::default().fg(MUTED)));
+        header_spans.push(Span::styled(
+            " toggle enablement  ",
+            Style::default().fg(MUTED),
+        ));
         header_spans.push(Span::styled("^d", Style::default().fg(DIM)));
         header_spans.push(Span::styled(" delete", Style::default().fg(MUTED)));
     }
@@ -338,7 +336,7 @@ fn render_agents(f: &mut Frame, area: Rect, state: &SettingsState) {
         let name_style = if script.disabled {
             Style::default().fg(DIM)
         } else if selected {
-            Style::default().fg(TEXT).bg(HIGHLIGHT_BG)
+            Style::default().fg(TEXT).bg(SETTINGS_HIGHLIGHT_BG)
         } else {
             Style::default().fg(MUTED)
         };
@@ -611,7 +609,7 @@ fn render_model_dropdown(f: &mut Frame, area: Rect, state: &SettingsState) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(ACCENT))
         .title(" Select Model ")
-        .style(Style::default().bg(super::BG));
+        .style(Style::default().bg(BG));
 
     let inner = block.inner(popup_area);
     f.render_widget(Clear, popup_area);
@@ -621,7 +619,7 @@ fn render_model_dropdown(f: &mut Frame, area: Rect, state: &SettingsState) {
     for (i, def) in items.iter().enumerate() {
         let selected = i == state.dropdown_selected;
         let style = if selected {
-            Style::default().fg(ACCENT).bg(HIGHLIGHT_BG)
+            Style::default().fg(ACCENT).bg(SETTINGS_HIGHLIGHT_BG)
         } else {
             Style::default().fg(TEXT)
         };
@@ -716,7 +714,7 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(ACCENT))
         .title(title)
-        .style(Style::default().bg(super::BG));
+        .style(Style::default().bg(BG));
 
     let inner = block.inner(popup_area);
     form.model_dropdown_inner_h.set(inner.height as usize);
@@ -864,7 +862,10 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
         lines.push(Line::raw(""));
         let header_h = lines.len() as u16;
 
-        let header_area = Rect { height: header_h, ..inner };
+        let header_area = Rect {
+            height: header_h,
+            ..inner
+        };
         f.render_widget(Paragraph::new(lines), header_area);
 
         let dropdown_area = Rect {
@@ -872,13 +873,14 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
             height: inner.height.saturating_sub(header_h),
             ..inner
         };
-        form.model_dropdown_inner_h.set(dropdown_area.height as usize);
+        form.model_dropdown_inner_h
+            .set(dropdown_area.height as usize);
 
         let mut dropdown_lines: Vec<Line> = Vec::new();
         for (i, name) in form.available_models.iter().enumerate() {
             let selected = i == form.model_dropdown_selected;
             let style = if selected {
-                Style::default().fg(ACCENT).bg(HIGHLIGHT_BG)
+                Style::default().fg(ACCENT).bg(POPUP_HIGHLIGHT_BG)
             } else {
                 Style::default().fg(TEXT)
             };
