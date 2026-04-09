@@ -53,7 +53,7 @@ CCRv2 uses HTTP POST for client-to-server messages and Server-Sent Events (SSE) 
 
 ## Enabling the Bridge
 
-Both bridge versions are disabled by default. Enable them in the web UI under **Settings** > **Claude Bridge**.
+Both bridge versions are disabled by default. Enable them in the web UI under **Settings** > **Claude Bridge**, or in the CLI TUI under **Settings** (`Ctrl+S`) > **Service** tab.
 
 | Setting | Default | Description |
 |---------|---------|-------------|

@@ -70,25 +70,29 @@ When semantic recon is enabled, the connector also creates a session and queries
 
 ## Session Management
 
-Sessions are created by spawning Gemini CLI as a subprocess with stdin/stdout communication.
+Sessions use the Agent Communication Protocol (ACP) -- a JSON-RPC 2.0 protocol over NDJSON stdio that provides real-time streaming updates during prompt execution.
 
 ### Session Context
 
 When creating a session, you can specify:
 
-**Working Directory** - Where Gemini should operate. The session ID is derived from a hash of this path.
+**Working Directory** - Where Gemini should operate.
 
-**YOLO Mode** - When enabled, passes `-y` to Gemini, which auto-approves tool calls.
+**YOLO Mode** - When enabled, tool permission requests are auto-approved.
+
+**Interactive Mode** - When set (TUI or web sessions), permission requests are forwarded to the user for approval. Non-interactive sessions (MCP, orchestrator) auto-deny permission requests.
 
 ### Transacting
 
-Sending prompts works by:
-1. Writing the prompt text to stdin (Gemini reads prompts from stdin)
-2. Waiting for Gemini to process and respond
-3. Parsing the response from stdout
-4. Returning the assistant's message
+Sending prompts works via ACP streaming:
+1. `gemini --acp` is spawned as a long-lived subprocess
+2. An ACP initialize handshake establishes the connection
+3. `session/prompt` sends the prompt and streams back real-time updates: text chunks, tool calls, tool results, and permission requests
+4. The response is assembled from the streamed chunks and returned
 
-Session continuity is maintained using the `-r` flag with the session ID discovered from Gemini's storage after the first prompt.
+### Cancellation
+
+Sessions support mid-prompt cancellation. A cancel signal interrupts the agent, stale responses are drained, and any partial output is preserved in the conversation.
 
 ## Config Editing
 

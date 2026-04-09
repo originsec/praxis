@@ -68,8 +68,19 @@ Operation and chain management with two tabs:
 
 Configuration management:
 - **LLM** — model definitions, provider selection, API keys, and feature assignment (orchestrator, semantic ops, semantic parser, traffic parser)
-- **Service** — MCP server toggle, MCP port, logging, hunting row limits, prompt timeout
+- **Service** — MCP server toggle, MCP port, Claude Bridge settings (CCRv1/CCRv2 enable and port configuration), logging, hunting row limits, prompt timeout
 - **About** — connection info
+
+### Mouse Support
+
+The TUI supports mouse interactions across all windows:
+
+- **Click** — select items in lists, tabs, and interactive elements
+- **Double-click** — activate items (e.g. open an operation, select a node)
+- **Drag** — scroll through lists and content areas
+- **Scroll wheel** — scroll through lists, chat history, and scrollable content
+
+Mouse interactions work alongside keyboard controls in all windows and popups.
 
 ### Global Keybindings
 

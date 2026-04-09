@@ -12,7 +12,7 @@ Lua agent scripts live in `agents/` at the project root and are embedded into bi
 
 ### CLI Agents vs Browser-Based Agents
 
-For **CLI agents** (e.g. Claude Code, Gemini CLI), use `praxis.command_run` / `praxis.command_run_handle` to spawn processes and interact via stdin/stdout.
+For **CLI agents** (e.g. Claude Code, Gemini CLI), use `praxis.command_run` / `praxis.command_run_handle` to spawn processes and interact via stdin/stdout. For agents that support the Agent Communication Protocol (ACP), use the `praxis.acp_*` APIs for long-lived subprocess sessions with real-time streaming (see [ACP Sessions](#acp-sessions-streaming-agents) below).
 
 For **browser-based agents** (e.g. M365 Copilot), use the `praxis.devtools` library and `praxis.cdp_*` native API to drive the agent via Chrome DevTools Protocol. See [DevTools-Based Agents](#devtools-based-agents-browser-automation) below.
 
@@ -162,6 +162,7 @@ The `praxis` global provides:
 
 - **Filesystem**: `path_exists`, `path_join`, `read_file`, `walk_files`, `glob_files`
 - **Commands**: `command_run`, `command_run_handle`, `command_abort_handle`
+- **ACP**: `acp_start`, `acp_create_session`, `acp_prompt`, `acp_close`
 - **Environment**: `os_name`, `user_homes`, `env_get`, `expand_path`
 - **Process**: `find_executables`, `kill_processes_by_name`
 - **CDP**: `cdp_spawn_and_connect`, `cdp_connect`, `cdp_evaluate`, `cdp_click`, `cdp_type_text`, `cdp_press_key`, `cdp_wait_for_element`, `cdp_find_elements`, `cdp_close`, `cdp_process_id`
@@ -175,6 +176,67 @@ The `devtools` module (`require("praxis.devtools")`) provides `connect`, `transa
 
 - **Embedded**: Add the `.lua` file to `agents/` and rebuild. It will be compiled into both node and service binaries.
 - **Runtime**: Upload via Settings > Agents in the web UI. The script is stored in the service database and pushed to all connected nodes.
+
+---
+
+## ACP Sessions (Streaming Agents)
+
+For agents that support the Agent Communication Protocol (ACP), sessions use a long-lived subprocess with JSON-RPC 2.0 over NDJSON stdio. This provides real-time streaming updates (text chunks, tool calls, permission requests) instead of waiting for the full response.
+
+### ACP Lua API
+
+| Function | Arguments | Returns | Description |
+|----------|-----------|---------|-------------|
+| `praxis.acp_start` | spec table | handle (string) | Spawn an ACP subprocess and perform the initialize handshake |
+| `praxis.acp_create_session` | handle, cwd | session_id (string) | Create an ACP session with a working directory |
+| `praxis.acp_prompt` | handle, prompt, yolo, interactive | response (string) | Send a prompt and wait for the streamed response. `yolo` auto-approves permission requests; `interactive` forwards them to the user |
+| `praxis.acp_close` | handle | — | Close the ACP session and terminate the subprocess |
+
+The `acp_start` spec table:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `program` | string | Path to the agent executable |
+| `args` | table | Command-line arguments (e.g. `{ "acp" }` or `{ "--acp" }`) |
+| `cwd` | string | Working directory for the subprocess |
+
+### Example
+
+```lua
+create_session = function(ctx)
+  local acp_handle = praxis.acp_start({
+    program = ctx.process_path,
+    args = { "--acp" },
+    cwd = ctx.working_dir or "",
+  })
+
+  local session_id = praxis.acp_create_session(acp_handle, ctx.working_dir or "")
+
+  return {
+    acp_handle = acp_handle,
+    acp_session_id = session_id,
+    yolo_mode = ctx.yolo_mode == true,
+    interactive = ctx.interactive == true,
+  }
+end,
+
+session_transact = function(_ctx, state, prompt)
+  local response = praxis.acp_prompt(
+    state.acp_handle, prompt,
+    state.yolo_mode or false,
+    state.interactive or false
+  )
+  return { response = response, state = state }
+end,
+
+session_close = function(_ctx, state)
+  if state.acp_handle then
+    praxis.acp_close(state.acp_handle)
+  end
+end,
+```
+
+During `acp_prompt`, streaming updates (text, tool calls, tool results) are automatically forwarded to the client (TUI or web UI) in real time. The function blocks until the full response is assembled and returns the final text.
 
 ---
 

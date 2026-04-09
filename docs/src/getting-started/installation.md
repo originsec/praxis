@@ -127,6 +127,8 @@ This starts:
 - **Praxis** (service + web) on port 8080
 - **RabbitMQ** on ports 5672 (AMQP) and 15672 (management UI)
 - **MCP server** on port 8585 (when enabled in Settings > MCP Server)
+- **Claude Bridge CCRv1** on port 8586 (when enabled in Settings > Claude Bridge)
+- **Claude Bridge CCRv2** on port 8587 (when enabled in Settings > Claude Bridge)
 
 Open **http://localhost:8080** and you're in.
 

@@ -156,13 +156,24 @@ This ensures the agent:
 
 Sessions allow direct interaction with agents:
 
-### CLI Agents
+### CLI Agents (PTY)
 
 1. PTY created for the agent process
 2. Agent spawned with appropriate flags (and as appropriate user when running as root)
 3. Prompts written to stdin
 4. Responses read from stdout
 5. Output parsed and returned
+
+### CLI Agents (ACP)
+
+Agents that support the Agent Communication Protocol (Cursor, Gemini) use a long-lived subprocess with JSON-RPC 2.0 over NDJSON stdio instead of PTY:
+
+1. Agent spawned with ACP flag (e.g. `cursor-agent acp`, `gemini --acp`)
+2. Initialize handshake establishes the connection
+3. Prompts sent via `session/prompt` JSON-RPC requests
+4. Real-time streaming updates (text chunks, tool calls, tool results) forwarded to the client
+5. Permission requests routed to the user (interactive) or auto-handled (yolo/non-interactive)
+6. Cancellation supported via cancel flag and `session/cancel` request
 
 ### Browser-based Agents
 
@@ -177,6 +188,7 @@ Sessions allow direct interaction with agents:
 Sessions are created with:
 - **Working directory** - where the agent operates
 - **YOLO mode** - auto-approve tool calls
+- **Interactive** - whether permission requests should be forwarded to the user (TUI/web) or auto-denied (MCP/orchestrator)
 
 ## Terminal Manager
 

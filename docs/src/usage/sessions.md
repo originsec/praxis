@@ -47,11 +47,22 @@ Sessions can be created with context:
 When you send a prompt:
 
 1. Text goes to the node via RabbitMQ
-2. Node writes to the agent's PTY stdin
+2. Node writes to the agent's PTY stdin (or sends via ACP for supported agents)
 3. Agent processes the prompt
-4. Response comes back through the PTY
+4. Response comes back through the PTY or as streaming updates via ACP
 5. Node parses and extracts the response
 6. Response appears in the UI
+
+### Streaming Sessions (ACP)
+
+Agents that support the Agent Communication Protocol (ACP) -- currently Cursor and Gemini -- provide real-time streaming updates during prompt execution. Instead of waiting for the full response, you see:
+
+- **Text chunks** — incremental output as the agent generates its response
+- **Tool calls** — tool name and input displayed as the agent invokes tools
+- **Tool results** — output from each tool call (with error highlighting)
+- **Permission requests** — when the agent needs approval for an action (interactive sessions only)
+
+Streaming sessions also support cancellation -- pressing Ctrl+C (TUI) or clicking Cancel (web UI) sends a cancel signal that interrupts the agent mid-response. Any partial output is preserved in the conversation history.
 
 ## Session Messages
 

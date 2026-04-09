@@ -45,19 +45,18 @@ In the web UI, HTTP/2 traffic appears grouped by URL (similar to WebSocket), wit
 
 ## Session Management
 
-Sessions are created using the `cursor-agent` CLI:
+Sessions use the Agent Communication Protocol (ACP) -- a JSON-RPC 2.0 protocol over NDJSON stdio that provides real-time streaming updates during prompt execution.
 
 ```diagram
 ┌───────────────────────────────────────────────────────┐
 │                      Praxis Node                      │
 │                                                       │
-│  cursor-agent create-chat                             │
+│  cursor-agent acp                                     │
 │         │                                             │
-│         └──▶ Returns chat_id                          │
-│                                                       │
-│  cursor-agent --resume <chat_id> -p <prompt>          │
-│         │                                             │
-│         └──▶ Executes prompt in existing chat         │
+│         ├──▶ ACP initialize handshake                 │
+│         ├──▶ session/create → session_id              │
+│         ├──▶ session/prompt → streaming updates       │
+│         └──▶ session/close → cleanup                  │
 └───────────────────────────────────────────────────────┘
 ```
 
@@ -65,34 +64,36 @@ Sessions are created using the `cursor-agent` CLI:
 
 When creating a session, you can specify:
 
-**Working Directory** - Where Cursor should operate. Passed via `--workspace <path>`.
+**Working Directory** - Where Cursor should operate.
 
-**YOLO Mode** - When enabled, passes flags for auto-approval:
-- `--force` - Auto-approve file changes
-- `--approve-mcps` - Auto-approve MCP server connections
-- `--browser` - Allow browser automation
+**YOLO Mode** - When enabled, tool permission requests are auto-approved.
+
+**Interactive Mode** - When set (TUI or web sessions), permission requests are forwarded to the user for approval. Non-interactive sessions (MCP, orchestrator) auto-deny permission requests.
 
 ### Session Creation
 
-1. `cursor-agent create-chat` is called to create a new chat
-2. The chat ID is extracted from stdout
-3. Subsequent prompts use `--resume <chat_id>` to continue the conversation
+1. `cursor-agent acp` is spawned as a long-lived subprocess
+2. An ACP initialize handshake establishes the connection
+3. `session/create` creates a new session with the working directory
 
 ### Transacting
 
-Sending prompts works by:
-1. Spawning `cursor-agent --resume <chat_id> -p` with the prompt on stdin
-2. Using `--output-format text` for clean output parsing
-3. Waiting for the process to complete
-4. Returning the assistant's response from stdout
+Sending prompts works via ACP streaming:
+1. A `session/prompt` request is sent with the prompt text
+2. The agent streams back real-time updates: text chunks, tool calls, tool results, and permission requests
+3. The response is assembled from the streamed chunks and returned
+
+### Cancellation
+
+Sessions support mid-prompt cancellation:
+1. A cancel signal is sent to the ACP client
+2. A `session/cancel` request tells the agent to stop
+3. Stale responses are drained to prevent cross-prompt data leakage
+4. Any partial output is preserved in the conversation
 
 ### Session Cleanup
 
-When a session is closed, Praxis:
-1. Aborts any in-progress transaction (kills the process tree)
-2. Deletes the chat history folder at `~/.config/cursor/chats/<project_hash>/<chat_id>/`
-
-The cleanup searches through project hash directories to find and remove the specific chat folder, ensuring no session history is left behind.
+When a session is closed, Praxis sends `session/close` via ACP, then terminates the subprocess.
 
 ## Files and Paths
 
