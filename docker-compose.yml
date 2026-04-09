@@ -9,6 +9,8 @@
 # Access:
 #   Web UI: http://localhost:8080
 #   MCP Server: http://localhost:8585/sse (enabled by default)
+#   Claude Bridge CCRv1: ws://localhost:8587 (disabled by default)
+#   Claude Bridge CCRv2: http://localhost:8588 (disabled by default)
 #   RabbitMQ Management: http://localhost:15672 (praxis/praxis)
 #
 # Environment Variables:
@@ -80,6 +82,8 @@ services:
     ports:
       - "8080:8080"
       - "${PRAXIS_MCP_PORT:-8585}:${PRAXIS_MCP_PORT:-8585}"
+      - "8587:8587"
+      - "8588:8588"
     volumes:
       - praxis_data:/app/data
     restart: unless-stopped
@@ -104,6 +108,8 @@ services:
     ports:
       - "8080:8080"
       - "${PRAXIS_MCP_PORT:-8585}:${PRAXIS_MCP_PORT:-8585}"
+      - "8587:8587"
+      - "8588:8588"
     restart: unless-stopped
     profiles:
       - postgres
