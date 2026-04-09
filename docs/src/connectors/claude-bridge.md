@@ -18,7 +18,7 @@ The bridge implements two protocol versions that correspond to the two transport
 
 CCRv1 uses a bidirectional WebSocket connection with newline-delimited JSON (NDJSON). This is the simpler protocol -- Claude connects via `ws://` and all messages flow over a single WebSocket.
 
-**Default port**: 8586
+**Default port**: 8587
 
 **Wire format**: Each message is `JSON.stringify(msg) + "\n"` sent as a WebSocket text frame. Multiple JSON objects may arrive in a single frame.
 
@@ -33,7 +33,7 @@ CCRv1 uses a bidirectional WebSocket connection with newline-delimited JSON (NDJ
 
 CCRv2 uses HTTP POST for client-to-server messages and Server-Sent Events (SSE) for server-to-client messages. This is the newer protocol used by Anthropic's cloud infrastructure.
 
-**Default port**: 8587
+**Default port**: 8588
 
 **Endpoints**:
 
@@ -58,9 +58,9 @@ Both bridge versions are disabled by default. Enable them in the web UI under **
 | Setting | Default | Description |
 |---------|---------|-------------|
 | CCRv1 Enabled | `false` | Enable the WebSocket bridge listener |
-| CCRv1 Port | `8586` | Port for WebSocket connections |
+| CCRv1 Port | `8587` | Port for WebSocket connections |
 | CCRv2 Enabled | `false` | Enable the HTTP+SSE bridge listener |
-| CCRv2 Port | `8587` | Port for HTTP connections |
+| CCRv2 Port | `8588` | Port for HTTP connections |
 
 Changes take effect immediately -- the bridge starts or stops without restarting the service.
 
@@ -72,7 +72,7 @@ To make Claude Code connect to a Praxis bridge instead of Anthropic's servers, l
 
 ```powershell
 $env:CLAUDE_CODE_SESSION_ACCESS_TOKEN = "local-token"
-claude --sdk-url ws://localhost:8586 --output-format stream-json --input-format stream-json
+claude --sdk-url ws://localhost:8587 --output-format stream-json --input-format stream-json
 ```
 
 The `CLAUDE_CODE_SESSION_ACCESS_TOKEN` is passed as an `Authorization: Bearer` header on the WebSocket upgrade request. The Praxis bridge does not validate the token, so any non-empty value works. You can also omit it entirely for CCRv1 -- the WebSocket transport accepts empty auth headers.
@@ -83,7 +83,7 @@ The `CLAUDE_CODE_SESSION_ACCESS_TOKEN` is passed as an `Authorization: Bearer` h
 $env:CLAUDE_CODE_USE_CCR_V2 = "1"
 $env:CLAUDE_CODE_WORKER_EPOCH = "1"
 $env:CLAUDE_CODE_SESSION_ACCESS_TOKEN = "local-token"
-claude --sdk-url http://localhost:8587 --output-format stream-json --input-format stream-json
+claude --sdk-url http://localhost:8588 --output-format stream-json --input-format stream-json
 ```
 
 CCRv2 has stricter requirements:
