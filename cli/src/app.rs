@@ -302,6 +302,7 @@ pub struct SessionChat {
     pub yolo: bool,
     pub working_dir: Option<String>,
     pub streaming_content: String,
+    pub had_tool_call: bool,
     pub agent_status: Option<String>,
     pub pending_permission: Option<PendingPermission>,
     pub tool_calls: Vec<ToolCallEntry>,
@@ -750,12 +751,29 @@ impl App {
                             {
                                 return false;
                             }
+
+                            //
+                            // Flush any streamed text before the cancel so
+                            // it's preserved in the message history.
+                            //
+
+                            if !session.streaming_content.is_empty() {
+                                let partial = std::mem::take(&mut session.streaming_content);
+                                session.messages.push(ChatMessage {
+                                    role: ChatRole::Agent,
+                                    text: partial,
+                                });
+                            }
                             session.messages.push(ChatMessage {
                                 role: ChatRole::System,
                                 text: "Cancelled".to_string(),
                             });
                             session.is_waiting = false;
                             session.active_transaction_id = None;
+                            session.tool_calls.clear();
+                            session.had_tool_call = false;
+                            session.agent_status = None;
+                            session.pending_permission = None;
                         }
                         SessionResult::Error(msg) => {
                             session.messages.push(ChatMessage {
@@ -777,6 +795,12 @@ impl App {
                     use common::SessionUpdateKind;
                     match update.update {
                         SessionUpdateKind::TextChunk { text } => {
+                            if session.had_tool_call
+                                && !session.streaming_content.is_empty()
+                            {
+                                session.streaming_content.push_str("\n\n");
+                                session.had_tool_call = false;
+                            }
                             session.streaming_content.push_str(&text);
                         }
                         SessionUpdateKind::ToolCall {
@@ -784,6 +808,7 @@ impl App {
                             tool_id,
                             input,
                         } => {
+                            session.had_tool_call = true;
                             session.tool_calls.push(ToolCallEntry {
                                 tool_name,
                                 tool_id,

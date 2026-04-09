@@ -41,11 +41,20 @@ pub fn remove_client(handle: &str) -> Option<AcpClient> {
 //
 
 pub fn cancel_client(handle: &str) {
-    if let Some(flag) = ACP_CANCEL_FLAGS.lock().unwrap().get(handle) {
-        flag.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
+    signal_cancel(handle);
     if let Some(&pid) = ACP_PIDS.lock().unwrap().get(handle) {
         crate::utils::terminate_process_tree(pid);
+    }
+}
+
+//
+// Signal cancellation without killing the subprocess. Sets the cancel flag
+// so the blocking read loop unblocks and sends an ACP cancel message.
+//
+
+pub fn signal_cancel(handle: &str) {
+    if let Some(flag) = ACP_CANCEL_FLAGS.lock().unwrap().get(handle) {
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 

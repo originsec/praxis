@@ -271,6 +271,11 @@ impl App {
         session.is_waiting = true;
         session.active_transaction_id = Some(uuid::Uuid::new_v4().to_string());
         session.scroll_offset = 0;
+        session.streaming_content.clear();
+        session.had_tool_call = false;
+        session.tool_calls.clear();
+        session.agent_status = None;
+        session.pending_permission = None;
 
         let node_id = session.node_id.clone();
         let transaction_id = session.active_transaction_id.clone().unwrap_or_default();
@@ -431,6 +436,7 @@ impl App {
             yolo,
             working_dir: working_dir.clone(),
             streaming_content: String::new(),
+            had_tool_call: false,
             agent_status: None,
             pending_permission: None,
             tool_calls: Vec::new(),

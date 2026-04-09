@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use common::{PermissionDecision, SessionUpdateKind};
 use serde_json::Value;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufReader, BufWriter, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -142,8 +142,17 @@ impl AcpClient {
             }],
         };
 
+        //
+        // Reset cancel flag for the new prompt.
+        //
+
+        self.cancelled.store(false, Ordering::SeqCst);
+
         let prompt_id = self.next_id;
-        tracing::debug!("ACP session/prompt id={} session={}", prompt_id, session_id);
+        tracing::debug!(
+            "ACP session/prompt id={} session={} prompt={:?}",
+            prompt_id, session_id, prompt
+        );
         self.send_request_no_wait(
             "session/prompt",
             Some(serde_json::to_value(params)?),
@@ -162,13 +171,52 @@ impl AcpClient {
                 && (cancel_flag.load(Ordering::Relaxed)
                     || self.cancelled.load(Ordering::Relaxed))
             {
+                tracing::debug!("ACP sending cancel for session {}", session_id);
                 let _ = self.send_cancel(&session_id);
                 cancelled = true;
             }
 
-            let msg = match self.read_message() {
+            let msg = match self.read_message(cancel_flag) {
                 Ok(msg) => msg,
                 Err(e) => {
+                    if cancel_flag.load(Ordering::Relaxed)
+                        || self.cancelled.load(Ordering::Relaxed)
+                    {
+                        if !cancelled {
+                            tracing::debug!("ACP sending cancel for session {}", session_id);
+                            let _ = self.send_cancel(&session_id);
+                        }
+
+                        //
+                        // Drain messages until we get our prompt response so
+                        // the next prompt doesn't see stale data. Reset the
+                        // cancel flag first so read_message doesn't bail.
+                        //
+
+                        self.cancelled.store(false, Ordering::SeqCst);
+                        let drain_deadline =
+                            std::time::Instant::now() + std::time::Duration::from_secs(5);
+                        let no_cancel = AtomicBool::new(false);
+                        while std::time::Instant::now() < drain_deadline {
+                            match self.read_message(&no_cancel) {
+                                Ok(msg) => {
+                                    tracing::debug!(
+                                        "ACP drain: id={:?} method={:?} result={:?} params={:?}",
+                                        msg.id, msg.method, msg.result, msg.params
+                                    );
+                                    if msg.id_matches(prompt_id) {
+                                        tracing::debug!(
+                                            "ACP drained response for cancelled prompt {}",
+                                            prompt_id
+                                        );
+                                        break;
+                                    }
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                        return Ok(assembled_text);
+                    }
                     let _ = update_tx.send(SessionUpdateKind::Error {
                         message: format!("ACP read error: {}", e),
                     });
@@ -185,7 +233,7 @@ impl AcpClient {
             // Response to our prompt request — we're done.
             //
 
-            if msg.id == Some(prompt_id) {
+            if msg.id_matches(prompt_id) {
                 if let Some(err) = msg.error {
                     bail!("ACP prompt failed: {}", err);
                 }
@@ -272,44 +320,74 @@ impl AcpClient {
         }
 
         //
-        // Handle tool call updates.
+        // Handle tool call updates. Supports both the `kind` field (standard
+        // ACP) and the `sessionUpdate` field (Claude Code bridge).
         //
 
-        if let Some(kind) = &content.kind {
-            match kind.as_str() {
-                "tool_call" => {
-                    let _ = update_tx.send(SessionUpdateKind::ToolCall {
-                        tool_name: content.tool_name.unwrap_or_default(),
-                        tool_id: content.tool_call_id.unwrap_or_default(),
-                        input: content
-                            .tool_input
-                            .map(|v| v.to_string())
-                            .unwrap_or_default(),
-                    });
+        let kind_str = content.kind.as_deref().unwrap_or("");
+        let session_update_str = content.session_update.as_deref().unwrap_or("");
+
+        if kind_str == "tool_call" || session_update_str == "tool_call" {
+            let tool_name = content
+                .tool_name
+                .or(content.title)
+                .unwrap_or_default();
+            let input = content
+                .tool_input
+                .or(content.raw_input)
+                .map(|v| v.to_string())
+                .unwrap_or_default();
+            let _ = update_tx.send(SessionUpdateKind::ToolCall {
+                tool_name,
+                tool_id: content.tool_call_id.unwrap_or_default(),
+                input,
+            });
+        } else if kind_str == "tool_call_result"
+            || (session_update_str == "tool_call_update"
+                && content.status.as_deref() == Some("completed"))
+        {
+            let output = if let Some(blocks) = &content.content {
+                blocks
+                    .iter()
+                    .filter_map(|b| b.text.as_ref())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            } else if let Some(raw) = &content.raw_output {
+                //
+                // Claude Code bridge sends rawOutput with stdout/stderr.
+                //
+
+                let stdout = raw.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
+                let stderr = raw.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
+                if !stderr.is_empty() && !stdout.is_empty() {
+                    format!("{}\n{}", stdout.trim(), stderr.trim())
+                } else if !stderr.is_empty() {
+                    stderr.trim().to_string()
+                } else {
+                    stdout.trim().to_string()
                 }
-                "tool_call_result" => {
-                    if let Some(blocks) = &content.content {
-                        let output = blocks
-                            .iter()
-                            .filter_map(|b| b.text.as_ref())
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        let _ = update_tx.send(SessionUpdateKind::ToolResult {
-                            tool_id: content.tool_call_id.unwrap_or_default(),
-                            output,
-                            is_error: false,
-                        });
-                    }
-                }
-                _ => {}
-            }
+            } else {
+                String::new()
+            };
+            let is_error = content
+                .raw_output
+                .as_ref()
+                .and_then(|r| r.get("exitCode"))
+                .and_then(|c| c.as_i64())
+                .map(|c| c != 0)
+                .unwrap_or(false);
+            let _ = update_tx.send(SessionUpdateKind::ToolResult {
+                tool_id: content.tool_call_id.unwrap_or_default(),
+                output,
+                is_error,
+            });
         }
     }
 
     fn handle_permission_request(
         &mut self,
-        request_id: Option<u64>,
+        request_id: Option<Value>,
         params: Value,
         update_tx: &tokio::sync::mpsc::UnboundedSender<SessionUpdateKind>,
         permission_rx: &std::sync::mpsc::Receiver<(String, PermissionDecision)>,
@@ -426,7 +504,7 @@ impl AcpClient {
         Ok(())
     }
 
-    fn send_permission_response(&mut self, request_id: u64, option_id: &str) -> Result<()> {
+    fn send_permission_response(&mut self, request_id: Value, option_id: &str) -> Result<()> {
         tracing::debug!("ACP sending permission response: id={} optionId={}", request_id, option_id);
         let response = serde_json::json!({
             "jsonrpc": "2.0",
@@ -441,7 +519,7 @@ impl AcpClient {
         self.write_message(&response)
     }
 
-    fn send_error_response(&mut self, request_id: u64, code: i64, message: &str) -> Result<()> {
+    fn send_error_response(&mut self, request_id: Value, code: i64, message: &str) -> Result<()> {
         let response = serde_json::json!({
             "jsonrpc": "2.0",
             "id": request_id,
@@ -506,9 +584,10 @@ impl AcpClient {
         // Read until we get a response with our id.
         //
 
+        let no_cancel = AtomicBool::new(false);
         loop {
-            let msg = self.read_message()?;
-            if msg.id == Some(id) {
+            let msg = self.read_message(&no_cancel)?;
+            if msg.id_matches(id) {
                 return Ok(msg);
             }
         }
@@ -529,26 +608,111 @@ impl AcpClient {
         Ok(())
     }
 
-    fn read_message(&mut self) -> Result<JsonRpcMessage> {
-        let mut line = String::new();
+    fn read_message(&mut self, cancel_flag: &AtomicBool) -> Result<JsonRpcMessage> {
+        use std::io::Read;
+        use std::os::unix::io::AsRawFd;
+
+        let fd = self.reader.get_ref().as_raw_fd();
+
+        //
+        // Set stdout to non-blocking so we can poll with a timeout
+        // and check the cancel flag between reads.
+        //
+
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL);
+            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        }
+
+        let mut buf = Vec::new();
+        let mut tmp = [0u8; 4096];
+
         loop {
-            line.clear();
-            let bytes_read = self
-                .reader
-                .read_line(&mut line)
-                .context("Failed to read from ACP subprocess")?;
-            if bytes_read == 0 {
-                bail!("ACP subprocess closed stdout (process exited)");
+            if cancel_flag.load(Ordering::Relaxed) || self.cancelled.load(Ordering::Relaxed) {
+                //
+                // Restore blocking mode before returning.
+                //
+
+                unsafe {
+                    let flags = libc::fcntl(fd, libc::F_GETFL);
+                    libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK);
+                }
+                bail!("Cancelled while waiting for ACP message");
             }
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            match serde_json::from_str::<JsonRpcMessage>(trimmed) {
-                Ok(msg) => return Ok(msg),
-                Err(_) => {
-                    // Skip non-JSON lines (agent may emit debug output).
+
+            //
+            // Poll for data with a 200ms timeout.
+            //
+
+            let mut pollfd = libc::pollfd {
+                fd,
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            let poll_result = unsafe { libc::poll(&mut pollfd, 1, 200) };
+
+            if poll_result < 0 {
+                let err = std::io::Error::last_os_error();
+                if err.kind() == std::io::ErrorKind::Interrupted {
                     continue;
+                }
+                unsafe {
+                    let flags = libc::fcntl(fd, libc::F_GETFL);
+                    libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK);
+                }
+                bail!("poll() failed: {}", err);
+            }
+
+            if poll_result == 0 {
+                continue; // timeout — loop back to check cancel flag
+            }
+
+            //
+            // Data available — read what we can.
+            //
+
+            match self.reader.get_mut().read(&mut tmp) {
+                Ok(0) => {
+                    unsafe {
+                        let flags = libc::fcntl(fd, libc::F_GETFL);
+                        libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK);
+                    }
+                    bail!("ACP subprocess closed stdout (process exited)");
+                }
+                Ok(n) => buf.extend_from_slice(&tmp[..n]),
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(e) => {
+                    unsafe {
+                        let flags = libc::fcntl(fd, libc::F_GETFL);
+                        libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK);
+                    }
+                    bail!("Failed to read from ACP subprocess: {}", e);
+                }
+            }
+
+            //
+            // Try to parse complete lines from the buffer.
+            //
+
+            while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+                let line: Vec<u8> = buf.drain(..=pos).collect();
+                let trimmed = String::from_utf8_lossy(&line);
+                let trimmed = trimmed.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                tracing::trace!("ACP raw line: {}", trimmed);
+                match serde_json::from_str::<JsonRpcMessage>(trimmed) {
+                    Err(e) => {
+                        tracing::debug!("ACP skipped line ({}): {}", e, trimmed);
+                    }
+                    Ok(msg) => {
+                        unsafe {
+                            let flags = libc::fcntl(fd, libc::F_GETFL);
+                            libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK);
+                        }
+                        return Ok(msg);
+                    }
                 }
             }
         }

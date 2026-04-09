@@ -20,6 +20,7 @@ sysinfo = "0.37.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 glob = "0.3"
 anyhow = "1.0.100"
+libc = "0.2"
 lapin = "2.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
