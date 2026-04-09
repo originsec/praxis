@@ -420,6 +420,7 @@ impl AcpClient {
     }
 
     fn send_permission_response(&mut self, request_id: u64, option_id: &str) -> Result<()> {
+        tracing::debug!("ACP sending permission response: id={} optionId={}", request_id, option_id);
         let response = serde_json::json!({
             "jsonrpc": "2.0",
             "id": request_id,
