@@ -15,11 +15,28 @@ static ACP_CLIENTS: Lazy<Mutex<HashMap<String, AcpClient>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 pub fn register_client(handle: &str, client: AcpClient) {
+    let cancel = client.cancel_flag();
+    ACP_CANCEL_FLAGS.lock().unwrap().insert(handle.to_string(), cancel);
     ACP_CLIENTS.lock().unwrap().insert(handle.to_string(), client);
 }
 
+static ACP_CANCEL_FLAGS: Lazy<Mutex<HashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
 pub fn remove_client(handle: &str) -> Option<AcpClient> {
+    ACP_CANCEL_FLAGS.lock().unwrap().remove(handle);
     ACP_CLIENTS.lock().unwrap().remove(handle)
+}
+
+//
+// Signal cancellation without locking ACP_CLIENTS. This avoids a deadlock
+// when abort_transaction is called while send_prompt holds the client lock.
+//
+
+pub fn cancel_client(handle: &str) {
+    if let Some(flag) = ACP_CANCEL_FLAGS.lock().unwrap().get(handle) {
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 pub fn with_client<F, R>(handle: &str, f: F) -> Option<R>

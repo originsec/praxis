@@ -155,8 +155,11 @@ impl AcpClient {
         let mut cancelled = false;
 
         loop {
-            if !cancelled && cancel_flag.load(Ordering::Relaxed) {
-                self.send_cancel(&session_id)?;
+            if !cancelled
+                && (cancel_flag.load(Ordering::Relaxed)
+                    || self.cancelled.load(Ordering::Relaxed))
+            {
+                let _ = self.send_cancel(&session_id);
                 cancelled = true;
             }
 
@@ -392,6 +395,7 @@ impl AcpClient {
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                         if cancel_flag.load(Ordering::Relaxed)
+                            || self.cancelled.load(Ordering::Relaxed)
                             || std::time::Instant::now() >= deadline
                         {
                             break;
@@ -473,6 +477,10 @@ impl AcpClient {
         tracing::debug!("ACP client closing subprocess");
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+
+    pub fn cancel_flag(&self) -> Arc<AtomicBool> {
+        self.cancelled.clone()
     }
 
     pub fn is_alive(&mut self) -> bool {

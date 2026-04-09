@@ -134,13 +134,12 @@ impl AgentSession for LuaAgentSession {
         let state = self.state.lock().unwrap().clone();
 
         //
-        // ACP agents: send cancel, then fall through to process kill.
+        // ACP agents: signal cancellation via the shared flag (doesn't need
+        // the client mutex, avoiding deadlock with send_prompt).
         //
 
         if let Some(handle) = state.get("acp_handle").and_then(|v| v.as_str()) {
-            let _ = crate::acp::with_client(handle, |client| {
-                let _ = client.cancel();
-            });
+            crate::acp::cancel_client(handle);
         }
 
         //
