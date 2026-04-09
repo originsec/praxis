@@ -465,15 +465,44 @@ return {
   end,
 
   create_session = function(ctx)
-    return run_create_session(ctx)
+    local pp = ctx.process_path
+    local working_dir = ctx.working_dir
+    if type(working_dir) ~= "string" or working_dir == "" then
+      local homes = helpers.user_homes_with_dir(".gemini")
+      working_dir = homes[1]
+    end
+
+    local acp_handle = praxis.acp_start({
+      program = pp,
+      args = { "--acp" },
+      cwd = working_dir or "",
+    })
+
+    local session_id = praxis.acp_create_session(acp_handle, working_dir or "")
+
+    return {
+      acp_handle = acp_handle,
+      acp_session_id = session_id,
+      process_path = pp,
+      working_dir = working_dir,
+      yolo_mode = ctx.yolo_mode == true,
+      interactive = ctx.interactive == true,
+      prompt_timeout_secs = ctx.prompt_timeout_secs,
+    }
   end,
 
   session_transact = function(_ctx, state, prompt)
-    return run_session_transact(state, prompt)
+    local response = praxis.acp_prompt(state.acp_handle, prompt, state.yolo_mode or false, state.interactive or false)
+    return {
+      response = response,
+      state = state,
+    }
   end,
 
   session_close = function(_ctx, state)
-    run_session_close(state)
+    if state.acp_handle then
+      praxis.acp_close(state.acp_handle)
+    end
   end,
 
 }

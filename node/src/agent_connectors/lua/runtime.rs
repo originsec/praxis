@@ -257,6 +257,7 @@ pub fn vm_create_session(
         "working_dir": context.working_dir,
         "yolo_mode": context.yolo_mode,
         "prompt_timeout_secs": context.prompt_timeout_secs,
+        "interactive": context.interactive,
         "process_path": process_path,
     });
     let ctx = lua.to_value(&ctx_json).map_err(lua_error)?;
@@ -651,6 +652,149 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
             "command_abort_handle",
             lua.create_function(|_, handle: String| {
                 Ok(abort_handle(&handle))
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    //
+    // ACP (Agent Client Protocol) functions for long-lived agent subprocesses.
+    //
+
+    praxis
+        .set(
+            "acp_start",
+            lua.create_function(|lua, spec: mlua::Value| {
+                let spec_json: JsonValue = lua.from_value(spec).map_err(|e| {
+                    mlua::Error::RuntimeError(format!("Invalid acp_start spec: {}", e))
+                })?;
+                let program = spec_json["program"]
+                    .as_str()
+                    .ok_or_else(|| mlua::Error::RuntimeError("Missing 'program'".into()))?;
+                let args: Vec<String> = spec_json["args"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let cwd = spec_json["cwd"].as_str().unwrap_or("");
+
+                let client = crate::acp::client::AcpClient::new(program, &args, cwd)
+                    .map_err(|e| mlua::Error::RuntimeError(format!("ACP start failed: {}", e)))?;
+
+                let handle = uuid::Uuid::new_v4().to_string();
+                crate::acp::register_client(&handle, client);
+                Ok(handle)
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "acp_create_session",
+            lua.create_function(|_, (handle, cwd): (String, String)| {
+                crate::acp::with_client(&handle, |client| {
+                    client.create_session(&cwd)
+                })
+                .ok_or_else(|| mlua::Error::RuntimeError(format!("ACP handle '{}' not found", handle)))?
+                .map_err(|e| mlua::Error::RuntimeError(format!("ACP session/new failed: {}", e)))
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "acp_prompt",
+            lua.create_function(|_, (handle, prompt, yolo, interactive): (String, String, bool, bool)| {
+                //
+                // Retrieve channels from the global registries. These are set up
+                // by the session handler before calling transact().
+                //
+
+                let update_tx = crate::acp::take_update_sender(&handle);
+                let permission_rx = crate::acp::take_permission_receiver(&handle);
+                tracing::debug!(
+                    "acp_prompt: handle='{}' has_update_tx={} has_permission_rx={}",
+                    handle, update_tx.is_some(), permission_rx.is_some()
+                );
+
+                //
+                // If no channels are registered (CLI-mode fallback or misconfigured),
+                // create dummy ones so the ACP client still works.
+                //
+
+                let (fallback_tx, _fallback_rx);
+                let update_tx = match update_tx {
+                    Some(tx) => tx,
+                    None => {
+                        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                        fallback_tx = tx;
+                        _fallback_rx = rx;
+                        fallback_tx.clone()
+                    }
+                };
+
+                let (fallback_perm_tx, fallback_perm_rx_holder);
+                let permission_rx = match permission_rx {
+                    Some(rx) => rx,
+                    None => {
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        fallback_perm_tx = tx;
+                        fallback_perm_rx_holder = rx;
+                        drop(fallback_perm_tx);
+                        fallback_perm_rx_holder
+                    }
+                };
+
+                let cancel_flag = std::sync::atomic::AtomicBool::new(false);
+
+                crate::acp::with_client(&handle, |client| {
+                    client.send_prompt(&prompt, &update_tx, &permission_rx, yolo, interactive, &cancel_flag)
+                })
+                .ok_or_else(|| mlua::Error::RuntimeError(format!("ACP handle '{}' not found", handle)))?
+                .map_err(|e| mlua::Error::RuntimeError(format!("ACP prompt failed: {}", e)))
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "acp_cancel",
+            lua.create_function(|_, handle: String| {
+                crate::acp::with_client(&handle, |client| {
+                    client.cancel()
+                })
+                .ok_or_else(|| mlua::Error::RuntimeError(format!("ACP handle '{}' not found", handle)))?
+                .map_err(|e| mlua::Error::RuntimeError(format!("ACP cancel failed: {}", e)))
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "acp_close",
+            lua.create_function(|_, handle: String| {
+                crate::acp::cleanup_channels(&handle);
+                if let Some(mut client) = crate::acp::remove_client(&handle) {
+                    client.close();
+                }
+                Ok(())
+            })
+            .map_err(lua_error)?,
+        )
+        .map_err(lua_error)?;
+
+    praxis
+        .set(
+            "acp_is_alive",
+            lua.create_function(|_, handle: String| {
+                Ok(crate::acp::with_client(&handle, |client| client.is_alive()).unwrap_or(false))
             })
             .map_err(lua_error)?,
         )

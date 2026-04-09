@@ -415,6 +415,23 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                 common::log_error!("Failed to store recon result: {}", e);
             }
         }
+
+        NodeSignalMessage::SessionUpdate(update) => {
+            common::log_info!(
+                "Forwarding session update to client {}",
+                update.client_id.get(..8).unwrap_or(&update.client_id)
+            );
+            let client_id = update.client_id.clone();
+            let client_message = ClientDirectMessage::SessionUpdate(update);
+            if let Err(e) =
+                send_to_client(&ctx.client_publish_channel, &client_id, client_message).await
+            {
+                common::log_error!(
+                    "Failed to send session update to client {}: {}",
+                    client_id, e
+                );
+            }
+        }
     }
 
     Ok(())

@@ -1,12 +1,12 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
-import { Send, Bot, Loader2, Download, Square } from 'lucide-react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { Send, Bot, Loader2, Download, Square, ShieldCheck, ShieldX, ShieldAlert } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { FloatingPanel } from './FloatingPanel';
 import { useApp, type AgentSessionMessage } from '../../context/AppContext';
 import { generateUUID } from '../../utils/uuid';
 import { exportAgentSession, downloadTextFile } from '../../utils/export';
-import type { NodeState } from '../../api/types';
+import type { NodeState, PermissionDecision } from '../../api/types';
 
 interface AgentSessionModalProps {
   nodeId: string;
@@ -16,7 +16,7 @@ interface AgentSessionModalProps {
 }
 
 export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: AgentSessionModalProps) {
-  const { state, sendCommand, addAgentSessionMessage } = useApp();
+  const { state, sendCommand, addAgentSessionMessage, clearAgentSessionStreaming } = useApp();
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -29,6 +29,31 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
     () => sessionId ? (state.agentSessionMessages[sessionId] || []) : [],
     [sessionId, state.agentSessionMessages],
   );
+
+  const streaming = state.agentSessionStreaming[nodeId];
+  const streamingContent = streaming?.content || '';
+  const pendingPermission = streaming?.pendingPermission || null;
+  const agentStatus = streaming?.agentStatus || null;
+  const toolCalls = streaming?.toolCalls || [];
+  const streamingTransactionId = streaming?.transactionId || '';
+
+  const [permissionSent, setPermissionSent] = useState<string | null>(null);
+
+  const handlePermissionResponse = useCallback((decision: PermissionDecision) => {
+    if (!pendingPermission || !streamingTransactionId) return;
+    setPermissionSent(pendingPermission.permissionId);
+    sendCommand(nodeId, {
+      Session: {
+        PermissionResponse: {
+          transaction_id: streamingTransactionId,
+          permission_id: pendingPermission.permissionId,
+          decision,
+        },
+      },
+    });
+  }, [nodeId, pendingPermission, streamingTransactionId, sendCommand]);
+
+  const showPermission = pendingPermission && permissionSent !== pendingPermission.permissionId;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -45,6 +70,8 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
     const text = input.trim();
     setInput('');
     setIsLoading(true);
+    clearAgentSessionStreaming(nodeId);
+    setPermissionSent(null);
 
     addAgentSessionMessage(sessionId, {
       role: 'user',
@@ -73,6 +100,7 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
       }
     } finally {
       setIsLoading(false);
+      clearAgentSessionStreaming(nodeId);
       inputRef.current?.focus();
     }
   };
@@ -168,9 +196,63 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
 
             {isLoading && (
               <div className="flex justify-start">
-                <div className="px-2 py-1.5 bg-[var(--bg-secondary)] flex items-center gap-1.5 text-muted text-[10px]">
-                  <Loader2 size={10} className="animate-spin" />
-                  <span>Thinking...</span>
+                <div className="max-w-[90%] px-2 py-1.5 bg-[var(--bg-secondary)] border-l-2 border-l-[var(--accent-success)]">
+                  {streamingContent ? (
+                    <div className="prose prose-invert max-w-none break-words text-[10px] leading-relaxed text-[var(--text-secondary)] [&_p]:my-0.5 [&_pre]:text-[9px] [&_code]:text-[9px]">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingContent}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-muted text-[10px]">
+                      <Loader2 size={10} className="animate-spin" />
+                      <span>{agentStatus || 'Thinking...'}</span>
+                    </div>
+                  )}
+
+                  {toolCalls.length > 0 && (
+                    <div className="mt-1 space-y-0.5">
+                      {toolCalls.map((tc, i) => (
+                        <div key={i} className="text-[9px] text-muted font-mono bg-[var(--bg-primary)] px-1.5 py-0.5">
+                          <span className="text-[var(--accent-warning)]">{tc.toolName}</span>
+                          {tc.output !== undefined && (
+                            <span className={tc.isError ? ' text-[var(--accent-error)]' : ' text-[var(--accent-success)]'}>
+                              {' '}{tc.isError ? '(error)' : '(done)'}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {showPermission && pendingPermission && (
+                    <div className="mt-1.5 p-1.5 bg-[var(--accent-warning)]/10 border border-[var(--accent-warning)]/30">
+                      <div className="flex items-center gap-1 text-[10px] text-[var(--accent-warning)] mb-1">
+                        <ShieldAlert size={10} />
+                        <span className="font-medium">{pendingPermission.toolName}</span>
+                      </div>
+                      <p className="text-[9px] text-muted font-mono mb-1.5 break-all">{pendingPermission.toolInput}</p>
+                      <div className="flex gap-1">
+                        <button onClick={() => handlePermissionResponse('Allow')}
+                          className="px-2 py-0.5 text-[9px] bg-[var(--accent-success)]/20 text-[var(--accent-success)] hover:bg-[var(--accent-success)]/30">
+                          <ShieldCheck size={9} className="inline mr-0.5" />Allow
+                        </button>
+                        <button onClick={() => handlePermissionResponse('AllowAlways')}
+                          className="px-2 py-0.5 text-[9px] bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/30">
+                          Always
+                        </button>
+                        <button onClick={() => handlePermissionResponse('Deny')}
+                          className="px-2 py-0.5 text-[9px] bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30">
+                          <ShieldX size={9} className="inline mr-0.5" />Deny
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {streamingContent && (
+                    <div className="flex items-center gap-1 mt-1 text-muted text-[9px]">
+                      <Loader2 size={8} className="animate-spin" />
+                      <span>{agentStatus || 'streaming...'}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

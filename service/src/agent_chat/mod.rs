@@ -881,6 +881,7 @@ impl AgentChatManager {
             working_dir: None,
             yolo_mode,
             prompt_timeout_secs: None,
+            interactive: false,
         };
         let create_message = NodeDirectMessage::Command(CommandRequest {
             command_id: create_cmd_id.clone(),

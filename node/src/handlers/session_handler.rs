@@ -1,5 +1,7 @@
 use crate::agent_connectors::{Agent, AgentSession};
-use common::{NodeCommandResult, SessionCommand, SessionCommandResult, TransactionId};
+use common::{
+    NodeCommandResult, PermissionDecision, SessionCommand, SessionCommandResult, TransactionId,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
@@ -13,6 +15,7 @@ struct PendingTransaction {
     cancel_tx: oneshot::Sender<()>,
     session: Arc<dyn AgentSession>,
     prompt_text: String,
+    permission_tx: Option<std::sync::mpsc::Sender<(String, PermissionDecision)>>,
 }
 
 /// Manages pending transactions for async operations
@@ -41,6 +44,7 @@ impl TransactionManager {
                 cancel_tx: tx,
                 session,
                 prompt_text,
+                permission_tx: None,
             },
         );
         rx
@@ -106,6 +110,46 @@ impl TransactionManager {
             common::log_info!("Cancelling transaction {} for node reset", tid);
             p.session.abort_transaction();
             let _ = p.cancel_tx.send(());
+        }
+    }
+
+    //
+    // Forward a permission response to the blocking ACP read loop for the
+    // given transaction. Returns true if the response was delivered.
+    //
+
+    //
+    // Forward a permission decision to the blocking ACP read loop for the
+    // given transaction. Returns true if the response was delivered.
+    //
+
+    pub fn forward_permission(
+        &self,
+        transaction_id: &TransactionId,
+        permission_id: String,
+        decision: PermissionDecision,
+    ) -> bool {
+        let pending = self.pending.lock().unwrap();
+        if let Some(p) = pending.get(transaction_id) {
+            if let Some(tx) = &p.permission_tx {
+                return tx.send((permission_id, decision)).is_ok();
+            }
+        }
+        false
+    }
+
+    //
+    // Set the permission sender for a transaction (used by ACP streaming sessions).
+    //
+
+    pub fn set_permission_tx(
+        &self,
+        transaction_id: &TransactionId,
+        tx: std::sync::mpsc::Sender<(String, PermissionDecision)>,
+    ) {
+        let mut pending = self.pending.lock().unwrap();
+        if let Some(p) = pending.get_mut(transaction_id) {
+            p.permission_tx = Some(tx);
         }
     }
 }
@@ -260,6 +304,25 @@ pub async fn handle_session_command(
             } else {
                 NodeCommandResult::Error {
                     message: format!("Transaction {} not found or already completed", transaction_id),
+                }
+            }
+        }
+        SessionCommand::PermissionResponse {
+            transaction_id,
+            permission_id,
+            decision,
+        } => {
+            if transaction_manager.forward_permission(&transaction_id, permission_id, decision) {
+                common::log_info!("Forwarded permission response for transaction {}", transaction_id);
+                NodeCommandResult::Session(SessionCommandResult::PermissionDelivered {
+                    transaction_id,
+                })
+            } else {
+                NodeCommandResult::Error {
+                    message: format!(
+                        "Transaction {} not found or has no permission channel",
+                        transaction_id
+                    ),
                 }
             }
         }

@@ -114,6 +114,7 @@ export interface SessionContext {
   working_dir?: string;
   yolo_mode?: boolean;
   prompt_timeout_secs?: number | null;
+  interactive?: boolean;
 }
 
 //
@@ -146,7 +147,8 @@ export type SessionCommand =
   | { Create: { context: SessionContext } }
   | 'Close'
   | { Prompt: { text: string; transaction_id: string } }
-  | { CancelTransaction: { transaction_id: string } };
+  | { CancelTransaction: { transaction_id: string } }
+  | { PermissionResponse: { transaction_id: string; permission_id: string; decision: PermissionDecision } };
 
 //
 // Interception method. Proxy works on all platforms. VPN works on Windows and
@@ -233,7 +235,8 @@ export type SessionCommandResult =
   | { Created: { session_id: string } }
   | 'Closed'
   | { PromptResponse: { transaction_id: string; response: string } }
-  | { TransactionCancelled: { transaction_id: string } };
+  | { TransactionCancelled: { transaction_id: string } }
+  | { PermissionDelivered: { transaction_id: string } };
 
 export type InterceptCommandResult =
   | { Enabled: { method: InterceptMethod } }
@@ -850,6 +853,27 @@ export type BrowserMessage =
   | { type: 'agent_chat_get_state'; session_id: string | null };
 
 //
+// Session streaming types (ACP agent sessions).
+//
+
+export interface SessionUpdate {
+  node_id: string;
+  client_id: string;
+  transaction_id: string;
+  update: SessionUpdateKind;
+}
+
+export type SessionUpdateKind =
+  | { TextChunk: { text: string } }
+  | { ToolCall: { tool_name: string; tool_id: string; input: string } }
+  | { ToolResult: { tool_id: string; output: string; is_error: boolean } }
+  | { PermissionRequest: { permission_id: string; tool_name: string; tool_input: string } }
+  | { AgentStatus: { status: string } }
+  | { Error: { message: string } };
+
+export type PermissionDecision = 'Allow' | 'AllowAlways' | 'Deny';
+
+//
 // WebSocket Messages (Server -> Browser).
 //
 export type ServerMessage =
@@ -958,4 +982,8 @@ export type ServerMessage =
   | { type: 'agent_chat_message'; session_id: string; message: AgentChatMessageInfo }
   | { type: 'agent_chat_state_update'; session: AgentChatSessionState }
   | { type: 'agent_chat_history_response'; session_id: string; channel_id: string | null; messages: AgentChatMessageInfo[] }
-  | { type: 'agent_chat_error'; message: string };
+  | { type: 'agent_chat_error'; message: string }
+  //
+  // Session streaming updates (ACP agent sessions).
+  //
+  | { type: 'session_update'; update: SessionUpdate };

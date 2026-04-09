@@ -19,6 +19,13 @@
 <newline>
 ```
 
+## Cancellation
+
+- All long-running operations must be cancellable at all times. Never hold a lock or block in a way that prevents cancellation.
+- When implementing blocking loops (e.g. polling, waiting for responses), always check a cancellation flag on each iteration.
+- Use shared `Arc<AtomicBool>` cancel flags accessible outside of mutexes to avoid deadlocks between cancellation and the operation being cancelled.
+- Double-check cancellation paths in code review — if a user can't Ctrl+C or close a session and have it respond promptly, that's a bug.
+
 ## Architecture
 
 - Main components are: Node, Service, Web
