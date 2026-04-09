@@ -1,16 +1,11 @@
 use crate::app::{Popup, PopupKind};
+use crate::ui::common::centered_rect_fixed;
+use crate::ui::theme::{ACCENT, DIM, MUTED, POPUP_BG, POPUP_HIGHLIGHT_BG, TEXT};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
-
-const ACCENT: Color = Color::Rgb(100, 180, 100);
-const DIM: Color = Color::Rgb(80, 80, 80);
-const MUTED: Color = Color::Rgb(120, 120, 120);
-const TEXT: Color = Color::Rgb(180, 180, 180);
-const HIGHLIGHT_BG: Color = Color::Rgb(35, 40, 35);
-const POPUP_BG: Color = Color::Rgb(30, 30, 35);
 
 pub fn render(f: &mut Frame, popup: &Popup) {
     match popup.kind {
@@ -355,7 +350,7 @@ fn render_list(
 
     let list = List::new(items).highlight_style(
         Style::default()
-            .bg(HIGHLIGHT_BG)
+            .bg(POPUP_HIGHLIGHT_BG)
             .fg(ACCENT)
             .add_modifier(Modifier::BOLD),
     );
@@ -530,10 +525,4 @@ pub fn render_run_options(f: &mut Frame, area: Rect, opts: &crate::app::RunOptio
         Span::styled(" cancel", Style::default().fg(MUTED)),
     ]);
     f.render_widget(Paragraph::new(hints), chunks[2]);
-}
-
-fn centered_rect_fixed(width: u16, height: u16, area: Rect) -> Rect {
-    let x = area.x + (area.width.saturating_sub(width)) / 2;
-    let y = area.y + (area.height.saturating_sub(height)) / 2;
-    Rect::new(x, y, width.min(area.width), height.min(area.height))
 }

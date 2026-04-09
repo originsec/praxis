@@ -1,26 +1,20 @@
 use crate::app::{ConversationEntry, OrchestratorState};
 use crate::markdown;
+use crate::ui::common::spinner_char;
+use crate::ui::theme::{
+    ACCENT, DIM, INPUT_BORDER, MUTED, STATUS_DONE, STATUS_FAIL, STATUS_RUNNING, TEXT,
+};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-const ACCENT: Color = Color::Rgb(100, 180, 100);
-const DIM: Color = Color::Rgb(80, 80, 80);
-const MUTED: Color = Color::Rgb(120, 120, 120);
-const TEXT: Color = Color::Rgb(180, 180, 180);
-const INPUT_BORDER: Color = Color::Rgb(60, 70, 60);
 const ERROR_FG: Color = Color::Rgb(180, 60, 60);
-const TOOL_OK: Color = Color::Rgb(80, 160, 80);
-const TOOL_FAIL: Color = Color::Rgb(180, 60, 60);
-const PLAN_DONE: Color = Color::Rgb(80, 160, 80);
-const PLAN_ACTIVE: Color = Color::Rgb(180, 160, 60);
-
-//
-// Braille spinner frames, matching the CLI's spinner.
-//
-const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+const TOOL_OK: Color = STATUS_DONE;
+const TOOL_FAIL: Color = STATUS_FAIL;
+const PLAN_DONE: Color = STATUS_DONE;
+const PLAN_ACTIVE: Color = STATUS_RUNNING;
 
 pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     let plan_height = if state.current_plan.is_some() {
@@ -146,7 +140,11 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
                 }
             }
             ConversationEntry::ToolGroup(tools) => {
-                lines.extend(build_tool_summary(tools, state.tools_expanded, state.tools_full));
+                lines.extend(build_tool_summary(
+                    tools,
+                    state.tools_expanded,
+                    state.tools_full,
+                ));
             }
             ConversationEntry::Info(msg) => {
                 lines.push(Line::from(""));
@@ -174,13 +172,7 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     //
     if state.is_streaming {
         if let Some(ref tool_name) = state.active_tool {
-            let frame_idx = (std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis()
-                / 100) as usize
-                % SPINNER_FRAMES.len();
-            let spinner_char = SPINNER_FRAMES[frame_idx];
+            let spinner_char = spinner_char();
 
             let pending_count = state.pending_tools.len();
             let label = if pending_count > 0 {
@@ -190,13 +182,7 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
             };
             lines.push(Line::from(Span::styled(label, Style::default().fg(MUTED))));
         } else if !last_message_has_visible_assistant_text(&state.messages) {
-            let frame_idx = (std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis()
-                / 100) as usize
-                % SPINNER_FRAMES.len();
-            let spinner_char = SPINNER_FRAMES[frame_idx];
+            let spinner_char = spinner_char();
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 format!("{}", spinner_char),
@@ -330,7 +316,11 @@ fn last_message_has_visible_assistant_text(messages: &[ConversationEntry]) -> bo
     }
 }
 
-fn build_tool_summary(tools: &[crate::app::ToolCall], expanded: bool, full: bool) -> Vec<Line<'static>> {
+fn build_tool_summary(
+    tools: &[crate::app::ToolCall],
+    expanded: bool,
+    full: bool,
+) -> Vec<Line<'static>> {
     let total = tools.len();
     let failures = tools.iter().filter(|t| !t.success).count();
 
@@ -398,10 +388,7 @@ fn build_tool_summary(tools: &[crate::app::ToolCall], expanded: bool, full: bool
 
             lines.push(Line::from(vec![
                 Span::styled("  ", Style::default()),
-                Span::styled(
-                    format!("{} ", tool_icon),
-                    Style::default().fg(tool_color),
-                ),
+                Span::styled(format!("{} ", tool_icon), Style::default().fg(tool_color)),
                 Span::styled(
                     tool.name.clone(),
                     Style::default().fg(if tool.success { TEXT } else { TOOL_FAIL }),
@@ -503,9 +490,7 @@ fn compact_multiline(s: &str, max_lines: usize, max_width: usize) -> Vec<String>
         s.to_string()
     };
 
-    let content_lines: Vec<&str> = formatted.lines()
-        .filter(|l| !l.trim().is_empty())
-        .collect();
+    let content_lines: Vec<&str> = formatted.lines().filter(|l| !l.trim().is_empty()).collect();
 
     let total = content_lines.len();
     let mut result = Vec::new();
@@ -618,10 +603,7 @@ fn render_model_info(f: &mut Frame, area: Rect, state: &OrchestratorState) {
         Span::styled(" tools  ", Style::default().fg(MUTED)),
         Span::styled("^w", Style::default().fg(DIM)),
         Span::styled(" save   ", Style::default().fg(MUTED)),
-        Span::styled(
-            format!("{} ", model_text),
-            Style::default().fg(MUTED),
-        ),
+        Span::styled(format!("{} ", model_text), Style::default().fg(MUTED)),
     ]);
 
     let paragraph = Paragraph::new(line).alignment(ratatui::layout::Alignment::Right);

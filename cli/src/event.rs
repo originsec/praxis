@@ -7,7 +7,7 @@ use crossterm::event::{Event, EventStream};
 use futures_util::StreamExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{Notify, mpsc};
 
 pub enum AppEvent {
     Terminal(Event),
@@ -125,7 +125,10 @@ impl EventHandler {
         let mut session_rx = client.subscribe_session_updates();
         tokio::spawn(async move {
             while let Some(update) = session_rx.recv().await {
-                if tx_session.send(AppEvent::SessionStreamUpdate(update)).is_err() {
+                if tx_session
+                    .send(AppEvent::SessionStreamUpdate(update))
+                    .is_err()
+                {
                     break;
                 }
             }

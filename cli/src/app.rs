@@ -1,3 +1,7 @@
+mod input;
+mod nodes;
+mod operations;
+
 use crate::client::Client;
 use crate::event::AppEvent;
 use chrono::Utc;
@@ -479,7 +483,6 @@ pub struct SettingsState {
     //
     // Connection info (read-only, set at startup).
     //
-
     pub rabbitmq_url: String,
     pub client_id: String,
 }
@@ -794,10 +797,8 @@ impl App {
                             output,
                             is_error,
                         } => {
-                            if let Some(tc) = session
-                                .tool_calls
-                                .iter_mut()
-                                .find(|t| t.tool_id == tool_id)
+                            if let Some(tc) =
+                                session.tool_calls.iter_mut().find(|t| t.tool_id == tool_id)
                             {
                                 tc.output = Some(output);
                                 tc.is_error = is_error;
@@ -1215,7 +1216,9 @@ impl App {
                         let ph = ic + 2;
                         let bottom_offset = 5u16;
                         let y = terminal_area.height.saturating_sub(bottom_offset + ph);
-                        let pw = (terminal_area.width / 2).max(30).min(terminal_area.width.saturating_sub(4));
+                        let pw = (terminal_area.width / 2)
+                            .max(30)
+                            .min(terminal_area.width.saturating_sub(4));
                         (1u16, y, pw, ic)
                     };
 
@@ -1260,11 +1263,7 @@ impl App {
         //
         if self.confirm.is_some() {
             if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-                let msg_len = self
-                    .confirm
-                    .as_ref()
-                    .map(|c| c.message.len())
-                    .unwrap_or(20);
+                let msg_len = self.confirm.as_ref().map(|c| c.message.len()).unwrap_or(20);
                 let width = (msg_len as u16 + 6).min(h.saturating_sub(4)).max(30);
                 let height = 5u16;
                 let px = (terminal_area.width.saturating_sub(width)) / 2;
@@ -1295,8 +1294,10 @@ impl App {
                             self.confirm = None;
                         }
                     }
-                } else if mouse.row < py || mouse.row >= py + height
-                    || mouse.column < px || mouse.column >= px + width
+                } else if mouse.row < py
+                    || mouse.row >= py + height
+                    || mouse.column < px
+                    || mouse.column >= px + width
                 {
                     self.confirm = None;
                 }
@@ -1391,12 +1392,12 @@ impl App {
                     //
                     let is_agent = form.mode == 1;
                     let field = match rel_row {
-                        0 => Some(0), // Mode
-                        2 => Some(1), // Name
-                        3 => Some(2), // Short Name
-                        4 => Some(3), // Category
-                        5 => Some(4), // Description
-                        6 if is_agent => Some(5), // Iterations
+                        0 => Some(0),                                         // Mode
+                        2 => Some(1),                                         // Name
+                        3 => Some(2),                                         // Short Name
+                        4 => Some(3),                                         // Category
+                        5 => Some(4),                                         // Description
+                        6 if is_agent => Some(5),                             // Iterations
                         6 if !is_agent => Some(6), // Timeout (shifts up when no iterations)
                         7 if is_agent => Some(6),  // Timeout
                         r if r == (if is_agent { 9 } else { 8 }) => Some(7), // YOLO
@@ -1691,8 +1692,7 @@ impl App {
                             if !session.is_waiting && session.session_id.is_some() {
                                 // Inner: padding(2) + border(1) + prompt "▸ "(2)
                                 let text_start = input_area.x + 5;
-                                let click_offset =
-                                    mouse.column.saturating_sub(text_start) as usize;
+                                let click_offset = mouse.column.saturating_sub(text_start) as usize;
                                 session.cursor_pos = click_offset.min(session.input.len());
                             }
                         }
@@ -1778,8 +1778,8 @@ impl App {
                 return;
             }
 
-            let outer = Layout::vertical([Constraint::Min(1), Constraint::Length(1)])
-                .split(content_area);
+            let outer =
+                Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(content_area);
             let hints_area = outer[1];
             let node_chunks = Layout::horizontal([
                 Constraint::Percentage(self.nodes.split_percent),
@@ -1825,7 +1825,10 @@ impl App {
                     // + 1 row header = data starts at y+2.
                     //
                     let list_start_row = list_area.y.saturating_add(2);
-                    let list_end_row = list_area.y.saturating_add(list_area.height).saturating_sub(1);
+                    let list_end_row = list_area
+                        .y
+                        .saturating_add(list_area.height)
+                        .saturating_sub(1);
                     if mouse.column >= list_area.x
                         && mouse.column < list_area.x.saturating_add(list_area.width)
                         && mouse.row >= list_start_row
@@ -1976,8 +1979,7 @@ impl App {
                                     let model_idx = rel_row - 6 + form.model_dropdown_scroll;
                                     if model_idx < form.available_models.len() {
                                         form.model_dropdown_selected = model_idx;
-                                        form.model_name =
-                                            form.available_models[model_idx].clone();
+                                        form.model_name = form.available_models[model_idx].clone();
                                         form.model_dropdown_open = false;
                                     }
                                 }
@@ -1995,15 +1997,17 @@ impl App {
                 if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
                     let item_count = self.settings.model_definitions.len();
                     if item_count > 0 {
-                        let popup_h = (item_count as u16 + 2)
-                            .min(terminal_area.height.saturating_sub(4));
-                        let max_name = self.settings.model_definitions
+                        let popup_h =
+                            (item_count as u16 + 2).min(terminal_area.height.saturating_sub(4));
+                        let max_name = self
+                            .settings
+                            .model_definitions
                             .iter()
                             .map(|d| d.name.len())
                             .max()
                             .unwrap_or(20);
-                        let popup_w = (max_name as u16 + 6)
-                            .min(terminal_area.width.saturating_sub(4));
+                        let popup_w =
+                            (max_name as u16 + 6).min(terminal_area.width.saturating_sub(4));
                         let px = content_area.x + (content_area.width.saturating_sub(popup_w)) / 2;
                         let py = content_area.y + (content_area.height.saturating_sub(popup_h)) / 2;
                         let inner_x = px + 1;
@@ -2050,17 +2054,13 @@ impl App {
                     let rel = mouse.column.saturating_sub(tabs_area.x) as usize;
                     // Positions from render_tabs spans: "  " + " LLM " + "  |  " + " Agents " + ...
                     if rel >= 2 && rel < 7 {
-                        self.settings.tab = SettingsTab::Llm;
-                        self.settings.selected = 0;
+                        self.switch_settings_tab(SettingsTab::Llm).await;
                     } else if rel >= 12 && rel < 20 {
-                        self.settings.tab = SettingsTab::Agents;
-                        self.settings.selected = 0;
+                        self.switch_settings_tab(SettingsTab::Agents).await;
                     } else if rel >= 25 && rel < 34 {
-                        self.settings.tab = SettingsTab::Service;
-                        self.settings.selected = 0;
+                        self.switch_settings_tab(SettingsTab::Service).await;
                     } else if rel >= 39 && rel < 46 {
-                        self.settings.tab = SettingsTab::About;
-                        self.settings.selected = 0;
+                        self.switch_settings_tab(SettingsTab::About).await;
                     }
                     return;
                 }
@@ -2144,10 +2144,11 @@ impl App {
                         SettingsTab::About => {
                             //
                             // Links row: "originhq.com   praxis.originhq.com"
-                            // Located at row 12 in the about content.
+                            // Located at row 13 in the about content.
                             //
-                            if rel_row == 12 {
-                                let rel_col = mouse.column.saturating_sub(settings_content.x + 2) as usize;
+                            if rel_row == 13 {
+                                let rel_col =
+                                    mouse.column.saturating_sub(settings_content.x) as usize;
                                 if rel_col < 12 {
                                     Self::open_url("https://originhq.com");
                                 } else if rel_col >= 15 {
@@ -2366,10 +2367,11 @@ impl App {
                 //
                 // Opening / at start of empty input opens command palette.
                 //
-                self.orchestrator
-                    .input
-                    .insert(self.orchestrator.cursor_pos, c);
-                self.orchestrator.cursor_pos += 1;
+                input::insert_char(
+                    &mut self.orchestrator.input,
+                    &mut self.orchestrator.cursor_pos,
+                    c,
+                );
 
                 //
                 // Open command palette when typing / at start.
@@ -2391,10 +2393,10 @@ impl App {
                 }
             }
             KeyCode::Backspace => {
-                if self.orchestrator.cursor_pos > 0 {
-                    self.orchestrator.cursor_pos -= 1;
-                    self.orchestrator.input.remove(self.orchestrator.cursor_pos);
-
+                if input::backspace(
+                    &mut self.orchestrator.input,
+                    &mut self.orchestrator.cursor_pos,
+                ) {
                     //
                     // Update or close command palette on backspace.
                     //
@@ -2417,57 +2419,37 @@ impl App {
                 }
             }
             KeyCode::Delete => {
-                if self.orchestrator.cursor_pos < self.orchestrator.input.len() {
-                    self.orchestrator.input.remove(self.orchestrator.cursor_pos);
-                }
+                input::delete(&mut self.orchestrator.input, &self.orchestrator.cursor_pos);
             }
             KeyCode::Left => {
-                if self.orchestrator.cursor_pos > 0 {
-                    self.orchestrator.cursor_pos -= 1;
-                }
+                input::move_left(&mut self.orchestrator.cursor_pos);
             }
             KeyCode::Right => {
-                if self.orchestrator.cursor_pos < self.orchestrator.input.len() {
-                    self.orchestrator.cursor_pos += 1;
-                }
+                input::move_right(&self.orchestrator.input, &mut self.orchestrator.cursor_pos);
             }
             KeyCode::Home => {
-                self.orchestrator.cursor_pos = 0;
+                input::move_home(&mut self.orchestrator.cursor_pos);
             }
             KeyCode::End => {
-                self.orchestrator.cursor_pos = self.orchestrator.input.len();
+                input::move_end(&self.orchestrator.input, &mut self.orchestrator.cursor_pos);
             }
             KeyCode::Up => {
-                let hist_len = self.orchestrator.history.len();
-                if hist_len > 0 {
-                    match self.orchestrator.history_index {
-                        None => {
-                            self.orchestrator.saved_input = self.orchestrator.input.clone();
-                            self.orchestrator.history_index = Some(hist_len - 1);
-                        }
-                        Some(idx) if idx > 0 => {
-                            self.orchestrator.history_index = Some(idx - 1);
-                        }
-                        _ => {}
-                    }
-                    if let Some(idx) = self.orchestrator.history_index {
-                        self.orchestrator.input = self.orchestrator.history[idx].clone();
-                        self.orchestrator.cursor_pos = self.orchestrator.input.len();
-                    }
-                }
+                input::history_up(
+                    &mut self.orchestrator.input,
+                    &mut self.orchestrator.cursor_pos,
+                    &self.orchestrator.history,
+                    &mut self.orchestrator.history_index,
+                    &mut self.orchestrator.saved_input,
+                );
             }
             KeyCode::Down => {
-                if let Some(idx) = self.orchestrator.history_index {
-                    if idx + 1 < self.orchestrator.history.len() {
-                        self.orchestrator.history_index = Some(idx + 1);
-                        self.orchestrator.input = self.orchestrator.history[idx + 1].clone();
-                        self.orchestrator.cursor_pos = self.orchestrator.input.len();
-                    } else {
-                        self.orchestrator.history_index = None;
-                        self.orchestrator.input = self.orchestrator.saved_input.clone();
-                        self.orchestrator.cursor_pos = self.orchestrator.input.len();
-                    }
-                }
+                input::history_down(
+                    &mut self.orchestrator.input,
+                    &mut self.orchestrator.cursor_pos,
+                    &self.orchestrator.history,
+                    &mut self.orchestrator.history_index,
+                    &self.orchestrator.saved_input,
+                );
             }
             KeyCode::Esc => {
                 self.orchestrator.input.clear();
@@ -2512,1545 +2494,13 @@ impl App {
         }
     }
 
-    async fn handle_nodes_key(&mut self, key: KeyEvent) {
-        //
-        // Terminal mode — forward all keys except ^q and ^t (close terminal).
-        //
-        if self.nodes.terminal.is_some() {
-            self.handle_terminal_key(key).await;
-            return;
-        }
-
-        //
-        // Session options screen.
-        //
-        if self.nodes.session_options.is_some() {
-            self.handle_session_options_key(key).await;
-            return;
-        }
-
-        //
-        // Session chat mode.
-        //
-        if self.nodes.session.is_some() {
-            self.handle_session_key(key);
-            return;
-        }
-
-        //
-        // Detail pane focused — navigate agents.
-        //
-        if self.nodes.detail_focus {
-            match key.code {
-                KeyCode::Esc | KeyCode::Left => {
-                    self.nodes.detail_focus = false;
-                }
-                KeyCode::Up => {
-                    if self.nodes.agent_selected > 0 {
-                        self.nodes.agent_selected -= 1;
-                    }
-                }
-                KeyCode::Down => {
-                    let agent_count = self
-                        .nodes
-                        .nodes
-                        .get(self.nodes.selected)
-                        .map(|n| n.discovered_agents.len())
-                        .unwrap_or(0);
-                    if self.nodes.agent_selected + 1 < agent_count {
-                        self.nodes.agent_selected += 1;
-                    }
-                }
-                KeyCode::Enter => {
-                    //
-                    // Open session with selected agent.
-                    //
-                    self.start_session_with_selected_agent();
-                }
-                _ => {}
-            }
-            return;
-        }
-
-        match key.code {
-            KeyCode::Up => {
-                if self.nodes.selected > 0 {
-                    self.nodes.selected -= 1;
-                    self.nodes.agent_selected = 0;
-                }
-            }
-            KeyCode::Down => {
-                if self.nodes.selected + 1 < self.nodes.nodes.len() {
-                    self.nodes.selected += 1;
-                    self.nodes.agent_selected = 0;
-                }
-            }
-            KeyCode::Right | KeyCode::Enter => {
-                self.nodes.detail_focus = true;
-                self.nodes.agent_selected = 0;
-            }
-            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.confirm_reset_node();
-            }
-            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if let Some(node) = self.nodes.nodes.get(self.nodes.selected) {
-                    if node.capabilities.is_empty()
-                        || node
-                            .capabilities
-                            .contains(&common::NodeCapability::Terminal)
-                    {
-                        self.open_terminal();
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn terminal_content_size() -> (u16, u16) {
-        let (term_cols, term_rows) = crossterm::terminal::size().unwrap_or((80, 24));
-        //
-        // Subtract: 2 vertical padding + 1 header bar + 1 status bar
-        //           + 1 terminal header + 1 top pad + 1 bottom pad + 1 hints = 8 rows
-        //           4 horizontal padding + 3 left inset = 7 cols
-        //
-        let cols = term_cols.saturating_sub(7);
-        let rows = term_rows.saturating_sub(8);
-        (cols, rows)
-    }
-
-    fn spawn_terminal_writer(
-        client: Arc<Client>,
-        node_id: String,
-    ) -> mpsc::UnboundedSender<TerminalRequest> {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        tokio::spawn(async move {
-            while let Some(request) = rx.recv().await {
-                match request {
-                    TerminalRequest::Write(data) => {
-                        let _ = client.send_terminal_input(&node_id, data).await;
-                    }
-                    TerminalRequest::Resize { rows, cols } => {
-                        let _ = client.send_terminal_resize(&node_id, rows, cols).await;
-                    }
-                    TerminalRequest::Close => {
-                        let _ = client.send_terminal_close(&node_id).await;
-                        break;
-                    }
-                }
-            }
-        });
-        tx
-    }
-
-    fn open_terminal(&mut self) {
-        if self.nodes.terminal.is_some() || self.nodes.terminal_opening {
-            return;
-        }
-        let node = match self.nodes.nodes.get(self.nodes.selected) {
-            Some(n) => n,
-            None => return,
-        };
-        let node_id = node.node_id.clone();
-        self.nodes.terminal_opening = true;
-        let client = self.client.clone();
-        let tx = self.event_tx.clone();
-
-        tokio::spawn(async move {
-            let Some(tx) = tx else { return };
-            let result = client
-                .send_command(
-                    &node_id,
-                    NodeCommand::Terminal(common::TerminalCommand::Create),
-                )
-                .await;
-
-            match result {
-                Ok(resp) => {
-                    if let NodeCommandResult::Terminal(common::TerminalCommandResult::Created {
-                        terminal_id,
-                    }) = resp.result
-                    {
-                        let _ = tx.send(AppEvent::TerminalCreated {
-                            node_id,
-                            terminal_id,
-                        });
-                    } else {
-                        let _ = tx.send(AppEvent::TerminalCreateFailed(
-                            "Failed to open terminal: unexpected response".to_string(),
-                        ));
-                    }
-                }
-                Err(e) => {
-                    let _ = tx.send(AppEvent::TerminalCreateFailed(format!(
-                        "Failed to open terminal: {}",
-                        e
-                    )));
-                }
-            }
-        });
-    }
-
-    async fn handle_terminal_key(&mut self, key: KeyEvent) {
-        //
-        // ^t closes the terminal.
-        //
-
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('t') {
-            self.close_terminal();
-            return;
-        }
-
-        //
-        // Scroll keys navigate the scrollback buffer instead of being
-        // forwarded to the remote PTY.
-        //
-
-        if matches!(key.code, KeyCode::PageUp | KeyCode::PageDown) {
-            if let Some(ref mut term) = self.nodes.terminal {
-                match key.code {
-                    KeyCode::PageUp => {
-                        let max = term.max_scroll.get();
-                        term.scroll_offset = (term.scroll_offset + 10).min(max);
-                    }
-                    KeyCode::PageDown => {
-                        term.scroll_offset = term.scroll_offset.saturating_sub(10);
-                    }
-                    _ => {}
-                }
-            }
-            return;
-        }
-
-        //
-        // Any other keypress snaps back to live view.
-        //
-
-        if let Some(ref mut term) = self.nodes.terminal {
-            term.scroll_offset = 0;
-        }
-
-        //
-        // Convert key event to bytes and send to the node PTY.
-        //
-
-        let data = match key.code {
-            KeyCode::Char(c) => {
-                if key.modifiers.contains(KeyModifiers::CONTROL) {
-                    // Ctrl+A = 0x01, Ctrl+C = 0x03, etc.
-                    let byte = (c as u8).wrapping_sub(b'a').wrapping_add(1);
-                    vec![byte]
-                } else {
-                    let mut buf = [0u8; 4];
-                    let s = c.encode_utf8(&mut buf);
-                    s.as_bytes().to_vec()
-                }
-            }
-            KeyCode::Enter => vec![b'\r'],
-            KeyCode::Backspace => vec![0x7f],
-            KeyCode::Tab => vec![b'\t'],
-            KeyCode::Esc => vec![0x1b],
-            KeyCode::Up => b"\x1b[A".to_vec(),
-            KeyCode::Down => b"\x1b[B".to_vec(),
-            KeyCode::Right => b"\x1b[C".to_vec(),
-            KeyCode::Left => b"\x1b[D".to_vec(),
-            KeyCode::Home => b"\x1b[H".to_vec(),
-            KeyCode::End => b"\x1b[F".to_vec(),
-            KeyCode::Delete => b"\x1b[3~".to_vec(),
-            _ => return,
-        };
-
-        if let Some(ref term) = self.nodes.terminal {
-            let _ = term.writer_tx.send(TerminalRequest::Write(data));
-        }
-    }
-
-    fn close_terminal(&mut self) {
-        if let Some(ref term) = self.nodes.terminal {
-            let _ = term.writer_tx.send(TerminalRequest::Close);
-        }
-        self.nodes.terminal = None;
-        self.nodes.terminal_opening = false;
-    }
-
-    fn confirm_reset_node(&mut self) {
-        if let Some(node) = self.nodes.nodes.get(self.nodes.selected) {
-            let node_id = node.node_id.clone();
-            let machine = node.machine_name.clone();
-            self.confirm = Some(ConfirmAction {
-                message: format!("Reset node '{}'?", machine),
-                action: ConfirmKind::ResetNode(node_id),
-            });
-        }
-    }
-
-    fn close_session(&mut self) {
-        if let Some(ref session) = self.nodes.session {
-            if session.session_id.is_some() {
-                let client = self.client.clone();
-                let node_id = session.node_id.clone();
-                tokio::spawn(async move {
-                    use common::SessionCommand;
-                    let _ = client
-                        .send_command(&node_id, NodeCommand::Session(SessionCommand::Close))
-                        .await;
-                });
-            }
-        }
-        self.nodes.session = None;
-    }
-
-    fn send_session_message(&mut self) {
-        let Some(ref mut session) = self.nodes.session else {
-            return;
-        };
-        let input = session.input.trim().to_string();
-        if input.is_empty() || session.is_waiting || session.session_id.is_none() {
-            return;
-        }
-
-        session.history.push(input.clone());
-        session.history_index = None;
-        session.messages.push(ChatMessage {
-            role: ChatRole::User,
-            text: input.clone(),
-        });
-        session.input.clear();
-        session.cursor_pos = 0;
-        session.is_waiting = true;
-        session.active_transaction_id = Some(uuid::Uuid::new_v4().to_string());
-        session.scroll_offset = 0;
-
-        let node_id = session.node_id.clone();
-        let transaction_id = session.active_transaction_id.clone().unwrap_or_default();
-        let client = self.client.clone();
-        let tx = self.event_tx.clone();
-
-        tokio::spawn(async move {
-            use crate::event::{AppEvent, SessionResult};
-            use common::SessionCommand;
-
-            let Some(tx) = tx else { return };
-            match client
-                .send_command(
-                    &node_id,
-                    NodeCommand::Session(SessionCommand::Prompt {
-                        text: input,
-                        transaction_id: transaction_id.clone(),
-                    }),
-                )
-                .await
-            {
-                Ok(resp) => match resp.result {
-                    NodeCommandResult::Session(
-                        common::SessionCommandResult::PromptResponse {
-                            transaction_id,
-                            response,
-                        },
-                    ) => {
-                        let _ = tx.send(AppEvent::SessionResponse(SessionResult::Response {
-                            transaction_id,
-                            text: response,
-                        }));
-                    }
-                    NodeCommandResult::Session(
-                        common::SessionCommandResult::TransactionCancelled {
-                            transaction_id,
-                        },
-                    ) => {
-                        let _ = tx.send(AppEvent::SessionResponse(
-                            SessionResult::Cancelled(transaction_id),
-                        ));
-                    }
-                    NodeCommandResult::Error { message } => {
-                        let _ =
-                            tx.send(AppEvent::SessionResponse(SessionResult::Error(message)));
-                    }
-                    _ => {}
-                },
-                Err(e) => {
-                    let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error(
-                        e.to_string(),
-                    )));
-                }
-            }
-        });
-    }
-
-    fn start_session_with_selected_agent(&mut self) {
-        let node = match self.nodes.nodes.get(self.nodes.selected) {
-            Some(n) => n,
-            None => return,
-        };
-
-        //
-        // Only allow sessions on nodes with Session capability.
-        //
-
-        if !node.capabilities.is_empty()
-            && !node.capabilities.contains(&common::NodeCapability::Session)
-        {
-            return;
-        }
-
-        let agent = match node.discovered_agents.get(self.nodes.agent_selected) {
-            Some(a) => a.short_name.clone(),
-            None => return,
-        };
-
-        let node_id = node.node_id.clone();
-
-        //
-        // Request recon to get project paths for working directory options.
-        //
-        let client = self.client.clone();
-        let nid = node_id.clone();
-        let ag = agent.clone();
-        tokio::spawn(async move {
-            client.request_recon(&nid, &ag).await;
-        });
-
-        self.nodes.session_options = Some(SessionOptions {
-            node_id,
-            agent_name: agent,
-            working_dirs: Vec::new(),
-            selected_dir: 0,
-            yolo: false,
-        });
-        self.nodes.detail_focus = false;
-    }
-
-    async fn handle_session_options_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc => {
-                self.nodes.session_options = None;
-            }
-            KeyCode::Up => {
-                if let Some(ref mut opts) = self.nodes.session_options {
-                    if opts.selected_dir > 0 {
-                        opts.selected_dir -= 1;
-                    }
-                }
-            }
-            KeyCode::Down => {
-                if let Some(ref mut opts) = self.nodes.session_options {
-                    let max = opts.working_dirs.len();
-                    if opts.selected_dir < max {
-                        opts.selected_dir += 1;
-                    }
-                }
-            }
-            KeyCode::Tab => {
-                if let Some(ref mut opts) = self.nodes.session_options {
-                    opts.yolo = !opts.yolo;
-                }
-            }
-            KeyCode::Enter => {
-                self.confirm_session_options();
-            }
-            _ => {}
-        }
-
-        //
-        // Refresh working dirs from cached recon paths.
-        //
-        if self.nodes.session_options.is_some() {
-            let paths = self.client.get_cached_project_paths().await;
-            if let Some(ref mut opts) = self.nodes.session_options {
-                if opts.working_dirs.is_empty() && !paths.is_empty() {
-                    opts.working_dirs = paths;
-                }
-            }
-        }
-    }
-
-    fn confirm_session_options(&mut self) {
-        let opts = match self.nodes.session_options.take() {
-            Some(o) => o,
-            None => return,
-        };
-
-        let working_dir = if opts.selected_dir > 0 && opts.selected_dir <= opts.working_dirs.len() {
-            Some(opts.working_dirs[opts.selected_dir - 1].clone())
-        } else {
-            None // index 0 = "Default (home)"
-        };
-
-        let node_id = opts.node_id.clone();
-        let agent = opts.agent_name.clone();
-        let yolo = opts.yolo;
-
-        self.nodes.session = Some(SessionChat {
-            node_id: node_id.clone(),
-            agent_name: agent.clone(),
-            session_id: None,
-            active_transaction_id: None,
-            messages: Vec::new(),
-            input: String::new(),
-            cursor_pos: 0,
-            scroll_offset: 0,
-            is_waiting: false,
-            history: Vec::new(),
-            history_index: None,
-            saved_input: String::new(),
-            yolo,
-            working_dir: working_dir.clone(),
-            streaming_content: String::new(),
-            agent_status: None,
-            pending_permission: None,
-            tool_calls: Vec::new(),
-        });
-
-        //
-        // Select agent and create session in background.
-        //
-        let client = self.client.clone();
-        let tx = self.event_tx.clone();
-
-        tokio::spawn(async move {
-            use crate::event::{AppEvent, SessionResult};
-            use common::{AgentCommand, SessionCommand, SessionContext};
-
-            let Some(tx) = tx else { return };
-
-            let prompt_timeout_secs = client
-                .get_config(vec!["prompt_timeout_secs".to_string()])
-                .await
-                .ok()
-                .and_then(|cfg| cfg.get("prompt_timeout_secs").and_then(|v| v.parse::<u64>().ok()));
-
-            let _ = client
-                .send_command(
-                    &node_id,
-                    NodeCommand::Agent(AgentCommand::Select {
-                        short_name: agent.clone(),
-                    }),
-                )
-                .await;
-
-            match client
-                .send_command(
-                    &node_id,
-                    NodeCommand::Session(SessionCommand::Create {
-                        context: SessionContext {
-                            working_dir,
-                            yolo_mode: yolo,
-                            prompt_timeout_secs,
-                            interactive: true,
-                        },
-                    }),
-                )
-                .await
-            {
-                Ok(resp) => {
-                    if let NodeCommandResult::Session(common::SessionCommandResult::Created {
-                        session_id,
-                    }) = resp.result
-                    {
-                        let _ = tx.send(AppEvent::SessionResponse(SessionResult::Created(
-                            session_id,
-                        )));
-                    }
-                }
-                Err(e) => {
-                    let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error(format!(
-                        "Session create failed: {}",
-                        e
-                    ))));
-                }
-            }
-        });
-    }
-
-    fn handle_session_key(&mut self, key: KeyEvent) {
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
-            match key.code {
-                KeyCode::Char('c') => {
-                    //
-                    // Cancel active transaction or close session.
-                    //
-                    if let Some(ref mut session) = self.nodes.session {
-                        if session.is_waiting {
-                            let Some(transaction_id) = session.active_transaction_id.clone() else {
-                                return;
-                            };
-                            let client = self.client.clone();
-                            let node_id = session.node_id.clone();
-                            let tx = self.event_tx.clone();
-                            tokio::spawn(async move {
-                                use crate::event::{AppEvent, SessionResult};
-                                use common::SessionCommand;
-                                let Some(tx) = tx else { return };
-
-                                match client
-                                    .send_command(
-                                        &node_id,
-                                        NodeCommand::Session(SessionCommand::CancelTransaction {
-                                            transaction_id: transaction_id.clone(),
-                                            force: false,
-                                        }),
-                                    )
-                                    .await
-                                {
-                                    Ok(resp) => match resp.result {
-                                        NodeCommandResult::Session(
-                                            common::SessionCommandResult::TransactionCancelled {
-                                                transaction_id,
-                                            },
-                                        ) => {
-                                            let _ = tx.send(AppEvent::SessionResponse(
-                                                SessionResult::Cancelled(transaction_id),
-                                            ));
-                                        }
-                                        NodeCommandResult::Error { message } => {
-                                            let _ = tx.send(AppEvent::SessionResponse(
-                                                SessionResult::Error(message),
-                                            ));
-                                        }
-                                        _ => {
-                                            let _ = tx.send(AppEvent::SessionResponse(
-                                                SessionResult::Error(
-                                                    "Unexpected response".to_string(),
-                                                ),
-                                            ));
-                                        }
-                                    },
-                                    Err(e) => {
-                                        let _ = tx.send(AppEvent::SessionResponse(
-                                            SessionResult::Error(format!("{}", e)),
-                                        ));
-                                    }
-                                }
-                            });
-                            session.messages.push(ChatMessage {
-                                role: ChatRole::System,
-                                text: "Cancelling...".to_string(),
-                            });
-                        } else {
-                            //
-                            // Not waiting — close session.
-                            //
-                            let client = self.client.clone();
-                            let node_id = session.node_id.clone();
-                            if session.session_id.is_some() {
-                                tokio::spawn(async move {
-                                    use common::SessionCommand;
-                                    let _ = client
-                                        .send_command(
-                                            &node_id,
-                                            NodeCommand::Session(SessionCommand::Close),
-                                        )
-                                        .await;
-                                });
-                            }
-                            self.nodes.session = None;
-                        }
-                    }
-                    return;
-                }
-                _ => {}
-            }
-        }
-
-        match key.code {
-            KeyCode::Esc => {
-                self.close_session();
-            }
-            KeyCode::Enter => {
-                self.send_session_message();
-            }
-            KeyCode::Char(c) => {
-                if let Some(ref mut session) = self.nodes.session {
-                    //
-                    // Permission response shortcuts when a permission is pending.
-                    //
-
-                    if session.pending_permission.is_some() && session.is_waiting {
-                        let decision = match c {
-                            'a' | 'A' => Some(common::PermissionDecision::Allow),
-                            'l' | 'L' => Some(common::PermissionDecision::AllowAlways),
-                            'd' | 'D' => Some(common::PermissionDecision::Deny),
-                            _ => None,
-                        };
-                        if let Some(decision) = decision {
-                            let perm = session.pending_permission.take().unwrap();
-                            let client = self.client.clone();
-                            let node_id = session.node_id.clone();
-                            let transaction_id =
-                                session.active_transaction_id.clone().unwrap_or_default();
-                            let permission_id = perm.permission_id.clone();
-                            tokio::spawn(async move {
-                                let _ = client
-                                    .send_command(
-                                        &node_id,
-                                        common::NodeCommand::Session(
-                                            common::SessionCommand::PermissionResponse {
-                                                transaction_id,
-                                                permission_id,
-                                                decision,
-                                            },
-                                        ),
-                                    )
-                                    .await;
-                            });
-                            return;
-                        }
-                    }
-
-                    session.input.insert(session.cursor_pos, c);
-                    session.cursor_pos += 1;
-                }
-            }
-            KeyCode::Backspace => {
-                if let Some(ref mut session) = self.nodes.session {
-                    if session.cursor_pos > 0 {
-                        session.cursor_pos -= 1;
-                        session.input.remove(session.cursor_pos);
-                    }
-                }
-            }
-            KeyCode::Left => {
-                if let Some(ref mut session) = self.nodes.session {
-                    if session.cursor_pos > 0 {
-                        session.cursor_pos -= 1;
-                    }
-                }
-            }
-            KeyCode::Right => {
-                if let Some(ref mut session) = self.nodes.session {
-                    if session.cursor_pos < session.input.len() {
-                        session.cursor_pos += 1;
-                    }
-                }
-            }
-            KeyCode::Up => {
-                if let Some(ref mut session) = self.nodes.session {
-                    let hist_len = session.history.len();
-                    if hist_len > 0 {
-                        match session.history_index {
-                            None => {
-                                session.saved_input = session.input.clone();
-                                session.history_index = Some(hist_len - 1);
-                            }
-                            Some(idx) if idx > 0 => {
-                                session.history_index = Some(idx - 1);
-                            }
-                            _ => {}
-                        }
-                        if let Some(idx) = session.history_index {
-                            session.input = session.history[idx].clone();
-                            session.cursor_pos = session.input.len();
-                        }
-                    }
-                }
-            }
-            KeyCode::Down => {
-                if let Some(ref mut session) = self.nodes.session {
-                    if let Some(idx) = session.history_index {
-                        if idx + 1 < session.history.len() {
-                            session.history_index = Some(idx + 1);
-                            session.input = session.history[idx + 1].clone();
-                        } else {
-                            session.history_index = None;
-                            session.input = session.saved_input.clone();
-                        }
-                        session.cursor_pos = session.input.len();
-                    }
-                }
-            }
-            KeyCode::PageUp => {
-                if let Some(ref mut session) = self.nodes.session {
-                    session.scroll_offset = session.scroll_offset.saturating_add(10);
-                }
-            }
-            KeyCode::PageDown => {
-                if let Some(ref mut session) = self.nodes.session {
-                    session.scroll_offset = session.scroll_offset.saturating_sub(10);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn refresh_operations(&self) {
-        let client = self.client.clone();
-        let tx = self.event_tx.clone();
-
-        tokio::spawn(async move {
-            let Some(tx) = tx else { return };
-
-            let _ = client.request_op_def_list().await;
-            let _ = client.request_semantic_op_list().await;
-            let _ = client.request_chain_list().await;
-            let _ = client.request_chain_execution_list().await;
-
-            //
-            // Brief delay then fetch cached results.
-            //
-            tokio::time::sleep(Duration::from_millis(300)).await;
-
-            let op_definitions = client.get_operation_definitions().await;
-            let chain_definitions = client.get_chain_definitions().await;
-            let operations = client.get_operations().await;
-            let chain_executions = client.get_chain_executions().await;
-
-            let _ = tx.send(AppEvent::OperationsRefreshed {
-                op_definitions,
-                chain_definitions,
-                operations,
-                chain_executions,
-            });
-        });
-    }
-
-    fn refresh_library_after(&self, delay: Duration) {
-        let client = self.client.clone();
-        let tx = self.event_tx.clone();
-
-        tokio::spawn(async move {
-            let Some(tx) = tx else { return };
-
-            if !delay.is_zero() {
-                tokio::time::sleep(delay).await;
-            }
-
-            let _ = client.request_op_def_list().await;
-            let _ = client.request_chain_list().await;
-            tokio::time::sleep(Duration::from_millis(300)).await;
-
-            let op_definitions = client.get_operation_definitions().await;
-            let chain_definitions = client.get_chain_definitions().await;
-
-            let _ = tx.send(AppEvent::LibraryRefreshed {
-                op_definitions,
-                chain_definitions,
-            });
-        });
-    }
-
-    fn refresh_execution_lists_after(&self, delay: Duration, reset_selection: bool) {
-        let client = self.client.clone();
-        let tx = self.event_tx.clone();
-
-        tokio::spawn(async move {
-            let Some(tx) = tx else { return };
-
-            if !delay.is_zero() {
-                tokio::time::sleep(delay).await;
-            }
-
-            let initial_operations = client.get_operations().await;
-            let initial_chain_executions = client.get_chain_executions().await;
-            let initial_operations_snapshot =
-                serde_json::to_string(&initial_operations).unwrap_or_default();
-            let initial_chain_snapshot =
-                serde_json::to_string(&initial_chain_executions).unwrap_or_default();
-
-            let _ = client.request_semantic_op_list().await;
-            let _ = client.request_chain_execution_list().await;
-
-            let mut operations = initial_operations.clone();
-            let mut chain_executions = initial_chain_executions.clone();
-
-            for _ in 0..20 {
-                tokio::time::sleep(Duration::from_millis(100)).await;
-
-                operations = client.get_operations().await;
-                chain_executions = client.get_chain_executions().await;
-
-                let operations_snapshot = serde_json::to_string(&operations).unwrap_or_default();
-                let chain_snapshot = serde_json::to_string(&chain_executions).unwrap_or_default();
-
-                if operations_snapshot != initial_operations_snapshot
-                    || chain_snapshot != initial_chain_snapshot
-                {
-                    break;
-                }
-            }
-
-            let _ = tx.send(AppEvent::ExecutionListsRefreshed {
-                operations,
-                chain_executions,
-                reset_selection,
-            });
-        });
-    }
-
-    async fn handle_operations_key(&mut self, key: KeyEvent) {
-        //
-        // When detail pane is focused, handle scroll and section toggles.
-        //
-        if self.operations.detail_focus {
-            match key.code {
-                KeyCode::Esc | KeyCode::Left => {
-                    self.operations.detail_focus = false;
-                }
-                KeyCode::Up => {
-                    if self.operations.collapsed.focused_section > 0 {
-                        self.operations.collapsed.focused_section -= 1;
-                    }
-                }
-                KeyCode::Down => {
-                    let max = CollapsedSections::section_count().saturating_sub(1);
-                    if self.operations.collapsed.focused_section < max {
-                        self.operations.collapsed.focused_section += 1;
-                    }
-                }
-                KeyCode::Enter | KeyCode::Char(' ') => {
-                    let idx = self.operations.collapsed.focused_section;
-                    if idx < self.operations.collapsed.sections.len() {
-                        self.operations.collapsed.sections[idx] =
-                            !self.operations.collapsed.sections[idx];
-                    }
-                }
-                KeyCode::PageUp => {
-                    self.operations.detail_scroll =
-                        self.operations.detail_scroll.saturating_sub(10);
-                }
-                KeyCode::PageDown => {
-                    self.operations.detail_scroll =
-                        self.operations.detail_scroll.saturating_add(10);
-                }
-                _ => {}
-            }
-            return;
-        }
-
-        match key.code {
-            KeyCode::Tab | KeyCode::BackTab => {
-                self.operations.tab = match self.operations.tab {
-                    OpsTab::Library => OpsTab::Executions,
-                    OpsTab::Executions => OpsTab::Library,
-                };
-                self.operations.filter.clear();
-            }
-            KeyCode::Up => match self.operations.tab {
-                OpsTab::Library => {
-                    if self.operations.library_selected > 0 {
-                        self.operations.library_selected -= 1;
-                    }
-                }
-                OpsTab::Executions => {
-                    if self.operations.exec_selected > 0 {
-                        self.operations.exec_selected -= 1;
-                        self.operations.detail_scroll = 0;
-                    }
-                }
-            },
-            KeyCode::Down => match self.operations.tab {
-                OpsTab::Library => {
-                    let total = self.ops_library_count();
-                    if self.operations.library_selected + 1 < total {
-                        self.operations.library_selected += 1;
-                    }
-                }
-                OpsTab::Executions => {
-                    let total = self.sorted_executions().len();
-                    if self.operations.exec_selected + 1 < total {
-                        self.operations.exec_selected += 1;
-                        self.operations.detail_scroll = 0;
-                    }
-                }
-            },
-            KeyCode::Right => {
-                //
-                // Focus the detail pane for scrolling.
-                //
-                self.operations.detail_focus = true;
-                self.operations.detail_scroll = 0;
-            }
-            KeyCode::Enter => {
-                if self.operations.tab == OpsTab::Library {
-                    self.open_run_target_popup();
-                } else {
-                    //
-                    // In executions tab, Enter focuses the detail pane.
-                    //
-                    self.operations.detail_focus = true;
-                    self.operations.detail_scroll = 0;
-                }
-            }
-            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if self.operations.tab == OpsTab::Library {
-                    self.open_new_op_form();
-                }
-            }
-            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if self.operations.tab == OpsTab::Library {
-                    self.edit_selected_op();
-                }
-            }
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                match self.operations.tab {
-                    OpsTab::Library => self.delete_selected_op().await,
-                    OpsTab::Executions => self.delete_selected_execution().await,
-                }
-            }
-            KeyCode::Char('c')
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && self.operations.tab == OpsTab::Executions =>
-            {
-                self.cancel_selected_execution().await;
-            }
-            KeyCode::Char('x')
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && self.operations.tab == OpsTab::Executions =>
-            {
-                self.confirm = Some(ConfirmAction {
-                    message: "Clear all executions?".to_string(),
-                    action: ConfirmKind::ClearAllExecutions,
-                });
-            }
-            KeyCode::Esc => {
-                if !self.operations.filter.is_empty() {
-                    self.operations.filter.clear();
-                    self.operations.library_selected = 0;
-                    self.operations.exec_selected = 0;
-                }
-            }
-            KeyCode::Backspace => {
-                if !self.operations.filter.is_empty() && !self.operations.detail_focus {
-                    self.operations.filter.pop();
-                    self.operations.library_selected = 0;
-                    self.operations.exec_selected = 0;
-                }
-            }
-            KeyCode::Char(c) => {
-                if !self.operations.detail_focus {
-                    self.operations.filter.push(c);
-                    self.operations.library_selected = 0;
-                    self.operations.exec_selected = 0;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    pub fn filtered_library(&self) -> Vec<(usize, bool)> {
-        //
-        // Returns (original_index, is_chain) for items matching the filter.
-        //
-        Self::filtered_library_static(
-            &self.operations.op_definitions,
-            &self.operations.chain_definitions,
-            &self.operations.filter,
-        )
-    }
-
-    pub fn filtered_library_static(
-        op_definitions: &[common::OperationDefinitionInfo],
-        chain_definitions: &[common::ChainDefinitionInfo],
-        filter: &str,
-    ) -> Vec<(usize, bool)> {
-        let filter = filter.to_lowercase();
-        let mut result = Vec::new();
-
-        for (idx, def) in op_definitions.iter().enumerate() {
-            if def.disabled {
-                continue;
-            }
-            if filter.is_empty()
-                || def.name.to_lowercase().contains(&filter)
-                || def.category.to_lowercase().contains(&filter)
-                || def.full_name.to_lowercase().contains(&filter)
-            {
-                result.push((idx, false));
-            }
-        }
-
-        for (idx, chain) in chain_definitions.iter().enumerate() {
-            if chain.disabled {
-                continue;
-            }
-            if filter.is_empty()
-                || chain.name.to_lowercase().contains(&filter)
-                || chain.category.to_lowercase().contains(&filter)
-            {
-                result.push((idx, true));
-            }
-        }
-
-        result
-    }
-
-    //
-    // Returns sorted (newest first) execution entries: (is_op, original_index).
-    //
-    pub fn sorted_executions(&self) -> Vec<(bool, usize)> {
-        let filter = self.operations.filter.to_lowercase();
-        let mut entries: Vec<(chrono::DateTime<chrono::Utc>, bool, usize)> = Vec::new();
-
-        for (i, op) in self.operations.operations.iter().enumerate() {
-            if !filter.is_empty()
-                && !op.spec.name.to_lowercase().contains(&filter)
-                && !op.agent_short_name.to_lowercase().contains(&filter)
-            {
-                continue;
-            }
-            entries.push((op.start_time, true, i));
-        }
-
-        for (i, exec) in self.operations.chain_executions.iter().enumerate() {
-            if !filter.is_empty()
-                && !exec.chain_name.to_lowercase().contains(&filter)
-                && !exec.agent_short_name.to_lowercase().contains(&filter)
-            {
-                continue;
-            }
-            entries.push((exec.started_at, false, i));
-        }
-
-        entries.sort_by(|a, b| b.0.cmp(&a.0));
-        entries
-            .into_iter()
-            .map(|(_, is_op, idx)| (is_op, idx))
-            .collect()
-    }
-
-    pub fn sorted_exec_static(
-        operations: &[common::SemanticOpUpdate],
-        chain_executions: &[common::ChainExecutionUpdate],
-        filter: &str,
-    ) -> Vec<(bool, usize)> {
-        let filter = filter.to_lowercase();
-        let mut entries: Vec<(chrono::DateTime<chrono::Utc>, bool, usize)> = Vec::new();
-
-        for (i, op) in operations.iter().enumerate() {
-            if !filter.is_empty()
-                && !op.spec.name.to_lowercase().contains(&filter)
-                && !op.agent_short_name.to_lowercase().contains(&filter)
-            {
-                continue;
-            }
-            entries.push((op.start_time, true, i));
-        }
-
-        for (i, exec) in chain_executions.iter().enumerate() {
-            if !filter.is_empty()
-                && !exec.chain_name.to_lowercase().contains(&filter)
-                && !exec.agent_short_name.to_lowercase().contains(&filter)
-            {
-                continue;
-            }
-            entries.push((exec.started_at, false, i));
-        }
-
-        entries.sort_by(|a, b| b.0.cmp(&a.0));
-        entries
-            .into_iter()
-            .map(|(_, is_op, idx)| (is_op, idx))
-            .collect()
-    }
-
-    fn ops_library_count(&self) -> usize {
-        self.filtered_library().len()
-    }
-
-    fn open_run_target_popup(&mut self) {
-        let filtered = self.filtered_library();
-        let Some(&(idx, is_chain)) = filtered.get(self.operations.library_selected) else {
-            return;
-        };
-        let (op_name, chain_id) = if is_chain {
-            let chain = &self.operations.chain_definitions[idx];
-            (chain.name.clone(), Some(chain.id.clone()))
-        } else {
-            let op = &self.operations.op_definitions[idx];
-            (op.full_name.clone(), None)
-        };
-
-        //
-        // Build node list — all selected by default.
-        //
-        let nodes: Vec<_> = self
-            .nodes
-            .nodes
-            .iter()
-            .map(|n| (n.node_id.clone(), n.machine_name.clone(), true))
-            .collect();
-
-        //
-        // Build unique agent list — all selected by default.
-        //
-        let mut agent_names: Vec<String> = Vec::new();
-        for node in &self.nodes.nodes {
-            for agent in &node.discovered_agents {
-                if agent.available && !agent_names.contains(&agent.short_name) {
-                    agent_names.push(agent.short_name.clone());
-                }
-            }
-        }
-        let agents: Vec<_> = agent_names.into_iter().map(|a| (a, true)).collect();
-
-        if nodes.is_empty() || agents.is_empty() {
-            return;
-        }
-
-        self.run_options = Some(RunOptions {
-            op_name,
-            is_chain,
-            chain_id,
-            nodes,
-            agents,
-            yolo: false,
-            focused_section: 0,
-            cursor: 0,
-        });
-    }
-
-    async fn cancel_selected_execution(&mut self) {
-        let sorted = self.sorted_executions();
-        let Some(&(is_op, idx)) = sorted.get(self.operations.exec_selected) else {
-            return;
-        };
-
-        if is_op {
-            let op_id = self.operations.operations[idx].operation_id.clone();
-            let _ = self.client.cancel_semantic_op(op_id).await;
-        } else {
-            let exec_id = self.operations.chain_executions[idx].execution_id.clone();
-            let _ = self.client.cancel_chain(exec_id).await;
-        }
-    }
-
-    fn is_finished_semantic_op(status: &common::SemanticOpStatus) -> bool {
-        matches!(
-            status,
-            common::SemanticOpStatus::Completed
-                | common::SemanticOpStatus::Failed
-                | common::SemanticOpStatus::Cancelled
-        )
-    }
-
-    fn is_finished_chain_execution(status: &common::ChainExecutionStatus) -> bool {
-        matches!(
-            status,
-            common::ChainExecutionStatus::Completed
-                | common::ChainExecutionStatus::Failed
-                | common::ChainExecutionStatus::Cancelled
-        )
-    }
-
-    async fn delete_selected_execution(&mut self) {
-        let sorted = self.sorted_executions();
-        let Some(&(is_op, idx)) = sorted.get(self.operations.exec_selected) else {
-            return;
-        };
-
-        if is_op {
-            let op_id = self.operations.operations[idx].operation_id.clone();
-            let _ = self.client.remove_semantic_op(op_id).await;
-            self.operations.operations.remove(idx);
-        } else {
-            let exec_id = self.operations.chain_executions[idx].execution_id.clone();
-            let _ = self.client.remove_chain_execution(exec_id).await;
-            self.operations.chain_executions.remove(idx);
-        }
-
-        let total = self.sorted_executions().len();
-        if total == 0 {
-            self.operations.exec_selected = 0;
-        } else if self.operations.exec_selected >= total {
-            self.operations.exec_selected = total - 1;
-        }
-
-        self.refresh_execution_lists_after(Duration::from_millis(300), false);
-    }
-
-    fn edit_selected_op(&mut self) {
-        let filtered = self.filtered_library();
-        if let Some(&(idx, is_chain)) = filtered.get(self.operations.library_selected) {
-            if is_chain {
-                return; // Can't edit chains this way.
-            }
-            let def = &self.operations.op_definitions[idx];
-            self.new_op_form = Some(NewOpForm {
-                name: def.name.clone(),
-                short_name: def.short_name.clone(),
-                category: def.category.clone(),
-                description: def.description.clone(),
-                mode: if def.mode == "agent" { 1 } else { 0 },
-                timeout: def.timeout.to_string(),
-                iterations: def.agent_iterations.to_string(),
-                yolo: def.yolo_mode,
-                prompt: def.operation_prompt.clone(),
-                focused_field: 0,
-            });
-        }
-    }
-
-    fn open_new_op_form(&mut self) {
-        self.new_op_form = Some(NewOpForm {
-            name: String::new(),
-            short_name: String::new(),
-            category: "custom".to_string(),
-            description: String::new(),
-            mode: 0,
-            timeout: "600".to_string(),
-            iterations: "10".to_string(),
-            yolo: false,
-            prompt: String::new(),
-            focused_field: 0, // Mode is field 0
-        });
-    }
-
-    async fn submit_new_op(&mut self) {
-        let form = match self.new_op_form.take() {
-            Some(f) => f,
-            None => return,
-        };
-
-        if form.name.is_empty() || form.short_name.is_empty() {
-            return;
-        }
-
-        let mode_str = if form.mode == 0 { "one-shot" } else { "agent" };
-
-        let op_def = serde_json::json!({
-            "full_name": format!("{}::{}", form.category, form.short_name),
-            "category": form.category,
-            "short_name": form.short_name,
-            "name": form.name,
-            "description": form.description,
-            "agent_info": "",
-            "timeout": form.timeout.parse::<u64>().unwrap_or(60),
-            "operation_prompt": form.prompt,
-            "mode": mode_str,
-            "agent_iterations": form.iterations.parse::<u32>().unwrap_or(5),
-            "operation_chain": [],
-            "disabled": false,
-            "yolo_mode": form.yolo,
-            "model_ref": null,
-        });
-
-        if let Err(e) = self.client.add_op_def(op_def.to_string()).await {
-            self.orchestrator
-                .messages
-                .push(ConversationEntry::Error(format!("Failed to add op: {}", e)));
-        }
-
-        //
-        // Refresh definitions.
-        //
-        self.refresh_library_after(Duration::from_millis(300));
-    }
-
-    async fn handle_new_op_form_key(&mut self, key: KeyEvent) {
-        //
-        // Visual field order: 0,1,2,3,4,6,5,7,8
-        // Field 6 (iterations) is skipped when mode is one-shot.
-        //
-        let visual_order = |form: &NewOpForm| -> Vec<usize> {
-            let mut order = vec![0, 1, 2, 3, 4];
-            if form.mode == 1 {
-                order.push(5); // iterations only for agent mode
-            }
-            order.extend([6, 7, 8]);
-            order
-        };
-
-        match key.code {
-            KeyCode::Esc => {
-                self.new_op_form = None;
-            }
-            KeyCode::Down | KeyCode::Tab => {
-                if let Some(ref mut form) = self.new_op_form {
-                    let order = visual_order(form);
-                    let pos = order
-                        .iter()
-                        .position(|&f| f == form.focused_field)
-                        .unwrap_or(0);
-                    let next = (pos + 1) % order.len();
-                    form.focused_field = order[next];
-                }
-            }
-            KeyCode::Up | KeyCode::BackTab => {
-                if let Some(ref mut form) = self.new_op_form {
-                    let order = visual_order(form);
-                    let pos = order
-                        .iter()
-                        .position(|&f| f == form.focused_field)
-                        .unwrap_or(0);
-                    let prev = if pos > 0 { pos - 1 } else { order.len() - 1 };
-                    form.focused_field = order[prev];
-                }
-            }
-            KeyCode::Char(' ') => {
-                if let Some(ref mut form) = self.new_op_form {
-                    if NewOpForm::is_toggle(form.focused_field) {
-                        Self::toggle_new_op_field(form);
-                    } else {
-                        match form.focused_field {
-                            1 => form.name.push(' '),
-                            2 => form.short_name.push(' '),
-                            3 => form.category.push(' '),
-                            4 => form.description.push(' '),
-                            5 => form.iterations.push(' '),
-                            6 => form.timeout.push(' '),
-                            8 => form.prompt.push(' '),
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            KeyCode::Left | KeyCode::Right => {
-                if let Some(ref mut form) = self.new_op_form {
-                    Self::toggle_new_op_field(form);
-                }
-            }
-            KeyCode::Enter
-                if key.modifiers.contains(KeyModifiers::SHIFT)
-                    || key.modifiers.contains(KeyModifiers::ALT) =>
-            {
-                //
-                // Shift+Enter or Alt+Enter adds newline in prompt field.
-                //
-                if let Some(ref mut form) = self.new_op_form {
-                    if form.focused_field == 8 {
-                        form.prompt.push('\n');
-                    }
-                }
-            }
-            KeyCode::Char('\n') => {
-                //
-                // Some terminals send Shift+Enter as literal '\n'.
-                //
-                if let Some(ref mut form) = self.new_op_form {
-                    if form.focused_field == 8 {
-                        form.prompt.push('\n');
-                    }
-                }
-            }
-            KeyCode::Enter => {
-                //
-                // Enter moves to next field (same as Down/Tab).
-                //
-                if let Some(ref mut form) = self.new_op_form {
-                    let order = visual_order(form);
-                    let pos = order
-                        .iter()
-                        .position(|&f| f == form.focused_field)
-                        .unwrap_or(0);
-                    let next = (pos + 1) % order.len();
-                    form.focused_field = order[next];
-                }
-            }
-            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                //
-                // ^s validates and submits.
-                //
-                let valid = if let Some(ref form) = self.new_op_form {
-                    !form.name.is_empty()
-                        && !form.short_name.is_empty()
-                        && !form.category.is_empty()
-                        && !form.prompt.is_empty()
-                        && !form.timeout.is_empty()
-                } else {
-                    false
-                };
-
-                if valid {
-                    self.submit_new_op().await;
-                } else {
-                    if let Some(ref form) = self.new_op_form {
-                        let mut missing = Vec::new();
-                        if form.name.is_empty() {
-                            missing.push("Name");
-                        }
-                        if form.short_name.is_empty() {
-                            missing.push("Short Name");
-                        }
-                        if form.category.is_empty() {
-                            missing.push("Category");
-                        }
-                        if form.prompt.is_empty() {
-                            missing.push("Prompt");
-                        }
-                        if form.timeout.is_empty() {
-                            missing.push("Timeout");
-                        }
-                        self.confirm = Some(ConfirmAction {
-                            message: format!("Required: {}", missing.join(", ")),
-                            action: ConfirmKind::Info,
-                        });
-                    }
-                }
-            }
-            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if let Some(ref mut form) = self.new_op_form {
-                    if !NewOpForm::is_toggle(form.focused_field) {
-                        match form.focused_field {
-                            1 => form.name.push(c),
-                            2 => form.short_name.push(c),
-                            3 => form.category.push(c),
-                            4 => form.description.push(c),
-                            5 => form.iterations.push(c),
-                            6 => form.timeout.push(c),
-                            8 => form.prompt.push(c),
-                            _ => {}
-                        }
-                    }
-                }
-            }
-            KeyCode::Backspace => {
-                if let Some(ref mut form) = self.new_op_form {
-                    match form.focused_field {
-                        1 => {
-                            form.name.pop();
-                        }
-                        2 => {
-                            form.short_name.pop();
-                        }
-                        3 => {
-                            form.category.pop();
-                        }
-                        4 => {
-                            form.description.pop();
-                        }
-                        5 => {
-                            form.iterations.pop();
-                        }
-                        6 => {
-                            form.timeout.pop();
-                        }
-                        8 => {
-                            form.prompt.pop();
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    async fn delete_selected_op(&mut self) {
-        let filtered = self.filtered_library();
-        let Some(&(idx, is_chain)) = filtered.get(self.operations.library_selected) else {
-            return;
-        };
-
-        if !is_chain {
-            let op = &self.operations.op_definitions[idx];
-            let full_name = op.full_name.clone();
-            let name = op.name.clone();
-            self.confirm = Some(ConfirmAction {
-                message: format!("Delete operation \"{}\" ({})?", name, full_name),
-                action: ConfirmKind::DeleteOp(full_name),
-            });
-        }
-    }
-
     async fn execute_confirm(&mut self, confirm: ConfirmAction) {
         match confirm.action {
             ConfirmKind::DeleteOp(full_name) => {
                 if let Err(e) = self.client.delete_op_def(full_name).await {
                     self.orchestrator
                         .messages
-                        .push(ConversationEntry::Error(format!(
-                            "Delete failed: {}",
-                            e
-                        )));
+                        .push(ConversationEntry::Error(format!("Delete failed: {}", e)));
                 }
                 self.refresh_library_after(Duration::from_millis(300));
             }
@@ -4074,9 +2524,10 @@ impl App {
                     self.settings.model_definitions.remove(idx);
                     self.save_model_definitions().await;
                     if self.settings.selected > 0 {
-                        self.settings.selected = self.settings.selected.min(
-                            self.settings.model_definitions.len().saturating_sub(1),
-                        );
+                        self.settings.selected = self
+                            .settings
+                            .selected
+                            .min(self.settings.model_definitions.len().saturating_sub(1));
                     }
                 }
             }
@@ -4092,56 +2543,6 @@ impl App {
             }
             ConfirmKind::Info => {}
         }
-    }
-
-    async fn execute_run_options(&mut self, opts: RunOptions) {
-        let selected_nodes: Vec<String> = opts
-            .nodes
-            .iter()
-            .filter(|(_, _, sel)| *sel)
-            .map(|(id, _, _)| id.clone())
-            .collect();
-        let selected_agents: Vec<String> = opts
-            .agents
-            .iter()
-            .filter(|(_, sel)| *sel)
-            .map(|(name, _)| name.clone())
-            .collect();
-
-        if selected_nodes.is_empty() || selected_agents.is_empty() {
-            return;
-        }
-
-        for node_id in &selected_nodes {
-            for agent in &selected_agents {
-                if opts.is_chain {
-                    if let Some(ref chain_id) = opts.chain_id {
-                        let _ = self
-                            .client
-                            .run_chain(
-                                chain_id.clone(),
-                                node_id.clone(),
-                                agent.clone(),
-                                None,
-                            )
-                            .await;
-                    }
-                } else {
-                    let _ = self
-                        .client
-                        .run_semantic_op(
-                            node_id.clone(),
-                            agent.clone(),
-                            opts.op_name.clone(),
-                            None,
-                        )
-                        .await;
-                }
-            }
-        }
-
-        self.operations.tab = OpsTab::Executions;
-        self.refresh_execution_lists_after(Duration::from_millis(500), false);
     }
 
     async fn handle_confirm_key(&mut self, key: KeyEvent) {
@@ -4160,68 +2561,6 @@ impl App {
             }
             KeyCode::Char('n') | KeyCode::Esc => {
                 self.confirm = None;
-            }
-            _ => {}
-        }
-    }
-
-    async fn handle_run_options_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc => {
-                self.run_options = None;
-            }
-            KeyCode::Tab => {
-                //
-                // Tab cycles visible sections only.
-                //
-                if let Some(ref mut opts) = self.run_options {
-                    let section_count = if opts.is_chain { 2 } else { 3 };
-                    opts.focused_section = (opts.focused_section + 1) % section_count;
-                    opts.cursor = 0;
-                }
-            }
-            KeyCode::Up => {
-                if let Some(ref mut opts) = self.run_options {
-                    if opts.cursor > 0 {
-                        opts.cursor -= 1;
-                    } else if opts.focused_section > 0 {
-                        opts.focused_section -= 1;
-                        let prev_max = match opts.focused_section {
-                            0 => opts.nodes.len(),
-                            1 => opts.agents.len(),
-                            _ => 1,
-                        };
-                        opts.cursor = prev_max.saturating_sub(1);
-                    }
-                }
-            }
-            KeyCode::Down => {
-                if let Some(ref mut opts) = self.run_options {
-                    let section_count = if opts.is_chain { 2 } else { 3 };
-                    let max = match opts.focused_section {
-                        0 => opts.nodes.len(),
-                        1 => opts.agents.len(),
-                        _ => 1,
-                    };
-                    if opts.cursor + 1 < max {
-                        opts.cursor += 1;
-                    } else if opts.focused_section + 1 < section_count {
-                        opts.focused_section += 1;
-                        opts.cursor = 0;
-                    }
-                }
-            }
-            KeyCode::Char(' ') | KeyCode::Enter => {
-                if let Some(ref opts) = self.run_options {
-                    let section = opts.focused_section;
-                    let cursor = opts.cursor;
-                    self.toggle_run_option(section, cursor);
-                }
-            }
-            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if let Some(opts) = self.run_options.take() {
-                    self.execute_run_options(opts).await;
-                }
             }
             _ => {}
         }
@@ -4560,7 +2899,13 @@ impl App {
                     self.orchestrator.active_tool_input = input;
                 }
             }
-            ClientDirectMessage::OrchestratorToolExecuted { name, success, display, result, .. } => {
+            ClientDirectMessage::OrchestratorToolExecuted {
+                name,
+                success,
+                display,
+                result,
+                ..
+            } => {
                 if name != "report_plan" {
                     let input = self.orchestrator.active_tool_input.take();
                     self.orchestrator.active_tool = None;
@@ -4568,8 +2913,16 @@ impl App {
                         name,
                         success,
                         input,
-                        display: if display.is_empty() { None } else { Some(display) },
-                        result: if result.is_empty() { None } else { Some(result) },
+                        display: if display.is_empty() {
+                            None
+                        } else {
+                            Some(display)
+                        },
+                        result: if result.is_empty() {
+                            None
+                        } else {
+                            Some(result)
+                        },
                     });
                 }
             }
@@ -4739,12 +3092,18 @@ impl App {
         let editor = std::env::var("VISUAL")
             .or_else(|_| std::env::var("EDITOR"))
             .unwrap_or_else(|_| {
-                if cfg!(windows) { "notepad".to_string() }
-                else { "vi".to_string() }
+                if cfg!(windows) {
+                    "notepad".to_string()
+                } else {
+                    "vi".to_string()
+                }
             });
 
         let extension = ".lua";
-        let prefix = existing.as_ref().map(|s| s.name.as_str()).unwrap_or("new_agent");
+        let prefix = existing
+            .as_ref()
+            .map(|s| s.name.as_str())
+            .unwrap_or("new_agent");
         let tmp = match tempfile::Builder::new()
             .prefix(prefix)
             .suffix(extension)
@@ -4773,21 +3132,22 @@ impl App {
         // can take over stdin/stdout without interference.
         //
 
-        self.terminal_paused.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.terminal_paused
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         crossterm::terminal::disable_raw_mode().ok();
         crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen).ok();
 
-        let status = std::process::Command::new(&editor)
-            .arg(&path)
-            .status();
+        let status = std::process::Command::new(&editor).arg(&path).status();
 
         crossterm::execute!(
             std::io::stdout(),
             crossterm::terminal::EnterAlternateScreen,
             crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
-        ).ok();
+        )
+        .ok();
         crossterm::terminal::enable_raw_mode().ok();
-        self.terminal_paused.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.terminal_paused
+            .store(false, std::sync::atomic::Ordering::Relaxed);
         self.terminal_resume.notify_one();
 
         //
@@ -4845,7 +3205,8 @@ impl App {
                 self.settings.status_message = Some("Editor exited with error".to_string());
             }
             Err(e) => {
-                self.settings.status_message = Some(format!("Failed to launch editor '{}': {}", editor, e));
+                self.settings.status_message =
+                    Some(format!("Failed to launch editor '{}': {}", editor, e));
             }
         }
         self.settings.status_message_at = Some(std::time::Instant::now());
@@ -4944,7 +3305,8 @@ impl App {
                 }
                 4 => {
                     self.settings.semantic_parser_model = name.clone();
-                    self.save_setting("llm_feature_semantic_parser", &name).await;
+                    self.save_setting("llm_feature_semantic_parser", &name)
+                        .await;
                 }
                 5 => {
                     self.settings.traffic_parser_model = name.clone();
@@ -4956,27 +3318,6 @@ impl App {
         self.settings.dropdown_open = false;
     }
 
-    fn toggle_run_option(&mut self, section: u8, cursor: usize) {
-        if let Some(ref mut opts) = self.run_options {
-            opts.focused_section = section;
-            opts.cursor = cursor;
-            match section {
-                0 => {
-                    if let Some(n) = opts.nodes.get_mut(cursor) {
-                        n.2 = !n.2;
-                    }
-                }
-                1 => {
-                    if let Some(a) = opts.agents.get_mut(cursor) {
-                        a.1 = !a.1;
-                    }
-                }
-                2 => opts.yolo = !opts.yolo,
-                _ => {}
-            }
-        }
-    }
-
     fn cycle_tools_display(&mut self) {
         if !self.orchestrator.tools_expanded {
             self.orchestrator.tools_expanded = true;
@@ -4985,14 +3326,6 @@ impl App {
         } else {
             self.orchestrator.tools_expanded = false;
             self.orchestrator.tools_full = false;
-        }
-    }
-
-    fn toggle_new_op_field(form: &mut NewOpForm) {
-        match form.focused_field {
-            0 => form.mode = (form.mode + 1) % 2,
-            7 => form.yolo = !form.yolo,
-            _ => {}
         }
     }
 
@@ -5047,6 +3380,14 @@ impl App {
                 _ => String::new(),
             },
             SettingsTab::About => String::new(),
+        }
+    }
+
+    async fn switch_settings_tab(&mut self, tab: SettingsTab) {
+        self.settings.tab = tab;
+        self.settings.selected = 0;
+        if self.settings.tab == SettingsTab::Agents && !self.settings.agent_scripts_loaded {
+            self.load_agent_scripts().await;
         }
     }
 
@@ -5140,28 +3481,22 @@ impl App {
 
         match key.code {
             KeyCode::Tab => {
-                self.settings.tab = match self.settings.tab {
+                let next_tab = match self.settings.tab {
                     SettingsTab::Llm => SettingsTab::Agents,
                     SettingsTab::Agents => SettingsTab::Service,
                     SettingsTab::Service => SettingsTab::About,
                     SettingsTab::About => SettingsTab::Llm,
                 };
-                self.settings.selected = 0;
-                if self.settings.tab == SettingsTab::Agents && !self.settings.agent_scripts_loaded {
-                    self.load_agent_scripts().await;
-                }
+                self.switch_settings_tab(next_tab).await;
             }
             KeyCode::BackTab => {
-                self.settings.tab = match self.settings.tab {
+                let next_tab = match self.settings.tab {
                     SettingsTab::Llm => SettingsTab::About,
                     SettingsTab::Agents => SettingsTab::Llm,
                     SettingsTab::Service => SettingsTab::Agents,
                     SettingsTab::About => SettingsTab::Service,
                 };
-                self.settings.selected = 0;
-                if self.settings.tab == SettingsTab::Agents && !self.settings.agent_scripts_loaded {
-                    self.load_agent_scripts().await;
-                }
+                self.switch_settings_tab(next_tab).await;
             }
             KeyCode::Up => {
                 if self.settings.selected > 0 {
@@ -5198,7 +3533,10 @@ impl App {
                     let script = &self.settings.agent_scripts[sel];
                     let id = script.id.clone();
                     let new_disabled = !script.disabled;
-                    let _ = self.client.toggle_lua_agent_script_disabled(id, new_disabled).await;
+                    let _ = self
+                        .client
+                        .toggle_lua_agent_script_disabled(id, new_disabled)
+                        .await;
                     self.settings.agent_scripts_loaded = false;
                     self.load_agent_scripts().await;
                 }
@@ -5284,7 +3622,8 @@ impl App {
                         1 => {
                             // Reset defaults.
                             self.confirm = Some(ConfirmAction {
-                                message: "Reset all agent scripts to built-in defaults?".to_string(),
+                                message: "Reset all agent scripts to built-in defaults?"
+                                    .to_string(),
                                 action: ConfirmKind::ResetAgentScripts,
                             });
                         }

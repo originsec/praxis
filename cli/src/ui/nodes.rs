@@ -1,15 +1,14 @@
 use crate::app::{ChatRole, NodesState, SessionOptions, TerminalState};
+use crate::ui::common::{short_id, spinner_char};
+use crate::ui::theme::{
+    ACCENT, BG, DIM, INPUT_BORDER, MUTED, PANEL_HIGHLIGHT_BG, POPUP_HIGHLIGHT_BG, STATUS_DONE,
+    STATUS_FAIL, STATUS_QUEUED, STATUS_RUNNING, TEXT,
+};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap};
-
-const ACCENT: Color = Color::Rgb(100, 180, 100);
-const DIM: Color = Color::Rgb(80, 80, 80);
-const MUTED: Color = Color::Rgb(120, 120, 120);
-const TEXT: Color = Color::Rgb(180, 180, 180);
-const HIGHLIGHT_BG: Color = Color::Rgb(35, 35, 40);
 
 pub fn render(
     f: &mut Frame,
@@ -98,22 +97,16 @@ fn render_node_list(f: &mut Frame, area: Rect, state: &NodesState) {
         .nodes
         .iter()
         .map(|node| {
-            let short_id = if node.node_id.len() >= 8 {
-                &node.node_id[..8]
-            } else {
-                &node.node_id
-            };
-
             let (status, status_color) = match node.status {
-                common::NodeStatus::Online => ("active", Color::Rgb(80, 160, 80)),
-                common::NodeStatus::Warning => ("warning", Color::Rgb(180, 160, 60)),
-                common::NodeStatus::Offline => ("inactive", Color::Rgb(160, 60, 60)),
+                common::NodeStatus::Online => ("active", STATUS_DONE),
+                common::NodeStatus::Warning => ("warning", STATUS_RUNNING),
+                common::NodeStatus::Offline => ("inactive", STATUS_FAIL),
             };
 
             let agent_count = node.discovered_agents.len().to_string();
 
             Row::new(vec![
-                Cell::from(short_id.to_string()).style(Style::default().fg(MUTED)),
+                Cell::from(short_id(&node.node_id).to_string()).style(Style::default().fg(MUTED)),
                 Cell::from(node.machine_name.clone()).style(Style::default().fg(TEXT)),
                 Cell::from(node.os_details.clone()).style(Style::default().fg(MUTED)),
                 Cell::from(status).style(Style::default().fg(status_color)),
@@ -141,7 +134,7 @@ fn render_node_list(f: &mut Frame, area: Rect, state: &NodesState) {
                 .title_style(Style::default().fg(MUTED))
                 .title(" Nodes "),
         )
-        .row_highlight_style(Style::default().bg(HIGHLIGHT_BG));
+        .row_highlight_style(Style::default().bg(PANEL_HIGHLIGHT_BG));
 
     let mut table_state = TableState::default();
     if !state.nodes.is_empty() {
@@ -196,15 +189,12 @@ fn render_node_detail(
             activity_lines.push(Line::from(vec![
                 Span::styled("  agent: ", Style::default().fg(MUTED)),
                 Span::styled(&agent.short_name, Style::default().fg(TEXT)),
-                Span::styled(
-                    format!("  ({})", &sid[..8.min(sid.len())]),
-                    Style::default().fg(DIM),
-                ),
+                Span::styled(format!("  ({})", short_id(sid)), Style::default().fg(DIM)),
             ]));
             if agent.yolo_mode {
                 activity_lines.push(Line::from(Span::styled(
                     "  YOLO mode enabled",
-                    Style::default().fg(Color::Rgb(180, 160, 60)),
+                    Style::default().fg(STATUS_RUNNING),
                 )));
             }
             if let Some(ref wd) = agent.working_dir {
@@ -216,7 +206,7 @@ fn render_node_detail(
             if let Some(ref prompt_text) = agent.active_prompt_text {
                 activity_lines.push(Line::from(Span::styled(
                     "  \u{25cf} Session Prompt",
-                    Style::default().fg(Color::Rgb(180, 160, 60)),
+                    Style::default().fg(STATUS_RUNNING),
                 )));
                 let short = if prompt_text.len() > 80 {
                     format!("{}...", &prompt_text[..80])
@@ -230,7 +220,7 @@ fn render_node_detail(
             } else if agent.active_transaction_id.is_some() {
                 activity_lines.push(Line::from(Span::styled(
                     "  \u{25cf} prompt executing...",
-                    Style::default().fg(Color::Rgb(180, 160, 60)),
+                    Style::default().fg(STATUS_RUNNING),
                 )));
             }
         }
@@ -257,8 +247,8 @@ fn render_node_detail(
         )));
         for op in &node_ops {
             let (status_str, status_color) = match op.status {
-                common::SemanticOpStatus::Running => ("\u{25cf}", Color::Rgb(180, 160, 60)),
-                common::SemanticOpStatus::Queued => ("\u{25cb}", Color::Rgb(100, 140, 180)),
+                common::SemanticOpStatus::Running => ("\u{25cf}", STATUS_RUNNING),
+                common::SemanticOpStatus::Queued => ("\u{25cb}", STATUS_QUEUED),
                 _ => ("\u{25cb}", DIM),
             };
             activity_lines.push(Line::from(vec![
@@ -320,8 +310,8 @@ fn render_node_detail(
         )));
         for chain in &node_chains {
             let (status_str, status_color) = match chain.status {
-                common::ChainExecutionStatus::Running => ("\u{25cf}", Color::Rgb(180, 160, 60)),
-                common::ChainExecutionStatus::Queued => ("\u{25cb}", Color::Rgb(100, 140, 180)),
+                common::ChainExecutionStatus::Running => ("\u{25cf}", STATUS_RUNNING),
+                common::ChainExecutionStatus::Queued => ("\u{25cb}", STATUS_QUEUED),
                 _ => ("\u{25cb}", DIM),
             };
             let done = chain
@@ -347,7 +337,7 @@ fn render_node_detail(
     if node.intercept_active {
         activity_lines.push(Line::from(Span::styled(
             "  intercept: active",
-            Style::default().fg(Color::Rgb(180, 160, 60)),
+            Style::default().fg(STATUS_RUNNING),
         )));
     }
 
@@ -367,12 +357,6 @@ fn render_node_detail(
     //
     // Node header.
     //
-    let short_id = if node.node_id.len() >= 8 {
-        &node.node_id[..8]
-    } else {
-        &node.node_id
-    };
-
     //
     // Capabilities inline with header.
     //
@@ -395,7 +379,10 @@ fn render_node_detail(
                 node.machine_name.clone(),
                 Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(format!("  {}", short_id), Style::default().fg(DIM)),
+            Span::styled(
+                format!("  {}", short_id(&node.node_id)),
+                Style::default().fg(DIM),
+            ),
         ]),
         Line::from(vec![
             Span::styled("  ", Style::default()),
@@ -407,7 +394,7 @@ fn render_node_detail(
             if !priv_str.is_empty() {
                 Span::styled(
                     format!("  {}", priv_str),
-                    Style::default().fg(Color::Rgb(180, 160, 60)),
+                    Style::default().fg(STATUS_RUNNING),
                 )
             } else {
                 Span::raw("")
@@ -433,9 +420,9 @@ fn render_node_detail(
             let version = agent.version.as_deref().unwrap_or("unknown");
 
             let status_indicator = if agent.available {
-                Span::styled("\u{25cf} ", Style::default().fg(Color::Rgb(80, 160, 80)))
+                Span::styled("\u{25cf} ", Style::default().fg(STATUS_DONE))
             } else {
-                Span::styled("\u{25cf} ", Style::default().fg(Color::Rgb(160, 60, 60)))
+                Span::styled("\u{25cf} ", Style::default().fg(STATUS_FAIL))
             };
 
             //
@@ -452,13 +439,11 @@ fn render_node_detail(
             let is_cursor = state.detail_focus && idx == state.agent_selected;
 
             let name_style = if has_session {
-                Style::default()
-                    .fg(Color::Rgb(20, 20, 25))
-                    .bg(Color::Rgb(100, 180, 100))
+                Style::default().fg(Color::Rgb(20, 20, 25)).bg(ACCENT)
             } else if is_cursor {
                 Style::default()
                     .fg(TEXT)
-                    .bg(Color::Rgb(35, 40, 35))
+                    .bg(POPUP_HIGHLIGHT_BG)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(TEXT)
@@ -509,14 +494,11 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!("  @ {}", &session.node_id[..8.min(session.node_id.len())]),
+            format!("  @ {}", short_id(&session.node_id)),
             Style::default().fg(DIM),
         ),
         if let Some(ref sid) = session.session_id {
-            Span::styled(
-                format!("  ({})", &sid[..8.min(sid.len())]),
-                Style::default().fg(DIM),
-            )
+            Span::styled(format!("  ({})", short_id(sid)), Style::default().fg(DIM))
         } else {
             Span::styled("  (connecting...)", Style::default().fg(DIM))
         },
@@ -526,7 +508,7 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
             Span::raw("")
         },
         if session.yolo {
-            Span::styled("  YOLO", Style::default().fg(Color::Rgb(180, 160, 60)))
+            Span::styled("  YOLO", Style::default().fg(STATUS_RUNNING))
         } else {
             Span::raw("")
         },
@@ -591,13 +573,7 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
     }
 
     if session.is_waiting {
-        let frame_idx = (std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-            / 100) as usize
-            % 10;
-        let spinners = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        let spinner = spinner_char();
 
         lines.push(Line::from(""));
 
@@ -617,22 +593,16 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
         for tc in &session.tool_calls {
             let status = if tc.output.is_some() {
                 if tc.is_error {
-                    Span::styled(" ✗", Style::default().fg(Color::Rgb(200, 80, 80)))
+                    Span::styled(" ✗", Style::default().fg(STATUS_FAIL))
                 } else {
-                    Span::styled(" ✓", Style::default().fg(Color::Rgb(80, 200, 80)))
+                    Span::styled(" ✓", Style::default().fg(STATUS_DONE))
                 }
             } else {
-                Span::styled(
-                    format!(" {}", spinners[frame_idx]),
-                    Style::default().fg(MUTED),
-                )
+                Span::styled(format!(" {}", spinner), Style::default().fg(MUTED))
             };
             lines.push(Line::from(vec![
                 Span::styled("  \u{2502} ", Style::default().fg(DIM)),
-                Span::styled(
-                    &tc.tool_name,
-                    Style::default().fg(Color::Rgb(180, 160, 60)),
-                ),
+                Span::styled(&tc.tool_name, Style::default().fg(STATUS_RUNNING)),
                 status,
             ]));
         }
@@ -644,14 +614,11 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
         if let Some(ref perm) = session.pending_permission {
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
-                Span::styled(
-                    "  \u{26a0} ",
-                    Style::default().fg(Color::Rgb(200, 180, 60)),
-                ),
+                Span::styled("  \u{26a0} ", Style::default().fg(STATUS_RUNNING)),
                 Span::styled(
                     &perm.tool_name,
                     Style::default()
-                        .fg(Color::Rgb(200, 180, 60))
+                        .fg(STATUS_RUNNING)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(" wants to run:", Style::default().fg(MUTED)),
@@ -667,11 +634,20 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
             )));
             lines.push(Line::from(vec![
                 Span::styled("    [", Style::default().fg(DIM)),
-                Span::styled("a", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "a",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("]llow  [", Style::default().fg(DIM)),
-                Span::styled("l", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "l",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("]always  [", Style::default().fg(DIM)),
-                Span::styled("d", Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "d",
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("]eny", Style::default().fg(DIM)),
             ]));
         }
@@ -681,19 +657,16 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
         //
 
         if session.streaming_content.is_empty() && session.pending_permission.is_none() {
-            let status_text = session
-                .agent_status
-                .as_deref()
-                .unwrap_or("thinking");
+            let status_text = session.agent_status.as_deref().unwrap_or("thinking");
             lines.push(Line::from(Span::styled(
-                format!("{} {}", spinners[frame_idx], status_text),
+                format!("{} {}", spinner, status_text),
                 Style::default().fg(MUTED),
             )));
         } else if session.pending_permission.is_none() {
             lines.push(Line::from(Span::styled(
                 format!(
                     "{} {}",
-                    spinners[frame_idx],
+                    spinner,
                     session.agent_status.as_deref().unwrap_or("streaming")
                 ),
                 Style::default().fg(MUTED),
@@ -747,7 +720,7 @@ fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionC
 
     let input_block = ratatui::widgets::Block::default()
         .borders(ratatui::widgets::Borders::ALL)
-        .border_style(Style::default().fg(Color::Rgb(60, 70, 60)));
+        .border_style(Style::default().fg(INPUT_BORDER));
 
     let paragraph = Paragraph::new(Line::from(spans)).block(input_block);
     f.render_widget(paragraph, input_area);
@@ -782,7 +755,7 @@ fn render_session_options(f: &mut Frame, area: Rect, opts: &SessionOptions) {
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!("  @ {}", &opts.node_id[..8.min(opts.node_id.len())]),
+            format!("  @ {}", short_id(&opts.node_id)),
             Style::default().fg(DIM),
         ),
     ]);
@@ -808,9 +781,7 @@ fn render_session_options(f: &mut Frame, area: Rect, opts: &SessionOptions) {
     let yolo_indicator = if opts.yolo {
         Span::styled(
             " \u{25cf} enabled ",
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Rgb(180, 160, 60)),
+            Style::default().fg(Color::Black).bg(STATUS_RUNNING),
         )
     } else {
         Span::styled(" \u{25cb} disabled ", Style::default().fg(DIM))
@@ -841,7 +812,7 @@ fn render_session_options(f: &mut Frame, area: Rect, opts: &SessionOptions) {
         let style = if is_selected {
             Style::default()
                 .fg(TEXT)
-                .bg(Color::Rgb(35, 40, 35))
+                .bg(POPUP_HIGHLIGHT_BG)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(DIM)
@@ -899,7 +870,7 @@ fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            term.node_id[..8.min(term.node_id.len())].to_string(),
+            short_id(&term.node_id).to_string(),
             Style::default().fg(DIM),
         ),
     ]);
@@ -969,10 +940,10 @@ fn render_vt100_screen(screen: &vt100::Screen, show_cursor: bool) -> Vec<Line<'s
             let bg = vt100_bg_to_color(cell.bgcolor());
 
             let mut style = if is_cursor {
-                Style::default().fg(super::BG).bg(ACCENT)
+                Style::default().fg(BG).bg(ACCENT)
             } else {
                 let mut s = Style::default().fg(fg);
-                if bg != super::BG {
+                if bg != BG {
                     s = s.bg(bg);
                 }
                 s
@@ -1085,7 +1056,7 @@ fn slice_terminal_scrollback(
 
 pub fn vt100_bg_to_color(color: vt100::Color) -> Color {
     match color {
-        vt100::Color::Default => super::BG,
+        vt100::Color::Default => BG,
         vt100::Color::Idx(i) => Color::Indexed(i),
         vt100::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
     }
