@@ -15,6 +15,7 @@ pub struct AcpClient {
     next_id: u64,
     session_id: Option<String>,
     cancelled: Arc<AtomicBool>,
+    pid: u32,
 }
 
 impl AcpClient {
@@ -40,6 +41,7 @@ impl AcpClient {
         let stdin = child.stdin.take().ok_or_else(|| anyhow!("No stdin"))?;
         let stdout = child.stdout.take().ok_or_else(|| anyhow!("No stdout"))?;
 
+        let pid = child.id();
         let mut client = Self {
             child,
             stdin: BufWriter::new(stdin),
@@ -47,6 +49,7 @@ impl AcpClient {
             next_id: 1,
             session_id: None,
             cancelled: Arc::new(AtomicBool::new(false)),
+            pid,
         };
 
         client.initialize()?;
@@ -481,6 +484,10 @@ impl AcpClient {
 
     pub fn cancel_flag(&self) -> Arc<AtomicBool> {
         self.cancelled.clone()
+    }
+
+    pub fn pid(&self) -> u32 {
+        self.pid
     }
 
     pub fn is_alive(&mut self) -> bool {

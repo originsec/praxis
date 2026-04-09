@@ -16,26 +16,36 @@ static ACP_CLIENTS: Lazy<Mutex<HashMap<String, AcpClient>>> =
 
 pub fn register_client(handle: &str, client: AcpClient) {
     let cancel = client.cancel_flag();
+    let pid = client.pid();
     ACP_CANCEL_FLAGS.lock().unwrap().insert(handle.to_string(), cancel);
+    ACP_PIDS.lock().unwrap().insert(handle.to_string(), pid);
     ACP_CLIENTS.lock().unwrap().insert(handle.to_string(), client);
 }
 
 static ACP_CANCEL_FLAGS: Lazy<Mutex<HashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
+static ACP_PIDS: Lazy<Mutex<HashMap<String, u32>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
 pub fn remove_client(handle: &str) -> Option<AcpClient> {
     ACP_CANCEL_FLAGS.lock().unwrap().remove(handle);
+    ACP_PIDS.lock().unwrap().remove(handle);
     ACP_CLIENTS.lock().unwrap().remove(handle)
 }
 
 //
-// Signal cancellation without locking ACP_CLIENTS. This avoids a deadlock
-// when abort_transaction is called while send_prompt holds the client lock.
+// Signal cancellation and kill the subprocess without locking ACP_CLIENTS.
+// This avoids a deadlock when abort/close is called while send_prompt holds
+// the client lock. Killing the process unblocks the blocking read_line().
 //
 
 pub fn cancel_client(handle: &str) {
     if let Some(flag) = ACP_CANCEL_FLAGS.lock().unwrap().get(handle) {
         flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    if let Some(&pid) = ACP_PIDS.lock().unwrap().get(handle) {
+        crate::utils::terminate_process_tree(pid);
     }
 }
 
