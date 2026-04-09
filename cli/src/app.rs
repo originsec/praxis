@@ -534,9 +534,9 @@ impl Default for SettingsState {
             hunting_row_limit: "10000000".to_string(),
             prompt_timeout_secs: "600".to_string(),
             claude_ccrv1_enabled: false,
-            claude_ccrv1_port: "8587".to_string(),
+            claude_ccrv1_port: "8586".to_string(),
             claude_ccrv2_enabled: false,
-            claude_ccrv2_port: "8588".to_string(),
+            claude_ccrv2_port: "8587".to_string(),
             agent_scripts: Vec::new(),
             agent_scripts_loaded: false,
             dropdown_open: false,
@@ -3703,7 +3703,7 @@ impl App {
                 s.claude_ccrv1_port = config
                     .get("claude_ccrv1_port")
                     .cloned()
-                    .unwrap_or("8587".to_string());
+                    .unwrap_or("8586".to_string());
                 s.claude_ccrv2_enabled = config
                     .get("claude_ccrv2_enabled")
                     .map(|v| v == "true" || v == "1" || v == "yes")
@@ -3711,7 +3711,7 @@ impl App {
                 s.claude_ccrv2_port = config
                     .get("claude_ccrv2_port")
                     .cloned()
-                    .unwrap_or("8588".to_string());
+                    .unwrap_or("8587".to_string());
 
                 s.loaded = true;
                 s.status_message = None;

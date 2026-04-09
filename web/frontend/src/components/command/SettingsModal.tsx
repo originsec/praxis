@@ -106,9 +106,9 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [mcpServerPort, setMcpServerPort] = useState('8585');
   const [promptTimeoutSecs, setPromptTimeoutSecs] = useState('600');
   const [ccrV1Enabled, setCcrV1Enabled] = useState(false);
-  const [ccrV1Port, setCcrV1Port] = useState('8587');
+  const [ccrV1Port, setCcrV1Port] = useState('8586');
   const [ccrV2Enabled, setCcrV2Enabled] = useState(false);
-  const [ccrV2Port, setCcrV2Port] = useState('8588');
+  const [ccrV2Port, setCcrV2Port] = useState('8587');
   const [nodeDownloads, setNodeDownloads] = useState<NodeDownloadInfo[]>([]);
   const [isLoadingDownloads, setIsLoadingDownloads] = useState(false);
 
@@ -235,14 +235,14 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     } else {
       setCcrV1Enabled(false);
     }
-    setCcrV1Port(cfg.claude_ccrv1_port || '8587');
+    setCcrV1Port(cfg.claude_ccrv1_port || '8586');
     if (cfg.claude_ccrv2_enabled) {
       const v = cfg.claude_ccrv2_enabled.toLowerCase();
       setCcrV2Enabled(!(v === 'false' || v === '0' || v === 'no'));
     } else {
       setCcrV2Enabled(false);
     }
-    setCcrV2Port(cfg.claude_ccrv2_port || '8588');
+    setCcrV2Port(cfg.claude_ccrv2_port || '8587');
   }, [state.config]);
 
   //

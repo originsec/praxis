@@ -42,8 +42,8 @@ pub const CLAUDE_CCRV2_ENABLED: &str = "claude_ccrv2_enabled";
 pub const CLAUDE_CCRV2_PORT: &str = "claude_ccrv2_port";
 
 /// Default Claude bridge ports
-pub const CLAUDE_CCRV1_DEFAULT_PORT: u16 = 8587;
-pub const CLAUDE_CCRV2_DEFAULT_PORT: u16 = 8588;
+pub const CLAUDE_CCRV1_DEFAULT_PORT: u16 = 8586;
+pub const CLAUDE_CCRV2_DEFAULT_PORT: u16 = 8587;
 
 /// All recognized config keys for validation purposes.
 pub const KNOWN_CONFIG_KEYS: &[&str] = &[
