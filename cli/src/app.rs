@@ -141,6 +141,7 @@ pub struct App {
     pub needs_full_redraw: bool,
     pub terminal_paused: Arc<std::sync::atomic::AtomicBool>,
     pub terminal_resume: Arc<tokio::sync::Notify>,
+    pub last_click: Option<(std::time::Instant, u16, u16)>,
 }
 
 //
@@ -572,6 +573,7 @@ impl App {
             needs_full_redraw: false,
             terminal_paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             terminal_resume: Arc::new(tokio::sync::Notify::new()),
+            last_click: None,
         }
     }
 
@@ -989,6 +991,19 @@ impl App {
         }
     }
 
+    fn is_double_click(&mut self, row: u16, col: u16) -> bool {
+        let now = std::time::Instant::now();
+        let is_dbl = if let Some((prev_time, prev_row, prev_col)) = self.last_click {
+            now.duration_since(prev_time) < Duration::from_millis(400)
+                && prev_row == row
+                && (col as i16 - prev_col as i16).unsigned_abs() <= 2
+        } else {
+            false
+        };
+        self.last_click = Some((now, row, col));
+        is_dbl
+    }
+
     async fn handle_mouse(&mut self, mouse: MouseEvent) {
         //
         // Terminal mode: forward scroll as escape sequences.
@@ -1070,6 +1085,238 @@ impl App {
         }
 
         //
+        // Popup mouse handling (ModelSelect, CommandPalette).
+        //
+        if let Some(ref popup) = self.popup {
+            let is_model = matches!(popup.kind, PopupKind::ModelSelect);
+            let is_command = matches!(popup.kind, PopupKind::CommandPalette);
+
+            if is_model || is_command {
+                if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                    let filtered = popup.filtered_items();
+
+                    //
+                    // Calculate popup geometry matching render code.
+                    //
+                    let (px, py, popup_w, item_count) = if is_model {
+                        let ic = filtered.len().min(12) as u16;
+                        let ph = ic + 2;
+                        let max_lw = filtered
+                            .iter()
+                            .map(|(_, item)| item.label.len() + item.description.len() + 4)
+                            .max()
+                            .unwrap_or(30);
+                        let pw = (max_lw as u16 + 4)
+                            .min(terminal_area.width.saturating_sub(4))
+                            .max(30);
+                        let x = (terminal_area.width.saturating_sub(pw)) / 2;
+                        let y = (terminal_area.height.saturating_sub(ph)) / 2;
+                        (x, y, pw, ic)
+                    } else {
+                        // CommandPalette: anchored above input at bottom.
+                        let ic = filtered.len().min(8) as u16;
+                        let ph = ic + 2;
+                        let bottom_offset = 5u16;
+                        let y = terminal_area.height.saturating_sub(bottom_offset + ph);
+                        let pw = (terminal_area.width / 2).max(30).min(terminal_area.width.saturating_sub(4));
+                        (1u16, y, pw, ic)
+                    };
+
+                    let inner_x = px + 1;
+                    let inner_y = py + 1;
+                    if mouse.row >= inner_y
+                        && mouse.row < inner_y + item_count
+                        && mouse.column >= inner_x
+                        && mouse.column < inner_x + popup_w.saturating_sub(2)
+                    {
+                        let clicked = (mouse.row - inner_y) as usize;
+                        let value = filtered.get(clicked).map(|(_, item)| item.value.clone());
+                        let is_dbl = self.is_double_click(mouse.row, mouse.column);
+
+                        if let Some(p) = self.popup.as_mut() {
+                            p.selected = clicked;
+                        }
+                        if is_dbl {
+                            if let Some(value) = value {
+                                if is_model {
+                                    self.popup = None;
+                                    self.select_model(&value).await;
+                                } else {
+                                    self.popup = None;
+                                    self.orchestrator.input.clear();
+                                    self.orchestrator.cursor_pos = 0;
+                                    self.handle_slash_command(&format!("/{}", value)).await;
+                                }
+                            }
+                        }
+                        return;
+                    }
+
+                    self.popup = None;
+                    return;
+                }
+            }
+        }
+
+        //
+        // Confirm dialog mouse handling.
+        //
+        if self.confirm.is_some() {
+            if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                let msg_len = self
+                    .confirm
+                    .as_ref()
+                    .map(|c| c.message.len())
+                    .unwrap_or(20);
+                let width = (msg_len as u16 + 6).min(h.saturating_sub(4)).max(30);
+                let height = 5u16;
+                let px = (terminal_area.width.saturating_sub(width)) / 2;
+                let py = (terminal_area.height.saturating_sub(height)) / 2;
+                let inner_y = py + 1;
+                let inner_x = px + 1;
+
+                //
+                // The confirm dialog has: line 0 = message, line 1 = blank,
+                // line 2 = " y yes  n no" (or "press any key" for Info).
+                //
+                let is_info = self
+                    .confirm
+                    .as_ref()
+                    .is_some_and(|c| matches!(c.action, ConfirmKind::Info));
+
+                if mouse.row == inner_y + 2 {
+                    if is_info {
+                        self.confirm = None;
+                    } else {
+                        let rel = mouse.column.saturating_sub(inner_x) as usize;
+                        if rel >= 1 && rel < 7 {
+                            // "y yes" region — confirm
+                            let confirm = self.confirm.take().unwrap();
+                            self.execute_confirm(confirm).await;
+                        } else if rel >= 8 {
+                            // "n no" region — cancel
+                            self.confirm = None;
+                        }
+                    }
+                } else if mouse.row < py || mouse.row >= py + height
+                    || mouse.column < px || mouse.column >= px + width
+                {
+                    self.confirm = None;
+                }
+            }
+            return;
+        }
+
+        //
+        // RunOptions popup mouse handling.
+        //
+        if self.run_options.is_some() {
+            if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                let opts_chunks = Layout::vertical([
+                    Constraint::Length(2),
+                    Constraint::Min(1),
+                    Constraint::Length(1),
+                ])
+                .split(content_area);
+                let opts_inner = Rect {
+                    x: opts_chunks[1].x + 2,
+                    width: opts_chunks[1].width.saturating_sub(4),
+                    ..opts_chunks[1]
+                };
+                let hints_area = opts_chunks[2];
+
+                if let Some(ref opts) = self.run_options {
+                    let rel_row = mouse.row.saturating_sub(opts_inner.y) as usize;
+                    let node_count = opts.nodes.len();
+                    let agent_count = opts.agents.len();
+                    let is_chain = opts.is_chain;
+
+                    let nodes_start = 1;
+                    let nodes_end = nodes_start + node_count;
+                    let agents_start = nodes_end + 2;
+                    let agents_end = agents_start + agent_count;
+                    let yolo_row = agents_end + 1;
+
+                    if rel_row >= nodes_start && rel_row < nodes_end {
+                        self.toggle_run_option(0, rel_row - nodes_start);
+                    } else if rel_row >= agents_start && rel_row < agents_end {
+                        self.toggle_run_option(1, rel_row - agents_start);
+                    } else if !is_chain && rel_row == yolo_row {
+                        self.toggle_run_option(2, 0);
+                    }
+                }
+
+                //
+                // Hint bar clicks: "^r run  esc cancel"
+                //
+                if mouse.row == hints_area.y {
+                    let rel = mouse.column.saturating_sub(hints_area.x) as usize;
+                    // "  ↑↓ navigate  enter toggle  tab section  ^r run  esc cancel"
+                    //   0             15            27           39 42   48  52
+                    if rel >= 39 && rel < 47 {
+                        if let Some(opts) = self.run_options.take() {
+                            self.execute_run_options(opts).await;
+                        }
+                    } else if rel >= 48 {
+                        self.run_options = None;
+                    }
+                }
+            }
+            return;
+        }
+
+        //
+        // NewOpForm popup mouse handling.
+        //
+        if self.new_op_form.is_some() {
+            if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                if let Some(ref mut form) = self.new_op_form {
+                    let chunks = Layout::vertical([
+                        Constraint::Length(2),
+                        Constraint::Min(1),
+                        Constraint::Length(1),
+                    ])
+                    .split(content_area);
+                    let form_inner = Rect {
+                        x: chunks[1].x + 2,
+                        width: chunks[1].width.saturating_sub(4),
+                        ..chunks[1]
+                    };
+
+                    let rel_row = mouse.row.saturating_sub(form_inner.y) as usize;
+
+                    //
+                    // Row layout (visual): 0=Mode, 1=blank, 2=Name, 3=ShortName,
+                    // 4=Category, 5=Description, 6=Iterations(agent only), 7=Timeout,
+                    // 8=blank, 9=YOLO, 10+=Prompt area
+                    //
+                    // Map visual row to field index.
+                    //
+                    let is_agent = form.mode == 1;
+                    let field = match rel_row {
+                        0 => Some(0), // Mode
+                        2 => Some(1), // Name
+                        3 => Some(2), // Short Name
+                        4 => Some(3), // Category
+                        5 => Some(4), // Description
+                        6 if is_agent => Some(5), // Iterations
+                        6 if !is_agent => Some(6), // Timeout (shifts up when no iterations)
+                        7 if is_agent => Some(6),  // Timeout
+                        r if r == (if is_agent { 9 } else { 8 }) => Some(7), // YOLO
+                        r if r >= (if is_agent { 10 } else { 9 }) => Some(8), // Prompt
+                        _ => None,
+                    };
+
+                    if let Some(idx) = field {
+                        form.focused_field = idx;
+                        Self::toggle_new_op_field(form);
+                    }
+                }
+            }
+            return;
+        }
+
+        //
         // Status bar clicks.
         //
         if mouse.row == status_area.y {
@@ -1085,15 +1332,17 @@ impl App {
                 let nodes_label = "^l nodes";
                 let ops_label = "^p ops";
                 let settings_label = "^s settings";
+                let quit_label = "^q quit";
                 let status_text = format!(
-                    " {}  \u{00b7} {}  {}  {}  {} \u{00b7} ^q quit",
-                    node_text, orch_label, nodes_label, ops_label, settings_label
+                    " {}  \u{00b7} {}  {}  {}  {} \u{00b7} {}",
+                    node_text, orch_label, nodes_label, ops_label, settings_label, quit_label
                 );
                 let orch_pos = status_area.x + status_text.find(orch_label).unwrap_or(999) as u16;
                 let nodes_pos = status_area.x + status_text.find(nodes_label).unwrap_or(999) as u16;
                 let ops_pos = status_area.x + status_text.find(ops_label).unwrap_or(999) as u16;
                 let settings_pos =
                     status_area.x + status_text.find(settings_label).unwrap_or(999) as u16;
+                let quit_pos = status_area.x + status_text.find(quit_label).unwrap_or(999) as u16;
 
                 if col >= ops_pos && col < ops_pos + ops_label.len() as u16 {
                     self.active_window = Window::Operations;
@@ -1105,13 +1354,15 @@ impl App {
                     self.active_window = Window::Nodes;
                 } else if col >= orch_pos && col < orch_pos + orch_label.len() as u16 {
                     self.active_window = Window::Orchestrator;
+                } else if col >= quit_pos && col < quit_pos + quit_label.len() as u16 {
+                    self.should_quit = true;
                 }
                 return;
             }
         }
 
         //
-        // Operations window tab clicks and list clicks.
+        // Operations window mouse handling.
         //
         if self.active_window == Window::Operations {
             let ops_chunks = Layout::vertical([
@@ -1122,6 +1373,7 @@ impl App {
             ])
             .split(content_area);
             let tabs_area = ops_chunks[0];
+            let hints_area = ops_chunks[3];
             let main_area = ops_chunks[2];
             let split = match self.operations.tab {
                 OpsTab::Library => Layout::horizontal([
@@ -1145,6 +1397,9 @@ impl App {
 
             match mouse.kind {
                 MouseEventKind::Down(MouseButton::Left) => {
+                    //
+                    // Tab clicks.
+                    //
                     if mouse.row == tabs_area.y {
                         let rel_col = mouse.column.saturating_sub(tabs_area.x);
                         if rel_col < 20 {
@@ -1155,6 +1410,63 @@ impl App {
                         return;
                     }
 
+                    //
+                    // Hint bar clicks.
+                    //
+                    if mouse.row == hints_area.y {
+                        let rel = mouse.column.saturating_sub(hints_area.x) as usize;
+                        match self.operations.tab {
+                            OpsTab::Library => {
+                                // " enter execute  ^n new  ^e edit  ^d delete  "
+                                //  0    5       15 17   23 25   31 33   42
+                                if rel >= 1 && rel < 16 {
+                                    self.open_run_target_popup();
+                                } else if rel >= 16 && rel < 24 {
+                                    self.open_new_op_form();
+                                } else if rel >= 24 && rel < 32 {
+                                    self.edit_selected_op();
+                                } else if rel >= 32 && rel < 43 {
+                                    self.delete_selected_op().await;
+                                }
+                            }
+                            OpsTab::Executions => {
+                                // Hint text varies, use find-based approach
+                                let hint_text = " ^c cancel  ^d delete  ^x clear all  ";
+                                if let Some(pos) = hint_text.find("cancel") {
+                                    let cancel_start = pos.saturating_sub(3);
+                                    let cancel_end = pos + 6;
+                                    if rel >= cancel_start && rel < cancel_end + 2 {
+                                        self.cancel_selected_execution().await;
+                                        return;
+                                    }
+                                }
+                                if let Some(pos) = hint_text.find("delete") {
+                                    let delete_start = pos.saturating_sub(3);
+                                    let delete_end = pos + 6;
+                                    if rel >= delete_start && rel < delete_end + 2 {
+                                        self.delete_selected_execution().await;
+                                        return;
+                                    }
+                                }
+                                if let Some(pos) = hint_text.find("clear all") {
+                                    let clear_start = pos.saturating_sub(3);
+                                    let clear_end = pos + 9;
+                                    if rel >= clear_start && rel < clear_end + 2 {
+                                        self.confirm = Some(ConfirmAction {
+                                            message: "Clear all executions?".to_string(),
+                                            action: ConfirmKind::ClearAllExecutions,
+                                        });
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                        return;
+                    }
+
+                    //
+                    // List item click (with double-click support).
+                    //
                     if mouse.column >= list_area.x
                         && mouse.column < list_area.x.saturating_add(list_area.width)
                     {
@@ -1163,12 +1475,16 @@ impl App {
                             && mouse.row < list_area.y.saturating_add(list_area.height)
                         {
                             let clicked_idx = (mouse.row - list_start_row) as usize;
+                            let is_dbl = self.is_double_click(mouse.row, mouse.column);
                             match self.operations.tab {
                                 OpsTab::Library => {
                                     let total = self.ops_library_count();
                                     if clicked_idx < total {
                                         self.operations.library_selected = clicked_idx;
                                         self.operations.detail_focus = false;
+                                        if is_dbl {
+                                            self.open_run_target_popup();
+                                        }
                                     }
                                 }
                                 OpsTab::Executions => {
@@ -1184,6 +1500,9 @@ impl App {
                         return;
                     }
 
+                    //
+                    // Detail pane click.
+                    //
                     if mouse.column >= detail_area.x
                         && mouse.column < detail_area.x.saturating_add(detail_area.width)
                         && mouse.row >= detail_area.y
@@ -1249,24 +1568,220 @@ impl App {
         // Nodes window mouse handling.
         //
         if self.active_window == Window::Nodes {
-            match mouse.kind {
-                MouseEventKind::Down(MouseButton::Left) => {
-                    let border_x = (h as u32 * self.nodes.split_percent as u32 / 100) as u16;
+            //
+            // Session chat intercepts mouse.
+            //
+            if self.nodes.session.is_some() {
+                if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                    let chat_chunks = Layout::vertical([
+                        Constraint::Length(1), // header
+                        Constraint::Length(1), // separator
+                        Constraint::Min(1),    // messages
+                        Constraint::Length(3), // input
+                        Constraint::Length(1), // hints
+                    ])
+                    .split(content_area);
+                    let input_area = chat_chunks[3];
+                    let hints_area = chat_chunks[4];
 
                     //
-                    // List item click.
+                    // Input area click — position cursor.
                     //
-                    let list_start_row = 3u16;
-                    if mouse.row >= list_start_row && mouse.column < border_x {
-                        let clicked_idx = (mouse.row - list_start_row) as usize;
-                        if clicked_idx < self.nodes.nodes.len() {
-                            self.nodes.selected = clicked_idx;
+                    if mouse.row >= input_area.y
+                        && mouse.row < input_area.y.saturating_add(input_area.height)
+                    {
+                        if let Some(ref mut session) = self.nodes.session {
+                            if !session.is_waiting && session.session_id.is_some() {
+                                // Inner: padding(2) + border(1) + prompt "▸ "(2)
+                                let text_start = input_area.x + 5;
+                                let click_offset =
+                                    mouse.column.saturating_sub(text_start) as usize;
+                                session.cursor_pos = click_offset.min(session.input.len());
+                            }
+                        }
+                        return;
+                    }
+
+                    //
+                    // Hint bar: "  enter send  esc close session"
+                    //
+                    if mouse.row == hints_area.y {
+                        let rel = mouse.column.saturating_sub(hints_area.x) as usize;
+                        if rel >= 2 && rel < 14 {
+                            // "enter send" — simulate Enter (send message)
+                            if let Some(ref mut session) = self.nodes.session {
+                                if !session.input.trim().is_empty()
+                                    && !session.is_waiting
+                                    && session.session_id.is_some()
+                                {
+                                    self.send_session_message();
+                                }
+                            }
+                        } else if rel >= 14 {
+                            // "esc close session" — close
+                            self.close_session();
+                        }
+                        return;
+                    }
+                }
+                return;
+            }
+
+            //
+            // Session options screen intercepts mouse.
+            //
+            if self.nodes.session_options.is_some() {
+                if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                    let opts_chunks = Layout::vertical([
+                        Constraint::Length(2),
+                        Constraint::Min(1),
+                        Constraint::Length(1),
+                    ])
+                    .split(content_area);
+                    let opts_inner = Rect {
+                        x: opts_chunks[1].x + 2,
+                        width: opts_chunks[1].width.saturating_sub(4),
+                        ..opts_chunks[1]
+                    };
+                    let hints_area = opts_chunks[2];
+
+                    let rel_row = mouse.row.saturating_sub(opts_inner.y) as usize;
+
+                    if let Some(ref mut opts) = self.nodes.session_options {
+                        //
+                        // Row 0: YOLO toggle, 1: blank, 2: "Working Directory:",
+                        // 3+: directory items
+                        //
+                        if rel_row == 0 {
+                            opts.yolo = !opts.yolo;
+                        } else if rel_row >= 3 {
+                            let mut dir_count = 1 + opts.working_dirs.len();
+                            if opts.working_dirs.is_empty() {
+                                dir_count = 1;
+                            }
+                            let idx = rel_row - 3;
+                            if idx < dir_count {
+                                opts.selected_dir = idx;
+                            }
                         }
                     }
 
                     //
-                    // Drag start.
+                    // Hint bar: "enter start  esc cancel"
                     //
+                    if mouse.row == hints_area.y {
+                        let rel = mouse.column.saturating_sub(hints_area.x) as usize;
+                        if rel >= 27 && rel < 40 {
+                            self.confirm_session_options();
+                        } else if rel >= 42 {
+                            self.nodes.session_options = None;
+                        }
+                    }
+                }
+                return;
+            }
+
+            let outer = Layout::vertical([Constraint::Min(1), Constraint::Length(1)])
+                .split(content_area);
+            let hints_area = outer[1];
+            let node_chunks = Layout::horizontal([
+                Constraint::Percentage(self.nodes.split_percent),
+                Constraint::Percentage(100 - self.nodes.split_percent),
+            ])
+            .split(outer[0]);
+            let list_area = node_chunks[0];
+            let detail_area = node_chunks[1];
+
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    //
+                    // Node hint bar clicks.
+                    //
+                    if mouse.row == hints_area.y {
+                        let rel = mouse.column.saturating_sub(hints_area.x) as usize;
+                        if self.nodes.detail_focus {
+                            // " enter session  ^r reset  ^t terminal"
+                            if rel >= 1 && rel < 16 {
+                                self.start_session_with_selected_agent();
+                                return;
+                            }
+                        } else {
+                            // " enter select  ^r reset  ^t terminal"
+                            if rel >= 1 && rel < 14 {
+                                self.nodes.detail_focus = true;
+                                self.nodes.agent_selected = 0;
+                                return;
+                            }
+                        }
+                        // "^r reset" and "^t terminal" follow
+                        if rel >= 15 && rel < 24 {
+                            self.confirm_reset_node();
+                            return;
+                        }
+                        if rel >= 24 {
+                            self.open_terminal();
+                            return;
+                        }
+                    }
+                    //
+                    // List item click. Table has Borders::ALL (1 row top border)
+                    // + 1 row header = data starts at y+2.
+                    //
+                    let list_start_row = list_area.y.saturating_add(2);
+                    let list_end_row = list_area.y.saturating_add(list_area.height).saturating_sub(1);
+                    if mouse.column >= list_area.x
+                        && mouse.column < list_area.x.saturating_add(list_area.width)
+                        && mouse.row >= list_start_row
+                        && mouse.row < list_end_row
+                    {
+                        let clicked_idx = (mouse.row - list_start_row) as usize;
+                        if clicked_idx < self.nodes.nodes.len() {
+                            self.nodes.selected = clicked_idx;
+                            self.nodes.detail_focus = false;
+                        }
+                        return;
+                    }
+
+                    //
+                    // Detail pane click — focus detail and check agent clicks.
+                    //
+                    if mouse.column >= detail_area.x
+                        && mouse.column < detail_area.x.saturating_add(detail_area.width)
+                        && mouse.row >= detail_area.y
+                        && mouse.row < detail_area.y.saturating_add(detail_area.height)
+                    {
+                        self.nodes.detail_focus = true;
+                        let is_dbl = self.is_double_click(mouse.row, mouse.column);
+
+                        //
+                        // The detail inner area: border(1) + header(3 lines) +
+                        // blank(1) + "Agents"(1) = agents start at inner.y + 5.
+                        //
+                        let inner_y = detail_area.y.saturating_add(1);
+                        let agents_start = inner_y + 5;
+                        let agent_count = self
+                            .nodes
+                            .nodes
+                            .get(self.nodes.selected)
+                            .map(|n| n.discovered_agents.len())
+                            .unwrap_or(0);
+
+                        if mouse.row >= agents_start
+                            && mouse.row < agents_start + agent_count as u16
+                        {
+                            let clicked_agent = (mouse.row - agents_start) as usize;
+                            self.nodes.agent_selected = clicked_agent;
+                            if is_dbl {
+                                self.start_session_with_selected_agent();
+                            }
+                        }
+                        return;
+                    }
+
+                    //
+                    // Pane border drag start.
+                    //
+                    let border_x = list_area.x.saturating_add(list_area.width);
                     if mouse.column >= border_x.saturating_sub(1) && mouse.column <= border_x + 1 {
                         self.nodes.dragging = true;
                     }
@@ -1281,6 +1796,388 @@ impl App {
                     self.nodes.dragging = false;
                 }
                 _ => {}
+            }
+            return;
+        }
+
+        //
+        // Settings window mouse handling.
+        //
+        if self.active_window == Window::Settings {
+            //
+            // Settings model edit form popup.
+            //
+            if self.settings.model_form.is_some() {
+                if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                    if let Some(ref mut form) = self.settings.model_form {
+                        //
+                        // Calculate popup geometry matching render_model_form.
+                        //
+                        let base_lines = 7u16;
+                        let dropdown_extra = if form.model_dropdown_open {
+                            1 + form.available_models.len() as u16
+                        } else if form.loading_models {
+                            1
+                        } else {
+                            0
+                        };
+                        let popup_h = (base_lines + dropdown_extra)
+                            .min(terminal_area.height.saturating_sub(4));
+                        let popup_w = 60u16.min(terminal_area.width.saturating_sub(4));
+                        let px = (terminal_area.width.saturating_sub(popup_w)) / 2;
+                        let py = (terminal_area.height.saturating_sub(popup_h)) / 2;
+                        let inner_x = px + 1;
+                        let inner_y = py + 1;
+
+                        let rel_row = mouse.row.saturating_sub(inner_y) as usize;
+                        let rel_col = mouse.column.saturating_sub(inner_x) as usize;
+
+                        //
+                        // Row 0: Provider, 1: API Key, 2: Model, 3: blank, 4: hints
+                        //
+                        match rel_row {
+                            0 => {
+                                form.focused_field = 0;
+                                // Click on arrows to cycle provider.
+                                let providers = crate::app::sorted_providers();
+                                if rel_col > 14 {
+                                    form.provider_idx = (form.provider_idx + 1) % providers.len();
+                                }
+                            }
+                            1 => {
+                                form.focused_field = 1;
+                                if !form.editing_text {
+                                    form.editing_text = true;
+                                    form.cursor_pos = form.api_key.len();
+                                }
+                            }
+                            2 => {
+                                form.focused_field = 2;
+                                if !form.editing_text {
+                                    form.editing_text = true;
+                                    form.cursor_pos = form.model_name.len();
+                                }
+                            }
+                            4 => {
+                                // "  ^s save  esc cancel"
+                                if rel_col >= 2 && rel_col < 10 {
+                                    // ^s save — trigger save
+                                    self.save_model_form().await;
+                                } else if rel_col >= 11 {
+                                    // esc cancel
+                                    self.settings.model_form = None;
+                                }
+                            }
+                            _ => {
+                                //
+                                // If model dropdown is open, handle clicks in it.
+                                //
+                                if form.model_dropdown_open
+                                    && !form.available_models.is_empty()
+                                    && rel_row >= 6
+                                {
+                                    let model_idx = rel_row - 6 + form.model_dropdown_scroll;
+                                    if model_idx < form.available_models.len() {
+                                        form.model_dropdown_selected = model_idx;
+                                        form.model_name =
+                                            form.available_models[model_idx].clone();
+                                        form.model_dropdown_open = false;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+
+            //
+            // Settings dropdown (model assignment selection).
+            //
+            if self.settings.dropdown_open {
+                if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                    let item_count = self.settings.model_definitions.len();
+                    if item_count > 0 {
+                        let popup_h = (item_count as u16 + 2)
+                            .min(terminal_area.height.saturating_sub(4));
+                        let max_name = self.settings.model_definitions
+                            .iter()
+                            .map(|d| d.name.len())
+                            .max()
+                            .unwrap_or(20);
+                        let popup_w = (max_name as u16 + 6)
+                            .min(terminal_area.width.saturating_sub(4));
+                        let px = content_area.x + (content_area.width.saturating_sub(popup_w)) / 2;
+                        let py = content_area.y + (content_area.height.saturating_sub(popup_h)) / 2;
+                        let inner_x = px + 1;
+                        let inner_y = py + 1;
+                        let inner_h = popup_h.saturating_sub(2);
+
+                        if mouse.row >= inner_y
+                            && mouse.row < inner_y + inner_h
+                            && mouse.column >= inner_x
+                            && mouse.column < inner_x + popup_w.saturating_sub(2)
+                        {
+                            let clicked = (mouse.row - inner_y) as usize;
+                            if clicked < item_count {
+                                let is_dbl = self.is_double_click(mouse.row, mouse.column);
+                                self.settings.dropdown_selected = clicked;
+                                if is_dbl {
+                                    self.apply_dropdown_selection().await;
+                                }
+                            }
+                        } else {
+                            self.settings.dropdown_open = false;
+                        }
+                    }
+                }
+                return;
+            }
+
+            if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                let settings_chunks = Layout::vertical([
+                    Constraint::Length(1), // tabs
+                    Constraint::Length(1), // spacer
+                    Constraint::Min(1),    // content
+                    Constraint::Length(1), // status
+                ])
+                .split(content_area);
+                let tabs_area = settings_chunks[0];
+                let settings_content = settings_chunks[2];
+
+                //
+                // Tab clicks. Match the rendered tab positions:
+                // "  LLM  |  Agents  |  Service  |  About "
+                //
+                if mouse.row == tabs_area.y {
+                    let rel = mouse.column.saturating_sub(tabs_area.x) as usize;
+                    // Positions from render_tabs spans: "  " + " LLM " + "  |  " + " Agents " + ...
+                    if rel >= 2 && rel < 7 {
+                        self.settings.tab = SettingsTab::Llm;
+                        self.settings.selected = 0;
+                    } else if rel >= 12 && rel < 20 {
+                        self.settings.tab = SettingsTab::Agents;
+                        self.settings.selected = 0;
+                    } else if rel >= 25 && rel < 34 {
+                        self.settings.tab = SettingsTab::Service;
+                        self.settings.selected = 0;
+                    } else if rel >= 39 && rel < 46 {
+                        self.settings.tab = SettingsTab::About;
+                        self.settings.selected = 0;
+                    }
+                    return;
+                }
+
+                //
+                // Content area clicks — select the clicked field/toggle.
+                // The content is rendered as a Paragraph with lines. We map
+                // the click row to the settings item index.
+                //
+                if mouse.row >= settings_content.y
+                    && mouse.row < settings_content.y.saturating_add(settings_content.height)
+                {
+                    let rel_row = (mouse.row - settings_content.y) as usize;
+                    let item_count = self.settings_item_count();
+
+                    //
+                    // Map visual row to item index based on tab layout.
+                    // Each tab has headers, blanks, and item rows. We build a
+                    // mapping from visual row -> item index.
+                    //
+                    let clicked_item = match self.settings.tab {
+                        SettingsTab::Llm => {
+                            let mc = self.settings.model_definitions.len();
+                            // Row 0: "Model Definitions" header
+                            // Row 1: blank
+                            // Rows 2..2+mc: model definition items (idx 0..mc)
+                            // Row 2+mc: "+ Add model" (idx mc)
+                            // Row 3+mc: blank
+                            // Row 4+mc: "Feature Assignments" header
+                            // Row 5+mc: blank
+                            // Rows 6+mc..6+mc+5: feature items (idx mc+1..mc+6)
+                            if rel_row >= 2 && rel_row < 2 + mc {
+                                Some(rel_row - 2)
+                            } else if rel_row == 2 + mc {
+                                Some(mc)
+                            } else if rel_row >= 6 + mc && rel_row < 6 + mc + 5 {
+                                Some(mc + 1 + (rel_row - 6 - mc))
+                            } else {
+                                None
+                            }
+                        }
+                        SettingsTab::Agents => {
+                            let sc = self.settings.agent_scripts.len();
+                            // Row 0: header
+                            // Row 1: blank
+                            // Rows 2..2+sc: scripts (idx 0..sc)
+                            // Row 2+sc: blank
+                            // Row 3+sc: "+ New agent script" (idx sc)
+                            // Row 4+sc: "Reset to defaults" (idx sc+1)
+                            if rel_row >= 2 && rel_row < 2 + sc {
+                                Some(rel_row - 2)
+                            } else if rel_row == 3 + sc {
+                                Some(sc)
+                            } else if rel_row == 4 + sc {
+                                Some(sc + 1)
+                            } else {
+                                None
+                            }
+                        }
+                        SettingsTab::Service => {
+                            // Row 0: "MCP Server" header, 1: blank
+                            // Row 2: MCP Server toggle (0), 3: MCP Port (1)
+                            // Row 4: blank, 5: "Logging" header, 6: blank
+                            // Row 7: Event Logging (2), 8: Hunting limit (3), 9: Prompt timeout (4)
+                            // Row 10: blank, 11: "Claude Bridge" header, 12: description, 13: blank
+                            // Row 14: CCRv1 enabled (5), 15: CCRv1 port (6)
+                            // Row 16: CCRv2 enabled (7), 17: CCRv2 port (8)
+                            match rel_row {
+                                2 => Some(0),
+                                3 => Some(1),
+                                7 => Some(2),
+                                8 => Some(3),
+                                9 => Some(4),
+                                14 => Some(5),
+                                15 => Some(6),
+                                16 => Some(7),
+                                17 => Some(8),
+                                _ => None,
+                            }
+                        }
+                        SettingsTab::About => {
+                            //
+                            // Links row: "originhq.com   praxis.originhq.com"
+                            // Located at row 12 in the about content.
+                            //
+                            if rel_row == 12 {
+                                let rel_col = mouse.column.saturating_sub(settings_content.x + 2) as usize;
+                                if rel_col < 12 {
+                                    Self::open_url("https://originhq.com");
+                                } else if rel_col >= 15 {
+                                    Self::open_url("https://praxis.originhq.com");
+                                }
+                            }
+                            None
+                        }
+                    };
+
+                    if let Some(idx) = clicked_item {
+                        if idx < item_count {
+                            let is_dbl = self.is_double_click(mouse.row, mouse.column);
+
+                            //
+                            // If already editing, commit current edit first.
+                            //
+                            if self.settings.editing {
+                                let val = self.settings.edit_buffer.clone();
+                                self.settings.editing = false;
+                                self.apply_settings_edit(val).await;
+                            }
+                            self.settings.selected = idx;
+
+                            if is_dbl {
+                                self.activate_settings_item().await;
+                            } else {
+                                self.auto_enter_edit();
+                            }
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
+        //
+        // Orchestrator window mouse handling.
+        //
+        if self.active_window == Window::Orchestrator {
+            if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                let plan_height = if self.orchestrator.current_plan.is_some() {
+                    let plan = self.orchestrator.current_plan.as_ref().unwrap();
+                    (plan.steps.len() as u16 + 2).min(12)
+                } else {
+                    0
+                };
+                let plan_spacer = if plan_height > 0 { 1 } else { 0 };
+
+                let orch_chunks = Layout::vertical([
+                    Constraint::Min(1),
+                    Constraint::Length(plan_spacer),
+                    Constraint::Length(plan_height),
+                    Constraint::Length(1),
+                    Constraint::Length(3),
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                ])
+                .split(content_area);
+
+                let model_area = orch_chunks[3];
+                let _tokens_area = orch_chunks[6];
+
+                //
+                // Model info line click — open model select.
+                // The model text is right-aligned: "^e/^!e tools  ^w save   provider / model "
+                //
+                if mouse.row == model_area.y {
+                    let padded_x = model_area.x + 1;
+                    let padded_w = model_area.width.saturating_sub(2);
+                    let rel = mouse.column.saturating_sub(padded_x) as usize;
+
+                    //
+                    // Build the hint string to find positions (same as render_model_info).
+                    //
+                    let model_text = match (&self.orchestrator.provider, &self.orchestrator.model) {
+                        (Some(provider), Some(model)) => format!("{} / {}", provider, model),
+                        _ => "No session".to_string(),
+                    };
+                    let full_line = format!("^e/^!e tools  ^w save   {} ", model_text);
+                    let full_len = full_line.len();
+
+                    //
+                    // The line is right-aligned, so compute the start offset.
+                    //
+                    let line_start = if (padded_w as usize) > full_len {
+                        padded_w as usize - full_len
+                    } else {
+                        0
+                    };
+
+                    if rel >= line_start {
+                        let line_rel = rel - line_start;
+                        if line_rel < 14 {
+                            self.cycle_tools_display();
+                        } else if line_rel >= 16 && line_rel < 23 {
+                            //
+                            // "^w save"
+                            //
+                            self.open_save_session();
+                        } else if line_rel >= 24 {
+                            //
+                            // Model name — open model select.
+                            //
+                            self.open_model_select().await;
+                        }
+                    }
+                    return;
+                }
+
+                //
+                // Input area click — position cursor.
+                //
+                let input_area = orch_chunks[4];
+                if mouse.row >= input_area.y
+                    && mouse.row < input_area.y.saturating_add(input_area.height)
+                    && mouse.column >= input_area.x
+                    && mouse.column < input_area.x.saturating_add(input_area.width)
+                    && !self.orchestrator.is_streaming
+                {
+                    // Inner area: border(1) + prompt char "▸ "(2) = text starts at x+3
+                    let text_start = input_area.x + 3;
+                    let click_offset = mouse.column.saturating_sub(text_start) as usize;
+                    let len = self.orchestrator.input.len();
+                    self.orchestrator.cursor_pos = click_offset.min(len);
+                    return;
+                }
             }
         }
     }
@@ -1596,14 +2493,7 @@ impl App {
                 self.nodes.agent_selected = 0;
             }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if let Some(node) = self.nodes.nodes.get(self.nodes.selected) {
-                    let node_id = node.node_id.clone();
-                    let machine = node.machine_name.clone();
-                    self.confirm = Some(ConfirmAction {
-                        message: format!("Reset node '{}'?", machine),
-                        action: ConfirmKind::ResetNode(node_id),
-                    });
-                }
+                self.confirm_reset_node();
             }
             KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if let Some(node) = self.nodes.nodes.get(self.nodes.selected) {
@@ -1784,6 +2674,110 @@ impl App {
         }
         self.nodes.terminal = None;
         self.nodes.terminal_opening = false;
+    }
+
+    fn confirm_reset_node(&mut self) {
+        if let Some(node) = self.nodes.nodes.get(self.nodes.selected) {
+            let node_id = node.node_id.clone();
+            let machine = node.machine_name.clone();
+            self.confirm = Some(ConfirmAction {
+                message: format!("Reset node '{}'?", machine),
+                action: ConfirmKind::ResetNode(node_id),
+            });
+        }
+    }
+
+    fn close_session(&mut self) {
+        if let Some(ref session) = self.nodes.session {
+            if session.session_id.is_some() {
+                let client = self.client.clone();
+                let node_id = session.node_id.clone();
+                tokio::spawn(async move {
+                    use common::SessionCommand;
+                    let _ = client
+                        .send_command(&node_id, NodeCommand::Session(SessionCommand::Close))
+                        .await;
+                });
+            }
+        }
+        self.nodes.session = None;
+    }
+
+    fn send_session_message(&mut self) {
+        let Some(ref mut session) = self.nodes.session else {
+            return;
+        };
+        let input = session.input.trim().to_string();
+        if input.is_empty() || session.is_waiting || session.session_id.is_none() {
+            return;
+        }
+
+        session.history.push(input.clone());
+        session.history_index = None;
+        session.messages.push(ChatMessage {
+            role: ChatRole::User,
+            text: input.clone(),
+        });
+        session.input.clear();
+        session.cursor_pos = 0;
+        session.is_waiting = true;
+        session.active_transaction_id = Some(uuid::Uuid::new_v4().to_string());
+        session.scroll_offset = 0;
+
+        let node_id = session.node_id.clone();
+        let transaction_id = session.active_transaction_id.clone().unwrap_or_default();
+        let client = self.client.clone();
+        let tx = self.event_tx.clone();
+
+        tokio::spawn(async move {
+            use crate::event::{AppEvent, SessionResult};
+            use common::SessionCommand;
+
+            let Some(tx) = tx else { return };
+            match client
+                .send_command(
+                    &node_id,
+                    NodeCommand::Session(SessionCommand::Prompt {
+                        text: input,
+                        transaction_id: transaction_id.clone(),
+                    }),
+                )
+                .await
+            {
+                Ok(resp) => match resp.result {
+                    NodeCommandResult::Session(
+                        common::SessionCommandResult::PromptResponse {
+                            transaction_id,
+                            response,
+                        },
+                    ) => {
+                        let _ = tx.send(AppEvent::SessionResponse(SessionResult::Response {
+                            transaction_id,
+                            text: response,
+                        }));
+                    }
+                    NodeCommandResult::Session(
+                        common::SessionCommandResult::TransactionCancelled {
+                            transaction_id,
+                        },
+                    ) => {
+                        let _ = tx.send(AppEvent::SessionResponse(
+                            SessionResult::Cancelled(transaction_id),
+                        ));
+                    }
+                    NodeCommandResult::Error { message } => {
+                        let _ =
+                            tx.send(AppEvent::SessionResponse(SessionResult::Error(message)));
+                    }
+                    _ => {}
+                },
+                Err(e) => {
+                    let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error(
+                        e.to_string(),
+                    )));
+                }
+            }
+        });
     }
 
     fn start_session_with_selected_agent(&mut self) {
@@ -2058,112 +3052,10 @@ impl App {
 
         match key.code {
             KeyCode::Esc => {
-                //
-                // Close session and send session_close command.
-                //
-                if let Some(ref session) = self.nodes.session {
-                    if session.session_id.is_some() {
-                        let client = self.client.clone();
-                        let node_id = session.node_id.clone();
-                        tokio::spawn(async move {
-                            use common::SessionCommand;
-                            let _ = client
-                                .send_command(&node_id, NodeCommand::Session(SessionCommand::Close))
-                                .await;
-                        });
-                    }
-                }
-                self.nodes.session = None;
+                self.close_session();
             }
             KeyCode::Enter => {
-                let Some(ref mut session) = self.nodes.session else {
-                    return;
-                };
-                let input = session.input.trim().to_string();
-                if input.is_empty() || session.is_waiting || session.session_id.is_none() {
-                    return;
-                }
-
-                //
-                // Save to history and show message immediately.
-                //
-                session.history.push(input.clone());
-                session.history_index = None;
-
-                session.messages.push(ChatMessage {
-                    role: ChatRole::User,
-                    text: input.clone(),
-                });
-                session.input.clear();
-                session.cursor_pos = 0;
-                session.is_waiting = true;
-                session.active_transaction_id = Some(uuid::Uuid::new_v4().to_string());
-                session.scroll_offset = 0;
-
-                let node_id = session.node_id.clone();
-                let transaction_id = session.active_transaction_id.clone().unwrap_or_default();
-
-                //
-                // Spawn background task for network calls.
-                // Results come back via SessionResponse events.
-                //
-                let client = self.client.clone();
-                let tx = self.event_tx.clone();
-
-                tokio::spawn(async move {
-                    use crate::event::{AppEvent, SessionResult};
-                    use common::SessionCommand;
-
-                    let Some(tx) = tx else { return };
-                    match client
-                        .send_command(
-                            &node_id,
-                            NodeCommand::Session(SessionCommand::Prompt {
-                                text: input,
-                                transaction_id: transaction_id.clone(),
-                            }),
-                        )
-                        .await
-                    {
-                        Ok(resp) => match resp.result {
-                            NodeCommandResult::Session(
-                                common::SessionCommandResult::PromptResponse {
-                                    transaction_id,
-                                    response,
-                                },
-                            ) => {
-                                let _ =
-                                    tx.send(AppEvent::SessionResponse(SessionResult::Response {
-                                        transaction_id,
-                                        text: response,
-                                    }));
-                            }
-                            NodeCommandResult::Session(
-                                common::SessionCommandResult::TransactionCancelled {
-                                    transaction_id,
-                                },
-                            ) => {
-                                let _ = tx.send(AppEvent::SessionResponse(
-                                    SessionResult::Cancelled(transaction_id),
-                                ));
-                            }
-                            NodeCommandResult::Error { message } => {
-                                let _ = tx
-                                    .send(AppEvent::SessionResponse(SessionResult::Error(message)));
-                            }
-                            _ => {
-                                let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error(
-                                    "Unexpected response".to_string(),
-                                )));
-                            }
-                        },
-                        Err(e) => {
-                            let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error(
-                                format!("{}", e),
-                            )));
-                        }
-                    }
-                });
+                self.send_session_message();
             }
             KeyCode::Char(c) => {
                 if let Some(ref mut session) = self.nodes.session {
@@ -2846,18 +3738,11 @@ impl App {
                 }
             }
             KeyCode::Char(' ') => {
-                //
-                // Space toggles Mode and YOLO, or types space in text fields.
-                //
                 if let Some(ref mut form) = self.new_op_form {
-                    let idx = form.focused_field;
-                    if idx == 0 {
-                        form.mode = (form.mode + 1) % 2;
-                    } else if idx == 7 {
-                        form.yolo = !form.yolo;
+                    if NewOpForm::is_toggle(form.focused_field) {
+                        Self::toggle_new_op_field(form);
                     } else {
-                        // Type space in text fields
-                        match idx {
+                        match form.focused_field {
                             1 => form.name.push(' '),
                             2 => form.short_name.push(' '),
                             3 => form.category.push(' '),
@@ -2871,16 +3756,8 @@ impl App {
                 }
             }
             KeyCode::Left | KeyCode::Right => {
-                //
-                // Left/Right toggles Mode and YOLO.
-                //
                 if let Some(ref mut form) = self.new_op_form {
-                    let idx = form.focused_field;
-                    if idx == 0 {
-                        form.mode = (form.mode + 1) % 2;
-                    } else if idx == 7 {
-                        form.yolo = !form.yolo;
-                    }
+                    Self::toggle_new_op_field(form);
                 }
             }
             KeyCode::Enter
@@ -3026,6 +3903,109 @@ impl App {
         }
     }
 
+    async fn execute_confirm(&mut self, confirm: ConfirmAction) {
+        match confirm.action {
+            ConfirmKind::DeleteOp(full_name) => {
+                if let Err(e) = self.client.delete_op_def(full_name).await {
+                    self.orchestrator
+                        .messages
+                        .push(ConversationEntry::Error(format!(
+                            "Delete failed: {}",
+                            e
+                        )));
+                }
+                self.refresh_library_after(Duration::from_millis(300));
+            }
+            ConfirmKind::ClearAllExecutions => {
+                let _ = self.client.clear_all_ops().await;
+                let _ = self.client.clear_all_chains().await;
+                self.operations
+                    .operations
+                    .retain(|op| !Self::is_finished_semantic_op(&op.status));
+                self.operations
+                    .chain_executions
+                    .retain(|exec| !Self::is_finished_chain_execution(&exec.status));
+                self.operations.exec_selected = 0;
+                self.refresh_execution_lists_after(Duration::from_millis(300), true);
+            }
+            ConfirmKind::ResetNode(node_id) => {
+                let _ = self.client.reset_node(&node_id).await;
+            }
+            ConfirmKind::DeleteModel(idx) => {
+                if idx < self.settings.model_definitions.len() {
+                    self.settings.model_definitions.remove(idx);
+                    self.save_model_definitions().await;
+                    if self.settings.selected > 0 {
+                        self.settings.selected = self.settings.selected.min(
+                            self.settings.model_definitions.len().saturating_sub(1),
+                        );
+                    }
+                }
+            }
+            ConfirmKind::DeleteAgentScript(script_id) => {
+                let _ = self.client.delete_lua_agent_script(script_id).await;
+                self.settings.agent_scripts_loaded = false;
+                self.load_agent_scripts().await;
+            }
+            ConfirmKind::ResetAgentScripts => {
+                let _ = self.client.reset_lua_agent_script_defaults().await;
+                self.settings.agent_scripts_loaded = false;
+                self.load_agent_scripts().await;
+            }
+            ConfirmKind::Info => {}
+        }
+    }
+
+    async fn execute_run_options(&mut self, opts: RunOptions) {
+        let selected_nodes: Vec<String> = opts
+            .nodes
+            .iter()
+            .filter(|(_, _, sel)| *sel)
+            .map(|(id, _, _)| id.clone())
+            .collect();
+        let selected_agents: Vec<String> = opts
+            .agents
+            .iter()
+            .filter(|(_, sel)| *sel)
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        if selected_nodes.is_empty() || selected_agents.is_empty() {
+            return;
+        }
+
+        for node_id in &selected_nodes {
+            for agent in &selected_agents {
+                if opts.is_chain {
+                    if let Some(ref chain_id) = opts.chain_id {
+                        let _ = self
+                            .client
+                            .run_chain(
+                                chain_id.clone(),
+                                node_id.clone(),
+                                agent.clone(),
+                                None,
+                            )
+                            .await;
+                    }
+                } else {
+                    let _ = self
+                        .client
+                        .run_semantic_op(
+                            node_id.clone(),
+                            agent.clone(),
+                            opts.op_name.clone(),
+                            None,
+                        )
+                        .await;
+                }
+            }
+        }
+
+        self.operations.tab = OpsTab::Executions;
+        self.refresh_execution_lists_after(Duration::from_millis(500), false);
+    }
+
     async fn handle_confirm_key(&mut self, key: KeyEvent) {
         match key.code {
             _ if self
@@ -3033,65 +4013,11 @@ impl App {
                 .as_ref()
                 .is_some_and(|c| matches!(c.action, ConfirmKind::Info)) =>
             {
-                //
-                // Info popup — any key dismisses.
-                //
                 self.confirm = None;
             }
             KeyCode::Char('y') | KeyCode::Enter => {
                 if let Some(confirm) = self.confirm.take() {
-                    match confirm.action {
-                        ConfirmKind::DeleteOp(full_name) => {
-                            if let Err(e) = self.client.delete_op_def(full_name).await {
-                                self.orchestrator
-                                    .messages
-                                    .push(ConversationEntry::Error(format!(
-                                        "Delete failed: {}",
-                                        e
-                                    )));
-                            }
-                            self.refresh_library_after(Duration::from_millis(300));
-                        }
-                        ConfirmKind::ClearAllExecutions => {
-                            let _ = self.client.clear_all_ops().await;
-                            let _ = self.client.clear_all_chains().await;
-                            self.operations
-                                .operations
-                                .retain(|op| !Self::is_finished_semantic_op(&op.status));
-                            self.operations
-                                .chain_executions
-                                .retain(|exec| !Self::is_finished_chain_execution(&exec.status));
-                            self.operations.exec_selected = 0;
-                            self.refresh_execution_lists_after(Duration::from_millis(300), true);
-                        }
-                        ConfirmKind::ResetNode(node_id) => {
-                            let _ = self.client.reset_node(&node_id).await;
-                        }
-                        ConfirmKind::DeleteModel(idx) => {
-                            if idx < self.settings.model_definitions.len() {
-                                self.settings.model_definitions.remove(idx);
-                                self.save_model_definitions().await;
-                                if self.settings.selected > 0 {
-                                    self.settings.selected = self.settings.selected.min(
-                                        self.settings.model_definitions.len().saturating_sub(1),
-                                    );
-                                }
-                            }
-                        }
-                        ConfirmKind::DeleteAgentScript(script_id) => {
-                            let _ = self.client.delete_lua_agent_script(script_id).await;
-                            self.settings.agent_scripts_loaded = false;
-                            self.load_agent_scripts().await;
-                        }
-                        ConfirmKind::ResetAgentScripts => {
-                            let _ = self.client.reset_lua_agent_script_defaults().await;
-                            self.settings.agent_scripts_loaded = false;
-                            self.load_agent_scripts().await;
-                        }
-                        ConfirmKind::Info => {
-                            // Just dismiss.
-                        }
-                    }
+                    self.execute_confirm(confirm).await;
                 }
             }
             KeyCode::Char('n') | KeyCode::Esc => {
@@ -3148,81 +4074,15 @@ impl App {
                 }
             }
             KeyCode::Char(' ') | KeyCode::Enter => {
-                //
-                // Space/Enter toggles selection of current item.
-                //
-                if let Some(ref mut opts) = self.run_options {
-                    match opts.focused_section {
-                        0 => {
-                            if let Some(n) = opts.nodes.get_mut(opts.cursor) {
-                                n.2 = !n.2;
-                            }
-                        }
-                        1 => {
-                            if let Some(a) = opts.agents.get_mut(opts.cursor) {
-                                a.1 = !a.1;
-                            }
-                        }
-                        2 => opts.yolo = !opts.yolo,
-                        _ => {}
-                    }
+                if let Some(ref opts) = self.run_options {
+                    let section = opts.focused_section;
+                    let cursor = opts.cursor;
+                    self.toggle_run_option(section, cursor);
                 }
             }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                //
-                // Execute with selected targets.
-                //
                 if let Some(opts) = self.run_options.take() {
-                    let selected_nodes: Vec<String> = opts
-                        .nodes
-                        .iter()
-                        .filter(|(_, _, sel)| *sel)
-                        .map(|(id, _, _)| id.clone())
-                        .collect();
-                    let selected_agents: Vec<String> = opts
-                        .agents
-                        .iter()
-                        .filter(|(_, sel)| *sel)
-                        .map(|(name, _)| name.clone())
-                        .collect();
-
-                    if selected_nodes.is_empty() || selected_agents.is_empty() {
-                        return;
-                    }
-
-                    //
-                    // Run on each selected node/agent combination.
-                    //
-                    for node_id in &selected_nodes {
-                        for agent in &selected_agents {
-                            if opts.is_chain {
-                                if let Some(ref chain_id) = opts.chain_id {
-                                    let _ = self
-                                        .client
-                                        .run_chain(
-                                            chain_id.clone(),
-                                            node_id.clone(),
-                                            agent.clone(),
-                                            None,
-                                        )
-                                        .await;
-                                }
-                            } else {
-                                let _ = self
-                                    .client
-                                    .run_semantic_op(
-                                        node_id.clone(),
-                                        agent.clone(),
-                                        opts.op_name.clone(),
-                                        None,
-                                    )
-                                    .await;
-                            }
-                        }
-                    }
-
-                    self.operations.tab = OpsTab::Executions;
-                    self.refresh_execution_lists_after(Duration::from_millis(500), false);
+                    self.execute_run_options(opts).await;
                 }
             }
             _ => {}
@@ -3927,6 +4787,99 @@ impl App {
         }
     }
 
+    async fn apply_dropdown_selection(&mut self) {
+        if let Some(def) = self
+            .settings
+            .model_definitions
+            .get(self.settings.dropdown_selected)
+        {
+            let name = def.name.clone();
+            let field = self.settings.dropdown_field;
+            match field {
+                1 => {
+                    self.settings.orchestrator_model = name.clone();
+                    self.save_setting("llm_feature_orchestrator", &name).await;
+                }
+                3 => {
+                    self.settings.semantic_ops_model = name.clone();
+                    self.save_setting("llm_feature_semantic_ops", &name).await;
+                }
+                4 => {
+                    self.settings.semantic_parser_model = name.clone();
+                    self.save_setting("llm_feature_semantic_parser", &name).await;
+                }
+                5 => {
+                    self.settings.traffic_parser_model = name.clone();
+                    self.save_setting("llm_feature_traffic_parser", &name).await;
+                }
+                _ => {}
+            }
+        }
+        self.settings.dropdown_open = false;
+    }
+
+    fn toggle_run_option(&mut self, section: u8, cursor: usize) {
+        if let Some(ref mut opts) = self.run_options {
+            opts.focused_section = section;
+            opts.cursor = cursor;
+            match section {
+                0 => {
+                    if let Some(n) = opts.nodes.get_mut(cursor) {
+                        n.2 = !n.2;
+                    }
+                }
+                1 => {
+                    if let Some(a) = opts.agents.get_mut(cursor) {
+                        a.1 = !a.1;
+                    }
+                }
+                2 => opts.yolo = !opts.yolo,
+                _ => {}
+            }
+        }
+    }
+
+    fn cycle_tools_display(&mut self) {
+        if !self.orchestrator.tools_expanded {
+            self.orchestrator.tools_expanded = true;
+        } else if !self.orchestrator.tools_full {
+            self.orchestrator.tools_full = true;
+        } else {
+            self.orchestrator.tools_expanded = false;
+            self.orchestrator.tools_full = false;
+        }
+    }
+
+    fn toggle_new_op_field(form: &mut NewOpForm) {
+        match form.focused_field {
+            0 => form.mode = (form.mode + 1) % 2,
+            7 => form.yolo = !form.yolo,
+            _ => {}
+        }
+    }
+
+    fn open_url(url: &str) {
+        let cmd = if cfg!(target_os = "macos") {
+            "open"
+        } else if cfg!(target_os = "windows") {
+            "cmd"
+        } else {
+            "xdg-open"
+        };
+
+        let mut command = std::process::Command::new(cmd);
+        if cfg!(target_os = "windows") {
+            command.args(["/C", "start", url]);
+        } else {
+            command.arg(url);
+        }
+        let _ = command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    }
+
     fn auto_enter_edit(&mut self) {
         if self.is_text_editable_field() {
             let val = self.current_field_value();
@@ -4031,35 +4984,7 @@ impl App {
                     }
                 }
                 KeyCode::Enter => {
-                    if let Some(def) = self
-                        .settings
-                        .model_definitions
-                        .get(self.settings.dropdown_selected)
-                    {
-                        let name = def.name.clone();
-                        let field = self.settings.dropdown_field;
-                        match field {
-                            1 => {
-                                self.settings.orchestrator_model = name.clone();
-                                self.save_setting("llm_feature_orchestrator", &name).await;
-                            }
-                            3 => {
-                                self.settings.semantic_ops_model = name.clone();
-                                self.save_setting("llm_feature_semantic_ops", &name).await;
-                            }
-                            4 => {
-                                self.settings.semantic_parser_model = name.clone();
-                                self.save_setting("llm_feature_semantic_parser", &name)
-                                    .await;
-                            }
-                            5 => {
-                                self.settings.traffic_parser_model = name.clone();
-                                self.save_setting("llm_feature_traffic_parser", &name).await;
-                            }
-                            _ => {}
-                        }
-                    }
-                    self.settings.dropdown_open = false;
+                    self.apply_dropdown_selection().await;
                 }
                 _ => {}
             }

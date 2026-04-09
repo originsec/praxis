@@ -41,11 +41,6 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         active_label("^s settings", app.active_window == Window::Settings),
         sep.clone(),
         Span::styled("^q quit", Style::default().fg(DIM)),
-        if app.active_window == Window::Orchestrator {
-            Span::styled("  ^w save", Style::default().fg(DIM))
-        } else {
-            Span::raw("")
-        },
     ]);
 
     let right = Line::from(vec![
