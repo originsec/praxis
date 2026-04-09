@@ -434,6 +434,14 @@ pub struct SettingsState {
     pub prompt_timeout_secs: String,
 
     //
+    // Claude Bridge settings.
+    //
+    pub claude_ccrv1_enabled: bool,
+    pub claude_ccrv1_port: String,
+    pub claude_ccrv2_enabled: bool,
+    pub claude_ccrv2_port: String,
+
+    //
     // Model select dropdown for feature assignments.
     //
     pub dropdown_open: bool,
@@ -525,6 +533,10 @@ impl Default for SettingsState {
             logging_enabled: false,
             hunting_row_limit: "10000000".to_string(),
             prompt_timeout_secs: "600".to_string(),
+            claude_ccrv1_enabled: false,
+            claude_ccrv1_port: "8587".to_string(),
+            claude_ccrv2_enabled: false,
+            claude_ccrv2_port: "8588".to_string(),
             agent_scripts: Vec::new(),
             agent_scripts_loaded: false,
             dropdown_open: false,
@@ -3626,6 +3638,10 @@ impl App {
             "application_logs_enabled".to_string(),
             "hunting_query_row_limit".to_string(),
             "prompt_timeout_secs".to_string(),
+            "claude_ccrv1_enabled".to_string(),
+            "claude_ccrv1_port".to_string(),
+            "claude_ccrv2_enabled".to_string(),
+            "claude_ccrv2_port".to_string(),
         ];
 
         match self.client.get_config(keys).await {
@@ -3680,6 +3696,22 @@ impl App {
                     .get("prompt_timeout_secs")
                     .cloned()
                     .unwrap_or("600".to_string());
+                s.claude_ccrv1_enabled = config
+                    .get("claude_ccrv1_enabled")
+                    .map(|v| v == "true" || v == "1" || v == "yes")
+                    .unwrap_or(false);
+                s.claude_ccrv1_port = config
+                    .get("claude_ccrv1_port")
+                    .cloned()
+                    .unwrap_or("8587".to_string());
+                s.claude_ccrv2_enabled = config
+                    .get("claude_ccrv2_enabled")
+                    .map(|v| v == "true" || v == "1" || v == "yes")
+                    .unwrap_or(false);
+                s.claude_ccrv2_port = config
+                    .get("claude_ccrv2_port")
+                    .cloned()
+                    .unwrap_or("8588".to_string());
 
                 s.loaded = true;
                 s.status_message = None;
@@ -3872,7 +3904,7 @@ impl App {
                 // Scripts list + "Add new" + "Reset defaults"
                 self.settings.agent_scripts.len() + 2
             }
-            SettingsTab::Service => 5, // mcp_enabled, mcp_port, logging, hunting_row_limit, prompt_timeout_secs
+            SettingsTab::Service => 9, // mcp_enabled, mcp_port, logging, hunting_row_limit, prompt_timeout_secs, ccrv1_enabled, ccrv1_port, ccrv2_enabled, ccrv2_port
             SettingsTab::About => 0,
         }
     }
@@ -3887,8 +3919,9 @@ impl App {
             }
             SettingsTab::Agents => false,
             SettingsTab::Service => {
-                // 1 = MCP port, 3 = hunting row limit, 4 = prompt timeout
-                sel == 1 || sel == 3 || sel == 4
+                // 1 = MCP port, 3 = hunting row limit, 4 = prompt timeout,
+                // 6 = CCRv1 port, 8 = CCRv2 port
+                sel == 1 || sel == 3 || sel == 4 || sel == 6 || sel == 8
             }
             SettingsTab::About => false,
         }
@@ -3918,6 +3951,8 @@ impl App {
                 1 => self.settings.mcp_port.clone(),
                 3 => self.settings.hunting_row_limit.clone(),
                 4 => self.settings.prompt_timeout_secs.clone(),
+                6 => self.settings.claude_ccrv1_port.clone(),
+                8 => self.settings.claude_ccrv2_port.clone(),
                 _ => String::new(),
             },
             SettingsTab::About => String::new(),
@@ -4231,6 +4266,36 @@ impl App {
                         self.settings.editing = true;
                         self.settings.edit_buffer = self.settings.prompt_timeout_secs.clone();
                     }
+                    5 => {
+                        // Toggle CCRv1 enabled.
+                        self.settings.claude_ccrv1_enabled = !self.settings.claude_ccrv1_enabled;
+                        let val = if self.settings.claude_ccrv1_enabled {
+                            "true"
+                        } else {
+                            "false"
+                        };
+                        self.save_setting("claude_ccrv1_enabled", val).await;
+                    }
+                    6 => {
+                        // Edit CCRv1 port.
+                        self.settings.editing = true;
+                        self.settings.edit_buffer = self.settings.claude_ccrv1_port.clone();
+                    }
+                    7 => {
+                        // Toggle CCRv2 enabled.
+                        self.settings.claude_ccrv2_enabled = !self.settings.claude_ccrv2_enabled;
+                        let val = if self.settings.claude_ccrv2_enabled {
+                            "true"
+                        } else {
+                            "false"
+                        };
+                        self.save_setting("claude_ccrv2_enabled", val).await;
+                    }
+                    8 => {
+                        // Edit CCRv2 port.
+                        self.settings.editing = true;
+                        self.settings.edit_buffer = self.settings.claude_ccrv2_port.clone();
+                    }
                     _ => {}
                 }
             }
@@ -4268,6 +4333,14 @@ impl App {
                 4 => {
                     self.settings.prompt_timeout_secs = val.clone();
                     self.save_setting("prompt_timeout_secs", &val).await;
+                }
+                6 => {
+                    self.settings.claude_ccrv1_port = val.clone();
+                    self.save_setting("claude_ccrv1_port", &val).await;
+                }
+                8 => {
+                    self.settings.claude_ccrv2_port = val.clone();
+                    self.save_setting("claude_ccrv2_port", &val).await;
                 }
                 _ => {}
             },

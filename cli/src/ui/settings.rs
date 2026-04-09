@@ -465,6 +465,42 @@ fn render_service(f: &mut Frame, area: Rect, state: &SettingsState) {
     ));
 
     lines.push(Line::raw(""));
+    lines.push(section_header("Claude Bridge"));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            "Bridge protocols for Claude SDK connections",
+            Style::default().fg(MUTED),
+        ),
+    ]));
+    lines.push(Line::raw(""));
+
+    lines.push(toggle_row(
+        "CCRv1 (WebSocket)",
+        state.claude_ccrv1_enabled,
+        state.selected == 5,
+    ));
+    lines.push(setting_row(
+        "  Port",
+        &state.claude_ccrv1_port,
+        state.selected == 6,
+        state.editing,
+        &state.edit_buffer,
+    ));
+    lines.push(toggle_row(
+        "CCRv2 (HTTP/SSE)",
+        state.claude_ccrv2_enabled,
+        state.selected == 7,
+    ));
+    lines.push(setting_row(
+        "  Port",
+        &state.claude_ccrv2_port,
+        state.selected == 8,
+        state.editing,
+        &state.edit_buffer,
+    ));
+
+    lines.push(Line::raw(""));
     lines.push(section_header("Connection"));
     lines.push(Line::raw(""));
 
