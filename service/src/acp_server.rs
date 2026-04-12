@@ -66,29 +66,20 @@ impl AcpServer {
         }
 
         match method.as_deref() {
-            //
-            // ACP spec methods.
-            //
-
             Some("initialize") => {
                 self.handle_initialize(client_id, id, publish_channel).await;
             }
-            Some("sendUserMessage") => {
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
-                self.handle_send_user_message(client_id, id, params, publish_channel).await;
-            }
-            Some("cancelSendMessage") => {
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
-                self.handle_cancel_send_message(client_id, id, params, publish_channel).await;
-            }
-
-            //
-            // Session management extensions.
-            //
-
             Some("session/new") => {
                 let params = msg.get("params").cloned().unwrap_or(json!({}));
                 self.handle_session_new(client_id, id, params, publish_channel).await;
+            }
+            Some("session/prompt") => {
+                let params = msg.get("params").cloned().unwrap_or(json!({}));
+                self.handle_session_prompt(client_id, id, params, publish_channel).await;
+            }
+            Some("session/cancel") => {
+                let params = msg.get("params").cloned().unwrap_or(json!({}));
+                self.handle_session_cancel(client_id, params, publish_channel).await;
             }
             Some("session/load") => {
                 let params = msg.get("params").cloned().unwrap_or(json!({}));
@@ -100,20 +91,6 @@ impl AcpServer {
             Some("session/close") => {
                 let params = msg.get("params").cloned().unwrap_or(json!({}));
                 self.handle_session_close(client_id, id, params, publish_channel).await;
-            }
-
-            //
-            // Legacy compatibility: session/prompt and session/cancel still
-            // work as aliases.
-            //
-
-            Some("session/prompt") => {
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
-                self.handle_session_prompt_legacy(client_id, id, params, publish_channel).await;
-            }
-            Some("session/cancel") => {
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
-                self.handle_session_cancel_legacy(client_id, params, publish_channel).await;
             }
 
             Some(unknown) => {
@@ -164,96 +141,7 @@ impl AcpServer {
         }
     }
 
-    //
-    // ACP spec: sendUserMessage. Extract text from chunks, find session via
-    // _meta.sessionId, and forward to the orchestrator.
-    //
-
-    async fn handle_send_user_message(
-        &self,
-        client_id: &str,
-        id: Option<Value>,
-        params: Value,
-        publish_channel: &Channel,
-    ) {
-        let session_id = params.get("_meta")
-            .and_then(|m| m.get("sessionId"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        let prompt_text = params.get("chunks")
-            .and_then(|c| c.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|chunk| chunk.get("text").and_then(|t| t.as_str()))
-                    .collect::<Vec<_>>()
-                    .join("")
-            })
-            .unwrap_or_default();
-
-        if session_id.is_empty() || prompt_text.is_empty() {
-            if let Some(id) = id {
-                let _ = send_to_client(
-                    publish_channel,
-                    client_id,
-                    acp_error_response(id, -32602, "Missing _meta.sessionId or text chunks"),
-                ).await;
-            }
-            return;
-        }
-
-        let prompt_id = match &id {
-            Some(Value::Number(n)) => n.to_string(),
-            Some(Value::String(s)) => s.clone(),
-            _ => "0".to_string(),
-        };
-
-        self.orchestrator_manager
-            .send_prompt(client_id, &session_id, prompt_id, prompt_text, publish_channel)
-            .await;
-    }
-
-    //
-    // ACP spec: cancelSendMessage. Cancel the current prompt and respond immediately.
-    //
-
-    async fn handle_cancel_send_message(
-        &self,
-        client_id: &str,
-        id: Option<Value>,
-        params: Value,
-        publish_channel: &Channel,
-    ) {
-        let session_id = params.get("_meta")
-            .and_then(|m| m.get("sessionId"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
-        if !session_id.is_empty() {
-            self.orchestrator_manager
-                .cancel_prompt(client_id, session_id, publish_channel)
-                .await;
-        }
-
-        //
-        // cancelSendMessage response is null.
-        //
-
-        if let Some(id) = id {
-            let _ = send_to_client(
-                publish_channel,
-                client_id,
-                acp_response(id, Value::Null),
-            ).await;
-        }
-    }
-
-    //
-    // Legacy session/prompt handler for backward compatibility.
-    //
-
-    async fn handle_session_prompt_legacy(
+    async fn handle_session_prompt(
         &self,
         client_id: &str,
         id: Option<Value>,
@@ -295,11 +183,7 @@ impl AcpServer {
             .await;
     }
 
-    //
-    // Legacy session/cancel handler for backward compatibility.
-    //
-
-    async fn handle_session_cancel_legacy(
+    async fn handle_session_cancel(
         &self,
         client_id: &str,
         params: Value,
