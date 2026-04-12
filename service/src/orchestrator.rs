@@ -319,8 +319,8 @@ impl OrchestratorManager {
                         let user_prompt_event = acp_notification("session/update", json!({
                             "sessionId": sid,
                             "update": {
-                                "kind": "user_prompt",
-                                "content": [{ "type": "text", "text": prompt }]
+                                "sessionUpdate": "user_message_chunk",
+                                "content": { "type": "text", "text": prompt }
                             }
                         }));
                         if let common::ClientDirectMessage::AcpMessage { ref json_rpc } = user_prompt_event {

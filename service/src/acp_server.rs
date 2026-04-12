@@ -352,12 +352,17 @@ pub fn acp_error_response(id: Value, code: i64, message: &str) -> ClientDirectMe
 // orchestrator.rs where the same envelope is constructed many times.
 //
 
+//
+// ACP spec-compliant session/update notifications.
+// See https://agentclientprotocol.com/protocol/schema
+//
+
 pub fn session_update_text(session_id: &str, text: impl Into<String>) -> ClientDirectMessage {
     acp_notification("session/update", json!({
         "sessionId": session_id,
         "update": {
-            "kind": "text",
-            "content": [{ "type": "text", "text": text.into() }]
+            "sessionUpdate": "agent_message_chunk",
+            "content": { "type": "text", "text": text.into() }
         }
     }))
 }
@@ -366,9 +371,12 @@ pub fn session_update_tool_call(session_id: &str, tool_name: &str, tool_input: O
     acp_notification("session/update", json!({
         "sessionId": session_id,
         "update": {
-            "kind": "tool_call",
-            "toolName": tool_name,
-            "toolInput": tool_input,
+            "sessionUpdate": "tool_call",
+            "toolCall": {
+                "toolUseId": uuid::Uuid::new_v4().to_string(),
+                "toolName": tool_name,
+                "toolInput": tool_input.unwrap_or(json!({})),
+            }
         }
     }))
 }
@@ -377,31 +385,59 @@ pub fn session_update_tool_result(session_id: &str, tool_name: &str, result: &st
     acp_notification("session/update", json!({
         "sessionId": session_id,
         "update": {
-            "kind": "tool_call_result",
-            "toolName": tool_name,
-            "content": [{ "type": "text", "text": result }]
+            "sessionUpdate": "tool_result",
+            "toolUseId": tool_name,
+            "content": { "type": "text", "text": result }
         }
     }))
 }
 
 pub fn session_update_plan(session_id: &str, plan: &Value) -> ClientDirectMessage {
+    //
+    // Convert our OrchestratorPlan format to ACP plan entries.
+    //
+
+    let entries = plan.get("steps")
+        .and_then(|s| s.as_array())
+        .map(|steps| {
+            steps.iter().map(|step| {
+                let status = match step.get("status").and_then(|s| s.as_str()) {
+                    Some("Done") => "completed",
+                    Some("InProgress") => "in_progress",
+                    _ => "pending",
+                };
+                json!({
+                    "content": step.get("description").and_then(|d| d.as_str()).unwrap_or(""),
+                    "status": status,
+                })
+            }).collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
     acp_notification("session/update", json!({
         "sessionId": session_id,
         "update": {
-            "kind": "plan_update",
-            "plan": plan,
+            "sessionUpdate": "plan",
+            "plan": { "entries": entries }
         }
     }))
 }
 
 pub fn session_update_usage(session_id: &str, prompt_tokens: u32, completion_tokens: u32, total_tokens: u32) -> ClientDirectMessage {
+    //
+    // Token usage as a session_info update with title containing the counts.
+    //
+
     acp_notification("session/update", json!({
         "sessionId": session_id,
         "update": {
-            "kind": "usage",
-            "promptTokens": prompt_tokens,
-            "completionTokens": completion_tokens,
-            "totalTokens": total_tokens,
+            "sessionUpdate": "session_info",
+            "title": null,
+            "_meta": {
+                "promptTokens": prompt_tokens,
+                "completionTokens": completion_tokens,
+                "totalTokens": total_tokens,
+            }
         }
     }))
 }
@@ -410,9 +446,12 @@ pub fn session_update_started(session_id: &str, provider: &str, model: &str) -> 
     acp_notification("session/update", json!({
         "sessionId": session_id,
         "update": {
-            "kind": "started",
-            "provider": provider,
-            "model": model,
+            "sessionUpdate": "session_info",
+            "title": format!("{}/{}", provider, model),
+            "_meta": {
+                "provider": provider,
+                "model": model,
+            },
         }
     }))
 }

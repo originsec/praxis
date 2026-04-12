@@ -1503,27 +1503,50 @@ export function AppProvider({ children }: { children: ReactNode }) {
               // content: [{ type: "text", text: "..." }]).
               //
 
+              //
+              // Extract text from ACP ContentBlock (single or array).
+              //
+
               const extractText = (u: Record<string, unknown>): string => {
-                const content = u.content as Array<{ type: string; text?: string }> | undefined;
-                if (content && Array.isArray(content)) {
-                  return content
-                    .filter(b => b.type === 'text' && b.text)
-                    .map(b => b.text!)
-                    .join('');
+                const content = u.content as { type: string; text?: string } | Array<{ type: string; text?: string }> | undefined;
+                if (!content) return '';
+                if (Array.isArray(content)) {
+                  return content.filter(b => b.type === 'text' && b.text).map(b => b.text!).join('');
                 }
-                return (u.text as string) || '';
+                return (content as { text?: string }).text || '';
               };
 
-              switch (update.kind) {
-                case 'started':
-                  dispatch({
-                    type: 'ORCHESTRATOR_SESSION_STARTED',
-                    sessionId,
-                    provider: (update.provider as string) || 'unknown',
-                    model: (update.model as string) || 'unknown',
-                  });
+              const sessionUpdate = update.sessionUpdate as string;
+
+              switch (sessionUpdate) {
+                case 'session_info': {
+                  //
+                  // Carries provider/model or token usage in _meta.
+                  //
+
+                  const meta = update._meta as Record<string, unknown> | undefined;
+                  if (meta) {
+                    if (meta.promptTokens !== undefined) {
+                      dispatch({
+                        type: 'ORCHESTRATOR_TOKEN_USAGE',
+                        sessionId,
+                        promptTokens: (meta.promptTokens as number) || 0,
+                        completionTokens: (meta.completionTokens as number) || 0,
+                        totalTokens: (meta.totalTokens as number) || 0,
+                      });
+                    }
+                    if (meta.provider && meta.model) {
+                      dispatch({
+                        type: 'ORCHESTRATOR_SESSION_STARTED',
+                        sessionId,
+                        provider: meta.provider as string,
+                        model: meta.model as string,
+                      });
+                    }
+                  }
                   break;
-                case 'user_prompt': {
+                }
+                case 'user_message_chunk': {
                   const promptText = extractText(update);
                   if (promptText) {
                     dispatch({
@@ -1535,7 +1558,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   }
                   break;
                 }
-                case 'text': {
+                case 'agent_message_chunk': {
                   const text = extractText(update);
                   if (text) {
                     dispatch({
@@ -1547,49 +1570,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   break;
                 }
                 case 'tool_call': {
-                  const toolName = (update.toolName as string) || '';
+                  const toolCall = update.toolCall as { toolName?: string; toolInput?: unknown } | undefined;
+                  const toolName = toolCall?.toolName || '';
                   if (toolName !== 'report_plan') {
-                    const toolInput = update.toolInput;
                     dispatch({
                       type: 'ORCHESTRATOR_TOOL_EXECUTING',
                       sessionId,
                       name: toolName,
-                      input: toolInput ? JSON.stringify(toolInput) : undefined,
+                      input: toolCall?.toolInput ? JSON.stringify(toolCall.toolInput) : undefined,
                     });
                   }
                   break;
                 }
-                case 'tool_call_result': {
-                  const toolName = (update.toolName as string) || '';
-                  if (toolName !== 'report_plan') {
+                case 'tool_result': {
+                  const toolUseId = (update.toolUseId as string) || '';
+                  if (toolUseId !== 'report_plan') {
                     const resultText = extractText(update);
                     dispatch({
                       type: 'ORCHESTRATOR_TOOL_EXECUTED',
                       sessionId,
-                      name: toolName,
-                      display: toolName,
+                      name: toolUseId,
+                      display: toolUseId,
                       success: true,
                       result: resultText,
                     });
                   }
                   break;
                 }
-                case 'plan_update':
-                  dispatch({
-                    type: 'ORCHESTRATOR_PLAN_UPDATED',
-                    sessionId,
-                    plan: update.plan as OrchestratorPlan,
-                  });
+                case 'plan': {
+                  const planData = update.plan as { entries?: Array<{ content: string; status: string }> } | undefined;
+                  if (planData?.entries) {
+                    const plan: OrchestratorPlan = {
+                      steps: planData.entries.map(e => ({
+                        description: e.content,
+                        status: e.status === 'completed' ? 'done' as const
+                          : e.status === 'in_progress' ? 'in_progress' as const
+                          : 'not_started' as const,
+                      })),
+                      summary: null,
+                      current_step_description: null,
+                    };
+                    dispatch({
+                      type: 'ORCHESTRATOR_PLAN_UPDATED',
+                      sessionId,
+                      plan,
+                    });
+                  }
                   break;
-                case 'usage':
-                  dispatch({
-                    type: 'ORCHESTRATOR_TOKEN_USAGE',
-                    sessionId,
-                    promptTokens: (update.promptTokens as number) || 0,
-                    completionTokens: (update.completionTokens as number) || 0,
-                    totalTokens: (update.totalTokens as number) || 0,
-                  });
-                  break;
+                }
               }
             } else if (rpc.id !== undefined && !rpc.method) {
               //

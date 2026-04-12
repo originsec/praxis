@@ -3,6 +3,28 @@ use serde_json::{json, Value};
 use crate::OrchestratorPlan;
 use super::types::*;
 
+//
+// Extract text from an ACP ContentBlock. Handles both a single content
+// object { type: "text", text: "..." } and an array of content blocks.
+//
+
+fn extract_content_text(update: &Value) -> Option<String> {
+    if let Some(content) = update.get("content") {
+        if let Some(text) = content.get("text").and_then(|v| v.as_str()) {
+            return Some(text.to_string());
+        }
+        if let Some(arr) = content.as_array() {
+            let texts: Vec<&str> = arr.iter()
+                .filter_map(|b| b.get("text").and_then(|v| v.as_str()))
+                .collect();
+            if !texts.is_empty() {
+                return Some(texts.join(""));
+            }
+        }
+    }
+    None
+}
+
 pub struct AcpClient {
     next_id: AtomicU64,
 }
@@ -165,16 +187,14 @@ impl AcpClient {
     //
 
     fn parse_notification(&self, method: &str, params: Option<Value>) -> Option<AcpEvent> {
+        let params = params?;
         match method {
             "session/update" => {
-                let params = params?;
-                let raw_update = params.get("update")?.clone();
-                let update_params: SessionUpdateParams =
-                    serde_json::from_value(params).ok()?;
-                self.parse_session_update(update_params, &raw_update)
+                let raw_update = params.get("update")?;
+                let session_id = params.get("sessionId").and_then(|v| v.as_str())?.to_string();
+                self.parse_session_update(&session_id, raw_update)
             }
             "session/closed" => {
-                let params = params?;
                 let session_id = params
                     .get("sessionId")
                     .and_then(|v| v.as_str())?
@@ -186,114 +206,80 @@ impl AcpClient {
     }
 
     //
-    // Parse a session/update notification into the appropriate AcpEvent based
-    // on the update kind.
+    // Parse a session/update notification using the ACP spec sessionUpdate
+    // field to determine the update type.
     //
 
-    fn parse_session_update(&self, params: SessionUpdateParams, raw_update: &Value) -> Option<AcpEvent> {
-        let session_id = params.session_id;
-        let update = params.update;
-        let kind = update.kind.as_deref()?;
+    fn parse_session_update(&self, session_id: &str, update: &Value) -> Option<AcpEvent> {
+        let session_update = update.get("sessionUpdate").and_then(|v| v.as_str())?;
+        let sid = session_id.to_string();
 
-        match kind {
-            "started" => {
-                let provider = raw_update.get("provider").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
-                let model = raw_update.get("model").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
-                Some(AcpEvent::SessionStarted { session_id, provider, model })
+        match session_update {
+            "agent_message_chunk" => {
+                let text = extract_content_text(update)?;
+                Some(AcpEvent::TextContent { session_id: sid, text })
             }
 
-            "user_prompt" => {
-                let text = update
-                    .content
-                    .as_ref()
-                    .and_then(|blocks| {
-                        blocks.iter().filter_map(|b| b.text.as_deref()).next().map(String::from)
-                    })
-                    .unwrap_or_default();
-                Some(AcpEvent::UserPrompt { session_id, text })
-            }
-
-            "text" => {
-                let text = update
-                    .content
-                    .as_ref()
-                    .and_then(|blocks| {
-                        let texts: Vec<&str> = blocks
-                            .iter()
-                            .filter_map(|b| b.text.as_deref())
-                            .collect();
-                        if texts.is_empty() {
-                            None
-                        } else {
-                            Some(texts.join(""))
-                        }
-                    })
-                    .unwrap_or_default();
-                Some(AcpEvent::TextContent { session_id, text })
+            "user_message_chunk" => {
+                let text = extract_content_text(update)?;
+                Some(AcpEvent::UserPrompt { session_id: sid, text })
             }
 
             "tool_call" => {
-                let name = update
-                    .tool_name
-                    .unwrap_or_else(|| "unknown".to_string());
-                let input = update
-                    .tool_input
-                    .map(|v| v.to_string());
-                Some(AcpEvent::ToolCall {
-                    session_id,
-                    name,
-                    input,
-                })
+                let tool_call = update.get("toolCall")?;
+                let name = tool_call.get("toolName").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                let input = tool_call.get("toolInput").map(|v| v.to_string());
+                Some(AcpEvent::ToolCall { session_id: sid, name, input })
             }
 
-            "tool_call_result" => {
-                let name = update
-                    .tool_name
-                    .unwrap_or_else(|| "unknown".to_string());
-                let success = update
-                    .status
-                    .as_deref()
-                    .map(|s| s == "success")
-                    .unwrap_or(true);
-                let result = update
-                    .content
-                    .as_ref()
-                    .and_then(|blocks| {
-                        blocks
-                            .iter()
-                            .filter_map(|b| b.text.as_deref())
-                            .next()
-                            .map(|s| s.to_string())
-                    })
-                    .unwrap_or_default();
-                Some(AcpEvent::ToolResult {
-                    session_id,
-                    name,
-                    success,
-                    result,
-                })
+            "tool_result" => {
+                let tool_use_id = update.get("toolUseId").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                let result = extract_content_text(update).unwrap_or_default();
+                Some(AcpEvent::ToolResult { session_id: sid, name: tool_use_id, success: true, result })
             }
 
-            "plan_update" => {
-                let plan = raw_update.get("plan")
-                    .and_then(|v| serde_json::from_value::<OrchestratorPlan>(v.clone()).ok())
-                    .unwrap_or_default();
-                Some(AcpEvent::PlanUpdate { session_id, plan })
+            "plan" => {
+                let plan_val = update.get("plan")?;
+                let entries = plan_val.get("entries").and_then(|v| v.as_array())?;
+                let steps: Vec<crate::PlanStep> = entries.iter().map(|e| {
+                    let desc = e.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let status = match e.get("status").and_then(|v| v.as_str()) {
+                        Some("completed") => crate::PlanStepStatus::Done,
+                        Some("in_progress") => crate::PlanStepStatus::InProgress,
+                        _ => crate::PlanStepStatus::NotStarted,
+                    };
+                    crate::PlanStep { description: desc, status }
+                }).collect();
+                let plan = OrchestratorPlan {
+                    steps,
+                    summary: None,
+                    current_step_description: None,
+                };
+                Some(AcpEvent::PlanUpdate { session_id: sid, plan })
             }
 
-            "usage" => {
-                let prompt_tokens =
-                    raw_update.get("promptTokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                let completion_tokens =
-                    raw_update.get("completionTokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                let total_tokens =
-                    raw_update.get("totalTokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                Some(AcpEvent::TokenUsage {
-                    session_id,
-                    prompt_tokens,
-                    completion_tokens,
-                    total_tokens,
-                })
+            "session_info" => {
+                //
+                // session_info carries provider/model or token usage in _meta.
+                //
+
+                let meta = update.get("_meta");
+
+                if let Some(meta) = meta {
+                    if let Some(pt) = meta.get("promptTokens") {
+                        let prompt_tokens = pt.as_u64().unwrap_or(0) as u32;
+                        let completion_tokens = meta.get("completionTokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                        let total_tokens = meta.get("totalTokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                        return Some(AcpEvent::TokenUsage { session_id: sid, prompt_tokens, completion_tokens, total_tokens });
+                    }
+
+                    if let Some(provider) = meta.get("provider").and_then(|v| v.as_str()) {
+                        let model = meta.get("model").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                        return Some(AcpEvent::SessionStarted { session_id: sid, provider: provider.to_string(), model });
+                    }
+                }
+
+                None
             }
 
             _ => None,
