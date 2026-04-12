@@ -95,17 +95,8 @@ pub async fn handle_browser_message(
         BrowserMessage::OpDefSetDisabled { full_name, disabled } => {
             state.rabbitmq.set_op_def_disabled(full_name, disabled).await?;
         }
-        BrowserMessage::OrchestratorStart => {
-            state.rabbitmq.start_orchestrator().await?;
-        }
-        BrowserMessage::OrchestratorPrompt { prompt_id, message } => {
-            state.rabbitmq.send_orchestrator_prompt(prompt_id, message).await?;
-        }
-        BrowserMessage::OrchestratorStop => {
-            state.rabbitmq.stop_orchestrator().await?;
-        }
-        BrowserMessage::OrchestratorCancel => {
-            state.rabbitmq.cancel_orchestrator().await?;
+        BrowserMessage::AcpMessage { json_rpc } => {
+            state.rabbitmq.send_acp_message(json_rpc).await?;
         }
 
         //

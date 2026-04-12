@@ -15,7 +15,7 @@ import {
   Brain,
   User,
 } from 'lucide-react';
-import type { OrchestratorMessage, OrchestratorToolExecution } from '../../context/AppContext';
+import type { OrchestratorMessage, OrchestratorToolExecution } from '../../context/orchestratorTypes';
 import type { OrchestratorPlan, PlanStep } from '../../api/types';
 
 //

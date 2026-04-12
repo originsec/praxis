@@ -31,7 +31,7 @@ pub struct Client {
 #[derive(Default)]
 struct ClientState {
     system_state: Option<SystemState>,
-    orchestrator_event_tx: Option<tokio::sync::mpsc::UnboundedSender<ClientDirectMessage>>,
+    acp_event_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     terminal_output_tx: Option<tokio::sync::mpsc::UnboundedSender<TerminalOutput>>,
     pending_config: Option<HashMap<String, String>>,
     pending_commands: std::collections::HashMap<String, Option<NodeCommandResult>>,
@@ -257,19 +257,11 @@ impl Client {
             }
 
             //
-            // Forward orchestrator events to subscriber if present.
+            // Forward ACP JSON-RPC messages to subscriber if present.
             //
-            msg @ (ClientDirectMessage::OrchestratorStarted { .. }
-            | ClientDirectMessage::OrchestratorContent { .. }
-            | ClientDirectMessage::OrchestratorToolExecuting { .. }
-            | ClientDirectMessage::OrchestratorToolExecuted { .. }
-            | ClientDirectMessage::OrchestratorPlanUpdated { .. }
-            | ClientDirectMessage::OrchestratorDone { .. }
-            | ClientDirectMessage::OrchestratorStopped
-            | ClientDirectMessage::OrchestratorError { .. }
-            | ClientDirectMessage::OrchestratorTokenUsage { .. }) => {
-                if let Some(ref tx) = state.orchestrator_event_tx {
-                    let _ = tx.send(msg);
+            ClientDirectMessage::AcpMessage { json_rpc } => {
+                if let Some(ref tx) = state.acp_event_tx {
+                    let _ = tx.send(json_rpc);
                 }
             }
 
@@ -374,50 +366,26 @@ impl Client {
     }
 
     //
-    // Orchestrator methods.
+    // ACP methods.
     //
 
-    pub fn subscribe_orchestrator_events(
-        &self,
-    ) -> tokio::sync::mpsc::UnboundedReceiver<ClientDirectMessage> {
+    pub fn subscribe_acp_events(&self) -> tokio::sync::mpsc::UnboundedReceiver<String> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let state = self.state.clone();
         tokio::task::block_in_place(|| {
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 let mut state = state.lock().await;
-                state.orchestrator_event_tx = Some(tx);
+                state.acp_event_tx = Some(tx);
             });
         });
         rx
     }
 
-    pub async fn start_orchestrator(&self) -> Result<()> {
-        let message = ClientSignalMessage::OrchestratorStart {
+    pub async fn send_acp_message(&self, json_rpc: String) -> Result<()> {
+        let message = ClientSignalMessage::AcpMessage {
             client_id: self.client_id.clone(),
-        };
-        self.publish_signal(message).await
-    }
-
-    pub async fn send_orchestrator_prompt(&self, prompt_id: String, prompt: String) -> Result<()> {
-        let message = ClientSignalMessage::OrchestratorPrompt {
-            client_id: self.client_id.clone(),
-            prompt_id,
-            message: prompt,
-        };
-        self.publish_signal(message).await
-    }
-
-    pub async fn stop_orchestrator(&self) -> Result<()> {
-        let message = ClientSignalMessage::OrchestratorStop {
-            client_id: self.client_id.clone(),
-        };
-        self.publish_signal(message).await
-    }
-
-    pub async fn cancel_orchestrator(&self) -> Result<()> {
-        let message = ClientSignalMessage::OrchestratorCancel {
-            client_id: self.client_id.clone(),
+            json_rpc,
         };
         self.publish_signal(message).await
     }

@@ -25,9 +25,9 @@ export interface OrchestratorTokenUsage {
   totalTokens: number;
 }
 
-export interface OrchestratorState {
-  sessionActive: boolean;
-  isStarting: boolean;
+export interface OrchestratorSessionState {
+  sessionId: string;
+  label: string;
   provider: string | null;
   model: string | null;
   messages: OrchestratorMessage[];
@@ -38,4 +38,11 @@ export interface OrchestratorState {
   currentToolExecutions: OrchestratorToolExecution[];
   tokenUsage: OrchestratorTokenUsage | null;
   currentPromptId: string | null;
+}
+
+export interface OrchestratorState {
+  sessions: OrchestratorSessionState[];
+  activeSessionId: string | null;
+  isStarting: boolean;
+  nextRequestId: number;
 }

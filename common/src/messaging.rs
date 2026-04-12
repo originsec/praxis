@@ -2005,16 +2005,10 @@ pub enum ClientSignalMessage {
     },
 
     //
-    // Orchestrator - LLM tool-calling orchestration.
+    // Orchestrator - ACP-based LLM tool-calling orchestration.
     //
-    /// Start an orchestrator session for this client
-    OrchestratorStart { client_id: String },
-    /// Send a prompt to the orchestrator session
-    OrchestratorPrompt { client_id: String, prompt_id: String, message: String },
-    /// Stop the orchestrator session (ends entirely)
-    OrchestratorStop { client_id: String },
-    /// Cancel current orchestrator inference (keeps session alive)
-    OrchestratorCancel { client_id: String },
+    /// ACP JSON-RPC message from client to service
+    AcpMessage { client_id: String, json_rpc: String },
 
     //
     // AgentChat - IRC-style multi-agent chat.
@@ -2370,27 +2364,8 @@ pub enum ClientDirectMessage {
     //
     // Orchestrator responses.
     //
-    /// Orchestrator session started
-    OrchestratorStarted {
-        provider: String,
-        model: String,
-    },
-    /// Orchestrator streaming text content
-    OrchestratorContent { prompt_id: String, content: String },
-    /// Orchestrator started executing a tool
-    OrchestratorToolExecuting { prompt_id: String, name: String, input: Option<String> },
-    /// Orchestrator finished executing a tool
-    OrchestratorToolExecuted { prompt_id: String, name: String, display: String, success: bool, result: String },
-    /// Orchestrator plan updated
-    OrchestratorPlanUpdated { prompt_id: String, plan: OrchestratorPlan },
-    /// Orchestrator response complete
-    OrchestratorDone { prompt_id: String },
-    /// Orchestrator session stopped
-    OrchestratorStopped,
-    /// Orchestrator error
-    OrchestratorError { prompt_id: String, message: String },
-    /// Orchestrator token usage update
-    OrchestratorTokenUsage { prompt_id: String, prompt_tokens: u32, completion_tokens: u32, total_tokens: u32 },
+    /// ACP JSON-RPC message from service to client
+    AcpMessage { json_rpc: String },
 
     //
     // AgentChat responses.

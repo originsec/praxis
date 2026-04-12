@@ -49,6 +49,10 @@ struct Cli {
     #[arg(long = "status")]
     status: bool,
 
+    /// Run as ACP stdio proxy (forward JSON-RPC over stdin/stdout to service via RabbitMQ)
+    #[arg(long = "acp")]
+    acp: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -121,6 +125,10 @@ async fn run() -> Result<()> {
         return run_command(&cli.rabbitmq_url, cli.timeout, command).await;
     }
 
+    if cli.acp {
+        return run_acp_proxy(&cli.rabbitmq_url, cli.timeout).await;
+    }
+
     run_tui(&cli.rabbitmq_url, cli.timeout).await
 }
 
@@ -153,6 +161,64 @@ async fn run_command(rabbitmq_url: &str, timeout: u64, command: Commands) -> Res
     let result = command.execute(&client).await;
     client.disconnect().await;
     result
+}
+
+async fn run_acp_proxy(rabbitmq_url: &str, timeout: u64) -> Result<()> {
+    let mut cli_state = state::CliState::load()?;
+    let client_id = cli_state.get_or_create_client_id()?;
+    let client = Arc::new(client::Client::connect(rabbitmq_url, timeout, client_id).await?);
+
+    let mut acp_rx = client.subscribe_acp_events();
+
+    //
+    // ACP responses from service written to stdout as NDJSON.
+    //
+    let stdout_task = tokio::spawn(async move {
+        let mut stdout = tokio::io::stdout();
+        while let Some(json_rpc) = acp_rx.recv().await {
+            use tokio::io::AsyncWriteExt;
+            if stdout.write_all(json_rpc.as_bytes()).await.is_err() {
+                break;
+            }
+            if stdout.write_all(b"\n").await.is_err() {
+                break;
+            }
+            if stdout.flush().await.is_err() {
+                break;
+            }
+        }
+    });
+
+    //
+    // NDJSON lines from stdin forwarded as ACP requests to service.
+    //
+    let client_clone = client.clone();
+    let stdin_task = tokio::spawn(async move {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        let reader = BufReader::new(tokio::io::stdin());
+        let mut lines = reader.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let line = line.trim().to_string();
+            if line.is_empty() {
+                continue;
+            }
+            if let Err(e) = client_clone.send_acp_message(line).await {
+                eprintln!("Failed to send ACP message: {}", e);
+                break;
+            }
+        }
+    });
+
+    //
+    // Wait for stdin to close (client disconnected).
+    //
+    let _ = stdin_task.await;
+    stdout_task.abort();
+
+    if let Ok(client) = Arc::try_unwrap(client) {
+        client.disconnect().await;
+    }
+    Ok(())
 }
 
 async fn run_tui(rabbitmq_url: &str, timeout: u64) -> Result<()> {

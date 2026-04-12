@@ -1,7 +1,7 @@
 use crate::client::Client;
 use common::{
-    ChainDefinitionInfo, ChainExecutionUpdate, ClientDirectMessage, OperationDefinitionInfo,
-    SemanticOpUpdate, SessionUpdate, SystemState, TerminalOutput,
+    ChainDefinitionInfo, ChainExecutionUpdate, OperationDefinitionInfo, SemanticOpUpdate,
+    SessionUpdate, SystemState, TerminalOutput,
 };
 use crossterm::event::{Event, EventStream};
 use futures_util::StreamExt;
@@ -11,7 +11,7 @@ use tokio::sync::{Notify, mpsc};
 
 pub enum AppEvent {
     Terminal(Event),
-    Orchestrator(ClientDirectMessage),
+    AcpEvent(String),
     StateUpdate(SystemState),
     OperationsRefreshed {
         op_definitions: Vec<OperationDefinitionInfo>,
@@ -93,13 +93,13 @@ impl EventHandler {
         });
 
         //
-        // Orchestrator events from the client's subscription channel.
+        // ACP events from the client's subscription channel.
         //
-        let tx_orch = tx.clone();
-        let mut orch_rx = client.subscribe_orchestrator_events();
+        let tx_acp = tx.clone();
+        let mut acp_rx = client.subscribe_acp_events();
         tokio::spawn(async move {
-            while let Some(msg) = orch_rx.recv().await {
-                if tx_orch.send(AppEvent::Orchestrator(msg)).is_err() {
+            while let Some(json_rpc) = acp_rx.recv().await {
+                if tx_acp.send(AppEvent::AcpEvent(json_rpc)).is_err() {
                     break;
                 }
             }

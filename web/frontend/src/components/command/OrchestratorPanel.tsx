@@ -4,11 +4,12 @@ import {
   Send,
   Loader2,
   PlayCircle,
-  StopCircle,
   Square,
   AlertCircle,
   Download,
   PanelRightClose,
+  Plus,
+  X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import {
@@ -37,10 +38,11 @@ interface OrchestratorPanelProps {
 export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) {
   const {
     state,
-    orchestratorStart,
-    orchestratorStop,
-    orchestratorCancel,
-    orchestratorPrompt,
+    orchestratorCreateSession,
+    orchestratorCloseSession,
+    orchestratorCancelPrompt,
+    orchestratorSendPrompt,
+    orchestratorSetActiveSession,
     orchestratorClearMessages,
     getConfig,
     setConfig,
@@ -49,6 +51,14 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  //
+  // Active session derived from state.
+  //
+  const activeSession = useMemo(
+    () => orchestrator.sessions.find(s => s.sessionId === orchestrator.activeSessionId) ?? null,
+    [orchestrator.sessions, orchestrator.activeSessionId]
+  );
 
   //
   // Panel width with drag-to-resize. Persisted in localStorage.
@@ -116,28 +126,28 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
 
   useEffect(() => {
     scrollToBottom();
-  }, [orchestrator.messages, orchestrator.streamingContent, orchestrator.currentToolExecutions]);
+  }, [activeSession?.messages, activeSession?.streamingContent, activeSession?.currentToolExecutions]);
 
   useEffect(() => {
-    if (!orchestrator.isLoading && orchestrator.sessionActive && isOpen) {
+    if (activeSession && !activeSession.isLoading && isOpen) {
       inputRef.current?.focus();
     }
-  }, [orchestrator.isLoading, orchestrator.sessionActive, isOpen]);
+  }, [activeSession?.isLoading, isOpen, activeSession]);
 
   const handleSendMessage = () => {
-    if (!input.trim() || orchestrator.isLoading) return;
+    if (!input.trim() || !activeSession || activeSession.isLoading) return;
     if (input.trim() === '/clear') {
-      orchestratorClearMessages();
+      orchestratorClearMessages(activeSession.sessionId);
       setInput('');
       return;
     }
-    orchestratorPrompt(input.trim());
+    orchestratorSendPrompt(activeSession.sessionId, input.trim());
     setInput('');
   };
 
   const handleExport = () => {
-    if (orchestrator.messages.length === 0) return;
-    const content = exportOrchestratorSession(orchestrator.messages, orchestrator.tokenUsage);
+    if (!activeSession || activeSession.messages.length === 0) return;
+    const content = exportOrchestratorSession(activeSession.messages, activeSession.tokenUsage);
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     downloadTextFile(content, `orchestrator-session-${timestamp}.md`);
   };
@@ -163,17 +173,18 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
     setConfig({ llm_feature_orchestrator: name });
   };
 
-  const handleStart = () => {
+  const handleCreateSession = () => {
     if (!isConfigured && modelDefs.length > 0) {
       setConfig({ llm_feature_orchestrator: modelDefs[0].name });
     }
-    orchestratorStart();
+    orchestratorCreateSession();
   };
 
   //
   // Current model display info.
   //
   const currentModel = modelDefs.find(d => d.name === selectedModelName);
+  const hasSessions = orchestrator.sessions.length > 0;
 
   return (
     <div
@@ -206,39 +217,31 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
               <div className="flex items-center gap-2">
                 <Bot size={14} className="text-[var(--accent-purple)]" />
                 <span className="text-xs font-medium text-highlight">Orchestrator</span>
-                {orchestrator.sessionActive && (
-                  <span className="text-[9px] px-1.5 py-0.5 bg-[var(--accent-success)]/20 text-[var(--accent-success)]">LIVE</span>
+                {hasSessions && (
+                  <span className="text-[9px] px-1.5 py-0.5 bg-[var(--accent-success)]/20 text-[var(--accent-success)]">
+                    {orchestrator.sessions.length} session{orchestrator.sessions.length !== 1 ? 's' : ''}
+                  </span>
                 )}
               </div>
               <div className="flex items-center gap-1">
                 <button
                   onClick={handleExport}
-                  disabled={orchestrator.messages.length === 0}
+                  disabled={!activeSession || activeSession.messages.length === 0}
                   className="p-1 text-muted hover:text-[var(--text-primary)] transition-colors disabled:opacity-30"
                   title="Export transcript"
                 >
                   <Download size={12} />
                 </button>
-                {orchestrator.sessionActive ? (
-                  <button
-                    onClick={orchestratorStop}
-                    className="p-1 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/20 transition-colors"
-                    title="Stop session"
-                  >
-                    <StopCircle size={12} />
-                  </button>
-                ) : (
-                  <button
-                    onClick={handleStart}
-                    disabled={!isConfigured || orchestrator.isStarting}
-                    className="p-1 text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/20 transition-colors disabled:opacity-30"
-                    title="Start session"
-                  >
-                    {orchestrator.isStarting
-                      ? <Loader2 size={12} className="animate-spin" />
-                      : <PlayCircle size={12} />}
-                  </button>
-                )}
+                <button
+                  onClick={handleCreateSession}
+                  disabled={!isConfigured || orchestrator.isStarting}
+                  className="p-1 text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/20 transition-colors disabled:opacity-30"
+                  title="New session"
+                >
+                  {orchestrator.isStarting
+                    ? <Loader2 size={12} className="animate-spin" />
+                    : <PlayCircle size={12} />}
+                </button>
                 <button
                   onClick={onToggle}
                   className="p-1 text-muted hover:text-[var(--text-primary)] transition-colors"
@@ -251,10 +254,54 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
 
             {/*
             //
-            // Model selector — shown when no session is active.
+            // Session tab bar.
             //
             */}
-            {!orchestrator.sessionActive && modelDefs.length > 0 && (
+            {hasSessions && (
+              <div className="flex border-b border-subtle bg-[var(--bg-primary)] overflow-x-auto flex-shrink-0">
+                {orchestrator.sessions.map((session) => {
+                  const isActive = session.sessionId === orchestrator.activeSessionId;
+                  return (
+                    <button
+                      key={session.sessionId}
+                      onClick={() => orchestratorSetActiveSession(session.sessionId)}
+                      className={`group flex items-center gap-1 px-3 py-1 text-[10px] whitespace-nowrap border-b-2 transition-colors ${
+                        isActive
+                          ? 'bg-[var(--bg-secondary)] text-highlight border-[var(--accent-purple)]'
+                          : 'text-muted hover:text-highlight border-transparent hover:border-[var(--accent-purple)]/30'
+                      }`}
+                    >
+                      <span className="truncate max-w-[100px]">{session.label}</span>
+                      {session.isLoading && <Loader2 size={8} className="animate-spin flex-shrink-0" />}
+                      <span
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          orchestratorCloseSession(session.sessionId);
+                        }}
+                        className="ml-1 opacity-0 group-hover:opacity-100 hover:text-[var(--accent-error)] transition-opacity cursor-pointer"
+                      >
+                        <X size={10} />
+                      </span>
+                    </button>
+                  );
+                })}
+                <button
+                  onClick={handleCreateSession}
+                  disabled={!isConfigured || orchestrator.isStarting}
+                  className="px-2 py-1 text-muted hover:text-highlight transition-colors disabled:opacity-30 flex-shrink-0"
+                  title="New session"
+                >
+                  <Plus size={12} />
+                </button>
+              </div>
+            )}
+
+            {/*
+            //
+            // Model selector -- shown when no sessions exist.
+            //
+            */}
+            {!hasSessions && modelDefs.length > 0 && (
               <div className="px-3 py-1.5 border-b border-subtle flex items-center gap-2 flex-shrink-0">
                 <span className="text-[9px] text-muted tracking-wider">MODEL</span>
                 <select
@@ -272,10 +319,10 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
 
             {/*
             //
-            // Active model indicator — shown during session.
+            // Active model indicator -- shown during session.
             //
             */}
-            {orchestrator.sessionActive && currentModel && (
+            {activeSession && currentModel && (
               <div className="px-3 py-1 border-b border-subtle text-[9px] text-muted flex-shrink-0">
                 {currentModel.provider}/{currentModel.model}
               </div>
@@ -301,16 +348,24 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
             //
             */}
             <div className="flex-1 overflow-auto p-2 space-y-2">
-              {orchestrator.messages.map(msg => (
-                <ChatMessage key={msg.id} message={msg} compact />
-              ))}
+              {activeSession ? (
+                <>
+                  {activeSession.messages.map(msg => (
+                    <ChatMessage key={msg.id} message={msg} compact />
+                  ))}
 
-              {orchestrator.isLoading && (
-                <StreamingMessage
-                  content={orchestrator.streamingContent}
-                  toolExecutions={orchestrator.currentToolExecutions}
-                  compact
-                />
+                  {activeSession.isLoading && (
+                    <StreamingMessage
+                      content={activeSession.streamingContent}
+                      toolExecutions={activeSession.currentToolExecutions}
+                      compact
+                    />
+                  )}
+                </>
+              ) : (
+                <div className="flex items-center justify-center h-full text-[10px] text-muted">
+                  {hasSessions ? 'Select a session' : 'Create a session to get started'}
+                </div>
               )}
 
               <div ref={messagesEndRef} />
@@ -318,11 +373,11 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
 
             {/*
             //
-            // Plan display — compact bar above input.
+            // Plan display -- compact bar above input.
             //
             */}
-            {orchestrator.currentPlan && orchestrator.currentPlan.steps.length > 0 && (
-              <PlanDisplay plan={orchestrator.currentPlan} compact />
+            {activeSession?.currentPlan && activeSession.currentPlan.steps.length > 0 && (
+              <PlanDisplay plan={activeSession.currentPlan} compact />
             )}
 
             {/*
@@ -330,9 +385,9 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
             // Token usage footer.
             //
             */}
-            {orchestrator.tokenUsage && (
+            {activeSession?.tokenUsage && (
               <div className="px-3 py-1 border-t border-subtle text-[9px] text-muted flex-shrink-0">
-                {orchestrator.tokenUsage.totalTokens.toLocaleString()} tokens
+                {activeSession.tokenUsage.totalTokens.toLocaleString()} tokens
               </div>
             )}
 
@@ -349,13 +404,13 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
-                  placeholder={orchestrator.sessionActive ? 'Ask...' : 'Start a session first'}
+                  placeholder={activeSession ? 'Ask...' : 'Create a session first'}
                   className="flex-1 bg-[var(--bg-primary)] border border-subtle px-2 py-1.5 text-xs text-[var(--text-primary)] placeholder-[var(--text-secondary)] focus:outline-none focus:border-[var(--border-active)]"
-                  disabled={!orchestrator.sessionActive || orchestrator.isLoading}
+                  disabled={!activeSession || activeSession.isLoading}
                 />
-                {orchestrator.isLoading ? (
+                {activeSession?.isLoading ? (
                   <button
-                    onClick={orchestratorCancel}
+                    onClick={() => orchestratorCancelPrompt(activeSession.sessionId)}
                     className="px-2 py-1.5 bg-[var(--accent-error)]/20 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/30 transition-colors"
                     title="Stop generation"
                   >
@@ -364,7 +419,7 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
                 ) : (
                   <button
                     onClick={handleSendMessage}
-                    disabled={!input.trim() || !orchestrator.sessionActive}
+                    disabled={!input.trim() || !activeSession}
                     className="px-2 py-1.5 bg-[var(--accent-purple)]/20 text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/30 transition-colors disabled:opacity-30"
                   >
                     <Send size={14} />

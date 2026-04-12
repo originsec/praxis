@@ -772,10 +772,7 @@ export type BrowserMessage =
   | { type: 'op_def_delete'; full_name: string }
   | { type: 'op_def_get'; full_name: string }
   | { type: 'op_def_set_disabled'; full_name: string; disabled: boolean }
-  | { type: 'orchestrator_start' }
-  | { type: 'orchestrator_prompt'; prompt_id: string; message: string }
-  | { type: 'orchestrator_stop' }
-  | { type: 'orchestrator_cancel' }
+  | { type: 'acp_message'; json_rpc: string }
   //
   // Traffic interception messages.
   //
@@ -893,15 +890,7 @@ export type ServerMessage =
   | { type: 'op_def_added'; full_name: string }
   | { type: 'op_def_deleted'; full_name: string; success: boolean }
   | { type: 'op_def_error'; message: string }
-  | { type: 'orchestrator_started'; provider: string; model: string }
-  | { type: 'orchestrator_content'; prompt_id: string; content: string }
-  | { type: 'orchestrator_tool_executing'; prompt_id: string; name: string; input?: string }
-  | { type: 'orchestrator_tool_executed'; prompt_id: string; name: string; display: string; success: boolean; result: string }
-  | { type: 'orchestrator_plan_updated'; prompt_id: string; plan: OrchestratorPlan }
-  | { type: 'orchestrator_done'; prompt_id: string }
-  | { type: 'orchestrator_stopped' }
-  | { type: 'orchestrator_error'; prompt_id: string; message: string }
-  | { type: 'orchestrator_token_usage'; prompt_id: string; prompt_tokens: number; completion_tokens: number; total_tokens: number }
+  | { type: 'acp_message'; json_rpc: string }
   //
   // Traffic interception messages.
   //

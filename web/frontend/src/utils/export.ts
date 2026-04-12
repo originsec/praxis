@@ -1,4 +1,5 @@
-import type { AgentSessionMessage, OrchestratorMessage } from '../context/AppContext';
+import type { AgentSessionMessage } from '../context/AppContext';
+import type { OrchestratorMessage } from '../context/orchestratorTypes';
 import type { SemanticOpUpdate, ChainExecutionUpdate, ElementExecutionStatus } from '../api/types';
 
 //
