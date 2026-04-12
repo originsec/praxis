@@ -2089,6 +2089,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     wsClient.send({ type: 'acp_message', json_rpc: jsonRpc });
   }, []);
 
+  const orchestratorSessionsRef = useRef(state.orchestrator.sessions);
+  orchestratorSessionsRef.current = state.orchestrator.sessions;
+
   const orchestratorSetActiveSession = useCallback((sessionId: string | null) => {
     dispatch({ type: 'ORCHESTRATOR_SET_ACTIVE_SESSION', sessionId });
 
@@ -2097,7 +2100,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     //
 
     if (sessionId) {
-      const session = state.orchestrator.sessions.find(s => s.sessionId === sessionId);
+      const session = orchestratorSessionsRef.current.find(s => s.sessionId === sessionId);
       if (session && !session.loaded) {
         const jsonRpc = acpRequest('session/load', { sessionId });
         wsClient.send({ type: 'acp_message', json_rpc: jsonRpc });
@@ -2105,7 +2108,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         pendingAcpRequestsRef.current.set(parsed.id, { method: 'session/load', sessionId });
       }
     }
-  }, [state.orchestrator.sessions]);
+  }, []);
 
   const orchestratorClearMessages = useCallback((sessionId: string) => {
     dispatch({ type: 'ORCHESTRATOR_CLEAR_MESSAGES', sessionId });
