@@ -122,7 +122,7 @@ impl AcpServer {
             Ok(request) => {
                 self.dispatch_request(client_id, id, request, publish_channel).await;
             }
-            Err(_) => {
+            Err(req_err) => {
                 //
                 // Try as notification.
                 //
@@ -132,16 +132,28 @@ impl AcpServer {
                         self.dispatch_notification(client_id, notification, publish_channel).await;
                     }
                     Err(_) => {
+                        //
+                        // If the request error was "method not found" then the
+                        // method is genuinely unknown. Otherwise the method is
+                        // known but params failed to deserialize.
+                        //
+
+                        let (code, msg) = if req_err.code == acp::ErrorCode::MethodNotFound {
+                            (-32601, format!("Method not found: {}", method))
+                        } else {
+                            (-32602, format!("Invalid params for {}: {}", method, req_err.message))
+                        };
                         common::log_warn!(
-                            "ACP: unknown method '{}' from {}",
-                            method,
-                            &client_id[..8.min(client_id.len())]
+                            "ACP: {} from {}: {}",
+                            if code == -32601 { "unknown method" } else { "invalid params" },
+                            &client_id[..8.min(client_id.len())],
+                            msg,
                         );
                         if let Some(id) = id {
                             let _ = send_to_client(
                                 publish_channel,
                                 client_id,
-                                acp_error_response(id, -32601, "Method not found"),
+                                acp_error_response(id, code as i64, &msg),
                             ).await;
                         }
                     }
