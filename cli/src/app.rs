@@ -3175,6 +3175,21 @@ impl App {
                 self.orchestrator.sessions.sort_by(|a, b| a.label.cmp(&b.label));
             }
 
+            AcpEvent::UserPrompt { session_id, text } => {
+                if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
+                    //
+                    // Only add if the message isn't already there (replay).
+                    //
+
+                    let already = session.messages.iter().any(|m| {
+                        matches!(m, ConversationEntry::UserPrompt(t) if t == &text)
+                    });
+                    if !already {
+                        session.messages.push(ConversationEntry::UserPrompt(text));
+                    }
+                }
+            }
+
             AcpEvent::TextContent { session_id, text } => {
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
                     session.active_tool = None;

@@ -14,6 +14,7 @@ pub enum AcpEvent {
     SessionStarted { session_id: String, provider: String, model: String },
     SessionList { sessions: Vec<(String, String)> },  // (session_id, name)
     SessionClosed { session_id: String },
+    UserPrompt { session_id: String, text: String },
     TextContent { session_id: String, text: String },
     ToolCall { session_id: String, name: String, input: Option<String> },
     ToolResult { session_id: String, name: String, success: bool, result: String },
@@ -199,6 +200,17 @@ impl AcpClient {
                 let provider = raw_update.get("provider").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
                 let model = raw_update.get("model").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
                 Some(AcpEvent::SessionStarted { session_id, provider, model })
+            }
+
+            "user_prompt" => {
+                let text = update
+                    .content
+                    .as_ref()
+                    .and_then(|blocks| {
+                        blocks.iter().filter_map(|b| b.text.as_deref()).next().map(String::from)
+                    })
+                    .unwrap_or_default();
+                Some(AcpEvent::UserPrompt { session_id, text })
             }
 
             "text" => {

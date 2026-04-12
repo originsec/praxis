@@ -1523,6 +1523,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
                     model: (update.model as string) || 'unknown',
                   });
                   break;
+                case 'user_prompt': {
+                  const promptText = extractText(update);
+                  if (promptText) {
+                    dispatch({
+                      type: 'ORCHESTRATOR_ADD_USER_MESSAGE',
+                      sessionId,
+                      message: promptText,
+                      promptId: generateUUID(),
+                    });
+                  }
+                  break;
+                }
                 case 'text': {
                   const text = extractText(update);
                   if (text) {

@@ -20,7 +20,7 @@ use rmcp::{
 };
 
 use crate::acp_server::{
-    acp_response, acp_error_response,
+    acp_notification, acp_response, acp_error_response,
     session_update_text, session_update_tool_call, session_update_tool_result,
     session_update_plan, session_update_usage, session_update_started,
 };
@@ -310,6 +310,23 @@ impl OrchestratorManager {
                     );
 
                     conversation_history.push(Message::user(&prompt));
+
+                    //
+                    // Log the user prompt for session/load replay.
+                    //
+
+                    {
+                        let user_prompt_event = acp_notification("session/update", json!({
+                            "sessionId": sid,
+                            "update": {
+                                "kind": "user_prompt",
+                                "content": [{ "type": "text", "text": prompt }]
+                            }
+                        }));
+                        if let common::ClientDirectMessage::AcpMessage { ref json_rpc } = user_prompt_event {
+                            event_log_clone.write().await.push(json_rpc.clone());
+                        }
+                    }
 
                     //
                     // Keep conversation manageable.
