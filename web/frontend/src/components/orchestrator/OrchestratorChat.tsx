@@ -57,7 +57,28 @@ function parseThinkingContent(content: string): { thinking: string[]; response: 
     remaining = remaining.substring(0, startIdx) + remaining.substring(endIdx + endTag.length);
   }
 
-  return { thinking, response: remaining.trim() };
+  let response = remaining.trim();
+
+  //
+  // Strip wrapping triple-backtick fences when the entire response is a
+  // single code block. This happens when LLMs wrap markdown output in ```
+  // which prevents ReactMarkdown from rendering tables, bold, etc.
+  //
+
+  if (response.startsWith('```')) {
+    const firstNewline = response.indexOf('\n');
+    if (firstNewline !== -1) {
+      const afterOpen = response.substring(firstNewline + 1).trimEnd();
+      if (afterOpen.endsWith('```')) {
+        const inner = afterOpen.substring(0, afterOpen.length - 3);
+        if (!inner.includes('\n```')) {
+          response = inner.trim();
+        }
+      }
+    }
+  }
+
+  return { thinking, response };
 }
 
 //
