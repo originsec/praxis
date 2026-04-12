@@ -762,6 +762,10 @@ fn render_tokens(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 }
 
 fn render_status_hints(f: &mut Frame, area: Rect, state: &OrchestratorState) {
+    if state.sessions.is_empty() {
+        return;
+    }
+
     let mut spans = vec![
         Span::styled("  ^n", Style::default().fg(DIM)),
         Span::styled(" new", Style::default().fg(MUTED)),
