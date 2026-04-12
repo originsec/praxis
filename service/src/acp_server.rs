@@ -60,6 +60,9 @@ impl AcpServer {
                 let params = msg.get("params").cloned().unwrap_or(json!({}));
                 self.handle_session_cancel(client_id, params, publish_channel).await;
             }
+            Some("session/list") => {
+                self.handle_session_list(client_id, id, publish_channel).await;
+            }
             Some("session/close") => {
                 let params = msg.get("params").cloned().unwrap_or(json!({}));
                 self.handle_session_close(client_id, id, params, publish_channel).await;
@@ -196,6 +199,22 @@ impl AcpServer {
             self.orchestrator_manager
                 .cancel_prompt(client_id, session_id, publish_channel)
                 .await;
+        }
+    }
+
+    async fn handle_session_list(
+        &self,
+        client_id: &str,
+        id: Option<Value>,
+        publish_channel: &Channel,
+    ) {
+        let session_ids = self.orchestrator_manager.list_sessions(client_id).await;
+        if let Some(id) = id {
+            let _ = send_to_client(
+                publish_channel,
+                client_id,
+                acp_response(id, json!({ "sessions": session_ids })),
+            ).await;
         }
     }
 

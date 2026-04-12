@@ -633,15 +633,19 @@ impl App {
     }
 
     pub async fn init(&mut self) {
-        self.start_orchestrator_session().await;
+        //
+        // Fetch existing orchestrator sessions from the service. If none
+        // exist, a new one will be created when the user types a prompt.
+        //
+
+        let (_, json_rpc) = self.orchestrator.acp_client.list_sessions();
+        let _ = self.client.send_acp_message(json_rpc).await;
+
         //
         // Request initial op list so broadcasts can update it.
         //
-        let _ = self.client.request_semantic_op_list().await;
-    }
 
-    pub async fn start_orchestrator_session(&mut self) {
-        self.create_new_orchestrator_session().await;
+        let _ = self.client.request_semantic_op_list().await;
     }
 
     async fn create_new_orchestrator_session(&mut self) {
@@ -3057,6 +3061,26 @@ impl App {
             }
 
             AcpEvent::InitializeResult { .. } => {}
+
+            AcpEvent::SessionList { sessions } => {
+                //
+                // Populate the session list from the server. Add any sessions
+                // we don't already have.
+                //
+
+                for sid in sessions {
+                    if self.orchestrator.session_by_id_mut(&sid).is_none() {
+                        let label = self.orchestrator.next_session_label();
+                        let session = OrchestratorSessionState::new(sid, label);
+                        self.orchestrator.sessions.push(session);
+                    }
+                }
+                if self.orchestrator.active_session_index.is_none()
+                    && !self.orchestrator.sessions.is_empty()
+                {
+                    self.orchestrator.active_session_index = Some(0);
+                }
+            }
 
             AcpEvent::TextContent { session_id, text } => {
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {

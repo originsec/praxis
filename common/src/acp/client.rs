@@ -12,6 +12,7 @@ pub enum AcpEvent {
     InitializeResult { protocol_version: u32 },
     SessionCreated { session_id: String },
     SessionStarted { session_id: String, provider: String, model: String },
+    SessionList { sessions: Vec<String> },
     SessionClosed { session_id: String },
     TextContent { session_id: String, text: String },
     ToolCall { session_id: String, name: String, input: Option<String> },
@@ -70,6 +71,13 @@ impl AcpClient {
             "sessionId": session_id
         })));
         serde_json::to_string(&notif).unwrap()
+    }
+
+    /// Build a session/list request. Returns (request_id, json_rpc_string).
+    pub fn list_sessions(&self) -> (u64, String) {
+        let id = self.next_id();
+        let req = JsonRpcRequest::new(id, "session/list", None);
+        (id, serde_json::to_string(&req).unwrap())
     }
 
     /// Build a session/close request. Returns (request_id, json_rpc_string).
@@ -272,6 +280,14 @@ impl AcpClient {
         if let Some(pv) = result.get("protocolVersion") {
             let protocol_version = pv.as_u64().unwrap_or(1) as u32;
             return Some(AcpEvent::InitializeResult { protocol_version });
+        }
+
+        if let Some(sessions) = result.get("sessions").and_then(|v| v.as_array()) {
+            let ids: Vec<String> = sessions
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+            return Some(AcpEvent::SessionList { sessions: ids });
         }
 
         if let Some(sid) = result.get("sessionId").and_then(|v| v.as_str()) {

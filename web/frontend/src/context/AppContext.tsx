@@ -1382,10 +1382,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const handleMessage = (message: ServerMessage) => {
       switch (message.type) {
-        case 'connected':
+        case 'connected': {
           dispatch({ type: 'SET_CONNECTED', connected: true, clientId: message.client_id, version: message.version });
           wsClient.send({ type: 'config_get', keys: ['prompt_timeout_secs'] });
+
+          //
+          // Fetch existing orchestrator sessions from the service.
+          //
+
+          const listRpc = acpRequest('session/list');
+          wsClient.send({ type: 'acp_message', json_rpc: listRpc });
+          const listParsed = JSON.parse(listRpc);
+          pendingAcpRequestsRef.current.set(listParsed.id, { method: 'session/list' });
           break;
+        }
         case 'state_update':
           //
           // Debug: Log selected_agent info from state updates.
@@ -1552,6 +1562,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
               }
 
               switch (pending.method) {
+                case 'session/list': {
+                  const sessions = rpc.result?.sessions as string[] | undefined;
+                  if (sessions && sessions.length > 0) {
+                    for (const sid of sessions) {
+                      dispatch({
+                        type: 'ORCHESTRATOR_SESSION_CREATED',
+                        sessionId: sid,
+                        label: `Session ${sid.slice(0, 6)}`,
+                      });
+                    }
+                  }
+                  break;
+                }
                 case 'session/new': {
                   const sessionId = rpc.result?.sessionId as string;
                   if (sessionId) {
