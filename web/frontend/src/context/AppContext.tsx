@@ -1506,7 +1506,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               const sessionUpdate = update.sessionUpdate as string;
 
               switch (sessionUpdate) {
-                case 'session_info': {
+                case 'session_info_update': {
                   const meta = update._meta as Record<string, unknown> | undefined;
                   if (meta) {
                     if (meta.promptTokens !== undefined) {
@@ -1553,28 +1553,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   break;
                 }
                 case 'tool_call': {
-                  const toolCall = update.toolCall as { toolName?: string; toolInput?: unknown } | undefined;
-                  const toolName = toolCall?.toolName || '';
+                  const toolName = (update.title as string) || '';
                   if (toolName !== 'report_plan') {
                     dispatch({
                       type: 'ORCHESTRATOR_TOOL_EXECUTING',
                       sessionId,
                       name: toolName,
-                      input: toolCall?.toolInput ? JSON.stringify(toolCall.toolInput) : undefined,
+                      input: update.toolCallId as string | undefined,
                     });
                   }
                   break;
                 }
-                case 'tool_result': {
-                  const toolUseId = (update.toolUseId as string) || '';
-                  if (toolUseId !== 'report_plan') {
+                case 'tool_call_update': {
+                  const tcId = (update.toolCallId as string) || '';
+                  const status = (update.status as string) || '';
+                  if (status === 'completed' || status === 'failed') {
                     const resultText = extractText(update);
                     dispatch({
                       type: 'ORCHESTRATOR_TOOL_EXECUTED',
                       sessionId,
-                      name: toolUseId,
-                      display: toolUseId,
-                      success: true,
+                      name: tcId,
+                      display: tcId,
+                      success: status !== 'failed',
                       result: resultText,
                     });
                   }

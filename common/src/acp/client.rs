@@ -205,16 +205,17 @@ impl AcpClient {
             }
 
             "tool_call" => {
-                let tool_call = update.get("toolCall")?;
-                let name = tool_call.get("toolName").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
-                let input = tool_call.get("toolInput").map(|v| v.to_string());
-                Some(AcpEvent::ToolCall { session_id: sid, name, input })
+                let name = update.get("title").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                let tc_id = update.get("toolCallId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                Some(AcpEvent::ToolCall { session_id: sid, name, input: Some(tc_id) })
             }
 
-            "tool_result" => {
-                let name = update.get("toolUseId").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+            "tool_call_update" => {
+                let tc_id = update.get("toolCallId").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
                 let result = extract_content_text(update).unwrap_or_default();
-                Some(AcpEvent::ToolResult { session_id: sid, name, success: true, result })
+                let status = update.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                let success = status != "failed";
+                Some(AcpEvent::ToolResult { session_id: sid, name: tc_id, success, result })
             }
 
             "plan" => {
@@ -237,7 +238,7 @@ impl AcpClient {
                 Some(AcpEvent::PlanUpdate { session_id: sid, plan })
             }
 
-            "session_info" => {
+            "session_info_update" => {
                 let meta = update.get("_meta")?;
 
                 if let Some(pt) = meta.get("promptTokens") {

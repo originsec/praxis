@@ -374,43 +374,39 @@ pub fn acp_error_response(id: Value, code: i64, message: &str) -> ClientDirectMe
 }
 
 //
-// session/update notification builders used for both live streaming
-// and event log replay.
+// session/update notification builders using the agent-client-protocol-schema
+// crate for correct wire format.
 //
 
-pub fn session_update_text(session_id: &str, text: impl Into<String>) -> ClientDirectMessage {
-    acp_notification("session/update", json!({
-        "sessionId": session_id,
-        "update": {
-            "sessionUpdate": "agent_message_chunk",
-            "content": { "type": "text", "text": text.into() }
-        }
-    }))
+use agent_client_protocol_schema as acp;
+
+fn session_notification(session_id: &str, update: acp::SessionUpdate) -> ClientDirectMessage {
+    let notif = acp::SessionNotification::new(session_id.to_string(), update);
+    let json_rpc = serde_json::to_string(&json!({
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": notif,
+    })).unwrap();
+    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 200));
+    ClientDirectMessage::AcpMessage { json_rpc }
 }
 
-pub fn session_update_tool_call(session_id: &str, tool_name: &str, tool_input: Option<Value>) -> ClientDirectMessage {
-    acp_notification("session/update", json!({
-        "sessionId": session_id,
-        "update": {
-            "sessionUpdate": "tool_call",
-            "toolCall": {
-                "toolUseId": uuid::Uuid::new_v4().to_string(),
-                "toolName": tool_name,
-                "toolInput": tool_input.unwrap_or(json!({})),
-            }
-        }
-    }))
+pub fn session_update_text(session_id: &str, text: impl Into<String>) -> ClientDirectMessage {
+    let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(text)));
+    session_notification(session_id, acp::SessionUpdate::AgentMessageChunk(chunk))
+}
+
+pub fn session_update_tool_call(session_id: &str, tool_name: &str, _tool_input: Option<Value>) -> ClientDirectMessage {
+    let tc = acp::ToolCall::new(uuid::Uuid::new_v4().to_string(), tool_name);
+    session_notification(session_id, acp::SessionUpdate::ToolCall(tc))
 }
 
 pub fn session_update_tool_result(session_id: &str, tool_name: &str, result: &str) -> ClientDirectMessage {
-    acp_notification("session/update", json!({
-        "sessionId": session_id,
-        "update": {
-            "sessionUpdate": "tool_result",
-            "toolUseId": tool_name,
-            "content": { "type": "text", "text": result }
-        }
-    }))
+    let fields = acp::ToolCallUpdateFields::new()
+        .status(acp::ToolCallStatus::Completed)
+        .content(vec![acp::ToolCallContent::Content(acp::Content::new(result))]);
+    let update = acp::ToolCallUpdate::new(tool_name.to_string(), fields);
+    session_notification(session_id, acp::SessionUpdate::ToolCallUpdate(update))
 }
 
 pub fn session_update_plan(session_id: &str, plan: &Value) -> ClientDirectMessage {
@@ -418,54 +414,36 @@ pub fn session_update_plan(session_id: &str, plan: &Value) -> ClientDirectMessag
         .and_then(|s| s.as_array())
         .map(|steps| {
             steps.iter().map(|step| {
+                let desc = step.get("description").and_then(|d| d.as_str()).unwrap_or("");
                 let status = match step.get("status").and_then(|s| s.as_str()) {
-                    Some("Done") => "completed",
-                    Some("InProgress") => "in_progress",
-                    _ => "pending",
+                    Some("Done") => acp::PlanEntryStatus::Completed,
+                    Some("InProgress") => acp::PlanEntryStatus::InProgress,
+                    _ => acp::PlanEntryStatus::Pending,
                 };
-                json!({
-                    "content": step.get("description").and_then(|d| d.as_str()).unwrap_or(""),
-                    "status": status,
-                    "priority": "medium",
-                })
+                acp::PlanEntry::new(desc, acp::PlanEntryPriority::Medium, status)
             }).collect::<Vec<_>>()
         })
         .unwrap_or_default();
 
-    acp_notification("session/update", json!({
-        "sessionId": session_id,
-        "update": {
-            "sessionUpdate": "plan",
-            "plan": { "entries": entries }
-        }
-    }))
+    session_notification(session_id, acp::SessionUpdate::Plan(acp::Plan::new(entries)))
 }
 
 pub fn session_update_usage(session_id: &str, prompt_tokens: u32, completion_tokens: u32, total_tokens: u32) -> ClientDirectMessage {
-    acp_notification("session/update", json!({
-        "sessionId": session_id,
-        "update": {
-            "sessionUpdate": "session_info",
-            "title": null,
-            "_meta": {
-                "promptTokens": prompt_tokens,
-                "completionTokens": completion_tokens,
-                "totalTokens": total_tokens,
-            }
-        }
-    }))
+    let info = acp::SessionInfoUpdate::new()
+        .meta(serde_json::from_value::<acp::Meta>(json!({
+            "promptTokens": prompt_tokens,
+            "completionTokens": completion_tokens,
+            "totalTokens": total_tokens,
+        })).unwrap());
+    session_notification(session_id, acp::SessionUpdate::SessionInfoUpdate(info))
 }
 
 pub fn session_update_started(session_id: &str, provider: &str, model: &str) -> ClientDirectMessage {
-    acp_notification("session/update", json!({
-        "sessionId": session_id,
-        "update": {
-            "sessionUpdate": "session_info",
-            "title": format!("{}/{}", provider, model),
-            "_meta": {
-                "provider": provider,
-                "model": model,
-            },
-        }
-    }))
+    let info = acp::SessionInfoUpdate::new()
+        .title(format!("{}/{}", provider, model))
+        .meta(serde_json::from_value::<acp::Meta>(json!({
+            "provider": provider,
+            "model": model,
+        })).unwrap());
+    session_notification(session_id, acp::SessionUpdate::SessionInfoUpdate(info))
 }
