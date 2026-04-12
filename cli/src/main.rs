@@ -164,8 +164,8 @@ async fn run_command(rabbitmq_url: &str, timeout: u64, command: Commands) -> Res
 }
 
 async fn run_acp_proxy(rabbitmq_url: &str, timeout: u64) -> Result<()> {
-    let mut cli_state = state::CliState::load()?;
-    let client_id = cli_state.get_or_create_client_id()?;
+    let uid = uuid::Uuid::new_v4().to_string();
+    let client_id = format!("acp_{}", &uid[..8]);
     let client = Arc::new(client::Client::connect(rabbitmq_url, timeout, client_id).await?);
 
     let mut acp_rx = client.subscribe_acp_events();
