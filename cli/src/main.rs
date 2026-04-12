@@ -171,11 +171,44 @@ async fn run_acp_proxy(rabbitmq_url: &str, timeout: u64) -> Result<()> {
     let mut acp_rx = client.subscribe_acp_events();
 
     //
-    // ACP responses from service written to stdout as NDJSON.
+    // Track request IDs originated from stdin so we only forward
+    // responses that belong to this proxy session.
     //
+
+    let pending_ids: Arc<std::sync::Mutex<std::collections::HashSet<serde_json::Value>>> =
+        Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+
+    //
+    // ACP responses from service written to stdout as NDJSON.
+    // Only forward notifications (no id) and responses to our requests.
+    //
+
+    let pending_ids_rx = pending_ids.clone();
     let stdout_task = tokio::spawn(async move {
         let mut stdout = tokio::io::stdout();
         while let Some(json_rpc) = acp_rx.recv().await {
+            //
+            // Parse to check if this is a response we should forward.
+            //
+
+            let should_forward = if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&json_rpc) {
+                if let Some(id) = msg.get("id") {
+                    if msg.get("method").is_some() {
+                        true // server-initiated request — forward
+                    } else {
+                        pending_ids_rx.lock().unwrap().remove(id) // response — only if we sent the request
+                    }
+                } else {
+                    true // notification (no id) — always forward
+                }
+            } else {
+                true // parse error — forward anyway
+            };
+
+            if !should_forward {
+                continue;
+            }
+
             use tokio::io::AsyncWriteExt;
             if stdout.write_all(json_rpc.as_bytes()).await.is_err() {
                 break;
@@ -191,8 +224,11 @@ async fn run_acp_proxy(rabbitmq_url: &str, timeout: u64) -> Result<()> {
 
     //
     // NDJSON lines from stdin forwarded as ACP requests to service.
+    // Track request IDs so we can filter responses.
     //
+
     let client_clone = client.clone();
+    let pending_ids_tx = pending_ids.clone();
     let stdin_task = tokio::spawn(async move {
         use tokio::io::{AsyncBufReadExt, BufReader};
         let reader = BufReader::new(tokio::io::stdin());
@@ -202,6 +238,17 @@ async fn run_acp_proxy(rabbitmq_url: &str, timeout: u64) -> Result<()> {
             if line.is_empty() {
                 continue;
             }
+
+            //
+            // Track the request ID if present.
+            //
+
+            if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
+                if let Some(id) = msg.get("id") {
+                    pending_ids_tx.lock().unwrap().insert(id.clone());
+                }
+            }
+
             if let Err(e) = client_clone.send_acp_message(line).await {
                 eprintln!("Failed to send ACP message: {}", e);
                 break;
