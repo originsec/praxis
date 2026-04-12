@@ -2,10 +2,11 @@ mod input;
 mod nodes;
 mod operations;
 
+use crate::acp::{AcpBridgeHandle, AcpNotification};
 use crate::client::Client;
 use crate::event::AppEvent;
 use chrono::Utc;
-use common::{AcpClient, AcpEvent, NodeCommand, NodeCommandResult, NodeState, OrchestratorPlan, SystemState};
+use common::{NodeCommand, NodeCommandResult, NodeState, OrchestratorPlan, SystemState};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
@@ -133,6 +134,7 @@ pub struct App {
     pub operations: OperationsState,
     pub settings: SettingsState,
     pub client: Arc<Client>,
+    pub acp: AcpBridgeHandle,
     pub should_quit: bool,
     pub connected: bool,
     pub popup: Option<Popup>,
@@ -221,7 +223,6 @@ impl OrchestratorSessionState {
 pub struct OrchestratorState {
     pub sessions: Vec<OrchestratorSessionState>,
     pub active_session_index: Option<usize>,
-    pub acp_client: AcpClient,
     pub session_counter: usize,
     pub input: String,
     pub cursor_pos: usize,
@@ -257,7 +258,6 @@ impl Default for OrchestratorState {
         Self {
             sessions: Vec::new(),
             active_session_index: None,
-            acp_client: AcpClient::new(),
             session_counter: 0,
             input: String::new(),
             cursor_pos: 0,
@@ -603,7 +603,13 @@ impl Default for SettingsState {
 }
 
 impl App {
-    pub fn new(client: Arc<Client>, rabbitmq_url: String, client_id: String) -> Self {
+    pub fn new(
+        client: Arc<Client>,
+        rabbitmq_url: String,
+        client_id: String,
+        event_tx: mpsc::UnboundedSender<AppEvent>,
+    ) -> Self {
+        let acp = AcpBridgeHandle::start(client.clone(), event_tx.clone());
         Self {
             active_window: Window::Orchestrator,
             orchestrator: OrchestratorState::default(),
@@ -615,6 +621,7 @@ impl App {
                 ..SettingsState::default()
             },
             client,
+            acp,
             should_quit: false,
             connected: true,
             popup: None,
@@ -622,7 +629,7 @@ impl App {
             run_options: None,
             confirm: None,
             terminal_width: 0,
-            event_tx: None,
+            event_tx: Some(event_tx),
             needs_full_redraw: false,
             terminal_paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             terminal_resume: Arc::new(tokio::sync::Notify::new()),
@@ -645,8 +652,7 @@ impl App {
         // exist, a new one will be created when the user types a prompt.
         //
 
-        let (_, json_rpc) = self.orchestrator.acp_client.list_sessions();
-        let _ = self.client.send_acp_message(json_rpc).await;
+        let _ = self.acp.list_sessions().await;
 
         //
         // Request initial op list so broadcasts can update it.
@@ -657,8 +663,7 @@ impl App {
 
     async fn create_new_orchestrator_session(&mut self) {
         let name = format!("CLI_Session {}", self.orchestrator.next_session_number());
-        let (_, json_rpc) = self.orchestrator.acp_client.create_session(".", Some(&name), None);
-        if let Err(e) = self.client.send_acp_message(json_rpc).await {
+        if let Err(e) = self.acp.create_session(".", Some(&name), None).await {
             if let Some(session) = self.orchestrator.active_session_mut() {
                 session.messages.push(ConversationEntry::Error(format!(
                     "Failed to create session: {}",
@@ -673,8 +678,7 @@ impl App {
         if let Some(session) = self.orchestrator.sessions.get(index) {
             if !session.loaded {
                 let sid = session.session_id.clone();
-                let (_, json_rpc) = self.orchestrator.acp_client.load_session(&sid);
-                let _ = self.client.send_acp_message(json_rpc).await;
+                let _ = self.acp.load_session(&sid).await;
             }
         }
     }
@@ -682,8 +686,7 @@ impl App {
     async fn close_active_orchestrator_session(&mut self) {
         if let Some(session) = self.orchestrator.active_session() {
             let session_id = session.session_id.clone();
-            let (_, json_rpc) = self.orchestrator.acp_client.close_session(&session_id);
-            let _ = self.client.send_acp_message(json_rpc).await;
+            let _ = self.acp.close_session(&session_id).await;
 
             //
             // Remove locally immediately and switch to another session if
@@ -727,14 +730,13 @@ impl App {
                 }
                 true
             }
-            AppEvent::AcpEvent(json_rpc) => {
-                self.handle_acp_event(json_rpc).await;
+            AppEvent::AcpNotification(notif) => {
+                self.handle_acp_notification(notif).await;
                 true
             }
             AppEvent::SessionListPoll => {
-                let (_, json_rpc) = self.orchestrator.acp_client.list_sessions();
-                let _ = self.client.send_acp_message(json_rpc).await;
-                false // no redraw needed, SessionList event will trigger it
+                let _ = self.acp.list_sessions().await;
+                false
             }
             AppEvent::StateUpdate(state) => {
                 self.handle_state_update(state);
@@ -2425,11 +2427,8 @@ impl App {
                 KeyCode::Char('c') => {
                     if let Some(session) = self.orchestrator.active_session() {
                         if session.is_streaming {
-                            let json_rpc = self
-                                .orchestrator
-                                .acp_client
-                                .cancel_prompt(&session.session_id);
-                            let _ = self.client.send_acp_message(json_rpc).await;
+                            let sid = session.session_id.clone();
+                            let _ = self.acp.cancel_prompt(&sid).await;
                         }
                     }
                     return;
@@ -2534,12 +2533,7 @@ impl App {
                         self.orchestrator.input.clear();
                         self.orchestrator.cursor_pos = 0;
 
-                        let (_, json_rpc) = self
-                            .orchestrator
-                            .acp_client
-                            .send_prompt(&session_id, &input);
-
-                        if let Err(e) = self.client.send_acp_message(json_rpc).await {
+                        if let Err(e) = self.acp.send_prompt(&session_id, &input).await {
                             if let Some(session) = self.orchestrator.active_session_mut() {
                                 session
                                     .messages
@@ -2909,8 +2903,7 @@ impl App {
         self.close_active_orchestrator_session().await;
 
         let name = format!("CLI_Session {}", self.orchestrator.next_session_number());
-        let (_, json_rpc) = self.orchestrator.acp_client.create_session(".", Some(&name), Some(model_name));
-        if let Err(e) = self.client.send_acp_message(json_rpc).await {
+        if let Err(e) = self.acp.create_session(".", Some(&name), Some(model_name)).await {
             if let Some(session) = self.orchestrator.active_session_mut() {
                 session
                     .messages
@@ -3045,13 +3038,9 @@ impl App {
         }
     }
 
-    async fn handle_acp_event(&mut self, json_rpc: String) {
-        let Some(event) = self.orchestrator.acp_client.parse_response(&json_rpc) else {
-            return;
-        };
-
-        match event {
-            AcpEvent::SessionCreated { session_id, provider, model } => {
+    async fn handle_acp_notification(&mut self, notif: AcpNotification) {
+        match notif {
+            AcpNotification::SessionCreated { session_id, provider, model } => {
                 //
                 // A new session was created by this client. Mark loaded since
                 // we'll see all events in real time.
@@ -3077,20 +3066,11 @@ impl App {
                         session.is_streaming = true;
                         session.prompt_seq += 1;
                     }
-                    let (_, json_rpc) = self.orchestrator.acp_client.send_prompt(&session_id, &prompt);
-                    let _ = self.client.send_acp_message(json_rpc).await;
+                    let _ = self.acp.send_prompt(&session_id, &prompt).await;
                 }
             }
 
-            AcpEvent::SessionStarted { session_id, provider, model } => {
-                if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
-                    session.provider = Some(provider);
-                    session.model = Some(model);
-                    session.loaded = true;
-                }
-            }
-
-            AcpEvent::SessionClosed { session_id } => {
+            AcpNotification::SessionClosed { session_id } => {
                 if let Some(idx) = self
                     .orchestrator
                     .sessions
@@ -3115,9 +3095,9 @@ impl App {
                 }
             }
 
-            AcpEvent::InitializeResult { .. } => {}
+            AcpNotification::InitializeResult => {}
 
-            AcpEvent::SessionList { sessions } => {
+            AcpNotification::SessionList { sessions } => {
                 //
                 // Sync session list with the server. Only show sessions
                 // with the CLI_ prefix (ours). Other clients have their
@@ -3177,7 +3157,7 @@ impl App {
                 self.orchestrator.sessions.sort_by(|a, b| a.label.cmp(&b.label));
             }
 
-            AcpEvent::UserPrompt { session_id, text } => {
+            AcpNotification::UserPrompt { session_id, text } => {
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
                     //
                     // Only add if the message isn't already there (replay).
@@ -3192,7 +3172,7 @@ impl App {
                 }
             }
 
-            AcpEvent::TextContent { session_id, text } => {
+            AcpNotification::TextContent { session_id, text } => {
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
                     session.active_tool = None;
 
@@ -3218,7 +3198,7 @@ impl App {
                 }
             }
 
-            AcpEvent::ToolCall { session_id, name, input } => {
+            AcpNotification::ToolCall { session_id, name, input } => {
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
                     if name != "report_plan" {
                         session.active_tool = Some(name);
@@ -3227,7 +3207,7 @@ impl App {
                 }
             }
 
-            AcpEvent::ToolResult { session_id, name, success, result } => {
+            AcpNotification::ToolResult { session_id, name, success, result } => {
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
                     let tool_name = session.active_tool.take().unwrap_or(name);
                     if tool_name != "report_plan" {
@@ -3243,13 +3223,13 @@ impl App {
                 }
             }
 
-            AcpEvent::PlanUpdate { session_id, plan } => {
+            AcpNotification::PlanUpdate { session_id, plan } => {
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
                     session.current_plan = Some(plan);
                 }
             }
 
-            AcpEvent::TokenUsage {
+            AcpNotification::TokenUsage {
                 session_id,
                 prompt_tokens,
                 completion_tokens,
@@ -3262,7 +3242,7 @@ impl App {
                 }
             }
 
-            AcpEvent::PromptComplete { .. } => {
+            AcpNotification::PromptComplete { .. } => {
                 //
                 // Find the session that was streaming and flush pending tools.
                 //
@@ -3280,9 +3260,9 @@ impl App {
                 }
             }
 
-            AcpEvent::SessionLoaded { .. } => {}
+            AcpNotification::SessionLoaded { .. } => {}
 
-            AcpEvent::Error {
+            AcpNotification::Error {
                 request_id: _,
                 message,
             } => {

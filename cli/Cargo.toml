@@ -12,6 +12,9 @@ path = "src/main.rs"
 
 [dependencies]
 common = { package = "praxis_common", path = "../common" }
+agent-client-protocol = { version = "0.10.4", features = ["unstable_session_close", "unstable_session_model", "unstable_session_usage"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+tracing = "0.1"
 tokio = { version = "1", features = ["full"] }
 lapin = "2.5"
 clap = { version = "4", features = ["derive", "env"] }

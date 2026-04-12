@@ -1,3 +1,4 @@
+use crate::acp::AcpNotification;
 use crate::client::Client;
 use common::{
     ChainDefinitionInfo, ChainExecutionUpdate, OperationDefinitionInfo, SemanticOpUpdate,
@@ -11,7 +12,7 @@ use tokio::sync::{Notify, mpsc};
 
 pub enum AppEvent {
     Terminal(Event),
-    AcpEvent(String),
+    AcpNotification(AcpNotification),
     SessionListPoll,
     StateUpdate(SystemState),
     OperationsRefreshed {
@@ -94,13 +95,13 @@ impl EventHandler {
         });
 
         //
-        // ACP events from the client's subscription channel.
+        // Terminal output from node PTY sessions.
         //
-        let tx_acp = tx.clone();
-        let mut acp_rx = client.subscribe_acp_events();
+        let tx_term_out = tx.clone();
+        let mut term_rx = client.subscribe_terminal_output();
         tokio::spawn(async move {
-            while let Some(json_rpc) = acp_rx.recv().await {
-                if tx_acp.send(AppEvent::AcpEvent(json_rpc)).is_err() {
+            while let Some(output) = term_rx.recv().await {
+                if tx_term_out.send(AppEvent::TerminalOutput(output)).is_err() {
                     break;
                 }
             }
@@ -109,25 +110,11 @@ impl EventHandler {
         //
         // Periodic session/list poll (every 5 seconds).
         //
-
         let tx_poll = tx.clone();
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 if tx_poll.send(AppEvent::SessionListPoll).is_err() {
-                    break;
-                }
-            }
-        });
-
-        //
-        // Terminal output from node PTY sessions.
-        //
-        let tx_term_out = tx.clone();
-        let mut term_rx = client.subscribe_terminal_output();
-        tokio::spawn(async move {
-            while let Some(output) = term_rx.recv().await {
-                if tx_term_out.send(AppEvent::TerminalOutput(output)).is_err() {
                     break;
                 }
             }

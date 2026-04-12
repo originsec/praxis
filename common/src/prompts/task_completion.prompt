@@ -1,10 +1,9 @@
 ## Task Completion
 
 Signal completion ONLY when you have gathered REAL data from tool responses.
+Output the JSON directly as plain text (NO code fences):
 
-```json
 {"complete": true, "result": true, "summary": "Detailed findings and data from the operation"}
-```
 
 ### FIELDS
 
@@ -44,16 +43,10 @@ Set result to `false` when:
 ### Example Flow
 
 Message 1 (you):
-```json
 {"tool": "session_prompt", "args": {"text": "list files"}}
-```
 
 Message 2 (system):
-```
 Tool 'session_prompt' result: file1.txt file2.txt file3.txt
-```
 
 Message 3 (you):
-```json
 {"complete": true, "result": true, "summary": "Listed files in directory: file1.txt file2.txt file3.txt"}
-```

@@ -20,10 +20,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "agent-client-protocol-schema"
-version = "0.11.5"
+name = "agent-client-protocol"
+version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3889095d10943a5fc6f803ba839679def450471ddb96de245e700ce82d601da6"
+checksum = "10eeef5e80864f9c3c148a3f395c3e35a66d37ec7561c7845b2bffae8e841759"
+dependencies = [
+ "agent-client-protocol-schema",
+ "anyhow",
+ "async-broadcast",
+ "async-trait",
+ "derive_more",
+ "futures",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "agent-client-protocol-schema"
+version = "0.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca68e7e55681ce56546c0cecc6bc8f20493d24b44c6d93ec46174f310730bba2"
 dependencies = [
  "anyhow",
  "derive_more",
@@ -219,6 +236,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "async-broadcast"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "435a87a52755b8f27fcf321ac4f04b2802e337c8c4872923137471ec39c37532"
+dependencies = [
+ "event-listener 5.4.1",
+ "event-listener-strategy",
+ "futures-core",
+ "pin-project-lite",
 ]
 
 [[package]]
@@ -3366,6 +3395,7 @@ dependencies = [
 name = "praxis_cli"
 version = "0.9.17"
 dependencies = [
+ "agent-client-protocol",
  "anyhow",
  "async-trait",
  "chrono",
@@ -3380,6 +3410,8 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-util",
+ "tracing",
  "uuid",
  "vt100",
 ]
@@ -3388,7 +3420,7 @@ dependencies = [
 name = "praxis_common"
 version = "0.9.17"
 dependencies = [
- "agent-client-protocol-schema",
+ "agent-client-protocol",
  "anyhow",
  "async-stream",
  "async-trait",
@@ -3414,6 +3446,7 @@ dependencies = [
 name = "praxis_node"
 version = "0.9.17"
 dependencies = [
+ "agent-client-protocol",
  "anyhow",
  "async-trait",
  "base64",
@@ -3480,7 +3513,7 @@ dependencies = [
 name = "praxis_service"
 version = "0.9.17"
 dependencies = [
- "agent-client-protocol-schema",
+ "agent-client-protocol",
  "anyhow",
  "async-stream",
  "async-trait",
@@ -3513,7 +3546,9 @@ dependencies = [
 name = "praxis_web"
 version = "0.9.17"
 dependencies = [
+ "agent-client-protocol",
  "anyhow",
+ "async-trait",
  "axum",
  "chrono",
  "dirs",
@@ -3526,6 +3561,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-util",
  "tower",
  "tower-http",
  "tracing",
@@ -5311,6 +5347,7 @@ checksum = "9ae9cec805b01e8fc3fd2fe289f89149a9b66dd16786abd8b19cfa7b48cb0098"
 dependencies = [
  "bytes",
  "futures-core",
+ "futures-io",
  "futures-sink",
  "futures-util",
  "pin-project-lite",

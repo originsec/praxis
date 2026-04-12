@@ -19,6 +19,9 @@ anyhow = "1.0"
 
 [dependencies]
 common = { package = "praxis_common", path = "../common" }
+agent-client-protocol = { version = "0.10.4", features = ["unstable_session_close", "unstable_session_model", "unstable_session_usage"] }
+async-trait = "0.1"
+tokio-util = { version = "0.7", features = ["compat"] }
 tokio = { version = "1", features = ["full"] }
 lapin = "2.5"
 serde = { version = "1", features = ["derive"] }

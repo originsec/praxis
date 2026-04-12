@@ -1,3 +1,4 @@
+mod acp;
 mod app;
 mod client;
 mod commands;
@@ -301,14 +302,22 @@ async fn run_tui(rabbitmq_url: &str, timeout: u64) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(client.clone(), rabbitmq_url.to_string(), client_id);
-    app.init().await;
+    let terminal_paused = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let terminal_resume = Arc::new(tokio::sync::Notify::new());
     let mut events = EventHandler::new(
         client.clone(),
-        app.terminal_paused.clone(),
-        app.terminal_resume.clone(),
+        terminal_paused.clone(),
+        terminal_resume.clone(),
     );
-    app.event_tx = Some(events.sender());
+    let mut app = App::new(
+        client.clone(),
+        rabbitmq_url.to_string(),
+        client_id,
+        events.sender(),
+    );
+    app.terminal_paused = terminal_paused;
+    app.terminal_resume = terminal_resume;
+    app.init().await;
     let mut should_draw = true;
 
     loop {

@@ -1,12 +1,10 @@
 pub mod messaging;
-pub mod acp;
 pub mod ai;
 pub mod config;
 pub mod logging;
 pub mod mcp;
 
 pub use messaging::*;
-pub use acp::{AcpClient, AcpEvent};
 pub use logging::{init as init_logging, send_event, is_initialized as is_logging_initialized};
 
 pub use ai::{

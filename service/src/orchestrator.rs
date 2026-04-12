@@ -20,9 +20,10 @@ use rmcp::{
 };
 
 use crate::acp_server::{
-    acp_notification, acp_response, acp_error_response,
-    session_update_text, session_update_tool_call, session_update_tool_result,
-    session_update_plan, session_update_usage, session_update_started,
+    acp_response, acp_error_response,
+    session_update_text, session_update_user_text, session_update_tool_call,
+    session_update_tool_result, session_update_plan, session_update_usage,
+    session_update_started,
 };
 use crate::config::ServiceConfig;
 use crate::messaging::send_to_client;
@@ -314,13 +315,7 @@ impl OrchestratorManager {
                     //
 
                     {
-                        let user_prompt_event = acp_notification("session/update", json!({
-                            "sessionId": sid,
-                            "update": {
-                                "sessionUpdate": "user_message_chunk",
-                                "content": { "type": "text", "text": prompt }
-                            }
-                        }));
+                        let user_prompt_event = session_update_user_text(&sid, &prompt);
                         if let common::ClientDirectMessage::AcpMessage { ref json_rpc } = user_prompt_event {
                             event_log_clone.write().await.push(json_rpc.clone());
                         }
@@ -387,21 +382,48 @@ impl OrchestratorManager {
                                                 //
                                                 // Flush text before the tool marker so it
                                                 // arrives at the client before tool events.
+                                                // Strip any code-fence remnants (partial
+                                                // backticks, "json" lang tag) that some
+                                                // models emit before the tool call JSON.
                                                 //
 
                                                 if marker_pos > 0 {
                                                     let pre_tool = send_buffer[..marker_pos].to_string();
-                                                    if !pre_tool.trim().is_empty() {
-                                                        bytes_sent += pre_tool.len();
-                                                        send_and_log!(session_update_text(&sid, pre_tool));
+                                                    let cleaned = pre_tool.trim_end_matches(|c: char| c == '`' || c == '\n' || c == '\r');
+                                                    let cleaned = cleaned.trim_end_matches("json").trim_end_matches(|c: char| c == '`');
+                                                    if !cleaned.trim().is_empty() {
+                                                        bytes_sent += cleaned.len();
+                                                        send_and_log!(session_update_text(&sid, cleaned));
                                                     }
                                                 }
                                                 held_back = true;
                                                 send_buffer.clear();
                                             } else if send_buffer.len() >= 50 || delta.content.contains('\n') {
-                                                bytes_sent += send_buffer.len();
-                                                send_and_log!(session_update_text(&sid, &send_buffer));
-                                                send_buffer.clear();
+
+                                                //
+                                                // Before flushing, retain any trailing
+                                                // backticks that could be the start of a
+                                                // code fence (```). This prevents the fence
+                                                // from being split across buffer flushes
+                                                // when token boundaries land mid-fence.
+                                                //
+
+                                                let trailing_backticks = send_buffer.as_bytes().iter().rev()
+                                                    .take_while(|&&b| b == b'`').count();
+
+                                                if trailing_backticks > 0 && trailing_backticks < 4 {
+                                                    let split = send_buffer.len() - trailing_backticks;
+                                                    if split > 0 {
+                                                        let to_send = &send_buffer[..split];
+                                                        bytes_sent += to_send.len();
+                                                        send_and_log!(session_update_text(&sid, to_send));
+                                                    }
+                                                    send_buffer = send_buffer[send_buffer.len() - trailing_backticks..].to_string();
+                                                } else {
+                                                    bytes_sent += send_buffer.len();
+                                                    send_and_log!(session_update_text(&sid, &send_buffer));
+                                                    send_buffer.clear();
+                                                }
                                             }
                                         }
                                     }
@@ -540,7 +562,12 @@ impl OrchestratorManager {
                     // original request ID that was encoded in prompt_id.
                     //
 
-                    send_and_log!(acp_response(prompt_id_to_json_rpc_id(&prompt_id), Value::Null));
+                    send_and_log!(acp_response(
+                        prompt_id_to_json_rpc_id(&prompt_id),
+                        serde_json::to_value(agent_client_protocol::PromptResponse::new(
+                            agent_client_protocol::StopReason::EndTurn,
+                        )).unwrap(),
+                    ));
                 }
 
                 //
@@ -680,7 +707,12 @@ impl OrchestratorManager {
             let _ = send_to_client(
                 publish_channel,
                 client_id,
-                acp_response(prompt_id_to_json_rpc_id(&prompt_id), json!({})),
+                acp_response(
+                    prompt_id_to_json_rpc_id(&prompt_id),
+                    serde_json::to_value(agent_client_protocol::PromptResponse::new(
+                        agent_client_protocol::StopReason::Cancelled,
+                    )).unwrap(),
+                ),
             ).await;
         }
     }

@@ -2,14 +2,35 @@ use std::sync::Arc;
 
 use lapin::Channel;
 use serde_json::{json, Value};
+use serde_json::value::RawValue;
 use tokio::sync::RwLock;
 
-use common::acp::types::ACP_PROTOCOL_VERSION;
+use agent_client_protocol as acp;
+use acp::{
+    ProtocolVersion, InitializeRequest, InitializeResponse, Implementation,
+    NewSessionRequest, NewSessionResponse,
+    PromptRequest,
+    CancelNotification,
+    LoadSessionRequest, LoadSessionResponse,
+    ListSessionsRequest, ListSessionsResponse,
+    CloseSessionRequest, CloseSessionResponse,
+    AgentSide, Side, ClientRequest, ClientNotification,
+    AgentNotification,
+    Response as AcpResponse, Notification as AcpNotif, RequestId,
+};
 use common::ClientDirectMessage;
 
 use crate::config::ServiceConfig;
 use crate::messaging::send_to_client;
 use crate::orchestrator::OrchestratorManager;
+
+//
+// AcpServer handles incoming ACP JSON-RPC messages from clients. Handler
+// methods use typed crate request/response structs matching the Agent trait
+// signatures. The Agent trait itself is !Send (async_trait(?Send)) which is
+// incompatible with our multi-threaded tokio dispatch, so we implement the
+// same interface as inherent methods.
+//
 
 pub struct AcpServer {
     orchestrator_manager: Arc<OrchestratorManager>,
@@ -34,6 +55,17 @@ impl AcpServer {
         json_rpc_str: &str,
         publish_channel: &Channel,
     ) {
+        common::log_info!(
+            "ACP recv from {}: {}",
+            &client_id[..8.min(client_id.len())],
+            common::truncate_str(json_rpc_str, 600),
+        );
+
+        //
+        // Parse the raw JSON-RPC. We need both the serde_json::Value (for id
+        // extraction) and the raw string (for typed decoding via RawValue).
+        //
+
         let msg: Value = match serde_json::from_str(json_rpc_str) {
             Ok(v) => v,
             Err(e) => {
@@ -49,15 +81,8 @@ impl AcpServer {
         let id = msg.get("id").cloned();
         let method = msg.get("method").and_then(|m| m.as_str()).map(String::from);
 
-        common::log_info!(
-            "ACP recv from {}: {}",
-            &client_id[..8.min(client_id.len())],
-            common::truncate_str(json_rpc_str, 200),
-        );
-
         //
-        // Check if this is a response to an agent request (has id, no method).
-        // These are client responses to our pushToolCall etc. requests.
+        // Response to an agent request (has id, no method).
         //
 
         if id.is_some() && method.is_none() {
@@ -65,101 +90,201 @@ impl AcpServer {
             return;
         }
 
-        match method.as_deref() {
-            Some("initialize") => {
-                self.handle_initialize(client_id, id, publish_channel).await;
-            }
-            Some("session/new") => {
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
-                self.handle_session_new(client_id, id, params, publish_channel).await;
-            }
-            Some("session/prompt") => {
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
-                self.handle_session_prompt(client_id, id, params, publish_channel).await;
-            }
-            Some("session/cancel") => {
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
-                self.handle_session_cancel(client_id, params, publish_channel).await;
-            }
-            Some("session/load") => {
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
-                self.handle_session_load(client_id, id, params, publish_channel).await;
-            }
-            Some("session/list") => {
-                self.handle_session_list(client_id, id, publish_channel).await;
-            }
-            Some("session/close") => {
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
-                self.handle_session_close(client_id, id, params, publish_channel).await;
-            }
+        let Some(method) = method else { return };
 
-            Some(unknown) => {
-                common::log_warn!(
-                    "ACP: unknown method '{}' from {}",
-                    unknown,
-                    &client_id[..8.min(client_id.len())]
-                );
+        //
+        // Get raw params for typed decoding.
+        //
+
+        let params_str = msg.get("params")
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "{}".to_string());
+        let raw_params = match RawValue::from_string(params_str) {
+            Ok(rv) => rv,
+            Err(_) => {
                 if let Some(id) = id {
                     let _ = send_to_client(
                         publish_channel,
                         client_id,
-                        acp_error_response(id, -32601, "Method not found"),
+                        acp_error_response(id, -32602, "Invalid params"),
                     ).await;
                 }
+                return;
             }
-            None => {}
+        };
+
+        //
+        // Try typed dispatch via AgentSide decoder first for standard ACP
+        // methods. Fall back to manual dispatch for extension methods.
+        //
+
+        match AgentSide::decode_request(&method, Some(&raw_params)) {
+            Ok(request) => {
+                self.dispatch_request(client_id, id, request, publish_channel).await;
+            }
+            Err(_) => {
+                //
+                // Try as notification.
+                //
+
+                match AgentSide::decode_notification(&method, Some(&raw_params)) {
+                    Ok(notification) => {
+                        self.dispatch_notification(client_id, notification, publish_channel).await;
+                    }
+                    Err(_) => {
+                        common::log_warn!(
+                            "ACP: unknown method '{}' from {}",
+                            method,
+                            &client_id[..8.min(client_id.len())]
+                        );
+                        if let Some(id) = id {
+                            let _ = send_to_client(
+                                publish_channel,
+                                client_id,
+                                acp_error_response(id, -32601, "Method not found"),
+                            ).await;
+                        }
+                    }
+                }
+            }
         }
     }
 
     //
-    // Handle client responses to our agent requests (pushToolCall responses etc.).
+    // Typed request dispatch. Each arm gets a strongly-typed request struct
+    // from the crate and calls the corresponding handler.
     //
 
-    async fn handle_client_response(&self, _client_id: &str, _msg: &Value) {
-        //
-        // Currently we fire-and-forget agent requests. If we need to track
-        // pushToolCall response IDs in the future, this is where we'd do it.
-        //
-    }
-
-    async fn handle_initialize(
+    async fn dispatch_request(
         &self,
         client_id: &str,
         id: Option<Value>,
+        request: ClientRequest,
         publish_channel: &Channel,
     ) {
-        if let Some(id) = id {
-            let result = json!({
-                "isAuthenticated": true,
-                "protocolVersion": ACP_PROTOCOL_VERSION,
-            });
-            let _ = send_to_client(
-                publish_channel,
-                client_id,
-                acp_response(id, result),
-            ).await;
+        match request {
+            ClientRequest::InitializeRequest(req) => {
+                let resp = self.handle_initialize(req).await;
+                if let Some(id) = id {
+                    match resp {
+                        Ok(r) => {
+                            let _ = send_to_client(
+                                publish_channel, client_id,
+                                acp_response(id, serde_json::to_value(r).unwrap()),
+                            ).await;
+                        }
+                        Err(e) => {
+                            let _ = send_to_client(
+                                publish_channel, client_id,
+                                acp_error_response(id, i32::from(e.code) as i64, &e.message),
+                            ).await;
+                        }
+                    }
+                }
+            }
+
+            ClientRequest::NewSessionRequest(req) => {
+                self.handle_session_new(client_id, id, req, publish_channel).await;
+            }
+
+            ClientRequest::PromptRequest(req) => {
+                self.handle_session_prompt(client_id, id, req, publish_channel).await;
+            }
+
+            ClientRequest::LoadSessionRequest(req) => {
+                self.handle_session_load(client_id, id, req, publish_channel).await;
+            }
+
+            ClientRequest::ListSessionsRequest(req) => {
+                let resp = self.handle_session_list(req).await;
+                if let Some(id) = id {
+                    match resp {
+                        Ok(r) => {
+                            let _ = send_to_client(
+                                publish_channel, client_id,
+                                acp_response(id, serde_json::to_value(r).unwrap()),
+                            ).await;
+                        }
+                        Err(e) => {
+                            let _ = send_to_client(
+                                publish_channel, client_id,
+                                acp_error_response(id, i32::from(e.code) as i64, &e.message),
+                            ).await;
+                        }
+                    }
+                }
+            }
+
+            ClientRequest::CloseSessionRequest(req) => {
+                self.handle_session_close(client_id, id, req, publish_channel).await;
+            }
+
+            _ => {
+                if let Some(id) = id {
+                    let _ = send_to_client(
+                        publish_channel,
+                        client_id,
+                        acp_error_response(id, -32601, "Method not supported"),
+                    ).await;
+                }
+            }
         }
+    }
+
+    //
+    // Typed notification dispatch.
+    //
+
+    async fn dispatch_notification(
+        &self,
+        client_id: &str,
+        notification: ClientNotification,
+        publish_channel: &Channel,
+    ) {
+        match notification {
+            ClientNotification::CancelNotification(notif) => {
+                self.handle_session_cancel(client_id, notif, publish_channel).await;
+            }
+            _ => {}
+        }
+    }
+
+    //
+    // Handle client responses to our agent requests (pushToolCall etc.).
+    //
+
+    async fn handle_client_response(&self, _client_id: &str, _msg: &Value) {}
+
+    //
+    // Handler methods matching the Agent trait signatures but as inherent
+    // methods (to avoid the !Send constraint).
+    //
+
+    async fn handle_initialize(&self, _req: InitializeRequest) -> acp::Result<InitializeResponse> {
+        Ok(
+            InitializeResponse::new(ProtocolVersion::LATEST)
+                .agent_info(Implementation::new("praxis", env!("CARGO_PKG_VERSION")))
+        )
     }
 
     async fn handle_session_prompt(
         &self,
         client_id: &str,
         id: Option<Value>,
-        params: Value,
+        req: PromptRequest,
         publish_channel: &Channel,
     ) {
-        let session_id = params.get("sessionId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        let session_id = req.session_id.to_string();
 
-        let prompt_text = params.get("prompt")
-            .and_then(|p| p.as_array())
-            .and_then(|arr| arr.first())
-            .and_then(|part| part.get("text"))
-            .and_then(|t| t.as_str())
-            .unwrap_or("")
-            .to_string();
+        let prompt_text = req.prompt.iter()
+            .find_map(|block| {
+                if let acp::ContentBlock::Text(tc) = block {
+                    Some(tc.text.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default();
 
         if session_id.is_empty() || prompt_text.is_empty() {
             if let Some(id) = id {
@@ -186,16 +311,13 @@ impl AcpServer {
     async fn handle_session_cancel(
         &self,
         client_id: &str,
-        params: Value,
+        notif: CancelNotification,
         publish_channel: &Channel,
     ) {
-        let session_id = params.get("sessionId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-
+        let session_id = notif.session_id.to_string();
         if !session_id.is_empty() {
             self.orchestrator_manager
-                .cancel_prompt(client_id, session_id, publish_channel)
+                .cancel_prompt(client_id, &session_id, publish_channel)
                 .await;
         }
     }
@@ -204,12 +326,18 @@ impl AcpServer {
         &self,
         client_id: &str,
         id: Option<Value>,
-        params: Value,
+        req: NewSessionRequest,
         publish_channel: &Channel,
     ) {
         let session_id = uuid::Uuid::new_v4().to_string();
-        let name = params.get("name").and_then(|v| v.as_str()).map(String::from);
-        let model_ref = params.get("modelRef").and_then(|v| v.as_str()).map(String::from);
+
+        //
+        // Extract extension fields from _meta for model resolution.
+        //
+
+        let params_value = serde_json::to_value(&req).unwrap_or(json!({}));
+        let name = params_value.get("name").and_then(|v| v.as_str()).map(String::from);
+        let model_ref = params_value.get("modelRef").and_then(|v| v.as_str()).map(String::from);
 
         //
         // Resolve the model definition for the response _meta.
@@ -229,17 +357,17 @@ impl AcpServer {
             .await;
 
         if let Some(id) = id {
-            let result = json!({
-                "sessionId": session_id,
-                "_meta": {
-                    "provider": provider,
-                    "model": model_name,
-                }
-            });
+            let model_id = format!("{}/{}", provider, model_name);
+            let model_state = acp::SessionModelState::new(
+                model_id.clone(),
+                vec![acp::ModelInfo::new(model_id, model_name.clone())],
+            );
+            let resp = NewSessionResponse::new(session_id)
+                .models(model_state);
             let _ = send_to_client(
                 publish_channel,
                 client_id,
-                acp_response(id, result),
+                acp_response(id, serde_json::to_value(resp).unwrap()),
             ).await;
         }
     }
@@ -248,13 +376,10 @@ impl AcpServer {
         &self,
         client_id: &str,
         id: Option<Value>,
-        params: Value,
+        req: LoadSessionRequest,
         publish_channel: &Channel,
     ) {
-        let session_id = params.get("sessionId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        let session_id = req.session_id.to_string();
 
         if session_id.is_empty() {
             if let Some(id) = id {
@@ -284,41 +409,34 @@ impl AcpServer {
             let _ = send_to_client(
                 publish_channel,
                 client_id,
-                acp_response(id, json!({ "loaded": true, "eventCount": events.len() })),
+                acp_response(id, serde_json::to_value(
+                    LoadSessionResponse::new()
+                        .meta(serde_json::from_value::<acp::Meta>(json!({
+                            "loaded": true,
+                            "eventCount": events.len(),
+                        })).unwrap())
+                ).unwrap()),
             ).await;
         }
     }
 
-    async fn handle_session_list(
-        &self,
-        client_id: &str,
-        id: Option<Value>,
-        publish_channel: &Channel,
-    ) {
+    async fn handle_session_list(&self, _req: ListSessionsRequest) -> acp::Result<ListSessionsResponse> {
         let session_list = self.orchestrator_manager.list_sessions().await;
-        let sessions: Vec<Value> = session_list.into_iter()
-            .map(|(sid, name)| json!({ "sessionId": sid, "name": name }))
+        let sessions: Vec<acp::SessionInfo> = session_list.into_iter()
+            .map(|(sid, name)| acp::SessionInfo::new(sid, ".").title(name))
             .collect();
-        if let Some(id) = id {
-            let _ = send_to_client(
-                publish_channel,
-                client_id,
-                acp_response(id, json!({ "sessions": sessions })),
-            ).await;
-        }
+
+        Ok(ListSessionsResponse::new(sessions))
     }
 
     async fn handle_session_close(
         &self,
         client_id: &str,
         id: Option<Value>,
-        params: Value,
+        req: CloseSessionRequest,
         publish_channel: &Channel,
     ) {
-        let session_id = params.get("sessionId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        let session_id = req.session_id.to_string();
 
         if !session_id.is_empty() {
             self.orchestrator_manager
@@ -330,70 +448,74 @@ impl AcpServer {
             let _ = send_to_client(
                 publish_channel,
                 client_id,
-                acp_response(id, json!({})),
+                acp_response(id, serde_json::to_value(CloseSessionResponse::new()).unwrap()),
             ).await;
         }
     }
 }
 
 //
-// JSON-RPC helpers used by both acp_server.rs and orchestrator.rs.
+// JSON-RPC helpers using crate types. Used by both acp_server.rs and
+// orchestrator.rs for building outgoing messages.
 //
 
-pub fn acp_notification(method: &str, params: Value) -> ClientDirectMessage {
-    let notif = json!({
-        "jsonrpc": "2.0",
-        "method": method,
-        "params": params,
-    });
-    let json_rpc = serde_json::to_string(&notif).unwrap();
-    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 200));
-    ClientDirectMessage::AcpMessage { json_rpc }
-}
-
 pub fn acp_response(id: Value, result: Value) -> ClientDirectMessage {
-    let resp = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "result": result,
-    });
-    let json_rpc = serde_json::to_string(&resp).unwrap();
-    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 200));
+    let rid = value_to_request_id(&id);
+    let resp = AcpResponse::<Value>::new(rid, Ok(result));
+    let wrapped = acp::JsonRpcMessage::wrap(resp);
+    let json_rpc = serde_json::to_string(&wrapped).unwrap();
+    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 600));
     ClientDirectMessage::AcpMessage { json_rpc }
 }
 
 pub fn acp_error_response(id: Value, code: i64, message: &str) -> ClientDirectMessage {
-    let resp = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "error": { "code": code, "message": message },
-    });
-    let json_rpc = serde_json::to_string(&resp).unwrap();
-    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 200));
+    let rid = value_to_request_id(&id);
+    let err = acp::Error::new(code as i32, message);
+    let resp = AcpResponse::<Value>::new(rid, Err(err));
+    let wrapped = acp::JsonRpcMessage::wrap(resp);
+    let json_rpc = serde_json::to_string(&wrapped).unwrap();
+    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 600));
     ClientDirectMessage::AcpMessage { json_rpc }
 }
 
+fn value_to_request_id(v: &Value) -> RequestId {
+    match v {
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                RequestId::Number(i)
+            } else {
+                RequestId::Str(n.to_string().into())
+            }
+        }
+        Value::String(s) => RequestId::Str(s.clone().into()),
+        _ => RequestId::Null,
+    }
+}
+
 //
-// session/update notification builders using the agent-client-protocol-schema
+// session/update notification builders using the agent-client-protocol
 // crate for correct wire format.
 //
 
-use agent_client_protocol_schema as acp;
-
 fn session_notification(session_id: &str, update: acp::SessionUpdate) -> ClientDirectMessage {
     let notif = acp::SessionNotification::new(session_id.to_string(), update);
-    let json_rpc = serde_json::to_string(&json!({
-        "jsonrpc": "2.0",
-        "method": "session/update",
-        "params": notif,
-    })).unwrap();
-    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 200));
+    let wrapped = acp::JsonRpcMessage::wrap(AcpNotif::<AgentNotification> {
+        method: acp::CLIENT_METHOD_NAMES.session_update.into(),
+        params: Some(AgentNotification::SessionNotification(notif)),
+    });
+    let json_rpc = serde_json::to_string(&wrapped).unwrap();
+    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 600));
     ClientDirectMessage::AcpMessage { json_rpc }
 }
 
 pub fn session_update_text(session_id: &str, text: impl Into<String>) -> ClientDirectMessage {
     let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(text)));
     session_notification(session_id, acp::SessionUpdate::AgentMessageChunk(chunk))
+}
+
+pub fn session_update_user_text(session_id: &str, text: impl Into<String>) -> ClientDirectMessage {
+    let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(acp::TextContent::new(text)));
+    session_notification(session_id, acp::SessionUpdate::UserMessageChunk(chunk))
 }
 
 pub fn session_update_tool_call(session_id: &str, tool_name: &str, _tool_input: Option<Value>) -> ClientDirectMessage {
@@ -429,21 +551,16 @@ pub fn session_update_plan(session_id: &str, plan: &Value) -> ClientDirectMessag
 }
 
 pub fn session_update_usage(session_id: &str, prompt_tokens: u32, completion_tokens: u32, total_tokens: u32) -> ClientDirectMessage {
-    let info = acp::SessionInfoUpdate::new()
+    let usage = acp::UsageUpdate::new(total_tokens as u64, 0)
         .meta(serde_json::from_value::<acp::Meta>(json!({
             "promptTokens": prompt_tokens,
             "completionTokens": completion_tokens,
-            "totalTokens": total_tokens,
         })).unwrap());
-    session_notification(session_id, acp::SessionUpdate::SessionInfoUpdate(info))
+    session_notification(session_id, acp::SessionUpdate::UsageUpdate(usage))
 }
 
 pub fn session_update_started(session_id: &str, provider: &str, model: &str) -> ClientDirectMessage {
     let info = acp::SessionInfoUpdate::new()
-        .title(format!("{}/{}", provider, model))
-        .meta(serde_json::from_value::<acp::Meta>(json!({
-            "provider": provider,
-            "model": model,
-        })).unwrap());
+        .title(format!("{}/{}", provider, model));
     session_notification(session_id, acp::SessionUpdate::SessionInfoUpdate(info))
 }

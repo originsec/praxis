@@ -3,6 +3,7 @@
 //! A WebSocket server that bridges browser clients to the Praxis service
 //! via RabbitMQ. This acts as another client from the service's perspective.
 
+pub mod acp;
 mod messages;
 mod rabbitmq;
 mod state;
