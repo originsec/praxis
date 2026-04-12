@@ -21,10 +21,8 @@ use rmcp::{
 
 use crate::acp_server::{
     acp_notification, acp_response, acp_error_response,
-    acp_stream_assistant_text, acp_push_tool_call, acp_update_tool_call, acp_update_plan,
-    session_update_text, session_update_tool_call as session_update_tool_call_legacy,
-    session_update_tool_result, session_update_plan as session_update_plan_legacy,
-    session_update_usage, session_update_started,
+    session_update_text, session_update_tool_call, session_update_tool_result,
+    session_update_plan, session_update_usage, session_update_started,
 };
 use crate::config::ServiceConfig;
 use crate::messaging::send_to_client;
@@ -220,22 +218,6 @@ impl OrchestratorManager {
                     }};
                 }
 
-                macro_rules! send_only {
-                    ($msg:expr) => {{
-                        let _ = send_to_client(&publish_channel_clone, &client_id_owned, $msg).await;
-                    }};
-                }
-
-                macro_rules! log_only {
-                    ($msg:expr) => {{
-                        let m = $msg;
-                        if let common::ClientDirectMessage::AcpMessage { ref json_rpc } = m {
-                            event_log_clone.write().await.push(json_rpc.clone());
-                        }
-                    }};
-                }
-
-                let mut next_tool_call_id: i64 = 1;
 
                 //
                 // Connect to MCP SSE server (this is the slow part).
@@ -411,16 +393,14 @@ impl OrchestratorManager {
                                                     let pre_tool = send_buffer[..marker_pos].to_string();
                                                     if !pre_tool.trim().is_empty() {
                                                         bytes_sent += pre_tool.len();
-                                                        send_only!(acp_stream_assistant_text(&sid, &pre_tool));
-                                                        log_only!(session_update_text(&sid, pre_tool));
+                                                        send_and_log!(session_update_text(&sid, pre_tool));
                                                     }
                                                 }
                                                 held_back = true;
                                                 send_buffer.clear();
                                             } else if send_buffer.len() >= 50 || delta.content.contains('\n') {
                                                 bytes_sent += send_buffer.len();
-                                                send_only!(acp_stream_assistant_text(&sid, &send_buffer));
-                                                log_only!(session_update_text(&sid, &send_buffer));
+                                                send_and_log!(session_update_text(&sid, &send_buffer));
                                                 send_buffer.clear();
                                             }
                                         }
@@ -456,8 +436,7 @@ impl OrchestratorManager {
 
                         if !send_buffer.is_empty() && !held_back {
                             bytes_sent += send_buffer.len();
-                            send_only!(acp_stream_assistant_text(&sid, &send_buffer));
-                            log_only!(session_update_text(&sid, &send_buffer));
+                            send_and_log!(session_update_text(&sid, &send_buffer));
                             send_buffer.clear();
                         }
 
@@ -478,11 +457,7 @@ impl OrchestratorManager {
                             // Send ACP pushToolCall to client and log legacy
                             // format for replay.
                             //
-
-                            let tc_id = next_tool_call_id;
-                            next_tool_call_id += 1;
-                            send_only!(acp_push_tool_call(&sid, &tool_name, tool_input_value.clone()));
-                            log_only!(session_update_tool_call_legacy(&sid, &tool_name, tool_input_value));
+                            send_and_log!(session_update_tool_call(&sid, &tool_name, tool_input_value));
 
                             let result = if let Some(local_result) = execute_local_tool(&tool_name, &tool_args).await {
                                 local_result
@@ -501,21 +476,7 @@ impl OrchestratorManager {
                                             //
                                             // Send ACP updatePlan and log legacy format.
                                             //
-
-                                            let acp_entries: Vec<Value> = plan.steps.iter().map(|step| {
-                                                let status = match step.status {
-                                                    PlanStepStatus::Done => "completed",
-                                                    PlanStepStatus::InProgress => "in_progress",
-                                                    PlanStepStatus::NotStarted => "pending",
-                                                };
-                                                json!({
-                                                    "content": step.description,
-                                                    "priority": "medium",
-                                                    "status": status,
-                                                })
-                                            }).collect();
-                                            send_only!(acp_update_plan(&sid, &acp_entries));
-                                            log_only!(session_update_plan_legacy(&sid, &plan_json));
+                                            send_and_log!(session_update_plan(&sid, &plan_json));
                                         }
                                     }
                                 }
@@ -525,8 +486,7 @@ impl OrchestratorManager {
                             // Send ACP updateToolCall (finished) and log legacy format.
                             //
 
-                            send_only!(acp_update_tool_call(&sid, tc_id, "finished", &result));
-                            log_only!(session_update_tool_result(&sid, &tool_name, &result));
+                            send_and_log!(session_update_tool_result(&sid, &tool_name, &result));
 
                             tool_results.push((tool_name, result));
                             response_text = remaining_text;
@@ -563,8 +523,7 @@ impl OrchestratorManager {
                         if full_response.len() > bytes_sent {
                             let unsent = &full_response[bytes_sent..];
                             if !unsent.is_empty() {
-                                send_only!(acp_stream_assistant_text(&sid, unsent));
-                                log_only!(session_update_text(&sid, unsent));
+                                send_and_log!(session_update_text(&sid, unsent));
                             }
                         }
 

@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
 
 use lapin::Channel;
 use serde_json::{json, Value};
@@ -491,99 +490,8 @@ pub fn acp_error_response(id: Value, code: i64, message: &str) -> ClientDirectMe
 }
 
 //
-// Agent request ID counter for agent-to-client requests.
-//
-
-static AGENT_REQUEST_ID: AtomicI64 = AtomicI64::new(1);
-
-fn next_agent_request_id() -> i64 {
-    AGENT_REQUEST_ID.fetch_add(1, Ordering::SeqCst)
-}
-
-//
-// ACP spec-compliant agent-to-client request builders.
-// These send JSON-RPC requests (with id) TO the client.
-//
-
-pub fn acp_stream_assistant_text(session_id: &str, text: impl Into<String>) -> ClientDirectMessage {
-    let id = next_agent_request_id();
-    let req = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "streamAssistantMessageChunk",
-        "params": {
-            "chunk": { "text": text.into() },
-            "_meta": { "sessionId": session_id }
-        }
-    });
-    let json_rpc = serde_json::to_string(&req).unwrap();
-    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 200));
-    ClientDirectMessage::AcpMessage { json_rpc }
-}
-
-pub fn acp_push_tool_call(session_id: &str, tool_name: &str, tool_input: Option<Value>) -> ClientDirectMessage {
-    let id = next_agent_request_id();
-    let content = tool_input.map(|input| {
-        json!({
-            "type": "markdown",
-            "markdown": serde_json::to_string_pretty(&input).unwrap_or_default()
-        })
-    });
-    let req = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "pushToolCall",
-        "params": {
-            "icon": tool_name_to_icon(tool_name),
-            "label": tool_name,
-            "content": content,
-            "_meta": { "sessionId": session_id }
-        }
-    });
-    let json_rpc = serde_json::to_string(&req).unwrap();
-    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 200));
-    ClientDirectMessage::AcpMessage { json_rpc }
-}
-
-pub fn acp_update_tool_call(session_id: &str, tool_call_id: i64, status: &str, result: &str) -> ClientDirectMessage {
-    let id = next_agent_request_id();
-    let req = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "updateToolCall",
-        "params": {
-            "toolCallId": tool_call_id,
-            "status": status,
-            "content": {
-                "type": "markdown",
-                "markdown": result
-            },
-            "_meta": { "sessionId": session_id }
-        }
-    });
-    let json_rpc = serde_json::to_string(&req).unwrap();
-    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 200));
-    ClientDirectMessage::AcpMessage { json_rpc }
-}
-
-pub fn acp_update_plan(session_id: &str, entries: &[Value]) -> ClientDirectMessage {
-    let id = next_agent_request_id();
-    let req = json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": "updatePlan",
-        "params": {
-            "entries": entries,
-            "_meta": { "sessionId": session_id }
-        }
-    });
-    let json_rpc = serde_json::to_string(&req).unwrap();
-    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 200));
-    ClientDirectMessage::AcpMessage { json_rpc }
-}
-
-//
-// Legacy notification builders kept for event log replay compatibility.
+// session/update notification builders used for both live streaming
+// and event log replay.
 //
 
 pub fn session_update_text(session_id: &str, text: impl Into<String>) -> ClientDirectMessage {
@@ -676,29 +584,4 @@ pub fn session_update_started(session_id: &str, provider: &str, model: &str) -> 
             },
         }
     }))
-}
-
-//
-// Map tool names to ACP icon values.
-//
-
-fn tool_name_to_icon(tool_name: &str) -> &'static str {
-    let name = tool_name.to_lowercase();
-    if name.contains("search") || name.contains("find") || name.contains("grep") {
-        "fileSearch"
-    } else if name.contains("file") || name.contains("read") || name.contains("write") || name.contains("directory") {
-        "folder"
-    } else if name.contains("http") || name.contains("fetch") || name.contains("url") || name.contains("web") {
-        "globe"
-    } else if name.contains("shell") || name.contains("exec") || name.contains("command") || name.contains("terminal") {
-        "terminal"
-    } else if name.contains("edit") || name.contains("modify") || name.contains("update") {
-        "pencil"
-    } else if name.contains("regex") || name.contains("pattern") {
-        "regex"
-    } else if name.contains("plan") || name.contains("think") || name.contains("analyze") {
-        "lightBulb"
-    } else {
-        "hammer"
-    }
 }
