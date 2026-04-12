@@ -18,6 +18,35 @@ const PLAN_ACTIVE: Color = STATUS_RUNNING;
 
 pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     let session = state.active_session();
+    let show_tabs = state.sessions.len() > 1;
+
+    //
+    // Show welcome logo when no session or the active session has no messages
+    // and isn't streaming yet.
+    //
+
+    let show_welcome = session
+        .map(|s| s.messages.is_empty() && !s.is_streaming)
+        .unwrap_or(true);
+
+    if show_welcome {
+        let chunks = Layout::vertical([
+            Constraint::Min(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+        ])
+        .split(area);
+
+        render_welcome(f, chunks[0]);
+
+        let padded = |r: Rect| -> Rect {
+            Rect { x: r.x + 1, width: r.width.saturating_sub(2), ..r }
+        };
+
+        render_input(f, padded(chunks[1]), state);
+        render_status_hints(f, padded(chunks[2]), state);
+        return;
+    }
 
     let plan_height = session
         .and_then(|s| s.current_plan.as_ref())
@@ -25,8 +54,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
         .unwrap_or(0);
     let plan_spacer = if plan_height > 0 { 1 } else { 0 };
 
+    let tab_height = if show_tabs { 1 } else { 0 };
+
     let chunks = Layout::vertical([
-        Constraint::Length(1), // tab bar
+        Constraint::Length(tab_height),
         Constraint::Min(1),
         Constraint::Length(plan_spacer),
         Constraint::Length(plan_height),
@@ -37,12 +68,12 @@ pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     ])
     .split(area);
 
-    render_tab_bar(f, chunks[0], state);
+    if show_tabs {
+        render_tab_bar(f, chunks[0], state);
+    }
 
     if let Some(session) = session {
         render_conversation(f, chunks[1], session);
-    } else {
-        render_welcome(f, chunks[1]);
     }
 
     let padded = |r: Rect| -> Rect {
@@ -62,7 +93,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     render_model_info(f, padded(chunks[4]), state);
     render_input(f, padded(chunks[5]), state);
     render_tokens(f, padded(chunks[6]), state);
-    render_status_hints(f, padded(chunks[7]));
+    render_status_hints(f, padded(chunks[7]), state);
 }
 
 fn render_tab_bar(f: &mut Frame, area: Rect, state: &OrchestratorState) {
@@ -647,7 +678,7 @@ fn render_model_info(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     let line = Line::from(vec![
         Span::styled("^e/^!e", Style::default().fg(DIM)),
         Span::styled(" tools  ", Style::default().fg(MUTED)),
-        Span::styled("^w", Style::default().fg(DIM)),
+        Span::styled("^!w", Style::default().fg(DIM)),
         Span::styled(" save   ", Style::default().fg(MUTED)),
         Span::styled(format!("{} ", model_text), Style::default().fg(MUTED)),
     ]);
@@ -724,16 +755,21 @@ fn render_tokens(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     f.render_widget(paragraph, area);
 }
 
-fn render_status_hints(f: &mut Frame, area: Rect) {
-    let line = Line::from(vec![
-        Span::styled("  ^t", Style::default().fg(DIM)),
-        Span::styled(" new  ", Style::default().fg(MUTED)),
-        Span::styled("^!w", Style::default().fg(DIM)),
-        Span::styled(" close  ", Style::default().fg(MUTED)),
-        Span::styled("!</>", Style::default().fg(DIM)),
-        Span::styled(" switch", Style::default().fg(MUTED)),
-    ]);
+fn render_status_hints(f: &mut Frame, area: Rect, state: &OrchestratorState) {
+    let mut spans = vec![
+        Span::styled("  ^n", Style::default().fg(DIM)),
+        Span::styled(" new", Style::default().fg(MUTED)),
+    ];
 
-    let paragraph = Paragraph::new(line);
+    if state.sessions.len() > 1 {
+        spans.extend([
+            Span::styled("  ^w", Style::default().fg(DIM)),
+            Span::styled(" close", Style::default().fg(MUTED)),
+            Span::styled("  tab/S-tab", Style::default().fg(DIM)),
+            Span::styled(" switch", Style::default().fg(MUTED)),
+        ]);
+    }
+
+    let paragraph = Paragraph::new(Line::from(spans));
     f.render_widget(paragraph, area);
 }

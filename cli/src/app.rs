@@ -57,6 +57,7 @@ pub enum ConfirmKind {
     DeleteAgentScript(String), // script_id
     ResetAgentScripts,
     ResetNode(String), // node_id
+    CloseOrchestratorSession,
     Info,
 }
 
@@ -2251,6 +2252,7 @@ impl App {
         if self.active_window == Window::Orchestrator {
             if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
                 let active_session = self.orchestrator.active_session();
+                let show_tabs = self.orchestrator.sessions.len() > 1;
                 let plan_height = active_session
                     .and_then(|s| s.current_plan.as_ref())
                     .map(|plan| (plan.steps.len() as u16 + 2).min(12))
@@ -2258,8 +2260,10 @@ impl App {
                 let plan_spacer = if plan_height > 0 { 1 } else { 0 };
                 let is_streaming = active_session.map(|s| s.is_streaming).unwrap_or(false);
 
+                let tab_height = if show_tabs { 1 } else { 0 };
+
                 let orch_chunks = Layout::vertical([
-                    Constraint::Length(1), // tab bar
+                    Constraint::Length(tab_height),
                     Constraint::Min(1),
                     Constraint::Length(plan_spacer),
                     Constraint::Length(plan_height),
@@ -2269,6 +2273,31 @@ impl App {
                     Constraint::Length(1),
                 ])
                 .split(content_area);
+
+                //
+                // Tab bar click — switch sessions.
+                //
+
+                if show_tabs && mouse.row == orch_chunks[0].y {
+                    let col = mouse.column.saturating_sub(orch_chunks[0].x) as usize;
+                    let mut x = 0usize;
+                    for (i, session) in self.orchestrator.sessions.iter().enumerate() {
+                        let is_active = self.orchestrator.active_session_index == Some(i);
+                        let label_len = if session.is_streaming {
+                            session.label.len() + 4 // " ● Label "
+                        } else {
+                            session.label.len() + 2 // " Label "
+                        };
+                        let tab_width = if is_active { label_len + 2 } else { label_len }; // brackets
+                        let total_width = tab_width + 1; // trailing space
+                        if col >= x && col < x + total_width {
+                            self.orchestrator.active_session_index = Some(i);
+                            return;
+                        }
+                        x += total_width;
+                    }
+                    return;
+                }
 
                 let model_area = orch_chunks[4];
                 let _tokens_area = orch_chunks[7];
@@ -2333,12 +2362,21 @@ impl App {
     async fn handle_orchestrator_key(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
-                KeyCode::Char('t') => {
+                KeyCode::Char('n') => {
                     self.create_new_orchestrator_session().await;
                     return;
                 }
                 KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::ALT) => {
-                    self.close_active_orchestrator_session().await;
+                    self.open_save_session();
+                    return;
+                }
+                KeyCode::Char('w') => {
+                    if self.orchestrator.active_session().is_some() {
+                        self.confirm = Some(ConfirmAction {
+                            message: "Close this orchestrator session?".to_string(),
+                            action: ConfirmKind::CloseOrchestratorSession,
+                        });
+                    }
                     return;
                 }
                 KeyCode::Char('c') => {
@@ -2351,10 +2389,6 @@ impl App {
                             let _ = self.client.send_acp_message(json_rpc).await;
                         }
                     }
-                    return;
-                }
-                KeyCode::Char('w') => {
-                    self.open_save_session();
                     return;
                 }
                 KeyCode::Char('e') => {
@@ -2378,28 +2412,31 @@ impl App {
         }
 
         //
-        // Alt+Left/Right to switch between sessions.
+        // Tab / Shift+Tab to switch between sessions.
         //
-        if key.modifiers.contains(KeyModifiers::ALT) {
-            match key.code {
-                KeyCode::Left => {
-                    if let Some(idx) = self.orchestrator.active_session_index {
-                        if idx > 0 {
-                            self.orchestrator.active_session_index = Some(idx - 1);
-                        }
-                    }
-                    return;
+
+        if key.code == KeyCode::Tab && !key.modifiers.contains(KeyModifiers::CONTROL) {
+            if let Some(idx) = self.orchestrator.active_session_index {
+                if self.orchestrator.sessions.len() > 1 {
+                    let next = if key.modifiers.contains(KeyModifiers::SHIFT) {
+                        if idx > 0 { idx - 1 } else { self.orchestrator.sessions.len() - 1 }
+                    } else {
+                        if idx + 1 < self.orchestrator.sessions.len() { idx + 1 } else { 0 }
+                    };
+                    self.orchestrator.active_session_index = Some(next);
                 }
-                KeyCode::Right => {
-                    if let Some(idx) = self.orchestrator.active_session_index {
-                        if idx + 1 < self.orchestrator.sessions.len() {
-                            self.orchestrator.active_session_index = Some(idx + 1);
-                        }
-                    }
-                    return;
-                }
-                _ => {}
             }
+            return;
+        }
+
+        if key.code == KeyCode::BackTab {
+            if let Some(idx) = self.orchestrator.active_session_index {
+                if self.orchestrator.sessions.len() > 1 {
+                    let prev = if idx > 0 { idx - 1 } else { self.orchestrator.sessions.len() - 1 };
+                    self.orchestrator.active_session_index = Some(prev);
+                }
+            }
+            return;
         }
 
         match key.code {
@@ -2642,6 +2679,9 @@ impl App {
                 let _ = self.client.reset_lua_agent_script_defaults().await;
                 self.settings.agent_scripts_loaded = false;
                 self.load_agent_scripts().await;
+            }
+            ConfirmKind::CloseOrchestratorSession => {
+                self.close_active_orchestrator_session().await;
             }
             ConfirmKind::Info => {}
         }
