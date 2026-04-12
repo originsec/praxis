@@ -66,6 +66,7 @@ impl OrchestratorManager {
         &self,
         client_id: &str,
         session_id: &str,
+        model_ref: Option<&str>,
         service_config: &Arc<RwLock<ServiceConfig>>,
         publish_channel: &Channel,
     ) {
@@ -94,7 +95,10 @@ impl OrchestratorManager {
         // Get orchestrator model definition from config.
         //
 
-        let model_def = match config.get_orchestrator_model_def() {
+        let model_def = match model_ref
+            .and_then(|name| config.find_model_definition(name))
+            .or_else(|| config.get_orchestrator_model_def())
+        {
             Some(def) => def,
             None => {
                 let _ = send_to_client(
@@ -551,6 +555,22 @@ impl OrchestratorManager {
         }
     }
 
+    //
+    // Find a session by session_id across all clients.
+    //
+
+    async fn find_session<'a>(
+        sessions: &'a HashMap<String, HashMap<String, OrchestratorSession>>,
+        session_id: &str,
+    ) -> Option<&'a OrchestratorSession> {
+        for client_sessions in sessions.values() {
+            if let Some(session) = client_sessions.get(session_id) {
+                return Some(session);
+            }
+        }
+        None
+    }
+
     pub async fn send_prompt(
         &self,
         client_id: &str,
@@ -560,29 +580,17 @@ impl OrchestratorManager {
         publish_channel: &Channel,
     ) {
         let sessions = self.sessions.read().await;
-        if let Some(client_sessions) = sessions.get(client_id) {
-            if let Some(session) = client_sessions.get(session_id) {
-                *session.current_prompt_id.write().await = prompt_id.clone();
-                if let Err(e) = session.prompt_tx.send((prompt_id.clone(), message)).await {
-                    common::log_warn!("Failed to send prompt to Orchestrator session: {}", e);
-                    let _ = send_to_client(
-                        publish_channel,
-                        client_id,
-                        acp_error_response(
-                            prompt_id_to_json_rpc_id(&prompt_id),
-                            -32000,
-                            &format!("Failed to send prompt: {}", e),
-                        ),
-                    ).await;
-                }
-            } else {
+        if let Some(session) = Self::find_session(&sessions, session_id).await {
+            *session.current_prompt_id.write().await = prompt_id.clone();
+            if let Err(e) = session.prompt_tx.send((prompt_id.clone(), message)).await {
+                common::log_warn!("Failed to send prompt to Orchestrator session: {}", e);
                 let _ = send_to_client(
                     publish_channel,
                     client_id,
                     acp_error_response(
                         prompt_id_to_json_rpc_id(&prompt_id),
                         -32000,
-                        "No active Orchestrator session with that ID.",
+                        &format!("Failed to send prompt: {}", e),
                     ),
                 ).await;
             }
@@ -593,7 +601,7 @@ impl OrchestratorManager {
                 acp_error_response(
                     prompt_id_to_json_rpc_id(&prompt_id),
                     -32000,
-                    "No active Orchestrator session. Start one first.",
+                    "No active Orchestrator session with that ID.",
                 ),
             ).await;
         }
@@ -601,19 +609,18 @@ impl OrchestratorManager {
 
     pub async fn close_session(
         &self,
-        client_id: &str,
+        _client_id: &str,
         session_id: &str,
         _publish_channel: &Channel,
     ) {
         let mut sessions = self.sessions.write().await;
-        if let Some(client_sessions) = sessions.get_mut(client_id) {
+        for client_sessions in sessions.values_mut() {
             if let Some(session) = client_sessions.remove(session_id) {
                 session.stop();
-            }
-            if client_sessions.is_empty() {
-                sessions.remove(client_id);
+                break;
             }
         }
+        sessions.retain(|_, m| !m.is_empty());
     }
 
     #[allow(dead_code)]
@@ -637,13 +644,9 @@ impl OrchestratorManager {
         publish_channel: &Channel,
     ) {
         let sessions = self.sessions.read().await;
-        let prompt_id = if let Some(client_sessions) = sessions.get(client_id) {
-            if let Some(session) = client_sessions.get(session_id) {
-                session.cancel();
-                session.current_prompt_id.read().await.clone()
-            } else {
-                String::new()
-            }
+        let prompt_id = if let Some(session) = Self::find_session(&sessions, session_id).await {
+            session.cancel();
+            session.current_prompt_id.read().await.clone()
         } else {
             String::new()
         };
@@ -657,12 +660,15 @@ impl OrchestratorManager {
         }
     }
 
-    #[allow(dead_code)]
-    pub async fn list_sessions(&self, client_id: &str) -> Vec<String> {
+    //
+    // Return all session IDs across all clients.
+    //
+
+    pub async fn list_sessions(&self) -> Vec<String> {
         let sessions = self.sessions.read().await;
-        sessions.get(client_id)
-            .map(|m| m.keys().cloned().collect())
-            .unwrap_or_default()
+        sessions.values()
+            .flat_map(|m| m.keys().cloned())
+            .collect()
     }
 }
 

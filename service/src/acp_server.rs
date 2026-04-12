@@ -44,6 +44,12 @@ impl AcpServer {
         let id = msg.get("id").cloned();
         let method = msg.get("method").and_then(|m| m.as_str()).map(String::from);
 
+        common::log_info!(
+            "ACP recv from {}: {}",
+            &client_id[..8.min(client_id.len())],
+            common::truncate_str(json_rpc_str, 200),
+        );
+
         match method.as_deref() {
             Some("initialize") => {
                 self.handle_initialize(client_id, id, publish_channel).await;
@@ -116,13 +122,14 @@ impl AcpServer {
         &self,
         client_id: &str,
         id: Option<Value>,
-        _params: Value,
+        params: Value,
         publish_channel: &Channel,
     ) {
         let session_id = uuid::Uuid::new_v4().to_string();
+        let model_ref = params.get("modelRef").and_then(|v| v.as_str()).map(String::from);
 
         self.orchestrator_manager
-            .create_session(client_id, &session_id, &self.service_config, publish_channel)
+            .create_session(client_id, &session_id, model_ref.as_deref(), &self.service_config, publish_channel)
             .await;
 
         if let Some(id) = id {
@@ -208,7 +215,7 @@ impl AcpServer {
         id: Option<Value>,
         publish_channel: &Channel,
     ) {
-        let session_ids = self.orchestrator_manager.list_sessions(client_id).await;
+        let session_ids = self.orchestrator_manager.list_sessions().await;
         if let Some(id) = id {
             let _ = send_to_client(
                 publish_channel,
@@ -240,7 +247,7 @@ impl AcpServer {
             let _ = send_to_client(
                 publish_channel,
                 client_id,
-                acp_response(id, json!({ "sessionId": session_id })),
+                acp_response(id, json!({})),
             ).await;
         }
     }
@@ -256,9 +263,9 @@ pub fn acp_notification(method: &str, params: Value) -> ClientDirectMessage {
         "method": method,
         "params": params,
     });
-    ClientDirectMessage::AcpMessage {
-        json_rpc: serde_json::to_string(&notif).unwrap(),
-    }
+    let json_rpc = serde_json::to_string(&notif).unwrap();
+    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 200));
+    ClientDirectMessage::AcpMessage { json_rpc }
 }
 
 pub fn acp_response(id: Value, result: Value) -> ClientDirectMessage {
@@ -267,9 +274,9 @@ pub fn acp_response(id: Value, result: Value) -> ClientDirectMessage {
         "id": id,
         "result": result,
     });
-    ClientDirectMessage::AcpMessage {
-        json_rpc: serde_json::to_string(&resp).unwrap(),
-    }
+    let json_rpc = serde_json::to_string(&resp).unwrap();
+    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 200));
+    ClientDirectMessage::AcpMessage { json_rpc }
 }
 
 pub fn acp_error_response(id: Value, code: i64, message: &str) -> ClientDirectMessage {
@@ -278,9 +285,9 @@ pub fn acp_error_response(id: Value, code: i64, message: &str) -> ClientDirectMe
         "id": id,
         "error": { "code": code, "message": message },
     });
-    ClientDirectMessage::AcpMessage {
-        json_rpc: serde_json::to_string(&resp).unwrap(),
-    }
+    let json_rpc = serde_json::to_string(&resp).unwrap();
+    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 200));
+    ClientDirectMessage::AcpMessage { json_rpc }
 }
 
 //

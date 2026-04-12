@@ -173,6 +173,22 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
     setConfig({ llm_feature_orchestrator: name });
   };
 
+  //
+  // Model for the active session, resolved from session state or config default.
+  //
+  const activeSessionModelName = useMemo(() => {
+    if (!activeSession?.provider || !activeSession?.model) return selectedModelName;
+    return modelDefs.find(
+      d => d.provider === activeSession.provider && d.model === activeSession.model
+    )?.name ?? selectedModelName;
+  }, [activeSession, modelDefs, selectedModelName]);
+
+  const handleSessionModelChange = (name: string) => {
+    if (!activeSession) return;
+    orchestratorCloseSession(activeSession.sessionId);
+    orchestratorCreateSession(name);
+  };
+
   const handleCreateSession = () => {
     if (!isConfigured && modelDefs.length > 0) {
       setConfig({ llm_feature_orchestrator: modelDefs[0].name });
@@ -180,10 +196,6 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
     orchestratorCreateSession();
   };
 
-  //
-  // Current model display info.
-  //
-  const currentModel = modelDefs.find(d => d.name === selectedModelName);
   const hasSessions = orchestrator.sessions.length > 0;
 
   return (
@@ -271,7 +283,12 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
                           : 'text-muted hover:text-highlight border-transparent hover:border-[var(--accent-purple)]/30'
                       }`}
                     >
-                      <span className="truncate max-w-[100px]">{session.label}</span>
+                      <span className="truncate max-w-[80px]">{session.label}</span>
+                      {session.provider && session.model && (
+                        <span className="text-[8px] text-muted truncate max-w-[60px]" title={`${session.provider}/${session.model}`}>
+                          {session.model}
+                        </span>
+                      )}
                       {session.isLoading && <Loader2 size={8} className="animate-spin flex-shrink-0" />}
                       <span
                         onClick={(e) => {
@@ -298,33 +315,28 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
 
             {/*
             //
-            // Model selector -- shown when no sessions exist.
+            // Model selector -- always visible when models are defined.
             //
             */}
-            {!hasSessions && modelDefs.length > 0 && (
+            {modelDefs.length > 0 && (
               <div className="px-3 py-1.5 border-b border-subtle flex items-center gap-2 flex-shrink-0">
                 <span className="text-[9px] text-muted tracking-wider">MODEL</span>
                 <select
-                  value={selectedModelName}
-                  onChange={e => handleModelChange(e.target.value)}
+                  value={activeSession ? activeSessionModelName : selectedModelName}
+                  onChange={e => {
+                    if (activeSession) {
+                      handleSessionModelChange(e.target.value);
+                    } else {
+                      handleModelChange(e.target.value);
+                    }
+                  }}
                   className="flex-1 bg-[var(--bg-primary)] border border-subtle px-1.5 py-0.5 text-[10px] text-highlight focus:outline-none focus:border-[var(--border-active)] truncate"
                 >
-                  {!selectedModelName && <option value="">Select model...</option>}
+                  {!selectedModelName && !activeSession && <option value="">Select model...</option>}
                   {modelDefs.map(d => (
                     <option key={d.name} value={d.name}>{d.name}</option>
                   ))}
                 </select>
-              </div>
-            )}
-
-            {/*
-            //
-            // Active model indicator -- shown during session.
-            //
-            */}
-            {activeSession && currentModel && (
-              <div className="px-3 py-1 border-b border-subtle text-[9px] text-muted flex-shrink-0">
-                {currentModel.provider}/{currentModel.model}
               </div>
             )}
 

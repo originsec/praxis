@@ -649,7 +649,7 @@ impl App {
     }
 
     async fn create_new_orchestrator_session(&mut self) {
-        let (_, json_rpc) = self.orchestrator.acp_client.create_session(".");
+        let (_, json_rpc) = self.orchestrator.acp_client.create_session(".", None);
         if let Err(e) = self.client.send_acp_message(json_rpc).await {
             if let Some(session) = self.orchestrator.active_session_mut() {
                 session.messages.push(ConversationEntry::Error(format!(
@@ -665,6 +665,22 @@ impl App {
             let session_id = session.session_id.clone();
             let (_, json_rpc) = self.orchestrator.acp_client.close_session(&session_id);
             let _ = self.client.send_acp_message(json_rpc).await;
+
+            //
+            // Remove locally immediately rather than waiting for the
+            // server's SessionClosed event.
+            //
+
+            if let Some(idx) = self.orchestrator.sessions.iter().position(|s| s.session_id == session_id) {
+                self.orchestrator.sessions.remove(idx);
+                if self.orchestrator.sessions.is_empty() {
+                    self.orchestrator.active_session_index = None;
+                } else if let Some(active) = self.orchestrator.active_session_index {
+                    if active >= self.orchestrator.sessions.len() {
+                        self.orchestrator.active_session_index = Some(self.orchestrator.sessions.len() - 1);
+                    }
+                }
+            }
         }
     }
 
@@ -2861,29 +2877,19 @@ impl App {
     }
 
     async fn select_model(&mut self, model_name: &str) {
-        let mut values = HashMap::new();
-        values.insert(
-            "llm_feature_orchestrator".to_string(),
-            model_name.to_string(),
-        );
+        self.close_active_orchestrator_session().await;
 
-        if let Err(e) = self.client.set_config(values).await {
+        let (_, json_rpc) = self.orchestrator.acp_client.create_session(".", Some(model_name));
+        if let Err(e) = self.client.send_acp_message(json_rpc).await {
             if let Some(session) = self.orchestrator.active_session_mut() {
                 session
                     .messages
                     .push(ConversationEntry::Error(format!(
-                        "Failed to set model: {}",
+                        "Failed to create session: {}",
                         e
                     )));
             }
-            return;
         }
-
-        //
-        // Close existing session and start a fresh one with the new model.
-        //
-        self.close_active_orchestrator_session().await;
-        self.create_new_orchestrator_session().await;
     }
 
     fn open_save_session(&mut self) {

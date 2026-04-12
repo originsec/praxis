@@ -46,12 +46,16 @@ impl AcpClient {
     }
 
     /// Build a session/new request. Returns (request_id, json_rpc_string).
-    pub fn create_session(&self, cwd: &str) -> (u64, String) {
+    pub fn create_session(&self, cwd: &str, model_ref: Option<&str>) -> (u64, String) {
         let id = self.next_id();
-        let req = JsonRpcRequest::new(id, "session/new", Some(json!({
+        let mut params = json!({
             "cwd": cwd,
             "mcpServers": []
-        })));
+        });
+        if let Some(mr) = model_ref {
+            params.as_object_mut().unwrap().insert("modelRef".to_string(), json!(mr));
+        }
+        let req = JsonRpcRequest::new(id, "session/new", Some(params));
         (id, serde_json::to_string(&req).unwrap())
     }
 

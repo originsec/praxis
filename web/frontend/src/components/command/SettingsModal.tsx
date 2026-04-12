@@ -806,7 +806,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                         <div className="flex items-center gap-3 p-2.5 bg-[var(--bg-secondary)] border border-dim">
                           <div className="w-28 flex-shrink-0">
                             <p className="text-xs font-medium text-highlight">Orchestrator</p>
-                            <p className="text-[10px] text-muted">AI assistant</p>
+                            <p className="text-[10px] text-muted">Default model</p>
                           </div>
                           <select
                             value={featureAssignments.orchestrator || ''}

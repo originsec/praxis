@@ -1264,7 +1264,7 @@ interface AppContextValue {
   //
   // Orchestrator (multi-session ACP).
   //
-  orchestratorCreateSession: () => void;
+  orchestratorCreateSession: (modelRef?: string) => void;
   orchestratorCloseSession: (sessionId: string) => void;
   orchestratorCancelPrompt: (sessionId: string) => void;
   orchestratorSendPrompt: (sessionId: string, message: string) => void;
@@ -1960,9 +1960,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Orchestrator functions (multi-session ACP).
   //
 
-  const orchestratorCreateSession = useCallback(() => {
+  const orchestratorCreateSession = useCallback((modelRef?: string) => {
     dispatch({ type: 'ORCHESTRATOR_CREATING_SESSION' });
-    const jsonRpc = acpRequest('session/new', { cwd: '.', mcpServers: [] });
+    const params: Record<string, unknown> = { cwd: '.', mcpServers: [] };
+    if (modelRef) {
+      params.modelRef = modelRef;
+    }
+    const jsonRpc = acpRequest('session/new', params);
     const parsed = JSON.parse(jsonRpc);
     pendingAcpRequestsRef.current.set(parsed.id, { method: 'session/new' });
     wsClient.send({ type: 'acp_message', json_rpc: jsonRpc });
