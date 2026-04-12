@@ -222,6 +222,7 @@ pub struct OrchestratorState {
     pub sessions: Vec<OrchestratorSessionState>,
     pub active_session_index: Option<usize>,
     pub acp_client: AcpClient,
+    pub session_counter: usize,
     pub input: String,
     pub cursor_pos: usize,
     pub history: Vec<String>,
@@ -245,8 +246,9 @@ impl OrchestratorState {
         self.sessions.iter_mut().find(|s| s.session_id == id)
     }
 
-    pub fn next_session_number(&self) -> usize {
-        self.sessions.len() + 1
+    pub fn next_session_number(&mut self) -> usize {
+        self.session_counter += 1;
+        self.session_counter
     }
 }
 
@@ -256,6 +258,7 @@ impl Default for OrchestratorState {
             sessions: Vec::new(),
             active_session_index: None,
             acp_client: AcpClient::new(),
+            session_counter: 0,
             input: String::new(),
             cursor_pos: 0,
             history: Vec::new(),
@@ -3129,6 +3132,18 @@ impl App {
                 for (sid, name) in &cli_sessions {
                     if self.orchestrator.session_by_id_mut(sid).is_none() {
                         let label = name.strip_prefix("CLI_").unwrap_or(name).to_string();
+
+                        //
+                        // Keep session_counter ahead of existing session numbers
+                        // so new sessions don't reuse labels.
+                        //
+
+                        if let Some(n) = label.strip_prefix("Session ").and_then(|s| s.parse::<usize>().ok()) {
+                            if n >= self.orchestrator.session_counter {
+                                self.orchestrator.session_counter = n;
+                            }
+                        }
+
                         let session = OrchestratorSessionState::new(sid.clone(), label);
                         self.orchestrator.sessions.push(session);
                     }

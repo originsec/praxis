@@ -1604,6 +1604,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
                       dispatch({ type: 'ORCHESTRATOR_SYNC_SESSIONS', sessionIds: serverIds });
                     }
 
+                    //
+                    // Keep session counter ahead of existing session numbers.
+                    //
+
+                    for (const sess of webSessions) {
+                      const match = sess.name.match(/^WEB_Session (\d+)$/);
+                      if (match) {
+                        const n = parseInt(match[1], 10);
+                        if (n >= webSessionCounter.current) {
+                          webSessionCounter.current = n + 1;
+                        }
+                      }
+                    }
+
                     for (const sess of webSessions) {
                       const label = sess.name.replace(/^WEB_/, '');
                       const alreadyExists = state.orchestrator.sessions.some(s => s.sessionId === sess.sessionId);
