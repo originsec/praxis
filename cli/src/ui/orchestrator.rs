@@ -767,10 +767,15 @@ fn render_status_hints(f: &mut Frame, area: Rect, state: &OrchestratorState) {
         Span::styled(" new", Style::default().fg(MUTED)),
     ];
 
-    if state.sessions.len() > 1 {
+    if !state.sessions.is_empty() {
         spans.extend([
             Span::styled("  ^w", Style::default().fg(DIM)),
             Span::styled(" close", Style::default().fg(MUTED)),
+        ]);
+    }
+
+    if state.sessions.len() > 1 {
+        spans.extend([
             Span::styled("  tab/S-tab", Style::default().fg(DIM)),
             Span::styled(" switch", Style::default().fg(MUTED)),
         ]);
