@@ -1654,7 +1654,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
                         if (!loadTriggered && !orchestratorActiveIdRef.current) {
                           loadTriggered = true;
-                          const loadRpc = acpRequest('session/load', { sessionId: sess.sessionId, cwd: '.' });
+                          const loadRpc = acpRequest('session/load', { sessionId: sess.sessionId, cwd: '.', mcpServers: [] });
                           wsClient.send({ type: 'acp_message', json_rpc: loadRpc });
                           const loadParsed = JSON.parse(loadRpc);
                           pendingAcpRequestsRef.current.set(loadParsed.id, { method: 'session/load', sessionId: sess.sessionId });
@@ -2122,7 +2122,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (sessionId) {
       const session = orchestratorSessionsRef.current.find(s => s.sessionId === sessionId);
       if (session && !session.loaded) {
-        const jsonRpc = acpRequest('session/load', { sessionId, cwd: '.' });
+        const jsonRpc = acpRequest('session/load', { sessionId, cwd: '.', mcpServers: [] });
         wsClient.send({ type: 'acp_message', json_rpc: jsonRpc });
         const parsed = JSON.parse(jsonRpc);
         pendingAcpRequestsRef.current.set(parsed.id, { method: 'session/load', sessionId });
