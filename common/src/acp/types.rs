@@ -270,6 +270,47 @@ pub struct ContentBlock {
 }
 
 //
+// ACP session/request_permission (from agent).
+//
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionRequestParams {
+    pub tool_call: PermissionToolCall,
+    pub options: Vec<PermissionOption>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionToolCall {
+    pub tool_call_id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub raw_input: Option<Value>,
+}
+
+impl PermissionToolCall {
+    pub fn display_name(&self) -> &str {
+        self.title
+            .as_deref()
+            .or(self.name.as_deref())
+            .unwrap_or("unknown")
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionOption {
+    #[serde(alias = "id")]
+    pub option_id: String,
+    #[serde(alias = "label")]
+    pub name: String,
+}
+
+//
 // ACP session/cancel notification.
 //
 
