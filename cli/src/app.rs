@@ -2,12 +2,11 @@ mod input;
 mod nodes;
 mod operations;
 
+use crate::acp::{AcpBridgeHandle, AcpNotification};
 use crate::client::Client;
 use crate::event::AppEvent;
 use chrono::Utc;
-use common::{
-    ClientDirectMessage, NodeCommand, NodeCommandResult, NodeState, OrchestratorPlan, SystemState,
-};
+use common::{NodeCommand, NodeCommandResult, NodeState, OrchestratorPlan, SystemState};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
@@ -59,6 +58,7 @@ pub enum ConfirmKind {
     DeleteAgentScript(String), // script_id
     ResetAgentScripts,
     ResetNode(String), // node_id
+    CloseOrchestratorSession,
     Info,
 }
 
@@ -134,6 +134,7 @@ pub struct App {
     pub operations: OperationsState,
     pub settings: SettingsState,
     pub client: Arc<Client>,
+    pub acp: AcpBridgeHandle,
     pub should_quit: bool,
     pub connected: bool,
     pub popup: Option<Popup>,
@@ -171,11 +172,12 @@ pub struct ToolCall {
     pub result: Option<String>,
 }
 
-pub struct OrchestratorState {
+pub struct OrchestratorSessionState {
+    pub session_id: String,
+    pub label: String,
+    pub loaded: bool,
     pub messages: Vec<ConversationEntry>,
     pub scroll_offset: u16,
-    pub input: String,
-    pub cursor_pos: usize,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub prompt_tokens: u32,
@@ -183,42 +185,23 @@ pub struct OrchestratorState {
     pub total_tokens: u32,
     pub is_streaming: bool,
     pub prompt_seq: u64,
-    pub session_active: bool,
-
-    //
-    // In-flight state for the current response turn.
-    //
     pub pending_tools: Vec<ToolCall>,
     pub active_tool: Option<String>,
     pub active_tool_input: Option<String>,
     pub current_plan: Option<OrchestratorPlan>,
-
-    //
-    // Tool group display: collapsed, expanded (names), or full (with details).
-    //
     pub tools_expanded: bool,
     pub tools_full: bool,
-
-    //
-    // Command history.
-    //
-    pub history: Vec<String>,
-    pub history_index: Option<usize>,
-    pub saved_input: String,
-
-    //
-    // Set by the renderer so scroll offset can be clamped.
-    //
     pub max_scroll: Cell<u16>,
 }
 
-impl Default for OrchestratorState {
-    fn default() -> Self {
+impl OrchestratorSessionState {
+    pub fn new(session_id: String, label: String) -> Self {
         Self {
+            session_id,
+            label,
+            loaded: false,
             messages: Vec::new(),
             scroll_offset: 0,
-            input: String::new(),
-            cursor_pos: 0,
             provider: None,
             model: None,
             prompt_tokens: 0,
@@ -226,17 +209,62 @@ impl Default for OrchestratorState {
             total_tokens: 0,
             is_streaming: false,
             prompt_seq: 0,
-            session_active: false,
             pending_tools: Vec::new(),
             active_tool: None,
             active_tool_input: None,
             current_plan: None,
             tools_expanded: false,
             tools_full: false,
+            max_scroll: Cell::new(0),
+        }
+    }
+}
+
+pub struct OrchestratorState {
+    pub sessions: Vec<OrchestratorSessionState>,
+    pub active_session_index: Option<usize>,
+    pub session_counter: usize,
+    pub input: String,
+    pub cursor_pos: usize,
+    pub history: Vec<String>,
+    pub history_index: Option<usize>,
+    pub saved_input: String,
+    pub pending_prompt: Option<String>,
+}
+
+impl OrchestratorState {
+    pub fn active_session(&self) -> Option<&OrchestratorSessionState> {
+        self.active_session_index
+            .and_then(|i| self.sessions.get(i))
+    }
+
+    pub fn active_session_mut(&mut self) -> Option<&mut OrchestratorSessionState> {
+        self.active_session_index
+            .and_then(|i| self.sessions.get_mut(i))
+    }
+
+    pub fn session_by_id_mut(&mut self, id: &str) -> Option<&mut OrchestratorSessionState> {
+        self.sessions.iter_mut().find(|s| s.session_id == id)
+    }
+
+    pub fn next_session_number(&mut self) -> usize {
+        self.session_counter += 1;
+        self.session_counter
+    }
+}
+
+impl Default for OrchestratorState {
+    fn default() -> Self {
+        Self {
+            sessions: Vec::new(),
+            active_session_index: None,
+            session_counter: 0,
+            input: String::new(),
+            cursor_pos: 0,
             history: Vec::new(),
             history_index: None,
             saved_input: String::new(),
-            max_scroll: Cell::new(0),
+            pending_prompt: None,
         }
     }
 }
@@ -575,7 +603,13 @@ impl Default for SettingsState {
 }
 
 impl App {
-    pub fn new(client: Arc<Client>, rabbitmq_url: String, client_id: String) -> Self {
+    pub fn new(
+        client: Arc<Client>,
+        rabbitmq_url: String,
+        client_id: String,
+        event_tx: mpsc::UnboundedSender<AppEvent>,
+    ) -> Self {
+        let acp = AcpBridgeHandle::start(client.clone(), event_tx.clone());
         Self {
             active_window: Window::Orchestrator,
             orchestrator: OrchestratorState::default(),
@@ -587,6 +621,7 @@ impl App {
                 ..SettingsState::default()
             },
             client,
+            acp,
             should_quit: false,
             connected: true,
             popup: None,
@@ -594,7 +629,7 @@ impl App {
             run_options: None,
             confirm: None,
             terminal_width: 0,
-            event_tx: None,
+            event_tx: Some(event_tx),
             needs_full_redraw: false,
             terminal_paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             terminal_resume: Arc::new(tokio::sync::Notify::new()),
@@ -603,31 +638,70 @@ impl App {
     }
 
     fn clamp_scroll(&mut self) {
-        let max = self.orchestrator.max_scroll.get();
-        if self.orchestrator.scroll_offset > max {
-            self.orchestrator.scroll_offset = max;
+        if let Some(session) = self.orchestrator.active_session_mut() {
+            let max = session.max_scroll.get();
+            if session.scroll_offset > max {
+                session.scroll_offset = max;
+            }
         }
     }
 
     pub async fn init(&mut self) {
-        self.start_orchestrator_session().await;
+        //
+        // Fetch existing orchestrator sessions from the service. If none
+        // exist, a new one will be created when the user types a prompt.
+        //
+
+        let _ = self.acp.list_sessions().await;
+
         //
         // Request initial op list so broadcasts can update it.
         //
+
         let _ = self.client.request_semantic_op_list().await;
     }
 
-    pub async fn start_orchestrator_session(&mut self) {
-        if let Err(e) = self.client.start_orchestrator().await {
-            self.orchestrator
-                .messages
-                .push(ConversationEntry::Error(format!(
-                    "Failed to start orchestrator: {}",
+    async fn create_new_orchestrator_session(&mut self) {
+        if let Err(e) = self.acp.create_session(".", None).await {
+            if let Some(session) = self.orchestrator.active_session_mut() {
+                session.messages.push(ConversationEntry::Error(format!(
+                    "Failed to create session: {}",
                     e
                 )));
-            return;
+            }
         }
-        self.orchestrator.session_active = true;
+    }
+
+    async fn switch_to_session(&mut self, index: usize) {
+        self.orchestrator.active_session_index = Some(index);
+        if let Some(session) = self.orchestrator.sessions.get(index) {
+            if !session.loaded {
+                let sid = session.session_id.clone();
+                let _ = self.acp.load_session(&sid).await;
+            }
+        }
+    }
+
+    async fn close_active_orchestrator_session(&mut self) {
+        if let Some(session) = self.orchestrator.active_session() {
+            let session_id = session.session_id.clone();
+            let _ = self.acp.close_session(&session_id).await;
+
+            //
+            // Remove locally immediately and switch to another session if
+            // one exists.
+            //
+
+            if let Some(idx) = self.orchestrator.sessions.iter().position(|s| s.session_id == session_id) {
+                self.orchestrator.sessions.remove(idx);
+                if self.orchestrator.sessions.is_empty() {
+                    self.orchestrator.active_session_index = None;
+                } else {
+                    let new_idx = idx.min(self.orchestrator.sessions.len() - 1);
+                    self.switch_to_session(new_idx).await;
+                }
+            }
+        }
     }
 
     pub async fn handle_event(&mut self, event: AppEvent) -> bool {
@@ -655,9 +729,13 @@ impl App {
                 }
                 true
             }
-            AppEvent::Orchestrator(msg) => {
-                self.handle_orchestrator_event(msg);
+            AppEvent::AcpNotification(notif) => {
+                self.handle_acp_notification(notif).await;
                 true
+            }
+            AppEvent::SessionListPoll => {
+                let _ = self.acp.list_sessions().await;
+                false
             }
             AppEvent::StateUpdate(state) => {
                 self.handle_state_update(state);
@@ -875,9 +953,9 @@ impl App {
             }
             AppEvent::TerminalCreateFailed(message) => {
                 self.nodes.terminal_opening = false;
-                self.orchestrator
-                    .messages
-                    .push(ConversationEntry::Error(message));
+                if let Some(session) = self.orchestrator.active_session_mut() {
+                    session.messages.push(ConversationEntry::Error(message));
+                }
                 true
             }
             AppEvent::TerminalOutput(output) => {
@@ -962,7 +1040,7 @@ impl App {
     }
 
     fn is_animating(&self) -> bool {
-        self.orchestrator.is_streaming
+        self.orchestrator.active_session().map(|s| s.is_streaming).unwrap_or(false)
             || self
                 .nodes
                 .session
@@ -1168,8 +1246,9 @@ impl App {
             MouseEventKind::ScrollUp => {
                 match self.active_window {
                     Window::Orchestrator => {
-                        self.orchestrator.scroll_offset =
-                            self.orchestrator.scroll_offset.saturating_add(3);
+                        if let Some(session) = self.orchestrator.active_session_mut() {
+                            session.scroll_offset = session.scroll_offset.saturating_add(3);
+                        }
                         self.clamp_scroll();
                     }
                     Window::Operations if self.operations.detail_focus => {
@@ -1188,8 +1267,9 @@ impl App {
             MouseEventKind::ScrollDown => {
                 match self.active_window {
                     Window::Orchestrator => {
-                        self.orchestrator.scroll_offset =
-                            self.orchestrator.scroll_offset.saturating_sub(3);
+                        if let Some(session) = self.orchestrator.active_session_mut() {
+                            session.scroll_offset = session.scroll_offset.saturating_sub(3);
+                        }
                     }
                     Window::Operations if self.operations.detail_focus => {
                         self.operations.detail_scroll =
@@ -2215,15 +2295,19 @@ impl App {
         //
         if self.active_window == Window::Orchestrator {
             if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-                let plan_height = if self.orchestrator.current_plan.is_some() {
-                    let plan = self.orchestrator.current_plan.as_ref().unwrap();
-                    (plan.steps.len() as u16 + 2).min(12)
-                } else {
-                    0
-                };
+                let active_session = self.orchestrator.active_session();
+                let show_tabs = self.orchestrator.sessions.len() > 1;
+                let plan_height = active_session
+                    .and_then(|s| s.current_plan.as_ref())
+                    .map(|plan| (plan.steps.len() as u16 + 2).min(12))
+                    .unwrap_or(0);
                 let plan_spacer = if plan_height > 0 { 1 } else { 0 };
+                let is_streaming = active_session.map(|s| s.is_streaming).unwrap_or(false);
+
+                let tab_height = if show_tabs { 1 } else { 0 };
 
                 let orch_chunks = Layout::vertical([
+                    Constraint::Length(tab_height),
                     Constraint::Min(1),
                     Constraint::Length(plan_spacer),
                     Constraint::Length(plan_height),
@@ -2234,31 +2318,52 @@ impl App {
                 ])
                 .split(content_area);
 
-                let model_area = orch_chunks[3];
-                let _tokens_area = orch_chunks[6];
+                //
+                // Tab bar click — switch sessions.
+                //
+
+                if show_tabs && mouse.row == orch_chunks[0].y {
+                    let col = mouse.column.saturating_sub(orch_chunks[0].x) as usize;
+                    let mut x = 0usize;
+                    for (i, session) in self.orchestrator.sessions.iter().enumerate() {
+                        let is_active = self.orchestrator.active_session_index == Some(i);
+                        let label_len = if session.is_streaming {
+                            session.label.len() + 4 // " ● Label "
+                        } else {
+                            session.label.len() + 2 // " Label "
+                        };
+                        let tab_width = if is_active { label_len + 2 } else { label_len }; // brackets
+                        let total_width = tab_width + 1; // trailing space
+                        if col >= x && col < x + total_width {
+                            self.orchestrator.active_session_index = Some(i);
+                            return;
+                        }
+                        x += total_width;
+                    }
+                    return;
+                }
+
+                let model_area = orch_chunks[4];
+                let _tokens_area = orch_chunks[7];
 
                 //
                 // Model info line click — open model select.
-                // The model text is right-aligned: "^e/^!e tools  ^w save   provider / model "
                 //
                 if mouse.row == model_area.y {
                     let padded_x = model_area.x + 1;
                     let padded_w = model_area.width.saturating_sub(2);
                     let rel = mouse.column.saturating_sub(padded_x) as usize;
 
-                    //
-                    // Build the hint string to find positions (same as render_model_info).
-                    //
-                    let model_text = match (&self.orchestrator.provider, &self.orchestrator.model) {
-                        (Some(provider), Some(model)) => format!("{} / {}", provider, model),
+                    let (provider, model) = active_session
+                        .map(|s| (s.provider.as_deref(), s.model.as_deref()))
+                        .unwrap_or((None, None));
+                    let model_text = match (provider, model) {
+                        (Some(p), Some(m)) => format!("{} / {}", p, m),
                         _ => "No session".to_string(),
                     };
                     let full_line = format!("^e/^!e tools  ^w save   {} ", model_text);
                     let full_len = full_line.len();
 
-                    //
-                    // The line is right-aligned, so compute the start offset.
-                    //
                     let line_start = if (padded_w as usize) > full_len {
                         padded_w as usize - full_len
                     } else {
@@ -2270,14 +2375,8 @@ impl App {
                         if line_rel < 14 {
                             self.cycle_tools_display();
                         } else if line_rel >= 16 && line_rel < 23 {
-                            //
-                            // "^w save"
-                            //
                             self.open_save_session();
                         } else if line_rel >= 24 {
-                            //
-                            // Model name — open model select.
-                            //
                             self.open_model_select().await;
                         }
                     }
@@ -2287,14 +2386,13 @@ impl App {
                 //
                 // Input area click — position cursor.
                 //
-                let input_area = orch_chunks[4];
+                let input_area = orch_chunks[5];
                 if mouse.row >= input_area.y
                     && mouse.row < input_area.y.saturating_add(input_area.height)
                     && mouse.column >= input_area.x
                     && mouse.column < input_area.x.saturating_add(input_area.width)
-                    && !self.orchestrator.is_streaming
+                    && !is_streaming
                 {
-                    // Inner area: border(1) + prompt char "▸ "(2) = text starts at x+3
                     let text_start = input_area.x + 3;
                     let click_offset = mouse.column.saturating_sub(text_start) as usize;
                     let len = self.orchestrator.input.len();
@@ -2309,33 +2407,43 @@ impl App {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('n') => {
-                    if self.orchestrator.session_active {
-                        let _ = self.client.stop_orchestrator().await;
-                    }
-                    self.orchestrator = OrchestratorState::default();
-                    self.start_orchestrator_session().await;
+                    self.create_new_orchestrator_session().await;
                     return;
                 }
-                KeyCode::Char('c') => {
-                    if self.orchestrator.is_streaming {
-                        let _ = self.client.cancel_orchestrator().await;
-                    }
-                    return;
-                }
-                KeyCode::Char('w') => {
+                KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::ALT) => {
                     self.open_save_session();
                     return;
                 }
-                KeyCode::Char('e') => {
-                    if key.modifiers.contains(KeyModifiers::ALT) {
-                        self.orchestrator.tools_full = !self.orchestrator.tools_full;
-                        if self.orchestrator.tools_full {
-                            self.orchestrator.tools_expanded = true;
+                KeyCode::Char('w') => {
+                    if self.orchestrator.active_session().is_some() {
+                        self.confirm = Some(ConfirmAction {
+                            message: "Close this orchestrator session?".to_string(),
+                            action: ConfirmKind::CloseOrchestratorSession,
+                        });
+                    }
+                    return;
+                }
+                KeyCode::Char('c') => {
+                    if let Some(session) = self.orchestrator.active_session() {
+                        if session.is_streaming {
+                            let sid = session.session_id.clone();
+                            let _ = self.acp.cancel_prompt(&sid).await;
                         }
-                    } else {
-                        self.orchestrator.tools_expanded = !self.orchestrator.tools_expanded;
-                        if !self.orchestrator.tools_expanded {
-                            self.orchestrator.tools_full = false;
+                    }
+                    return;
+                }
+                KeyCode::Char('e') => {
+                    if let Some(session) = self.orchestrator.active_session_mut() {
+                        if key.modifiers.contains(KeyModifiers::ALT) {
+                            session.tools_full = !session.tools_full;
+                            if session.tools_full {
+                                session.tools_expanded = true;
+                            }
+                        } else {
+                            session.tools_expanded = !session.tools_expanded;
+                            if !session.tools_expanded {
+                                session.tools_full = false;
+                            }
                         }
                     }
                     return;
@@ -2344,10 +2452,44 @@ impl App {
             }
         }
 
+        //
+        // Tab / Shift+Tab to switch between sessions.
+        //
+
+        if key.code == KeyCode::Tab && !key.modifiers.contains(KeyModifiers::CONTROL) {
+            if let Some(idx) = self.orchestrator.active_session_index {
+                if self.orchestrator.sessions.len() > 1 {
+                    let next = if key.modifiers.contains(KeyModifiers::SHIFT) {
+                        if idx > 0 { idx - 1 } else { self.orchestrator.sessions.len() - 1 }
+                    } else {
+                        if idx + 1 < self.orchestrator.sessions.len() { idx + 1 } else { 0 }
+                    };
+                    self.switch_to_session(next).await;
+                }
+            }
+            return;
+        }
+
+        if key.code == KeyCode::BackTab {
+            if let Some(idx) = self.orchestrator.active_session_index {
+                if self.orchestrator.sessions.len() > 1 {
+                    let prev = if idx > 0 { idx - 1 } else { self.orchestrator.sessions.len() - 1 };
+                    self.switch_to_session(prev).await;
+                }
+            }
+            return;
+        }
+
         match key.code {
             KeyCode::Enter => {
                 let input = self.orchestrator.input.trim().to_string();
-                if !input.is_empty() && !self.orchestrator.is_streaming {
+                let is_streaming = self
+                    .orchestrator
+                    .active_session()
+                    .map(|s| s.is_streaming)
+                    .unwrap_or(false);
+
+                if !input.is_empty() && !is_streaming {
                     //
                     // Save to history.
                     //
@@ -2365,26 +2507,39 @@ impl App {
                         return;
                     }
 
-                    if !self.orchestrator.session_active {
-                        self.start_orchestrator_session().await;
+                    //
+                    // Create a session if none exists. The prompt will be
+                    // sent when SessionCreated arrives.
+                    //
+
+                    if self.orchestrator.sessions.is_empty() {
+                        self.orchestrator.pending_prompt = Some(input.clone());
+                        self.orchestrator.input.clear();
+                        self.orchestrator.cursor_pos = 0;
+                        self.create_new_orchestrator_session().await;
+                        return;
                     }
 
-                    self.orchestrator
-                        .messages
-                        .push(ConversationEntry::UserPrompt(input.clone()));
-                    self.orchestrator.input.clear();
-                    self.orchestrator.cursor_pos = 0;
-                    self.orchestrator.is_streaming = true;
-                    self.orchestrator.scroll_offset = 0;
-
-                    let prompt_id = format!("{}", self.orchestrator.prompt_seq);
-                    self.orchestrator.prompt_seq += 1;
-
-                    if let Err(e) = self.client.send_orchestrator_prompt(prompt_id, input).await {
-                        self.orchestrator
+                    if let Some(session) = self.orchestrator.active_session_mut() {
+                        session
                             .messages
-                            .push(ConversationEntry::Error(format!("Send failed: {}", e)));
-                        self.orchestrator.is_streaming = false;
+                            .push(ConversationEntry::UserPrompt(input.clone()));
+                        session.is_streaming = true;
+                        session.scroll_offset = 0;
+                        session.prompt_seq += 1;
+
+                        let session_id = session.session_id.clone();
+                        self.orchestrator.input.clear();
+                        self.orchestrator.cursor_pos = 0;
+
+                        if let Err(e) = self.acp.send_prompt(&session_id, &input).await {
+                            if let Some(session) = self.orchestrator.active_session_mut() {
+                                session
+                                    .messages
+                                    .push(ConversationEntry::Error(format!("Send failed: {}", e)));
+                                session.is_streaming = false;
+                            }
+                        }
                     }
                 }
             }
@@ -2482,13 +2637,15 @@ impl App {
                 self.popup = None;
             }
             KeyCode::PageUp => {
-                self.orchestrator.scroll_offset =
-                    self.orchestrator.scroll_offset.saturating_add(10);
+                if let Some(session) = self.orchestrator.active_session_mut() {
+                    session.scroll_offset = session.scroll_offset.saturating_add(10);
+                }
                 self.clamp_scroll();
             }
             KeyCode::PageDown => {
-                self.orchestrator.scroll_offset =
-                    self.orchestrator.scroll_offset.saturating_sub(10);
+                if let Some(session) = self.orchestrator.active_session_mut() {
+                    session.scroll_offset = session.scroll_offset.saturating_sub(10);
+                }
             }
             _ => {}
         }
@@ -2499,22 +2656,21 @@ impl App {
 
         match cmd {
             "clear" => {
-                if self.orchestrator.session_active {
-                    let _ = self.client.stop_orchestrator().await;
-                }
-                self.orchestrator = OrchestratorState::default();
-                self.start_orchestrator_session().await;
+                self.close_active_orchestrator_session().await;
+                self.create_new_orchestrator_session().await;
             }
             "model" => {
                 self.open_model_select().await;
             }
             _ => {
-                self.orchestrator
-                    .messages
-                    .push(ConversationEntry::Error(format!(
-                        "Unknown command: /{}",
-                        cmd
-                    )));
+                if let Some(session) = self.orchestrator.active_session_mut() {
+                    session
+                        .messages
+                        .push(ConversationEntry::Error(format!(
+                            "Unknown command: /{}",
+                            cmd
+                        )));
+                }
             }
         }
     }
@@ -2523,9 +2679,9 @@ impl App {
         match confirm.action {
             ConfirmKind::DeleteOp(full_name) => {
                 if let Err(e) = self.client.delete_op_def(full_name).await {
-                    self.orchestrator
-                        .messages
-                        .push(ConversationEntry::Error(format!("Delete failed: {}", e)));
+                    if let Some(session) = self.orchestrator.active_session_mut() {
+                        session.messages.push(ConversationEntry::Error(format!("Delete failed: {}", e)));
+                    }
                 }
                 self.refresh_library_after(Duration::from_millis(300));
             }
@@ -2565,6 +2721,9 @@ impl App {
                 let _ = self.client.reset_lua_agent_script_defaults().await;
                 self.settings.agent_scripts_loaded = false;
                 self.load_agent_scripts().await;
+            }
+            ConfirmKind::CloseOrchestratorSession => {
+                self.close_active_orchestrator_session().await;
             }
             ConfirmKind::Info => {}
         }
@@ -2624,12 +2783,12 @@ impl App {
         {
             Ok(c) => c,
             Err(e) => {
-                self.orchestrator
-                    .messages
-                    .push(ConversationEntry::Error(format!(
+                if let Some(session) = self.orchestrator.active_session_mut() {
+                    session.messages.push(ConversationEntry::Error(format!(
                         "Failed to fetch models: {}",
                         e
                     )));
+                }
                 return;
             }
         };
@@ -2653,9 +2812,11 @@ impl App {
         let defs: Vec<ModelDef> = serde_json::from_str(&defs_json).unwrap_or_default();
 
         if defs.is_empty() {
-            self.orchestrator.messages.push(ConversationEntry::Error(
-                "No models configured. Configure models in Settings.".to_string(),
-            ));
+            if let Some(session) = self.orchestrator.active_session_mut() {
+                session.messages.push(ConversationEntry::Error(
+                    "No models configured. Configure models in Settings.".to_string(),
+                ));
+            }
             return;
         }
 
@@ -2738,30 +2899,18 @@ impl App {
     }
 
     async fn select_model(&mut self, model_name: &str) {
-        let mut values = HashMap::new();
-        values.insert(
-            "llm_feature_orchestrator".to_string(),
-            model_name.to_string(),
-        );
+        self.close_active_orchestrator_session().await;
 
-        if let Err(e) = self.client.set_config(values).await {
-            self.orchestrator
-                .messages
-                .push(ConversationEntry::Error(format!(
-                    "Failed to set model: {}",
-                    e
-                )));
-            return;
+        if let Err(e) = self.acp.create_session(".", Some(model_name)).await {
+            if let Some(session) = self.orchestrator.active_session_mut() {
+                session
+                    .messages
+                    .push(ConversationEntry::Error(format!(
+                        "Failed to create session: {}",
+                        e
+                    )));
+            }
         }
-
-        //
-        // Restart the orchestrator session with the new model.
-        //
-        if self.orchestrator.session_active {
-            let _ = self.client.stop_orchestrator().await;
-        }
-        self.orchestrator = OrchestratorState::default();
-        self.start_orchestrator_session().await;
     }
 
     fn open_save_session(&mut self) {
@@ -2814,12 +2963,16 @@ impl App {
             path.to_string()
         };
 
+        let Some(session) = self.orchestrator.active_session_mut() else {
+            return;
+        };
+
         let now = Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
-        let provider = self.orchestrator.provider.as_deref().unwrap_or("unknown");
-        let model = self.orchestrator.model.as_deref().unwrap_or("unknown");
-        let pt = self.orchestrator.prompt_tokens;
-        let ct = self.orchestrator.completion_tokens;
-        let tt = self.orchestrator.total_tokens;
+        let provider = session.provider.as_deref().unwrap_or("unknown");
+        let model = session.model.as_deref().unwrap_or("unknown");
+        let pt = session.prompt_tokens;
+        let ct = session.completion_tokens;
+        let tt = session.total_tokens;
 
         let mut md = String::new();
         md.push_str("# Praxis Orchestrator Session\n\n");
@@ -2832,7 +2985,7 @@ impl App {
         ));
         md.push_str("\n---\n");
 
-        for entry in &self.orchestrator.messages {
+        for entry in &session.messages {
             match entry {
                 ConversationEntry::UserPrompt(prompt) => {
                     md.push_str(&format!("\n**\u{25b8} {}**\n", prompt));
@@ -2865,7 +3018,7 @@ impl App {
 
         match std::fs::write(&expanded, &md) {
             Ok(_) => {
-                self.orchestrator
+                session
                     .messages
                     .push(ConversationEntry::Info(format!(
                         "Session saved to {}",
@@ -2873,7 +3026,7 @@ impl App {
                     )));
             }
             Err(e) => {
-                self.orchestrator
+                session
                     .messages
                     .push(ConversationEntry::Error(format!(
                         "Failed to save session: {}",
@@ -2883,109 +3036,237 @@ impl App {
         }
     }
 
-    fn handle_orchestrator_event(&mut self, msg: ClientDirectMessage) {
-        match msg {
-            ClientDirectMessage::OrchestratorStarted { provider, model } => {
-                self.orchestrator.provider = Some(provider);
-                self.orchestrator.model = Some(model);
-                self.orchestrator.session_active = true;
-            }
-            ClientDirectMessage::OrchestratorContent { content, .. } => {
-                self.orchestrator.active_tool = None;
+    async fn handle_acp_notification(&mut self, notif: AcpNotification) {
+        match notif {
+            AcpNotification::SessionCreated { session_id, provider, model } => {
+                //
+                // A new session was created by this client. Mark loaded since
+                // we'll see all events in real time.
+                //
+
+                let label = format!("Session {}", self.orchestrator.next_session_number());
+                let mut session = OrchestratorSessionState::new(session_id.clone(), label);
+                session.loaded = true;
+                session.provider = provider;
+                session.model = model;
+                self.orchestrator.sessions.push(session);
+                self.orchestrator.active_session_index =
+                    Some(self.orchestrator.sessions.len() - 1);
 
                 //
-                // Flush pending tool calls before appending text so tool
-                // calls appear between text blocks.
+                // If there's a pending prompt (from typing on the welcome
+                // screen before any session existed), send it now.
                 //
-                if !self.orchestrator.pending_tools.is_empty() {
-                    let tools = std::mem::take(&mut self.orchestrator.pending_tools);
-                    self.orchestrator
-                        .messages
-                        .push(ConversationEntry::ToolGroup(tools));
+
+                if let Some(prompt) = self.orchestrator.pending_prompt.take() {
+                    if let Some(session) = self.orchestrator.active_session_mut() {
+                        session.messages.push(ConversationEntry::UserPrompt(prompt.clone()));
+                        session.is_streaming = true;
+                        session.prompt_seq += 1;
+                    }
+                    let _ = self.acp.send_prompt(&session_id, &prompt).await;
+                }
+            }
+
+            AcpNotification::SessionClosed { session_id } => {
+                if let Some(idx) = self
+                    .orchestrator
+                    .sessions
+                    .iter()
+                    .position(|s| s.session_id == session_id)
+                {
+                    self.orchestrator.sessions.remove(idx);
+
+                    //
+                    // Fix up the active index after removal.
+                    //
+                    if self.orchestrator.sessions.is_empty() {
+                        self.orchestrator.active_session_index = None;
+                    } else if let Some(active) = self.orchestrator.active_session_index {
+                        if active >= self.orchestrator.sessions.len() {
+                            self.orchestrator.active_session_index =
+                                Some(self.orchestrator.sessions.len() - 1);
+                        } else if active > idx {
+                            self.orchestrator.active_session_index = Some(active - 1);
+                        }
+                    }
+                }
+            }
+
+            AcpNotification::InitializeResult => {}
+
+            AcpNotification::SessionList { sessions } => {
+                //
+                // Sync session list with the server. Only show sessions
+                // with the CLI_ prefix in the session ID (ours).
+                //
+
+                let cli_sessions: Vec<_> = sessions.into_iter()
+                    .filter(|(id, _)| id.starts_with("CLI_"))
+                    .collect();
+
+                let server_ids: Vec<String> = cli_sessions.iter().map(|(id, _)| id.clone()).collect();
+                self.orchestrator.sessions.retain(|s| server_ids.contains(&s.session_id));
+
+                for (sid, _title) in &cli_sessions {
+                    if self.orchestrator.session_by_id_mut(sid).is_none() {
+                        let label = format!("Session {}", self.orchestrator.next_session_number());
+                        let session = OrchestratorSessionState::new(sid.clone(), label);
+                        self.orchestrator.sessions.push(session);
+                    }
                 }
 
                 //
-                // Append to the last AssistantText, or create a new one.
+                // Fix active index after potential removal.
                 //
-                match self.orchestrator.messages.last_mut() {
-                    Some(ConversationEntry::AssistantText(existing)) => {
-                        existing.push_str(&content);
+
+                if self.orchestrator.sessions.is_empty() {
+                    self.orchestrator.active_session_index = None;
+                } else if let Some(active) = self.orchestrator.active_session_index {
+                    if active >= self.orchestrator.sessions.len() {
+                        self.orchestrator.active_session_index = Some(self.orchestrator.sessions.len() - 1);
                     }
-                    _ => {
-                        self.orchestrator
-                            .messages
-                            .push(ConversationEntry::AssistantText(content));
-                    }
+                } else {
+                    //
+                    // First session list received — select the first session
+                    // and trigger a load to get its history.
+                    //
+
+                    self.switch_to_session(0).await;
                 }
+
+                //
+                // Sort sessions by label for consistent tab ordering.
+                //
+
+                self.orchestrator.sessions.sort_by(|a, b| a.label.cmp(&b.label));
             }
-            ClientDirectMessage::OrchestratorToolExecuting { name, input, .. } => {
-                if name != "report_plan" {
-                    self.orchestrator.active_tool = Some(name);
-                    self.orchestrator.active_tool_input = input;
-                }
-            }
-            ClientDirectMessage::OrchestratorToolExecuted {
-                name,
-                success,
-                display,
-                result,
-                ..
-            } => {
-                if name != "report_plan" {
-                    let input = self.orchestrator.active_tool_input.take();
-                    self.orchestrator.active_tool = None;
-                    self.orchestrator.pending_tools.push(ToolCall {
-                        name,
-                        success,
-                        input,
-                        display: if display.is_empty() {
-                            None
-                        } else {
-                            Some(display)
-                        },
-                        result: if result.is_empty() {
-                            None
-                        } else {
-                            Some(result)
-                        },
+
+            AcpNotification::UserPrompt { session_id, text } => {
+                if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
+                    //
+                    // Only add if the message isn't already there (replay).
+                    //
+
+                    let already = session.messages.iter().any(|m| {
+                        matches!(m, ConversationEntry::UserPrompt(t) if t == &text)
                     });
+                    if !already {
+                        session.messages.push(ConversationEntry::UserPrompt(text));
+                    }
                 }
             }
-            ClientDirectMessage::OrchestratorPlanUpdated { plan, .. } => {
-                self.orchestrator.current_plan = Some(plan);
+
+            AcpNotification::TextContent { session_id, text } => {
+                if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
+                    session.active_tool = None;
+
+                    //
+                    // Flush pending tool calls before appending text so tool
+                    // calls appear between text blocks.
+                    //
+                    if !session.pending_tools.is_empty() {
+                        let tools = std::mem::take(&mut session.pending_tools);
+                        session.messages.push(ConversationEntry::ToolGroup(tools));
+                    }
+
+                    match session.messages.last_mut() {
+                        Some(ConversationEntry::AssistantText(existing)) => {
+                            existing.push_str(&text);
+                        }
+                        _ => {
+                            session
+                                .messages
+                                .push(ConversationEntry::AssistantText(text));
+                        }
+                    }
+                }
             }
-            ClientDirectMessage::OrchestratorTokenUsage {
+
+            AcpNotification::ToolCall { session_id, name, input } => {
+                if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
+                    if name != "report_plan" {
+                        session.active_tool = Some(name);
+                        session.active_tool_input = input;
+                    }
+                }
+            }
+
+            AcpNotification::ToolResult { session_id, name, success, result } => {
+                if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
+                    let tool_name = session.active_tool.take().unwrap_or(name);
+                    if tool_name != "report_plan" {
+                        let input = session.active_tool_input.take();
+                        session.pending_tools.push(ToolCall {
+                            name: tool_name,
+                            success,
+                            input,
+                            display: None,
+                            result: Some(result),
+                        });
+                    }
+                }
+            }
+
+            AcpNotification::PlanUpdate { session_id, plan } => {
+                if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
+                    session.current_plan = Some(plan);
+                }
+            }
+
+            AcpNotification::TokenUsage {
+                session_id,
                 prompt_tokens,
                 completion_tokens,
                 total_tokens,
-                ..
             } => {
-                self.orchestrator.prompt_tokens += prompt_tokens;
-                self.orchestrator.completion_tokens += completion_tokens;
-                self.orchestrator.total_tokens += total_tokens;
-            }
-            ClientDirectMessage::OrchestratorDone { .. } => {
-                if !self.orchestrator.pending_tools.is_empty() {
-                    let tools = std::mem::take(&mut self.orchestrator.pending_tools);
-                    self.orchestrator
-                        .messages
-                        .push(ConversationEntry::ToolGroup(tools));
+                if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
+                    session.prompt_tokens += prompt_tokens;
+                    session.completion_tokens += completion_tokens;
+                    session.total_tokens += total_tokens;
                 }
-                self.orchestrator.active_tool = None;
-                self.orchestrator.current_plan = None;
-                self.orchestrator.is_streaming = false;
             }
-            ClientDirectMessage::OrchestratorStopped => {
-                self.orchestrator.is_streaming = false;
-                self.orchestrator.session_active = false;
+
+            AcpNotification::PromptComplete { .. } => {
+                //
+                // Find the session that was streaming and flush pending tools.
+                //
+                for session in &mut self.orchestrator.sessions {
+                    if session.is_streaming {
+                        if !session.pending_tools.is_empty() {
+                            let tools = std::mem::take(&mut session.pending_tools);
+                            session.messages.push(ConversationEntry::ToolGroup(tools));
+                        }
+                        session.active_tool = None;
+                        session.current_plan = None;
+                        session.is_streaming = false;
+                        break;
+                    }
+                }
             }
-            ClientDirectMessage::OrchestratorError { message, .. } => {
-                self.orchestrator.is_streaming = false;
-                self.orchestrator
-                    .messages
-                    .push(ConversationEntry::Error(message));
+
+            AcpNotification::SessionLoaded { .. } => {}
+
+            AcpNotification::Error {
+                request_id: _,
+                message,
+            } => {
+                //
+                // Show error in the streaming session if one exists,
+                // otherwise the active session.
+                //
+                let idx = self
+                    .orchestrator
+                    .sessions
+                    .iter()
+                    .position(|s| s.is_streaming)
+                    .or(self.orchestrator.active_session_index);
+
+                if let Some(session) = idx.and_then(|i| self.orchestrator.sessions.get_mut(i)) {
+                    session.is_streaming = false;
+                    session.messages.push(ConversationEntry::Error(message));
+                }
             }
-            _ => {}
         }
     }
 
@@ -3344,13 +3625,15 @@ impl App {
     }
 
     fn cycle_tools_display(&mut self) {
-        if !self.orchestrator.tools_expanded {
-            self.orchestrator.tools_expanded = true;
-        } else if !self.orchestrator.tools_full {
-            self.orchestrator.tools_full = true;
-        } else {
-            self.orchestrator.tools_expanded = false;
-            self.orchestrator.tools_full = false;
+        if let Some(session) = self.orchestrator.active_session_mut() {
+            if !session.tools_expanded {
+                session.tools_expanded = true;
+            } else if !session.tools_full {
+                session.tools_full = true;
+            } else {
+                session.tools_expanded = false;
+                session.tools_full = false;
+            }
         }
     }
 

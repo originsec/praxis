@@ -15,7 +15,7 @@ import {
   Brain,
   User,
 } from 'lucide-react';
-import type { OrchestratorMessage, OrchestratorToolExecution } from '../../context/AppContext';
+import type { OrchestratorMessage, OrchestratorToolExecution } from '../../context/orchestratorTypes';
 import type { OrchestratorPlan, PlanStep } from '../../api/types';
 
 //
@@ -57,7 +57,37 @@ function parseThinkingContent(content: string): { thinking: string[]; response: 
     remaining = remaining.substring(0, startIdx) + remaining.substring(endIdx + endTag.length);
   }
 
-  return { thinking, response: remaining.trim() };
+  let response = remaining.trim();
+
+  //
+  // Strip code fences that contain markdown formatting. LLMs sometimes
+  // wrap markdown tables, headers, or bold text inside ``` blocks which
+  // prevents ReactMarkdown from rendering them properly.
+  //
+
+  response = stripMarkdownCodeFences(response);
+
+  return { thinking, response };
+}
+
+function stripMarkdownCodeFences(text: string): string {
+  //
+  // Match ``` blocks and check if their content looks like markdown
+  // (contains tables, headers, or bold). If so, unwrap them.
+  //
+
+  return text.replace(
+    /```[a-z]*\n([\s\S]*?)```/g,
+    (_match, inner: string) => {
+      const hasTable = /^\s*\|.*\|/m.test(inner);
+      const hasHeader = /^#{1,6}\s/m.test(inner);
+      const hasBold = /\*\*[^*]+\*\*/.test(inner);
+      if (hasTable || hasHeader || hasBold) {
+        return inner;
+      }
+      return _match;
+    }
+  );
 }
 
 //

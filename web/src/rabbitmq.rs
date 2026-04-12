@@ -682,35 +682,13 @@ impl RabbitMqClient {
     }
 
     //
-    // Orchestrator methods.
+    // ACP message forwarding.
     //
 
-    pub async fn start_orchestrator(&self) -> Result<()> {
-        let message = ClientSignalMessage::OrchestratorStart {
+    pub async fn send_acp_message(&self, json_rpc: String) -> Result<()> {
+        let message = ClientSignalMessage::AcpMessage {
             client_id: self.state.client_id.clone(),
-        };
-        self.publish_signal(message).await
-    }
-
-    pub async fn send_orchestrator_prompt(&self, prompt_id: String, prompt: String) -> Result<()> {
-        let message = ClientSignalMessage::OrchestratorPrompt {
-            client_id: self.state.client_id.clone(),
-            prompt_id,
-            message: prompt,
-        };
-        self.publish_signal(message).await
-    }
-
-    pub async fn stop_orchestrator(&self) -> Result<()> {
-        let message = ClientSignalMessage::OrchestratorStop {
-            client_id: self.state.client_id.clone(),
-        };
-        self.publish_signal(message).await
-    }
-
-    pub async fn cancel_orchestrator(&self) -> Result<()> {
-        let message = ClientSignalMessage::OrchestratorCancel {
-            client_id: self.state.client_id.clone(),
+            json_rpc,
         };
         self.publish_signal(message).await
     }
@@ -1245,34 +1223,10 @@ impl RabbitMqClient {
             }
 
             //
-            // Orchestrator responses.
+            // ACP message responses.
             //
-            ClientDirectMessage::OrchestratorStarted { provider, model } => {
-                self.state.broadcast(ServerMessage::OrchestratorStarted { provider, model });
-            }
-            ClientDirectMessage::OrchestratorContent { prompt_id, content } => {
-                self.state.broadcast(ServerMessage::OrchestratorContent { prompt_id, content });
-            }
-            ClientDirectMessage::OrchestratorToolExecuting { prompt_id, name, input } => {
-                self.state.broadcast(ServerMessage::OrchestratorToolExecuting { prompt_id, name, input });
-            }
-            ClientDirectMessage::OrchestratorToolExecuted { prompt_id, name, display, success, result } => {
-                self.state.broadcast(ServerMessage::OrchestratorToolExecuted { prompt_id, name, display, success, result });
-            }
-            ClientDirectMessage::OrchestratorPlanUpdated { prompt_id, plan } => {
-                self.state.broadcast(ServerMessage::OrchestratorPlanUpdated { prompt_id, plan });
-            }
-            ClientDirectMessage::OrchestratorDone { prompt_id } => {
-                self.state.broadcast(ServerMessage::OrchestratorDone { prompt_id });
-            }
-            ClientDirectMessage::OrchestratorStopped => {
-                self.state.broadcast(ServerMessage::OrchestratorStopped);
-            }
-            ClientDirectMessage::OrchestratorError { prompt_id, message } => {
-                self.state.broadcast(ServerMessage::OrchestratorError { prompt_id, message });
-            }
-            ClientDirectMessage::OrchestratorTokenUsage { prompt_id, prompt_tokens, completion_tokens, total_tokens } => {
-                self.state.broadcast(ServerMessage::OrchestratorTokenUsage { prompt_id, prompt_tokens, completion_tokens, total_tokens });
+            ClientDirectMessage::AcpMessage { json_rpc } => {
+                self.state.broadcast(ServerMessage::AcpMessage { json_rpc });
             }
 
             //

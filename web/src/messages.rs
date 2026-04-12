@@ -4,7 +4,7 @@ use common::{
     ChainDefinitionFull, ChainDefinitionInfo, ChainExecutionUpdate,
     CommandRequest, CommandResponse,
     InterceptMethod, InterceptRule, InterceptStatus, InterceptedTrafficEntry,
-    ApplicationLogEntry, OrchestratorPlan, OperationDefinitionInfo, PayloadInfo,
+    ApplicationLogEntry, OperationDefinitionInfo, PayloadInfo,
     SemanticOpUpdate, SystemState, TerminalOutput, TrafficLogFilters,
     TrafficMatchWithDetails, RuleScope, TargetDirection, TrafficSearchFilters,
     TargetSpec, ToolkitApplyItem, ToolkitApplyOutcome, ToolkitExecuteResult,
@@ -82,17 +82,10 @@ pub enum BrowserMessage {
     OpDefGet {
         full_name: String,
     },
-    /// Start a new Orchestrator session
-    OrchestratorStart,
-    /// Send a prompt to Orchestrator
-    OrchestratorPrompt {
-        prompt_id: String,
-        message: String,
+    /// ACP JSON-RPC message to forward to service
+    AcpMessage {
+        json_rpc: String,
     },
-    /// Stop/interrupt Orchestrator session
-    OrchestratorStop,
-    /// Cancel current Orchestrator inference (keeps session active)
-    OrchestratorCancel,
 
     //
     // Traffic interception messages.
@@ -443,52 +436,9 @@ pub enum ServerMessage {
     OpDefError {
         message: String,
     },
-    /// Orchestrator session started
-    OrchestratorStarted {
-        provider: String,
-        model: String,
-    },
-    /// Orchestrator streaming text content
-    OrchestratorContent {
-        prompt_id: String,
-        content: String,
-    },
-    /// Orchestrator started executing a tool
-    OrchestratorToolExecuting {
-        prompt_id: String,
-        name: String,
-        input: Option<String>,
-    },
-    /// Orchestrator finished executing a tool
-    OrchestratorToolExecuted {
-        prompt_id: String,
-        name: String,
-        display: String,
-        success: bool,
-        result: String,
-    },
-    /// Orchestrator plan updated
-    OrchestratorPlanUpdated {
-        prompt_id: String,
-        plan: OrchestratorPlan,
-    },
-    /// Orchestrator response complete
-    OrchestratorDone {
-        prompt_id: String,
-    },
-    /// Orchestrator session stopped
-    OrchestratorStopped,
-    /// Orchestrator error
-    OrchestratorError {
-        prompt_id: String,
-        message: String,
-    },
-    /// Orchestrator token usage update
-    OrchestratorTokenUsage {
-        prompt_id: String,
-        prompt_tokens: u32,
-        completion_tokens: u32,
-        total_tokens: u32,
+    /// ACP JSON-RPC message from service
+    AcpMessage {
+        json_rpc: String,
     },
 
     //

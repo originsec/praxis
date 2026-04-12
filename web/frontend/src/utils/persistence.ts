@@ -1,14 +1,28 @@
-import type { OrchestratorMessage, OrchestratorState } from '../context/orchestratorTypes';
+import type { OrchestratorMessage, OrchestratorState, OrchestratorSessionState } from '../context/orchestratorTypes';
 
 const ORCHESTRATOR_SESSION_STORAGE_KEY = 'praxis_orchestrator_session';
 const RECENT_NODES_STORAGE_KEY = 'praxis_recent_nodes';
 
+function serializeSessionMessages(messages: OrchestratorMessage[]): object[] {
+  return messages.map((msg) => ({
+    ...msg,
+    timestamp: msg.timestamp.toISOString(),
+  }));
+}
+
+function deserializeSessionMessages(messages: Array<OrchestratorMessage & { timestamp: string }>): OrchestratorMessage[] {
+  return messages.map((msg) => ({
+    ...msg,
+    timestamp: new Date(msg.timestamp),
+  }));
+}
+
 function serializeOrchestratorState(state: OrchestratorState): string {
   return JSON.stringify({
     ...state,
-    messages: state.messages.map((msg) => ({
-      ...msg,
-      timestamp: msg.timestamp.toISOString(),
+    sessions: state.sessions.map((session) => ({
+      ...session,
+      messages: serializeSessionMessages(session.messages),
     })),
   });
 }
@@ -18,10 +32,18 @@ function deserializeOrchestratorState(json: string): OrchestratorState | null {
     const parsed = JSON.parse(json);
     return {
       ...parsed,
-      messages: parsed.messages.map((msg: OrchestratorMessage & { timestamp: string }) => ({
-        ...msg,
-        timestamp: new Date(msg.timestamp),
+      sessions: (parsed.sessions || []).map((session: OrchestratorSessionState & { messages: Array<OrchestratorMessage & { timestamp: string }> }) => ({
+        ...session,
+        messages: deserializeSessionMessages(session.messages),
+        //
+        // Reset transient states that shouldn't persist across page loads.
+        //
+        isLoading: false,
+        streamingContent: '',
+        hadToolCall: false,
+        currentToolExecutions: [],
       })),
+      isStarting: false,
     };
   } catch {
     return null;
@@ -34,17 +56,7 @@ export function loadPersistedOrchestratorState(initial: OrchestratorState): Orch
     if (stored) {
       const state = deserializeOrchestratorState(stored);
       if (state) {
-        //
-        // Reset transient states that shouldn't persist across page loads.
-        //
-        return {
-          ...state,
-          isStarting: false,
-          isLoading: false,
-          streamingContent: '',
-          hadToolCall: false,
-          currentToolExecutions: [],
-        };
+        return state;
       }
     }
   } catch {
@@ -57,12 +69,9 @@ export function loadPersistedOrchestratorState(initial: OrchestratorState): Orch
 
 export function persistOrchestratorState(state: OrchestratorState): void {
   try {
-    if (state.sessionActive) {
+    if (state.sessions.length > 0) {
       sessionStorage.setItem(ORCHESTRATOR_SESSION_STORAGE_KEY, serializeOrchestratorState(state));
     } else {
-      //
-      // Clear storage when session is stopped.
-      //
       sessionStorage.removeItem(ORCHESTRATOR_SESSION_STORAGE_KEY);
     }
   } catch {

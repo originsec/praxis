@@ -1,5 +1,6 @@
 //! Praxis Service - Orchestration service for the Praxis framework
 
+mod acp_server;
 mod banner;
 mod claude_bridge;
 mod config;
@@ -318,10 +319,14 @@ async fn run_main_loop() -> Result<()> {
     common::log_info!("Initialized AgentChat manager");
 
     //
-    // Initialize Orchestrator manager.
+    // Initialize Orchestrator manager and ACP server.
     //
     let orchestrator_manager = Arc::new(OrchestratorManager::new());
-    common::log_info!("Initialized Orchestrator manager");
+    let acp_server = Arc::new(acp_server::AcpServer::new(
+        orchestrator_manager.clone(),
+        service_config.clone(),
+    ));
+    common::log_info!("Initialized Orchestrator manager and ACP server");
 
     //
     // Initialize Toolkit manager.
@@ -639,7 +644,7 @@ async fn run_main_loop() -> Result<()> {
         chain_executor,
         node_exec_lock: node_exec_lock.clone(),
         agent_chat_manager,
-        orchestrator_manager,
+        acp_server,
         toolkit_manager,
         mcp_manager,
         ccrv1_manager,
@@ -712,8 +717,16 @@ async fn run_main_loop() -> Result<()> {
                 //
                 // Both consumers returned None - connection lost.
                 //
-                return Ok(());
+                break;
             }
         }
     }
+
+    //
+    // Shut down orchestrator sessions before exiting.
+    //
+
+    ctx.acp_server.shutdown().await;
+
+    Ok(())
 }

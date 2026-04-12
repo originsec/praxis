@@ -1,3 +1,4 @@
+mod acp;
 mod app;
 mod client;
 mod commands;
@@ -48,6 +49,10 @@ struct Cli {
     /// Check service connection status
     #[arg(long = "status")]
     status: bool,
+
+    /// Run as ACP stdio proxy (forward JSON-RPC over stdin/stdout to service via RabbitMQ)
+    #[arg(long = "acp")]
+    acp: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -121,6 +126,10 @@ async fn run() -> Result<()> {
         return run_command(&cli.rabbitmq_url, cli.timeout, command).await;
     }
 
+    if cli.acp {
+        return run_acp_proxy(&cli.rabbitmq_url, cli.timeout).await;
+    }
+
     run_tui(&cli.rabbitmq_url, cli.timeout).await
 }
 
@@ -153,6 +162,111 @@ async fn run_command(rabbitmq_url: &str, timeout: u64, command: Commands) -> Res
     let result = command.execute(&client).await;
     client.disconnect().await;
     result
+}
+
+async fn run_acp_proxy(rabbitmq_url: &str, timeout: u64) -> Result<()> {
+    let uid = uuid::Uuid::new_v4().to_string();
+    let client_id = format!("acp_{}", &uid[..8]);
+    let client = Arc::new(client::Client::connect(rabbitmq_url, timeout, client_id).await?);
+
+    let mut acp_rx = client.subscribe_acp_events();
+
+    //
+    // Track request IDs originated from stdin so we only forward
+    // responses that belong to this proxy session.
+    //
+
+    let pending_ids: Arc<std::sync::Mutex<std::collections::HashSet<serde_json::Value>>> =
+        Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+
+    //
+    // ACP responses from service written to stdout as NDJSON.
+    // Only forward notifications (no id) and responses to our requests.
+    //
+
+    let pending_ids_rx = pending_ids.clone();
+    let stdout_task = tokio::spawn(async move {
+        let mut stdout = tokio::io::stdout();
+        while let Some(json_rpc) = acp_rx.recv().await {
+            //
+            // Parse to check if this is a response we should forward.
+            //
+
+            let should_forward = if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&json_rpc) {
+                if let Some(id) = msg.get("id") {
+                    if msg.get("method").is_some() {
+                        true // server-initiated request — forward
+                    } else {
+                        pending_ids_rx.lock().unwrap().remove(id) // response — only if we sent the request
+                    }
+                } else {
+                    true // notification (no id) — always forward
+                }
+            } else {
+                true // parse error — forward anyway
+            };
+
+            if !should_forward {
+                continue;
+            }
+
+            use tokio::io::AsyncWriteExt;
+            if stdout.write_all(json_rpc.as_bytes()).await.is_err() {
+                break;
+            }
+            if stdout.write_all(b"\n").await.is_err() {
+                break;
+            }
+            if stdout.flush().await.is_err() {
+                break;
+            }
+        }
+    });
+
+    //
+    // NDJSON lines from stdin forwarded as ACP requests to service.
+    // Track request IDs so we can filter responses.
+    //
+
+    let client_clone = client.clone();
+    let pending_ids_tx = pending_ids.clone();
+    let stdin_task = tokio::spawn(async move {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        let reader = BufReader::new(tokio::io::stdin());
+        let mut lines = reader.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let line = line.trim().to_string();
+            if line.is_empty() {
+                continue;
+            }
+
+            //
+            // Track the request ID if present.
+            //
+
+            if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) {
+                if let Some(id) = msg.get("id") {
+                    pending_ids_tx.lock().unwrap().insert(id.clone());
+                }
+            }
+
+            if let Err(e) = client_clone.send_acp_message(line).await {
+                eprintln!("Failed to send ACP message: {}", e);
+                break;
+            }
+        }
+    });
+
+    //
+    // Wait for stdin to close (client disconnected).
+    //
+    let _ = stdin_task.await;
+    stdout_task.abort();
+
+    if let Ok(client) = Arc::try_unwrap(client) {
+        client.disconnect().await;
+    }
+    Ok(())
 }
 
 async fn run_tui(rabbitmq_url: &str, timeout: u64) -> Result<()> {
@@ -188,14 +302,22 @@ async fn run_tui(rabbitmq_url: &str, timeout: u64) -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(client.clone(), rabbitmq_url.to_string(), client_id);
-    app.init().await;
+    let terminal_paused = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let terminal_resume = Arc::new(tokio::sync::Notify::new());
     let mut events = EventHandler::new(
         client.clone(),
-        app.terminal_paused.clone(),
-        app.terminal_resume.clone(),
+        terminal_paused.clone(),
+        terminal_resume.clone(),
     );
-    app.event_tx = Some(events.sender());
+    let mut app = App::new(
+        client.clone(),
+        rabbitmq_url.to_string(),
+        client_id,
+        events.sender(),
+    );
+    app.terminal_paused = terminal_paused;
+    app.terminal_resume = terminal_resume;
+    app.init().await;
     let mut should_draw = true;
 
     loop {

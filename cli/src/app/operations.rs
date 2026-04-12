@@ -529,9 +529,9 @@ impl App {
         });
 
         if let Err(e) = self.client.add_op_def(op_def.to_string()).await {
-            self.orchestrator
-                .messages
-                .push(ConversationEntry::Error(format!("Failed to add op: {}", e)));
+            if let Some(session) = self.orchestrator.active_session_mut() {
+                session.messages.push(ConversationEntry::Error(format!("Failed to add op: {}", e)));
+            }
         }
 
         self.refresh_library_after(Duration::from_millis(300));

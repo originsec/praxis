@@ -174,9 +174,6 @@ async fn handle_incoming(
     }
 
     //
-    // Stop orchestrator session when connection closes (via RabbitMQ).
+    // Service handles ACP session cleanup when the client disconnects.
     //
-    if let Err(e) = state.rabbitmq.stop_orchestrator().await {
-        common::log_warn!("Failed to send OrchestratorStop on disconnect: {}", e);
-    }
 }

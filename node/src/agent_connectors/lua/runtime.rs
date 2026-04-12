@@ -681,7 +681,7 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
                     .unwrap_or_default();
                 let cwd = spec_json["cwd"].as_str().unwrap_or("");
 
-                let client = crate::acp::client::AcpClient::new(program, &args, cwd)
+                let client = crate::acp::client::spawn_acp_client(program, &args, cwd)
                     .map_err(|e| mlua::Error::RuntimeError(format!("ACP start failed: {}", e)))?;
 
                 let handle = uuid::Uuid::new_v4().to_string();
@@ -753,7 +753,7 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
                 let cancel_flag = std::sync::atomic::AtomicBool::new(false);
 
                 crate::acp::with_client(&handle, |client| {
-                    client.send_prompt(&prompt, &update_tx, &permission_rx, yolo, interactive, &cancel_flag)
+                    client.send_prompt(&prompt, &update_tx, permission_rx, yolo, interactive, &cancel_flag)
                 })
                 .ok_or_else(|| mlua::Error::RuntimeError(format!("ACP handle '{}' not found", handle)))?
                 .map_err(|e| mlua::Error::RuntimeError(format!("ACP prompt failed: {}", e)))
@@ -781,7 +781,7 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
             "acp_close",
             lua.create_function(|_, handle: String| {
                 crate::acp::cleanup_channels(&handle);
-                if let Some(mut client) = crate::acp::remove_client(&handle) {
+                if let Some(client) = crate::acp::remove_client(&handle) {
                     client.close();
                 }
                 Ok(())

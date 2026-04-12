@@ -1,4 +1,4 @@
-use crate::app::{ConversationEntry, OrchestratorState};
+use crate::app::{ConversationEntry, OrchestratorSessionState, OrchestratorState};
 use crate::markdown;
 use crate::ui::common::spinner_char;
 use crate::ui::theme::{
@@ -17,15 +17,50 @@ const PLAN_DONE: Color = STATUS_DONE;
 const PLAN_ACTIVE: Color = STATUS_RUNNING;
 
 pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
-    let plan_height = if state.current_plan.is_some() {
-        let plan = state.current_plan.as_ref().unwrap();
-        (plan.steps.len() as u16 + 2).min(12)
-    } else {
-        0
-    };
+    let session = state.active_session();
+    let show_tabs = state.sessions.len() > 1;
+
+    //
+    // Show welcome logo only when there are zero sessions.
+    //
+
+    let show_welcome = state.sessions.is_empty();
+
+    if show_welcome {
+        let tab_height = if show_tabs { 1 } else { 0 };
+
+        let chunks = Layout::vertical([
+            Constraint::Length(tab_height),
+            Constraint::Min(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+        ])
+        .split(area);
+
+        if show_tabs {
+            render_tab_bar(f, chunks[0], state);
+        }
+        render_welcome(f, chunks[1]);
+
+        let padded = |r: Rect| -> Rect {
+            Rect { x: r.x + 1, width: r.width.saturating_sub(2), ..r }
+        };
+
+        render_input(f, padded(chunks[2]), state);
+        render_status_hints(f, padded(chunks[3]), state);
+        return;
+    }
+
+    let plan_height = session
+        .and_then(|s| s.current_plan.as_ref())
+        .map(|plan| (plan.steps.len() as u16 + 2).min(12))
+        .unwrap_or(0);
     let plan_spacer = if plan_height > 0 { 1 } else { 0 };
 
+    let tab_height = if show_tabs { 1 } else { 0 };
+
     let chunks = Layout::vertical([
+        Constraint::Length(tab_height),
         Constraint::Min(1),
         Constraint::Length(plan_spacer),
         Constraint::Length(plan_height),
@@ -36,7 +71,13 @@ pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     ])
     .split(area);
 
-    render_conversation(f, chunks[0], state);
+    if show_tabs {
+        render_tab_bar(f, chunks[0], state);
+    }
+
+    if let Some(session) = session {
+        render_conversation(f, chunks[1], session);
+    }
 
     let padded = |r: Rect| -> Rect {
         Rect {
@@ -47,15 +88,53 @@ pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     };
 
     if plan_height > 0 {
-        render_plan_widget(f, padded(chunks[2]), state);
+        if let Some(session) = session {
+            render_plan_widget(f, padded(chunks[3]), session);
+        }
     }
 
-    render_model_info(f, padded(chunks[3]), state);
-    render_input(f, padded(chunks[4]), state);
-    render_tokens(f, padded(chunks[5]), state);
+    render_model_info(f, padded(chunks[4]), state);
+    render_input(f, padded(chunks[5]), state);
+    render_tokens(f, padded(chunks[6]), state);
+    render_status_hints(f, padded(chunks[7]), state);
 }
 
-fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
+fn render_tab_bar(f: &mut Frame, area: Rect, state: &OrchestratorState) {
+    let mut spans: Vec<Span> = Vec::new();
+
+    for (i, session) in state.sessions.iter().enumerate() {
+        let is_active = state.active_session_index == Some(i);
+        let style = if is_active {
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(DIM)
+        };
+
+        let label = if session.is_streaming {
+            format!(" {} {} ", spinner_char(), session.label)
+        } else {
+            format!(" {} ", session.label)
+        };
+
+        if is_active {
+            spans.push(Span::styled("[", Style::default().fg(ACCENT)));
+            spans.push(Span::styled(label, style));
+            spans.push(Span::styled("]", Style::default().fg(ACCENT)));
+        } else {
+            spans.push(Span::styled(format!(" {} ", label.trim()), style));
+        }
+        spans.push(Span::raw(" "));
+    }
+
+    if state.sessions.is_empty() {
+        spans.push(Span::styled("No sessions", Style::default().fg(DIM)));
+    }
+
+    let paragraph = Paragraph::new(Line::from(spans));
+    f.render_widget(paragraph, area);
+}
+
+fn render_conversation(f: &mut Frame, area: Rect, session: &OrchestratorSessionState) {
     //
     // Inset the conversation area by 2 chars on the left so that ratatui's
     // word-wrap keeps continuation lines aligned with the first line.
@@ -68,12 +147,16 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 
     let mut lines: Vec<Line> = Vec::new();
 
-    if state.messages.is_empty() && !state.is_streaming {
-        render_welcome(f, inner, state);
+    if session.messages.is_empty() && !session.is_streaming {
+        let paragraph = Paragraph::new(Line::from(Span::styled(
+            "Type a prompt to begin.",
+            Style::default().fg(DIM),
+        )));
+        f.render_widget(paragraph, inner);
         return;
     }
 
-    for entry in &state.messages {
+    for entry in &session.messages {
         match entry {
             ConversationEntry::UserPrompt(text) => {
                 lines.push(Line::from(""));
@@ -142,8 +225,8 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
             ConversationEntry::ToolGroup(tools) => {
                 lines.extend(build_tool_summary(
                     tools,
-                    state.tools_expanded,
-                    state.tools_full,
+                    session.tools_expanded,
+                    session.tools_full,
                 ));
             }
             ConversationEntry::Info(msg) => {
@@ -164,24 +247,20 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     }
 
     //
-    // Plan is rendered as a separate fixed widget, not in the scroll area.
-    //
-
-    //
     // Show active tool or waiting spinner.
     //
-    if state.is_streaming {
-        if let Some(ref tool_name) = state.active_tool {
+    if session.is_streaming {
+        if let Some(ref tool_name) = session.active_tool {
             let spinner_char = spinner_char();
 
-            let pending_count = state.pending_tools.len();
+            let pending_count = session.pending_tools.len();
             let label = if pending_count > 0 {
                 format!("{} {} ({})", spinner_char, tool_name, pending_count + 1)
             } else {
                 format!("{} {}", spinner_char, tool_name)
             };
             lines.push(Line::from(Span::styled(label, Style::default().fg(MUTED))));
-        } else if !last_message_has_visible_assistant_text(&state.messages) {
+        } else if !last_message_has_visible_assistant_text(&session.messages) {
             let spinner_char = spinner_char();
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
@@ -192,8 +271,7 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     }
 
     //
-    // Estimate visual line count accounting for word wrap. Each logical
-    // line that exceeds the visible width wraps into multiple visual lines.
+    // Estimate visual line count accounting for word wrap.
     //
     let visible_width = inner.width.max(1) as usize;
     let total_visual_lines: u16 = lines
@@ -210,8 +288,8 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 
     let visible_height = inner.height;
     let max_scroll = total_visual_lines.saturating_sub(visible_height);
-    state.max_scroll.set(max_scroll);
-    let scroll = max_scroll.saturating_sub(state.scroll_offset);
+    session.max_scroll.set(max_scroll);
+    let scroll = max_scroll.saturating_sub(session.scroll_offset);
 
     let paragraph = Paragraph::new(Text::from(lines))
         .wrap(Wrap { trim: false })
@@ -221,7 +299,7 @@ fn render_conversation(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     f.render_widget(paragraph, inner);
 }
 
-fn render_welcome(f: &mut Frame, area: Rect, _state: &OrchestratorState) {
+fn render_welcome(f: &mut Frame, area: Rect) {
     let art: &[&str] = &[
         "██████╗ ██████╗  █████╗ ██╗  ██╗██╗███████╗",
         "██╔══██╗██╔══██╗██╔══██╗╚██╗██╔╝██║██╔════╝",
@@ -538,8 +616,8 @@ fn build_compact_output_line(
     }
 }
 
-fn render_plan_widget(f: &mut Frame, area: Rect, state: &OrchestratorState) {
-    let Some(ref plan) = state.current_plan else {
+fn render_plan_widget(f: &mut Frame, area: Rect, session: &OrchestratorSessionState) {
+    let Some(ref plan) = session.current_plan else {
         return;
     };
 
@@ -593,15 +671,20 @@ fn render_plan_widget(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 }
 
 fn render_model_info(f: &mut Frame, area: Rect, state: &OrchestratorState) {
-    let model_text = match (&state.provider, &state.model) {
-        (Some(provider), Some(model)) => format!("{} / {}", provider, model),
-        _ => "No session".to_string(),
+    let session = state.active_session();
+
+    let model_text = match session {
+        Some(s) => match (s.provider.as_ref(), s.model.as_ref()) {
+            (Some(provider), Some(model)) => format!("{} / {}", provider, model),
+            _ => "Connecting...".to_string(),
+        },
+        None => String::new(),
     };
 
     let line = Line::from(vec![
         Span::styled("^e/^!e", Style::default().fg(DIM)),
         Span::styled(" tools  ", Style::default().fg(MUTED)),
-        Span::styled("^w", Style::default().fg(DIM)),
+        Span::styled("^!w", Style::default().fg(DIM)),
         Span::styled(" save   ", Style::default().fg(MUTED)),
         Span::styled(format!("{} ", model_text), Style::default().fg(MUTED)),
     ]);
@@ -611,7 +694,12 @@ fn render_model_info(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 }
 
 fn render_input(f: &mut Frame, area: Rect, state: &OrchestratorState) {
-    let input_style = if state.is_streaming {
+    let is_streaming = state
+        .active_session()
+        .map(|s| s.is_streaming)
+        .unwrap_or(false);
+
+    let input_style = if is_streaming {
         Style::default().fg(DIM)
     } else {
         Style::default().fg(TEXT)
@@ -625,7 +713,7 @@ fn render_input(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 
     let mut spans = vec![prompt_char];
 
-    if state.is_streaming {
+    if is_streaming {
         spans.push(Span::styled("^c to cancel", Style::default().fg(DIM)));
     } else {
         let pos = state.cursor_pos;
@@ -656,16 +744,47 @@ fn render_input(f: &mut Frame, area: Rect, state: &OrchestratorState) {
 }
 
 fn render_tokens(f: &mut Frame, area: Rect, state: &OrchestratorState) {
-    let text = if state.total_tokens > 0 {
-        format!(
-            "  tokens: {} prompt + {} completion = {} total",
-            state.prompt_tokens, state.completion_tokens, state.total_tokens
-        )
-    } else {
-        "  tokens: -".to_string()
+    let session = state.active_session();
+
+    let text = match session {
+        Some(s) if s.total_tokens > 0 => {
+            format!(
+                "  tokens: {} prompt + {} completion = {} total",
+                s.prompt_tokens, s.completion_tokens, s.total_tokens
+            )
+        }
+        _ => "  tokens: -".to_string(),
     };
 
     let paragraph = Paragraph::new(Line::from(Span::styled(text, Style::default().fg(DIM))));
 
+    f.render_widget(paragraph, area);
+}
+
+fn render_status_hints(f: &mut Frame, area: Rect, state: &OrchestratorState) {
+    if state.sessions.is_empty() {
+        return;
+    }
+
+    let mut spans = vec![
+        Span::styled("  ^n", Style::default().fg(DIM)),
+        Span::styled(" new", Style::default().fg(MUTED)),
+    ];
+
+    if !state.sessions.is_empty() {
+        spans.extend([
+            Span::styled("  ^w", Style::default().fg(DIM)),
+            Span::styled(" close", Style::default().fg(MUTED)),
+        ]);
+    }
+
+    if state.sessions.len() > 1 {
+        spans.extend([
+            Span::styled("  tab/S-tab", Style::default().fg(DIM)),
+            Span::styled(" switch", Style::default().fg(MUTED)),
+        ]);
+    }
+
+    let paragraph = Paragraph::new(Line::from(spans));
     f.render_widget(paragraph, area);
 }

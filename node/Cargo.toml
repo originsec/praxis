@@ -41,7 +41,8 @@ socket2 = { version = "0.5", features = ["all"] }
 etherparse = "0.16"
 hickory-resolver = { version = "0.24", features = ["tokio-runtime"] }
 dashmap = "6"
-tokio-util = { version = "0.7", features = ["rt"] }
+tokio-util = { version = "0.7", features = ["rt", "compat"] }
+agent-client-protocol = { version = "0.10.4", features = ["unstable_session_close", "unstable_session_model", "unstable_session_usage"] }
 time = "0.3"
 rcgen = "0.13"
 rustls = { version = "0.23", features = ["ring"] }

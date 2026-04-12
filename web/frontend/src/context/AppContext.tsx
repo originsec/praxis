@@ -1,12 +1,12 @@
 import { createContext, useContext, useReducer, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { wsClient } from '../api/websocket';
 import { generateUUID } from '../utils/uuid';
-import type { OrchestratorState } from './orchestratorTypes';
+import type { OrchestratorState, OrchestratorSessionState } from './orchestratorTypes';
 
 //
 // Re-export Orchestrator types for consumers.
 //
-export type { OrchestratorMessage, OrchestratorToolExecution } from './orchestratorTypes';
+export type { OrchestratorMessage, OrchestratorToolExecution, OrchestratorSessionState } from './orchestratorTypes';
 import { loadPersistedOrchestratorState, loadRecentNodes, persistRecentNodes, persistOrchestratorState } from '../utils/persistence';
 import type {
   SystemState,
@@ -58,19 +58,40 @@ export interface AgentSessionMessage {
   timestamp: Date;
 }
 
+//
+// ACP JSON-RPC helpers.
+//
+
+let nextAcpId = 1;
+
+function acpRequest(method: string, params?: unknown): string {
+  const id = nextAcpId++;
+  return JSON.stringify({ jsonrpc: '2.0', id, method, params });
+}
+
+interface AcpJsonRpc {
+  jsonrpc: string;
+  id?: number | string;
+  method?: string;
+  params?: Record<string, unknown>;
+  result?: Record<string, unknown>;
+  error?: { code: number; message: string };
+}
+
+//
+// Track pending ACP request IDs to correlate responses.
+//
+interface PendingAcpRequest {
+  method: string;
+  sessionId?: string;
+  label?: string;
+}
+
 const initialOrchestratorState: OrchestratorState = {
-  sessionActive: false,
+  sessions: [],
+  activeSessionId: null,
   isStarting: false,
-  provider: null,
-  model: null,
-  messages: [],
-  currentPlan: null,
-  isLoading: false,
-  streamingContent: '',
-  hadToolCall: false,
-  currentToolExecutions: [],
-  tokenUsage: null,
-  currentPromptId: null,
+  nextRequestId: 1,
 };
 
 const MAX_RECENT_NODES = 3;
@@ -272,19 +293,22 @@ type Action =
   | { type: 'SET_CONFIG'; values: Record<string, string> }
   | { type: 'SET_OP_DEF_ERROR'; error: string | null }
   | { type: 'SET_OP_DEF_SUCCESS'; fullName: string | null }
-  | { type: 'ORCHESTRATOR_STARTING' }
-  | { type: 'ORCHESTRATOR_STARTED'; provider: string; model: string }
-  | { type: 'ORCHESTRATOR_STOPPED' }
-  | { type: 'ORCHESTRATOR_ADD_USER_MESSAGE'; message: string; promptId: string }
-  | { type: 'ORCHESTRATOR_ADD_CONTENT'; content: string }
-  | { type: 'ORCHESTRATOR_TOOL_EXECUTING'; name: string; input?: string }
-  | { type: 'ORCHESTRATOR_TOOL_EXECUTED'; name: string; display: string; success: boolean; result: string }
-  | { type: 'ORCHESTRATOR_PLAN_UPDATED'; plan: OrchestratorPlan }
-  | { type: 'ORCHESTRATOR_DONE' }
-  | { type: 'ORCHESTRATOR_ERROR'; message: string }
-  | { type: 'ORCHESTRATOR_CLEAR_MESSAGES' }
-  | { type: 'ORCHESTRATOR_SET_LOADING'; loading: boolean }
-  | { type: 'ORCHESTRATOR_TOKEN_USAGE'; promptTokens: number; completionTokens: number; totalTokens: number }
+  | { type: 'ORCHESTRATOR_CREATING_SESSION' }
+  | { type: 'ORCHESTRATOR_SESSION_CREATED'; sessionId: string; label: string; loaded?: boolean; provider?: string; model?: string }
+  | { type: 'ORCHESTRATOR_SESSION_STARTED'; sessionId: string; provider: string; model: string }
+  | { type: 'ORCHESTRATOR_SESSION_CLOSED'; sessionId: string }
+  | { type: 'ORCHESTRATOR_SESSION_LOADED'; sessionId: string }
+  | { type: 'ORCHESTRATOR_SYNC_SESSIONS'; sessionIds: string[] }
+  | { type: 'ORCHESTRATOR_SET_ACTIVE_SESSION'; sessionId: string | null }
+  | { type: 'ORCHESTRATOR_ADD_USER_MESSAGE'; sessionId: string; message: string; promptId: string }
+  | { type: 'ORCHESTRATOR_ADD_CONTENT'; sessionId: string; content: string }
+  | { type: 'ORCHESTRATOR_TOOL_EXECUTING'; sessionId: string; name: string; input?: string }
+  | { type: 'ORCHESTRATOR_TOOL_EXECUTED'; sessionId: string; name: string; display: string; success: boolean; result: string }
+  | { type: 'ORCHESTRATOR_PLAN_UPDATED'; sessionId: string; plan: OrchestratorPlan }
+  | { type: 'ORCHESTRATOR_DONE'; sessionId: string }
+  | { type: 'ORCHESTRATOR_ERROR'; sessionId: string; message: string }
+  | { type: 'ORCHESTRATOR_CLEAR_MESSAGES'; sessionId: string }
+  | { type: 'ORCHESTRATOR_TOKEN_USAGE'; sessionId: string; promptTokens: number; completionTokens: number; totalTokens: number }
   //
   // Hunting actions.
   //
@@ -412,9 +436,30 @@ function reduceCore(state: AppState, action: Action): AppState | null {
   }
 }
 
+//
+// Helper to update a specific session within the orchestrator state.
+//
+function updateSession(
+  state: AppState,
+  sessionId: string,
+  updater: (session: OrchestratorSessionState) => OrchestratorSessionState,
+): AppState | null {
+  const session = state.orchestrator.sessions.find(s => s.sessionId === sessionId);
+  if (!session) return null;
+  return {
+    ...state,
+    orchestrator: {
+      ...state.orchestrator,
+      sessions: state.orchestrator.sessions.map(s =>
+        s.sessionId === sessionId ? updater(s) : s
+      ),
+    },
+  };
+}
+
 function reduceOrchestrator(state: AppState, action: Action): AppState | null {
   switch (action.type) {
-    case 'ORCHESTRATOR_STARTING':
+    case 'ORCHESTRATOR_CREATING_SESSION':
       return {
         ...state,
         orchestrator: {
@@ -422,190 +467,210 @@ function reduceOrchestrator(state: AppState, action: Action): AppState | null {
           isStarting: true,
         },
       };
-    case 'ORCHESTRATOR_STARTED':
+    case 'ORCHESTRATOR_SESSION_CREATED': {
+      const exists = state.orchestrator.sessions.some(s => s.sessionId === action.sessionId);
+      if (exists) return state;
+      const newSession: OrchestratorSessionState = {
+        sessionId: action.sessionId,
+        label: action.label,
+        loaded: action.loaded ?? true,
+        provider: null,
+        model: null,
+        messages: action.loaded !== false ? [{
+          id: generateUUID(),
+          role: 'system',
+          content: `Session "${action.label}" created.`,
+          timestamp: new Date(),
+        }] : [],
+        currentPlan: null,
+        isLoading: false,
+        streamingContent: '',
+        hadToolCall: false,
+        currentToolExecutions: [],
+        tokenUsage: null,
+        currentPromptId: null,
+      };
       return {
         ...state,
         orchestrator: {
-          ...initialOrchestratorState,
-          sessionActive: true,
+          ...state.orchestrator,
+          sessions: [...state.orchestrator.sessions, newSession].sort((a, b) => a.label.localeCompare(b.label)),
+          activeSessionId: action.sessionId,
           isStarting: false,
+        },
+      };
+    }
+    case 'ORCHESTRATOR_SESSION_STARTED':
+      return updateSession(state, action.sessionId, (s) => {
+        //
+        // Only add the "Session started" message once (skip on replay).
+        //
+
+        const alreadyStarted = s.provider !== null;
+        return {
+          ...s,
+          loaded: true,
           provider: action.provider,
           model: action.model,
-          messages: [{
+          messages: alreadyStarted ? s.messages : [...s.messages, {
             id: generateUUID(),
-            role: 'system',
-            content: `Orchestrator session started (${action.provider}::${action.model}).`,
+            role: 'system' as const,
+            content: `Session started (${action.provider}::${action.model}).`,
             timestamp: new Date(),
           }],
-        },
-      };
-    case 'ORCHESTRATOR_STOPPED':
+        };
+      });
+    case 'ORCHESTRATOR_SESSION_CLOSED': {
+      const remaining = state.orchestrator.sessions.filter(s => s.sessionId !== action.sessionId);
+      const newActive = state.orchestrator.activeSessionId === action.sessionId
+        ? (remaining.length > 0 ? remaining[remaining.length - 1].sessionId : null)
+        : state.orchestrator.activeSessionId;
       return {
         ...state,
         orchestrator: {
           ...state.orchestrator,
-          sessionActive: false,
-          isStarting: false,
-          isLoading: false,
-          messages: state.orchestrator.sessionActive
-            ? [
-                ...state.orchestrator.messages,
-                {
-                  id: generateUUID(),
-                  role: 'system',
-                  content: 'Orchestrator session stopped.',
-                  timestamp: new Date(),
-                },
-              ]
-            : state.orchestrator.messages,
+          sessions: remaining,
+          activeSessionId: newActive,
         },
       };
+    }
+    case 'ORCHESTRATOR_SET_ACTIVE_SESSION':
+      return {
+        ...state,
+        orchestrator: {
+          ...state.orchestrator,
+          activeSessionId: action.sessionId,
+        },
+      };
+    case 'ORCHESTRATOR_SESSION_LOADED':
+      return updateSession(state, action.sessionId, (s) => ({
+        ...s,
+        loaded: true,
+      }));
+    case 'ORCHESTRATOR_SYNC_SESSIONS': {
+      const keep = new Set(action.sessionIds);
+      const filtered = state.orchestrator.sessions.filter(s => keep.has(s.sessionId));
+      const newActive = state.orchestrator.activeSessionId && keep.has(state.orchestrator.activeSessionId)
+        ? state.orchestrator.activeSessionId
+        : filtered.length > 0 ? filtered[0].sessionId : null;
+      return {
+        ...state,
+        orchestrator: {
+          ...state.orchestrator,
+          sessions: filtered,
+          activeSessionId: newActive,
+        },
+      };
+    }
     case 'ORCHESTRATOR_ADD_USER_MESSAGE':
-      return {
-        ...state,
-        orchestrator: {
-          ...state.orchestrator,
-          messages: [...state.orchestrator.messages, {
-            id: generateUUID(),
-            role: 'user',
-            content: action.message,
-            timestamp: new Date(),
-          }],
-          isLoading: true,
-          streamingContent: '',
-          hadToolCall: false,
-          currentToolExecutions: [],
-          currentPromptId: action.promptId,
-        },
-      };
-    case 'ORCHESTRATOR_ADD_CONTENT': {
-      const orch = state.orchestrator;
-      const needsSep = orch.hadToolCall && orch.streamingContent.length > 0
-        && !orch.streamingContent.endsWith('\n\n');
-      const prefix = needsSep ? '\n\n' : '';
-      return {
-        ...state,
-        orchestrator: {
-          ...orch,
-          streamingContent: orch.streamingContent + prefix + action.content,
-          hadToolCall: false,
-        },
-      };
-    }
-    case 'ORCHESTRATOR_TOOL_EXECUTING':
-      return {
-        ...state,
-        orchestrator: {
-          ...state.orchestrator,
-          hadToolCall: true,
-          currentToolExecutions: [...state.orchestrator.currentToolExecutions, {
-            name: action.name,
-            display: 'Executing...',
-            success: true,
-            executing: true,
-            input: action.input,
-          }],
-        },
-      };
-    case 'ORCHESTRATOR_TOOL_EXECUTED': {
-      const executions = state.orchestrator.currentToolExecutions.map((ex) =>
-        ex.name === action.name && ex.executing
-          ? { name: action.name, display: action.display, success: action.success, executing: false, input: ex.input, result: action.result }
-          : ex
-      );
-      return {
-        ...state,
-        orchestrator: {
-          ...state.orchestrator,
-          currentToolExecutions: executions,
-        },
-      };
-    }
-    case 'ORCHESTRATOR_PLAN_UPDATED':
-      return {
-        ...state,
-        orchestrator: {
-          ...state.orchestrator,
-          currentPlan: action.plan,
-        },
-      };
-    case 'ORCHESTRATOR_DONE': {
-      //
-      // Finalize the current streaming content and tool executions into a
-      // message.
-      //
-      const newMessages = [...state.orchestrator.messages];
-      if (state.orchestrator.streamingContent || state.orchestrator.currentToolExecutions.length > 0) {
-        newMessages.push({
+      return updateSession(state, action.sessionId, (s) => ({
+        ...s,
+        messages: [...s.messages, {
           id: generateUUID(),
-          role: 'assistant',
-          content: state.orchestrator.streamingContent,
+          role: 'user' as const,
+          content: action.message,
           timestamp: new Date(),
-          toolExecutions: state.orchestrator.currentToolExecutions.length > 0
-            ? [...state.orchestrator.currentToolExecutions]
-            : undefined,
-        });
-      }
-      return {
-        ...state,
-        orchestrator: {
-          ...state.orchestrator,
+        }],
+        isLoading: true,
+        streamingContent: '',
+        hadToolCall: false,
+        currentToolExecutions: [],
+        currentPromptId: action.promptId,
+      }));
+    case 'ORCHESTRATOR_ADD_CONTENT':
+      return updateSession(state, action.sessionId, (s) => {
+        const needsSep = s.hadToolCall && s.streamingContent.length > 0
+          && !s.streamingContent.endsWith('\n\n');
+        const prefix = needsSep ? '\n\n' : '';
+        return {
+          ...s,
+          streamingContent: s.streamingContent + prefix + action.content,
+          hadToolCall: false,
+        };
+      });
+    case 'ORCHESTRATOR_TOOL_EXECUTING':
+      return updateSession(state, action.sessionId, (s) => ({
+        ...s,
+        hadToolCall: true,
+        currentToolExecutions: [...s.currentToolExecutions, {
+          name: action.name,
+          display: 'Executing...',
+          success: true,
+          executing: true,
+          input: action.input,
+        }],
+      }));
+    case 'ORCHESTRATOR_TOOL_EXECUTED':
+      return updateSession(state, action.sessionId, (s) => ({
+        ...s,
+        currentToolExecutions: s.currentToolExecutions.map((ex) =>
+          ex.name === action.name && ex.executing
+            ? { name: action.name, display: action.display, success: action.success, executing: false, input: ex.input, result: action.result }
+            : ex
+        ),
+      }));
+    case 'ORCHESTRATOR_PLAN_UPDATED':
+      return updateSession(state, action.sessionId, (s) => ({
+        ...s,
+        currentPlan: action.plan,
+      }));
+    case 'ORCHESTRATOR_DONE':
+      return updateSession(state, action.sessionId, (s) => {
+        //
+        // Finalize the current streaming content and tool executions into a
+        // message.
+        //
+        const newMessages = [...s.messages];
+        if (s.streamingContent || s.currentToolExecutions.length > 0) {
+          newMessages.push({
+            id: generateUUID(),
+            role: 'assistant',
+            content: s.streamingContent,
+            timestamp: new Date(),
+            toolExecutions: s.currentToolExecutions.length > 0
+              ? [...s.currentToolExecutions]
+              : undefined,
+          });
+        }
+        return {
+          ...s,
           messages: newMessages,
           isLoading: false,
           streamingContent: '',
           currentToolExecutions: [],
-        },
-      };
-    }
-    case 'ORCHESTRATOR_ERROR': {
-      const newMessages = [...state.orchestrator.messages, {
-        id: generateUUID(),
-        role: 'system' as const,
-        content: `Error: ${action.message}`,
-        timestamp: new Date(),
-      }];
-      return {
-        ...state,
-        orchestrator: {
-          ...state.orchestrator,
-          messages: newMessages,
-          isStarting: false,
-          isLoading: false,
-          streamingContent: '',
-          currentToolExecutions: [],
-        },
-      };
-    }
+        };
+      });
+    case 'ORCHESTRATOR_ERROR':
+      return updateSession(state, action.sessionId, (s) => ({
+        ...s,
+        messages: [...s.messages, {
+          id: generateUUID(),
+          role: 'system' as const,
+          content: `Error: ${action.message}`,
+          timestamp: new Date(),
+        }],
+        isLoading: false,
+        streamingContent: '',
+        currentToolExecutions: [],
+      }));
     case 'ORCHESTRATOR_CLEAR_MESSAGES':
-      return {
-        ...state,
-        orchestrator: {
-          ...initialOrchestratorState,
-          sessionActive: state.orchestrator.sessionActive,
-          provider: state.orchestrator.provider,
-          model: state.orchestrator.model,
-        },
-      };
-    case 'ORCHESTRATOR_SET_LOADING':
-      return {
-        ...state,
-        orchestrator: {
-          ...state.orchestrator,
-          isLoading: action.loading,
-        },
-      };
+      return updateSession(state, action.sessionId, (s) => ({
+        ...s,
+        messages: [],
+        currentPlan: null,
+        streamingContent: '',
+        currentToolExecutions: [],
+        tokenUsage: null,
+      }));
     case 'ORCHESTRATOR_TOKEN_USAGE':
-      return {
-        ...state,
-        orchestrator: {
-          ...state.orchestrator,
-          tokenUsage: {
-            promptTokens: action.promptTokens,
-            completionTokens: action.completionTokens,
-            totalTokens: action.totalTokens,
-          },
+      return updateSession(state, action.sessionId, (s) => ({
+        ...s,
+        tokenUsage: {
+          promptTokens: action.promptTokens,
+          completionTokens: action.completionTokens,
+          totalTokens: action.totalTokens,
         },
-      };
+      }));
     default:
       return null;
   }
@@ -1227,13 +1292,14 @@ interface AppContextValue {
   //
   clearOpDefStatus: () => void;
   //
-  // Orchestrator.
+  // Orchestrator (multi-session ACP).
   //
-  orchestratorStart: () => void;
-  orchestratorStop: () => void;
-  orchestratorCancel: () => void;
-  orchestratorPrompt: (message: string) => void;
-  orchestratorClearMessages: () => void;
+  orchestratorCreateSession: (modelRef?: string) => void;
+  orchestratorCloseSession: (sessionId: string) => void;
+  orchestratorCancelPrompt: (sessionId: string) => void;
+  orchestratorSendPrompt: (sessionId: string, message: string) => void;
+  orchestratorSetActiveSession: (sessionId: string | null) => void;
+  orchestratorClearMessages: (sessionId: string) => void;
   //
   // Generic send.
   //
@@ -1324,6 +1390,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const pendingCommandsRef = useRef<Map<string, (response: CommandResponse) => void>>(new Map());
   const terminalHandlersRef = useRef<Map<string, (output: TerminalOutput) => void>>(new Map());
   const clientIdRef = useRef<string | null>(null);
+  const pendingAcpRequestsRef = useRef<Map<number | string, PendingAcpRequest>>(new Map());
 
   //
   // Keep clientId ref in sync.
@@ -1345,10 +1412,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const handleMessage = (message: ServerMessage) => {
       switch (message.type) {
-        case 'connected':
+        case 'connected': {
           dispatch({ type: 'SET_CONNECTED', connected: true, clientId: message.client_id, version: message.version });
           wsClient.send({ type: 'config_get', keys: ['prompt_timeout_secs'] });
+
+          //
+          // Fetch existing orchestrator sessions from the service.
+          //
+
+          const listRpc = acpRequest('session/list');
+          wsClient.send({ type: 'acp_message', json_rpc: listRpc });
+          const listParsed = JSON.parse(listRpc);
+          pendingAcpRequestsRef.current.set(listParsed.id, { method: 'session/list' });
           break;
+        }
         case 'state_update':
           //
           // Debug: Log selected_agent info from state updates.
@@ -1402,55 +1479,230 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'SET_OP_DEF_SUCCESS', fullName: message.full_name });
           break;
         //
-        // Orchestrator messages. Events carry a prompt_id; discard stale
-        // events that don't match the current prompt.
+        // ACP JSON-RPC messages from the service. Parse and dispatch
+        // appropriate orchestrator actions.
         //
-        case 'orchestrator_started':
-          dispatch({ type: 'ORCHESTRATOR_STARTED', provider: message.provider, model: message.model });
-          break;
-        case 'orchestrator_stopped':
-          dispatch({ type: 'ORCHESTRATOR_STOPPED' });
-          break;
-        case 'orchestrator_content':
-          if (message.prompt_id === String(orchestratorPromptSeq.current)) {
-            dispatch({ type: 'ORCHESTRATOR_ADD_CONTENT', content: message.content });
+        case 'acp_message': {
+          try {
+            const rpc = JSON.parse(message.json_rpc) as AcpJsonRpc;
+
+            if (rpc.method === 'session/update' && rpc.params) {
+              //
+              // Session update notification from the server.
+              //
+              const sessionId = rpc.params.sessionId as string;
+              const update = rpc.params.update as Record<string, unknown>;
+              if (!sessionId || !update) break;
+
+              const extractText = (u: Record<string, unknown>): string => {
+                const content = u.content as { type: string; text?: string } | Array<{ type: string; text?: string }> | undefined;
+                if (!content) return '';
+                if (Array.isArray(content)) {
+                  return content.filter(b => b.type === 'text' && b.text).map(b => b.text!).join('');
+                }
+                return (content as { text?: string }).text || '';
+              };
+
+              const sessionUpdate = update.sessionUpdate as string;
+
+              switch (sessionUpdate) {
+                case 'session_info_update': {
+                  const meta = update._meta as Record<string, unknown> | undefined;
+                  if (meta) {
+                    if (meta.promptTokens !== undefined) {
+                      dispatch({
+                        type: 'ORCHESTRATOR_TOKEN_USAGE',
+                        sessionId,
+                        promptTokens: (meta.promptTokens as number) || 0,
+                        completionTokens: (meta.completionTokens as number) || 0,
+                        totalTokens: (meta.totalTokens as number) || 0,
+                      });
+                    }
+                    if (meta.provider && meta.model) {
+                      dispatch({
+                        type: 'ORCHESTRATOR_SESSION_STARTED',
+                        sessionId,
+                        provider: meta.provider as string,
+                        model: meta.model as string,
+                      });
+                    }
+                  }
+                  break;
+                }
+                case 'user_message_chunk': {
+                  const promptText = extractText(update);
+                  if (promptText) {
+                    dispatch({
+                      type: 'ORCHESTRATOR_ADD_USER_MESSAGE',
+                      sessionId,
+                      message: promptText,
+                      promptId: generateUUID(),
+                    });
+                  }
+                  break;
+                }
+                case 'agent_message_chunk': {
+                  const text = extractText(update);
+                  if (text) {
+                    dispatch({
+                      type: 'ORCHESTRATOR_ADD_CONTENT',
+                      sessionId,
+                      content: text,
+                    });
+                  }
+                  break;
+                }
+                case 'tool_call': {
+                  const toolName = (update.title as string) || '';
+                  if (toolName !== 'report_plan') {
+                    dispatch({
+                      type: 'ORCHESTRATOR_TOOL_EXECUTING',
+                      sessionId,
+                      name: toolName,
+                      input: update.toolCallId as string | undefined,
+                    });
+                  }
+                  break;
+                }
+                case 'tool_call_update': {
+                  const tcId = (update.toolCallId as string) || '';
+                  const status = (update.status as string) || '';
+                  if (status === 'completed' || status === 'failed') {
+                    const resultText = extractText(update);
+                    dispatch({
+                      type: 'ORCHESTRATOR_TOOL_EXECUTED',
+                      sessionId,
+                      name: tcId,
+                      display: tcId,
+                      success: status !== 'failed',
+                      result: resultText,
+                    });
+                  }
+                  break;
+                }
+                case 'plan': {
+                  const planData = update.plan as { entries?: Array<{ content: string; status: string }> } | undefined;
+                  if (planData?.entries) {
+                    const plan: OrchestratorPlan = {
+                      steps: planData.entries.map(e => ({
+                        description: e.content,
+                        status: e.status === 'completed' ? 'done' as const
+                          : e.status === 'in_progress' ? 'in_progress' as const
+                          : 'not_started' as const,
+                      })),
+                      summary: undefined,
+                      current_step_description: undefined,
+                    };
+                    dispatch({
+                      type: 'ORCHESTRATOR_PLAN_UPDATED',
+                      sessionId,
+                      plan,
+                    });
+                  }
+                  break;
+                }
+              }
+            } else if (rpc.id !== undefined && !rpc.method) {
+              //
+              // Response to a pending request.
+              //
+              const pending = pendingAcpRequestsRef.current.get(rpc.id);
+              if (!pending) break;
+              pendingAcpRequestsRef.current.delete(rpc.id);
+
+              if (rpc.error) {
+                const sessionId = pending.sessionId;
+                if (sessionId) {
+                  dispatch({ type: 'ORCHESTRATOR_ERROR', sessionId, message: rpc.error.message });
+                }
+                break;
+              }
+
+              switch (pending.method) {
+                case 'session/list': {
+                  const rawSessions = rpc.result?.sessions as Array<{ sessionId: string; title?: string; cwd?: string }> | undefined;
+                  if (rawSessions && rawSessions.length > 0) {
+                    //
+                    // Filter to only WEB_ prefixed sessions (by session ID).
+                    //
+
+                    const webSessions = rawSessions.filter(s => s.sessionId.startsWith('WEB_'));
+                    const serverIds = webSessions.map(s => s.sessionId);
+                    const serverSet = new Set(serverIds);
+                    const currentSessions = orchestratorSessionsRef.current;
+                    const existing = currentSessions.filter(s => serverSet.has(s.sessionId));
+                    if (existing.length !== currentSessions.length) {
+                      dispatch({ type: 'ORCHESTRATOR_SYNC_SESSIONS', sessionIds: serverIds });
+                    }
+
+                    let loadTriggered = false;
+                    for (const sess of webSessions) {
+                      const label = `Session ${webSessionCounter.current++}`;
+                      const alreadyExists = orchestratorSessionsRef.current.some(s => s.sessionId === sess.sessionId);
+                      if (!alreadyExists) {
+                        dispatch({
+                          type: 'ORCHESTRATOR_SESSION_CREATED',
+                          sessionId: sess.sessionId,
+                          label,
+                          loaded: false,
+                        });
+
+                        //
+                        // Trigger session/load for the first new session when
+                        // no session is currently active (reconnect scenario).
+                        //
+
+                        if (!loadTriggered && !orchestratorActiveIdRef.current) {
+                          loadTriggered = true;
+                          const loadRpc = acpRequest('session/load', { sessionId: sess.sessionId, cwd: '.', mcpServers: [] });
+                          wsClient.send({ type: 'acp_message', json_rpc: loadRpc });
+                          const loadParsed = JSON.parse(loadRpc);
+                          pendingAcpRequestsRef.current.set(loadParsed.id, { method: 'session/load', sessionId: sess.sessionId });
+                        }
+                      }
+                    }
+                  }
+                  break;
+                }
+                case 'session/new': {
+                  const sessionId = rpc.result?.sessionId as string;
+                  if (sessionId) {
+                    dispatch({
+                      type: 'ORCHESTRATOR_SESSION_CREATED',
+                      sessionId,
+                      label: `Session ${webSessionCounter.current++}`,
+                    });
+                  }
+                  break;
+                }
+                case 'session/prompt': {
+                  const sessionId = pending.sessionId;
+                  if (sessionId) {
+                    dispatch({ type: 'ORCHESTRATOR_DONE', sessionId });
+                  }
+                  break;
+                }
+                case 'session/load': {
+                  const sessionId = pending.sessionId;
+                  if (sessionId) {
+                    dispatch({ type: 'ORCHESTRATOR_SESSION_LOADED', sessionId });
+                  }
+                  break;
+                }
+                case 'session/close': {
+                  const sessionId = pending.sessionId;
+                  if (sessionId) {
+                    dispatch({ type: 'ORCHESTRATOR_SESSION_CLOSED', sessionId });
+                  }
+                  break;
+                }
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to parse ACP message:', e);
           }
           break;
-        case 'orchestrator_tool_executing':
-          if (message.prompt_id === String(orchestratorPromptSeq.current) && message.name !== 'report_plan') {
-            dispatch({ type: 'ORCHESTRATOR_TOOL_EXECUTING', name: message.name, input: message.input });
-          }
-          break;
-        case 'orchestrator_tool_executed':
-          if (message.prompt_id === String(orchestratorPromptSeq.current) && message.name !== 'report_plan') {
-            dispatch({ type: 'ORCHESTRATOR_TOOL_EXECUTED', name: message.name, display: message.display, success: message.success, result: message.result });
-          }
-          break;
-        case 'orchestrator_plan_updated':
-          if (message.prompt_id === String(orchestratorPromptSeq.current)) {
-            dispatch({ type: 'ORCHESTRATOR_PLAN_UPDATED', plan: message.plan });
-          }
-          break;
-        case 'orchestrator_done':
-          if (message.prompt_id === String(orchestratorPromptSeq.current)) {
-            dispatch({ type: 'ORCHESTRATOR_DONE' });
-          }
-          break;
-        case 'orchestrator_error':
-          if (message.prompt_id === String(orchestratorPromptSeq.current)) {
-            dispatch({ type: 'ORCHESTRATOR_ERROR', message: message.message });
-          }
-          break;
-        case 'orchestrator_token_usage':
-          if (message.prompt_id === String(orchestratorPromptSeq.current)) {
-            dispatch({
-              type: 'ORCHESTRATOR_TOKEN_USAGE',
-              promptTokens: message.prompt_tokens,
-              completionTokens: message.completion_tokens,
-              totalTokens: message.total_tokens,
-            });
-          }
-          break;
+        }
         //
         // Traffic interception messages.
         //
@@ -1663,10 +1915,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     //
     // Connect to WebSocket.
     //
+
     wsClient.connect().catch(console.error);
+
+    //
+    // Poll session/list every 5 seconds to stay in sync.
+    //
+
+    const pollInterval = setInterval(() => {
+      const rpc = acpRequest('session/list');
+      wsClient.send({ type: 'acp_message', json_rpc: rpc });
+      const parsed = JSON.parse(rpc);
+      pendingAcpRequestsRef.current.set(parsed.id, { method: 'session/list' });
+    }, 5000);
 
     return () => {
       unsubscribe();
+      clearInterval(pollInterval);
     };
   //
   // Empty deps - only run once.
@@ -1801,34 +2066,72 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   //
-  // Orchestrator functions.
+  // Orchestrator functions (multi-session ACP).
   //
-  const orchestratorStart = useCallback(() => {
-    dispatch({ type: 'ORCHESTRATOR_STARTING' });
-    wsClient.send({ type: 'orchestrator_start' });
+
+  const webSessionCounter = useRef(1);
+  const orchestratorCreateSession = useCallback((modelRef?: string) => {
+    dispatch({ type: 'ORCHESTRATOR_CREATING_SESSION' });
+    const params: Record<string, unknown> = { cwd: '.', mcpServers: [] };
+    if (modelRef) {
+      params._meta = { modelRef };
+    }
+    const jsonRpc = acpRequest('session/new', params);
+    const parsed = JSON.parse(jsonRpc);
+    pendingAcpRequestsRef.current.set(parsed.id, { method: 'session/new' });
+    wsClient.send({ type: 'acp_message', json_rpc: jsonRpc });
   }, []);
 
-  const orchestratorStop = useCallback(() => {
-    wsClient.send({ type: 'orchestrator_stop' });
-    dispatch({ type: 'ORCHESTRATOR_STOPPED' });
+  const orchestratorCloseSession = useCallback((sessionId: string) => {
+    const jsonRpc = acpRequest('session/close', { sessionId });
+    const parsed = JSON.parse(jsonRpc);
+    pendingAcpRequestsRef.current.set(parsed.id, { method: 'session/close', sessionId });
+    wsClient.send({ type: 'acp_message', json_rpc: jsonRpc });
   }, []);
 
-  const orchestratorCancel = useCallback(() => {
-    wsClient.send({ type: 'orchestrator_cancel' });
-    dispatch({ type: 'ORCHESTRATOR_DONE' });
+  const orchestratorCancelPrompt = useCallback((sessionId: string) => {
+    const jsonRpc = JSON.stringify({ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId } });
+    wsClient.send({ type: 'acp_message', json_rpc: jsonRpc });
+    dispatch({ type: 'ORCHESTRATOR_DONE', sessionId });
   }, []);
 
-  const orchestratorPromptSeq = useRef(0);
-
-  const orchestratorPrompt = useCallback((message: string) => {
-    orchestratorPromptSeq.current += 1;
-    const promptId = String(orchestratorPromptSeq.current);
-    dispatch({ type: 'ORCHESTRATOR_ADD_USER_MESSAGE', message, promptId });
-    wsClient.send({ type: 'orchestrator_prompt', prompt_id: promptId, message });
+  const orchestratorSendPrompt = useCallback((sessionId: string, message: string) => {
+    const promptId = generateUUID();
+    dispatch({ type: 'ORCHESTRATOR_ADD_USER_MESSAGE', sessionId, message, promptId });
+    const jsonRpc = acpRequest('session/prompt', {
+      sessionId,
+      prompt: [{ type: 'text', text: message }],
+    });
+    const parsed = JSON.parse(jsonRpc);
+    pendingAcpRequestsRef.current.set(parsed.id, { method: 'session/prompt', sessionId });
+    wsClient.send({ type: 'acp_message', json_rpc: jsonRpc });
   }, []);
 
-  const orchestratorClearMessages = useCallback(() => {
-    dispatch({ type: 'ORCHESTRATOR_CLEAR_MESSAGES' });
+  const orchestratorSessionsRef = useRef(state.orchestrator.sessions);
+  orchestratorSessionsRef.current = state.orchestrator.sessions;
+  const orchestratorActiveIdRef = useRef(state.orchestrator.activeSessionId);
+  orchestratorActiveIdRef.current = state.orchestrator.activeSessionId;
+
+  const orchestratorSetActiveSession = useCallback((sessionId: string | null) => {
+    dispatch({ type: 'ORCHESTRATOR_SET_ACTIVE_SESSION', sessionId });
+
+    //
+    // If the session hasn't been loaded yet, send session/load to get history.
+    //
+
+    if (sessionId) {
+      const session = orchestratorSessionsRef.current.find(s => s.sessionId === sessionId);
+      if (session && !session.loaded) {
+        const jsonRpc = acpRequest('session/load', { sessionId, cwd: '.', mcpServers: [] });
+        wsClient.send({ type: 'acp_message', json_rpc: jsonRpc });
+        const parsed = JSON.parse(jsonRpc);
+        pendingAcpRequestsRef.current.set(parsed.id, { method: 'session/load', sessionId });
+      }
+    }
+  }, []);
+
+  const orchestratorClearMessages = useCallback((sessionId: string) => {
+    dispatch({ type: 'ORCHESTRATOR_CLEAR_MESSAGES', sessionId });
   }, []);
 
   //
@@ -2165,10 +2468,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     getConfig,
     setConfig,
     clearOpDefStatus,
-    orchestratorStart,
-    orchestratorStop,
-    orchestratorCancel,
-    orchestratorPrompt,
+    orchestratorCreateSession,
+    orchestratorCloseSession,
+    orchestratorCancelPrompt,
+    orchestratorSendPrompt,
+    orchestratorSetActiveSession,
     orchestratorClearMessages,
     send,
     requestTrafficLog,

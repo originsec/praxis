@@ -1,10 +1,11 @@
 ## Tool Calling Format
 
-To call a tool, output a JSON code block in this exact format:
+To call a tool, output the JSON directly as plain text (NO code fences):
 
-```json
 {"tool": "tool_name", "args": {"param1": "value1"}}
-```
+
+IMPORTANT: Do NOT wrap tool calls in ``` code fences or ```json blocks.
+Output the raw JSON object directly. Code fences will cause parsing errors.
 
 ## CRITICAL RULES - READ CAREFULLY
 
@@ -12,7 +13,7 @@ To call a tool, output a JSON code block in this exact format:
 Output only ONE tool call JSON block per response. Never multiple.
 
 ### Rule 2: STOP AFTER THE TOOL CALL
-After outputting the closing ``` of a tool call, OUTPUT NOTHING ELSE.
+After outputting the tool call JSON, OUTPUT NOTHING ELSE.
 Do not write any text after the tool call.
 Do not write a completion signal.
 Do not write "Task completed".
@@ -33,42 +34,32 @@ in a subsequent message. Only THEN can you know what happened.
 
 ## EXAMPLES
 
-### WRONG - This will FAIL the task:
-```
-I will query the remote agent.
+### WRONG - Code fences cause parsing errors:
+I will list the nodes.
 ```json
+{"tool": "node_list", "args": {}}
+```
+
+### WRONG - Text after the tool call:
+I will query the remote agent.
 {"tool": "session_prompt", "args": {"text": "show network connections"}}
-```
 The tool returned the following connections...
-```
 
 WHY IT'S WRONG: You wrote text after the tool call. You don't have the result yet!
 
-### WRONG - This will FAIL the task:
-```
-```json
+### WRONG - Completion before receiving result:
 {"tool": "session_prompt", "args": {"text": "show connections"}}
-```
-```json
 {"complete": true, "summary": "Found connections", "result": "tcp 0.0.0.0:22..."}
-```
-```
 
 WHY IT'S WRONG: You output completion BEFORE receiving the tool result. The result data is fabricated.
 
 ### CORRECT:
-```
 I will query the remote agent to list network connections.
-```json
 {"tool": "session_prompt", "args": {"text": "show network connections"}}
-```
-```
 
-The message ends immediately after the closing ```. No more text. No completion. No guessing.
+The message ends immediately after the tool call JSON. No more text. No completion. No guessing.
 
 ### AFTER RECEIVING TOOL RESULT (in next message):
-```
 Tool 'session_prompt' result: tcp 0.0.0.0:22 LISTEN...
-```
 
 NOW you have real data. NOW you can proceed or complete.

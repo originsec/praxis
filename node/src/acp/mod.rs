@@ -1,20 +1,19 @@
 pub mod client;
-pub mod types;
 
-use client::AcpClient;
+use client::AcpHandle;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
 //
-// Global registry of active ACP clients, keyed by handle string.
+// Global registry of active ACP handles, keyed by handle string.
 // Lua agents create clients via praxis.acp_start() and reference them by handle.
 //
 
-static ACP_CLIENTS: Lazy<Mutex<HashMap<String, AcpClient>>> =
+static ACP_CLIENTS: Lazy<Mutex<HashMap<String, AcpHandle>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
-pub fn register_client(handle: &str, client: AcpClient) {
+pub fn register_client(handle: &str, client: AcpHandle) {
     let cancel = client.cancel_flag();
     let pid = client.pid();
     ACP_CANCEL_FLAGS.lock().unwrap().insert(handle.to_string(), cancel);
@@ -28,7 +27,7 @@ static ACP_CANCEL_FLAGS: Lazy<Mutex<HashMap<String, std::sync::Arc<std::sync::at
 static ACP_PIDS: Lazy<Mutex<HashMap<String, u32>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
-pub fn remove_client(handle: &str) -> Option<AcpClient> {
+pub fn remove_client(handle: &str) -> Option<AcpHandle> {
     ACP_CANCEL_FLAGS.lock().unwrap().remove(handle);
     ACP_PIDS.lock().unwrap().remove(handle);
     ACP_CLIENTS.lock().unwrap().remove(handle)
@@ -60,10 +59,10 @@ pub fn signal_cancel(handle: &str) {
 
 pub fn with_client<F, R>(handle: &str, f: F) -> Option<R>
 where
-    F: FnOnce(&mut AcpClient) -> R,
+    F: FnOnce(&AcpHandle) -> R,
 {
-    let mut clients = ACP_CLIENTS.lock().unwrap();
-    clients.get_mut(handle).map(f)
+    let clients = ACP_CLIENTS.lock().unwrap();
+    clients.get(handle).map(f)
 }
 
 //
@@ -129,7 +128,7 @@ pub fn cleanup_channels(handle: &str) {
 #[allow(dead_code)]
 pub fn close_all() {
     let mut clients = ACP_CLIENTS.lock().unwrap();
-    for (_, mut client) in clients.drain() {
+    for (_, client) in clients.drain() {
         client.close();
     }
     ACP_UPDATE_SENDERS.lock().unwrap().clear();

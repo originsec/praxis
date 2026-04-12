@@ -16,7 +16,7 @@ use crate::database::Database;
 use crate::handlers::{ClientMessageHandler, NodeMessageHandler};
 use crate::claude_bridge::{CcrV1Manager, CcrV2Manager};
 use crate::mcp::McpServerManager;
-use crate::orchestrator::OrchestratorManager;
+use crate::acp_server::AcpServer;
 use crate::semantic_ops::{ChainExecutor, NodeExecLock, ResponseTracker, SemanticOpsManager};
 use crate::state::{ClientRegistry, NodeRegistry, PendingCommands};
 use crate::tools::ToolkitManager;
@@ -38,7 +38,7 @@ pub struct ServiceContext {
     pub chain_executor: Arc<ChainExecutor>,
     pub node_exec_lock: NodeExecLock,
     pub agent_chat_manager: Arc<AgentChatManager>,
-    pub orchestrator_manager: Arc<OrchestratorManager>,
+    pub acp_server: Arc<AcpServer>,
     pub toolkit_manager: Arc<ToolkitManager>,
     pub mcp_manager: Arc<McpServerManager>,
     pub ccrv1_manager: Arc<CcrV1Manager>,

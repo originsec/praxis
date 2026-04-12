@@ -1,7 +1,8 @@
+use crate::acp::AcpNotification;
 use crate::client::Client;
 use common::{
-    ChainDefinitionInfo, ChainExecutionUpdate, ClientDirectMessage, OperationDefinitionInfo,
-    SemanticOpUpdate, SessionUpdate, SystemState, TerminalOutput,
+    ChainDefinitionInfo, ChainExecutionUpdate, OperationDefinitionInfo, SemanticOpUpdate,
+    SessionUpdate, SystemState, TerminalOutput,
 };
 use crossterm::event::{Event, EventStream};
 use futures_util::StreamExt;
@@ -11,7 +12,8 @@ use tokio::sync::{Notify, mpsc};
 
 pub enum AppEvent {
     Terminal(Event),
-    Orchestrator(ClientDirectMessage),
+    AcpNotification(AcpNotification),
+    SessionListPoll,
     StateUpdate(SystemState),
     OperationsRefreshed {
         op_definitions: Vec<OperationDefinitionInfo>,
@@ -93,19 +95,6 @@ impl EventHandler {
         });
 
         //
-        // Orchestrator events from the client's subscription channel.
-        //
-        let tx_orch = tx.clone();
-        let mut orch_rx = client.subscribe_orchestrator_events();
-        tokio::spawn(async move {
-            while let Some(msg) = orch_rx.recv().await {
-                if tx_orch.send(AppEvent::Orchestrator(msg)).is_err() {
-                    break;
-                }
-            }
-        });
-
-        //
         // Terminal output from node PTY sessions.
         //
         let tx_term_out = tx.clone();
@@ -113,6 +102,19 @@ impl EventHandler {
         tokio::spawn(async move {
             while let Some(output) = term_rx.recv().await {
                 if tx_term_out.send(AppEvent::TerminalOutput(output)).is_err() {
+                    break;
+                }
+            }
+        });
+
+        //
+        // Periodic session/list poll (every 5 seconds).
+        //
+        let tx_poll = tx.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                if tx_poll.send(AppEvent::SessionListPoll).is_err() {
                     break;
                 }
             }

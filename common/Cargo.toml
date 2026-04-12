@@ -26,6 +26,7 @@ rmcp = { version = "0.8", features = ["server", "transport-io", "transport-sse-s
 schemars = "1"
 uuid = { version = "1", features = ["v4"] }
 async-trait = "0.1"
+agent-client-protocol = { version = "0.10.4", features = ["unstable_session_close", "unstable_session_model", "unstable_session_usage"] }
 
 [lib]
 name = "common"

@@ -248,7 +248,7 @@ fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
     let base = model_count + 1;
 
     lines.push(setting_row(
-        "Orchestrator Model",
+        "Orchestrator Default Model",
         &state.orchestrator_model,
         state.selected == base,
         state.editing,
