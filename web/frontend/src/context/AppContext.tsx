@@ -88,6 +88,7 @@ interface AcpJsonRpc {
 interface PendingAcpRequest {
   method: string;
   sessionId?: string;
+  label?: string;
 }
 
 const initialOrchestratorState: OrchestratorState = {
@@ -1605,12 +1606,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
                     for (const sess of webSessions) {
                       const label = sess.name.replace(/^WEB_/, '');
-                      dispatch({
-                        type: 'ORCHESTRATOR_SESSION_CREATED',
-                        sessionId: sess.sessionId,
-                        label,
-                        loaded: false,
-                      });
+                      const alreadyExists = state.orchestrator.sessions.some(s => s.sessionId === sess.sessionId);
+                      if (!alreadyExists) {
+                        dispatch({
+                          type: 'ORCHESTRATOR_SESSION_CREATED',
+                          sessionId: sess.sessionId,
+                          label,
+                          loaded: false,
+                        });
+
+                        //
+                        // Trigger session/load for the first unloaded session
+                        // so history replays on reconnect.
+                        //
+
+                        if (!state.orchestrator.activeSessionId) {
+                          const loadRpc = acpRequest('session/load', { sessionId: sess.sessionId });
+                          wsClient.send({ type: 'acp_message', json_rpc: loadRpc });
+                          const loadParsed = JSON.parse(loadRpc);
+                          pendingAcpRequestsRef.current.set(loadParsed.id, { method: 'session/load', sessionId: sess.sessionId });
+                        }
+                      }
                     }
                   }
                   break;
@@ -1621,7 +1637,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                     dispatch({
                       type: 'ORCHESTRATOR_SESSION_CREATED',
                       sessionId,
-                      label: (pending as { label?: string }).label || `Session ${sessionId.slice(0, 6)}`,
+                      label: pending.label || `Session ${sessionId.slice(0, 6)}`,
                     });
                   }
                   break;

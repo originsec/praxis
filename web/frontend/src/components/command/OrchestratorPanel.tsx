@@ -284,11 +284,6 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
                       }`}
                     >
                       <span className="truncate">{session.label}</span>
-                      {session.provider && session.model && (
-                        <span className="text-[8px] text-muted truncate" title={`${session.provider}/${session.model}`}>
-                          {session.model}
-                        </span>
-                      )}
                       {session.isLoading && <Loader2 size={8} className="animate-spin flex-shrink-0" />}
                       <span
                         onClick={(e) => {

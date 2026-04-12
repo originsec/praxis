@@ -60,25 +60,34 @@ function parseThinkingContent(content: string): { thinking: string[]; response: 
   let response = remaining.trim();
 
   //
-  // Strip wrapping triple-backtick fences when the entire response is a
-  // single code block. This happens when LLMs wrap markdown output in ```
-  // which prevents ReactMarkdown from rendering tables, bold, etc.
+  // Strip code fences that contain markdown formatting. LLMs sometimes
+  // wrap markdown tables, headers, or bold text inside ``` blocks which
+  // prevents ReactMarkdown from rendering them properly.
   //
 
-  if (response.startsWith('```')) {
-    const firstNewline = response.indexOf('\n');
-    if (firstNewline !== -1) {
-      const afterOpen = response.substring(firstNewline + 1).trimEnd();
-      if (afterOpen.endsWith('```')) {
-        const inner = afterOpen.substring(0, afterOpen.length - 3);
-        if (!inner.includes('\n```')) {
-          response = inner.trim();
-        }
-      }
-    }
-  }
+  response = stripMarkdownCodeFences(response);
 
   return { thinking, response };
+}
+
+function stripMarkdownCodeFences(text: string): string {
+  //
+  // Match ``` blocks and check if their content looks like markdown
+  // (contains tables, headers, or bold). If so, unwrap them.
+  //
+
+  return text.replace(
+    /```[a-z]*\n([\s\S]*?)```/g,
+    (_match, inner: string) => {
+      const hasTable = /^\s*\|.*\|/m.test(inner);
+      const hasHeader = /^#{1,6}\s/m.test(inner);
+      const hasBold = /\*\*[^*]+\*\*/.test(inner);
+      if (hasTable || hasHeader || hasBold) {
+        return inner;
+      }
+      return _match;
+    }
+  );
 }
 
 //

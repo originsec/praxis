@@ -21,13 +21,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     let show_tabs = state.sessions.len() > 1;
 
     //
-    // Show welcome logo when no session or the active session has no messages
-    // and isn't streaming yet.
+    // Show welcome logo only when there are zero sessions.
     //
 
-    let show_welcome = session
-        .map(|s| s.messages.is_empty() && !s.is_streaming)
-        .unwrap_or(true);
+    let show_welcome = state.sessions.is_empty();
 
     if show_welcome {
         let tab_height = if show_tabs { 1 } else { 0 };

@@ -227,6 +227,7 @@ pub struct OrchestratorState {
     pub history: Vec<String>,
     pub history_index: Option<usize>,
     pub saved_input: String,
+    pub pending_prompt: Option<String>,
 }
 
 impl OrchestratorState {
@@ -260,6 +261,7 @@ impl Default for OrchestratorState {
             history: Vec::new(),
             history_index: None,
             saved_input: String::new(),
+            pending_prompt: None,
         }
     }
 }
@@ -681,18 +683,17 @@ impl App {
             let _ = self.client.send_acp_message(json_rpc).await;
 
             //
-            // Remove locally immediately rather than waiting for the
-            // server's SessionClosed event.
+            // Remove locally immediately and switch to another session if
+            // one exists.
             //
 
             if let Some(idx) = self.orchestrator.sessions.iter().position(|s| s.session_id == session_id) {
                 self.orchestrator.sessions.remove(idx);
                 if self.orchestrator.sessions.is_empty() {
                     self.orchestrator.active_session_index = None;
-                } else if let Some(active) = self.orchestrator.active_session_index {
-                    if active >= self.orchestrator.sessions.len() {
-                        self.orchestrator.active_session_index = Some(self.orchestrator.sessions.len() - 1);
-                    }
+                } else {
+                    let new_idx = idx.min(self.orchestrator.sessions.len() - 1);
+                    self.switch_to_session(new_idx).await;
                 }
             }
         }
@@ -2506,10 +2507,16 @@ impl App {
                     }
 
                     //
-                    // Create a session if none exists.
+                    // Create a session if none exists. The prompt will be
+                    // sent when SessionCreated arrives.
                     //
+
                     if self.orchestrator.sessions.is_empty() {
+                        self.orchestrator.pending_prompt = Some(input.clone());
+                        self.orchestrator.input.clear();
+                        self.orchestrator.cursor_pos = 0;
                         self.create_new_orchestrator_session().await;
+                        return;
                     }
 
                     if let Some(session) = self.orchestrator.active_session_mut() {
@@ -3046,12 +3053,28 @@ impl App {
                 // A new session was created by this client. Mark loaded since
                 // we'll see all events in real time.
                 //
+
                 let label = format!("Session {}", self.orchestrator.next_session_number());
-                let mut session = OrchestratorSessionState::new(session_id, label);
+                let mut session = OrchestratorSessionState::new(session_id.clone(), label);
                 session.loaded = true;
                 self.orchestrator.sessions.push(session);
                 self.orchestrator.active_session_index =
                     Some(self.orchestrator.sessions.len() - 1);
+
+                //
+                // If there's a pending prompt (from typing on the welcome
+                // screen before any session existed), send it now.
+                //
+
+                if let Some(prompt) = self.orchestrator.pending_prompt.take() {
+                    if let Some(session) = self.orchestrator.active_session_mut() {
+                        session.messages.push(ConversationEntry::UserPrompt(prompt.clone()));
+                        session.is_streaming = true;
+                        session.prompt_seq += 1;
+                    }
+                    let (_, json_rpc) = self.orchestrator.acp_client.send_prompt(&session_id, &prompt);
+                    let _ = self.client.send_acp_message(json_rpc).await;
+                }
             }
 
             AcpEvent::SessionStarted { session_id, provider, model } => {
