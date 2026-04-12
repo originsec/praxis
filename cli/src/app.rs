@@ -662,8 +662,7 @@ impl App {
     }
 
     async fn create_new_orchestrator_session(&mut self) {
-        let name = format!("CLI_Session {}", self.orchestrator.next_session_number());
-        if let Err(e) = self.acp.create_session(".", Some(&name), None).await {
+        if let Err(e) = self.acp.create_session(".", None).await {
             if let Some(session) = self.orchestrator.active_session_mut() {
                 session.messages.push(ConversationEntry::Error(format!(
                     "Failed to create session: {}",
@@ -2902,8 +2901,7 @@ impl App {
     async fn select_model(&mut self, model_name: &str) {
         self.close_active_orchestrator_session().await;
 
-        let name = format!("CLI_Session {}", self.orchestrator.next_session_number());
-        if let Err(e) = self.acp.create_session(".", Some(&name), Some(model_name)).await {
+        if let Err(e) = self.acp.create_session(".", Some(model_name)).await {
             if let Some(session) = self.orchestrator.active_session_mut() {
                 session
                     .messages
@@ -3100,32 +3098,19 @@ impl App {
             AcpNotification::SessionList { sessions } => {
                 //
                 // Sync session list with the server. Only show sessions
-                // with the CLI_ prefix (ours). Other clients have their
-                // own prefix.
+                // with the CLI_ prefix in the session ID (ours).
                 //
 
                 let cli_sessions: Vec<_> = sessions.into_iter()
-                    .filter(|(_, name)| name.starts_with("CLI_"))
+                    .filter(|(id, _)| id.starts_with("CLI_"))
                     .collect();
 
                 let server_ids: Vec<String> = cli_sessions.iter().map(|(id, _)| id.clone()).collect();
                 self.orchestrator.sessions.retain(|s| server_ids.contains(&s.session_id));
 
-                for (sid, name) in &cli_sessions {
+                for (sid, _title) in &cli_sessions {
                     if self.orchestrator.session_by_id_mut(sid).is_none() {
-                        let label = name.strip_prefix("CLI_").unwrap_or(name).to_string();
-
-                        //
-                        // Keep session_counter ahead of existing session numbers
-                        // so new sessions don't reuse labels.
-                        //
-
-                        if let Some(n) = label.strip_prefix("Session ").and_then(|s| s.parse::<usize>().ok()) {
-                            if n >= self.orchestrator.session_counter {
-                                self.orchestrator.session_counter = n;
-                            }
-                        }
-
+                        let label = format!("Session {}", self.orchestrator.next_session_number());
                         let session = OrchestratorSessionState::new(sid.clone(), label);
                         self.orchestrator.sessions.push(session);
                     }

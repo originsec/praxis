@@ -329,16 +329,22 @@ impl AcpServer {
         req: NewSessionRequest,
         publish_channel: &Channel,
     ) {
-        let session_id = uuid::Uuid::new_v4().to_string();
+        //
+        // Generate session ID with a prefix based on caller type.
+        //
 
-        //
-        // Extract extension fields from _meta.
-        //
+        let prefix = if client_id.starts_with("cli_") {
+            "CLI"
+        } else if client_id.starts_with("web_") {
+            "WEB"
+        } else {
+            "ACP"
+        };
+        let session_id = format!("{}_{}", prefix, uuid::Uuid::new_v4());
 
         let meta_val = req.meta.as_ref()
             .map(|m| serde_json::to_value(m).unwrap_or_default())
             .unwrap_or_default();
-        let name = meta_val.get("name").and_then(|v| v.as_str()).map(String::from);
         let model_ref = meta_val.get("modelRef").and_then(|v| v.as_str()).map(String::from);
 
         //
@@ -355,7 +361,7 @@ impl AcpServer {
         drop(config);
 
         self.orchestrator_manager
-            .create_session(client_id, &session_id, name.as_deref(), model_ref.as_deref(), &self.service_config, publish_channel)
+            .create_session(client_id, &session_id, Some(&session_id), model_ref.as_deref(), &self.service_config, publish_channel)
             .await;
 
         if let Some(id) = id {

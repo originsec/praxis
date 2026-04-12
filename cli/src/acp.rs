@@ -81,7 +81,6 @@ enum BridgeCommand {
     },
     CreateSession {
         cwd: String,
-        name: Option<String>,
         model_ref: Option<String>,
         reply: oneshot::Sender<acp::Result<acp::NewSessionResponse>>,
     },
@@ -125,14 +124,12 @@ impl AcpBridgeHandle {
     pub async fn create_session(
         &self,
         cwd: &str,
-        name: Option<&str>,
         model_ref: Option<&str>,
     ) -> anyhow::Result<()> {
         let (tx, _rx) = oneshot::channel();
         self.cmd_tx
             .send(BridgeCommand::CreateSession {
                 cwd: cwd.to_string(),
-                name: name.map(String::from),
                 model_ref: model_ref.map(String::from),
                 reply: tx,
             })
@@ -488,24 +485,12 @@ async fn run_bridge(
                 });
             }
 
-            BridgeCommand::CreateSession { cwd, name, model_ref, reply } => {
+            BridgeCommand::CreateSession { cwd, model_ref, reply } => {
                 tokio::task::spawn_local(async move {
                     let mut req = acp::NewSessionRequest::new(cwd);
-
-                    //
-                    // Pass name and modelRef as extension fields in _meta.
-                    //
-
-                    let mut meta = serde_json::Map::new();
-                    if let Some(n) = &name {
-                        meta.insert("name".into(), serde_json::json!(n));
-                    }
                     if let Some(mr) = &model_ref {
-                        meta.insert("modelRef".into(), serde_json::json!(mr));
-                    }
-                    if !meta.is_empty() {
                         req = req.meta(serde_json::from_value::<acp::Meta>(
-                            serde_json::Value::Object(meta)
+                            serde_json::json!({ "modelRef": mr })
                         ).unwrap());
                     }
 
