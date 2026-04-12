@@ -146,90 +146,6 @@ pub struct InitializeResult {
     pub server_capabilities: ServerCapabilities,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SendUserMessageParams {
-    pub chunks: Vec<UserMessageChunk>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum UserMessageChunk {
-    Text { text: String },
-    Path { path: String },
-}
-
-//
-// ACP Client methods (agent -> client requests).
-//
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StreamAssistantMessageChunkParams {
-    pub chunk: AssistantMessageChunk,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum AssistantMessageChunk {
-    Text { text: String },
-    Thought { thought: String },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PushToolCallParams {
-    pub icon: String,
-    pub label: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<ToolCallContent>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub locations: Option<Vec<ToolCallLocation>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PushToolCallResponse {
-    pub id: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateToolCallParams {
-    pub tool_call_id: i64,
-    pub status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<ToolCallContent>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpdatePlanParams {
-    pub entries: Vec<PlanEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanEntry {
-    pub content: String,
-    pub priority: String,
-    pub status: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum ToolCallContent {
-    Markdown { markdown: String },
-    #[serde(rename_all = "camelCase")]
-    Diff {
-        path: String,
-        old_text: Option<String>,
-        new_text: String,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolCallLocation {
-    pub path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub line: Option<u32>,
-}
-
 //
 // Custom session management extensions (not part of ACP spec).
 //
@@ -248,8 +164,7 @@ pub struct SessionNewResult {
 }
 
 //
-// Legacy types used by node/src/acp. These match the old protocol version
-// and are kept for backward compatibility with the node ACP client.
+// Shared client/server types used by both node and orchestrator ACP clients.
 //
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

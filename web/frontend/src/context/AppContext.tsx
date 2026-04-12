@@ -1486,100 +1486,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           try {
             const rpc = JSON.parse(message.json_rpc) as AcpJsonRpc;
 
-            //
-            // Helper to send a null JSON-RPC response back to the agent.
-            //
-            const respondNull = (requestId: number | string) => {
-              const resp = JSON.stringify({ jsonrpc: '2.0', id: requestId, result: null });
-              wsClient.send({ type: 'acp_message', json_rpc: resp });
-            };
-
-            //
-            // Helper to send a pushToolCall response with an assigned ID.
-            //
-            const respondToolCallId = (requestId: number | string, toolCallId: number) => {
-              const resp = JSON.stringify({ jsonrpc: '2.0', id: requestId, result: { id: toolCallId } });
-              wsClient.send({ type: 'acp_message', json_rpc: resp });
-            };
-
-            if (rpc.method && rpc.id !== undefined) {
+            if (rpc.method === 'session/update' && rpc.params) {
               //
-              // Agent request (method + id): the service is calling a client
-              // method on us. We must respond.
-              //
-              const meta = rpc.params?._meta as Record<string, unknown> | undefined;
-              const sessionId = (meta?.sessionId as string) || '';
-
-              switch (rpc.method) {
-                case 'streamAssistantMessageChunk': {
-                  respondNull(rpc.id);
-                  const chunk = rpc.params?.chunk as { text?: string; thought?: string } | undefined;
-                  if (chunk?.text && sessionId) {
-                    dispatch({
-                      type: 'ORCHESTRATOR_ADD_CONTENT',
-                      sessionId,
-                      content: chunk.text,
-                    });
-                  }
-                  break;
-                }
-                case 'pushToolCall': {
-                  const tcId = webToolCallCounter.current++;
-                  respondToolCallId(rpc.id, tcId);
-                  const label = (rpc.params?.label as string) || '';
-                  if (label !== 'report_plan' && sessionId) {
-                    const content = rpc.params?.content as { type: string; markdown?: string } | undefined;
-                    dispatch({
-                      type: 'ORCHESTRATOR_TOOL_EXECUTING',
-                      sessionId,
-                      name: label,
-                      input: content?.markdown,
-                    });
-                  }
-                  break;
-                }
-                case 'updateToolCall': {
-                  respondNull(rpc.id);
-                  const status = (rpc.params?.status as string) || 'running';
-                  const content = rpc.params?.content as { type: string; markdown?: string } | undefined;
-                  if ((status === 'finished' || status === 'error') && sessionId) {
-                    dispatch({
-                      type: 'ORCHESTRATOR_TOOL_EXECUTED',
-                      sessionId,
-                      name: '',
-                      display: '',
-                      success: status !== 'error',
-                      result: content?.markdown || '',
-                    });
-                  }
-                  break;
-                }
-                case 'updatePlan': {
-                  respondNull(rpc.id);
-                  const entries = rpc.params?.entries as Array<{ content: string; priority: string; status: string }> | undefined;
-                  if (entries && sessionId) {
-                    const plan: OrchestratorPlan = {
-                      steps: entries.map(e => ({
-                        description: e.content,
-                        status: e.status === 'completed' ? 'done' as const
-                          : e.status === 'in_progress' ? 'in_progress' as const
-                          : 'not_started' as const,
-                      })),
-                      summary: undefined,
-                      current_step_description: undefined,
-                    };
-                    dispatch({
-                      type: 'ORCHESTRATOR_PLAN_UPDATED',
-                      sessionId,
-                      plan,
-                    });
-                  }
-                  break;
-                }
-              }
-            } else if (rpc.method === 'session/update' && rpc.params) {
-              //
-              // Legacy notification format (used for event log replay).
+              // Session update notification from the server.
               //
               const sessionId = rpc.params.sessionId as string;
               const update = rpc.params.update as Record<string, unknown>;
@@ -1780,7 +1689,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   }
                   break;
                 }
-                case 'sendUserMessage':
                 case 'session/prompt': {
                   const sessionId = pending.sessionId;
                   if (sessionId) {
@@ -2176,7 +2084,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   //
 
   const webSessionCounter = useRef(1);
-  const webToolCallCounter = useRef(1);
   const orchestratorCreateSession = useCallback((modelRef?: string) => {
     dispatch({ type: 'ORCHESTRATOR_CREATING_SESSION' });
     const name = `WEB_Session ${webSessionCounter.current++}`;
@@ -2198,9 +2105,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const orchestratorCancelPrompt = useCallback((sessionId: string) => {
-    const jsonRpc = acpRequest('cancelSendMessage', { _meta: { sessionId } });
-    const parsed = JSON.parse(jsonRpc);
-    pendingAcpRequestsRef.current.set(parsed.id, { method: 'cancelSendMessage', sessionId });
+    const jsonRpc = JSON.stringify({ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId } });
     wsClient.send({ type: 'acp_message', json_rpc: jsonRpc });
     dispatch({ type: 'ORCHESTRATOR_DONE', sessionId });
   }, []);
@@ -2208,12 +2113,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const orchestratorSendPrompt = useCallback((sessionId: string, message: string) => {
     const promptId = generateUUID();
     dispatch({ type: 'ORCHESTRATOR_ADD_USER_MESSAGE', sessionId, message, promptId });
-    const jsonRpc = acpRequest('sendUserMessage', {
-      chunks: [{ text: message }],
-      _meta: { sessionId },
+    const jsonRpc = acpRequest('session/prompt', {
+      sessionId,
+      prompt: [{ type: 'text', text: message }],
     });
     const parsed = JSON.parse(jsonRpc);
-    pendingAcpRequestsRef.current.set(parsed.id, { method: 'sendUserMessage', sessionId });
+    pendingAcpRequestsRef.current.set(parsed.id, { method: 'session/prompt', sessionId });
     wsClient.send({ type: 'acp_message', json_rpc: jsonRpc });
   }, []);
 

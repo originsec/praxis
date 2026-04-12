@@ -223,7 +223,6 @@ pub struct OrchestratorState {
     pub active_session_index: Option<usize>,
     pub acp_client: AcpClient,
     pub session_counter: usize,
-    pub next_tool_call_id: i64,
     pub input: String,
     pub cursor_pos: usize,
     pub history: Vec<String>,
@@ -260,7 +259,6 @@ impl Default for OrchestratorState {
             active_session_index: None,
             acp_client: AcpClient::new(),
             session_counter: 0,
-            next_tool_call_id: 1,
             input: String::new(),
             cursor_pos: 0,
             history: Vec::new(),
@@ -2427,7 +2425,7 @@ impl App {
                 KeyCode::Char('c') => {
                     if let Some(session) = self.orchestrator.active_session() {
                         if session.is_streaming {
-                            let (_, json_rpc) = self
+                            let json_rpc = self
                                 .orchestrator
                                 .acp_client
                                 .cancel_prompt(&session.session_id);
@@ -3194,17 +3192,8 @@ impl App {
                 }
             }
 
-            AcpEvent::AssistantText { request_id, session_id, text } => {
-                //
-                // Respond with null to the agent's request.
-                //
-                if !request_id.is_null() {
-                    let resp = AcpClient::respond_null(&request_id);
-                    let _ = self.client.send_acp_message(resp).await;
-                }
-
-                let sid = session_id.unwrap_or_default();
-                if let Some(session) = self.orchestrator.session_by_id_mut(&sid) {
+            AcpEvent::TextContent { session_id, text } => {
+                if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
                     session.active_tool = None;
 
                     //
@@ -3229,97 +3218,28 @@ impl App {
                 }
             }
 
-            AcpEvent::AssistantThought { request_id, .. } => {
-                if !request_id.is_null() {
-                    let resp = AcpClient::respond_null(&request_id);
-                    let _ = self.client.send_acp_message(resp).await;
-                }
-            }
-
-            AcpEvent::PushToolCall {
-                request_id,
-                session_id,
-                icon: _,
-                label,
-                content,
-            } => {
-                //
-                // Respond with a tool call ID.
-                //
-                if !request_id.is_null() {
-                    let tc_id = self.orchestrator.next_tool_call_id as i64;
-                    self.orchestrator.next_tool_call_id += 1;
-                    let resp = AcpClient::respond_to_push_tool_call(&request_id, tc_id);
-                    let _ = self.client.send_acp_message(resp).await;
-                }
-
-                let sid = session_id.unwrap_or_default();
-                if let Some(session) = self.orchestrator.session_by_id_mut(&sid) {
-                    if label != "report_plan" {
-                        session.active_tool = Some(label);
-                        session.active_tool_input = content;
+            AcpEvent::ToolCall { session_id, name, input } => {
+                if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
+                    if name != "report_plan" {
+                        session.active_tool = Some(name);
+                        session.active_tool_input = input;
                     }
                 }
             }
 
-            AcpEvent::UpdateToolCall {
-                request_id,
-                session_id,
-                tool_call_id: _,
-                status,
-                content,
-            } => {
-                if !request_id.is_null() {
-                    let resp = AcpClient::respond_null(&request_id);
-                    let _ = self.client.send_acp_message(resp).await;
-                }
-
-                let sid = session_id.unwrap_or_default();
-                if let Some(session) = self.orchestrator.session_by_id_mut(&sid) {
-                    let tool_name = session.active_tool.take().unwrap_or_default();
+            AcpEvent::ToolResult { session_id, name, success, result } => {
+                if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
+                    let tool_name = session.active_tool.take().unwrap_or(name);
                     if tool_name != "report_plan" {
-                        let is_finished = status == "finished" || status == "error";
-                        let success = status != "error";
                         let input = session.active_tool_input.take();
-
-                        if is_finished {
-                            session.pending_tools.push(ToolCall {
-                                name: tool_name,
-                                success,
-                                input,
-                                display: None,
-                                result: content,
-                            });
-                        }
+                        session.pending_tools.push(ToolCall {
+                            name: tool_name,
+                            success,
+                            input,
+                            display: None,
+                            result: Some(result),
+                        });
                     }
-                }
-            }
-
-            AcpEvent::UpdatePlan {
-                request_id,
-                session_id,
-                entries,
-            } => {
-                if !request_id.is_null() {
-                    let resp = AcpClient::respond_null(&request_id);
-                    let _ = self.client.send_acp_message(resp).await;
-                }
-
-                let sid = session_id.unwrap_or_default();
-                if let Some(session) = self.orchestrator.session_by_id_mut(&sid) {
-                    let steps: Vec<common::PlanStep> = entries.iter().map(|(content, _priority, status)| {
-                        let step_status = match status.as_str() {
-                            "completed" => common::PlanStepStatus::Done,
-                            "in_progress" => common::PlanStepStatus::InProgress,
-                            _ => common::PlanStepStatus::NotStarted,
-                        };
-                        common::PlanStep { description: content.clone(), status: step_status }
-                    }).collect();
-                    session.current_plan = Some(OrchestratorPlan {
-                        steps,
-                        summary: None,
-                        current_step_description: None,
-                    });
                 }
             }
 
@@ -3342,7 +3262,7 @@ impl App {
                 }
             }
 
-            AcpEvent::SendMessageComplete | AcpEvent::PromptComplete { .. } => {
+            AcpEvent::PromptComplete { .. } => {
                 //
                 // Find the session that was streaming and flush pending tools.
                 //

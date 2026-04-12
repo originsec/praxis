@@ -9,53 +9,18 @@ pub struct AcpClient {
 
 #[derive(Debug, Clone)]
 pub enum AcpEvent {
-    //
-    // Responses to our requests (agent -> client responses).
-    //
     InitializeResult { is_authenticated: bool, protocol_version: String },
     SessionCreated { session_id: String, provider: Option<String>, model: Option<String> },
     SessionStarted { session_id: String, provider: String, model: String },
     SessionList { sessions: Vec<(String, String)> },
     SessionClosed { session_id: String },
     SessionLoaded { session_id: String },
-    SendMessageComplete,
-
-    //
-    // Incoming requests from the agent (client methods). These carry a
-    // request_id that must be responded to.
-    //
-    AssistantText { request_id: Value, session_id: Option<String>, text: String },
-    AssistantThought { request_id: Value, session_id: Option<String>, thought: String },
-    PushToolCall {
-        request_id: Value,
-        session_id: Option<String>,
-        icon: String,
-        label: String,
-        content: Option<String>,
-    },
-    UpdateToolCall {
-        request_id: Value,
-        session_id: Option<String>,
-        tool_call_id: i64,
-        status: String,
-        content: Option<String>,
-    },
-    UpdatePlan {
-        request_id: Value,
-        session_id: Option<String>,
-        entries: Vec<(String, String, String)>,
-    },
-
-    //
-    // Notifications (no response needed).
-    //
     UserPrompt { session_id: String, text: String },
-    TokenUsage { session_id: String, prompt_tokens: u32, completion_tokens: u32, total_tokens: u32 },
+    TextContent { session_id: String, text: String },
+    ToolCall { session_id: String, name: String, input: Option<String> },
+    ToolResult { session_id: String, name: String, success: bool, result: String },
     PlanUpdate { session_id: String, plan: OrchestratorPlan },
-
-    //
-    // Errors.
-    //
+    TokenUsage { session_id: String, prompt_tokens: u32, completion_tokens: u32, total_tokens: u32 },
     PromptComplete { request_id: String },
     Error { request_id: Option<String>, message: String },
 }
@@ -80,55 +45,22 @@ impl AcpClient {
         (id, serde_json::to_string(&req).unwrap())
     }
 
-    /// Build a sendUserMessage request. Returns (request_id, json_rpc_string).
-    pub fn send_message(&self, session_id: &str, text: &str) -> (u64, String) {
-        let id = self.next_id();
-        let req = JsonRpcRequest::new(id, "sendUserMessage", Some(json!({
-            "chunks": [{ "text": text }],
-            "_meta": { "sessionId": session_id }
-        })));
-        (id, serde_json::to_string(&req).unwrap())
-    }
-
-    /// Build a cancelSendMessage request. Returns (request_id, json_rpc_string).
-    pub fn cancel_message(&self, session_id: &str) -> (u64, String) {
-        let id = self.next_id();
-        let req = JsonRpcRequest::new(id, "cancelSendMessage", Some(json!({
-            "_meta": { "sessionId": session_id }
-        })));
-        (id, serde_json::to_string(&req).unwrap())
-    }
-
-    //
-    // Backwards-compatible aliases used by the TUI.
-    //
-
+    /// Build a session/prompt request. Returns (request_id, json_rpc_string).
     pub fn send_prompt(&self, session_id: &str, prompt: &str) -> (u64, String) {
-        self.send_message(session_id, prompt)
+        let id = self.next_id();
+        let req = JsonRpcRequest::new(id, "session/prompt", Some(json!({
+            "sessionId": session_id,
+            "prompt": [{ "type": "text", "text": prompt }]
+        })));
+        (id, serde_json::to_string(&req).unwrap())
     }
 
-    pub fn cancel_prompt(&self, session_id: &str) -> (u64, String) {
-        self.cancel_message(session_id)
-    }
-
-    /// Build a response to pushToolCall (returns the assigned tool call id).
-    pub fn respond_to_push_tool_call(request_id: &Value, tool_call_id: i64) -> String {
-        let resp = json!({
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": { "id": tool_call_id }
-        });
-        serde_json::to_string(&resp).unwrap()
-    }
-
-    /// Build a null response for streamAssistantMessageChunk, updateToolCall, updatePlan.
-    pub fn respond_null(request_id: &Value) -> String {
-        let resp = json!({
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": null
-        });
-        serde_json::to_string(&resp).unwrap()
+    /// Build a session/cancel notification (no id, no response expected).
+    pub fn cancel_prompt(&self, session_id: &str) -> String {
+        let notif = JsonRpcNotification::new("session/cancel", Some(json!({
+            "sessionId": session_id
+        })));
+        serde_json::to_string(&notif).unwrap()
     }
 
     //
@@ -188,18 +120,13 @@ impl AcpClient {
         });
 
         //
-        // Incoming request from the agent: has method AND id.
+        // Notification: has method, no id.
         //
 
         if let Some(method) = &msg.method {
-            if msg.id.is_some() {
-                return self.parse_agent_request(method, msg.id.unwrap(), msg.params);
+            if msg.id.is_none() {
+                return self.parse_notification(method, msg.params);
             }
-
-            //
-            // Notification: has method, no id.
-            //
-            return self.parse_notification(method, msg.params);
         }
 
         //
@@ -220,7 +147,7 @@ impl AcpClient {
 
             //
             // Response with id but neither result nor error -- null result
-            // means sendUserMessage completed.
+            // means prompt completed.
             //
 
             if let Some(rid) = request_id {
@@ -232,90 +159,8 @@ impl AcpClient {
     }
 
     //
-    // Parse incoming JSON-RPC requests from the agent (client methods).
-    // These are bidirectional calls the agent makes TO us.
-    //
-
-    fn parse_agent_request(&self, method: &str, id: Value, params: Option<Value>) -> Option<AcpEvent> {
-        let params = params.unwrap_or(Value::Null);
-        let session_id = params.get("_meta")
-            .and_then(|m| m.get("sessionId"))
-            .and_then(|v| v.as_str())
-            .map(String::from);
-
-        match method {
-            "streamAssistantMessageChunk" => {
-                let chunk = params.get("chunk")?;
-                if let Some(text) = chunk.get("text").and_then(|v| v.as_str()) {
-                    Some(AcpEvent::AssistantText {
-                        request_id: id,
-                        session_id,
-                        text: text.to_string(),
-                    })
-                } else if let Some(thought) = chunk.get("thought").and_then(|v| v.as_str()) {
-                    Some(AcpEvent::AssistantThought {
-                        request_id: id,
-                        session_id,
-                        thought: thought.to_string(),
-                    })
-                } else {
-                    None
-                }
-            }
-
-            "pushToolCall" => {
-                let icon = params.get("icon").and_then(|v| v.as_str()).unwrap_or("hammer").to_string();
-                let label = params.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let content = extract_tool_call_content_text(&params);
-                Some(AcpEvent::PushToolCall {
-                    request_id: id,
-                    session_id,
-                    icon,
-                    label,
-                    content,
-                })
-            }
-
-            "updateToolCall" => {
-                let tool_call_id = params.get("toolCallId").and_then(|v| v.as_i64()).unwrap_or(0);
-                let status = params.get("status").and_then(|v| v.as_str()).unwrap_or("running").to_string();
-                let content = extract_tool_call_content_text(&params);
-                Some(AcpEvent::UpdateToolCall {
-                    request_id: id,
-                    session_id,
-                    tool_call_id,
-                    status,
-                    content,
-                })
-            }
-
-            "updatePlan" => {
-                let entries = params.get("entries")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter().map(|e| {
-                            let content = e.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            let priority = e.get("priority").and_then(|v| v.as_str()).unwrap_or("medium").to_string();
-                            let status = e.get("status").and_then(|v| v.as_str()).unwrap_or("pending").to_string();
-                            (content, priority, status)
-                        }).collect()
-                    })
-                    .unwrap_or_default();
-                Some(AcpEvent::UpdatePlan {
-                    request_id: id,
-                    session_id,
-                    entries,
-                })
-            }
-
-            _ => None,
-        }
-    }
-
-    //
-    // Parse a JSON-RPC notification by method name. These are our custom
-    // session management notifications and legacy session/update format
-    // used for event log replay.
+    // Parse a JSON-RPC notification by method name. Handles session/update
+    // and session/closed notifications.
     //
 
     fn parse_notification(&self, method: &str, params: Option<Value>) -> Option<AcpEvent> {
@@ -329,14 +174,10 @@ impl AcpClient {
                 Some(AcpEvent::SessionClosed { session_id })
             }
 
-            //
-            // Legacy session/update notifications (used for event log replay).
-            //
-
             "session/update" => {
                 let raw_update = params.get("update")?;
                 let session_id = params.get("sessionId").and_then(|v| v.as_str())?.to_string();
-                self.parse_legacy_session_update(&session_id, raw_update)
+                self.parse_session_update(&session_id, raw_update)
             }
 
             _ => None,
@@ -344,25 +185,22 @@ impl AcpClient {
     }
 
     //
-    // Parse legacy session/update format used in event log replay.
+    // Parse session/update notification content. The update carries a
+    // sessionUpdate field indicating the type of content.
     //
 
-    fn parse_legacy_session_update(&self, session_id: &str, update: &Value) -> Option<AcpEvent> {
+    fn parse_session_update(&self, session_id: &str, update: &Value) -> Option<AcpEvent> {
         let session_update = update.get("sessionUpdate").and_then(|v| v.as_str())?;
         let sid = session_id.to_string();
 
         match session_update {
             "agent_message_chunk" => {
-                let text = extract_legacy_content_text(update)?;
-                Some(AcpEvent::AssistantText {
-                    request_id: Value::Null,
-                    session_id: Some(sid),
-                    text,
-                })
+                let text = extract_content_text(update)?;
+                Some(AcpEvent::TextContent { session_id: sid, text })
             }
 
             "user_message_chunk" => {
-                let text = extract_legacy_content_text(update)?;
+                let text = extract_content_text(update)?;
                 Some(AcpEvent::UserPrompt { session_id: sid, text })
             }
 
@@ -370,25 +208,13 @@ impl AcpClient {
                 let tool_call = update.get("toolCall")?;
                 let name = tool_call.get("toolName").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
                 let input = tool_call.get("toolInput").map(|v| v.to_string());
-                Some(AcpEvent::PushToolCall {
-                    request_id: Value::Null,
-                    session_id: Some(sid),
-                    icon: "hammer".to_string(),
-                    label: name,
-                    content: input,
-                })
+                Some(AcpEvent::ToolCall { session_id: sid, name, input })
             }
 
             "tool_result" => {
-                let tool_use_id = update.get("toolUseId").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
-                let result = extract_legacy_content_text(update).unwrap_or_default();
-                Some(AcpEvent::UpdateToolCall {
-                    request_id: Value::Null,
-                    session_id: Some(sid),
-                    tool_call_id: 0,
-                    status: "finished".to_string(),
-                    content: Some(format!("{}:{}", tool_use_id, result)),
-                })
+                let name = update.get("toolUseId").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                let result = extract_content_text(update).unwrap_or_default();
+                Some(AcpEvent::ToolResult { session_id: sid, name, success: true, result })
             }
 
             "plan" => {
@@ -474,15 +300,17 @@ impl AcpClient {
         //
 
         if result.get("loaded").is_some() {
-            return None; // Handled separately via SessionLoaded dispatch
+            return None;
         }
 
         //
-        // Null result means sendUserMessage or cancelSendMessage completed.
+        // Null result means prompt completed.
         //
 
         if result.is_null() {
-            return Some(AcpEvent::SendMessageComplete);
+            if let Some(rid) = request_id {
+                return Some(AcpEvent::PromptComplete { request_id: rid });
+            }
         }
 
         if let Some(rid) = request_id {
@@ -494,29 +322,10 @@ impl AcpClient {
 }
 
 //
-// Extract displayable text from a ToolCallContent value in params.
+// Extract text from ACP ContentBlock format used in session/update.
 //
 
-fn extract_tool_call_content_text(params: &Value) -> Option<String> {
-    let content = params.get("content")?;
-    if content.is_null() {
-        return None;
-    }
-    match content.get("type").and_then(|v| v.as_str())? {
-        "markdown" => content.get("markdown").and_then(|v| v.as_str()).map(String::from),
-        "diff" => {
-            let path = content.get("path").and_then(|v| v.as_str()).unwrap_or("");
-            Some(format!("diff: {}", path))
-        }
-        _ => None,
-    }
-}
-
-//
-// Extract text from legacy ACP ContentBlock format.
-//
-
-fn extract_legacy_content_text(update: &Value) -> Option<String> {
+fn extract_content_text(update: &Value) -> Option<String> {
     if let Some(content) = update.get("content") {
         if let Some(text) = content.get("text").and_then(|v| v.as_str()) {
             return Some(text.to_string());
