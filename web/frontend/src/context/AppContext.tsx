@@ -2072,7 +2072,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const webSessionCounter = useRef(1);
   const orchestratorCreateSession = useCallback((modelRef?: string) => {
     dispatch({ type: 'ORCHESTRATOR_CREATING_SESSION' });
-    const params: Record<string, unknown> = { cwd: '.' };
+    const params: Record<string, unknown> = { cwd: '.', mcpServers: [] };
     if (modelRef) {
       params._meta = { modelRef };
     }
