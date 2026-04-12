@@ -23,7 +23,6 @@ use crate::acp_server::{
     acp_response, acp_error_response,
     session_update_text, session_update_user_text, session_update_tool_call,
     session_update_tool_result, session_update_plan, session_update_usage,
-    session_update_started,
 };
 use crate::config::ServiceConfig;
 use crate::messaging::send_to_client;
@@ -170,7 +169,6 @@ impl OrchestratorManager {
         // channel.
         //
 
-        let provider_name = model_def.provider.clone();
         let model = model_def.model.clone();
         let session_id_owned = session_id.to_string();
 
@@ -280,13 +278,6 @@ impl OrchestratorManager {
                     &client_id_owned[..8.min(client_id_owned.len())], &sid[..8.min(sid.len())],
                     provider, model, max_tokens, tools.len()
                 );
-
-                //
-                // MCP connected. Send the "started" notification now that
-                // the client has had time to process the session/new response.
-                //
-
-                send_and_log!(session_update_started(&sid, &provider_name, &model));
 
                 //
                 // Now process prompts.

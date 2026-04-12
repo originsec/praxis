@@ -567,8 +567,3 @@ pub fn session_update_usage(session_id: &str, prompt_tokens: u32, completion_tok
     session_notification(session_id, acp::SessionUpdate::UsageUpdate(usage))
 }
 
-pub fn session_update_started(session_id: &str, provider: &str, model: &str) -> ClientDirectMessage {
-    let info = acp::SessionInfoUpdate::new()
-        .title(format!("{}/{}", provider, model));
-    session_notification(session_id, acp::SessionUpdate::SessionInfoUpdate(info))
-}
