@@ -171,11 +171,7 @@ In this mode the CLI:
 This means any ACP client can use Praxis as its agent. For example, using [acpx](https://www.npmjs.com/package/acpx):
 
 ```bash
-# Send a single prompt
-acpx --agent './target/debug/praxis_cli --acp' 'list agents'
-
-# Interactive session
-acpx --agent 'praxis_cli --acp'
+acpx --agent 'praxis_cli --acp' 'list agents'
 ```
 
 The bridge connects with an `acp_` prefixed client ID, so sessions created through it get `ACP_` prefixed session IDs.
