@@ -3,3 +3,6 @@ target/
 .cargo/
 .praxis*
 op_runner/
+package/
+acpx-0.5.3.tgz
+.codex
