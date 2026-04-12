@@ -55,14 +55,26 @@ When you send a prompt:
 
 ### Streaming Sessions (ACP)
 
-Agents that support the Agent Communication Protocol (ACP) -- currently Cursor and Gemini -- provide real-time streaming updates during prompt execution. Instead of waiting for the full response, you see:
+Agents that support the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP) -- currently Cursor and Gemini -- provide real-time streaming updates during prompt execution. Praxis uses the `agent-client-protocol` crate for typed communication. Instead of waiting for the full response, you see:
 
 - **Text chunks** — incremental output as the agent generates its response
 - **Tool calls** — tool name and input displayed as the agent invokes tools
 - **Tool results** — output from each tool call (with error highlighting)
+- **Plans** — the agent's execution plan with step status tracking
 - **Permission requests** — when the agent needs approval for an action (interactive sessions only)
+- **Token usage** — prompt/completion token counts updated in real time
 
 Streaming sessions also support cancellation -- pressing Ctrl+C (TUI) or clicking Cancel (web UI) sends a cancel signal that interrupts the agent mid-response. Any partial output is preserved in the conversation history.
+
+### Session IDs
+
+Session IDs are prefixed by the caller type:
+
+- `CLI_` — sessions created from the TUI
+- `WEB_` — sessions created from the web UI
+- `ACP_` — sessions created by other ACP clients
+
+Each client only sees its own sessions in the session list.
 
 ## Session Messages
 

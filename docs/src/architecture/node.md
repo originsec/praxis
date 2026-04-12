@@ -166,14 +166,17 @@ Sessions allow direct interaction with agents:
 
 ### CLI Agents (ACP)
 
-Agents that support the Agent Communication Protocol (Cursor, Gemini) use a long-lived subprocess with JSON-RPC 2.0 over NDJSON stdio instead of PTY:
+Agents that support the [Agent Client Protocol](https://agentclientprotocol.com/) (Cursor, Gemini) use a long-lived subprocess with JSON-RPC 2.0 over NDJSON stdio instead of PTY. The node uses the `agent-client-protocol` crate's `ClientSideConnection` for typed, async communication:
 
-1. Agent spawned with ACP flag (e.g. `cursor-agent acp`, `gemini --acp`)
-2. Initialize handshake establishes the connection
-3. Prompts sent via `session/prompt` JSON-RPC requests
-4. Real-time streaming updates (text chunks, tool calls, tool results) forwarded to the client
-5. Permission requests routed to the user (interactive) or auto-handled (yolo/non-interactive)
-6. Cancellation supported via cancel flag and `session/cancel` request
+1. Agent spawned with ACP flag (e.g. `cursor-agent acp`, `gemini --acp`) via `tokio::process::Command`
+2. `ClientSideConnection` established over the subprocess stdin/stdout
+3. Initialize handshake via typed `InitializeRequest`/`InitializeResponse`
+4. Prompts sent via typed `PromptRequest`, responses received as `PromptResponse` with `StopReason`
+5. Real-time streaming updates (`SessionUpdate` variants: text chunks, tool calls, tool results, plans) delivered via the `Client` trait's `session_notification` callback
+6. Permission requests handled via the `Client` trait's `request_permission` callback
+7. Cancellation via `CancelNotification`
+
+The connection runs on a dedicated thread with a `LocalSet` (since `ClientSideConnection` is `!Send`). An `AcpHandle` provides a `Send`-safe interface for the Lua runtime via channels.
 
 ### Browser-based Agents
 

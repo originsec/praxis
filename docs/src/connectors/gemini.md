@@ -70,7 +70,7 @@ When semantic recon is enabled, the connector also creates a session and queries
 
 ## Session Management
 
-Sessions use the Agent Communication Protocol (ACP) -- a JSON-RPC 2.0 protocol over NDJSON stdio that provides real-time streaming updates during prompt execution.
+Sessions use the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP) -- a JSON-RPC 2.0 protocol over NDJSON stdio. Praxis uses the `agent-client-protocol` crate's `ClientSideConnection` for typed, async communication.
 
 ### Session Context
 
@@ -84,15 +84,15 @@ When creating a session, you can specify:
 
 ### Transacting
 
-Sending prompts works via ACP streaming:
-1. `gemini --acp` is spawned as a long-lived subprocess
-2. An ACP initialize handshake establishes the connection
-3. `session/prompt` sends the prompt and streams back real-time updates: text chunks, tool calls, tool results, and permission requests
-4. The response is assembled from the streamed chunks and returned
+1. `gemini --acp` is spawned as an async subprocess
+2. `ClientSideConnection` established, `InitializeRequest` handshake performed
+3. `PromptRequest` sends the prompt; the agent streams back `SessionUpdate` notifications (text chunks, tool calls, plans, tool results)
+4. Permission requests handled via the `Client` trait callback
+5. `PromptResponse` returned with `StopReason` on completion
 
 ### Cancellation
 
-Sessions support mid-prompt cancellation. A cancel signal interrupts the agent, stale responses are drained, and any partial output is preserved in the conversation.
+Sessions support mid-prompt cancellation via `CancelNotification`. The agent responds with `StopReason::Cancelled` and any partial output is preserved.
 
 ## Config Editing
 

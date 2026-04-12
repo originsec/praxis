@@ -12,7 +12,7 @@ Lua agent scripts live in `agents/` at the project root and are embedded into bi
 
 ### CLI Agents vs Browser-Based Agents
 
-For **CLI agents** (e.g. Claude Code, Gemini CLI), use `praxis.command_run` / `praxis.command_run_handle` to spawn processes and interact via stdin/stdout. For agents that support the Agent Communication Protocol (ACP), use the `praxis.acp_*` APIs for long-lived subprocess sessions with real-time streaming (see [ACP Sessions](#acp-sessions-streaming-agents) below).
+For **CLI agents** (e.g. Claude Code, Gemini CLI), use `praxis.command_run` / `praxis.command_run_handle` to spawn processes and interact via stdin/stdout. For agents that support the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP), use the `praxis.acp_*` APIs for long-lived subprocess sessions with real-time streaming (see [ACP Sessions](#acp-sessions-streaming-agents) below).
 
 For **browser-based agents** (e.g. M365 Copilot), use the `praxis.devtools` library and `praxis.cdp_*` native API to drive the agent via Chrome DevTools Protocol. See [DevTools-Based Agents](#devtools-based-agents-browser-automation) below.
 
@@ -181,7 +181,7 @@ The `devtools` module (`require("praxis.devtools")`) provides `connect`, `transa
 
 ## ACP Sessions (Streaming Agents)
 
-For agents that support the Agent Communication Protocol (ACP), sessions use a long-lived subprocess with JSON-RPC 2.0 over NDJSON stdio. This provides real-time streaming updates (text chunks, tool calls, permission requests) instead of waiting for the full response.
+For agents that support the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP), sessions use a long-lived subprocess with JSON-RPC 2.0 over NDJSON stdio. Praxis uses the `agent-client-protocol` crate internally, providing typed `ClientSideConnection` communication with `Client` trait callbacks for real-time streaming updates (text chunks, tool calls, plans, permission requests).
 
 ### ACP Lua API
 

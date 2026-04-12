@@ -45,7 +45,7 @@ In the web UI, HTTP/2 traffic appears grouped by URL (similar to WebSocket), wit
 
 ## Session Management
 
-Sessions use the Agent Communication Protocol (ACP) -- a JSON-RPC 2.0 protocol over NDJSON stdio that provides real-time streaming updates during prompt execution.
+Sessions use the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP) -- a JSON-RPC 2.0 protocol over NDJSON stdio. Praxis uses the `agent-client-protocol` crate's `ClientSideConnection` for typed, async communication.
 
 ```diagram
 ┌───────────────────────────────────────────────────────┐
@@ -53,8 +53,8 @@ Sessions use the Agent Communication Protocol (ACP) -- a JSON-RPC 2.0 protocol o
 │                                                       │
 │  cursor-agent acp                                     │
 │         │                                             │
-│         ├──▶ ACP initialize handshake                 │
-│         ├──▶ session/create → session_id              │
+│         ├──▶ initialize (InitializeRequest)           │
+│         ├──▶ session/new → session_id + models        │
 │         ├──▶ session/prompt → streaming updates       │
 │         └──▶ session/close → cleanup                  │
 └───────────────────────────────────────────────────────┘
@@ -72,28 +72,29 @@ When creating a session, you can specify:
 
 ### Session Creation
 
-1. `cursor-agent acp` is spawned as a long-lived subprocess
-2. An ACP initialize handshake establishes the connection
-3. `session/create` creates a new session with the working directory
+1. `cursor-agent acp` is spawned as an async subprocess via `tokio::process::Command`
+2. `ClientSideConnection` established over stdin/stdout
+3. `InitializeRequest` handshake establishes the connection and negotiates capabilities
+4. `NewSessionRequest` creates a session with the working directory
 
 ### Transacting
 
-Sending prompts works via ACP streaming:
-1. A `session/prompt` request is sent with the prompt text
-2. The agent streams back real-time updates: text chunks, tool calls, tool results, and permission requests
-3. The response is assembled from the streamed chunks and returned
+Sending prompts uses typed ACP requests:
+1. A `PromptRequest` is sent with the prompt text as `ContentBlock::Text`
+2. The agent streams back real-time `SessionUpdate` notifications: `AgentMessageChunk`, `ToolCall`, `ToolCallUpdate`, `Plan`, and `UsageUpdate`
+3. Permission requests arrive via the `Client` trait's `request_permission` callback
+4. The prompt completes with a `PromptResponse` containing a `StopReason`
 
 ### Cancellation
 
 Sessions support mid-prompt cancellation:
-1. A cancel signal is sent to the ACP client
-2. A `session/cancel` request tells the agent to stop
-3. Stale responses are drained to prevent cross-prompt data leakage
-4. Any partial output is preserved in the conversation
+1. A `CancelNotification` is sent to the agent
+2. The agent responds to the original `PromptRequest` with `StopReason::Cancelled`
+3. Any partial output is preserved in the conversation
 
 ### Session Cleanup
 
-When a session is closed, Praxis sends `session/close` via ACP, then terminates the subprocess.
+When a session is closed, Praxis sends `CloseSessionRequest` via ACP, then terminates the subprocess.
 
 ## Files and Paths
 
