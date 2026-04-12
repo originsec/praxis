@@ -2,23 +2,23 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 //
-// JSON-RPC 2.0 message types for ACP (Agent Control Protocol) communication.
+// JSON-RPC 2.0 message types for ACP (Agent Client Protocol) communication.
 //
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcRequest {
     pub jsonrpc: String,
-    pub id: u64,
+    pub id: Value,
     pub method: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<Value>,
 }
 
 impl JsonRpcRequest {
-    pub fn new(id: u64, method: &str, params: Option<Value>) -> Self {
+    pub fn new(id: impl Into<Value>, method: &str, params: Option<Value>) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),
-            id,
+            id: id.into(),
             method: method.to_string(),
             params,
         }
@@ -44,7 +44,7 @@ impl JsonRpcNotification {
 }
 
 //
-// Incoming JSON-RPC message — could be a response, notification, or request
+// Incoming JSON-RPC message -- could be a response, notification, or request
 // from the agent. Deserialized flexibly and classified afterwards.
 //
 
@@ -118,8 +118,16 @@ impl JsonRpcResponse {
     }
 }
 
+pub const ACP_PROTOCOL_VERSION: &str = "0.0.10";
+
 //
-// ACP initialize.
+// ACP Agent methods (client -> agent requests).
+//
+
+//
+// InitializeParams: uses u32 for backward compatibility with the node ACP
+// client. The orchestrator ACP client builds JSON directly and sends the
+// protocol version as a string per the ACP spec.
 //
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,15 +139,6 @@ pub struct InitializeParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClientInfo {
-    pub name: String,
-    pub version: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClientCapabilities {}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InitializeResult {
     pub protocol_version: u32,
@@ -148,19 +147,91 @@ pub struct InitializeResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerInfo {
-    pub name: String,
-    pub version: String,
+pub struct SendUserMessageParams {
+    pub chunks: Vec<UserMessageChunk>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum UserMessageChunk {
+    Text { text: String },
+    Path { path: String },
+}
+
+//
+// ACP Client methods (agent -> client requests).
+//
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamAssistantMessageChunkParams {
+    pub chunk: AssistantMessageChunk,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AssistantMessageChunk {
+    Text { text: String },
+    Thought { thought: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ServerCapabilities {
-    pub supports_streaming: bool,
+pub struct PushToolCallParams {
+    pub icon: String,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<ToolCallContent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locations: Option<Vec<ToolCallLocation>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushToolCallResponse {
+    pub id: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateToolCallParams {
+    pub tool_call_id: i64,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<ToolCallContent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdatePlanParams {
+    pub entries: Vec<PlanEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlanEntry {
+    pub content: String,
+    pub priority: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ToolCallContent {
+    Markdown { markdown: String },
+    #[serde(rename_all = "camelCase")]
+    Diff {
+        path: String,
+        old_text: Option<String>,
+        new_text: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallLocation {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
 }
 
 //
-// ACP session/new.
+// Custom session management extensions (not part of ACP spec).
 //
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,8 +248,31 @@ pub struct SessionNewResult {
 }
 
 //
-// ACP session/prompt.
+// Legacy types used by node/src/acp. These match the old protocol version
+// and are kept for backward compatibility with the node ACP client.
 //
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientInfo {
+    pub name: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientCapabilities {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerInfo {
+    pub name: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerCapabilities {
+    pub supports_streaming: bool,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -193,10 +287,6 @@ pub struct PromptPart {
     pub part_type: String,
     pub text: String,
 }
-
-//
-// ACP session/update notification (from agent).
-//
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -232,11 +322,6 @@ pub struct SessionUpdateContent {
     pub raw_output: Option<Value>,
 }
 
-//
-// Custom deserializer that handles content as either a single block or an
-// array of blocks, depending on agent implementation.
-//
-
 fn deserialize_content_blocks<'de, D>(
     deserializer: D,
 ) -> Result<Option<Vec<ContentBlock>>, D::Error>
@@ -268,10 +353,6 @@ pub struct ContentBlock {
     #[serde(default)]
     pub text: Option<String>,
 }
-
-//
-// ACP session/request_permission (from agent).
-//
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -309,10 +390,6 @@ pub struct PermissionOption {
     #[serde(alias = "label")]
     pub name: String,
 }
-
-//
-// ACP session/cancel notification.
-//
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

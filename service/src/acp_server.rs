@@ -1,9 +1,11 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use lapin::Channel;
 use serde_json::{json, Value};
 use tokio::sync::RwLock;
 
+use common::acp::types::ACP_PROTOCOL_VERSION;
 use common::ClientDirectMessage;
 
 use crate::config::ServiceConfig;
@@ -54,21 +56,40 @@ impl AcpServer {
             common::truncate_str(json_rpc_str, 200),
         );
 
+        //
+        // Check if this is a response to an agent request (has id, no method).
+        // These are client responses to our pushToolCall etc. requests.
+        //
+
+        if id.is_some() && method.is_none() {
+            self.handle_client_response(client_id, &msg).await;
+            return;
+        }
+
         match method.as_deref() {
+            //
+            // ACP spec methods.
+            //
+
             Some("initialize") => {
                 self.handle_initialize(client_id, id, publish_channel).await;
             }
+            Some("sendUserMessage") => {
+                let params = msg.get("params").cloned().unwrap_or(json!({}));
+                self.handle_send_user_message(client_id, id, params, publish_channel).await;
+            }
+            Some("cancelSendMessage") => {
+                let params = msg.get("params").cloned().unwrap_or(json!({}));
+                self.handle_cancel_send_message(client_id, id, params, publish_channel).await;
+            }
+
+            //
+            // Session management extensions.
+            //
+
             Some("session/new") => {
                 let params = msg.get("params").cloned().unwrap_or(json!({}));
                 self.handle_session_new(client_id, id, params, publish_channel).await;
-            }
-            Some("session/prompt") => {
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
-                self.handle_session_prompt(client_id, id, params, publish_channel).await;
-            }
-            Some("session/cancel") => {
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
-                self.handle_session_cancel(client_id, params, publish_channel).await;
             }
             Some("session/load") => {
                 let params = msg.get("params").cloned().unwrap_or(json!({}));
@@ -81,6 +102,21 @@ impl AcpServer {
                 let params = msg.get("params").cloned().unwrap_or(json!({}));
                 self.handle_session_close(client_id, id, params, publish_channel).await;
             }
+
+            //
+            // Legacy compatibility: session/prompt and session/cancel still
+            // work as aliases.
+            //
+
+            Some("session/prompt") => {
+                let params = msg.get("params").cloned().unwrap_or(json!({}));
+                self.handle_session_prompt_legacy(client_id, id, params, publish_channel).await;
+            }
+            Some("session/cancel") => {
+                let params = msg.get("params").cloned().unwrap_or(json!({}));
+                self.handle_session_cancel_legacy(client_id, params, publish_channel).await;
+            }
+
             Some(unknown) => {
                 common::log_warn!(
                     "ACP: unknown method '{}' from {}",
@@ -95,10 +131,19 @@ impl AcpServer {
                     ).await;
                 }
             }
-            None => {
-                // Response or notification without method -- ignore.
-            }
+            None => {}
         }
+    }
+
+    //
+    // Handle client responses to our agent requests (pushToolCall responses etc.).
+    //
+
+    async fn handle_client_response(&self, _client_id: &str, _msg: &Value) {
+        //
+        // Currently we fire-and-forget agent requests. If we need to track
+        // pushToolCall response IDs in the future, this is where we'd do it.
+        //
     }
 
     async fn handle_initialize(
@@ -109,14 +154,8 @@ impl AcpServer {
     ) {
         if let Some(id) = id {
             let result = json!({
-                "protocolVersion": 1,
-                "serverInfo": {
-                    "name": "praxis",
-                    "version": env!("CARGO_PKG_VERSION"),
-                },
-                "serverCapabilities": {
-                    "supportsStreaming": true,
-                }
+                "isAuthenticated": true,
+                "protocolVersion": ACP_PROTOCOL_VERSION,
             });
             let _ = send_to_client(
                 publish_channel,
@@ -126,32 +165,96 @@ impl AcpServer {
         }
     }
 
-    async fn handle_session_new(
+    //
+    // ACP spec: sendUserMessage. Extract text from chunks, find session via
+    // _meta.sessionId, and forward to the orchestrator.
+    //
+
+    async fn handle_send_user_message(
         &self,
         client_id: &str,
         id: Option<Value>,
         params: Value,
         publish_channel: &Channel,
     ) {
-        let session_id = uuid::Uuid::new_v4().to_string();
-        let name = params.get("name").and_then(|v| v.as_str()).map(String::from);
-        let model_ref = params.get("modelRef").and_then(|v| v.as_str()).map(String::from);
+        let session_id = params.get("_meta")
+            .and_then(|m| m.get("sessionId"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let prompt_text = params.get("chunks")
+            .and_then(|c| c.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|chunk| chunk.get("text").and_then(|t| t.as_str()))
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+            .unwrap_or_default();
+
+        if session_id.is_empty() || prompt_text.is_empty() {
+            if let Some(id) = id {
+                let _ = send_to_client(
+                    publish_channel,
+                    client_id,
+                    acp_error_response(id, -32602, "Missing _meta.sessionId or text chunks"),
+                ).await;
+            }
+            return;
+        }
+
+        let prompt_id = match &id {
+            Some(Value::Number(n)) => n.to_string(),
+            Some(Value::String(s)) => s.clone(),
+            _ => "0".to_string(),
+        };
 
         self.orchestrator_manager
-            .create_session(client_id, &session_id, name.as_deref(), model_ref.as_deref(), &self.service_config, publish_channel)
+            .send_prompt(client_id, &session_id, prompt_id, prompt_text, publish_channel)
             .await;
+    }
+
+    //
+    // ACP spec: cancelSendMessage. Cancel the current prompt and respond immediately.
+    //
+
+    async fn handle_cancel_send_message(
+        &self,
+        client_id: &str,
+        id: Option<Value>,
+        params: Value,
+        publish_channel: &Channel,
+    ) {
+        let session_id = params.get("_meta")
+            .and_then(|m| m.get("sessionId"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        if !session_id.is_empty() {
+            self.orchestrator_manager
+                .cancel_prompt(client_id, session_id, publish_channel)
+                .await;
+        }
+
+        //
+        // cancelSendMessage response is null.
+        //
 
         if let Some(id) = id {
-            let result = json!({ "sessionId": session_id });
             let _ = send_to_client(
                 publish_channel,
                 client_id,
-                acp_response(id, result),
+                acp_response(id, Value::Null),
             ).await;
         }
     }
 
-    async fn handle_session_prompt(
+    //
+    // Legacy session/prompt handler for backward compatibility.
+    //
+
+    async fn handle_session_prompt_legacy(
         &self,
         client_id: &str,
         id: Option<Value>,
@@ -182,11 +285,6 @@ impl AcpServer {
             return;
         }
 
-        //
-        // Use the JSON-RPC request ID as the prompt_id so the orchestrator
-        // task can send the response with the correct ID when done.
-        //
-
         let prompt_id = match &id {
             Some(Value::Number(n)) => n.to_string(),
             Some(Value::String(s)) => s.clone(),
@@ -196,12 +294,13 @@ impl AcpServer {
         self.orchestrator_manager
             .send_prompt(client_id, &session_id, prompt_id, prompt_text, publish_channel)
             .await;
-
-        // NOTE: The response is NOT sent here. It's sent by the orchestrator
-        // task when the prompt completes (via acp_response with the prompt_id).
     }
 
-    async fn handle_session_cancel(
+    //
+    // Legacy session/cancel handler for backward compatibility.
+    //
+
+    async fn handle_session_cancel_legacy(
         &self,
         client_id: &str,
         params: Value,
@@ -215,6 +314,31 @@ impl AcpServer {
             self.orchestrator_manager
                 .cancel_prompt(client_id, session_id, publish_channel)
                 .await;
+        }
+    }
+
+    async fn handle_session_new(
+        &self,
+        client_id: &str,
+        id: Option<Value>,
+        params: Value,
+        publish_channel: &Channel,
+    ) {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let name = params.get("name").and_then(|v| v.as_str()).map(String::from);
+        let model_ref = params.get("modelRef").and_then(|v| v.as_str()).map(String::from);
+
+        self.orchestrator_manager
+            .create_session(client_id, &session_id, name.as_deref(), model_ref.as_deref(), &self.service_config, publish_channel)
+            .await;
+
+        if let Some(id) = id {
+            let result = json!({ "sessionId": session_id });
+            let _ = send_to_client(
+                publish_channel,
+                client_id,
+                acp_response(id, result),
+            ).await;
         }
     }
 
@@ -242,7 +366,7 @@ impl AcpServer {
         }
 
         //
-        // Replay the event log as session/update notifications.
+        // Replay the event log as ACP messages.
         //
 
         let events = self.orchestrator_manager.get_event_log(&session_id).await;
@@ -348,13 +472,99 @@ pub fn acp_error_response(id: Value, code: i64, message: &str) -> ClientDirectMe
 }
 
 //
-// session/update notification builders. These reduce boilerplate in
-// orchestrator.rs where the same envelope is constructed many times.
+// Agent request ID counter for agent-to-client requests.
 //
 
+static AGENT_REQUEST_ID: AtomicI64 = AtomicI64::new(1);
+
+fn next_agent_request_id() -> i64 {
+    AGENT_REQUEST_ID.fetch_add(1, Ordering::SeqCst)
+}
+
 //
-// ACP spec-compliant session/update notifications.
-// See https://agentclientprotocol.com/protocol/schema
+// ACP spec-compliant agent-to-client request builders.
+// These send JSON-RPC requests (with id) TO the client.
+//
+
+pub fn acp_stream_assistant_text(session_id: &str, text: impl Into<String>) -> ClientDirectMessage {
+    let id = next_agent_request_id();
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "streamAssistantMessageChunk",
+        "params": {
+            "chunk": { "text": text.into() },
+            "_meta": { "sessionId": session_id }
+        }
+    });
+    let json_rpc = serde_json::to_string(&req).unwrap();
+    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 200));
+    ClientDirectMessage::AcpMessage { json_rpc }
+}
+
+pub fn acp_push_tool_call(session_id: &str, tool_name: &str, tool_input: Option<Value>) -> ClientDirectMessage {
+    let id = next_agent_request_id();
+    let content = tool_input.map(|input| {
+        json!({
+            "type": "markdown",
+            "markdown": serde_json::to_string_pretty(&input).unwrap_or_default()
+        })
+    });
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "pushToolCall",
+        "params": {
+            "icon": tool_name_to_icon(tool_name),
+            "label": tool_name,
+            "content": content,
+            "_meta": { "sessionId": session_id }
+        }
+    });
+    let json_rpc = serde_json::to_string(&req).unwrap();
+    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 200));
+    ClientDirectMessage::AcpMessage { json_rpc }
+}
+
+pub fn acp_update_tool_call(session_id: &str, tool_call_id: i64, status: &str, result: &str) -> ClientDirectMessage {
+    let id = next_agent_request_id();
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "updateToolCall",
+        "params": {
+            "toolCallId": tool_call_id,
+            "status": status,
+            "content": {
+                "type": "markdown",
+                "markdown": result
+            },
+            "_meta": { "sessionId": session_id }
+        }
+    });
+    let json_rpc = serde_json::to_string(&req).unwrap();
+    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 200));
+    ClientDirectMessage::AcpMessage { json_rpc }
+}
+
+pub fn acp_update_plan(session_id: &str, entries: &[Value]) -> ClientDirectMessage {
+    let id = next_agent_request_id();
+    let req = json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "updatePlan",
+        "params": {
+            "entries": entries,
+            "_meta": { "sessionId": session_id }
+        }
+    });
+    let json_rpc = serde_json::to_string(&req).unwrap();
+    tracing::debug!("ACP send: {}", common::truncate_str(&json_rpc, 200));
+    ClientDirectMessage::AcpMessage { json_rpc }
+}
+
+//
+// Legacy notification builders kept for event log replay compatibility.
 //
 
 pub fn session_update_text(session_id: &str, text: impl Into<String>) -> ClientDirectMessage {
@@ -393,10 +603,6 @@ pub fn session_update_tool_result(session_id: &str, tool_name: &str, result: &st
 }
 
 pub fn session_update_plan(session_id: &str, plan: &Value) -> ClientDirectMessage {
-    //
-    // Convert our OrchestratorPlan format to ACP plan entries.
-    //
-
     let entries = plan.get("steps")
         .and_then(|s| s.as_array())
         .map(|steps| {
@@ -409,6 +615,7 @@ pub fn session_update_plan(session_id: &str, plan: &Value) -> ClientDirectMessag
                 json!({
                     "content": step.get("description").and_then(|d| d.as_str()).unwrap_or(""),
                     "status": status,
+                    "priority": "medium",
                 })
             }).collect::<Vec<_>>()
         })
@@ -424,10 +631,6 @@ pub fn session_update_plan(session_id: &str, plan: &Value) -> ClientDirectMessag
 }
 
 pub fn session_update_usage(session_id: &str, prompt_tokens: u32, completion_tokens: u32, total_tokens: u32) -> ClientDirectMessage {
-    //
-    // Token usage as a session_info update with title containing the counts.
-    //
-
     acp_notification("session/update", json!({
         "sessionId": session_id,
         "update": {
@@ -454,4 +657,29 @@ pub fn session_update_started(session_id: &str, provider: &str, model: &str) -> 
             },
         }
     }))
+}
+
+//
+// Map tool names to ACP icon values.
+//
+
+fn tool_name_to_icon(tool_name: &str) -> &'static str {
+    let name = tool_name.to_lowercase();
+    if name.contains("search") || name.contains("find") || name.contains("grep") {
+        "fileSearch"
+    } else if name.contains("file") || name.contains("read") || name.contains("write") || name.contains("directory") {
+        "folder"
+    } else if name.contains("http") || name.contains("fetch") || name.contains("url") || name.contains("web") {
+        "globe"
+    } else if name.contains("shell") || name.contains("exec") || name.contains("command") || name.contains("terminal") {
+        "terminal"
+    } else if name.contains("edit") || name.contains("modify") || name.contains("update") {
+        "pencil"
+    } else if name.contains("regex") || name.contains("pattern") {
+        "regex"
+    } else if name.contains("plan") || name.contains("think") || name.contains("analyze") {
+        "lightBulb"
+    } else {
+        "hammer"
+    }
 }

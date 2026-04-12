@@ -21,8 +21,10 @@ use rmcp::{
 
 use crate::acp_server::{
     acp_notification, acp_response, acp_error_response,
-    session_update_text, session_update_tool_call, session_update_tool_result,
-    session_update_plan, session_update_usage, session_update_started,
+    acp_stream_assistant_text, acp_push_tool_call, acp_update_tool_call, acp_update_plan,
+    session_update_text, session_update_tool_call as session_update_tool_call_legacy,
+    session_update_tool_result, session_update_plan as session_update_plan_legacy,
+    session_update_usage, session_update_started,
 };
 use crate::config::ServiceConfig;
 use crate::messaging::send_to_client;
@@ -218,6 +220,13 @@ impl OrchestratorManager {
                 // the event log for session/load replay.
                 //
 
+                //
+                // send_and_log: send to client AND record in event log.
+                // send_only: send to client without recording (for ACP
+                //   requests that use a different format than replay).
+                // log_only: record for replay without sending to client.
+                //
+
                 macro_rules! send_and_log {
                     ($msg:expr) => {{
                         let m = $msg;
@@ -227,6 +236,23 @@ impl OrchestratorManager {
                         let _ = send_to_client(&publish_channel_clone, &client_id_owned, m).await;
                     }};
                 }
+
+                macro_rules! send_only {
+                    ($msg:expr) => {{
+                        let _ = send_to_client(&publish_channel_clone, &client_id_owned, $msg).await;
+                    }};
+                }
+
+                macro_rules! log_only {
+                    ($msg:expr) => {{
+                        let m = $msg;
+                        if let common::ClientDirectMessage::AcpMessage { ref json_rpc } = m {
+                            event_log_clone.write().await.push(json_rpc.clone());
+                        }
+                    }};
+                }
+
+                let mut next_tool_call_id: i64 = 1;
 
                 //
                 // Connect to MCP SSE server (this is the slow part).
@@ -395,14 +421,16 @@ impl OrchestratorManager {
                                                     let pre_tool = send_buffer[..marker_pos].to_string();
                                                     if !pre_tool.trim().is_empty() {
                                                         bytes_sent += pre_tool.len();
-                                                        send_and_log!(session_update_text(&sid, pre_tool));
+                                                        send_only!(acp_stream_assistant_text(&sid, &pre_tool));
+                                                        log_only!(session_update_text(&sid, pre_tool));
                                                     }
                                                 }
                                                 held_back = true;
                                                 send_buffer.clear();
                                             } else if send_buffer.len() >= 50 || delta.content.contains('\n') {
                                                 bytes_sent += send_buffer.len();
-                                                send_and_log!(session_update_text(&sid, &send_buffer));
+                                                send_only!(acp_stream_assistant_text(&sid, &send_buffer));
+                                                log_only!(session_update_text(&sid, &send_buffer));
                                                 send_buffer.clear();
                                             }
                                         }
@@ -438,7 +466,8 @@ impl OrchestratorManager {
 
                         if !send_buffer.is_empty() && !held_back {
                             bytes_sent += send_buffer.len();
-                            send_and_log!(session_update_text(&sid, &send_buffer));
+                            send_only!(acp_stream_assistant_text(&sid, &send_buffer));
+                            log_only!(session_update_text(&sid, &send_buffer));
                             send_buffer.clear();
                         }
 
@@ -451,12 +480,19 @@ impl OrchestratorManager {
                                 break;
                             }
 
-
                             common::log_info!("Orchestrator executing tool: {}", tool_name);
 
                             let tool_input_value = serde_json::to_value(&tool_args).ok();
 
-                            send_and_log!(session_update_tool_call(&sid, &tool_name, tool_input_value));
+                            //
+                            // Send ACP pushToolCall to client and log legacy
+                            // format for replay.
+                            //
+
+                            let tc_id = next_tool_call_id;
+                            next_tool_call_id += 1;
+                            send_only!(acp_push_tool_call(&sid, &tool_name, tool_input_value.clone()));
+                            log_only!(session_update_tool_call_legacy(&sid, &tool_name, tool_input_value));
 
                             let result = if let Some(local_result) = execute_local_tool(&tool_name, &tool_args).await {
                                 local_result
@@ -471,13 +507,36 @@ impl OrchestratorManager {
                                     if let Some(plan_obj) = result_json.get("plan") {
                                         if let Ok(plan) = serde_json::from_value::<OrchestratorPlan>(plan_obj.clone()) {
                                             let plan_json = serde_json::to_value(&plan).unwrap_or(Value::Null);
-                                            send_and_log!(session_update_plan(&sid, &plan_json));
+
+                                            //
+                                            // Send ACP updatePlan and log legacy format.
+                                            //
+
+                                            let acp_entries: Vec<Value> = plan.steps.iter().map(|step| {
+                                                let status = match step.status {
+                                                    PlanStepStatus::Done => "completed",
+                                                    PlanStepStatus::InProgress => "in_progress",
+                                                    PlanStepStatus::NotStarted => "pending",
+                                                };
+                                                json!({
+                                                    "content": step.description,
+                                                    "priority": "medium",
+                                                    "status": status,
+                                                })
+                                            }).collect();
+                                            send_only!(acp_update_plan(&sid, &acp_entries));
+                                            log_only!(session_update_plan_legacy(&sid, &plan_json));
                                         }
                                     }
                                 }
                             }
 
-                            send_and_log!(session_update_tool_result(&sid, &tool_name, &result));
+                            //
+                            // Send ACP updateToolCall (finished) and log legacy format.
+                            //
+
+                            send_only!(acp_update_tool_call(&sid, tc_id, "finished", &result));
+                            log_only!(session_update_tool_result(&sid, &tool_name, &result));
 
                             tool_results.push((tool_name, result));
                             response_text = remaining_text;
@@ -514,7 +573,8 @@ impl OrchestratorManager {
                         if full_response.len() > bytes_sent {
                             let unsent = &full_response[bytes_sent..];
                             if !unsent.is_empty() {
-                                send_and_log!(session_update_text(&sid, unsent));
+                                send_only!(acp_stream_assistant_text(&sid, unsent));
+                                log_only!(session_update_text(&sid, unsent));
                             }
                         }
 
@@ -531,7 +591,7 @@ impl OrchestratorManager {
                     // original request ID that was encoded in prompt_id.
                     //
 
-                    send_and_log!(acp_response(prompt_id_to_json_rpc_id(&prompt_id), json!({})));
+                    send_and_log!(acp_response(prompt_id_to_json_rpc_id(&prompt_id), Value::Null));
                 }
 
                 //
