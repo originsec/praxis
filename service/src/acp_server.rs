@@ -23,6 +23,10 @@ impl AcpServer {
         Self { orchestrator_manager, service_config }
     }
 
+    pub async fn shutdown(&self) {
+        self.orchestrator_manager.shutdown().await;
+    }
+
     pub async fn handle_message(
         &self,
         client_id: &str,

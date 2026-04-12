@@ -717,8 +717,16 @@ async fn run_main_loop() -> Result<()> {
                 //
                 // Both consumers returned None - connection lost.
                 //
-                return Ok(());
+                break;
             }
         }
     }
+
+    //
+    // Shut down orchestrator sessions before exiting.
+    //
+
+    ctx.acp_server.shutdown().await;
+
+    Ok(())
 }

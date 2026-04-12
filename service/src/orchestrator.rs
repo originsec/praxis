@@ -623,6 +623,23 @@ impl OrchestratorManager {
         sessions.retain(|_, m| !m.is_empty());
     }
 
+    //
+    // Stop all sessions. Called on service shutdown.
+    //
+
+    pub async fn shutdown(&self) {
+        let mut sessions = self.sessions.write().await;
+        let count: usize = sessions.values().map(|m| m.len()).sum();
+        if count > 0 {
+            common::log_info!("Shutting down {} orchestrator session(s)", count);
+        }
+        for (_, client_sessions) in sessions.drain() {
+            for (_, session) in client_sessions {
+                session.stop();
+            }
+        }
+    }
+
     #[allow(dead_code)]
     pub async fn close_all_sessions(
         &self,
