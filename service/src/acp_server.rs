@@ -328,12 +328,31 @@ impl AcpServer {
         let name = params.get("name").and_then(|v| v.as_str()).map(String::from);
         let model_ref = params.get("modelRef").and_then(|v| v.as_str()).map(String::from);
 
+        //
+        // Resolve the model definition for the response _meta.
+        //
+
+        let config = self.service_config.read().await;
+        let model_def = model_ref.as_deref()
+            .and_then(|mr| config.find_model_definition(mr))
+            .or_else(|| config.get_orchestrator_model_def());
+        let (provider, model_name) = model_def
+            .map(|d| (d.provider.clone(), d.model.clone()))
+            .unwrap_or_else(|| ("unknown".into(), "unknown".into()));
+        drop(config);
+
         self.orchestrator_manager
             .create_session(client_id, &session_id, name.as_deref(), model_ref.as_deref(), &self.service_config, publish_channel)
             .await;
 
         if let Some(id) = id {
-            let result = json!({ "sessionId": session_id });
+            let result = json!({
+                "sessionId": session_id,
+                "_meta": {
+                    "provider": provider,
+                    "model": model_name,
+                }
+            });
             let _ = send_to_client(
                 publish_channel,
                 client_id,

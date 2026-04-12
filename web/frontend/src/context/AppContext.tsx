@@ -294,7 +294,7 @@ type Action =
   | { type: 'SET_OP_DEF_ERROR'; error: string | null }
   | { type: 'SET_OP_DEF_SUCCESS'; fullName: string | null }
   | { type: 'ORCHESTRATOR_CREATING_SESSION' }
-  | { type: 'ORCHESTRATOR_SESSION_CREATED'; sessionId: string; label: string; loaded?: boolean }
+  | { type: 'ORCHESTRATOR_SESSION_CREATED'; sessionId: string; label: string; loaded?: boolean; provider?: string; model?: string }
   | { type: 'ORCHESTRATOR_SESSION_STARTED'; sessionId: string; provider: string; model: string }
   | { type: 'ORCHESTRATOR_SESSION_CLOSED'; sessionId: string }
   | { type: 'ORCHESTRATOR_SESSION_LOADED'; sessionId: string }

@@ -175,12 +175,6 @@ impl OrchestratorManager {
         let model = model_def.model.clone();
         let session_id_owned = session_id.to_string();
 
-        let _ = send_to_client(
-            publish_channel,
-            client_id,
-            session_update_started(&session_id_owned, &provider_name, &model),
-        ).await;
-
         let (prompt_tx, mut prompt_rx) = mpsc::channel::<(String, String)>(32);
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_flag_clone = Arc::clone(&stop_flag);
@@ -192,17 +186,6 @@ impl OrchestratorManager {
         let publish_channel_clone = publish_channel.clone();
         let event_log: Arc<RwLock<Vec<String>>> = Arc::new(RwLock::new(Vec::new()));
         let event_log_clone = event_log.clone();
-
-        //
-        // Log the session/update "started" event for replay.
-        //
-
-        {
-            let started = session_update_started(&session_id_owned, &provider_name, &model);
-            if let common::ClientDirectMessage::AcpMessage { ref json_rpc } = started {
-                event_log.write().await.push(json_rpc.clone());
-            }
-        }
 
         //
         // Store the session immediately so prompts can be sent while MCP
@@ -316,7 +299,14 @@ impl OrchestratorManager {
                 );
 
                 //
-                // MCP connected. Now process prompts.
+                // MCP connected. Send the "started" notification now that
+                // the client has had time to process the session/new response.
+                //
+
+                send_and_log!(session_update_started(&sid, &provider_name, &model));
+
+                //
+                // Now process prompts.
                 //
 
                 let mut conversation_history: Vec<Message> = Vec::new();

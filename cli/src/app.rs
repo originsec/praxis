@@ -3053,7 +3053,7 @@ impl App {
         };
 
         match event {
-            AcpEvent::SessionCreated { session_id } => {
+            AcpEvent::SessionCreated { session_id, provider, model } => {
                 //
                 // A new session was created by this client. Mark loaded since
                 // we'll see all events in real time.
@@ -3062,6 +3062,8 @@ impl App {
                 let label = format!("Session {}", self.orchestrator.next_session_number());
                 let mut session = OrchestratorSessionState::new(session_id.clone(), label);
                 session.loaded = true;
+                session.provider = provider;
+                session.model = model;
                 self.orchestrator.sessions.push(session);
                 self.orchestrator.active_session_index =
                     Some(self.orchestrator.sessions.len() - 1);

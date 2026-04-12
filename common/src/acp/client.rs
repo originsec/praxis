@@ -13,7 +13,7 @@ pub enum AcpEvent {
     // Responses to our requests (agent -> client responses).
     //
     InitializeResult { is_authenticated: bool, protocol_version: String },
-    SessionCreated { session_id: String },
+    SessionCreated { session_id: String, provider: Option<String>, model: Option<String> },
     SessionStarted { session_id: String, provider: String, model: String },
     SessionList { sessions: Vec<(String, String)> },
     SessionClosed { session_id: String },
@@ -459,8 +459,13 @@ impl AcpClient {
         }
 
         if let Some(sid) = result.get("sessionId").and_then(|v| v.as_str()) {
+            let meta = result.get("_meta");
+            let provider = meta.and_then(|m| m.get("provider")).and_then(|v| v.as_str()).map(String::from);
+            let model = meta.and_then(|m| m.get("model")).and_then(|v| v.as_str()).map(String::from);
             return Some(AcpEvent::SessionCreated {
                 session_id: sid.to_string(),
+                provider,
+                model,
             });
         }
 
