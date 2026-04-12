@@ -332,12 +332,14 @@ impl AcpServer {
         let session_id = uuid::Uuid::new_v4().to_string();
 
         //
-        // Extract extension fields from _meta for model resolution.
+        // Extract extension fields from _meta.
         //
 
-        let params_value = serde_json::to_value(&req).unwrap_or(json!({}));
-        let name = params_value.get("name").and_then(|v| v.as_str()).map(String::from);
-        let model_ref = params_value.get("modelRef").and_then(|v| v.as_str()).map(String::from);
+        let meta_val = req.meta.as_ref()
+            .map(|m| serde_json::to_value(m).unwrap_or_default())
+            .unwrap_or_default();
+        let name = meta_val.get("name").and_then(|v| v.as_str()).map(String::from);
+        let model_ref = meta_val.get("modelRef").and_then(|v| v.as_str()).map(String::from);
 
         //
         // Resolve the model definition for the response _meta.

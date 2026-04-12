@@ -1,0 +1,117 @@
+{
+  "name": "acpx",
+  "version": "0.5.3",
+  "description": "Headless CLI client for the Agent Client Protocol (ACP) — talk to coding agents from the command line",
+  "keywords": [
+    "acp",
+    "agent-client-protocol",
+    "ai",
+    "claude-code",
+    "cli",
+    "codex",
+    "coding-agent"
+  ],
+  "license": "MIT",
+  "author": "OpenClaw Team <dev@openclaw.ai>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openclaw/acpx.git"
+  },
+  "bin": {
+    "acpx": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./dist/cli.js",
+    "./runtime": "./dist/runtime.js",
+    "./flows": "./dist/flows.js",
+    "./dist/*": "./dist/*",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "tsdown src/cli.ts src/flows.ts src/runtime.ts --format esm --dts --clean --platform node --target node22 --no-fixedExtension",
+    "build:test": "node -e \"require('node:fs').rmSync('dist-test',{recursive:true,force:true})\" && tsc -p tsconfig.test.json",
+    "check": "pnpm run format:check && pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run viewer:typecheck && pnpm run viewer:build && pnpm run test:coverage",
+    "check:docs": "pnpm run format:docs:check && pnpm run lint:docs",
+    "conformance:run": "tsx conformance/runner/run.ts",
+    "dev": "tsx src/cli.ts",
+    "format": "oxfmt --write",
+    "format:check": "oxfmt --check",
+    "format:diff": "oxfmt --write && git --no-pager diff",
+    "format:docs": "git ls-files 'docs/**/*.md' 'examples/flows/**/*.md' 'README.md' | xargs oxfmt --write",
+    "format:docs:check": "git ls-files 'docs/**/*.md' 'examples/flows/**/*.md' 'README.md' | xargs oxfmt --check",
+    "lint": "oxlint --type-aware src && pnpm run lint:persisted-key-casing && pnpm run lint:flow-schema-terms",
+    "lint:docs": "markdownlint-cli2 README.md docs/**/*.md examples/flows/**/*.md",
+    "lint:fix": "oxlint --type-aware --fix src && pnpm run format",
+    "lint:flow-schema-terms": "tsx scripts/lint-flow-schema-terms.ts",
+    "lint:persisted-key-casing": "tsx scripts/lint-persisted-key-casing.ts",
+    "perf:report": "tsx scripts/perf-report.ts",
+    "precommit": "pnpm exec lint-staged && pnpm run -s build",
+    "prepack": "pnpm run build",
+    "prepare": "husky",
+    "test": "pnpm run build:test && node --test dist-test/test/*.test.js",
+    "test:coverage": "pnpm run build:test && node --experimental-test-coverage --test-coverage-lines=83 --test-coverage-branches=76 --test-coverage-functions=86 --test dist-test/test/*.test.js",
+    "test:live": "pnpm run build:test && node --test dist-test/test/cursor-live.integration.js",
+    "typecheck": "tsgo --noEmit",
+    "typecheck:tsc": "tsc --noEmit",
+    "viewer": "tsx examples/flows/replay-viewer/server.ts start",
+    "viewer:build": "vite build --config examples/flows/replay-viewer/vite.config.ts",
+    "viewer:dev": "tsx examples/flows/replay-viewer/server.ts start",
+    "viewer:open": "tsx examples/flows/replay-viewer/server.ts start --open",
+    "viewer:preview": "tsx examples/flows/replay-viewer/server.ts start",
+    "viewer:status": "tsx examples/flows/replay-viewer/server.ts status",
+    "viewer:stop": "tsx examples/flows/replay-viewer/server.ts stop",
+    "viewer:typecheck": "tsc -p examples/flows/replay-viewer/tsconfig.json --noEmit && tsc -p examples/flows/replay-viewer/tsconfig.server.json --noEmit"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^0.17.0",
+    "commander": "^14.0.3",
+    "skillflag": "^0.1.4",
+    "tsx": "^4.0.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.5",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/react-test-renderer": "^19.1.0",
+    "@types/ws": "^8.18.1",
+    "@typescript/native-preview": "7.0.0-dev.20260328.1",
+    "@vitejs/plugin-react": "^6.0.1",
+    "@xyflow/react": "^12.10.1",
+    "elkjs": "^0.11.1",
+    "fast-json-patch": "^3.1.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.3.2",
+    "markdownlint-cli2": "^0.22.0",
+    "oxfmt": "^0.42.0",
+    "oxlint": "^1.51.0",
+    "oxlint-tsgolint": "^0.18.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-test-renderer": "^19.2.0",
+    "tsdown": "^0.21.0-beta.2",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.7",
+    "ws": "^8.18.3"
+  },
+  "lint-staged": {
+    "*.{js,ts}": [
+      "oxfmt --write",
+      "oxlint --fix"
+    ],
+    "*.{json,md}": [
+      "oxfmt --write"
+    ]
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "pnpm@10.23.0"
+}

@@ -473,18 +473,13 @@ async fn run_bridge(
                 tokio::task::spawn_local(async move {
                     let result = conn.list_sessions(acp::ListSessionsRequest::new()).await;
                     if let Ok(ref resp) = result {
-                        let sessions: Vec<(String, String)> = serde_json::to_value(resp)
-                            .ok()
-                            .and_then(|v| v.get("sessions").cloned())
-                            .and_then(|v| v.as_array().cloned())
-                            .map(|arr| {
-                                arr.iter().filter_map(|s| {
-                                    let sid = s.get("sessionId").and_then(|v| v.as_str())?;
-                                    let name = s.get("name").and_then(|v| v.as_str()).unwrap_or(sid);
-                                    Some((sid.to_string(), name.to_string()))
-                                }).collect()
+                        let sessions: Vec<(String, String)> = resp.sessions.iter()
+                            .map(|s| {
+                                let sid = s.session_id.to_string();
+                                let name = s.title.clone().unwrap_or_else(|| sid.clone());
+                                (sid, name)
                             })
-                            .unwrap_or_default();
+                            .collect();
                         let _ = event_tx.send(AppEvent::AcpNotification(
                             AcpNotification::SessionList { sessions },
                         ));
@@ -496,13 +491,23 @@ async fn run_bridge(
             BridgeCommand::CreateSession { cwd, name, model_ref, reply } => {
                 tokio::task::spawn_local(async move {
                     let mut req = acp::NewSessionRequest::new(cwd);
+
+                    //
+                    // Pass name and modelRef as extension fields in _meta.
+                    //
+
+                    let mut meta = serde_json::Map::new();
                     if let Some(n) = &name {
+                        meta.insert("name".into(), serde_json::json!(n));
+                    }
+                    if let Some(mr) = &model_ref {
+                        meta.insert("modelRef".into(), serde_json::json!(mr));
+                    }
+                    if !meta.is_empty() {
                         req = req.meta(serde_json::from_value::<acp::Meta>(
-                            serde_json::json!({ "name": n })
+                            serde_json::Value::Object(meta)
                         ).unwrap());
                     }
-                    // model_ref is a custom extension
-                    let _ = model_ref; // TODO: pass via meta or ext method
 
                     let result = conn.new_session(req).await;
                     if let Ok(ref resp) = result {
