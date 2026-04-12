@@ -497,7 +497,7 @@ function reduceOrchestrator(state: AppState, action: Action): AppState | null {
         ...state,
         orchestrator: {
           ...state.orchestrator,
-          sessions: [...state.orchestrator.sessions, newSession],
+          sessions: [...state.orchestrator.sessions, newSession].sort((a, b) => a.label.localeCompare(b.label)),
           activeSessionId: action.sessionId,
           isStarting: false,
         },
@@ -1621,7 +1621,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                     dispatch({
                       type: 'ORCHESTRATOR_SESSION_CREATED',
                       sessionId,
-                      label: `Session ${sessionId.slice(0, 6)}`,
+                      label: (pending as { label?: string }).label || `Session ${sessionId.slice(0, 6)}`,
                     });
                   }
                   break;
@@ -2030,7 +2030,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     const jsonRpc = acpRequest('session/new', params);
     const parsed = JSON.parse(jsonRpc);
-    pendingAcpRequestsRef.current.set(parsed.id, { method: 'session/new' });
+    pendingAcpRequestsRef.current.set(parsed.id, { method: 'session/new', label: name.replace(/^WEB_/, '') });
     wsClient.send({ type: 'acp_message', json_rpc: jsonRpc });
   }, []);
 

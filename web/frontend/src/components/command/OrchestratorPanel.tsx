@@ -283,9 +283,9 @@ export function OrchestratorPanel({ isOpen, onToggle }: OrchestratorPanelProps) 
                           : 'text-muted hover:text-highlight border-transparent hover:border-[var(--accent-purple)]/30'
                       }`}
                     >
-                      <span className="truncate max-w-[80px]">{session.label}</span>
+                      <span className="truncate">{session.label}</span>
                       {session.provider && session.model && (
-                        <span className="text-[8px] text-muted truncate max-w-[60px]" title={`${session.provider}/${session.model}`}>
+                        <span className="text-[8px] text-muted truncate" title={`${session.provider}/${session.model}`}>
                           {session.model}
                         </span>
                       )}

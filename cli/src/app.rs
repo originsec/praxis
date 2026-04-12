@@ -244,8 +244,8 @@ impl OrchestratorState {
         self.sessions.iter_mut().find(|s| s.session_id == id)
     }
 
-    pub fn next_session_label(&self) -> String {
-        format!("Session {}", self.sessions.len() + 1)
+    pub fn next_session_number(&self) -> usize {
+        self.sessions.len() + 1
     }
 }
 
@@ -651,7 +651,7 @@ impl App {
     }
 
     async fn create_new_orchestrator_session(&mut self) {
-        let name = format!("CLI_{}", self.orchestrator.next_session_label());
+        let name = format!("CLI_Session {}", self.orchestrator.next_session_number());
         let (_, json_rpc) = self.orchestrator.acp_client.create_session(".", Some(&name), None);
         if let Err(e) = self.client.send_acp_message(json_rpc).await {
             if let Some(session) = self.orchestrator.active_session_mut() {
@@ -724,7 +724,7 @@ impl App {
                 true
             }
             AppEvent::AcpEvent(json_rpc) => {
-                self.handle_acp_event(json_rpc);
+                self.handle_acp_event(json_rpc).await;
                 true
             }
             AppEvent::SessionListPoll => {
@@ -2898,7 +2898,7 @@ impl App {
     async fn select_model(&mut self, model_name: &str) {
         self.close_active_orchestrator_session().await;
 
-        let name = format!("CLI_{}", self.orchestrator.next_session_label());
+        let name = format!("CLI_Session {}", self.orchestrator.next_session_number());
         let (_, json_rpc) = self.orchestrator.acp_client.create_session(".", Some(&name), Some(model_name));
         if let Err(e) = self.client.send_acp_message(json_rpc).await {
             if let Some(session) = self.orchestrator.active_session_mut() {
@@ -3035,7 +3035,7 @@ impl App {
         }
     }
 
-    fn handle_acp_event(&mut self, json_rpc: String) {
+    async fn handle_acp_event(&mut self, json_rpc: String) {
         let Some(event) = self.orchestrator.acp_client.parse_response(&json_rpc) else {
             return;
         };
@@ -3046,7 +3046,7 @@ impl App {
                 // A new session was created by this client. Mark loaded since
                 // we'll see all events in real time.
                 //
-                let label = self.orchestrator.next_session_label();
+                let label = format!("Session {}", self.orchestrator.next_session_number());
                 let mut session = OrchestratorSessionState::new(session_id, label);
                 session.loaded = true;
                 self.orchestrator.sessions.push(session);
@@ -3122,8 +3122,19 @@ impl App {
                         self.orchestrator.active_session_index = Some(self.orchestrator.sessions.len() - 1);
                     }
                 } else {
-                    self.orchestrator.active_session_index = Some(0);
+                    //
+                    // First session list received — select the first session
+                    // and trigger a load to get its history.
+                    //
+
+                    self.switch_to_session(0).await;
                 }
+
+                //
+                // Sort sessions by label for consistent tab ordering.
+                //
+
+                self.orchestrator.sessions.sort_by(|a, b| a.label.cmp(&b.label));
             }
 
             AcpEvent::TextContent { session_id, text } => {
