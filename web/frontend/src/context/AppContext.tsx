@@ -505,18 +505,25 @@ function reduceOrchestrator(state: AppState, action: Action): AppState | null {
       };
     }
     case 'ORCHESTRATOR_SESSION_STARTED':
-      return updateSession(state, action.sessionId, (s) => ({
-        ...s,
-        loaded: true,
-        provider: action.provider,
-        model: action.model,
-        messages: [...s.messages, {
-          id: generateUUID(),
-          role: 'system' as const,
-          content: `Session started (${action.provider}::${action.model}).`,
-          timestamp: new Date(),
-        }],
-      }));
+      return updateSession(state, action.sessionId, (s) => {
+        //
+        // Only add the "Session started" message once (skip on replay).
+        //
+
+        const alreadyStarted = s.provider !== null;
+        return {
+          ...s,
+          loaded: true,
+          provider: action.provider,
+          model: action.model,
+          messages: alreadyStarted ? s.messages : [...s.messages, {
+            id: generateUUID(),
+            role: 'system' as const,
+            content: `Session started (${action.provider}::${action.model}).`,
+            timestamp: new Date(),
+          }],
+        };
+      });
     case 'ORCHESTRATOR_SESSION_CLOSED': {
       const remaining = state.orchestrator.sessions.filter(s => s.sessionId !== action.sessionId);
       const newActive = state.orchestrator.activeSessionId === action.sessionId
@@ -1599,8 +1606,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
                     const webSessions = rawSessions.filter(s => s.name.startsWith('WEB_'));
                     const serverIds = webSessions.map(s => s.sessionId);
                     const serverSet = new Set(serverIds);
-                    const existing = state.orchestrator.sessions.filter(s => serverSet.has(s.sessionId));
-                    if (existing.length !== state.orchestrator.sessions.length) {
+                    const currentSessions = orchestratorSessionsRef.current;
+                    const existing = currentSessions.filter(s => serverSet.has(s.sessionId));
+                    if (existing.length !== currentSessions.length) {
                       dispatch({ type: 'ORCHESTRATOR_SYNC_SESSIONS', sessionIds: serverIds });
                     }
 
@@ -1618,9 +1626,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
                       }
                     }
 
+                    let loadTriggered = false;
                     for (const sess of webSessions) {
                       const label = sess.name.replace(/^WEB_/, '');
-                      const alreadyExists = state.orchestrator.sessions.some(s => s.sessionId === sess.sessionId);
+                      const alreadyExists = orchestratorSessionsRef.current.some(s => s.sessionId === sess.sessionId);
                       if (!alreadyExists) {
                         dispatch({
                           type: 'ORCHESTRATOR_SESSION_CREATED',
@@ -1630,11 +1639,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
                         });
 
                         //
-                        // Trigger session/load for the first unloaded session
-                        // so history replays on reconnect.
+                        // Trigger session/load for the first new session when
+                        // no session is currently active (reconnect scenario).
                         //
 
-                        if (!state.orchestrator.activeSessionId) {
+                        if (!loadTriggered && !orchestratorActiveIdRef.current) {
+                          loadTriggered = true;
                           const loadRpc = acpRequest('session/load', { sessionId: sess.sessionId });
                           wsClient.send({ type: 'acp_message', json_rpc: loadRpc });
                           const loadParsed = JSON.parse(loadRpc);
@@ -2091,6 +2101,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const orchestratorSessionsRef = useRef(state.orchestrator.sessions);
   orchestratorSessionsRef.current = state.orchestrator.sessions;
+  const orchestratorActiveIdRef = useRef(state.orchestrator.activeSessionId);
+  orchestratorActiveIdRef.current = state.orchestrator.activeSessionId;
 
   const orchestratorSetActiveSession = useCallback((sessionId: string | null) => {
     dispatch({ type: 'ORCHESTRATOR_SET_ACTIVE_SESSION', sessionId });

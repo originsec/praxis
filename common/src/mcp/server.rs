@@ -971,10 +971,9 @@ impl<C: McpClient + Clone + 'static> ServerHandler for PraxisServer<C> {
             },
             instructions: Some(
                 "Praxis C2 framework for orchestrating AI coding agents. \
-                Use node_list to see connected nodes, agent_list to see agents. \
-                Use recon_run to discover tools/configs/sessions, recon_list to query stored results. \
-                Use recon_config_read/recon_session_read to read files, recon_config_grep/recon_session_grep to search. \
-                IMPORTANT: Always call session_close when done with a session."
+                This is an orchestrator session where natural language can be used to control \
+                the Praxis network — manage nodes, run agents, execute operations, and coordinate \
+                tasks across distributed targets."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
