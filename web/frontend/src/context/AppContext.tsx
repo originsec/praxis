@@ -297,9 +297,11 @@ type Action =
   | { type: 'SET_OP_DEF_ERROR'; error: string | null }
   | { type: 'SET_OP_DEF_SUCCESS'; fullName: string | null }
   | { type: 'ORCHESTRATOR_CREATING_SESSION' }
-  | { type: 'ORCHESTRATOR_SESSION_CREATED'; sessionId: string; label: string }
+  | { type: 'ORCHESTRATOR_SESSION_CREATED'; sessionId: string; label: string; loaded?: boolean }
   | { type: 'ORCHESTRATOR_SESSION_STARTED'; sessionId: string; provider: string; model: string }
   | { type: 'ORCHESTRATOR_SESSION_CLOSED'; sessionId: string }
+  | { type: 'ORCHESTRATOR_SESSION_LOADED'; sessionId: string }
+  | { type: 'ORCHESTRATOR_SYNC_SESSIONS'; sessionIds: string[] }
   | { type: 'ORCHESTRATOR_SET_ACTIVE_SESSION'; sessionId: string | null }
   | { type: 'ORCHESTRATOR_ADD_USER_MESSAGE'; sessionId: string; message: string; promptId: string }
   | { type: 'ORCHESTRATOR_ADD_CONTENT'; sessionId: string; content: string }
@@ -469,17 +471,20 @@ function reduceOrchestrator(state: AppState, action: Action): AppState | null {
         },
       };
     case 'ORCHESTRATOR_SESSION_CREATED': {
+      const exists = state.orchestrator.sessions.some(s => s.sessionId === action.sessionId);
+      if (exists) return state;
       const newSession: OrchestratorSessionState = {
         sessionId: action.sessionId,
         label: action.label,
+        loaded: action.loaded ?? true,
         provider: null,
         model: null,
-        messages: [{
+        messages: action.loaded !== false ? [{
           id: generateUUID(),
           role: 'system',
           content: `Session "${action.label}" created.`,
           timestamp: new Date(),
-        }],
+        }] : [],
         currentPlan: null,
         isLoading: false,
         streamingContent: '',
@@ -501,6 +506,7 @@ function reduceOrchestrator(state: AppState, action: Action): AppState | null {
     case 'ORCHESTRATOR_SESSION_STARTED':
       return updateSession(state, action.sessionId, (s) => ({
         ...s,
+        loaded: true,
         provider: action.provider,
         model: action.model,
         messages: [...s.messages, {
@@ -532,6 +538,26 @@ function reduceOrchestrator(state: AppState, action: Action): AppState | null {
           activeSessionId: action.sessionId,
         },
       };
+    case 'ORCHESTRATOR_SESSION_LOADED':
+      return updateSession(state, action.sessionId, (s) => ({
+        ...s,
+        loaded: true,
+      }));
+    case 'ORCHESTRATOR_SYNC_SESSIONS': {
+      const keep = new Set(action.sessionIds);
+      const filtered = state.orchestrator.sessions.filter(s => keep.has(s.sessionId));
+      const newActive = state.orchestrator.activeSessionId && keep.has(state.orchestrator.activeSessionId)
+        ? state.orchestrator.activeSessionId
+        : filtered.length > 0 ? filtered[0].sessionId : null;
+      return {
+        ...state,
+        orchestrator: {
+          ...state.orchestrator,
+          sessions: filtered,
+          activeSessionId: newActive,
+        },
+      };
+    }
     case 'ORCHESTRATOR_ADD_USER_MESSAGE':
       return updateSession(state, action.sessionId, (s) => ({
         ...s,
@@ -1563,13 +1589,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
               switch (pending.method) {
                 case 'session/list': {
-                  const sessions = rpc.result?.sessions as string[] | undefined;
-                  if (sessions && sessions.length > 0) {
-                    for (const sid of sessions) {
+                  const rawSessions = rpc.result?.sessions as Array<{ sessionId: string; name: string }> | undefined;
+                  if (rawSessions && rawSessions.length > 0) {
+                    //
+                    // Filter to only WEB_ prefixed sessions.
+                    //
+
+                    const webSessions = rawSessions.filter(s => s.name.startsWith('WEB_'));
+                    const serverIds = webSessions.map(s => s.sessionId);
+                    const serverSet = new Set(serverIds);
+                    const existing = state.orchestrator.sessions.filter(s => serverSet.has(s.sessionId));
+                    if (existing.length !== state.orchestrator.sessions.length) {
+                      dispatch({ type: 'ORCHESTRATOR_SYNC_SESSIONS', sessionIds: serverIds });
+                    }
+
+                    for (const sess of webSessions) {
+                      const label = sess.name.replace(/^WEB_/, '');
                       dispatch({
                         type: 'ORCHESTRATOR_SESSION_CREATED',
-                        sessionId: sid,
-                        label: `Session ${sid.slice(0, 6)}`,
+                        sessionId: sess.sessionId,
+                        label,
+                        loaded: false,
                       });
                     }
                   }
@@ -1590,6 +1630,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   const sessionId = pending.sessionId;
                   if (sessionId) {
                     dispatch({ type: 'ORCHESTRATOR_DONE', sessionId });
+                  }
+                  break;
+                }
+                case 'session/load': {
+                  const sessionId = pending.sessionId;
+                  if (sessionId) {
+                    dispatch({ type: 'ORCHESTRATOR_SESSION_LOADED', sessionId });
                   }
                   break;
                 }
@@ -1819,10 +1866,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     //
     // Connect to WebSocket.
     //
+
     wsClient.connect().catch(console.error);
+
+    //
+    // Poll session/list every 5 seconds to stay in sync.
+    //
+
+    const pollInterval = setInterval(() => {
+      const rpc = acpRequest('session/list');
+      wsClient.send({ type: 'acp_message', json_rpc: rpc });
+      const parsed = JSON.parse(rpc);
+      pendingAcpRequestsRef.current.set(parsed.id, { method: 'session/list' });
+    }, 5000);
 
     return () => {
       unsubscribe();
+      clearInterval(pollInterval);
     };
   //
   // Empty deps - only run once.
@@ -1960,9 +2020,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Orchestrator functions (multi-session ACP).
   //
 
+  const webSessionCounter = useRef(1);
   const orchestratorCreateSession = useCallback((modelRef?: string) => {
     dispatch({ type: 'ORCHESTRATOR_CREATING_SESSION' });
-    const params: Record<string, unknown> = { cwd: '.', mcpServers: [] };
+    const name = `WEB_Session ${webSessionCounter.current++}`;
+    const params: Record<string, unknown> = { cwd: '.', mcpServers: [], name };
     if (modelRef) {
       params.modelRef = modelRef;
     }
@@ -1999,7 +2061,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const orchestratorSetActiveSession = useCallback((sessionId: string | null) => {
     dispatch({ type: 'ORCHESTRATOR_SET_ACTIVE_SESSION', sessionId });
-  }, []);
+
+    //
+    // If the session hasn't been loaded yet, send session/load to get history.
+    //
+
+    if (sessionId) {
+      const session = state.orchestrator.sessions.find(s => s.sessionId === sessionId);
+      if (session && !session.loaded) {
+        const jsonRpc = acpRequest('session/load', { sessionId });
+        wsClient.send({ type: 'acp_message', json_rpc: jsonRpc });
+        const parsed = JSON.parse(jsonRpc);
+        pendingAcpRequestsRef.current.set(parsed.id, { method: 'session/load', sessionId });
+      }
+    }
+  }, [state.orchestrator.sessions]);
 
   const orchestratorClearMessages = useCallback((sessionId: string) => {
     dispatch({ type: 'ORCHESTRATOR_CLEAR_MESSAGES', sessionId });

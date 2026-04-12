@@ -173,6 +173,7 @@ pub struct ToolCall {
 pub struct OrchestratorSessionState {
     pub session_id: String,
     pub label: String,
+    pub loaded: bool,
     pub messages: Vec<ConversationEntry>,
     pub scroll_offset: u16,
     pub provider: Option<String>,
@@ -196,6 +197,7 @@ impl OrchestratorSessionState {
         Self {
             session_id,
             label,
+            loaded: false,
             messages: Vec::new(),
             scroll_offset: 0,
             provider: None,
@@ -649,13 +651,25 @@ impl App {
     }
 
     async fn create_new_orchestrator_session(&mut self) {
-        let (_, json_rpc) = self.orchestrator.acp_client.create_session(".", None);
+        let name = format!("CLI_{}", self.orchestrator.next_session_label());
+        let (_, json_rpc) = self.orchestrator.acp_client.create_session(".", Some(&name), None);
         if let Err(e) = self.client.send_acp_message(json_rpc).await {
             if let Some(session) = self.orchestrator.active_session_mut() {
                 session.messages.push(ConversationEntry::Error(format!(
                     "Failed to create session: {}",
                     e
                 )));
+            }
+        }
+    }
+
+    async fn switch_to_session(&mut self, index: usize) {
+        self.orchestrator.active_session_index = Some(index);
+        if let Some(session) = self.orchestrator.sessions.get(index) {
+            if !session.loaded {
+                let sid = session.session_id.clone();
+                let (_, json_rpc) = self.orchestrator.acp_client.load_session(&sid);
+                let _ = self.client.send_acp_message(json_rpc).await;
             }
         }
     }
@@ -712,6 +726,11 @@ impl App {
             AppEvent::AcpEvent(json_rpc) => {
                 self.handle_acp_event(json_rpc);
                 true
+            }
+            AppEvent::SessionListPoll => {
+                let (_, json_rpc) = self.orchestrator.acp_client.list_sessions();
+                let _ = self.client.send_acp_message(json_rpc).await;
+                false // no redraw needed, SessionList event will trigger it
             }
             AppEvent::StateUpdate(state) => {
                 self.handle_state_update(state);
@@ -2443,7 +2462,7 @@ impl App {
                     } else {
                         if idx + 1 < self.orchestrator.sessions.len() { idx + 1 } else { 0 }
                     };
-                    self.orchestrator.active_session_index = Some(next);
+                    self.switch_to_session(next).await;
                 }
             }
             return;
@@ -2453,7 +2472,7 @@ impl App {
             if let Some(idx) = self.orchestrator.active_session_index {
                 if self.orchestrator.sessions.len() > 1 {
                     let prev = if idx > 0 { idx - 1 } else { self.orchestrator.sessions.len() - 1 };
-                    self.orchestrator.active_session_index = Some(prev);
+                    self.switch_to_session(prev).await;
                 }
             }
             return;
@@ -2879,7 +2898,8 @@ impl App {
     async fn select_model(&mut self, model_name: &str) {
         self.close_active_orchestrator_session().await;
 
-        let (_, json_rpc) = self.orchestrator.acp_client.create_session(".", Some(model_name));
+        let name = format!("CLI_{}", self.orchestrator.next_session_label());
+        let (_, json_rpc) = self.orchestrator.acp_client.create_session(".", Some(&name), Some(model_name));
         if let Err(e) = self.client.send_acp_message(json_rpc).await {
             if let Some(session) = self.orchestrator.active_session_mut() {
                 session
@@ -3023,12 +3043,12 @@ impl App {
         match event {
             AcpEvent::SessionCreated { session_id } => {
                 //
-                // A new session was created. Add it to the list and make it
-                // active. If there's already a placeholder session waiting,
-                // update its session_id instead.
+                // A new session was created by this client. Mark loaded since
+                // we'll see all events in real time.
                 //
                 let label = self.orchestrator.next_session_label();
-                let session = OrchestratorSessionState::new(session_id, label);
+                let mut session = OrchestratorSessionState::new(session_id, label);
+                session.loaded = true;
                 self.orchestrator.sessions.push(session);
                 self.orchestrator.active_session_index =
                     Some(self.orchestrator.sessions.len() - 1);
@@ -3038,6 +3058,7 @@ impl App {
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
                     session.provider = Some(provider);
                     session.model = Some(model);
+                    session.loaded = true;
                 }
             }
 
@@ -3070,20 +3091,37 @@ impl App {
 
             AcpEvent::SessionList { sessions } => {
                 //
-                // Populate the session list from the server. Add any sessions
-                // we don't already have.
+                // Sync session list with the server. Only show sessions
+                // with the CLI_ prefix (ours). Other clients have their
+                // own prefix.
                 //
 
-                for sid in sessions {
-                    if self.orchestrator.session_by_id_mut(&sid).is_none() {
-                        let label = self.orchestrator.next_session_label();
-                        let session = OrchestratorSessionState::new(sid, label);
+                let cli_sessions: Vec<_> = sessions.into_iter()
+                    .filter(|(_, name)| name.starts_with("CLI_"))
+                    .collect();
+
+                let server_ids: Vec<String> = cli_sessions.iter().map(|(id, _)| id.clone()).collect();
+                self.orchestrator.sessions.retain(|s| server_ids.contains(&s.session_id));
+
+                for (sid, name) in &cli_sessions {
+                    if self.orchestrator.session_by_id_mut(sid).is_none() {
+                        let label = name.strip_prefix("CLI_").unwrap_or(name).to_string();
+                        let session = OrchestratorSessionState::new(sid.clone(), label);
                         self.orchestrator.sessions.push(session);
                     }
                 }
-                if self.orchestrator.active_session_index.is_none()
-                    && !self.orchestrator.sessions.is_empty()
-                {
+
+                //
+                // Fix active index after potential removal.
+                //
+
+                if self.orchestrator.sessions.is_empty() {
+                    self.orchestrator.active_session_index = None;
+                } else if let Some(active) = self.orchestrator.active_session_index {
+                    if active >= self.orchestrator.sessions.len() {
+                        self.orchestrator.active_session_index = Some(self.orchestrator.sessions.len() - 1);
+                    }
+                } else {
                     self.orchestrator.active_session_index = Some(0);
                 }
             }

@@ -31,12 +31,19 @@ const ORCHESTRATOR_PROMPT: &str = include_str!("prompts/orchestrator.prompt");
 
 /// Orchestrator session state
 struct OrchestratorSession {
+    name: String,
     prompt_tx: mpsc::Sender<(String, String)>,
     #[allow(dead_code)]
     task_handle: tokio::task::JoinHandle<()>,
     stop_flag: Arc<AtomicBool>,
     cancel_flag: Arc<AtomicBool>,
     current_prompt_id: RwLock<String>,
+
+    //
+    // Shared event log for session/load replay. The background task appends
+    // ACP JSON-RPC notification strings here as they are sent to the client.
+    //
+    event_log: Arc<RwLock<Vec<String>>>,
 }
 
 impl OrchestratorSession {
@@ -66,6 +73,7 @@ impl OrchestratorManager {
         &self,
         client_id: &str,
         session_id: &str,
+        name: Option<&str>,
         model_ref: Option<&str>,
         service_config: &Arc<RwLock<ServiceConfig>>,
         publish_channel: &Channel,
@@ -180,6 +188,19 @@ impl OrchestratorManager {
         let client_id_owned = client_id.to_string();
         let sid = session_id_owned.clone();
         let publish_channel_clone = publish_channel.clone();
+        let event_log: Arc<RwLock<Vec<String>>> = Arc::new(RwLock::new(Vec::new()));
+        let event_log_clone = event_log.clone();
+
+        //
+        // Log the session/update "started" event for replay.
+        //
+
+        {
+            let started = session_update_started(&session_id_owned, &provider_name, &model);
+            if let common::ClientDirectMessage::AcpMessage { ref json_rpc } = started {
+                event_log.write().await.push(json_rpc.clone());
+            }
+        }
 
         //
         // Store the session immediately so prompts can be sent while MCP
@@ -187,8 +208,25 @@ impl OrchestratorManager {
         //
 
         let session = OrchestratorSession {
+            name: name.unwrap_or(session_id).to_string(),
             prompt_tx,
+            event_log,
             task_handle: tokio::spawn(async move {
+
+                //
+                // Helper: send an ACP message to the client and record it in
+                // the event log for session/load replay.
+                //
+
+                macro_rules! send_and_log {
+                    ($msg:expr) => {{
+                        let m = $msg;
+                        if let common::ClientDirectMessage::AcpMessage { ref json_rpc } = m {
+                            event_log_clone.write().await.push(json_rpc.clone());
+                        }
+                        let _ = send_to_client(&publish_channel_clone, &client_id_owned, m).await;
+                    }};
+                }
 
                 //
                 // Connect to MCP SSE server (this is the slow part).
@@ -201,15 +239,11 @@ impl OrchestratorManager {
                     Ok(t) => t,
                     Err(e) => {
                         common::log_error!("Failed to connect to MCP server at {}: {}", sse_url, e);
-                        let _ = send_to_client(
-                            &publish_channel_clone,
-                            &client_id_owned,
-                            acp_error_response(
+                        send_and_log!(acp_error_response(
                                 Value::Null,
                                 -32000,
                                 &format!("Failed to connect to MCP server at {}: {}", sse_url, e),
-                            ),
-                        ).await;
+                            ));
                         return;
                     }
                 };
@@ -218,15 +252,11 @@ impl OrchestratorManager {
                     Ok(s) => s,
                     Err(e) => {
                         common::log_error!("Failed to initialize MCP client: {}", e);
-                        let _ = send_to_client(
-                            &publish_channel_clone,
-                            &client_id_owned,
-                            acp_error_response(
+                        send_and_log!(acp_error_response(
                                 Value::Null,
                                 -32000,
                                 &format!("Failed to initialize MCP client: {}", e),
-                            ),
-                        ).await;
+                            ));
                         return;
                     }
                 };
@@ -237,15 +267,11 @@ impl OrchestratorManager {
                     Ok(t) => t,
                     Err(e) => {
                         common::log_error!("Failed to list MCP tools: {}", e);
-                        let _ = send_to_client(
-                            &publish_channel_clone,
-                            &client_id_owned,
-                            acp_error_response(
+                        send_and_log!(acp_error_response(
                                 Value::Null,
                                 -32000,
                                 &format!("Failed to list MCP tools: {}", e),
-                            ),
-                        ).await;
+                            ));
                         return;
                     }
                 };
@@ -352,22 +378,14 @@ impl OrchestratorManager {
                                                     let pre_tool = send_buffer[..marker_pos].to_string();
                                                     if !pre_tool.trim().is_empty() {
                                                         bytes_sent += pre_tool.len();
-                                                        let _ = send_to_client(
-                                                            &publish_channel_clone,
-                                                            &client_id_owned,
-                                                            session_update_text(&sid, pre_tool),
-                                                        ).await;
+                                                        send_and_log!(session_update_text(&sid, pre_tool));
                                                     }
                                                 }
                                                 held_back = true;
                                                 send_buffer.clear();
                                             } else if send_buffer.len() >= 50 || delta.content.contains('\n') {
                                                 bytes_sent += send_buffer.len();
-                                                let _ = send_to_client(
-                                                    &publish_channel_clone,
-                                                    &client_id_owned,
-                                                    session_update_text(&sid, &send_buffer),
-                                                ).await;
+                                                send_and_log!(session_update_text(&sid, &send_buffer));
                                                 send_buffer.clear();
                                             }
                                         }
@@ -379,15 +397,11 @@ impl OrchestratorManager {
                                 Err(e) => {
                                     let err_msg = format!("AI request failed: {}", e);
                                     common::log_error!("{}", err_msg);
-                                    let _ = send_to_client(
-                                        &publish_channel_clone,
-                                        &client_id_owned,
-                                        acp_error_response(
+                                    send_and_log!(acp_error_response(
                                             prompt_id_to_json_rpc_id(&prompt_id),
                                             -32000,
                                             &err_msg,
-                                        ),
-                                    ).await;
+                                        ));
                                     stream_error = true;
                                     break;
                                 }
@@ -407,11 +421,7 @@ impl OrchestratorManager {
 
                         if !send_buffer.is_empty() && !held_back {
                             bytes_sent += send_buffer.len();
-                            let _ = send_to_client(
-                                &publish_channel_clone,
-                                &client_id_owned,
-                                session_update_text(&sid, &send_buffer),
-                            ).await;
+                            send_and_log!(session_update_text(&sid, &send_buffer));
                             send_buffer.clear();
                         }
 
@@ -429,11 +439,7 @@ impl OrchestratorManager {
 
                             let tool_input_value = serde_json::to_value(&tool_args).ok();
 
-                            let _ = send_to_client(
-                                &publish_channel_clone,
-                                &client_id_owned,
-                                session_update_tool_call(&sid, &tool_name, tool_input_value),
-                            ).await;
+                            send_and_log!(session_update_tool_call(&sid, &tool_name, tool_input_value));
 
                             let result = if let Some(local_result) = execute_local_tool(&tool_name, &tool_args).await {
                                 local_result
@@ -448,21 +454,13 @@ impl OrchestratorManager {
                                     if let Some(plan_obj) = result_json.get("plan") {
                                         if let Ok(plan) = serde_json::from_value::<OrchestratorPlan>(plan_obj.clone()) {
                                             let plan_json = serde_json::to_value(&plan).unwrap_or(Value::Null);
-                                            let _ = send_to_client(
-                                                &publish_channel_clone,
-                                                &client_id_owned,
-                                                session_update_plan(&sid, &plan_json),
-                                            ).await;
+                                            send_and_log!(session_update_plan(&sid, &plan_json));
                                         }
                                     }
                                 }
                             }
 
-                            let _ = send_to_client(
-                                &publish_channel_clone,
-                                &client_id_owned,
-                                session_update_tool_result(&sid, &tool_name, &result),
-                            ).await;
+                            send_and_log!(session_update_tool_result(&sid, &tool_name, &result));
 
                             tool_results.push((tool_name, result));
                             response_text = remaining_text;
@@ -477,11 +475,7 @@ impl OrchestratorManager {
                             //
 
                             if let Some(usage) = &stream_usage {
-                                let _ = send_to_client(
-                                    &publish_channel_clone,
-                                    &client_id_owned,
-                                    session_update_usage(&sid, usage.prompt_tokens, usage.completion_tokens, usage.total_tokens),
-                                ).await;
+                                send_and_log!(session_update_usage(&sid, usage.prompt_tokens, usage.completion_tokens, usage.total_tokens));
                             }
 
                             conversation_history.push(Message::assistant(&full_response));
@@ -503,20 +497,12 @@ impl OrchestratorManager {
                         if full_response.len() > bytes_sent {
                             let unsent = &full_response[bytes_sent..];
                             if !unsent.is_empty() {
-                                let _ = send_to_client(
-                                    &publish_channel_clone,
-                                    &client_id_owned,
-                                    session_update_text(&sid, unsent),
-                                ).await;
+                                send_and_log!(session_update_text(&sid, unsent));
                             }
                         }
 
                         if let Some(usage) = &stream_usage {
-                            let _ = send_to_client(
-                                &publish_channel_clone,
-                                &client_id_owned,
-                                session_update_usage(&sid, usage.prompt_tokens, usage.completion_tokens, usage.total_tokens),
-                            ).await;
+                            send_and_log!(session_update_usage(&sid, usage.prompt_tokens, usage.completion_tokens, usage.total_tokens));
                         }
 
                         conversation_history.push(Message::assistant(&full_response));
@@ -528,11 +514,7 @@ impl OrchestratorManager {
                     // original request ID that was encoded in prompt_id.
                     //
 
-                    let _ = send_to_client(
-                        &publish_channel_clone,
-                        &client_id_owned,
-                        acp_response(prompt_id_to_json_rpc_id(&prompt_id), json!({})),
-                    ).await;
+                    send_and_log!(acp_response(prompt_id_to_json_rpc_id(&prompt_id), json!({})));
                 }
 
                 //
@@ -681,11 +663,25 @@ impl OrchestratorManager {
     // Return all session IDs across all clients.
     //
 
-    pub async fn list_sessions(&self) -> Vec<String> {
+    pub async fn list_sessions(&self) -> Vec<(String, String)> {
         let sessions = self.sessions.read().await;
         sessions.values()
-            .flat_map(|m| m.keys().cloned())
+            .flat_map(|m| m.iter().map(|(id, s)| (id.clone(), s.name.clone())))
             .collect()
+    }
+
+    //
+    // Get the event log for a session (for session/load replay).
+    //
+
+    pub async fn get_event_log(&self, session_id: &str) -> Vec<String> {
+        let sessions = self.sessions.read().await;
+        for client_sessions in sessions.values() {
+            if let Some(session) = client_sessions.get(session_id) {
+                return session.event_log.read().await.clone();
+            }
+        }
+        Vec::new()
     }
 }
 

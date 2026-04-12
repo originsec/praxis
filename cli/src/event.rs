@@ -12,6 +12,7 @@ use tokio::sync::{Notify, mpsc};
 pub enum AppEvent {
     Terminal(Event),
     AcpEvent(String),
+    SessionListPoll,
     StateUpdate(SystemState),
     OperationsRefreshed {
         op_definitions: Vec<OperationDefinitionInfo>,
@@ -100,6 +101,20 @@ impl EventHandler {
         tokio::spawn(async move {
             while let Some(json_rpc) = acp_rx.recv().await {
                 if tx_acp.send(AppEvent::AcpEvent(json_rpc)).is_err() {
+                    break;
+                }
+            }
+        });
+
+        //
+        // Periodic session/list poll (every 5 seconds).
+        //
+
+        let tx_poll = tx.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                if tx_poll.send(AppEvent::SessionListPoll).is_err() {
                     break;
                 }
             }

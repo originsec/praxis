@@ -12,7 +12,7 @@ pub enum AcpEvent {
     InitializeResult { protocol_version: u32 },
     SessionCreated { session_id: String },
     SessionStarted { session_id: String, provider: String, model: String },
-    SessionList { sessions: Vec<String> },
+    SessionList { sessions: Vec<(String, String)> },  // (session_id, name)
     SessionClosed { session_id: String },
     TextContent { session_id: String, text: String },
     ToolCall { session_id: String, name: String, input: Option<String> },
@@ -46,12 +46,15 @@ impl AcpClient {
     }
 
     /// Build a session/new request. Returns (request_id, json_rpc_string).
-    pub fn create_session(&self, cwd: &str, model_ref: Option<&str>) -> (u64, String) {
+    pub fn create_session(&self, cwd: &str, name: Option<&str>, model_ref: Option<&str>) -> (u64, String) {
         let id = self.next_id();
         let mut params = json!({
             "cwd": cwd,
             "mcpServers": []
         });
+        if let Some(n) = name {
+            params.as_object_mut().unwrap().insert("name".to_string(), json!(n));
+        }
         if let Some(mr) = model_ref {
             params.as_object_mut().unwrap().insert("modelRef".to_string(), json!(mr));
         }
@@ -75,6 +78,15 @@ impl AcpClient {
             "sessionId": session_id
         })));
         serde_json::to_string(&notif).unwrap()
+    }
+
+    /// Build a session/load request. Returns (request_id, json_rpc_string).
+    pub fn load_session(&self, session_id: &str) -> (u64, String) {
+        let id = self.next_id();
+        let req = JsonRpcRequest::new(id, "session/load", Some(json!({
+            "sessionId": session_id
+        })));
+        (id, serde_json::to_string(&req).unwrap())
     }
 
     /// Build a session/list request. Returns (request_id, json_rpc_string).
@@ -287,11 +299,15 @@ impl AcpClient {
         }
 
         if let Some(sessions) = result.get("sessions").and_then(|v| v.as_array()) {
-            let ids: Vec<String> = sessions
+            let list: Vec<(String, String)> = sessions
                 .iter()
-                .filter_map(|v| v.as_str().map(String::from))
+                .filter_map(|v| {
+                    let sid = v.get("sessionId").and_then(|s| s.as_str())?;
+                    let name = v.get("name").and_then(|s| s.as_str()).unwrap_or(sid);
+                    Some((sid.to_string(), name.to_string()))
+                })
                 .collect();
-            return Some(AcpEvent::SessionList { sessions: ids });
+            return Some(AcpEvent::SessionList { sessions: list });
         }
 
         if let Some(sid) = result.get("sessionId").and_then(|v| v.as_str()) {

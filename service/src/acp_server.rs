@@ -70,6 +70,10 @@ impl AcpServer {
                 let params = msg.get("params").cloned().unwrap_or(json!({}));
                 self.handle_session_cancel(client_id, params, publish_channel).await;
             }
+            Some("session/load") => {
+                let params = msg.get("params").cloned().unwrap_or(json!({}));
+                self.handle_session_load(client_id, id, params, publish_channel).await;
+            }
             Some("session/list") => {
                 self.handle_session_list(client_id, id, publish_channel).await;
             }
@@ -130,10 +134,11 @@ impl AcpServer {
         publish_channel: &Channel,
     ) {
         let session_id = uuid::Uuid::new_v4().to_string();
+        let name = params.get("name").and_then(|v| v.as_str()).map(String::from);
         let model_ref = params.get("modelRef").and_then(|v| v.as_str()).map(String::from);
 
         self.orchestrator_manager
-            .create_session(client_id, &session_id, model_ref.as_deref(), &self.service_config, publish_channel)
+            .create_session(client_id, &session_id, name.as_deref(), model_ref.as_deref(), &self.service_config, publish_channel)
             .await;
 
         if let Some(id) = id {
@@ -213,18 +218,66 @@ impl AcpServer {
         }
     }
 
+    async fn handle_session_load(
+        &self,
+        client_id: &str,
+        id: Option<Value>,
+        params: Value,
+        publish_channel: &Channel,
+    ) {
+        let session_id = params.get("sessionId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if session_id.is_empty() {
+            if let Some(id) = id {
+                let _ = send_to_client(
+                    publish_channel,
+                    client_id,
+                    acp_error_response(id, -32602, "Missing sessionId"),
+                ).await;
+            }
+            return;
+        }
+
+        //
+        // Replay the event log as session/update notifications.
+        //
+
+        let events = self.orchestrator_manager.get_event_log(&session_id).await;
+        for json_rpc in &events {
+            let _ = send_to_client(
+                publish_channel,
+                client_id,
+                ClientDirectMessage::AcpMessage { json_rpc: json_rpc.clone() },
+            ).await;
+        }
+
+        if let Some(id) = id {
+            let _ = send_to_client(
+                publish_channel,
+                client_id,
+                acp_response(id, json!({ "loaded": true, "eventCount": events.len() })),
+            ).await;
+        }
+    }
+
     async fn handle_session_list(
         &self,
         client_id: &str,
         id: Option<Value>,
         publish_channel: &Channel,
     ) {
-        let session_ids = self.orchestrator_manager.list_sessions().await;
+        let session_list = self.orchestrator_manager.list_sessions().await;
+        let sessions: Vec<Value> = session_list.into_iter()
+            .map(|(sid, name)| json!({ "sessionId": sid, "name": name }))
+            .collect();
         if let Some(id) = id {
             let _ = send_to_client(
                 publish_channel,
                 client_id,
-                acp_response(id, json!({ "sessions": session_ids })),
+                acp_response(id, json!({ "sessions": sessions })),
             ).await;
         }
     }

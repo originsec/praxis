@@ -28,6 +28,7 @@ export interface OrchestratorTokenUsage {
 export interface OrchestratorSessionState {
   sessionId: string;
   label: string;
+  loaded: boolean;
   provider: string | null;
   model: string | null;
   messages: OrchestratorMessage[];
