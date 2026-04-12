@@ -676,9 +676,12 @@ fn render_plan_widget(f: &mut Frame, area: Rect, session: &OrchestratorSessionSt
 fn render_model_info(f: &mut Frame, area: Rect, state: &OrchestratorState) {
     let session = state.active_session();
 
-    let model_text = match session.and_then(|s| s.provider.as_ref().zip(s.model.as_ref())) {
-        Some((provider, model)) => format!("{} / {}", provider, model),
-        _ => "No session".to_string(),
+    let model_text = match session {
+        Some(s) => match (s.provider.as_ref(), s.model.as_ref()) {
+            (Some(provider), Some(model)) => format!("{} / {}", provider, model),
+            _ => "Connecting...".to_string(),
+        },
+        None => String::new(),
     };
 
     let line = Line::from(vec![
