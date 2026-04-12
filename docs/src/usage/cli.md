@@ -148,10 +148,37 @@ session close --node <prefix>
 | `-r, --rabbitmq` | RabbitMQ URL | `amqp://praxis:praxis@localhost:5672` |
 | `-t, --timeout` | Connection/command timeout in seconds | `600` |
 | `-C, --command` | Run a single command and exit | - |
+| `--acp` | Run as an ACP bridge (stdin/stdout proxy) | - |
 | `--clear` | Clear local state and exit | - |
 | `--status` | Check service connection status | - |
 
 The RabbitMQ URL can also be set via the `PRAXIS_RABBITMQ_URL` environment variable.
+
+## ACP Bridge Mode
+
+The CLI can act as an [Agent Client Protocol](https://agentclientprotocol.com/) bridge, exposing the Praxis service as a standard ACP agent over stdin/stdout. This allows any ACP-compatible client to interact with Praxis.
+
+```bash
+praxis_cli --acp
+```
+
+In this mode the CLI:
+- Reads NDJSON JSON-RPC requests from **stdin**
+- Forwards them to the Praxis service via RabbitMQ
+- Writes JSON-RPC responses and notifications to **stdout** as NDJSON
+- Only forwards responses to requests it originated (filters out other clients' traffic)
+
+This means any ACP client can use Praxis as its agent. For example, using [acpx](https://www.npmjs.com/package/acpx):
+
+```bash
+# Send a single prompt
+acpx --agent './target/debug/praxis_cli --acp' 'list agents'
+
+# Interactive session
+acpx --agent 'praxis_cli --acp'
+```
+
+The bridge connects with an `acp_` prefixed client ID, so sessions created through it get `ACP_` prefixed session IDs.
 
 ## Local State
 
