@@ -1620,13 +1620,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
               switch (pending.method) {
                 case 'session/list': {
-                  const rawSessions = rpc.result?.sessions as Array<{ sessionId: string; name: string }> | undefined;
+                  const rawSessions = rpc.result?.sessions as Array<{ sessionId: string; title?: string; cwd?: string }> | undefined;
                   if (rawSessions && rawSessions.length > 0) {
                     //
-                    // Filter to only WEB_ prefixed sessions.
+                    // Filter to only WEB_ prefixed sessions (by session ID).
                     //
 
-                    const webSessions = rawSessions.filter(s => s.name.startsWith('WEB_'));
+                    const webSessions = rawSessions.filter(s => s.sessionId.startsWith('WEB_'));
                     const serverIds = webSessions.map(s => s.sessionId);
                     const serverSet = new Set(serverIds);
                     const currentSessions = orchestratorSessionsRef.current;
@@ -1635,23 +1635,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
                       dispatch({ type: 'ORCHESTRATOR_SYNC_SESSIONS', sessionIds: serverIds });
                     }
 
-                    //
-                    // Keep session counter ahead of existing session numbers.
-                    //
-
-                    for (const sess of webSessions) {
-                      const match = sess.name.match(/^WEB_Session (\d+)$/);
-                      if (match) {
-                        const n = parseInt(match[1], 10);
-                        if (n >= webSessionCounter.current) {
-                          webSessionCounter.current = n + 1;
-                        }
-                      }
-                    }
-
                     let loadTriggered = false;
                     for (const sess of webSessions) {
-                      const label = sess.name.replace(/^WEB_/, '');
+                      const label = sess.title || `Session ${webSessionCounter.current++}`;
                       const alreadyExists = orchestratorSessionsRef.current.some(s => s.sessionId === sess.sessionId);
                       if (!alreadyExists) {
                         dispatch({
@@ -1684,7 +1670,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                     dispatch({
                       type: 'ORCHESTRATOR_SESSION_CREATED',
                       sessionId,
-                      label: pending.label || `Session ${sessionId.slice(0, 6)}`,
+                      label: `Session ${webSessionCounter.current++}`,
                     });
                   }
                   break;
@@ -2086,14 +2072,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const webSessionCounter = useRef(1);
   const orchestratorCreateSession = useCallback((modelRef?: string) => {
     dispatch({ type: 'ORCHESTRATOR_CREATING_SESSION' });
-    const name = `WEB_Session ${webSessionCounter.current++}`;
-    const params: Record<string, unknown> = { cwd: '.', mcpServers: [], name };
+    const params: Record<string, unknown> = { cwd: '.' };
     if (modelRef) {
-      params.modelRef = modelRef;
+      params._meta = { modelRef };
     }
     const jsonRpc = acpRequest('session/new', params);
     const parsed = JSON.parse(jsonRpc);
-    pendingAcpRequestsRef.current.set(parsed.id, { method: 'session/new', label: name.replace(/^WEB_/, '') });
+    pendingAcpRequestsRef.current.set(parsed.id, { method: 'session/new' });
     wsClient.send({ type: 'acp_message', json_rpc: jsonRpc });
   }, []);
 
