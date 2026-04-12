@@ -1454,6 +1454,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
               const update = rpc.params.update as Record<string, unknown>;
               if (!sessionId || !update) break;
 
+              //
+              // Extract text from content blocks (service sends
+              // content: [{ type: "text", text: "..." }]).
+              //
+
+              const extractText = (u: Record<string, unknown>): string => {
+                const content = u.content as Array<{ type: string; text?: string }> | undefined;
+                if (content && Array.isArray(content)) {
+                  return content
+                    .filter(b => b.type === 'text' && b.text)
+                    .map(b => b.text!)
+                    .join('');
+                }
+                return (u.text as string) || '';
+              };
+
               switch (update.kind) {
                 case 'started':
                   dispatch({
@@ -1463,35 +1479,45 @@ export function AppProvider({ children }: { children: ReactNode }) {
                     model: (update.model as string) || 'unknown',
                   });
                   break;
-                case 'text':
-                  dispatch({
-                    type: 'ORCHESTRATOR_ADD_CONTENT',
-                    sessionId,
-                    content: (update.text as string) || '',
-                  });
+                case 'text': {
+                  const text = extractText(update);
+                  if (text) {
+                    dispatch({
+                      type: 'ORCHESTRATOR_ADD_CONTENT',
+                      sessionId,
+                      content: text,
+                    });
+                  }
                   break;
-                case 'tool_call':
-                  if ((update.name as string) !== 'report_plan') {
+                }
+                case 'tool_call': {
+                  const toolName = (update.toolName as string) || '';
+                  if (toolName !== 'report_plan') {
+                    const toolInput = update.toolInput;
                     dispatch({
                       type: 'ORCHESTRATOR_TOOL_EXECUTING',
                       sessionId,
-                      name: (update.name as string) || '',
-                      input: update.input as string | undefined,
+                      name: toolName,
+                      input: toolInput ? JSON.stringify(toolInput) : undefined,
                     });
                   }
                   break;
-                case 'tool_call_result':
-                  if ((update.name as string) !== 'report_plan') {
+                }
+                case 'tool_call_result': {
+                  const toolName = (update.toolName as string) || '';
+                  if (toolName !== 'report_plan') {
+                    const resultText = extractText(update);
                     dispatch({
                       type: 'ORCHESTRATOR_TOOL_EXECUTED',
                       sessionId,
-                      name: (update.name as string) || '',
-                      display: (update.display as string) || '',
-                      success: (update.success as boolean) ?? true,
-                      result: (update.result as string) || '',
+                      name: toolName,
+                      display: toolName,
+                      success: true,
+                      result: resultText,
                     });
                   }
                   break;
+                }
                 case 'plan_update':
                   dispatch({
                     type: 'ORCHESTRATOR_PLAN_UPDATED',
@@ -1503,9 +1529,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   dispatch({
                     type: 'ORCHESTRATOR_TOKEN_USAGE',
                     sessionId,
-                    promptTokens: (update.prompt_tokens as number) || 0,
-                    completionTokens: (update.completion_tokens as number) || 0,
-                    totalTokens: (update.total_tokens as number) || 0,
+                    promptTokens: (update.promptTokens as number) || 0,
+                    completionTokens: (update.completionTokens as number) || 0,
+                    totalTokens: (update.totalTokens as number) || 0,
                   });
                   break;
               }

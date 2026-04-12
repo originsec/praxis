@@ -30,21 +30,27 @@ pub fn render(f: &mut Frame, area: Rect, state: &OrchestratorState) {
         .unwrap_or(true);
 
     if show_welcome {
+        let tab_height = if show_tabs { 1 } else { 0 };
+
         let chunks = Layout::vertical([
+            Constraint::Length(tab_height),
             Constraint::Min(1),
             Constraint::Length(3),
             Constraint::Length(1),
         ])
         .split(area);
 
-        render_welcome(f, chunks[0]);
+        if show_tabs {
+            render_tab_bar(f, chunks[0], state);
+        }
+        render_welcome(f, chunks[1]);
 
         let padded = |r: Rect| -> Rect {
             Rect { x: r.x + 1, width: r.width.saturating_sub(2), ..r }
         };
 
-        render_input(f, padded(chunks[1]), state);
-        render_status_hints(f, padded(chunks[2]), state);
+        render_input(f, padded(chunks[2]), state);
+        render_status_hints(f, padded(chunks[3]), state);
         return;
     }
 

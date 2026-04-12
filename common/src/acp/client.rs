@@ -11,6 +11,7 @@ pub struct AcpClient {
 pub enum AcpEvent {
     InitializeResult { protocol_version: u32 },
     SessionCreated { session_id: String },
+    SessionStarted { session_id: String, provider: String, model: String },
     SessionClosed { session_id: String },
     TextContent { session_id: String, text: String },
     ToolCall { session_id: String, name: String, input: Option<String> },
@@ -142,9 +143,10 @@ impl AcpClient {
         match method {
             "session/update" => {
                 let params = params?;
+                let raw_update = params.get("update")?.clone();
                 let update_params: SessionUpdateParams =
                     serde_json::from_value(params).ok()?;
-                self.parse_session_update(update_params)
+                self.parse_session_update(update_params, &raw_update)
             }
             "session/closed" => {
                 let params = params?;
@@ -163,12 +165,18 @@ impl AcpClient {
     // on the update kind.
     //
 
-    fn parse_session_update(&self, params: SessionUpdateParams) -> Option<AcpEvent> {
+    fn parse_session_update(&self, params: SessionUpdateParams, raw_update: &Value) -> Option<AcpEvent> {
         let session_id = params.session_id;
         let update = params.update;
         let kind = update.kind.as_deref()?;
 
         match kind {
+            "started" => {
+                let provider = raw_update.get("provider").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                let model = raw_update.get("model").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                Some(AcpEvent::SessionStarted { session_id, provider, model })
+            }
+
             "text" => {
                 let text = update
                     .content
@@ -231,21 +239,19 @@ impl AcpClient {
             }
 
             "plan_update" => {
-                let plan = update
-                    .raw_input
-                    .and_then(|v| serde_json::from_value::<OrchestratorPlan>(v).ok())
+                let plan = raw_update.get("plan")
+                    .and_then(|v| serde_json::from_value::<OrchestratorPlan>(v.clone()).ok())
                     .unwrap_or_default();
                 Some(AcpEvent::PlanUpdate { session_id, plan })
             }
 
             "usage" => {
-                let raw = update.raw_input.or(update.raw_output)?;
                 let prompt_tokens =
-                    raw.get("promptTokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    raw_update.get("promptTokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                 let completion_tokens =
-                    raw.get("completionTokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    raw_update.get("completionTokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                 let total_tokens =
-                    raw.get("totalTokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    raw_update.get("totalTokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
                 Some(AcpEvent::TokenUsage {
                     session_id,
                     prompt_tokens,

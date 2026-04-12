@@ -3024,6 +3024,13 @@ impl App {
                     Some(self.orchestrator.sessions.len() - 1);
             }
 
+            AcpEvent::SessionStarted { session_id, provider, model } => {
+                if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
+                    session.provider = Some(provider);
+                    session.model = Some(model);
+                }
+            }
+
             AcpEvent::SessionClosed { session_id } => {
                 if let Some(idx) = self
                     .orchestrator
