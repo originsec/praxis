@@ -224,11 +224,6 @@ pub struct OrchestratorState {
     pub history: Vec<String>,
     pub history_index: Option<usize>,
     pub saved_input: String,
-
-    //
-    // Set by the renderer so scroll offset can be clamped.
-    //
-    pub max_scroll: Cell<u16>,
 }
 
 impl OrchestratorState {
@@ -262,7 +257,6 @@ impl Default for OrchestratorState {
             history: Vec::new(),
             history_index: None,
             saved_input: String::new(),
-            max_scroll: Cell::new(0),
         }
     }
 }

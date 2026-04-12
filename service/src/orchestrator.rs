@@ -437,8 +437,6 @@ impl OrchestratorManager {
                                 execute_mcp_tool(&peer, &tool_name, &tool_args).await
                             };
 
-                            let success = !result.contains("\"status\":\"error\"");
-
                             common::log_info!("Tool {} result: {}", tool_name, common::truncate_str(&result, 100));
 
                             if tool_name == "report_plan" {
@@ -618,6 +616,7 @@ impl OrchestratorManager {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn close_all_sessions(
         &self,
         client_id: &str,
@@ -658,6 +657,7 @@ impl OrchestratorManager {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn list_sessions(&self, client_id: &str) -> Vec<String> {
         let sessions = self.sessions.read().await;
         sessions.get(client_id)

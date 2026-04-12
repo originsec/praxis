@@ -644,7 +644,6 @@ async fn run_main_loop() -> Result<()> {
         chain_executor,
         node_exec_lock: node_exec_lock.clone(),
         agent_chat_manager,
-        orchestrator_manager,
         acp_server,
         toolkit_manager,
         mcp_manager,
