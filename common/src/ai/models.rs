@@ -190,12 +190,23 @@ pub async fn probe_openai_compatible_endpoint(
     Ok(data.data.into_iter().map(|m| m.id).collect())
 }
 
-/// Fetch models from local Ollama instance
-pub async fn fetch_ollama_models() -> Result<Vec<String>, String> {
+/// Fetch models from a local Ollama instance.
+///
+/// Uses the Ollama-native `/api/tags` endpoint for model discovery.
+/// The base_url should be the Ollama server root (e.g. `http://localhost:11434`),
+/// not the OpenAI-compatible `/v1` path.
+pub async fn fetch_ollama_models(base_url: Option<&str>) -> Result<Vec<String>, String> {
     let client = reqwest::Client::new();
 
+    //
+    // Strip /v1 suffix if present — the tags endpoint is on the native API.
+    //
+    let root = base_url.unwrap_or("http://localhost:11434");
+    let root = root.trim_end_matches('/').trim_end_matches("/v1");
+    let url = format!("{}/api/tags", root);
+
     let response = client
-        .get("http://localhost:11434/api/tags")
+        .get(&url)
         .timeout(std::time::Duration::from_secs(5))
         .send()
         .await
@@ -215,12 +226,20 @@ pub async fn fetch_ollama_models() -> Result<Vec<String>, String> {
     Ok(data.models.into_iter().map(|m| m.name).collect())
 }
 
-/// Fetch models for a given provider
-pub async fn fetch_models_for_provider(provider: &str, api_key: &str) -> Result<Vec<String>, String> {
+/// Fetch models for a given provider.
+///
+/// The optional `base_url` overrides the default endpoint for providers that
+/// support it (Ollama, Custom, or any OpenAI-compatible provider).
+pub async fn fetch_models_for_provider(
+    provider: &str,
+    api_key: &str,
+    base_url: Option<&str>,
+) -> Result<Vec<String>, String> {
     let mut models = match provider {
         "anthropic" => fetch_anthropic_models(api_key).await,
         "openai" => {
-            fetch_openai_compatible_models("https://api.openai.com/v1", api_key).await
+            let url = base_url.unwrap_or("https://api.openai.com/v1");
+            fetch_openai_compatible_models(url, api_key).await
         }
         "groq" => {
             fetch_openai_compatible_models("https://api.groq.com/openai/v1", api_key).await
@@ -250,7 +269,16 @@ pub async fn fetch_models_for_provider(provider: &str, api_key: &str) -> Result<
         "openrouter" => {
             fetch_openai_compatible_models("https://openrouter.ai/api/v1", api_key).await
         }
-        "ollama" => fetch_ollama_models().await,
+        "ollama" => fetch_ollama_models(base_url).await,
+        "custom" => {
+            let url = base_url.ok_or("Custom provider requires a base URL")?;
+            let key = if api_key.is_empty() {
+                None
+            } else {
+                Some(api_key)
+            };
+            probe_openai_compatible_endpoint(url, key, true).await
+        }
         _ => Err(format!("Unknown or unsupported provider: {}", provider)),
     }?;
 

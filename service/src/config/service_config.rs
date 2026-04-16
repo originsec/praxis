@@ -71,6 +71,8 @@ pub struct ModelDefinition {
     pub provider: String,
     pub model: String,
     pub api_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
 }
 
 /// Service configuration backed by database storage

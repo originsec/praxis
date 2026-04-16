@@ -25,7 +25,7 @@ pub async fn run_transform_per_message(
 
     let provider = Provider::from_str(&model_def.provider)
         .ok_or_else(|| anyhow!("Unsupported provider '{}'", model_def.provider))?;
-    let client = create_ai_client(provider, model_def.api_key.clone())?;
+    let client = create_ai_client(provider, model_def.api_key.clone(), model_def.base_url.as_deref())?;
 
     let (mut messages, format) = parse_session_messages(session_content)?;
 

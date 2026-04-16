@@ -689,7 +689,9 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
         .map(|p| p.display_name())
         .unwrap_or("?");
 
-    let base_lines: u16 = 5 + 2; // 3 fields + blank + hints + border top/bottom
+    let show_base_url = form.shows_base_url();
+    let field_count: u16 = if show_base_url { 4 } else { 3 }; // provider + apikey + [baseurl] + model
+    let base_lines: u16 = field_count + 2 + 2; // fields + blank + hints + border top/bottom
     let dropdown_extra = if form.model_dropdown_open {
         1 + form.available_models.len() as u16 // blank + model list
     } else if form.loading_models {
@@ -786,11 +788,20 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
         };
 
     //
-    // API key: mask when not editing.
+    // API key: mask when not editing. Show (optional) hint for local providers.
     //
 
-    let key_sel = form.focused_field == 1;
+    let key_sel = form.logical_field() == 1 && form.focused_field == 1;
     let key_text;
+    let api_key_optional = providers
+        .get(form.provider_idx)
+        .map(|p| p.api_key_optional())
+        .unwrap_or(false);
+    let key_label = if api_key_optional {
+        "API Key (opt)"
+    } else {
+        "API Key     "
+    };
     let key_display = if key_sel && form.editing_text {
         &form.api_key
     } else if form.api_key.is_empty() {
@@ -807,7 +818,7 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
     };
 
     lines.push(build_field(
-        "API Key     ",
+        key_label,
         key_display,
         key_sel,
         form.editing_text,
@@ -815,10 +826,26 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
     ));
 
     //
+    // Base URL field (only for local/custom providers).
+    //
+
+    if show_base_url {
+        let url_sel = form.focused_field == 2;
+        lines.push(build_field(
+            "Base URL    ",
+            &form.base_url,
+            url_sel,
+            form.editing_text,
+            form.cursor_pos,
+        ));
+    }
+
+    //
     // Model name field.
     //
 
-    let mod_sel = form.focused_field == 2;
+    let model_field_idx = if show_base_url { 3 } else { 2 };
+    let mod_sel = form.focused_field == model_field_idx;
     lines.push(build_field(
         "Model       ",
         &form.model_name,
@@ -839,7 +866,7 @@ fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm) {
         Span::styled("esc", Style::default().fg(DIM)),
         Span::styled(" cancel", Style::default().fg(MUTED)),
     ];
-    if form.focused_field == 2 && form.editing_text {
+    if form.logical_field() == 3 && form.editing_text {
         hints.push(Span::styled("  enter", Style::default().fg(DIM)));
         hints.push(Span::styled(" load models", Style::default().fg(MUTED)));
     }

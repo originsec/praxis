@@ -15,6 +15,8 @@ pub enum Provider {
     Moonshot,
     FireworksAI,
     OpenRouter,
+    Ollama,
+    Custom,
 }
 
 impl Provider {
@@ -33,6 +35,8 @@ impl Provider {
             Provider::Moonshot => "moonshot",
             Provider::FireworksAI => "fireworksai",
             Provider::OpenRouter => "openrouter",
+            Provider::Ollama => "ollama",
+            Provider::Custom => "custom",
         }
     }
 
@@ -51,6 +55,8 @@ impl Provider {
             "moonshot" => Some(Provider::Moonshot),
             "fireworksai" | "fireworks" => Some(Provider::FireworksAI),
             "openrouter" => Some(Provider::OpenRouter),
+            "ollama" => Some(Provider::Ollama),
+            "custom" => Some(Provider::Custom),
             _ => None,
         }
     }
@@ -70,6 +76,8 @@ impl Provider {
             Provider::Moonshot,
             Provider::FireworksAI,
             Provider::OpenRouter,
+            Provider::Ollama,
+            Provider::Custom,
         ]
     }
 
@@ -88,6 +96,8 @@ impl Provider {
             Provider::Moonshot => "Moonshot AI",
             Provider::FireworksAI => "Fireworks AI",
             Provider::OpenRouter => "OpenRouter",
+            Provider::Ollama => "Ollama (Local)",
+            Provider::Custom => "Custom (OpenAI-Compatible)",
         }
     }
 
@@ -106,6 +116,8 @@ impl Provider {
             Provider::Moonshot => "https://api.moonshot.ai/v1",
             Provider::FireworksAI => "https://api.fireworks.ai/inference/v1",
             Provider::OpenRouter => "https://openrouter.ai/api/v1",
+            Provider::Ollama => "http://localhost:11434/v1",
+            Provider::Custom => "",
         }
     }
 
@@ -123,7 +135,19 @@ impl Provider {
                 | Provider::Moonshot
                 | Provider::FireworksAI
                 | Provider::OpenRouter
+                | Provider::Ollama
+                | Provider::Custom
         )
+    }
+
+    /// Whether this provider requires a base URL to be specified by the user
+    pub fn requires_base_url(&self) -> bool {
+        matches!(self, Provider::Custom)
+    }
+
+    /// Whether the API key is optional for this provider
+    pub fn api_key_optional(&self) -> bool {
+        matches!(self, Provider::Ollama | Provider::Custom)
     }
 }
 

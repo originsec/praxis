@@ -62,6 +62,7 @@ async fn main() -> anyhow::Result<()> {
         model: "claude-haiku-4-5-20241022".to_string(),
         max_retries: 3,
         max_tokens: Some(4096),
+        base_url: None,
     };
 
     let parser = SemanticParser::new(config)?;

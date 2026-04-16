@@ -40,7 +40,7 @@ pub struct SemanticParser {
 impl SemanticParser {
     /// Create a new semantic parser with the given configuration
     pub fn new(config: ParserConfig) -> Result<Self> {
-        let client = create_ai_client(config.provider, config.api_key)?;
+        let client = create_ai_client(config.provider, config.api_key, config.base_url.as_deref())?;
 
         Ok(Self {
             client,

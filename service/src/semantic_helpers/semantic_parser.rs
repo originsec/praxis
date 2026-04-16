@@ -54,6 +54,7 @@ pub async fn handle_semantic_parser_request(
         model: model_def.model.clone(),
         max_retries: 3,
         max_tokens: Some(4096),
+        base_url: model_def.base_url,
     };
 
     let parser = match SemanticParser::new(parser_config) {

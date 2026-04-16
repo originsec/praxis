@@ -435,7 +435,7 @@ pub async fn execute_agent_mode(
             .ok_or_else(|| anyhow::anyhow!("No LLM configured for Semantic Ops. Configure in Settings > LLM Providers."))?
     };
 
-    let (provider_str, model, api_key) = (model_def.provider, model_def.model, model_def.api_key);
+    let (provider_str, model, api_key, base_url) = (model_def.provider, model_def.model, model_def.api_key, model_def.base_url);
 
     //
     // Drop the config read lock now that we've extracted the values we need.
@@ -458,7 +458,7 @@ pub async fn execute_agent_mode(
     //
     // Create AI client.
     //
-    let client = create_ai_client(provider, api_key.clone())?;
+    let client = create_ai_client(provider, api_key.clone(), base_url.as_deref())?;
 
     //
     // Define the session_prompt tool.

@@ -1249,12 +1249,12 @@ impl ChainExecutor {
             config_guard.get_semantic_ops_model_def()
                 .ok_or_else(|| anyhow::anyhow!("No LLM configured for transform. Configure in Settings > LLM Providers."))?
         };
-        let (provider_str, model_name, api_key) = (model_def.provider, model_def.model, model_def.api_key);
+        let (provider_str, model_name, api_key, base_url) = (model_def.provider, model_def.model, model_def.api_key, model_def.base_url);
         drop(config_guard);
 
         let provider = Provider::from_str(&provider_str)
             .ok_or_else(|| anyhow::anyhow!("Unknown provider: {}", provider_str))?;
-        let client = create_ai_client(provider, api_key)?;
+        let client = create_ai_client(provider, api_key, base_url.as_deref())?;
 
         let user_content = if merged_input.is_empty() {
             prompt.to_string()
