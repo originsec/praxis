@@ -13,6 +13,8 @@ pub struct ParserConfig {
     pub max_retries: usize,
     /// Maximum tokens in response (default: 4096)
     pub max_tokens: Option<u32>,
+    /// Optional custom base URL for the provider's API
+    pub base_url: Option<String>,
 }
 
 impl Default for ParserConfig {
@@ -23,6 +25,7 @@ impl Default for ParserConfig {
             model: "claude-haiku-4-5-20241022".to_string(),
             max_retries: 3,
             max_tokens: Some(4096),
+            base_url: None,
         }
     }
 }

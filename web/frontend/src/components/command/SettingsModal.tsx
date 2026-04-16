@@ -27,6 +27,7 @@ interface ModelDefinition {
   provider: string;
   model: string;
   apiKey: string;
+  baseUrl?: string;
 }
 
 interface FeatureAssignments {
@@ -65,6 +66,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     provider: 'anthropic',
     model: '',
     apiKey: '',
+    baseUrl: '',
   });
 
   //
@@ -276,10 +278,12 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       alert(`Model "${name}" already exists.`);
       return;
     }
-    const updated = [...modelDefinitions, { name, ...newModel }];
+    const def: ModelDefinition = { name, ...newModel };
+    if (!def.baseUrl) delete def.baseUrl;
+    const updated = [...modelDefinitions, def];
     setModelDefinitions(updated);
     saveModels(updated);
-    setNewModel({ provider: 'anthropic', model: '', apiKey: '' });
+    setNewModel({ provider: 'anthropic', model: '', apiKey: '', baseUrl: '' });
     setIsAddingModel(false);
   };
 
@@ -291,8 +295,10 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       alert(`Model "${newName}" already exists.`);
       return;
     }
+    const cleanModel = { ...editingModel, name: newName };
+    if (!cleanModel.baseUrl) delete cleanModel.baseUrl;
     const updated = modelDefinitions.map(m =>
-      m.name === oldName ? { ...editingModel, name: newName } : m
+      m.name === oldName ? cleanModel : m
     );
     setModelDefinitions(updated);
     saveModels(updated);
@@ -336,21 +342,30 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     saveFeatures(featureAssignments, orchestratorMaxTokens);
   };
 
-  const fetchModels = async (provider: string, apiKey: string) => {
+  const isLocalProvider = (p: string) => p === 'ollama' || p === 'custom';
+
+  const fetchModels = async (provider: string, apiKey: string, baseUrl?: string) => {
     setModelError(null);
     setIsLoadingModels(true);
     setShowModelChooser(true);
     setAvailableModels([]);
-    if (!apiKey) {
+    if (!apiKey && !isLocalProvider(provider)) {
       setModelError('API key is required to fetch models');
       setIsLoadingModels(false);
       return;
     }
+    if (provider === 'custom' && !baseUrl) {
+      setModelError('Base URL is required for Custom provider');
+      setIsLoadingModels(false);
+      return;
+    }
     try {
+      const body: Record<string, string> = { provider, api_key: apiKey };
+      if (baseUrl) body.base_url = baseUrl;
       const response = await fetch('/api/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, api_key: apiKey }),
+        body: JSON.stringify(body),
       });
       if (!response.ok) {
         const text = await response.text();
@@ -622,7 +637,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                           <label className="block text-[10px] tracking-wider text-muted mb-1">Provider</label>
                           <select
                             value={newModel.provider}
-                            onChange={e => setNewModel(m => ({ ...m, provider: e.target.value }))}
+                            onChange={e => setNewModel(m => ({ ...m, provider: e.target.value, baseUrl: e.target.value === 'ollama' ? 'http://localhost:11434/v1' : e.target.value === 'custom' ? '' : '' }))}
                             className={inputCls}
                           >
                             {providers.map(p => (
@@ -631,15 +646,36 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                           </select>
                         </div>
                         <div>
-                          <label className="block text-[10px] tracking-wider text-muted mb-1">API Key</label>
+                          <label className="block text-[10px] tracking-wider text-muted mb-1">
+                            API Key {isLocalProvider(newModel.provider) && <span className="text-muted">(optional)</span>}
+                          </label>
                           <input
                             type="text"
                             value={newModel.apiKey}
                             onChange={e => setNewModel(m => ({ ...m, apiKey: e.target.value }))}
-                            placeholder="sk-..."
+                            placeholder={isLocalProvider(newModel.provider) ? '(optional)' : 'sk-...'}
                             className={inputCls}
                           />
                         </div>
+                        {isLocalProvider(newModel.provider) && (
+                          <div className="col-span-2">
+                            <label className="block text-[10px] tracking-wider text-muted mb-1">
+                              Base URL {newModel.provider === 'custom' && <span className="text-[var(--accent-error)]">*</span>}
+                            </label>
+                            <input
+                              type="text"
+                              value={newModel.baseUrl || ''}
+                              onChange={e => setNewModel(m => ({ ...m, baseUrl: e.target.value }))}
+                              placeholder={newModel.provider === 'ollama' ? 'http://localhost:11434/v1' : 'http://localhost:8000/v1'}
+                              className={inputCls}
+                            />
+                            <p className="text-[9px] text-muted mt-0.5">
+                              {newModel.provider === 'ollama'
+                                ? 'Ollama OpenAI-compatible endpoint (default: localhost:11434/v1)'
+                                : 'OpenAI-compatible API endpoint (vLLM, llama.cpp, LM Studio, etc.)'}
+                            </p>
+                          </div>
+                        )}
                         <div className="col-span-2">
                           <label className="block text-[10px] tracking-wider text-muted mb-1">Model</label>
                           <div className="flex gap-1.5">
@@ -651,9 +687,9 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                               className={`flex-1 ${inputCls}`}
                             />
                             <button
-                              onClick={() => { setModelChooserTarget('new'); fetchModels(newModel.provider, newModel.apiKey); }}
-                              disabled={!newModel.apiKey}
-                              title={newModel.apiKey ? 'Browse models' : 'Enter API key first'}
+                              onClick={() => { setModelChooserTarget('new'); fetchModels(newModel.provider, newModel.apiKey, newModel.baseUrl); }}
+                              disabled={!newModel.apiKey && !isLocalProvider(newModel.provider)}
+                              title={newModel.apiKey || isLocalProvider(newModel.provider) ? 'Browse models' : 'Enter API key first'}
                               className="px-1.5 py-1 bg-[var(--bg-primary)] border border-subtle hover:bg-[var(--bg-tertiary)] transition-colors disabled:opacity-50"
                             >
                               <List size={14} />
@@ -702,7 +738,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                                   <label className="block text-[10px] tracking-wider text-muted mb-1">Provider</label>
                                   <select
                                     value={editingModel.provider}
-                                    onChange={e => setEditingModel({ ...editingModel, provider: e.target.value })}
+                                    onChange={e => setEditingModel({ ...editingModel, provider: e.target.value, baseUrl: e.target.value === 'ollama' ? (editingModel.baseUrl || 'http://localhost:11434/v1') : e.target.value === 'custom' ? (editingModel.baseUrl || '') : editingModel.baseUrl })}
                                     className={inputCls}
                                   >
                                     {providers.map(p => (
@@ -711,15 +747,31 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                                   </select>
                                 </div>
                                 <div>
-                                  <label className="block text-[10px] tracking-wider text-muted mb-1">API Key</label>
+                                  <label className="block text-[10px] tracking-wider text-muted mb-1">
+                                    API Key {isLocalProvider(editingModel.provider) && <span className="text-muted">(optional)</span>}
+                                  </label>
                                   <input
                                     type="text"
                                     value={editingModel.apiKey}
                                     onChange={e => setEditingModel({ ...editingModel, apiKey: e.target.value })}
-                                    placeholder="sk-..."
+                                    placeholder={isLocalProvider(editingModel.provider) ? '(optional)' : 'sk-...'}
                                     className={inputCls}
                                   />
                                 </div>
+                                {isLocalProvider(editingModel.provider) && (
+                                  <div className="col-span-2">
+                                    <label className="block text-[10px] tracking-wider text-muted mb-1">
+                                      Base URL {editingModel.provider === 'custom' && <span className="text-[var(--accent-error)]">*</span>}
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={editingModel.baseUrl || ''}
+                                      onChange={e => setEditingModel({ ...editingModel, baseUrl: e.target.value })}
+                                      placeholder={editingModel.provider === 'ollama' ? 'http://localhost:11434/v1' : 'http://localhost:8000/v1'}
+                                      className={inputCls}
+                                    />
+                                  </div>
+                                )}
                                 <div className="col-span-2">
                                   <label className="block text-[10px] tracking-wider text-muted mb-1">Model</label>
                                   <div className="flex gap-1.5">
@@ -730,8 +782,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                                       className={`flex-1 ${inputCls}`}
                                     />
                                     <button
-                                      onClick={() => { setModelChooserTarget('edit'); fetchModels(editingModel.provider, editingModel.apiKey); }}
-                                      disabled={!editingModel.apiKey}
+                                      onClick={() => { setModelChooserTarget('edit'); fetchModels(editingModel.provider, editingModel.apiKey, editingModel.baseUrl); }}
+                                      disabled={!editingModel.apiKey && !isLocalProvider(editingModel.provider)}
                                       className="px-1.5 py-1 bg-[var(--bg-primary)] border border-subtle hover:bg-[var(--bg-tertiary)] transition-colors disabled:opacity-50"
                                     >
                                       <List size={14} />

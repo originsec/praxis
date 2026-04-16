@@ -55,12 +55,12 @@ pub async fn summarize_traffic(
         }
     };
 
-    let (api_key, model) = (model_def.api_key, model_def.model);
+    let (api_key, model, base_url) = (model_def.api_key, model_def.model, model_def.base_url);
 
     //
     // Create AI client.
     //
-    let client = match create_ai_client(provider, api_key) {
+    let client = match create_ai_client(provider, api_key, base_url.as_deref()) {
         Ok(c) => c,
         Err(e) => {
             return SummarizationResult {

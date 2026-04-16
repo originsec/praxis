@@ -157,7 +157,10 @@ pub fn print_banner(rabbitmq_url: &str, listen_addr: &SocketAddr) {
 #[allow(dead_code)]
 struct ModelListRequest {
     provider: String,
+    #[serde(default)]
     api_key: String,
+    #[serde(default)]
+    base_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -325,7 +328,7 @@ async fn get_providers() -> Json<ProvidersResponse> {
 async fn list_models(
     Json(request): Json<ModelListRequest>,
 ) -> Result<Json<ModelListResponse>, (axum::http::StatusCode, Json<ErrorResponse>)> {
-    match common::ai::fetch_models_for_provider(&request.provider, &request.api_key).await {
+    match common::ai::fetch_models_for_provider(&request.provider, &request.api_key, request.base_url.as_deref()).await {
         Ok(models) => Ok(Json(ModelListResponse { models })),
         Err(e) => Err((
             axum::http::StatusCode::BAD_GATEWAY,

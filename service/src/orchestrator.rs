@@ -122,7 +122,11 @@ impl OrchestratorManager {
             }
         };
 
-        if model_def.api_key.is_empty() {
+        let provider_needs_key = Provider::from_str(&model_def.provider)
+            .map(|p| !p.api_key_optional())
+            .unwrap_or(true);
+
+        if model_def.api_key.is_empty() && provider_needs_key {
             let _ = send_to_client(
                 publish_channel,
                 client_id,
@@ -146,7 +150,7 @@ impl OrchestratorManager {
 
         let provider = Provider::from_str(&model_def.provider).unwrap_or(Provider::Anthropic);
 
-        let client = match create_ai_client(provider, model_def.api_key.clone()) {
+        let client = match create_ai_client(provider, model_def.api_key.clone(), model_def.base_url.as_deref()) {
             Ok(c) => c,
             Err(e) => {
                 let _ = send_to_client(

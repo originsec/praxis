@@ -68,71 +68,50 @@ impl AiClient {
     }
 }
 
-/// Create an AI client with the given configuration
+/// Create an AI client with the given configuration.
 ///
-/// # Arguments
-///
-/// * `provider` - The AI provider to use
-/// * `api_key` - API key for the provider
-///
-/// # Returns
-///
-/// Result containing the configured AiClient or an error
-///
-/// # Examples
-///
-/// ```no_run
-/// use common::ai::{Provider, create_ai_client};
-///
-/// # async fn example() -> anyhow::Result<()> {
-/// let client = create_ai_client(Provider::Anthropic, "sk-...".to_string())?;
-/// # Ok(())
-/// # }
-/// ```
-pub fn create_ai_client(provider: Provider, api_key: String) -> Result<AiClient> {
+/// The optional `base_url` overrides the provider's default endpoint. This is
+/// used for local model servers (Ollama, vLLM, llama.cpp, LM Studio) and
+/// custom OpenAI-compatible endpoints.
+pub fn create_ai_client(
+    provider: Provider,
+    api_key: String,
+    base_url: Option<&str>,
+) -> Result<AiClient> {
     match provider {
         Provider::Anthropic => Ok(AiClient::Anthropic(AnthropicClient::new(api_key))),
-        Provider::OpenAI => Ok(AiClient::OpenAI(OpenAIClient::new(api_key))),
         Provider::Gemini => Ok(AiClient::Gemini(GeminiClient::new(api_key))),
+
         //
-        // OpenAI-compatible providers.
+        // Custom provider requires a base URL.
         //
-        Provider::Groq => Ok(AiClient::OpenAI(OpenAIClient::with_base_url(
-            api_key,
-            "https://api.groq.com/openai/v1".to_string(),
-        ))),
-        Provider::Mistral => Ok(AiClient::OpenAI(OpenAIClient::with_base_url(
-            api_key,
-            "https://api.mistral.ai/v1".to_string(),
-        ))),
-        Provider::XAI => Ok(AiClient::OpenAI(OpenAIClient::with_base_url(
-            api_key,
-            "https://api.x.ai/v1".to_string(),
-        ))),
-        Provider::Cerebras => Ok(AiClient::OpenAI(OpenAIClient::with_base_url(
-            api_key,
-            "https://api.cerebras.ai/v1".to_string(),
-        ))),
-        Provider::Nvidia => Ok(AiClient::OpenAI(OpenAIClient::with_base_url(
-            api_key,
-            "https://integrate.api.nvidia.com/v1".to_string(),
-        ))),
-        Provider::MiniMax => Ok(AiClient::OpenAI(OpenAIClient::with_base_url(
-            api_key,
-            "https://api.minimax.io/v1".to_string(),
-        ))),
-        Provider::Moonshot => Ok(AiClient::OpenAI(OpenAIClient::with_base_url(
-            api_key,
-            "https://api.moonshot.ai/v1".to_string(),
-        ))),
-        Provider::FireworksAI => Ok(AiClient::OpenAI(OpenAIClient::with_base_url(
-            api_key,
-            "https://api.fireworks.ai/inference/v1".to_string(),
-        ))),
-        Provider::OpenRouter => Ok(AiClient::OpenAI(OpenAIClient::with_base_url(
-            api_key,
-            "https://openrouter.ai/api/v1".to_string(),
-        ))),
+        Provider::Custom => {
+            let url = base_url
+                .filter(|u| !u.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("Custom provider requires a base URL"))?;
+            Ok(AiClient::OpenAI(OpenAIClient::with_base_url(
+                api_key,
+                url.to_string(),
+            )))
+        }
+
+        //
+        // All other OpenAI-compatible providers (including Ollama).
+        // Use custom base_url if provided, otherwise fall back to the
+        // provider's default.
+        //
+        other => {
+            let url = base_url
+                .filter(|u| !u.is_empty())
+                .map(|u| u.to_string())
+                .unwrap_or_else(|| other.base_url().to_string());
+
+            if other == Provider::OpenAI && base_url.is_none() {
+                Ok(AiClient::OpenAI(OpenAIClient::new(api_key)))
+            } else {
+                Ok(AiClient::OpenAI(OpenAIClient::with_base_url(api_key, url)))
+            }
+        }
     }
 }
 
@@ -209,7 +188,7 @@ pub fn build_message(role: Role, content: String) -> Message {
 /// use common::ai::{Provider, create_ai_client, execute_with_tool_parsing, build_message, AiResponse, Role};
 ///
 /// # async fn example() -> anyhow::Result<()> {
-/// let client = create_ai_client(Provider::Anthropic, "sk-...".to_string())?;
+/// let client = create_ai_client(Provider::Anthropic, "sk-...".to_string(), None)?;
 /// let messages = vec![
 ///     build_message(Role::User, "Hello!".to_string())
 /// ];
@@ -254,33 +233,65 @@ mod tests {
 
     #[test]
     fn test_create_client_anthropic() {
-        let client = create_ai_client(Provider::Anthropic, "test-key".to_string());
+        let client = create_ai_client(Provider::Anthropic, "test-key".to_string(), None);
         assert!(client.is_ok());
         assert!(matches!(client.unwrap(), AiClient::Anthropic(_)));
     }
 
     #[test]
     fn test_create_client_openai() {
-        let client = create_ai_client(Provider::OpenAI, "test-key".to_string());
+        let client = create_ai_client(Provider::OpenAI, "test-key".to_string(), None);
         assert!(client.is_ok());
         assert!(matches!(client.unwrap(), AiClient::OpenAI(_)));
     }
 
     #[test]
     fn test_create_client_groq() {
-        let client = create_ai_client(Provider::Groq, "test-key".to_string());
+        let client = create_ai_client(Provider::Groq, "test-key".to_string(), None);
         assert!(client.is_ok());
-        //
-        // Groq uses OpenAI-compatible.
-        //
         assert!(matches!(client.unwrap(), AiClient::OpenAI(_)));
     }
 
     #[test]
     fn test_create_client_gemini() {
-        let client = create_ai_client(Provider::Gemini, "test-key".to_string());
+        let client = create_ai_client(Provider::Gemini, "test-key".to_string(), None);
         assert!(client.is_ok());
         assert!(matches!(client.unwrap(), AiClient::Gemini(_)));
+    }
+
+    #[test]
+    fn test_create_client_ollama() {
+        let client = create_ai_client(Provider::Ollama, String::new(), None);
+        assert!(client.is_ok());
+        assert!(matches!(client.unwrap(), AiClient::OpenAI(_)));
+    }
+
+    #[test]
+    fn test_create_client_ollama_custom_url() {
+        let client = create_ai_client(
+            Provider::Ollama,
+            String::new(),
+            Some("http://myserver:11434/v1"),
+        );
+        assert!(client.is_ok());
+        assert!(matches!(client.unwrap(), AiClient::OpenAI(_)));
+    }
+
+    #[test]
+    fn test_create_client_custom_requires_url() {
+        let client = create_ai_client(Provider::Custom, String::new(), None);
+        assert!(client.is_err());
+    }
+
+    #[test]
+    fn test_create_client_custom_with_url() {
+        let client = create_ai_client(
+            Provider::Custom,
+            String::new(),
+            Some("http://localhost:8000/v1"),
+        );
+        assert!(client.is_ok());
+        assert!(matches!(client.unwrap(), AiClient::OpenAI(_)));
     }
 
     #[test]

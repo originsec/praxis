@@ -523,6 +523,8 @@ pub struct ModelDef {
     pub model: String,
     #[serde(rename = "apiKey", default)]
     pub api_key: String,
+    #[serde(rename = "baseUrl", default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
 }
 
 pub fn sorted_providers() -> Vec<common::Provider> {
@@ -537,9 +539,10 @@ pub fn sorted_providers() -> Vec<common::Provider> {
 
 pub struct ModelEditForm {
     pub edit_index: Option<usize>, // None = adding new, Some(i) = editing existing
-    pub focused_field: usize,      // 0=provider, 1=apiKey, 2=model
+    pub focused_field: usize,      // 0=provider, 1=apiKey, 2=baseUrl, 3=model
     pub provider_idx: usize,       // index into Provider::all()
     pub api_key: String,
+    pub base_url: String,
     pub model_name: String,
     pub editing_text: bool, // true when typing in a text field
     pub cursor_pos: usize,  // char-based cursor position in active field
@@ -552,10 +555,36 @@ pub struct ModelEditForm {
 }
 
 impl ModelEditForm {
+    /// Whether the currently selected provider shows the base URL field.
+    pub fn shows_base_url(&self) -> bool {
+        let providers = sorted_providers();
+        providers
+            .get(self.provider_idx)
+            .map(|p| p.api_key_optional())
+            .unwrap_or(false)
+    }
+
+    /// The maximum field index (depends on whether base_url is shown).
+    pub fn max_field(&self) -> usize {
+        if self.shows_base_url() { 3 } else { 2 }
+    }
+
+    /// Map focused_field to actual field accounting for hidden base_url.
+    /// Returns: 0=provider, 1=apiKey, 2=baseUrl (if shown), 3=model.
+    /// When base_url is hidden, field 2 maps to model.
+    pub fn logical_field(&self) -> usize {
+        if self.shows_base_url() || self.focused_field < 2 {
+            self.focused_field
+        } else {
+            self.focused_field + 1 // skip base_url
+        }
+    }
+
     pub fn active_field(&self) -> &str {
-        match self.focused_field {
+        match self.logical_field() {
             1 => &self.api_key,
-            2 => &self.model_name,
+            2 => &self.base_url,
+            3 => &self.model_name,
             _ => "",
         }
     }
@@ -2018,7 +2047,9 @@ impl App {
                         //
                         // Calculate popup geometry matching render_model_form.
                         //
-                        let base_lines = 7u16;
+                        let show_base_url = form.shows_base_url();
+                        let field_count = if show_base_url { 4u16 } else { 3u16 };
+                        let base_lines = field_count + 2 + 2;
                         let dropdown_extra = if form.model_dropdown_open {
                             1 + form.available_models.len() as u16
                         } else if form.loading_models {
@@ -2038,56 +2069,55 @@ impl App {
                         let rel_col = mouse.column.saturating_sub(inner_x) as usize;
 
                         //
-                        // Row 0: Provider, 1: API Key, 2: Model, 3: blank, 4: hints
+                        // Row layout depends on whether base_url is shown:
+                        // Without: 0=Provider, 1=APIKey, 2=Model, 3=blank, 4=hints
+                        // With:    0=Provider, 1=APIKey, 2=BaseURL, 3=Model, 4=blank, 5=hints
                         //
-                        match rel_row {
-                            0 => {
-                                form.focused_field = 0;
-                                // Click on arrows to cycle provider.
-                                let providers = crate::app::sorted_providers();
-                                if rel_col > 14 {
-                                    form.provider_idx = (form.provider_idx + 1) % providers.len();
-                                }
+                        let model_row = if show_base_url { 3 } else { 2 };
+                        let hints_row = model_row + 2;
+                        let dropdown_start = hints_row + 2;
+
+                        if rel_row == 0 {
+                            form.focused_field = 0;
+                            let providers = crate::app::sorted_providers();
+                            if rel_col > 14 {
+                                form.provider_idx = (form.provider_idx + 1) % providers.len();
+                                let p = providers[form.provider_idx];
+                                form.base_url = if p.api_key_optional() { p.base_url().to_string() } else { String::new() };
                             }
-                            1 => {
-                                form.focused_field = 1;
-                                if !form.editing_text {
-                                    form.editing_text = true;
-                                    form.cursor_pos = form.api_key.len();
-                                }
+                        } else if rel_row == 1 {
+                            form.focused_field = 1;
+                            if !form.editing_text {
+                                form.editing_text = true;
+                                form.cursor_pos = form.api_key.len();
                             }
-                            2 => {
-                                form.focused_field = 2;
-                                if !form.editing_text {
-                                    form.editing_text = true;
-                                    form.cursor_pos = form.model_name.len();
-                                }
+                        } else if show_base_url && rel_row == 2 {
+                            form.focused_field = 2;
+                            if !form.editing_text {
+                                form.editing_text = true;
+                                form.cursor_pos = form.base_url.len();
                             }
-                            4 => {
-                                // "  ^s save  esc cancel"
-                                if rel_col >= 2 && rel_col < 10 {
-                                    // ^s save — trigger save
-                                    self.save_model_form().await;
-                                } else if rel_col >= 11 {
-                                    // esc cancel
-                                    self.settings.model_form = None;
-                                }
+                        } else if rel_row == model_row {
+                            form.focused_field = if show_base_url { 3 } else { 2 };
+                            if !form.editing_text {
+                                form.editing_text = true;
+                                form.cursor_pos = form.model_name.len();
                             }
-                            _ => {
-                                //
-                                // If model dropdown is open, handle clicks in it.
-                                //
-                                if form.model_dropdown_open
-                                    && !form.available_models.is_empty()
-                                    && rel_row >= 6
-                                {
-                                    let model_idx = rel_row - 6 + form.model_dropdown_scroll;
-                                    if model_idx < form.available_models.len() {
-                                        form.model_dropdown_selected = model_idx;
-                                        form.model_name = form.available_models[model_idx].clone();
-                                        form.model_dropdown_open = false;
-                                    }
-                                }
+                        } else if rel_row == hints_row {
+                            if rel_col >= 2 && rel_col < 10 {
+                                self.save_model_form().await;
+                            } else if rel_col >= 11 {
+                                self.settings.model_form = None;
+                            }
+                        } else if form.model_dropdown_open
+                            && !form.available_models.is_empty()
+                            && rel_row >= dropdown_start
+                        {
+                            let model_idx = rel_row - dropdown_start + form.model_dropdown_scroll;
+                            if model_idx < form.available_models.len() {
+                                form.model_dropdown_selected = model_idx;
+                                form.model_name = form.available_models[model_idx].clone();
+                                form.model_dropdown_open = false;
                             }
                         }
                     }
@@ -4061,16 +4091,23 @@ impl App {
 
     fn open_model_form(&mut self, edit_index: Option<usize>) {
         let providers = sorted_providers();
-        let (provider_idx, api_key, model_name) = match edit_index {
+        let (provider_idx, api_key, base_url, model_name) = match edit_index {
             Some(idx) => {
                 let def = &self.settings.model_definitions[idx];
                 let pidx = providers
                     .iter()
                     .position(|p| p.as_str() == def.provider)
                     .unwrap_or(0);
-                (pidx, def.api_key.clone(), def.model.clone())
+                (pidx, def.api_key.clone(), def.base_url.clone().unwrap_or_default(), def.model.clone())
             }
-            None => (0, String::new(), String::new()),
+            None => {
+                let default_url = if providers[0].api_key_optional() {
+                    providers[0].base_url().to_string()
+                } else {
+                    String::new()
+                };
+                (0, String::new(), default_url, String::new())
+            }
         };
 
         self.settings.model_form = Some(ModelEditForm {
@@ -4078,6 +4115,7 @@ impl App {
             focused_field: 0,
             provider_idx,
             api_key,
+            base_url,
             model_name,
             editing_text: false,
             cursor_pos: 0,
@@ -4153,6 +4191,8 @@ impl App {
         //
 
         if form.editing_text {
+            let max_field = form.max_field();
+            let is_model_field = form.logical_field() == 3;
             match key.code {
                 KeyCode::Esc => {
                     self.settings.model_form = None;
@@ -4165,17 +4205,17 @@ impl App {
                     }
                 }
                 KeyCode::Enter => {
-                    if form.focused_field == 2 {
+                    if is_model_field {
                         self.load_provider_models().await;
                         return;
                     }
-                    if form.focused_field < 2 {
+                    if form.focused_field < max_field {
                         form.focused_field += 1;
                         Self::sync_model_form_edit(form);
                     }
                 }
                 KeyCode::Down | KeyCode::Tab => {
-                    if form.focused_field < 2 {
+                    if form.focused_field < max_field {
                         form.focused_field += 1;
                         Self::sync_model_form_edit(form);
                     }
@@ -4203,9 +4243,11 @@ impl App {
                 }
                 KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                     let pos = form.cursor_pos;
-                    let field = match form.focused_field {
+                    let logical = form.logical_field();
+                    let field = match logical {
                         1 => &mut form.api_key,
-                        2 => &mut form.model_name,
+                        2 => &mut form.base_url,
+                        3 => &mut form.model_name,
                         _ => {
                             return;
                         }
@@ -4221,9 +4263,11 @@ impl App {
                 KeyCode::Backspace => {
                     if form.cursor_pos > 0 {
                         let pos = form.cursor_pos - 1;
-                        let field = match form.focused_field {
+                        let logical = form.logical_field();
+                        let field = match logical {
                             1 => &mut form.api_key,
-                            2 => &mut form.model_name,
+                            2 => &mut form.base_url,
+                            3 => &mut form.model_name,
                             _ => {
                                 return;
                             }
@@ -4239,9 +4283,11 @@ impl App {
                 }
                 KeyCode::Delete => {
                     let pos = form.cursor_pos;
-                    let field = match form.focused_field {
+                    let logical = form.logical_field();
+                    let field = match logical {
                         1 => &mut form.api_key,
-                        2 => &mut form.model_name,
+                        2 => &mut form.base_url,
+                        3 => &mut form.model_name,
                         _ => {
                             return;
                         }
@@ -4278,7 +4324,8 @@ impl App {
             }
             KeyCode::Down | KeyCode::Tab => {
                 let form = self.settings.model_form.as_mut().unwrap();
-                if form.focused_field < 2 {
+                let max_field = form.max_field();
+                if form.focused_field < max_field {
                     form.focused_field += 1;
                     Self::sync_model_form_edit(form);
                 }
@@ -4293,6 +4340,8 @@ impl App {
                         form.provider_idx = providers.len() - 1;
                     }
                     form.available_models.clear();
+                    let p = providers[form.provider_idx];
+                    form.base_url = if p.api_key_optional() { p.base_url().to_string() } else { String::new() };
                 }
             }
             KeyCode::Right => {
@@ -4301,6 +4350,8 @@ impl App {
                     let providers = sorted_providers();
                     form.provider_idx = (form.provider_idx + 1) % providers.len();
                     form.available_models.clear();
+                    let p = providers[form.provider_idx];
+                    form.base_url = if p.api_key_optional() { p.base_url().to_string() } else { String::new() };
                 }
             }
             KeyCode::Enter => {
@@ -4325,16 +4376,27 @@ impl App {
         };
 
         let providers = sorted_providers();
-        let provider = providers[form.provider_idx].as_str().to_string();
+        let provider_enum = providers[form.provider_idx];
+        let provider = provider_enum.as_str().to_string();
         let api_key = form.api_key.clone();
+        let base_url = if form.base_url.is_empty() {
+            None
+        } else {
+            Some(form.base_url.clone())
+        };
 
-        if api_key.is_empty() {
+        if api_key.is_empty() && !provider_enum.api_key_optional() {
             self.settings.status_message = Some("Enter an API key first".to_string());
             return;
         }
 
+        if provider_enum.requires_base_url() && base_url.is_none() {
+            self.settings.status_message = Some("Enter a base URL first".to_string());
+            return;
+        }
+
         form.loading_models = true;
-        let result = common::ai::fetch_models_for_provider(&provider, &api_key).await;
+        let result = common::ai::fetch_models_for_provider(&provider, &api_key, base_url.as_deref()).await;
 
         let form = match self.settings.model_form.as_mut() {
             Some(f) => f,
@@ -4359,12 +4421,16 @@ impl App {
     }
 
     fn sync_model_form_edit(form: &mut ModelEditForm) {
-        match form.focused_field {
+        match form.logical_field() {
             1 => {
                 form.editing_text = true;
                 form.cursor_pos = form.api_key.chars().count();
             }
             2 => {
+                form.editing_text = true;
+                form.cursor_pos = form.base_url.chars().count();
+            }
+            3 => {
                 form.editing_text = true;
                 form.cursor_pos = form.model_name.chars().count();
             }
@@ -4390,11 +4456,17 @@ impl App {
         }
 
         let name = format!("{}::{}", provider_str, form.model_name);
+        let base_url = if form.base_url.is_empty() {
+            None
+        } else {
+            Some(form.base_url)
+        };
         let def = ModelDef {
             name,
             provider: provider_str,
             model: form.model_name,
             api_key: form.api_key,
+            base_url,
         };
 
         match form.edit_index {
