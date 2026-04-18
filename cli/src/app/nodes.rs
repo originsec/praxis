@@ -676,4 +676,240 @@ impl App {
             _ => {}
         }
     }
+
+    pub(crate) async fn handle_nodes_mouse(&mut self, mouse: MouseEvent, content_area: Rect) {
+        //
+        // Session chat intercepts mouse.
+        //
+        if self.nodes.session.is_some() {
+            if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                let chat_chunks = Layout::vertical([
+                    Constraint::Length(1), // header
+                    Constraint::Length(1), // separator
+                    Constraint::Min(1),    // messages
+                    Constraint::Length(3), // input
+                    Constraint::Length(1), // hints
+                ])
+                .split(content_area);
+                let input_area = chat_chunks[3];
+                let hints_area = chat_chunks[4];
+
+                //
+                // Input area click — position cursor.
+                //
+                if mouse.row >= input_area.y
+                    && mouse.row < input_area.y.saturating_add(input_area.height)
+                {
+                    if let Some(ref mut session) = self.nodes.session {
+                        if !session.is_waiting && session.session_id.is_some() {
+                            // Inner: padding(2) + border(1) + prompt "▸ "(2)
+                            let text_start = input_area.x + 5;
+                            let click_offset = mouse.column.saturating_sub(text_start) as usize;
+                            session.cursor_pos = click_offset.min(session.input.len());
+                        }
+                    }
+                    return;
+                }
+
+                //
+                // Hint bar: "  enter send  esc close session"
+                //
+                if mouse.row == hints_area.y {
+                    let rel = mouse.column.saturating_sub(hints_area.x) as usize;
+                    if rel >= 2 && rel < 14 {
+                        // "enter send" — simulate Enter (send message)
+                        if let Some(ref mut session) = self.nodes.session {
+                            if !session.input.trim().is_empty()
+                                && !session.is_waiting
+                                && session.session_id.is_some()
+                            {
+                                self.send_session_message();
+                            }
+                        }
+                    } else if rel >= 14 {
+                        // "esc close session" — close
+                        self.close_session();
+                    }
+                    return;
+                }
+            }
+            return;
+        }
+
+        //
+        // Session options screen intercepts mouse.
+        //
+        if self.nodes.session_options.is_some() {
+            if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                let opts_chunks = Layout::vertical([
+                    Constraint::Length(2),
+                    Constraint::Min(1),
+                    Constraint::Length(1),
+                ])
+                .split(content_area);
+                let opts_inner = Rect {
+                    x: opts_chunks[1].x + 2,
+                    width: opts_chunks[1].width.saturating_sub(4),
+                    ..opts_chunks[1]
+                };
+                let hints_area = opts_chunks[2];
+
+                let rel_row = mouse.row.saturating_sub(opts_inner.y) as usize;
+
+                if let Some(ref mut opts) = self.nodes.session_options {
+                    //
+                    // Row 0: YOLO toggle, 1: blank, 2: "Working Directory:",
+                    // 3+: directory items
+                    //
+                    if rel_row == 0 {
+                        opts.yolo = !opts.yolo;
+                    } else if rel_row >= 3 {
+                        let mut dir_count = 1 + opts.working_dirs.len();
+                        if opts.working_dirs.is_empty() {
+                            dir_count = 1;
+                        }
+                        let idx = rel_row - 3;
+                        if idx < dir_count {
+                            opts.selected_dir = idx;
+                        }
+                    }
+                }
+
+                //
+                // Hint bar: "enter start  esc cancel"
+                //
+                if mouse.row == hints_area.y {
+                    let rel = mouse.column.saturating_sub(hints_area.x) as usize;
+                    if rel >= 27 && rel < 40 {
+                        self.confirm_session_options();
+                    } else if rel >= 42 {
+                        self.nodes.session_options = None;
+                    }
+                }
+            }
+            return;
+        }
+
+        let outer =
+            Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(content_area);
+        let hints_area = outer[1];
+        let node_chunks = Layout::horizontal([
+            Constraint::Percentage(self.nodes.split_percent),
+            Constraint::Percentage(100 - self.nodes.split_percent),
+        ])
+        .split(outer[0]);
+        let list_area = node_chunks[0];
+        let detail_area = node_chunks[1];
+
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                //
+                // Node hint bar clicks.
+                //
+                if mouse.row == hints_area.y {
+                    let rel = mouse.column.saturating_sub(hints_area.x) as usize;
+                    if self.nodes.detail_focus {
+                        // " enter session  ^r reset  ^t terminal"
+                        if rel >= 1 && rel < 16 {
+                            self.start_session_with_selected_agent();
+                            return;
+                        }
+                    } else {
+                        // " enter select  ^r reset  ^t terminal"
+                        if rel >= 1 && rel < 14 {
+                            self.nodes.detail_focus = true;
+                            self.nodes.agent_selected = 0;
+                            return;
+                        }
+                    }
+                    // "^r reset" and "^t terminal" follow
+                    if rel >= 15 && rel < 24 {
+                        self.confirm_reset_node();
+                        return;
+                    }
+                    if rel >= 24 {
+                        self.open_terminal();
+                        return;
+                    }
+                }
+                //
+                // List item click. Table has Borders::ALL (1 row top border)
+                // + 1 row header = data starts at y+2.
+                //
+                let list_start_row = list_area.y.saturating_add(2);
+                let list_end_row = list_area
+                    .y
+                    .saturating_add(list_area.height)
+                    .saturating_sub(1);
+                if mouse.column >= list_area.x
+                    && mouse.column < list_area.x.saturating_add(list_area.width)
+                    && mouse.row >= list_start_row
+                    && mouse.row < list_end_row
+                {
+                    let clicked_idx = (mouse.row - list_start_row) as usize;
+                    if clicked_idx < self.nodes.nodes.len() {
+                        self.nodes.selected = clicked_idx;
+                        self.nodes.detail_focus = false;
+                    }
+                    return;
+                }
+
+                //
+                // Detail pane click — focus detail and check agent clicks.
+                //
+                if mouse.column >= detail_area.x
+                    && mouse.column < detail_area.x.saturating_add(detail_area.width)
+                    && mouse.row >= detail_area.y
+                    && mouse.row < detail_area.y.saturating_add(detail_area.height)
+                {
+                    self.nodes.detail_focus = true;
+                    let is_dbl = self.is_double_click(mouse.row, mouse.column);
+
+                    //
+                    // The detail inner area: border(1) + header(3 lines) +
+                    // blank(1) + "Agents"(1) = agents start at inner.y + 5.
+                    //
+                    let inner_y = detail_area.y.saturating_add(1);
+                    let agents_start = inner_y + 5;
+                    let agent_count = self
+                        .nodes
+                        .nodes
+                        .get(self.nodes.selected)
+                        .map(|n| n.discovered_agents.len())
+                        .unwrap_or(0);
+
+                    if mouse.row >= agents_start
+                        && mouse.row < agents_start + agent_count as u16
+                    {
+                        let clicked_agent = (mouse.row - agents_start) as usize;
+                        self.nodes.agent_selected = clicked_agent;
+                        if is_dbl {
+                            self.start_session_with_selected_agent();
+                        }
+                    }
+                    return;
+                }
+
+                //
+                // Pane border drag start.
+                //
+                let border_x = list_area.x.saturating_add(list_area.width);
+                if mouse.column >= border_x.saturating_sub(1) && mouse.column <= border_x + 1 {
+                    self.nodes.dragging = true;
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let h = self.terminal_width;
+                if self.nodes.dragging && h > 0 {
+                    let pct = (mouse.column as u32 * 100 / h as u32) as u16;
+                    self.nodes.split_percent = pct.clamp(20, 80);
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.nodes.dragging = false;
+            }
+            _ => {}
+        }
+        return;
+    }
 }

@@ -852,4 +852,205 @@ impl App {
             _ => {}
         }
     }
+
+    pub(crate) async fn handle_operations_mouse(&mut self, mouse: MouseEvent, content_area: Rect) {
+        let ops_chunks = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
+        .split(content_area);
+        let tabs_area = ops_chunks[0];
+        let hints_area = ops_chunks[3];
+        let main_area = ops_chunks[2];
+        let split = match self.operations.tab {
+            OpsTab::Library => Layout::horizontal([
+                Constraint::Percentage(self.operations.split_percent),
+                Constraint::Percentage(100 - self.operations.split_percent),
+            ])
+            .split(main_area),
+            OpsTab::Executions => {
+                Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
+                    .split(main_area)
+            }
+        };
+        let list_area = split[0];
+        let detail_area = split[1];
+        let detail_inner = Rect::new(
+            detail_area.x.saturating_add(1),
+            detail_area.y.saturating_add(1),
+            detail_area.width.saturating_sub(2),
+            detail_area.height.saturating_sub(2),
+        );
+
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                //
+                // Tab clicks.
+                //
+                if mouse.row == tabs_area.y {
+                    let rel_col = mouse.column.saturating_sub(tabs_area.x);
+                    if rel_col < 20 {
+                        self.operations.tab = OpsTab::Library;
+                    } else if rel_col < 40 {
+                        self.operations.tab = OpsTab::Executions;
+                    }
+                    return;
+                }
+
+                //
+                // Hint bar clicks.
+                //
+                if mouse.row == hints_area.y {
+                    let rel = mouse.column.saturating_sub(hints_area.x) as usize;
+                    match self.operations.tab {
+                        OpsTab::Library => {
+                            // " enter execute  ^n new  ^e edit  ^d delete  "
+                            //  0    5       15 17   23 25   31 33   42
+                            if rel >= 1 && rel < 16 {
+                                self.open_run_target_popup();
+                            } else if rel >= 16 && rel < 24 {
+                                self.open_new_op_form();
+                            } else if rel >= 24 && rel < 32 {
+                                self.edit_selected_op();
+                            } else if rel >= 32 && rel < 43 {
+                                self.delete_selected_op().await;
+                            }
+                        }
+                        OpsTab::Executions => {
+                            // Hint text varies, use find-based approach
+                            let hint_text = " ^c cancel  ^d delete  ^x clear all  ";
+                            if let Some(pos) = hint_text.find("cancel") {
+                                let cancel_start = pos.saturating_sub(3);
+                                let cancel_end = pos + 6;
+                                if rel >= cancel_start && rel < cancel_end + 2 {
+                                    self.cancel_selected_execution().await;
+                                    return;
+                                }
+                            }
+                            if let Some(pos) = hint_text.find("delete") {
+                                let delete_start = pos.saturating_sub(3);
+                                let delete_end = pos + 6;
+                                if rel >= delete_start && rel < delete_end + 2 {
+                                    self.delete_selected_execution().await;
+                                    return;
+                                }
+                            }
+                            if let Some(pos) = hint_text.find("clear all") {
+                                let clear_start = pos.saturating_sub(3);
+                                let clear_end = pos + 9;
+                                if rel >= clear_start && rel < clear_end + 2 {
+                                    self.confirm = Some(ConfirmAction {
+                                        message: "Clear all executions?".to_string(),
+                                        action: ConfirmKind::ClearAllExecutions,
+                                    });
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+
+                //
+                // List item click (with double-click support).
+                //
+                if mouse.column >= list_area.x
+                    && mouse.column < list_area.x.saturating_add(list_area.width)
+                {
+                    let list_start_row = list_area.y.saturating_add(2);
+                    if mouse.row >= list_start_row
+                        && mouse.row < list_area.y.saturating_add(list_area.height)
+                    {
+                        let clicked_idx = (mouse.row - list_start_row) as usize;
+                        let is_dbl = self.is_double_click(mouse.row, mouse.column);
+                        match self.operations.tab {
+                            OpsTab::Library => {
+                                let total = self.ops_library_count();
+                                if clicked_idx < total {
+                                    self.operations.library_selected = clicked_idx;
+                                    self.operations.detail_focus = false;
+                                    if is_dbl {
+                                        self.open_run_target_popup();
+                                    }
+                                }
+                            }
+                            OpsTab::Executions => {
+                                let total = self.sorted_executions().len();
+                                if clicked_idx < total {
+                                    self.operations.exec_selected = clicked_idx;
+                                    self.operations.detail_scroll = 0;
+                                    self.operations.detail_focus = false;
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+
+                //
+                // Detail pane click.
+                //
+                if mouse.column >= detail_area.x
+                    && mouse.column < detail_area.x.saturating_add(detail_area.width)
+                    && mouse.row >= detail_area.y
+                    && mouse.row < detail_area.y.saturating_add(detail_area.height)
+                {
+                    self.operations.detail_focus = true;
+
+                    if self.operations.tab == OpsTab::Executions
+                        && mouse.column >= detail_inner.x
+                        && mouse.column < detail_inner.x.saturating_add(detail_inner.width)
+                        && mouse.row >= detail_inner.y
+                        && mouse.row < detail_inner.y.saturating_add(detail_inner.height)
+                    {
+                        let visual_row = mouse
+                            .row
+                            .saturating_sub(detail_inner.y)
+                            .saturating_add(self.operations.detail_scroll);
+                        if let Some(section_idx) =
+                            crate::ui::operations::execution_detail_section_at_row(
+                                &self.operations,
+                                detail_inner.width,
+                                visual_row,
+                            )
+                        {
+                            self.operations.collapsed.focused_section = section_idx;
+                            if section_idx < self.operations.collapsed.sections.len() {
+                                self.operations.collapsed.sections[section_idx] =
+                                    !self.operations.collapsed.sections[section_idx];
+                            }
+                        }
+                    }
+                    return;
+                }
+
+                //
+                // Pane border drag start.
+                //
+                if self.operations.tab == OpsTab::Library {
+                    let border_x = list_area.x.saturating_add(list_area.width);
+                    if mouse.column >= border_x.saturating_sub(1)
+                        && mouse.column <= border_x + 1
+                        && mouse.row >= main_area.y
+                    {
+                        self.operations.dragging = true;
+                    }
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                let h = self.terminal_width;
+                if self.operations.dragging && h > 0 {
+                    let pct = (mouse.column as u32 * 100 / h as u32) as u16;
+                    self.operations.split_percent = pct.clamp(20, 80);
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.operations.dragging = false;
+            }
+            _ => {}
+        }
+        return;
+    }
 }
