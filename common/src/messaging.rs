@@ -496,49 +496,6 @@ pub struct ClientRegistrationAck {
 /// Unique identifier for tracking command requests and responses
 pub type CommandId = String;
 
-/// Agent-related commands
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum AgentCommand {
-    /// Request an information update from the node
-    Update,
-    /// Select an agent by short_name (only one can be selected at a time)
-    Select { short_name: String },
-    /// Perform reconnaissance on the selected agent (static discovery)
-    /// Returns MCP servers, skills, and config
-    Recon,
-    /// Perform semantic reconnaissance on the selected agent
-    /// Returns everything from Recon plus internal tools (via semantic analysis)
-    ReconSemantic,
-    /// Read file content, optionally within a line range (1-based inclusive)
-    ReadFile {
-        file_type: AgentFileType,
-        path: String,
-        line_start: Option<usize>,
-        line_end: Option<usize>,
-    },
-    /// Write file content
-    WriteFile {
-        file_type: AgentFileType,
-        path: String,
-        contents: String,
-    },
-    /// Search file content using a regex pattern and return matching lines.
-    /// Accepts multiple paths (including globs) for batch grep in a single
-    /// round-trip.
-    GrepFiles {
-        file_type: AgentFileType,
-        paths: Vec<String>,
-        pattern: String,
-    },
-    /// Write session content for a specific session path.
-    /// This is separate from WriteFile to allow agents with virtual/DB-backed
-    /// session stores to implement custom write behavior.
-    WriteSessionContent {
-        path: String,
-        contents: String,
-    },
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum AgentFileType {
     Config,
@@ -578,37 +535,6 @@ pub struct SessionContext {
     /// permissions unless yolo_mode is enabled. Default: false.
     #[serde(default)]
     pub interactive: bool,
-}
-
-/// Session-related commands (requires an agent to be selected)
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum SessionCommand {
-    /// Create a new session with the selected agent
-    Create {
-        #[serde(default)]
-        context: SessionContext,
-    },
-    /// Close the current session
-    Close,
-    /// Send a prompt to the session and get a response
-    /// transaction_id is used to match request with response
-    Prompt {
-        text: String,
-        transaction_id: TransactionId,
-    },
-    /// Cancel a pending transaction
-    /// force: If true, forcibly kills the underlying process (SIGKILL/TerminateProcess)
-    CancelTransaction {
-        transaction_id: TransactionId,
-        #[serde(default)]
-        force: bool,
-    },
-    /// Respond to a permission request from an ACP agent session
-    PermissionResponse {
-        transaction_id: TransactionId,
-        permission_id: String,
-        decision: PermissionDecision,
-    },
 }
 
 /// Method of interception
@@ -694,8 +620,6 @@ pub enum AgentRegistryCommand {
 /// Top-level command envelope
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum NodeCommand {
-    Agent(AgentCommand),
-    Session(SessionCommand),
     Intercept(InterceptCommand),
     Terminal(TerminalCommand),
     Config(ConfigCommand),
@@ -705,29 +629,6 @@ pub enum NodeCommand {
 impl std::fmt::Display for NodeCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            NodeCommand::Agent(cmd) => {
-                let variant = match cmd {
-                    AgentCommand::Update => "Update",
-                    AgentCommand::Select { .. } => "Select",
-                    AgentCommand::Recon => "Recon",
-                    AgentCommand::ReconSemantic => "ReconSemantic",
-                    AgentCommand::ReadFile { .. } => "ReadFile",
-                    AgentCommand::WriteFile { .. } => "WriteFile",
-                    AgentCommand::GrepFiles { .. } => "GrepFiles",
-                    AgentCommand::WriteSessionContent { .. } => "WriteSessionContent",
-                };
-                write!(f, "Agent::{variant}")
-            }
-            NodeCommand::Session(cmd) => {
-                let variant = match cmd {
-                    SessionCommand::Create { .. } => "Create",
-                    SessionCommand::Close => "Close",
-                    SessionCommand::Prompt { .. } => "Prompt",
-                    SessionCommand::CancelTransaction { .. } => "CancelTransaction",
-                    SessionCommand::PermissionResponse { .. } => "PermissionResponse",
-                };
-                write!(f, "Session::{variant}")
-            }
             NodeCommand::Intercept(cmd) => {
                 let variant = match cmd {
                     InterceptCommand::Enable { .. } => "Enable",
@@ -765,18 +666,8 @@ impl std::fmt::Display for NodeCommand {
 impl NodeCommand {
     pub fn required_capability(&self) -> Option<NodeCapability> {
         match self {
-            NodeCommand::Session(_) => Some(NodeCapability::Session),
             NodeCommand::Intercept(_) => Some(NodeCapability::Interception),
             NodeCommand::Terminal(_) => Some(NodeCapability::Terminal),
-            NodeCommand::Agent(cmd) => match cmd {
-                AgentCommand::Recon
-                | AgentCommand::ReconSemantic
-                | AgentCommand::ReadFile { .. }
-                | AgentCommand::WriteFile { .. }
-                | AgentCommand::GrepFiles { .. }
-                | AgentCommand::WriteSessionContent { .. } => Some(NodeCapability::Recon),
-                _ => None,
-            },
             _ => None,
         }
     }
@@ -794,70 +685,6 @@ pub struct CommandRequest {
 //
 // Command Responses - Node -> Server -> Client.
 //
-
-/// Result of an agent command
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum AgentCommandResult {
-    UpdateSent,
-    Selected {
-        short_name: String,
-    },
-    /// Reconnaissance completed with discovered tools and config
-    ReconComplete {
-        result: ReconResult,
-    },
-    /// File content write result
-    WriteFileResult {
-        file_type: AgentFileType,
-        path: String,
-        success: bool,
-        error: Option<String>,
-    },
-    /// File content response
-    ReadFileResult {
-        file_type: AgentFileType,
-        path: String,
-        content: Option<String>,
-        line_start: Option<usize>,
-        line_end: Option<usize>,
-        error: Option<String>,
-    },
-    /// Batch file grep response
-    GrepFilesResult {
-        file_type: AgentFileType,
-        pattern: String,
-        results: Vec<GrepFileEntry>,
-        errors: Vec<String>,
-    },
-    /// Session content write result
-    WriteSessionContentResult {
-        path: String,
-        success: bool,
-        error: Option<String>,
-    },
-}
-
-/// Result of a session command
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub enum SessionCommandResult {
-    Created {
-        session_id: String,
-    },
-    Closed,
-    /// Response to a prompt, includes transaction_id for matching
-    PromptResponse {
-        transaction_id: TransactionId,
-        response: String,
-    },
-    /// Transaction was cancelled
-    TransactionCancelled {
-        transaction_id: TransactionId,
-    },
-    /// Permission response was delivered to the agent
-    PermissionDelivered {
-        transaction_id: TransactionId,
-    },
-}
 
 //
 // Session streaming types — used for real-time updates during ACP agent
@@ -953,8 +780,6 @@ pub enum AgentRegistryCommandResult {
 /// Top-level command result envelope
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum NodeCommandResult {
-    Agent(AgentCommandResult),
-    Session(SessionCommandResult),
     Intercept(InterceptCommandResult),
     Terminal(TerminalCommandResult),
     Config(ConfigCommandResult),
@@ -2788,15 +2613,6 @@ pub enum NodeSignalMessage {
     InterceptedTraffic(InterceptedTrafficEntry),
     /// Node intercept status update
     InterceptStatusUpdate(InterceptStatus),
-    /// Recon result update from node
-    ReconResultUpdate {
-        node_id: String,
-        agent_short_name: String,
-        recon_result: ReconResult,
-        is_semantic: bool,
-    },
-    /// Streaming session update from an ACP agent transaction
-    SessionUpdate(SessionUpdate),
     /// ACP JSON-RPC frame emitted by the node's ACP server, destined for the
     /// external client identified by client_id (forwarded by the service).
     Acp {

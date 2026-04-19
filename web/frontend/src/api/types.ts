@@ -121,8 +121,6 @@ export interface SessionContext {
 // Commands.
 //
 export type NodeCommand =
-  | { Agent: AgentCommand }
-  | { Session: SessionCommand }
   | { Intercept: InterceptCommand }
   | { Terminal: TerminalCommand }
   | { Config: ConfigCommand }
@@ -131,24 +129,6 @@ export type NodeCommand =
 export type AgentRegistryCommand =
   | { Update: { scripts: string[] } }
   | 'List';
-
-export type AgentCommand =
-  | 'Update'
-  | 'Recon'
-  | 'ReconSemantic'
-  | { Select: { short_name: string } }
-  | { ReadFile: { file_type: AgentFileType; path: string; line_start?: number; line_end?: number } }
-  | { WriteFile: { file_type: AgentFileType; path: string; contents: string } }
-  | { GrepFiles: { file_type: AgentFileType; paths: string[]; pattern: string } };
-
-export type AgentFileType = 'Config' | 'Session';
-
-export type SessionCommand =
-  | { Create: { context: SessionContext } }
-  | 'Close'
-  | { Prompt: { text: string; transaction_id: string } }
-  | { CancelTransaction: { transaction_id: string } }
-  | { PermissionResponse: { transaction_id: string; permission_id: string; decision: PermissionDecision } };
 
 //
 // Interception method. Proxy works on all platforms. VPN works on Windows and
@@ -180,8 +160,6 @@ export interface CommandRequest {
 // Command Results.
 //
 export type NodeCommandResult =
-  | { Agent: AgentCommandResult }
-  | { Session: SessionCommandResult }
   | { Intercept: InterceptCommandResult }
   | { Terminal: TerminalCommandResult }
   | { Config: ConfigCommandResult }
@@ -210,33 +188,6 @@ export interface LuaAgentScriptInfo {
   created_at: string;
   updated_at: string;
 }
-
-export type AgentCommandResult =
-  | 'UpdateSent'
-  | { ReconComplete: { result: ReconResult } }
-  | { Selected: { short_name: string } }
-  | { YoloSet: { enabled: boolean } }
-  | { WriteFileResult: { file_type: AgentFileType; path: string; success: boolean; error?: string } }
-  | { ReadFileResult: { file_type: AgentFileType; path: string; content?: string; line_start?: number; line_end?: number; error?: string } }
-  | { GrepFilesResult: { file_type: AgentFileType; pattern: string; results: GrepFileEntry[]; errors: string[] } };
-
-export interface GrepMatch {
-  line_number: number;
-  line_content: string;
-}
-
-export interface GrepFileEntry {
-  path: string;
-  matches: GrepMatch[];
-  error?: string;
-}
-
-export type SessionCommandResult =
-  | { Created: { session_id: string } }
-  | 'Closed'
-  | { PromptResponse: { transaction_id: string; response: string } }
-  | { TransactionCancelled: { transaction_id: string } }
-  | { PermissionDelivered: { transaction_id: string } };
 
 export type InterceptCommandResult =
   | { Enabled: { method: InterceptMethod } }

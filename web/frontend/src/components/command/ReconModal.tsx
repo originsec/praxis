@@ -33,7 +33,7 @@ type ReconTab = 'config' | 'tools' | 'sessions';
 type ToolsCategory = 'mcp' | 'skills' | 'internal';
 
 export function ReconModal({ nodeId, agentShortName, onClose }: ReconModalProps) {
-  const { send, sendCommand } = useApp();
+  const { send, sendAcpNodeRequest } = useApp();
 
   const [reconResult, setReconResult] = useState<ReconResult | null>(null);
   const [reconPerformedAt, setReconPerformedAt] = useState<string | null>(null);
@@ -102,9 +102,10 @@ export function ReconModal({ nodeId, agentShortName, onClose }: ReconModalProps)
           window.removeEventListener('ws-message', handleWsMessage);
         } else if (!reconTriggered) {
           reconTriggered = true;
-          sendCommand(nodeId, { Agent: { Select: { short_name: agentShortName } } })
-            .then(() => sendCommand(nodeId, { Agent: 'Recon' }))
-            .catch(() => {});
+          sendAcpNodeRequest(nodeId, '_praxis/recon', {
+            agent_short_name: agentShortName,
+            is_semantic: false,
+          }).catch(() => {});
           pollInterval = setInterval(() => {
             if (!cancelled) requestRecon();
           }, 1000);
@@ -120,7 +121,7 @@ export function ReconModal({ nodeId, agentShortName, onClose }: ReconModalProps)
       window.removeEventListener('ws-message', handleWsMessage);
       if (pollInterval) clearInterval(pollInterval);
     };
-  }, [nodeId, agentShortName, send, sendCommand]);
+  }, [nodeId, agentShortName, send, sendAcpNodeRequest]);
 
   //
   // Trigger recon (standard or semantic). Polls until performed_at changes,
@@ -132,7 +133,6 @@ export function ReconModal({ nodeId, agentShortName, onClose }: ReconModalProps)
 
     setIsLoading(true);
     const previousPerformedAt = reconPerformedAt;
-    const command = semantic ? 'ReconSemantic' : 'Recon';
 
     const pollInterval = setInterval(() => {
       send({ type: 'recon_get', node_id: nodeId, agent_short_name: agentShortName });
@@ -166,12 +166,10 @@ export function ReconModal({ nodeId, agentShortName, onClose }: ReconModalProps)
 
     (async () => {
       try {
-        const selectResp = await sendCommand(nodeId, {
-          Agent: { Select: { short_name: agentShortName } },
+        await sendAcpNodeRequest(nodeId, '_praxis/recon', {
+          agent_short_name: agentShortName,
+          is_semantic: semantic,
         });
-        if ('Error' in selectResp.result) throw new Error();
-        const reconResp = await sendCommand(nodeId, { Agent: command });
-        if ('Error' in reconResp.result) throw new Error();
       } catch {
         clearInterval(pollInterval);
         clearTimeout(timeout);
@@ -209,25 +207,20 @@ export function ReconModal({ nodeId, agentShortName, onClose }: ReconModalProps)
     setIsLoadingConfigContent(true);
     setConfigContent(null);
 
-    sendCommand(nodeId, {
-      Agent: { ReadFile: { file_type: 'Config', path: configItem.path } },
-    }).then(response => {
+    sendAcpNodeRequest(nodeId, '_praxis/read_file', {
+      agent_short_name: agentShortName,
+      file_type: 'Config',
+      path: configItem.path,
+    }).then(({ result }) => {
       if (isCancelled) return;
-      if ('Agent' in response.result &&
-          typeof response.result.Agent === 'object' &&
-          response.result.Agent !== null &&
-          'ReadFileResult' in response.result.Agent) {
-        const result = response.result.Agent.ReadFileResult;
-        if (result.content) {
-          setConfigContent(result.content);
-          const updatedConfig = [...reconResult.config];
-          updatedConfig[selectedConfigIdx] = { ...configItem, contents: result.content };
-          setReconResult({ ...reconResult, config: updatedConfig });
-        } else if (result.error) {
-          setConfigContentError(result.error);
-        }
-      } else if ('Error' in response.result) {
-        setConfigContentError((response.result as { Error: { message: string } }).Error.message);
+      const r = result as { content?: string; error?: string } | null;
+      if (r?.content) {
+        setConfigContent(r.content);
+        const updatedConfig = [...reconResult.config];
+        updatedConfig[selectedConfigIdx] = { ...configItem, contents: r.content };
+        setReconResult({ ...reconResult, config: updatedConfig });
+      } else if (r?.error) {
+        setConfigContentError(r.error);
       }
     }).catch(error => {
       if (!isCancelled) setConfigContentError(String(error));
@@ -236,7 +229,7 @@ export function ReconModal({ nodeId, agentShortName, onClose }: ReconModalProps)
     });
 
     return () => { isCancelled = true; };
-  }, [selectedConfigIdx, reconResult?.config, nodeId, sendCommand]);
+  }, [selectedConfigIdx, reconResult?.config, nodeId, agentShortName, sendAcpNodeRequest]);
 
   //
   // Session content fetching.
@@ -256,20 +249,15 @@ export function ReconModal({ nodeId, agentShortName, onClose }: ReconModalProps)
     setSessionContentError(null);
     setSessionContent(null);
 
-    sendCommand(nodeId, {
-      Agent: { ReadFile: { file_type: 'Session', path: session.session_file } },
-    }).then(response => {
+    sendAcpNodeRequest(nodeId, '_praxis/read_file', {
+      agent_short_name: agentShortName,
+      file_type: 'Session',
+      path: session.session_file,
+    }).then(({ result }) => {
       if (isCancelled) return;
-      if ('Agent' in response.result &&
-          typeof response.result.Agent === 'object' &&
-          response.result.Agent !== null &&
-          'ReadFileResult' in response.result.Agent) {
-        const result = response.result.Agent.ReadFileResult;
-        if (result.content) setSessionContent(result.content);
-        else if (result.error) setSessionContentError(result.error);
-      } else if ('Error' in response.result) {
-        setSessionContentError((response.result as { Error: { message: string } }).Error.message);
-      }
+      const r = result as { content?: string; error?: string } | null;
+      if (r?.content) setSessionContent(r.content);
+      else if (r?.error) setSessionContentError(r.error);
     }).catch(error => {
       if (!isCancelled) setSessionContentError(String(error));
     }).finally(() => {
@@ -277,7 +265,7 @@ export function ReconModal({ nodeId, agentShortName, onClose }: ReconModalProps)
     });
 
     return () => { isCancelled = true; };
-  }, [selectedSessionIdx, reconResult?.sessions, nodeId, sendCommand]);
+  }, [selectedSessionIdx, reconResult?.sessions, nodeId, agentShortName, sendAcpNodeRequest]);
 
   //
   // Config editing handlers.
@@ -303,27 +291,21 @@ export function ReconModal({ nodeId, agentShortName, onClose }: ReconModalProps)
     setConfigSaveError(null);
 
     try {
-      const response = await sendCommand(nodeId, {
-        Agent: { WriteFile: { file_type: 'Config', path: item.path, contents: editingConfigContent } },
+      const { result } = await sendAcpNodeRequest(nodeId, '_praxis/write_file', {
+        file_type: 'Config',
+        path: item.path,
+        contents: editingConfigContent,
       });
-
-      if ('Agent' in response.result &&
-          typeof response.result.Agent === 'object' &&
-          response.result.Agent !== null &&
-          'WriteFileResult' in response.result.Agent) {
-        const result = response.result.Agent.WriteFileResult;
-        if (result.success) {
-          const updatedItems = [...reconResult.config];
-          updatedItems[editingConfigIdx] = { ...item, contents: editingConfigContent };
-          setReconResult({ ...reconResult, config: updatedItems });
-          setConfigContent(editingConfigContent);
-          setEditingConfigIdx(null);
-          setEditingConfigContent('');
-        } else {
-          setConfigSaveError(result.error || 'Failed to save');
-        }
-      } else if ('Error' in response.result) {
-        setConfigSaveError((response.result as { Error: { message: string } }).Error.message);
+      const r = result as { success?: boolean; error?: string } | null;
+      if (r?.success) {
+        const updatedItems = [...reconResult.config];
+        updatedItems[editingConfigIdx] = { ...item, contents: editingConfigContent };
+        setReconResult({ ...reconResult, config: updatedItems });
+        setConfigContent(editingConfigContent);
+        setEditingConfigIdx(null);
+        setEditingConfigContent('');
+      } else {
+        setConfigSaveError(r?.error || 'Failed to save');
       }
     } catch (error) {
       setConfigSaveError(String(error));
