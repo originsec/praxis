@@ -2127,10 +2127,9 @@ async fn handle_chain_run(
         let service_config = ctx.service_config.clone();
         let semantic_ops_channel = ctx.semantic_ops_channel.clone();
         let broadcast_channel_clone = ctx.broadcast_channel.clone();
-        let response_tracker = ctx.response_tracker.clone();
+        let acp_node_proxy = ctx.acp_node_proxy.clone();
         let database = ctx.database.clone();
         let toolkit_manager = ctx.toolkit_manager.clone();
-        let node_exec_lock = ctx.node_exec_lock.clone();
 
         tokio::spawn(async move {
             let results = chain_executor.execute_fan_out(
@@ -2141,10 +2140,9 @@ async fn handle_chain_run(
                 service_config,
                 semantic_ops_channel,
                 broadcast_channel_clone,
-                response_tracker,
+                acp_node_proxy,
                 database,
                 Some(toolkit_manager),
-                Some(node_exec_lock),
             ).await;
             for result in results {
                 match result {
@@ -2189,11 +2187,10 @@ async fn handle_chain_run(
             ctx.service_config.clone(),
             ctx.semantic_ops_channel.clone(),
             ctx.broadcast_channel.clone(),
-            ctx.response_tracker.clone(),
+            ctx.acp_node_proxy.clone(),
             ctx.database.clone(),
             Some(ctx.toolkit_manager.clone()),
             None,
-            Some(ctx.node_exec_lock.clone()),
         )
         .await
     {

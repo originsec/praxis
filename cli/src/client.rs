@@ -2,9 +2,11 @@ use anyhow::{Result, anyhow};
 use common::{
     CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE, ChainDefinitionFull, ChainDefinitionInfo,
     ChainExecutionUpdate, ClientBroadcastMessage, ClientDirectMessage, ClientRegistration,
-    ClientSignalMessage, CommandRequest, CommandResponse, LuaAgentScriptInfo, NodeCommand,
-    NodeCommandResult, OperationDefinitionInfo, SemanticOpUpdate, SystemState, TerminalOutput,
-    client_queue_name, publish_json,
+    ClientSignalMessage, LuaAgentScriptInfo, OperationDefinitionInfo, SemanticOpUpdate,
+    SystemState, TerminalOutput,
+    client_queue_name,
+    mcp::{build_notification_frame, build_request_frame},
+    publish_json, publish_terminal_command,
 };
 use futures_util::StreamExt;
 use lapin::{
@@ -15,10 +17,11 @@ use lapin::{
     },
     types::FieldTable,
 };
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, oneshot};
 
 pub struct Client {
     channel: Channel,
@@ -28,13 +31,25 @@ pub struct Client {
     consumer_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
+//
+// In-flight ACP request. When `text_buf` is Some, streamed
+// `agent_message_chunk` text for the tracked session_id is appended.
+//
+
+struct PendingAcp {
+    response_tx: Option<oneshot::Sender<Result<Value, String>>>,
+    text_buf: Option<String>,
+    session_id: Option<String>,
+}
+
 #[derive(Default)]
 struct ClientState {
     system_state: Option<SystemState>,
     acp_event_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
     terminal_output_tx: Option<tokio::sync::mpsc::UnboundedSender<TerminalOutput>>,
     pending_config: Option<HashMap<String, String>>,
-    pending_commands: std::collections::HashMap<String, Option<NodeCommandResult>>,
+    pending_acp: HashMap<String, PendingAcp>,
+    pending_terminal_creates: HashMap<String, oneshot::Sender<Result<String, String>>>,
     cached_project_paths: Vec<String>,
     operations: Vec<SemanticOpUpdate>,
     operation_definitions: Vec<OperationDefinitionInfo>,
@@ -189,6 +204,21 @@ impl Client {
             return;
         };
 
+        //
+        // Intercept legacy terminal-create responses via a common decoder
+        // so we don't have to touch `CommandResponse` / `NodeCommandResult`
+        // directly here. This is the only legacy Command reply we still
+        // handle in the CLI; everything else flows over ACP.
+        //
+
+        if let Some((command_id, result)) = common::decode_terminal_create_response(&message) {
+            let mut state = state.lock().await;
+            if let Some(tx) = state.pending_terminal_creates.remove(&command_id) {
+                let _ = tx.send(result);
+            }
+            return;
+        }
+
         let mut state = state.lock().await;
 
         match message {
@@ -197,11 +227,6 @@ impl Client {
                 state.system_state = Some(system_state);
             }
 
-            ClientDirectMessage::CommandResponse(response) => {
-                if let Some(entry) = state.pending_commands.get_mut(&response.command_id) {
-                    *entry = Some(response.result);
-                }
-            }
             ClientDirectMessage::ServiceConfigResponse { values } => {
                 state.pending_config = Some(values);
             }
@@ -257,9 +282,13 @@ impl Client {
             }
 
             //
-            // Forward ACP JSON-RPC messages to subscriber if present.
+            // ACP JSON-RPC frames: route responses to any pending request,
+            // buffer streamed chunks for text-collecting requests, and also
+            // forward every frame to any external subscriber (the CLI's
+            // orchestrator bridge uses this stream).
             //
             ClientDirectMessage::AcpMessage { json_rpc } => {
+                Self::handle_acp_frame(&mut state, &json_rpc);
                 if let Some(ref tx) = state.acp_event_tx {
                     let _ = tx.send(json_rpc);
                 }
@@ -430,60 +459,190 @@ impl Client {
     // Operation methods.
     //
 
-    pub async fn send_command(
+    //
+    // Send an ACP JSON-RPC request to the given node and await its
+    // response. The target node id is encoded as
+    // `params._meta.praxis.nodeId` so the service routes the frame.
+    //
+
+    pub async fn acp_request(
         &self,
         node_id: &str,
-        command: NodeCommand,
-    ) -> Result<CommandResponse> {
-        let command_id = uuid::Uuid::new_v4().to_string();
+        method: &str,
+        params: Value,
+    ) -> Result<Value> {
+        self.do_acp_request(node_id, method, params, false)
+            .await
+            .map(|(v, _)| v)
+    }
+
+    //
+    // Same as `acp_request` but additionally buffers any streamed
+    // `agent_message_chunk` text that arrives while the request is in
+    // flight, returning it alongside the response result.
+    //
+
+    pub async fn acp_request_collecting_text(
+        &self,
+        node_id: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<(Value, String)> {
+        self.do_acp_request(node_id, method, params, true).await
+    }
+
+    //
+    // Fire an ACP JSON-RPC notification (no id, no response). Used for
+    // e.g. session/cancel.
+    //
+
+    pub async fn acp_notification(
+        &self,
+        node_id: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<()> {
+        let frame = build_notification_frame(node_id, method, params);
+        self.publish_signal(ClientSignalMessage::AcpMessage {
+            client_id: self.client_id.clone(),
+            json_rpc: serde_json::to_string(&frame)?,
+        })
+        .await
+    }
+
+    async fn do_acp_request(
+        &self,
+        node_id: &str,
+        method: &str,
+        params: Value,
+        collect_text: bool,
+    ) -> Result<(Value, String)> {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let (tx, rx) = oneshot::channel();
+
+        let session_id = params
+            .get("sessionId")
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         {
             let mut state = self.state.lock().await;
-            state.pending_commands.insert(command_id.clone(), None);
+            state.pending_acp.insert(
+                request_id.clone(),
+                PendingAcp {
+                    response_tx: Some(tx),
+                    text_buf: if collect_text { Some(String::new()) } else { None },
+                    session_id,
+                },
+            );
         }
 
-        let request = CommandRequest {
-            command_id: command_id.clone(),
-            client_id: self.client_id.clone(),
-            node_id: node_id.to_string(),
-            command,
+        let frame = build_request_frame(&request_id, node_id, method, params);
+        if let Err(e) = self
+            .publish_signal(ClientSignalMessage::AcpMessage {
+                client_id: self.client_id.clone(),
+                json_rpc: serde_json::to_string(&frame)?,
+            })
+            .await
+        {
+            self.state.lock().await.pending_acp.remove(&request_id);
+            return Err(e);
+        }
+
+        let result = match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(Ok(value))) => Ok(value),
+            Ok(Ok(Err(message))) => Err(anyhow!(message)),
+            Ok(Err(_)) => Err(anyhow!("ACP response channel closed")),
+            Err(_) => {
+                self.state.lock().await.pending_acp.remove(&request_id);
+                Err(anyhow!(
+                    "Timeout waiting for ACP response to {} after {}s",
+                    method,
+                    self.timeout.as_secs()
+                ))
+            }
+        }?;
+
+        let text = {
+            let mut state = self.state.lock().await;
+            state
+                .pending_acp
+                .remove(&request_id)
+                .and_then(|p| p.text_buf)
+                .unwrap_or_default()
         };
 
-        self.publish_signal(ClientSignalMessage::Command(request))
-            .await?;
+        Ok((result, text))
+    }
 
-        let poll_interval = Duration::from_millis(250);
-        let max_polls = (self.timeout.as_millis() / poll_interval.as_millis()) as usize;
+    fn handle_acp_frame(state: &mut ClientState, json_rpc: &str) {
+        let msg: Value = match serde_json::from_str(json_rpc) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
 
-        for _ in 0..max_polls {
-            tokio::time::sleep(poll_interval).await;
-            let mut state = self.state.lock().await;
-            let has_result = state
-                .pending_commands
-                .get(&command_id)
-                .map(|v| v.is_some())
-                .unwrap_or(false);
+        let has_method = msg.get("method").and_then(|m| m.as_str()).is_some();
+        let id_str = msg.get("id").map(|v| match v {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            _ => String::new(),
+        });
 
-            if has_result {
-                if let Some(Some(result)) = state.pending_commands.remove(&command_id) {
-                    return Ok(CommandResponse {
-                        command_id: command_id.clone(),
-                        node_id: node_id.to_string(),
-                        result,
-                    });
+        if !has_method {
+            let Some(request_id) = id_str else { return };
+            let Some(mut pending) = state.pending_acp.remove(&request_id) else {
+                return;
+            };
+            let Some(tx) = pending.response_tx.take() else { return };
+
+            if let Some(err) = msg.get("error") {
+                let message = err
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("ACP error")
+                    .to_string();
+                let _ = tx.send(Err(message));
+            } else {
+                let result = msg.get("result").cloned().unwrap_or(Value::Null);
+                let _ = tx.send(Ok(result));
+            }
+            return;
+        }
+
+        let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
+        if method != "session/update" {
+            return;
+        }
+        let params = match msg.get("params") {
+            Some(p) => p,
+            None => return,
+        };
+        let session_id = match params.get("sessionId").and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => return,
+        };
+        let update = match params.get("update") {
+            Some(u) => u,
+            None => return,
+        };
+        if update.get("sessionUpdate").and_then(|v| v.as_str()) != Some("agent_message_chunk") {
+            return;
+        }
+        let Some(text) = update
+            .get("content")
+            .and_then(|c| c.get("text"))
+            .and_then(|v| v.as_str())
+        else {
+            return;
+        };
+
+        for pending in state.pending_acp.values_mut() {
+            if let (Some(buf), Some(sid)) = (&mut pending.text_buf, &pending.session_id) {
+                if sid == session_id {
+                    buf.push_str(text);
                 }
             }
         }
-
-        {
-            let mut state = self.state.lock().await;
-            state.pending_commands.remove(&command_id);
-        }
-
-        Err(anyhow!(
-            "Timeout waiting for command response after {} seconds",
-            self.timeout.as_secs()
-        ))
     }
 
     pub async fn request_recon(&self, node_id: &str, agent_short_name: &str) {
@@ -514,29 +673,70 @@ impl Client {
     // Terminal methods.
     //
 
-    async fn send_terminal_command_fire_and_forget(
-        &self,
-        node_id: &str,
-        cmd: common::TerminalCommand,
-    ) -> Result<()> {
+    //
+    // Terminal create needs a response (the terminal_id). The terminal
+    // surface still uses the legacy Command dispatch path — it has no ACP
+    // counterpart — so we keep a narrow awaitable wrapper that correlates
+    // by command_id via a pending-creates map populated by
+    // handle_direct_message.
+    //
+
+    pub async fn create_terminal(&self, node_id: &str) -> Result<String> {
         let command_id = uuid::Uuid::new_v4().to_string();
-        let request = CommandRequest {
-            command_id,
-            client_id: self.client_id.clone(),
-            node_id: node_id.to_string(),
-            command: NodeCommand::Terminal(cmd),
-        };
-        self.publish_signal(ClientSignalMessage::Command(request))
-            .await
+        let (tx, rx) = oneshot::channel::<Result<String, String>>();
+        {
+            let mut state = self.state.lock().await;
+            state
+                .pending_terminal_creates
+                .insert(command_id.clone(), tx);
+        }
+
+        let publish = common::publish_terminal_command_with_id(
+            &self.channel,
+            &self.client_id,
+            node_id,
+            &command_id,
+            common::TerminalCommand::Create,
+        )
+        .await;
+        if let Err(e) = publish {
+            self.state
+                .lock()
+                .await
+                .pending_terminal_creates
+                .remove(&command_id);
+            return Err(e);
+        }
+
+        match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(Ok(terminal_id))) => Ok(terminal_id),
+            Ok(Ok(Err(msg))) => Err(anyhow!(msg)),
+            Ok(Err(_)) => Err(anyhow!("Terminal create channel closed")),
+            Err(_) => {
+                self.state
+                    .lock()
+                    .await
+                    .pending_terminal_creates
+                    .remove(&command_id);
+                Err(anyhow!("Timeout waiting for terminal create"))
+            }
+        }
     }
 
     pub async fn send_terminal_input(&self, node_id: &str, data: Vec<u8>) -> Result<()> {
-        self.send_terminal_command_fire_and_forget(node_id, common::TerminalCommand::Write { data })
-            .await
+        publish_terminal_command(
+            &self.channel,
+            &self.client_id,
+            node_id,
+            common::TerminalCommand::Write { data },
+        )
+        .await
     }
 
     pub async fn send_terminal_resize(&self, node_id: &str, rows: u16, cols: u16) -> Result<()> {
-        self.send_terminal_command_fire_and_forget(
+        publish_terminal_command(
+            &self.channel,
+            &self.client_id,
             node_id,
             common::TerminalCommand::Resize { rows, cols },
         )
@@ -544,8 +744,13 @@ impl Client {
     }
 
     pub async fn send_terminal_close(&self, node_id: &str) -> Result<()> {
-        self.send_terminal_command_fire_and_forget(node_id, common::TerminalCommand::Close)
-            .await
+        publish_terminal_command(
+            &self.channel,
+            &self.client_id,
+            node_id,
+            common::TerminalCommand::Close,
+        )
+        .await
     }
 
     pub fn subscribe_terminal_output(

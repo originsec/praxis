@@ -127,28 +127,12 @@ impl App {
 
         tokio::spawn(async move {
             let Some(tx) = tx else { return };
-            let result = client
-                .send_command(
-                    &node_id,
-                    NodeCommand::Terminal(common::TerminalCommand::Create),
-                )
-                .await;
-
-            match result {
-                Ok(resp) => {
-                    if let NodeCommandResult::Terminal(common::TerminalCommandResult::Created {
+            match client.create_terminal(&node_id).await {
+                Ok(terminal_id) => {
+                    let _ = tx.send(AppEvent::TerminalCreated {
+                        node_id,
                         terminal_id,
-                    }) = resp.result
-                    {
-                        let _ = tx.send(AppEvent::TerminalCreated {
-                            node_id,
-                            terminal_id,
-                        });
-                    } else {
-                        let _ = tx.send(AppEvent::TerminalCreateFailed(
-                            "Failed to open terminal: unexpected response".to_string(),
-                        ));
-                    }
+                    });
                 }
                 Err(e) => {
                     let _ = tx.send(AppEvent::TerminalCreateFailed(format!(
@@ -237,13 +221,14 @@ impl App {
 
     pub(crate) fn close_session(&mut self) {
         if let Some(ref session) = self.nodes.session {
-            if session.session_id.is_some() {
+            if let Some(session_id) = session.session_id.clone() {
                 let client = self.client.clone();
                 let node_id = session.node_id.clone();
                 tokio::spawn(async move {
-                    use common::SessionCommand;
                     let _ = client
-                        .send_command(&node_id, NodeCommand::Session(SessionCommand::Close))
+                        .acp_request(&node_id, "session/close", serde_json::json!({
+                            "sessionId": session_id,
+                        }))
                         .await;
                 });
             }
@@ -279,46 +264,50 @@ impl App {
 
         let node_id = session.node_id.clone();
         let transaction_id = session.active_transaction_id.clone().unwrap_or_default();
+        let session_id = session.session_id.clone().unwrap_or_default();
         let client = self.client.clone();
         let tx = self.event_tx.clone();
 
         tokio::spawn(async move {
             use crate::event::{AppEvent, SessionResult};
-            use common::SessionCommand;
 
             let Some(tx) = tx else { return };
-            match client
-                .send_command(
+            let result = client
+                .acp_request_collecting_text(
                     &node_id,
-                    NodeCommand::Session(SessionCommand::Prompt {
-                        text: input,
-                        transaction_id: transaction_id.clone(),
+                    "session/prompt",
+                    serde_json::json!({
+                        "sessionId": session_id,
+                        "prompt": [{ "type": "text", "text": input }],
                     }),
                 )
-                .await
-            {
-                Ok(resp) => match resp.result {
-                    NodeCommandResult::Session(common::SessionCommandResult::PromptResponse {
-                        transaction_id,
-                        response,
-                    }) => {
-                        let _ = tx.send(AppEvent::SessionResponse(SessionResult::Response {
-                            transaction_id,
-                            text: response,
-                        }));
-                    }
-                    NodeCommandResult::Session(
-                        common::SessionCommandResult::TransactionCancelled { transaction_id },
-                    ) => {
+                .await;
+
+            match result {
+                Ok((value, text)) => {
+                    //
+                    // The node returns { stopReason } where StopReason is
+                    // "cancelled" or "end_turn". Treat cancellation as a
+                    // cancel event so the UI resets, otherwise report the
+                    // collected text as the agent's reply.
+                    //
+
+                    let stop = value
+                        .get("stopReason")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("end_turn");
+
+                    if stop == "cancelled" {
                         let _ = tx.send(AppEvent::SessionResponse(SessionResult::Cancelled(
                             transaction_id,
                         )));
+                    } else {
+                        let _ = tx.send(AppEvent::SessionResponse(SessionResult::Response {
+                            transaction_id,
+                            text,
+                        }));
                     }
-                    NodeCommandResult::Error { message } => {
-                        let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error(message)));
-                    }
-                    _ => {}
-                },
+                }
                 Err(e) => {
                     let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error(
                         e.to_string(),
@@ -447,7 +436,6 @@ impl App {
 
         tokio::spawn(async move {
             use crate::event::{AppEvent, SessionResult};
-            use common::{AgentCommand, SessionCommand, SessionContext};
 
             let Some(tx) = tx else { return };
 
@@ -460,36 +448,33 @@ impl App {
                         .and_then(|v| v.parse::<u64>().ok())
                 });
 
-            let _ = client
-                .send_command(
-                    &node_id,
-                    NodeCommand::Agent(AgentCommand::Select {
-                        short_name: agent.clone(),
-                    }),
-                )
-                .await;
+            let cwd = working_dir.clone().unwrap_or_else(|| "/".to_string());
+            let mut praxis_meta = serde_json::json!({
+                "nodeId": node_id,
+                "connector": agent,
+                "yolo": yolo,
+                "interactive": true,
+            });
+            if let Some(t) = prompt_timeout_secs {
+                praxis_meta["promptTimeoutSecs"] = serde_json::json!(t);
+            }
 
             match client
-                .send_command(
-                    &node_id,
-                    NodeCommand::Session(SessionCommand::Create {
-                        context: SessionContext {
-                            working_dir,
-                            yolo_mode: yolo,
-                            prompt_timeout_secs,
-                            interactive: true,
-                        },
-                    }),
-                )
+                .acp_request(&node_id, "session/new", serde_json::json!({
+                    "cwd": cwd,
+                    "mcpServers": [],
+                    "_meta": { "praxis": praxis_meta }
+                }))
                 .await
             {
-                Ok(resp) => {
-                    if let NodeCommandResult::Session(common::SessionCommandResult::Created {
-                        session_id,
-                    }) = resp.result
-                    {
+                Ok(value) => {
+                    if let Some(session_id) = value.get("sessionId").and_then(|v| v.as_str()) {
                         let _ = tx.send(AppEvent::SessionResponse(SessionResult::Created(
-                            session_id,
+                            session_id.to_string(),
+                        )));
+                    } else {
+                        let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error(
+                            "Session create: missing sessionId in response".to_string(),
                         )));
                     }
                 }
@@ -508,54 +493,27 @@ impl App {
             if key.code == KeyCode::Char('c') {
                 if let Some(ref mut session) = self.nodes.session {
                     if session.is_waiting {
-                        let Some(transaction_id) = session.active_transaction_id.clone() else {
+                        let Some(session_id) = session.session_id.clone() else {
                             return;
                         };
                         let client = self.client.clone();
                         let node_id = session.node_id.clone();
-                        let tx = self.event_tx.clone();
                         tokio::spawn(async move {
-                            use crate::event::{AppEvent, SessionResult};
-                            use common::SessionCommand;
-                            let Some(tx) = tx else { return };
+                            //
+                            // session/cancel is a JSON-RPC notification
+                            // (no id, no response) — the node cancels the
+                            // in-flight prompt which then resolves with
+                            // stopReason=cancelled through the normal
+                            // session/prompt response flow.
+                            //
 
-                            match client
-                                .send_command(
+                            let _ = client
+                                .acp_notification(
                                     &node_id,
-                                    NodeCommand::Session(SessionCommand::CancelTransaction {
-                                        transaction_id: transaction_id.clone(),
-                                        force: false,
-                                    }),
+                                    "session/cancel",
+                                    serde_json::json!({ "sessionId": session_id }),
                                 )
-                                .await
-                            {
-                                Ok(resp) => match resp.result {
-                                    NodeCommandResult::Session(
-                                        common::SessionCommandResult::TransactionCancelled {
-                                            transaction_id,
-                                        },
-                                    ) => {
-                                        let _ = tx.send(AppEvent::SessionResponse(
-                                            SessionResult::Cancelled(transaction_id),
-                                        ));
-                                    }
-                                    NodeCommandResult::Error { message } => {
-                                        let _ = tx.send(AppEvent::SessionResponse(
-                                            SessionResult::Error(message),
-                                        ));
-                                    }
-                                    _ => {
-                                        let _ = tx.send(AppEvent::SessionResponse(
-                                            SessionResult::Error("Unexpected response".to_string()),
-                                        ));
-                                    }
-                                },
-                                Err(e) => {
-                                    let _ = tx.send(AppEvent::SessionResponse(
-                                        SessionResult::Error(format!("{}", e)),
-                                    ));
-                                }
-                            }
+                                .await;
                         });
                         session.messages.push(ChatMessage {
                             role: ChatRole::System,
@@ -564,14 +522,12 @@ impl App {
                     } else {
                         let client = self.client.clone();
                         let node_id = session.node_id.clone();
-                        if session.session_id.is_some() {
+                        if let Some(session_id) = session.session_id.clone() {
                             tokio::spawn(async move {
-                                use common::SessionCommand;
                                 let _ = client
-                                    .send_command(
-                                        &node_id,
-                                        NodeCommand::Session(SessionCommand::Close),
-                                    )
+                                    .acp_request(&node_id, "session/close", serde_json::json!({
+                                        "sessionId": session_id,
+                                    }))
                                     .await;
                             });
                         }
@@ -598,27 +554,18 @@ impl App {
                             'd' | 'D' => Some(common::PermissionDecision::Deny),
                             _ => None,
                         };
-                        if let Some(decision) = decision {
-                            let perm = session.pending_permission.take().unwrap();
-                            let client = self.client.clone();
-                            let node_id = session.node_id.clone();
-                            let transaction_id =
-                                session.active_transaction_id.clone().unwrap_or_default();
-                            let permission_id = perm.permission_id.clone();
-                            tokio::spawn(async move {
-                                let _ = client
-                                    .send_command(
-                                        &node_id,
-                                        common::NodeCommand::Session(
-                                            common::SessionCommand::PermissionResponse {
-                                                transaction_id,
-                                                permission_id,
-                                                decision,
-                                            },
-                                        ),
-                                    )
-                                    .await;
-                            });
+                        if let Some(_decision) = decision {
+                            //
+                            // Under ACP the agent-initiated permission
+                            // flow uses `session/request_permission` +
+                            // client response. That wiring isn't hooked
+                            // up to the node ACP server yet, so this is
+                            // a no-op until the node side lands; we still
+                            // consume the decision keypress so the UI
+                            // clears the pending permission.
+                            //
+
+                            let _ = session.pending_permission.take();
                             return;
                         }
                     }

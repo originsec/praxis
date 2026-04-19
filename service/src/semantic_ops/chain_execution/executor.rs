@@ -8,19 +8,17 @@ use uuid::Uuid;
 
 use chrono::Utc;
 use common::{
-    publish_json_exchange, ChainExecutionStatus, ClientBroadcastMessage, ElementConfig,
-    ElementContext, SemanticOperationSpec, SemanticOpStatus, CLIENT_BROADCAST_EXCHANGE,
-    ai::{create_ai_client, execute_chat_completion, Message, Provider},
+    publish_json_exchange, ai::{create_ai_client, execute_chat_completion, Message, Provider},
+    ChainExecutionStatus, ClientBroadcastMessage, ElementConfig, ElementContext,
+    SemanticOperationSpec, SemanticOpStatus, CLIENT_BROADCAST_EXCHANGE,
 };
 
+use crate::acp_node_proxy::AcpNodeProxy;
 use crate::config::ServiceConfig;
-use crate::database::{ChainDefinition, ChainElement, ChainExecutionRecord, OperationRecord, SessionGroup};
 use crate::database::Database;
+use crate::database::{ChainDefinition, ChainElement, ChainExecutionRecord, OperationRecord, SessionGroup};
+use crate::semantic_ops::{close_session, create_session, execute_agent_mode, execute_one_shot};
 use crate::tools::ToolkitManager;
-use crate::semantic_ops::{
-    close_session, create_session, execute_agent_mode, execute_one_shot, select_agent,
-    ResponseTracker,
-};
 
 use super::graph::ExecutionGraph;
 use super::implicit::is_implicit_chain;
@@ -28,11 +26,16 @@ use super::state::{ChainExecutionRegistry, ChainExecutionState};
 
 struct CancelHandle {
     cancel_token: CancellationToken,
-    node_id: String,
-    rabbitmq_channel: Channel,
+    //
+    // We keep the session/channel/proxy here so cancel() can close any
+    // active session on the node. The chain's own run loop tracks the live
+    // session_id — we take a snapshot each time a session is created.
+    //
+    channel: Channel,
+    proxy: Arc<AcpNodeProxy>,
+    active_session: Arc<std::sync::Mutex<Option<(String, String)>>>, // (node_id, session_id)
 }
 
-/// Chain executor handles running operation chains
 pub struct ChainExecutor {
     pub registry: Arc<ChainExecutionRegistry>,
     cancel_handles: Arc<TokioRwLock<HashMap<String, CancelHandle>>>,
@@ -46,9 +49,13 @@ impl ChainExecutor {
         }
     }
 
-    /// Execute a chain with optional initial input for trigger context.
-    /// When `preset_execution_id` is provided (from fan-out), reuses the
-    /// pre-registered execution ID and updates the existing DB record.
+    //
+    // Execute a chain with optional initial input for trigger context.
+    // When `preset_execution_id` is provided (from fan-out), reuses the
+    // pre-registered execution ID and updates the existing DB record.
+    //
+
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute(
         &self,
         chain: ChainDefinition,
@@ -59,29 +66,19 @@ impl ChainExecutor {
         config: Arc<TokioRwLock<ServiceConfig>>,
         rabbitmq_channel: Channel,
         broadcast_channel: Channel,
-        response_tracker: Arc<ResponseTracker>,
+        acp_node_proxy: Arc<AcpNodeProxy>,
         database: Arc<Database>,
         toolkit_manager: Option<Arc<ToolkitManager>>,
         preset_execution_id: Option<String>,
-        node_exec_lock: Option<crate::semantic_ops::NodeExecLock>,
     ) -> Result<String> {
         let has_preset_id = preset_execution_id.is_some();
         let execution_id = preset_execution_id.unwrap_or_else(|| Uuid::new_v4().to_string());
 
-        //
-        // Build execution graph.
-        //
         let graph = ExecutionGraph::from_chain(&chain)
             .map_err(|e| anyhow::anyhow!("Failed to build execution graph: {}", e))?;
 
-        //
-        // Get all element IDs.
-        //
         let element_ids: Vec<String> = chain.elements.iter().map(|e| e.id().clone()).collect();
 
-        //
-        // Create execution state.
-        //
         let state = ChainExecutionState::new(
             execution_id.clone(),
             chain.id.clone(),
@@ -93,16 +90,8 @@ impl ChainExecutor {
 
         let state_arc = self.registry.register(state);
 
-        //
-        // Check if this is an implicit chain (don't persist to chain_executions
-        // table).
-        //
         let is_implicit = is_implicit_chain(&chain.id);
 
-        //
-        // Persist initial state to database (skip for implicit chains and
-        // pre-registered executions from fan-out which are already in the DB).
-        //
         if !is_implicit && !has_preset_id {
             let record = {
                 let s = state_arc.read().unwrap();
@@ -125,24 +114,25 @@ impl ChainExecutor {
             }
         }
 
-        //
-        // Create cancellation token.
-        //
         let cancel_token = CancellationToken::new();
-        self.cancel_handles
-            .write()
-            .await
-            .insert(execution_id.clone(), CancelHandle {
+        let active_session: Arc<std::sync::Mutex<Option<(String, String)>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        self.cancel_handles.write().await.insert(
+            execution_id.clone(),
+            CancelHandle {
                 cancel_token: cancel_token.clone(),
-                node_id: node_id.clone(),
-                rabbitmq_channel: rabbitmq_channel.clone(),
-            });
+                channel: rabbitmq_channel.clone(),
+                proxy: acp_node_proxy.clone(),
+                active_session: active_session.clone(),
+            },
+        );
 
-        //
-        // Broadcast initial state.
-        //
         let update = state_arc.read().unwrap().to_update();
-        Self::broadcast_update(&broadcast_channel, ClientBroadcastMessage::ChainExecutionUpdate(update)).await;
+        Self::broadcast_update(
+            &broadcast_channel,
+            ClientBroadcastMessage::ChainExecutionUpdate(update),
+        )
+        .await;
 
         common::log_info!(
             "Starting chain execution {} for chain {} on node {}",
@@ -151,89 +141,63 @@ impl ChainExecutor {
             &node_id[..8]
         );
 
-        //
-        // Clone for spawn.
-        //
         let exec_id = execution_id.clone();
         let state_clone = state_arc.clone();
-        let _registry_clone = self.registry.clone();
         let cancel_handles = self.cancel_handles.clone();
         let database_clone = database.clone();
         let working_dir_clone = working_dir.clone();
         let initial_input_clone = initial_input;
 
-        //
-        // Spawn the execution task - runs entirely in background.
-        //
         tokio::spawn(async move {
             //
-            // Acquire per-node execution lock so no other op or chain runs
-            // concurrently on this node.
-            //
-            let _node_guard = if let Some(ref lock) = node_exec_lock {
-                Some(lock.get(&node_id).lock_owned().await)
-            } else {
-                None
-            };
-
-            //
-            // Mark as Running now that we're actually executing.
+            // Mark Running.
             //
             {
                 let mut state = state_clone.write().unwrap();
                 state.mark_running();
             }
 
-            //
-            // Persist Running state and broadcast (skip for implicit chains).
-            //
             if !is_implicit {
-                if let Err(e) = database_clone.update_chain_execution_status(
-                    &exec_id,
-                    ChainExecutionStatus::Running,
-                    None,
-                ).await {
+                if let Err(e) = database_clone
+                    .update_chain_execution_status(&exec_id, ChainExecutionStatus::Running, None)
+                    .await
+                {
                     common::log_error!("Failed to update chain execution to Running: {}", e);
                 }
             }
             let update = state_clone.read().unwrap().to_update();
-            Self::broadcast_update(&broadcast_channel, ClientBroadcastMessage::ChainExecutionUpdate(update)).await;
+            Self::broadcast_update(
+                &broadcast_channel,
+                ClientBroadcastMessage::ChainExecutionUpdate(update),
+            )
+            .await;
 
             //
-            // Select the agent first (inside spawn so it doesn't block the
-            // caller).
+            // Run the chain. Session creation is per-session-group and
+            // happens inside run_chain; there is no global "select_agent"
+            // anymore (ACP folds that into session/new).
             //
-            let agent_result = select_agent(&node_id, &agent_short_name, &rabbitmq_channel, response_tracker.clone())
-                .await
-                .context("Failed to select agent");
 
-            let result = match agent_result {
-                Ok(()) => {
-                    Self::run_chain(
-                        exec_id.clone(),
-                        graph,
-                        chain,
-                        node_id,
-                        agent_short_name,
-                        working_dir_clone,
-                        initial_input_clone,
-                        config,
-                        rabbitmq_channel,
-                        broadcast_channel.clone(),
-                        response_tracker,
-                        database,
-                        state_clone.clone(),
-                        cancel_token,
-                        toolkit_manager,
-                    )
-                    .await
-                }
-                Err(e) => Err(e),
-            };
+            let result = Self::run_chain(
+                exec_id.clone(),
+                graph,
+                chain,
+                node_id,
+                agent_short_name,
+                working_dir_clone,
+                initial_input_clone,
+                config,
+                rabbitmq_channel,
+                broadcast_channel.clone(),
+                acp_node_proxy,
+                database,
+                state_clone.clone(),
+                cancel_token,
+                active_session,
+                toolkit_manager,
+            )
+            .await;
 
-            //
-            // Update final state.
-            //
             {
                 let mut state = state_clone.write().unwrap();
                 match result {
@@ -247,73 +211,79 @@ impl ChainExecutor {
                             common::log_info!("Chain execution {} was cancelled", &exec_id[..8]);
                         } else {
                             state.mark_failed();
-                            common::log_error!("Chain execution {} failed: {}", &exec_id[..8], e);
+                            common::log_error!(
+                                "Chain execution {} failed: {}",
+                                &exec_id[..8],
+                                e
+                            );
                         }
                     }
                 }
             }
 
-            //
-            // Persist final state to database (skip for implicit chains).
-            //
             if !is_implicit {
                 let (status, elements, outputs, ended_at) = {
                     let s = state_clone.read().unwrap();
-                    (s.status.clone(), s.elements.clone(), s.outputs.clone(), s.ended_at)
+                    (
+                        s.status.clone(),
+                        s.elements.clone(),
+                        s.outputs.clone(),
+                        s.ended_at,
+                    )
                 };
-                if let Err(e) = database_clone.update_chain_execution(
-                    &exec_id,
-                    status,
-                    &elements,
-                    &outputs,
-                    ended_at,
-                ).await {
+                if let Err(e) = database_clone
+                    .update_chain_execution(&exec_id, status, &elements, &outputs, ended_at)
+                    .await
+                {
                     common::log_error!("Failed to persist final chain execution state: {}", e);
                 }
             }
 
-            //
-            // Broadcast final state.
-            //
             let update = state_clone.read().unwrap().to_update();
-            Self::broadcast_update(&broadcast_channel, ClientBroadcastMessage::ChainExecutionUpdate(update)).await;
+            Self::broadcast_update(
+                &broadcast_channel,
+                ClientBroadcastMessage::ChainExecutionUpdate(update),
+            )
+            .await;
 
-            //
-            // Cleanup.
-            //
             cancel_handles.write().await.remove(&exec_id);
-
-            //
-            // Keep execution in registry for a bit so clients can see final
-            // state
-            // (could add TTL-based cleanup later).
-            //
         });
 
         Ok(execution_id)
     }
 
-    /// Cancel a running chain execution
+    //
+    // Cancel a running chain execution. Closes any in-flight session so
+    // the remote agent stops promptly.
+    //
+
     pub async fn cancel(&self, execution_id: &str) -> bool {
         if let Some(handle) = self.cancel_handles.write().await.remove(execution_id) {
             handle.cancel_token.cancel();
 
             //
-            // Immediately abort any running command on the node.
+            // If a session is active, close it so the node aborts the
+            // in-flight work.
             //
-
-            let _ = close_session(&handle.node_id, &handle.rabbitmq_channel).await;
+            let snapshot = handle.active_session.lock().unwrap().clone();
+            if let Some((node_id, session_id)) = snapshot {
+                let _ = close_session(&node_id, &session_id, &handle.channel, &handle.proxy).await;
+            }
             true
         } else {
             false
         }
     }
 
-    /// Execute a chain against multiple resolved targets (fan-out).
-    ///
-    /// Targets on different nodes run in parallel. Targets on the same node
-    /// run sequentially (each execution must complete before the next starts)
-    /// to avoid session conflicts on a shared node.
+    //
+    // Execute a chain against multiple resolved targets (fan-out). Under
+    // ACP, same-node targets CAN run concurrently because each chain
+    // execution uses its own session. We keep the sequential wait here for
+    // parity with the pre-ACP chain semantics (some chain designs assume
+    // one run at a time on a given node); revisit if we want concurrency
+    // here too.
+    //
+
     #[allow(clippy::too_many_arguments)]
     pub async fn execute_fan_out(
         &self,
@@ -324,25 +294,24 @@ impl ChainExecutor {
         config: Arc<TokioRwLock<ServiceConfig>>,
         rabbitmq_channel: Channel,
         broadcast_channel: Channel,
-        response_tracker: Arc<ResponseTracker>,
+        acp_node_proxy: Arc<AcpNodeProxy>,
         database: Arc<Database>,
         toolkit_manager: Option<Arc<ToolkitManager>>,
-        node_exec_lock: Option<crate::semantic_ops::NodeExecLock>,
     ) -> Vec<Result<String>> {
         use std::collections::HashMap;
 
-        //
-        // Group targets by node_id so same-node targets run sequentially.
-        //
         let mut by_node: HashMap<String, Vec<super::targeting::ResolvedTarget>> = HashMap::new();
         for target in targets {
-            by_node.entry(target.node_id.clone()).or_default().push(target);
+            by_node
+                .entry(target.node_id.clone())
+                .or_default()
+                .push(target);
         }
 
         let mut handles = Vec::new();
 
         for (_node_id, node_targets) in by_node {
-            let executor = self.registry.clone();
+            let registry = self.registry.clone();
             let cancel_handles = self.cancel_handles.clone();
             let chain = chain.clone();
             let initial_input = initial_input.clone();
@@ -350,28 +319,20 @@ impl ChainExecutor {
             let config = config.clone();
             let rabbitmq_channel = rabbitmq_channel.clone();
             let broadcast_channel = broadcast_channel.clone();
-            let response_tracker = response_tracker.clone();
+            let acp_node_proxy = acp_node_proxy.clone();
             let database = database.clone();
             let toolkit_manager = toolkit_manager.clone();
-            let node_exec_lock = node_exec_lock.clone();
 
-            //
-            // Each node gets its own spawn — targets within the node run
-            // sequentially inside that spawn.
-            //
             let self_clone = Self {
-                registry: executor,
+                registry,
                 cancel_handles,
             };
             let handle = tokio::spawn(async move {
-                //
-                // Pre-register all targets as Queued so the UI shows
-                // them immediately, then execute sequentially.
-                //
                 let mut queued_ids: Vec<(String, super::targeting::ResolvedTarget)> = Vec::new();
                 for target in &node_targets {
                     let exec_id = Uuid::new_v4().to_string();
-                    let element_ids: Vec<String> = chain.elements.iter().map(|e| e.id().to_string()).collect();
+                    let element_ids: Vec<String> =
+                        chain.elements.iter().map(|e| e.id().to_string()).collect();
                     let state = ChainExecutionState::new(
                         exec_id.clone(),
                         chain.id.clone(),
@@ -401,35 +362,31 @@ impl ChainExecutor {
                     let _ = database.insert_chain_execution(&record).await;
 
                     let update = state_arc.read().unwrap().to_update();
-                    Self::broadcast_update(&broadcast_channel, ClientBroadcastMessage::ChainExecutionUpdate(update)).await;
+                    Self::broadcast_update(
+                        &broadcast_channel,
+                        ClientBroadcastMessage::ChainExecutionUpdate(update),
+                    )
+                    .await;
 
                     queued_ids.push((exec_id, target.clone()));
                 }
 
-                //
-                // Execute sequentially — each execute() will find the
-                // pre-registered state and update it.
-                //
                 let mut node_results = Vec::new();
                 for (exec_id, target) in queued_ids {
-                    //
-                    // Skip if cancelled while queued. The cancel handler
-                    // removes from the registry, so if it's gone the
-                    // chain was cancelled.
-                    //
-                    let still_queued = self_clone.registry.list().iter().any(|e| e.execution_id == exec_id);
+                    let still_queued = self_clone
+                        .registry
+                        .list()
+                        .iter()
+                        .any(|e| e.execution_id == exec_id);
                     if !still_queued {
-                        common::log_info!("Chain execution {} was cancelled while queued, skipping", &exec_id[..8]);
+                        common::log_info!(
+                            "Chain execution {} was cancelled while queued, skipping",
+                            &exec_id[..8]
+                        );
                         node_results.push(Ok(exec_id));
                         continue;
                     }
 
-                    //
-                    // Remove the pre-registered Queued placeholder from
-                    // the registry so execute() can re-register with the
-                    // same ID. The DB record stays — execute() will
-                    // overwrite it.
-                    //
                     self_clone.registry.remove(&exec_id);
 
                     let result = self_clone
@@ -442,28 +399,24 @@ impl ChainExecutor {
                             config.clone(),
                             rabbitmq_channel.clone(),
                             broadcast_channel.clone(),
-                            response_tracker.clone(),
+                            acp_node_proxy.clone(),
                             database.clone(),
                             toolkit_manager.clone(),
                             Some(exec_id),
-                            node_exec_lock.clone(),
                         )
                         .await;
 
-                    //
-                    // Wait for completion before starting the next one
-                    // on the same node, so sessions don't collide.
-                    //
                     if let Ok(ref id) = result {
                         let poll_interval = std::time::Duration::from_secs(2);
                         let max_polls = 1800;
                         for _ in 0..max_polls {
                             tokio::time::sleep(poll_interval).await;
-                            let still_running = self_clone.registry.list().iter().any(|e| {
-                                &e.execution_id == id
-                                    && (e.status == common::ChainExecutionStatus::Running
-                                        || e.status == common::ChainExecutionStatus::Queued)
-                            });
+                            let still_running =
+                                self_clone.registry.list().iter().any(|e| {
+                                    &e.execution_id == id
+                                        && (e.status == common::ChainExecutionStatus::Running
+                                            || e.status == common::ChainExecutionStatus::Queued)
+                                });
                             if !still_running {
                                 break;
                             }
@@ -477,11 +430,6 @@ impl ChainExecutor {
             handles.push(handle);
         }
 
-        //
-        // Collect results from all node spawns. Each execute() returns
-        // immediately after spawning — the actual chain runs in the
-        // background. No need to wait for completion here.
-        //
         let mut all_results = Vec::new();
         for handle in handles {
             match handle.await {
@@ -492,12 +440,11 @@ impl ChainExecutor {
         all_results
     }
 
-    /// Broadcast an update to all clients via RabbitMQ
     async fn broadcast_update(channel: &Channel, message: ClientBroadcastMessage) {
         let _ = publish_json_exchange(channel, CLIENT_BROADCAST_EXCHANGE, &message).await;
     }
 
-    /// Run the chain execution logic
+    #[allow(clippy::too_many_arguments)]
     async fn run_chain(
         execution_id: String,
         graph: ExecutionGraph,
@@ -509,10 +456,11 @@ impl ChainExecutor {
         config: Arc<TokioRwLock<ServiceConfig>>,
         rabbitmq_channel: Channel,
         broadcast_channel: Channel,
-        response_tracker: Arc<ResponseTracker>,
+        acp_node_proxy: Arc<AcpNodeProxy>,
         database: Arc<Database>,
         state: Arc<std::sync::RwLock<ChainExecutionState>>,
         cancel_token: CancellationToken,
+        active_session_snapshot: Arc<std::sync::Mutex<Option<(String, String)>>>,
         toolkit_manager: Option<Arc<ToolkitManager>>,
     ) -> Result<()> {
         use std::collections::VecDeque;
@@ -523,38 +471,61 @@ impl ChainExecutor {
         let mut hit_counts: HashMap<String, u32> = HashMap::new();
         let mut initial_inputs: HashMap<String, String> = HashMap::new();
 
-        //
-        // Track active session state.
-        //
         let mut active_session: Option<String> = None;
         let mut current_session_group_id: Option<String> = None;
         let mut current_session_yolo_mode: bool = false;
 
         //
-        // Seed with trigger.
+        // Closure-equivalent helper: close the current session if any and
+        // clear the snapshot.
         //
+        let close_if_active = |session: &mut Option<String>,
+                               snapshot: &Arc<std::sync::Mutex<Option<(String, String)>>>,
+                               channel: &Channel,
+                               proxy: &Arc<AcpNodeProxy>,
+                               node_id: &str| {
+            let channel = channel.clone();
+            let proxy = proxy.clone();
+            let node_id = node_id.to_string();
+            let taken = session.take();
+            let snapshot = snapshot.clone();
+            async move {
+                if let Some(sid) = taken {
+                    let _ = close_session(&node_id, &sid, &channel, &proxy).await;
+                    *snapshot.lock().unwrap() = None;
+                }
+            }
+        };
+
         work_queue.push_back(graph.trigger_id.clone());
 
         while let Some(element_id) = work_queue.pop_front() {
-            //
-            // Safety check: prevent infinite loops.
-            //
             let hit = hit_counts.entry(element_id.clone()).or_insert(0);
             *hit += 1;
             if *hit > 1000 {
-                if active_session.is_some() {
-                    let _ = close_session(&node_id, &rabbitmq_channel).await;
-                }
-                return Err(anyhow::anyhow!("Safety limit: element {} executed >1000 times", element_id));
+                close_if_active(
+                    &mut active_session,
+                    &active_session_snapshot,
+                    &rabbitmq_channel,
+                    &acp_node_proxy,
+                    &node_id,
+                )
+                .await;
+                return Err(anyhow::anyhow!(
+                    "Safety limit: element {} executed >1000 times",
+                    element_id
+                ));
             }
 
-            //
-            // Check cancellation.
-            //
             if cancel_token.is_cancelled() {
-                if active_session.is_some() {
-                    let _ = close_session(&node_id, &rabbitmq_channel).await;
-                }
+                close_if_active(
+                    &mut active_session,
+                    &active_session_snapshot,
+                    &rabbitmq_channel,
+                    &acp_node_proxy,
+                    &node_id,
+                )
+                .await;
                 return Err(anyhow::anyhow!("Chain execution cancelled"));
             }
 
@@ -563,10 +534,6 @@ impl ChainExecutor {
                 None => continue,
             };
 
-            //
-            // Session management: check if we're entering or exiting a session
-            // group.
-            //
             let element_session_group_id = graph.get_session_group_id(&element_id);
             common::log_info!(
                 "Chain element {}: session_group_id={:?}, current_session_group_id={:?}, active_session={:?}",
@@ -575,51 +542,61 @@ impl ChainExecutor {
                 current_session_group_id,
                 active_session.as_ref().map(|s| &s[..8.min(s.len())])
             );
+
             if element_session_group_id != current_session_group_id {
                 //
-                // Exiting a session group - close the session.
+                // Exit current session group if any.
                 //
                 if current_session_group_id.is_some() && active_session.is_some() {
-                    let _ = close_session(&node_id, &rabbitmq_channel).await;
-                    active_session = None;
+                    close_if_active(
+                        &mut active_session,
+                        &active_session_snapshot,
+                        &rabbitmq_channel,
+                        &acp_node_proxy,
+                        &node_id,
+                    )
+                    .await;
                     common::log_info!("Closed session for session group");
                 }
 
                 //
-                // Entering a new session group - create session.
+                // Enter new session group: create a session.
                 //
                 if let Some(ref group_id) = element_session_group_id {
                     let session_group = graph.get_session_group(&element_id);
                     let yolo_mode = session_group.map(|sg| sg.yolo_mode).unwrap_or(false);
                     current_session_yolo_mode = yolo_mode;
 
-                    //
-                    // Session group working_dir overrides chain-level
-                    // working_dir.
-                    //
                     let session_working_dir = session_group
                         .and_then(|sg| sg.working_dir.clone())
                         .or_else(|| working_dir.clone());
 
                     let prompt_timeout_secs = Some(config.read().await.get_prompt_timeout_secs());
-                    active_session = Some(
-                        create_session(&node_id, yolo_mode, session_working_dir, prompt_timeout_secs, &rabbitmq_channel, response_tracker.clone())
-                            .await
-                            .context("Failed to create session for session group")?,
-                    );
+                    let sid = create_session(
+                        &node_id,
+                        &agent_short_name,
+                        yolo_mode,
+                        session_working_dir,
+                        prompt_timeout_secs,
+                        &rabbitmq_channel,
+                        &acp_node_proxy,
+                    )
+                    .await
+                    .context("Failed to create session for session group")?;
+                    *active_session_snapshot.lock().unwrap() =
+                        Some((node_id.clone(), sid.clone()));
+                    active_session = Some(sid);
                     common::log_info!("Created session for session group {}", group_id);
                 }
 
                 current_session_group_id = element_session_group_id.clone();
             }
 
-            //
-            // Determine if first in session: no other element in this group has
-            // been resolved yet.
-            //
             let is_first_in_session = if let Some(ref gid) = element_session_group_id {
                 if let Some((_, member_ids)) = graph.session_groups.get(gid) {
-                    !member_ids.iter().any(|mid| mid != &element_id && resolved.contains_key(mid))
+                    !member_ids
+                        .iter()
+                        .any(|mid| mid != &element_id && resolved.contains_key(mid))
                 } else {
                     true
                 }
@@ -627,19 +604,19 @@ impl ChainExecutor {
                 false
             };
 
-            //
-            // Collect inputs from resolved upstream connections that fired. On
-            // loop retry (re-execution), reuse the element's initial input so
-            // the block restarts with its original data.
-            //
             let merged_input = if let Some(initial) = initial_inputs.get(&element_id) {
                 initial.clone()
             } else {
-                let inputs: Vec<String> = graph.incoming_connections(&element_id)
+                let inputs: Vec<String> = graph
+                    .incoming_connections(&element_id)
                     .iter()
                     .filter_map(|conn| {
                         if let Some((output, success)) = resolved.get(&conn.from_element) {
-                            if connection_fires(conn, success) { Some(output.clone()) } else { None }
+                            if connection_fires(conn, success) {
+                                Some(output.clone())
+                            } else {
+                                None
+                            }
                         } else {
                             None
                         }
@@ -650,16 +627,9 @@ impl ChainExecutor {
                 input
             };
 
-            //
-            // Per-block yolo_mode override takes precedence over session group.
-            //
-            let block_yolo = node.element.block_config()
-                .and_then(|bc| bc.yolo_mode);
+            let block_yolo = node.element.block_config().and_then(|bc| bc.yolo_mode);
             let yolo_mode = block_yolo.unwrap_or(current_session_yolo_mode);
 
-            //
-            // Build element config and context based on element type.
-            //
             let (elem_config, elem_context) = match &node.element {
                 ChainElement::Trigger { .. } => (
                     ElementConfig::Trigger,
@@ -670,7 +640,11 @@ impl ChainExecutor {
                         is_first_in_session,
                     },
                 ),
-                ChainElement::Operation { operation_name, model_ref, .. } => (
+                ChainElement::Operation {
+                    operation_name,
+                    model_ref,
+                    ..
+                } => (
                     ElementConfig::Operation {
                         operation_name: operation_name.clone(),
                         model_ref: model_ref.clone(),
@@ -682,7 +656,9 @@ impl ChainExecutor {
                         is_first_in_session,
                     },
                 ),
-                ChainElement::Transform { prompt, model_ref, .. } => (
+                ChainElement::Transform {
+                    prompt, model_ref, ..
+                } => (
                     ElementConfig::Transform {
                         prompt: prompt.clone(),
                         model_ref: model_ref.clone(),
@@ -724,7 +700,9 @@ impl ChainExecutor {
                     },
                 ),
                 ChainElement::Loop { max_iterations, .. } => (
-                    ElementConfig::Loop { max_iterations: *max_iterations },
+                    ElementConfig::Loop {
+                        max_iterations: *max_iterations,
+                    },
                     ElementContext {
                         input: merged_input.clone(),
                         session_id: None,
@@ -732,7 +710,11 @@ impl ChainExecutor {
                         is_first_in_session: false,
                     },
                 ),
-                ChainElement::Tool { tool_name, tool_params, .. } => (
+                ChainElement::Tool {
+                    tool_name,
+                    tool_params,
+                    ..
+                } => (
                     ElementConfig::Tool {
                         tool_name: tool_name.clone(),
                         tool_params: tool_params.clone(),
@@ -766,9 +748,6 @@ impl ChainExecutor {
                 ),
             };
 
-            //
-            // Update state to running with config and context.
-            //
             let element_type_name = match &node.element {
                 ChainElement::Trigger { .. } => "Trigger",
                 ChainElement::Operation { operation_name, .. } => operation_name.as_str(),
@@ -787,7 +766,11 @@ impl ChainExecutor {
                 s.set_element_running_with_context(&element_id, elem_config, elem_context);
             }
             let update = state.read().unwrap().to_update();
-            Self::broadcast_update(&broadcast_channel, ClientBroadcastMessage::ChainExecutionUpdate(update)).await;
+            Self::broadcast_update(
+                &broadcast_channel,
+                ClientBroadcastMessage::ChainExecutionUpdate(update),
+            )
+            .await;
 
             common::log_debug!(
                 "[chain {}] START {} ({}) | input: {} bytes",
@@ -797,163 +780,154 @@ impl ChainExecutor {
                 merged_input.len()
             );
 
-            //
-            // Execute based on element type.
-            //
-            //
-            // semantic_success: overrides Ok/Err for chain edge decisions.
-            // Only agent-mode operations produce this (via the LLM completion
-            // signal). None means "use Ok/Err as-is".
-            //
-            let (result, active_port, semantic_success): (Result<String>, Option<u32>, Option<bool>) = match &node.element {
-                ChainElement::Trigger { .. } => {
-                    let trigger_output = initial_input.clone().unwrap_or_default();
-                    (Ok(trigger_output), None, None)
-                }
-                ChainElement::Loop { max_iterations, .. } => {
-                    let counter = loop_counters.entry(element_id.clone()).or_insert(0);
-                    *counter += 1;
-                    if *counter <= *max_iterations {
-                        //
-                        // Retry: fire port 0 (back to target element).
-                        //
-                        (Ok(merged_input.clone()), Some(0), None)
-                    } else {
-                        //
-                        // Exhausted: don't fire any port. Use non-existent
-                        // port so no outgoing connections match.
-                        //
-                        (Ok(merged_input.clone()), Some(u32::MAX), None)
+            let (result, active_port, semantic_success): (Result<String>, Option<u32>, Option<bool>) =
+                match &node.element {
+                    ChainElement::Trigger { .. } => {
+                        let trigger_output = initial_input.clone().unwrap_or_default();
+                        (Ok(trigger_output), None, None)
                     }
-                }
-                //
-                // Long-running elements wrapped in tokio::select! so
-                // cancellation takes effect immediately rather than waiting
-                // for LLM/agent responses to complete.
-                //
-                ChainElement::Operation {
-                    operation_name,
-                    model_ref,
-                    ..
-                } => {
-                    tokio::select! {
-                        _ = cancel_token.cancelled() => {
-                            (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
-                        }
-                        op_result = Self::execute_operation(
-                            &execution_id,
-                            &element_id,
-                            operation_name,
-                            model_ref,
-                            &merged_input,
-                            is_first_in_session,
-                            yolo_mode,
-                            &active_session,
-                            &working_dir,
-                            &node_id,
-                            &agent_short_name,
-                            &config,
-                            &rabbitmq_channel,
-                            response_tracker.clone(),
-                            database.clone(),
-                        ) => {
-                            match op_result {
-                                Ok((output, sem_success)) => (Ok(output), None, sem_success),
-                                Err(e) => (Err(e), None, None),
-                            }
-                        }
-                    }
-                }
-                ChainElement::Transform { prompt, model_ref, .. } => {
-                    tokio::select! {
-                        _ = cancel_token.cancelled() => {
-                            (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
-                        }
-                        result = Self::execute_transform(
-                            prompt,
-                            model_ref,
-                            &merged_input,
-                            &config,
-                        ) => {
-                            (result, None, None)
-                        }
-                    }
-                }
-                ChainElement::GenericPrompt { prompt, session_group, .. } => {
-                    tokio::select! {
-                        _ = cancel_token.cancelled() => {
-                            (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
-                        }
-                        result = Self::execute_generic_prompt(
-                            prompt,
-                            session_group,
-                            &merged_input,
-                            is_first_in_session,
-                            &active_session,
-                            yolo_mode,
-                            &working_dir,
-                            &node_id,
-                            &rabbitmq_channel,
-                            response_tracker.clone(),
-                            database.clone(),
-                            &config,
-                        ) => {
-                            (result, None, None)
-                        }
-                    }
-                }
-                ChainElement::Memory { key, mode, .. } => {
-                    let mem_result = match mode {
-                        crate::database::MemoryMode::Store => {
-                            database.set_memory(key, &merged_input).await
-                                .map_err(|e| anyhow::anyhow!("Failed to store memory '{}': {}", key, e))
-                                .map(|_| merged_input.clone())
-                        }
-                        crate::database::MemoryMode::Retrieve => {
-                            database.get_memory(key).await
-                                .map_err(|e| anyhow::anyhow!("Failed to retrieve memory '{}': {}", key, e))
-                                .map(|v| v.unwrap_or_default())
-                        }
-                    };
-                    (mem_result, None, None)
-                }
-                ChainElement::Tool { tool_name, tool_params, .. } => {
-                    let tool_future = async {
-                        if let Some(ref tm) = toolkit_manager {
-                            if let Some(tool) = tm.get_chain_tool(tool_name) {
-                                tool.execute_chain(&merged_input, tool_params).await
-                            } else {
-                                Err(anyhow::anyhow!("Tool '{}' not found", tool_name))
-                            }
+                    ChainElement::Loop { max_iterations, .. } => {
+                        let counter = loop_counters.entry(element_id.clone()).or_insert(0);
+                        *counter += 1;
+                        if *counter <= *max_iterations {
+                            (Ok(merged_input.clone()), Some(0), None)
                         } else {
-                            Err(anyhow::anyhow!("ToolkitManager not available"))
-                        }
-                    };
-                    tokio::select! {
-                        _ = cancel_token.cancelled() => {
-                            (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
-                        }
-                        result = tool_future => {
-                            (result, None, None)
+                            (Ok(merged_input.clone()), Some(u32::MAX), None)
                         }
                     }
-                }
-                ChainElement::Payload { payload_id, .. } => {
-                    let result = match database.get_payload(payload_id).await {
-                        Ok(Some(record)) => Ok(record.content),
-                        Ok(None) => Err(anyhow::anyhow!("Payload '{}' not found", payload_id)),
-                        Err(e) => Err(anyhow::anyhow!("Failed to load payload: {}", e)),
-                    };
-                    (result, None, None)
-                }
-                ChainElement::Termination { .. } => {
-                    (Ok(merged_input.clone()), None, None)
-                }
-            };
+                    ChainElement::Operation {
+                        operation_name,
+                        model_ref,
+                        ..
+                    } => {
+                        tokio::select! {
+                            _ = cancel_token.cancelled() => {
+                                (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
+                            }
+                            op_result = Self::execute_operation(
+                                &execution_id,
+                                &element_id,
+                                operation_name,
+                                model_ref,
+                                &merged_input,
+                                is_first_in_session,
+                                yolo_mode,
+                                &active_session,
+                                &working_dir,
+                                &node_id,
+                                &agent_short_name,
+                                &config,
+                                &rabbitmq_channel,
+                                &acp_node_proxy,
+                                database.clone(),
+                            ) => {
+                                match op_result {
+                                    Ok((output, sem_success)) => (Ok(output), None, sem_success),
+                                    Err(e) => (Err(e), None, None),
+                                }
+                            }
+                        }
+                    }
+                    ChainElement::Transform {
+                        prompt, model_ref, ..
+                    } => {
+                        tokio::select! {
+                            _ = cancel_token.cancelled() => {
+                                (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
+                            }
+                            result = Self::execute_transform(
+                                prompt,
+                                model_ref,
+                                &merged_input,
+                                &config,
+                            ) => {
+                                (result, None, None)
+                            }
+                        }
+                    }
+                    ChainElement::GenericPrompt {
+                        prompt,
+                        session_group,
+                        ..
+                    } => {
+                        tokio::select! {
+                            _ = cancel_token.cancelled() => {
+                                (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
+                            }
+                            result = Self::execute_generic_prompt(
+                                prompt,
+                                session_group,
+                                &merged_input,
+                                is_first_in_session,
+                                &active_session,
+                                yolo_mode,
+                                &working_dir,
+                                &node_id,
+                                &agent_short_name,
+                                &rabbitmq_channel,
+                                &acp_node_proxy,
+                                database.clone(),
+                                &config,
+                            ) => {
+                                (result, None, None)
+                            }
+                        }
+                    }
+                    ChainElement::Memory { key, mode, .. } => {
+                        let mem_result = match mode {
+                            crate::database::MemoryMode::Store => database
+                                .set_memory(key, &merged_input)
+                                .await
+                                .map_err(|e| {
+                                    anyhow::anyhow!("Failed to store memory '{}': {}", key, e)
+                                })
+                                .map(|_| merged_input.clone()),
+                            crate::database::MemoryMode::Retrieve => database
+                                .get_memory(key)
+                                .await
+                                .map_err(|e| {
+                                    anyhow::anyhow!("Failed to retrieve memory '{}': {}", key, e)
+                                })
+                                .map(|v| v.unwrap_or_default()),
+                        };
+                        (mem_result, None, None)
+                    }
+                    ChainElement::Tool {
+                        tool_name,
+                        tool_params,
+                        ..
+                    } => {
+                        let tool_future = async {
+                            if let Some(ref tm) = toolkit_manager {
+                                if let Some(tool) = tm.get_chain_tool(tool_name) {
+                                    tool.execute_chain(&merged_input, tool_params).await
+                                } else {
+                                    Err(anyhow::anyhow!("Tool '{}' not found", tool_name))
+                                }
+                            } else {
+                                Err(anyhow::anyhow!("ToolkitManager not available"))
+                            }
+                        };
+                        tokio::select! {
+                            _ = cancel_token.cancelled() => {
+                                (Err(anyhow::anyhow!("Chain execution cancelled")), None, None)
+                            }
+                            result = tool_future => {
+                                (result, None, None)
+                            }
+                        }
+                    }
+                    ChainElement::Payload { payload_id, .. } => {
+                        let result = match database.get_payload(payload_id).await {
+                            Ok(Some(record)) => Ok(record.content),
+                            Ok(None) => Err(anyhow::anyhow!("Payload '{}' not found", payload_id)),
+                            Err(e) => Err(anyhow::anyhow!("Failed to load payload: {}", e)),
+                        };
+                        (result, None, None)
+                    }
+                    ChainElement::Termination { .. } => (Ok(merged_input.clone()), None, None),
+                };
 
-            //
-            // Handle result: store output and enqueue downstream.
-            //
             let (output, success) = match result {
                 Ok(output) => {
                     common::log_debug!(
@@ -989,31 +963,19 @@ impl ChainExecutor {
                 }
             };
 
-            //
-            // If the agent signalled semantic success/failure, use that for
-            // edge decisions instead of Ok/Err. The operation itself still
-            // completed successfully — this only affects which chain edges
-            // fire.
-            //
             let edge_success = semantic_success.map(Some).unwrap_or(success);
 
-            //
-            // Store resolved output.
-            //
             resolved.insert(element_id.clone(), (output.clone(), edge_success));
 
-            //
-            // Terminal check: if no outgoing connections, store as output.
-            //
             if graph.outgoing_connections(&element_id).is_empty() {
                 if edge_success == Some(true) {
-                    state.write().unwrap().add_output(element_id.clone(), output.clone());
+                    state
+                        .write()
+                        .unwrap()
+                        .add_output(element_id.clone(), output.clone());
                 }
             }
 
-            //
-            // Determine fired outgoing connections and enqueue ready targets.
-            //
             for conn in graph.outgoing_connections(&element_id) {
                 if !connection_fires(conn, &edge_success) {
                     continue;
@@ -1028,18 +990,14 @@ impl ChainExecutor {
                 }
             }
 
-            //
-            // If the work queue is drained, check for elements configured with
-            // require_all_inputs=false that have at least one fired input but
-            // are waiting on sources that will never resolve (e.g. from a
-            // conditional branch that didn't fire).
-            //
             if work_queue.is_empty() {
                 for (id, node) in &graph.nodes {
                     if resolved.contains_key(id) {
                         continue;
                     }
-                    let allows_partial = node.element.block_config()
+                    let allows_partial = node
+                        .element
+                        .block_config()
                         .and_then(|bc| bc.require_all_inputs)
                         .map(|v| !v)
                         .unwrap_or(false);
@@ -1049,47 +1007,45 @@ impl ChainExecutor {
                 }
             }
 
-            //
-            // Broadcast progress.
-            //
             let update = state.read().unwrap().to_update();
-            Self::broadcast_update(&broadcast_channel, ClientBroadcastMessage::ChainExecutionUpdate(update)).await;
+            Self::broadcast_update(
+                &broadcast_channel,
+                ClientBroadcastMessage::ChainExecutionUpdate(update),
+            )
+            .await;
         }
 
-        //
-        // Mark unresolved elements as skipped.
-        //
         for (id, _) in &graph.nodes {
             if !resolved.contains_key(id) {
                 state.write().unwrap().set_element_skipped(id);
             }
         }
 
-        //
-        // Clean up session.
-        //
-        if active_session.is_some() {
-            let _ = close_session(&node_id, &rabbitmq_channel).await;
-        }
+        close_if_active(
+            &mut active_session,
+            &active_session_snapshot,
+            &rabbitmq_channel,
+            &acp_node_proxy,
+            &node_id,
+        )
+        .await;
 
-        //
-        // Determine chain success: the Termination element must have been
-        // reached (resolved). Semantic success/failure of individual
-        // operations does not affect the chain's own completion status.
-        //
-        let termination_id = chain.elements.iter()
+        let termination_id = chain
+            .elements
+            .iter()
             .find(|e| matches!(e, ChainElement::Termination { .. }))
             .map(|e| e.id().clone());
         if let Some(ref tid) = termination_id {
             if !resolved.contains_key(tid) {
-                return Err(anyhow::anyhow!("Chain failed: Termination element was not reached"));
+                return Err(anyhow::anyhow!(
+                    "Chain failed: Termination element was not reached"
+                ));
             }
         }
 
         Ok(())
     }
 
-    /// Execute an Operation element
     #[allow(clippy::too_many_arguments)]
     async fn execute_operation(
         execution_id: &str,
@@ -1105,7 +1061,7 @@ impl ChainExecutor {
         agent_short_name: &str,
         config: &Arc<TokioRwLock<ServiceConfig>>,
         rabbitmq_channel: &Channel,
-        response_tracker: Arc<ResponseTracker>,
+        acp_node_proxy: &Arc<AcpNodeProxy>,
         database: Arc<Database>,
     ) -> Result<(String, Option<bool>)> {
         let op_def = database
@@ -1157,84 +1113,96 @@ impl ChainExecutor {
             result: None,
             queue_position: None,
             created_at: now,
-            output: Some(format!("[Chain: {} | Element: {}]\n", execution_id, element_id)),
+            output: Some(format!(
+                "[Chain: {} | Element: {}]\n",
+                execution_id, element_id
+            )),
             chain_execution_id: Some(execution_id.to_string()),
         };
         if let Err(e) = database.insert_operation(&op_record).await {
             common::log_warn!("Failed to record chain operation to database: {}", e);
         }
 
-        let use_existing_session = active_session.is_some();
         let (_op_cancel_tx, op_cancel_rx) = oneshot::channel::<()>();
 
-        //
-        // Agent mode returns (summary, result, semantic_success). One-shot
-        // has no completion signal so semantic_success is always None.
-        //
-        let (op_result, semantic_success): (Result<(String, String)>, Option<bool>) = if spec.mode == "agent" {
-            let prompt_timeout_secs = Some(config.read().await.get_prompt_timeout_secs());
-            match execute_agent_mode(
-                &op_id,
-                node_id,
-                &spec,
-                working_dir.clone(),
-                prompt_timeout_secs,
-                config,
-                rabbitmq_channel,
-                response_tracker.clone(),
-                database.clone(),
-                op_cancel_rx,
-                use_existing_session,
-            )
-            .await
-            {
-                Ok((summary, result, success)) => (Ok((summary, result)), success),
-                Err(e) => (Err(e), None),
-            }
-        } else {
-            let prompt_timeout_secs = Some(config.read().await.get_prompt_timeout_secs());
-            let result = execute_one_shot(
-                &op_id,
-                node_id,
-                &spec,
-                working_dir.clone(),
-                prompt_timeout_secs,
-                rabbitmq_channel,
-                response_tracker.clone(),
-                database.clone(),
-                op_cancel_rx,
-                use_existing_session,
-            )
-            .await;
-            (result, None)
-        };
+        let (op_result, semantic_success): (Result<(String, String)>, Option<bool>) =
+            if spec.mode == "agent" {
+                let prompt_timeout_secs = Some(config.read().await.get_prompt_timeout_secs());
+                match execute_agent_mode(
+                    &op_id,
+                    node_id,
+                    agent_short_name,
+                    &spec,
+                    working_dir.clone(),
+                    prompt_timeout_secs,
+                    active_session.clone(),
+                    config,
+                    rabbitmq_channel,
+                    acp_node_proxy,
+                    database.clone(),
+                    op_cancel_rx,
+                )
+                .await
+                {
+                    Ok((summary, result, success)) => (Ok((summary, result)), success),
+                    Err(e) => (Err(e), None),
+                }
+            } else {
+                let prompt_timeout_secs = Some(config.read().await.get_prompt_timeout_secs());
+                let result = execute_one_shot(
+                    &op_id,
+                    node_id,
+                    agent_short_name,
+                    &spec,
+                    working_dir.clone(),
+                    prompt_timeout_secs,
+                    active_session.clone(),
+                    rabbitmq_channel,
+                    acp_node_proxy,
+                    database.clone(),
+                    op_cancel_rx,
+                )
+                .await;
+                (result, None)
+            };
 
         let end_time = Utc::now();
         match &op_result {
             Ok((summary, result)) => {
-                let _ = database.update_status(
-                    &op_id,
-                    SemanticOpStatus::Completed,
-                    Some(end_time),
-                    if summary.is_empty() { None } else { Some(summary.clone()) },
-                    if result.is_empty() { None } else { Some(result.clone()) },
-                ).await;
+                let _ = database
+                    .update_status(
+                        &op_id,
+                        SemanticOpStatus::Completed,
+                        Some(end_time),
+                        if summary.is_empty() {
+                            None
+                        } else {
+                            Some(summary.clone())
+                        },
+                        if result.is_empty() {
+                            None
+                        } else {
+                            Some(result.clone())
+                        },
+                    )
+                    .await;
             }
             Err(e) => {
-                let _ = database.update_status(
-                    &op_id,
-                    SemanticOpStatus::Failed,
-                    Some(end_time),
-                    None,
-                    Some(e.to_string()),
-                ).await;
+                let _ = database
+                    .update_status(
+                        &op_id,
+                        SemanticOpStatus::Failed,
+                        Some(end_time),
+                        None,
+                        Some(e.to_string()),
+                    )
+                    .await;
             }
         }
 
         op_result.map(|(summary, _result)| (summary, semantic_success))
     }
 
-    /// Execute a Transform element
     async fn execute_transform(
         prompt: &str,
         model_ref: &Option<String>,
@@ -1243,13 +1211,25 @@ impl ChainExecutor {
     ) -> Result<String> {
         let config_guard = config.read().await;
         let model_def = if let Some(mref) = model_ref {
-            config_guard.find_model_definition(mref)
-                .ok_or_else(|| anyhow::anyhow!("Model '{}' not found. Configure in Settings > LLM Providers.", mref))?
+            config_guard.find_model_definition(mref).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Model '{}' not found. Configure in Settings > LLM Providers.",
+                    mref
+                )
+            })?
         } else {
-            config_guard.get_semantic_ops_model_def()
-                .ok_or_else(|| anyhow::anyhow!("No LLM configured for transform. Configure in Settings > LLM Providers."))?
+            config_guard.get_semantic_ops_model_def().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "No LLM configured for transform. Configure in Settings > LLM Providers."
+                )
+            })?
         };
-        let (provider_str, model_name, api_key, base_url) = (model_def.provider, model_def.model, model_def.api_key, model_def.base_url);
+        let (provider_str, model_name, api_key, base_url) = (
+            model_def.provider,
+            model_def.model,
+            model_def.api_key,
+            model_def.base_url,
+        );
         drop(config_guard);
 
         let provider = Provider::from_str(&provider_str)
@@ -1266,7 +1246,6 @@ impl ChainExecutor {
         execute_chat_completion(&client, model_name, messages, Some(8192)).await
     }
 
-    /// Execute a GenericPrompt element
     #[allow(clippy::too_many_arguments)]
     async fn execute_generic_prompt(
         prompt: &str,
@@ -1277,8 +1256,9 @@ impl ChainExecutor {
         yolo_mode: bool,
         working_dir: &Option<String>,
         node_id: &str,
+        agent_short_name: &str,
         rabbitmq_channel: &Channel,
-        response_tracker: Arc<ResponseTracker>,
+        acp_node_proxy: &Arc<AcpNodeProxy>,
         database: Arc<Database>,
         config: &Arc<TokioRwLock<ServiceConfig>>,
     ) -> Result<String> {
@@ -1292,12 +1272,10 @@ impl ChainExecutor {
             } else {
                 prompt.to_string()
             }
+        } else if merged_input.is_empty() {
+            prompt.to_string()
         } else {
-            if merged_input.is_empty() {
-                prompt.to_string()
-            } else {
-                format!("{}\n\n{}", merged_input, prompt)
-            }
+            format!("{}\n\n{}", merged_input, prompt)
         };
 
         let spec = SemanticOperationSpec {
@@ -1313,42 +1291,37 @@ impl ChainExecutor {
         };
 
         let op_id = Uuid::new_v4().to_string();
-        let needs_temp_session = active_session.is_none();
-        let session_yolo = session_group.as_ref().map(|sg| sg.yolo_mode).unwrap_or(false);
-
-        if needs_temp_session {
-            let prompt_timeout_secs = Some(config.read().await.get_prompt_timeout_secs());
-            let _temp_session = create_session(node_id, session_yolo, working_dir.clone(), prompt_timeout_secs, rabbitmq_channel, response_tracker.clone())
-                .await
-                .context("Failed to create temp session for generic prompt")?;
-        }
-
         let (_op_cancel_tx, op_cancel_rx) = oneshot::channel::<()>();
-
         let prompt_timeout_secs = Some(config.read().await.get_prompt_timeout_secs());
+
+        //
+        // If there's no active session, the executor will create a
+        // temporary one by passing existing_session_id=None.
+        //
         let result = execute_one_shot(
             &op_id,
             node_id,
+            agent_short_name,
             &spec,
             working_dir.clone(),
             prompt_timeout_secs,
+            active_session.clone(),
             rabbitmq_channel,
-            response_tracker.clone(),
-            database.clone(),
+            acp_node_proxy,
+            database,
             op_cancel_rx,
-            !needs_temp_session,
         )
         .await;
-
-        if needs_temp_session {
-            let _ = close_session(node_id, rabbitmq_channel).await;
-        }
 
         result.map(|(summary, _result)| summary)
     }
 }
 
-/// Check if a connection fires based on its condition and the source element's success.
+//
+// Check if a connection fires based on its condition and the source
+// element's success.
+//
+
 fn connection_fires(conn: &crate::database::ChainConnection, success: &Option<bool>) -> bool {
     match &conn.condition {
         None => true,
@@ -1357,13 +1330,15 @@ fn connection_fires(conn: &crate::database::ChainConnection, success: &Option<bo
     }
 }
 
-/// Check if a target element is ready to execute (all forward-edge sources
-/// resolved, at least one fires).
-///
-/// On first execution of a target (not yet resolved), back-edge sources are
-/// skipped. A back-edge is a connection from a source that the target can
-/// reach via forward traversal (i.e. they form a cycle). This prevents
-/// deadlock in loop structures like Op → Loop → (port 0) → Op.
+//
+// Check if a target element is ready to execute (all forward-edge sources
+// resolved, at least one fires). On first execution of a target (not yet
+// resolved), back-edge sources are skipped. A back-edge is a connection
+// from a source that the target can reach via forward traversal (i.e. they
+// form a cycle). This prevents deadlock in loop structures like
+// Op → Loop → (port 0) → Op.
+//
+
 fn is_target_ready(
     target_id: &str,
     graph: &ExecutionGraph,
@@ -1380,10 +1355,6 @@ fn is_target_ready(
                 any_fires = true;
             }
         } else {
-            //
-            // Source not resolved. If this is a back-edge on first pass,
-            // skip it — the loop will re-enqueue when it fires.
-            //
             if first_execution && graph.is_reachable(target_id, &conn.from_element) {
                 continue;
             }
@@ -1394,9 +1365,11 @@ fn is_target_ready(
     all_required_resolved && any_fires
 }
 
-/// Check if a target element has at least one incoming connection that fires,
-/// regardless of whether all sources are resolved. Used at merge points where
-/// some upstream branches didn't fire (e.g. conditional paths).
+//
+// Check if a target element has at least one incoming connection that
+// fires, regardless of whether all sources are resolved.
+//
+
 fn has_any_fired_input(
     target_id: &str,
     graph: &ExecutionGraph,

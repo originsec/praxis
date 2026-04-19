@@ -1,11 +1,11 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use serde_json::Value;
 
 use crate::{
     ChainDefinitionFull, ChainDefinitionInfo, ChainExecutionUpdate, ChainTriggerInfo,
-    CommandResponse, InterceptedTrafficEntry, NodeCommand, OperationDefinitionInfo,
-    ReconResult, SemanticOpUpdate, SemanticOperationSpec, SystemState, TargetSpec,
-    TrafficSearchFilters, TriggerConfig,
+    InterceptedTrafficEntry, OperationDefinitionInfo, ReconResult, SemanticOpUpdate,
+    SemanticOperationSpec, SystemState, TargetSpec, TrafficSearchFilters, TriggerConfig,
 };
 
 //
@@ -18,8 +18,45 @@ pub trait McpClient: Send + Sync {
     /// Get current system state with connected nodes.
     async fn get_state(&self) -> Option<SystemState>;
 
-    /// Send a command to a specific node.
-    async fn send_command(&self, node_id: &str, command: NodeCommand) -> Result<CommandResponse>;
+    //
+    // Send an ACP JSON-RPC request to the node targeted by `node_id`. The
+    // node id is embedded as `params._meta.praxis.nodeId` so the service-side
+    // AcpNodeProxy can forward it. Returns the decoded `result` value from
+    // the JSON-RPC response.
+    //
+
+    async fn acp_request(
+        &self,
+        node_id: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<Value>;
+
+    //
+    // Like `acp_request` but additionally buffers any `session/update`
+    // notifications (where `update.sessionUpdate == "agent_message_chunk"`)
+    // that arrive for the session while the request is in flight, and
+    // returns the concatenated text alongside the response result.
+    //
+
+    async fn acp_request_collecting_text(
+        &self,
+        node_id: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<(Value, String)>;
+
+    //
+    // Fire a JSON-RPC notification (no id, no response). Used e.g. for
+    // session/cancel.
+    //
+
+    async fn acp_notification(
+        &self,
+        node_id: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<()>;
 
     /// Search intercepted traffic.
     async fn search_traffic(

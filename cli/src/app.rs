@@ -16,7 +16,7 @@ use crate::acp::{AcpBridgeHandle, AcpNotification};
 use crate::client::Client;
 use crate::event::AppEvent;
 use chrono::Utc;
-use common::{NodeCommand, NodeCommandResult, NodeState, OrchestratorPlan, SystemState};
+use common::{NodeState, OrchestratorPlan, SystemState};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };

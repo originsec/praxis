@@ -1,9 +1,7 @@
 use anyhow::{Result, anyhow};
 use clap::Subcommand;
-use common::{
-    AgentCommand as NodeAgentCommand, AgentCommandResult, AgentFileType as NodeFileType,
-    NodeCommand as NodeCmd, NodeCommandResult,
-};
+use common::AgentFileType as NodeFileType;
+use serde_json::json;
 
 use crate::client::Client;
 use crate::output::{format_short_id, print_header, print_success};
@@ -222,47 +220,64 @@ async fn list_agents(client: &Client, node_prefix: &str) -> Result<()> {
 }
 
 async fn select_agent(client: &Client, node_prefix: &str, short_name: &str) -> Result<()> {
+    //
+    // Under ACP the connector is chosen per session. There is no node-side
+    // method for selection, so validate against the cached agent list.
+    //
+
     let state = client
         .get_state()
         .await
         .ok_or_else(|| anyhow!("No state available"))?;
-    let node_id = find_node_id(&state, node_prefix)
+    let node = state
+        .nodes
+        .iter()
+        .find(|n| n.node_id.to_lowercase().starts_with(&node_prefix.to_lowercase()))
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
-    let cmd = NodeCmd::Agent(NodeAgentCommand::Select {
-        short_name: short_name.to_string(),
-    });
-    let response = client.send_command(&node_id, cmd).await?;
-
-    match response.result {
-        NodeCommandResult::Agent(AgentCommandResult::Selected { short_name }) => {
-            print_success(&format!("Selected agent: {}", short_name));
-            Ok(())
-        }
-        NodeCommandResult::Error { message } => Err(anyhow!(message)),
-        _ => Err(anyhow!("Unexpected response")),
+    let exists = node.discovered_agents.iter().any(|a| a.short_name == short_name);
+    if !exists {
+        return Err(anyhow!(
+            "Agent '{}' not available on node. Use `agent list` to see discovered agents.",
+            short_name
+        ));
     }
+
+    print_success(&format!("Selected agent: {}", short_name));
+    Ok(())
 }
 
 async fn update_agent(client: &Client, node_prefix: &str) -> Result<()> {
+    //
+    // Agent info is refreshed automatically via NodeInformationUpdate
+    // broadcasts; just report the cached count.
+    //
+
     let state = client
         .get_state()
         .await
         .ok_or_else(|| anyhow!("No state available"))?;
-    let node_id = find_node_id(&state, node_prefix)
+    let node = state
+        .nodes
+        .iter()
+        .find(|n| n.node_id.to_lowercase().starts_with(&node_prefix.to_lowercase()))
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
-    let cmd = NodeCmd::Agent(NodeAgentCommand::Update);
-    let response = client.send_command(&node_id, cmd).await?;
+    print_success(&format!(
+        "Reporting cached agent info: {} agent(s)",
+        node.discovered_agents.len()
+    ));
+    Ok(())
+}
 
-    match response.result {
-        NodeCommandResult::Agent(AgentCommandResult::UpdateSent) => {
-            print_success("Update request sent");
-            Ok(())
-        }
-        NodeCommandResult::Error { message } => Err(anyhow!(message)),
-        _ => Err(anyhow!("Unexpected response")),
-    }
+fn selected_agent_short_name(state: &common::SystemState, node_id: &str) -> Result<String> {
+    state
+        .nodes
+        .iter()
+        .find(|n| n.node_id == node_id)
+        .and_then(|n| n.selected_agent.as_ref())
+        .map(|a| a.short_name.clone())
+        .ok_or_else(|| anyhow!("No agent selected on node. Use `agent select` first."))
 }
 
 async fn read_file(
@@ -279,49 +294,50 @@ async fn read_file(
         .ok_or_else(|| anyhow!("No state available"))?;
     let node_id = find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+    let agent_short_name = selected_agent_short_name(&state, &node_id)?;
 
-    let cmd = NodeCmd::Agent(NodeAgentCommand::ReadFile {
-        file_type,
-        path: path.to_string(),
-        line_start,
-        line_end,
+    let mut params = json!({
+        "agent_short_name": agent_short_name,
+        "file_type": file_type,
+        "path": path,
     });
-    let response = client.send_command(&node_id, cmd).await?;
-
-    match response.result {
-        NodeCommandResult::Agent(AgentCommandResult::ReadFileResult {
-            file_type,
-            path,
-            content,
-            line_start,
-            line_end,
-            error,
-        }) => {
-            if let Some(error) = error {
-                return Err(anyhow!(error));
-            }
-
-            let title = match file_type {
-                NodeFileType::Config => "Config Content",
-                NodeFileType::Session => "Session Content",
-            };
-            print_header(title);
-            println!();
-            println!("  Path: {}", path);
-            if line_start.is_some() || line_end.is_some() {
-                println!("  Lines: {:?}..{:?}", line_start, line_end);
-            }
-            println!();
-            if let Some(content) = content {
-                println!("{}", content);
-            }
-            println!();
-            print_success("Read complete");
-            Ok(())
-        }
-        NodeCommandResult::Error { message } => Err(anyhow!(message)),
-        _ => Err(anyhow!("Unexpected response")),
+    if let Some(v) = line_start {
+        params["line_start"] = json!(v);
     }
+    if let Some(v) = line_end {
+        params["line_end"] = json!(v);
+    }
+
+    let result = client.acp_request(&node_id, "_praxis/read_file", params).await?;
+
+    if result.get("path").is_none() {
+        if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
+            return Err(anyhow!(err.to_string()));
+        }
+    }
+
+    if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
+        return Err(anyhow!(err.to_string()));
+    }
+
+    let title = match file_type {
+        NodeFileType::Config => "Config Content",
+        NodeFileType::Session => "Session Content",
+    };
+    print_header(title);
+    println!();
+    let out_path = result.get("path").and_then(|v| v.as_str()).unwrap_or(path);
+    println!("  Path: {}", out_path);
+    if line_start.is_some() || line_end.is_some() {
+        println!("  Lines: {:?}..{:?}", line_start, line_end);
+    }
+    println!();
+    if let Some(content) = result.get("content").and_then(|v| v.as_str()) {
+        println!("{}", content);
+    }
+    println!();
+    print_success("Read complete");
+    Ok(())
 }
 
 async fn write_file(
@@ -338,26 +354,24 @@ async fn write_file(
     let node_id = find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
-    let cmd = NodeCmd::Agent(NodeAgentCommand::WriteFile {
-        file_type,
-        path: path.to_string(),
-        contents: contents.to_string(),
-    });
-    let response = client.send_command(&node_id, cmd).await?;
+    let result = client
+        .acp_request(&node_id, "_praxis/write_file", json!({
+            "file_type": file_type,
+            "path": path,
+            "contents": contents,
+        }))
+        .await?;
 
-    match response.result {
-        NodeCommandResult::Agent(AgentCommandResult::WriteFileResult {
-            success, error, ..
-        }) => {
-            if success {
-                print_success("Write complete");
-                Ok(())
-            } else {
-                Err(anyhow!(error.unwrap_or_else(|| "Write failed".to_string())))
-            }
-        }
-        NodeCommandResult::Error { message } => Err(anyhow!(message)),
-        _ => Err(anyhow!("Unexpected response")),
+    let success = result.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+    if success {
+        print_success("Write complete");
+        Ok(())
+    } else {
+        let err = result
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Write failed");
+        Err(anyhow!(err.to_string()))
     }
 }
 
@@ -374,51 +388,62 @@ async fn grep_file(
         .ok_or_else(|| anyhow!("No state available"))?;
     let node_id = find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
+    let agent_short_name = selected_agent_short_name(&state, &node_id)?;
 
-    let cmd = NodeCmd::Agent(NodeAgentCommand::GrepFiles {
-        file_type,
-        paths: vec![path.to_string()],
-        pattern: pattern.to_string(),
-    });
-    let response = client.send_command(&node_id, cmd).await?;
+    let result = client
+        .acp_request(&node_id, "_praxis/grep_files", json!({
+            "agent_short_name": agent_short_name,
+            "file_type": file_type,
+            "paths": vec![path.to_string()],
+            "pattern": pattern,
+        }))
+        .await?;
 
-    match response.result {
-        NodeCommandResult::Agent(AgentCommandResult::GrepFilesResult {
-            file_type,
-            pattern,
-            results,
-            ..
-        }) => {
-            let title = match file_type {
-                NodeFileType::Config => "Config Grep Results",
-                NodeFileType::Session => "Session Grep Results",
-            };
-            let entry = results.first();
-
-            if let Some(result) = entry {
-                if let Some(error) = &result.error {
-                    return Err(anyhow!(error.clone()));
-                }
-            }
-
-            print_header(title);
-            println!();
-            println!("  Path: {}", path);
-            println!("  Pattern: {}", pattern);
-            if let Some(result) = entry {
-                println!("  Matches: {}", result.matches.len());
-                println!();
-                for matched in &result.matches {
-                    println!("  {:>6}: {}", matched.line_number, matched.line_content);
-                }
-            } else {
-                println!("  Matches: 0");
-            }
-            println!();
-            print_success("Grep complete");
-            Ok(())
+    if result.get("pattern").is_none() {
+        if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
+            return Err(anyhow!(err.to_string()));
         }
-        NodeCommandResult::Error { message } => Err(anyhow!(message)),
-        _ => Err(anyhow!("Unexpected response")),
     }
+
+    let title = match file_type {
+        NodeFileType::Config => "Config Grep Results",
+        NodeFileType::Session => "Session Grep Results",
+    };
+
+    let results: Vec<common::GrepFileEntry> = result
+        .get("results")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|e| anyhow!("Failed to parse grep results: {}", e))?
+        .unwrap_or_default();
+
+    if let Some(entry) = results.first() {
+        if let Some(error) = &entry.error {
+            return Err(anyhow!(error.clone()));
+        }
+    }
+
+    let result_pattern = result
+        .get("pattern")
+        .and_then(|v| v.as_str())
+        .unwrap_or(pattern);
+
+    print_header(title);
+    println!();
+    println!("  Path: {}", path);
+    println!("  Pattern: {}", result_pattern);
+    if let Some(entry) = results.first() {
+        println!("  Matches: {}", entry.matches.len());
+        println!();
+        for matched in &entry.matches {
+            println!("  {:>6}: {}", matched.line_number, matched.line_content);
+        }
+    } else {
+        println!("  Matches: 0");
+    }
+    println!();
+    print_success("Grep complete");
+    Ok(())
 }
+

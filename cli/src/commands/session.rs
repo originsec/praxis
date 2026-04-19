@@ -1,12 +1,10 @@
 use anyhow::{Result, anyhow};
 use clap::Subcommand;
-use common::{
-    NodeCommand as NodeCmd, NodeCommandResult, SessionCommand as NodeSessionCommand,
-    SessionCommandResult, SessionContext,
-};
+use serde_json::json;
 
 use crate::client::Client;
 use crate::output::{format_short_id, print_success};
+use crate::state::CliState;
 
 #[derive(Subcommand)]
 pub enum SessionCommand {
@@ -83,9 +81,13 @@ async fn create_session(
     let node_id = find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
-    //
-    // Use explicit timeout if provided, otherwise fetch from service config.
-    //
+    let connector = state
+        .nodes
+        .iter()
+        .find(|n| n.node_id == node_id)
+        .and_then(|n| n.selected_agent.as_ref())
+        .map(|a| a.short_name.clone())
+        .ok_or_else(|| anyhow!("No agent selected on node. Use `agent select` first."))?;
 
     let prompt_timeout_secs = match timeout {
         Some(t) => Some(t),
@@ -93,38 +95,56 @@ async fn create_session(
             .get_config(vec!["prompt_timeout_secs".to_string()])
             .await
             .ok()
-            .and_then(|cfg| cfg.get("prompt_timeout_secs").and_then(|v| v.parse().ok())),
+            .and_then(|cfg| cfg.get("prompt_timeout_secs").and_then(|v| v.parse::<u64>().ok())),
     };
 
-    let context = SessionContext {
-        working_dir: project.clone(),
-        yolo_mode: yolo,
-        prompt_timeout_secs,
-        interactive: false,
-    };
+    let cwd = project.clone().unwrap_or_else(|| "/".to_string());
 
-    let cmd = NodeCmd::Session(NodeSessionCommand::Create { context });
-    let response = client.send_command(&node_id, cmd).await?;
-
-    match response.result {
-        NodeCommandResult::Session(SessionCommandResult::Created { session_id }) => {
-            let project_info = project
-                .as_ref()
-                .map(|path| format!(" in {}", path))
-                .unwrap_or_default();
-            print_success(&format!(
-                "Session created: {}{}",
-                format_short_id(&session_id),
-                project_info
-            ));
-            if yolo {
-                println!("  YOLO mode enabled");
-            }
-            Ok(())
-        }
-        NodeCommandResult::Error { message } => Err(anyhow!(message)),
-        _ => Err(anyhow!("Unexpected response")),
+    let mut praxis_meta = json!({
+        "nodeId": node_id,
+        "connector": connector,
+        "yolo": yolo,
+        "interactive": false,
+    });
+    if let Some(t) = prompt_timeout_secs {
+        praxis_meta["promptTimeoutSecs"] = json!(t);
     }
+
+    let result = client
+        .acp_request(&node_id, "session/new", json!({
+            "cwd": cwd,
+            "mcpServers": [],
+            "_meta": { "praxis": praxis_meta }
+        }))
+        .await?;
+
+    let session_id = result
+        .get("sessionId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("session/new response missing sessionId"))?
+        .to_string();
+
+    //
+    // Persist the session id so subsequent `session prompt` / `session
+    // close` invocations can find it.
+    //
+
+    let mut cli_state = CliState::load().unwrap_or_default();
+    cli_state.set_session(&node_id, &session_id)?;
+
+    let project_info = project
+        .as_ref()
+        .map(|path| format!(" in {}", path))
+        .unwrap_or_default();
+    print_success(&format!(
+        "Session created: {}{}",
+        format_short_id(&session_id),
+        project_info
+    ));
+    if yolo {
+        println!("  YOLO mode enabled");
+    }
+    Ok(())
 }
 
 async fn send_prompt(client: &Client, node_prefix: &str, text: &str) -> Result<()> {
@@ -135,23 +155,20 @@ async fn send_prompt(client: &Client, node_prefix: &str, text: &str) -> Result<(
     let node_id = find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
-    let cmd = NodeCmd::Session(NodeSessionCommand::Prompt {
-        text: text.to_string(),
-        transaction_id: uuid::Uuid::new_v4().to_string(),
-    });
-    let response = client.send_command(&node_id, cmd).await?;
+    let cli_state = CliState::load().unwrap_or_default();
+    let session_id = cli_state.get_session(&node_id).ok_or_else(|| {
+        anyhow!("No active session for node. Run `session create` first.")
+    })?;
 
-    match response.result {
-        NodeCommandResult::Session(SessionCommandResult::PromptResponse { response, .. }) => {
-            println!("{}", response);
-            Ok(())
-        }
-        NodeCommandResult::Session(SessionCommandResult::TransactionCancelled { .. }) => {
-            Err(anyhow!("Prompt cancelled"))
-        }
-        NodeCommandResult::Error { message } => Err(anyhow!(message)),
-        _ => Err(anyhow!("Unexpected response")),
-    }
+    let (_result, text) = client
+        .acp_request_collecting_text(&node_id, "session/prompt", json!({
+            "sessionId": session_id,
+            "prompt": [{ "type": "text", "text": text }],
+        }))
+        .await?;
+
+    println!("{}", text);
+    Ok(())
 }
 
 async fn close_session(client: &Client, node_prefix: &str) -> Result<()> {
@@ -162,15 +179,19 @@ async fn close_session(client: &Client, node_prefix: &str) -> Result<()> {
     let node_id = find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
-    let cmd = NodeCmd::Session(NodeSessionCommand::Close);
-    let response = client.send_command(&node_id, cmd).await?;
+    let mut cli_state = CliState::load().unwrap_or_default();
+    let session_id = cli_state.get_session(&node_id).ok_or_else(|| {
+        anyhow!("No active session for node.")
+    })?;
 
-    match response.result {
-        NodeCommandResult::Session(SessionCommandResult::Closed) => {
-            print_success("Session closed");
-            Ok(())
-        }
-        NodeCommandResult::Error { message } => Err(anyhow!(message)),
-        _ => Err(anyhow!("Unexpected response")),
-    }
+    client
+        .acp_request(&node_id, "session/close", json!({
+            "sessionId": session_id,
+        }))
+        .await?;
+
+    cli_state.clear_session(&node_id)?;
+
+    print_success("Session closed");
+    Ok(())
 }

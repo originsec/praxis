@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
+use uuid::Uuid;
 use lapin::{
     BasicProperties, Channel, options::BasicPublishOptions, publisher_confirm::PublisherConfirm,
 };
@@ -60,6 +61,80 @@ pub async fn publish_json<T: Serialize>(
         )
         .await?;
     Ok(confirm)
+}
+
+//
+// Publish a fire-and-forget terminal command to a node. Wraps the given
+// `TerminalCommand` in a `NodeCommand::Terminal` / `CommandRequest` on
+// behalf of the caller so consumers can avoid touching the legacy
+// NodeCommand surface directly. Terminal dispatch still uses the legacy
+// Command path; it isn't part of the ACP migration.
+//
+
+pub async fn publish_terminal_command(
+    channel: &Channel,
+    client_id: &str,
+    node_id: &str,
+    cmd: TerminalCommand,
+) -> anyhow::Result<()> {
+    publish_terminal_command_with_id(
+        channel,
+        client_id,
+        node_id,
+        &Uuid::new_v4().to_string(),
+        cmd,
+    )
+    .await
+}
+
+//
+// Like `publish_terminal_command` but lets the caller supply the
+// command_id so they can correlate a subsequent response.
+//
+
+pub async fn publish_terminal_command_with_id(
+    channel: &Channel,
+    client_id: &str,
+    node_id: &str,
+    command_id: &str,
+    cmd: TerminalCommand,
+) -> anyhow::Result<()> {
+    let request = CommandRequest {
+        command_id: command_id.to_string(),
+        client_id: client_id.to_string(),
+        node_id: node_id.to_string(),
+        command: NodeCommand::Terminal(cmd),
+    };
+    publish_json(channel, CLIENT_SIGNAL_QUEUE, &ClientSignalMessage::Command(request)).await?;
+    Ok(())
+}
+
+//
+// Try to decode a ClientDirectMessage payload as a terminal-create
+// response. Returns `Some((command_id, Ok(terminal_id)))` on a successful
+// Created result, `Some((command_id, Err(...)))` on any other terminal
+// command result (unexpected for Create), or None if the message isn't a
+// CommandResponse carrying a terminal result. Callers use this to route
+// create-terminal replies without having to touch `NodeCommand`/
+// `NodeCommandResult` directly.
+//
+
+pub fn decode_terminal_create_response(
+    msg: &ClientDirectMessage,
+) -> Option<(String, Result<String, String>)> {
+    if let ClientDirectMessage::CommandResponse(resp) = msg {
+        match &resp.result {
+            NodeCommandResult::Terminal(TerminalCommandResult::Created { terminal_id }) => {
+                Some((resp.command_id.clone(), Ok(terminal_id.clone())))
+            }
+            NodeCommandResult::Error { message } => {
+                Some((resp.command_id.clone(), Err(message.clone())))
+            }
+            _ => None,
+        }
+    } else {
+        None
+    }
 }
 
 /// Publish a JSON message to a fanout exchange.

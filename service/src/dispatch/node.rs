@@ -96,12 +96,6 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
         }
 
         NodeSignalMessage::CommandResponse(response) => {
-            //
-            // Forward to response_tracker for semantic operations.
-            //
-            ctx.response_tracker
-                .complete(&response.command_id, response.clone());
-
             if let Some(pending) = ctx.pending_commands.remove(&response.command_id).await {
                 //
                 // Track whether we need to broadcast state to all clients
