@@ -12,8 +12,26 @@ impl App {
             return;
         }
 
-        if self.nodes.session.is_some() {
+        //
+        // Sessions list overlay takes precedence over everything else.
+        //
+
+        if self.nodes.sessions_list_open {
+            self.handle_sessions_list_key(key).await;
+            return;
+        }
+
+        if self.nodes.active_session().is_some() {
             self.handle_session_key(key);
+            return;
+        }
+
+        //
+        // Ctrl+W in the nodes browse view toggles the sessions list.
+        //
+
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('w') {
+            self.toggle_sessions_list();
             return;
         }
 
@@ -219,25 +237,150 @@ impl App {
         }
     }
 
-    pub(crate) fn close_session(&mut self) {
-        if let Some(ref session) = self.nodes.session {
-            if let Some(session_id) = session.session_id.clone() {
-                let client = self.client.clone();
-                let node_id = session.node_id.clone();
-                tokio::spawn(async move {
+    //
+    // Pause the active session: hide the chat view but keep the session
+    // alive on the node and its state preserved locally. The session
+    // stays in self.nodes.sessions and can be resumed from the list.
+    //
+
+    pub(crate) fn pause_active_session(&mut self) {
+        self.nodes.active_session_id = None;
+    }
+
+    //
+    // Foreground a session by local_id. If unknown, no-op.
+    //
+
+    pub(crate) fn resume_session(&mut self, local_id: &str) {
+        if self.nodes.sessions.contains_key(local_id) {
+            self.nodes.active_session_id = Some(local_id.to_string());
+            self.nodes.sessions_list_open = false;
+        }
+    }
+
+    //
+    // Discard a session by local_id: fire session/cancel if a prompt is
+    // in-flight, then session/close, then remove from state. If it is the
+    // currently foregrounded session, also clear active_session_id.
+    //
+
+    pub(crate) fn discard_session(&mut self, local_id: &str) {
+        let Some(session) = self.nodes.sessions.remove(local_id) else {
+            return;
+        };
+        if self.nodes.active_session_id.as_deref() == Some(local_id) {
+            self.nodes.active_session_id = None;
+        }
+        if let Some(session_id) = session.session_id.clone() {
+            let client = self.client.clone();
+            let node_id = session.node_id.clone();
+            let in_flight = session.is_waiting;
+            tokio::spawn(async move {
+                if in_flight {
                     let _ = client
-                        .acp_request(&node_id, "session/close", serde_json::json!({
-                            "sessionId": session_id,
-                        }))
+                        .acp_notification(
+                            &node_id,
+                            "session/cancel",
+                            serde_json::json!({ "sessionId": session_id }),
+                        )
                         .await;
-                });
+                }
+                let _ = client
+                    .acp_request(&node_id, "session/close", serde_json::json!({
+                        "sessionId": session_id,
+                    }))
+                    .await;
+            });
+        }
+
+        //
+        // Clamp the list selection.
+        //
+
+        let len = self.nodes.sessions.len();
+        if len == 0 {
+            self.nodes.sessions_list_selected = 0;
+            self.nodes.sessions_list_open = false;
+        } else if self.nodes.sessions_list_selected >= len {
+            self.nodes.sessions_list_selected = len - 1;
+        }
+    }
+
+    //
+    // Close the currently-active session (the "existing close key" path
+    // from inside the chat view — behaves like today: sends session/close
+    // and removes the session).
+    //
+
+    pub(crate) fn close_active_session(&mut self) {
+        if let Some(id) = self.nodes.active_session_id.clone() {
+            self.discard_session(&id);
+        }
+    }
+
+    pub(crate) fn toggle_sessions_list(&mut self) {
+        self.nodes.sessions_list_open = !self.nodes.sessions_list_open;
+        if self.nodes.sessions_list_open {
+            //
+            // Clamp on open so we don't index past the end after a
+            // discard that happened with the list closed.
+            //
+            let len = self.nodes.sessions.len();
+            if len == 0 {
+                self.nodes.sessions_list_selected = 0;
+            } else if self.nodes.sessions_list_selected >= len {
+                self.nodes.sessions_list_selected = len - 1;
             }
         }
-        self.nodes.session = None;
+    }
+
+    pub(crate) async fn handle_sessions_list_key(&mut self, key: KeyEvent) {
+        let count = self.nodes.sessions.len();
+        match key.code {
+            KeyCode::Esc => {
+                self.nodes.sessions_list_open = false;
+            }
+            KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.nodes.sessions_list_open = false;
+            }
+            KeyCode::Up => {
+                if self.nodes.sessions_list_selected > 0 {
+                    self.nodes.sessions_list_selected -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if self.nodes.sessions_list_selected + 1 < count {
+                    self.nodes.sessions_list_selected += 1;
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(id) = self.selected_list_session_id() {
+                    self.resume_session(&id);
+                }
+            }
+            KeyCode::Char('d') | KeyCode::Delete => {
+                if let Some(id) = self.selected_list_session_id() {
+                    self.discard_session(&id);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    //
+    // Return the local_id of the session currently selected in the
+    // sessions list overlay (in newest-first order).
+    //
+
+    pub(crate) fn selected_list_session_id(&self) -> Option<String> {
+        self.nodes
+            .sessions_sorted()
+            .get(self.nodes.sessions_list_selected)
+            .map(|s| s.local_id.clone())
     }
 
     pub(crate) fn send_session_message(&mut self) {
-        let Some(ref mut session) = self.nodes.session else {
+        let Some(session) = self.nodes.active_session_mut() else {
             return;
         };
         let input = session.input.trim().to_string();
@@ -261,10 +404,12 @@ impl App {
         session.tool_calls.clear();
         session.agent_status = None;
         session.pending_permission = None;
+        session.last_activity_at = std::time::Instant::now();
 
         let node_id = session.node_id.clone();
         let transaction_id = session.active_transaction_id.clone().unwrap_or_default();
         let session_id = session.session_id.clone().unwrap_or_default();
+        let local_id = session.local_id.clone();
         let client = self.client.clone();
         let tx = self.event_tx.clone();
 
@@ -298,20 +443,23 @@ impl App {
                         .unwrap_or("end_turn");
 
                     if stop == "cancelled" {
-                        let _ = tx.send(AppEvent::SessionResponse(SessionResult::Cancelled(
+                        let _ = tx.send(AppEvent::SessionResponse(SessionResult::Cancelled {
+                            session_local_id: local_id,
                             transaction_id,
-                        )));
+                        }));
                     } else {
                         let _ = tx.send(AppEvent::SessionResponse(SessionResult::Response {
+                            session_local_id: local_id,
                             transaction_id,
                             text,
                         }));
                     }
                 }
                 Err(e) => {
-                    let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error(
-                        e.to_string(),
-                    )));
+                    let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error {
+                        session_local_id: local_id,
+                        message: e.to_string(),
+                    }));
                 }
             }
         });
@@ -408,12 +556,17 @@ impl App {
         let node_id = opts.node_id.clone();
         let agent = opts.agent_name.clone();
         let yolo = opts.yolo;
+        let local_id = uuid::Uuid::new_v4().to_string();
+        let now = std::time::Instant::now();
 
-        self.nodes.session = Some(SessionChat {
+        self.nodes.sessions.insert(local_id.clone(), SessionChat {
+            local_id: local_id.clone(),
             node_id: node_id.clone(),
             agent_name: agent.clone(),
             session_id: None,
             active_transaction_id: None,
+            created_at: now,
+            last_activity_at: now,
             messages: Vec::new(),
             input: String::new(),
             cursor_pos: 0,
@@ -430,6 +583,7 @@ impl App {
             pending_permission: None,
             tool_calls: Vec::new(),
         });
+        self.nodes.active_session_id = Some(local_id.clone());
 
         let client = self.client.clone();
         let tx = self.event_tx.clone();
@@ -469,20 +623,22 @@ impl App {
             {
                 Ok(value) => {
                     if let Some(session_id) = value.get("sessionId").and_then(|v| v.as_str()) {
-                        let _ = tx.send(AppEvent::SessionResponse(SessionResult::Created(
-                            session_id.to_string(),
-                        )));
+                        let _ = tx.send(AppEvent::SessionResponse(SessionResult::Created {
+                            session_local_id: local_id,
+                            session_id: session_id.to_string(),
+                        }));
                     } else {
-                        let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error(
-                            "Session create: missing sessionId in response".to_string(),
-                        )));
+                        let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error {
+                            session_local_id: local_id,
+                            message: "Session create: missing sessionId in response".to_string(),
+                        }));
                     }
                 }
                 Err(e) => {
-                    let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error(format!(
-                        "Session create failed: {}",
-                        e
-                    ))));
+                    let _ = tx.send(AppEvent::SessionResponse(SessionResult::Error {
+                        session_local_id: local_id,
+                        message: format!("Session create failed: {}", e),
+                    }));
                 }
             }
         });
@@ -490,49 +646,56 @@ impl App {
 
     pub(crate) fn handle_session_key(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
-            if key.code == KeyCode::Char('c') {
-                if let Some(ref mut session) = self.nodes.session {
-                    if session.is_waiting {
-                        let Some(session_id) = session.session_id.clone() else {
-                            return;
-                        };
-                        let client = self.client.clone();
-                        let node_id = session.node_id.clone();
-                        tokio::spawn(async move {
-                            //
-                            // session/cancel is a JSON-RPC notification
-                            // (no id, no response) — the node cancels the
-                            // in-flight prompt which then resolves with
-                            // stopReason=cancelled through the normal
-                            // session/prompt response flow.
-                            //
+            //
+            // Ctrl+W pauses the active session (hides the chat view,
+            // keeps the session alive on the node). Use the sessions
+            // list (also Ctrl+W from the browse view) to resume.
+            //
 
-                            let _ = client
-                                .acp_notification(
-                                    &node_id,
-                                    "session/cancel",
-                                    serde_json::json!({ "sessionId": session_id }),
-                                )
-                                .await;
-                        });
-                        session.messages.push(ChatMessage {
-                            role: ChatRole::System,
-                            text: "Cancelling...".to_string(),
-                        });
-                    } else {
-                        let client = self.client.clone();
-                        let node_id = session.node_id.clone();
-                        if let Some(session_id) = session.session_id.clone() {
-                            tokio::spawn(async move {
-                                let _ = client
-                                    .acp_request(&node_id, "session/close", serde_json::json!({
-                                        "sessionId": session_id,
-                                    }))
-                                    .await;
-                            });
-                        }
-                        self.nodes.session = None;
-                    }
+            if key.code == KeyCode::Char('w') {
+                self.pause_active_session();
+                return;
+            }
+
+            if key.code == KeyCode::Char('c') {
+                let Some(session) = self.nodes.active_session_mut() else {
+                    return;
+                };
+                if session.is_waiting {
+                    let Some(session_id) = session.session_id.clone() else {
+                        return;
+                    };
+                    let client = self.client.clone();
+                    let node_id = session.node_id.clone();
+                    session.messages.push(ChatMessage {
+                        role: ChatRole::System,
+                        text: "Cancelling...".to_string(),
+                    });
+                    tokio::spawn(async move {
+                        //
+                        // session/cancel is a JSON-RPC notification
+                        // (no id, no response) — the node cancels the
+                        // in-flight prompt which then resolves with
+                        // stopReason=cancelled through the normal
+                        // session/prompt response flow.
+                        //
+
+                        let _ = client
+                            .acp_notification(
+                                &node_id,
+                                "session/cancel",
+                                serde_json::json!({ "sessionId": session_id }),
+                            )
+                            .await;
+                    });
+                } else {
+                    //
+                    // Not waiting — Ctrl+C acts as the existing "close
+                    // session" key, firing session/close and removing
+                    // the session from state.
+                    //
+
+                    self.close_active_session();
                 }
                 return;
             }
@@ -540,13 +703,18 @@ impl App {
 
         match key.code {
             KeyCode::Esc => {
-                self.close_session();
+                //
+                // Esc pauses (preserves the session). Use Ctrl+C (when
+                // idle) to actually close and discard.
+                //
+
+                self.pause_active_session();
             }
             KeyCode::Enter => {
                 self.send_session_message();
             }
             KeyCode::Char(c) => {
-                if let Some(ref mut session) = self.nodes.session {
+                if let Some(session) = self.nodes.active_session_mut() {
                     if session.pending_permission.is_some() && session.is_waiting {
                         let decision = match c {
                             'a' | 'A' => Some(common::PermissionDecision::Allow),
@@ -574,22 +742,22 @@ impl App {
                 }
             }
             KeyCode::Backspace => {
-                if let Some(ref mut session) = self.nodes.session {
+                if let Some(session) = self.nodes.active_session_mut() {
                     input::backspace(&mut session.input, &mut session.cursor_pos);
                 }
             }
             KeyCode::Left => {
-                if let Some(ref mut session) = self.nodes.session {
+                if let Some(session) = self.nodes.active_session_mut() {
                     input::move_left(&mut session.cursor_pos);
                 }
             }
             KeyCode::Right => {
-                if let Some(ref mut session) = self.nodes.session {
+                if let Some(session) = self.nodes.active_session_mut() {
                     input::move_right(&session.input, &mut session.cursor_pos);
                 }
             }
             KeyCode::Up => {
-                if let Some(ref mut session) = self.nodes.session {
+                if let Some(session) = self.nodes.active_session_mut() {
                     input::history_up(
                         &mut session.input,
                         &mut session.cursor_pos,
@@ -600,7 +768,7 @@ impl App {
                 }
             }
             KeyCode::Down => {
-                if let Some(ref mut session) = self.nodes.session {
+                if let Some(session) = self.nodes.active_session_mut() {
                     input::history_down(
                         &mut session.input,
                         &mut session.cursor_pos,
@@ -611,12 +779,12 @@ impl App {
                 }
             }
             KeyCode::PageUp => {
-                if let Some(ref mut session) = self.nodes.session {
+                if let Some(session) = self.nodes.active_session_mut() {
                     session.scroll_offset = session.scroll_offset.saturating_add(10);
                 }
             }
             KeyCode::PageDown => {
-                if let Some(ref mut session) = self.nodes.session {
+                if let Some(session) = self.nodes.active_session_mut() {
                     session.scroll_offset = session.scroll_offset.saturating_sub(10);
                 }
             }
@@ -626,9 +794,44 @@ impl App {
 
     pub(crate) async fn handle_nodes_mouse(&mut self, mouse: MouseEvent, content_area: Rect) {
         //
+        // Sessions list overlay intercepts mouse when open.
+        //
+        if self.nodes.sessions_list_open {
+            if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                //
+                // The overlay is drawn as a centered panel; we delegate
+                // hit-testing to a helper that reproduces the render
+                // geometry.
+                //
+                if let Some(clicked) = Self::sessions_list_hit_test(
+                    mouse.row,
+                    mouse.column,
+                    content_area,
+                    self.nodes.sessions.len(),
+                ) {
+                    let count = self.nodes.sessions.len();
+                    if clicked < count {
+                        self.nodes.sessions_list_selected = clicked;
+                        if self.is_double_click(mouse.row, mouse.column) {
+                            if let Some(id) = self.selected_list_session_id() {
+                                self.resume_session(&id);
+                            }
+                        }
+                    }
+                } else {
+                    //
+                    // Click outside the list closes it.
+                    //
+                    self.nodes.sessions_list_open = false;
+                }
+            }
+            return;
+        }
+
+        //
         // Session chat intercepts mouse.
         //
-        if self.nodes.session.is_some() {
+        if self.nodes.active_session().is_some() {
             if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
                 let chat_chunks = Layout::vertical([
                     Constraint::Length(1), // header
@@ -647,7 +850,7 @@ impl App {
                 if mouse.row >= input_area.y
                     && mouse.row < input_area.y.saturating_add(input_area.height)
                 {
-                    if let Some(ref mut session) = self.nodes.session {
+                    if let Some(session) = self.nodes.active_session_mut() {
                         if !session.is_waiting && session.session_id.is_some() {
                             // Inner: padding(2) + border(1) + prompt "▸ "(2)
                             let text_start = input_area.x + 5;
@@ -659,23 +862,26 @@ impl App {
                 }
 
                 //
-                // Hint bar: "  enter send  esc close session"
+                // Hint bar: "  enter send  ^w pause  ^c close"
                 //
                 if mouse.row == hints_area.y {
                     let rel = mouse.column.saturating_sub(hints_area.x) as usize;
                     if rel >= 2 && rel < 14 {
                         // "enter send" — simulate Enter (send message)
-                        if let Some(ref mut session) = self.nodes.session {
-                            if !session.input.trim().is_empty()
+                        if let Some(session) = self.nodes.active_session_mut() {
+                            let ready = !session.input.trim().is_empty()
                                 && !session.is_waiting
-                                && session.session_id.is_some()
-                            {
+                                && session.session_id.is_some();
+                            if ready {
                                 self.send_session_message();
                             }
                         }
-                    } else if rel >= 14 {
-                        // "esc close session" — close
-                        self.close_session();
+                    } else if rel >= 14 && rel < 23 {
+                        // "^w pause" — pause active session
+                        self.pause_active_session();
+                    } else if rel >= 23 {
+                        // "^c close" — close active session
+                        self.close_active_session();
                     }
                     return;
                 }
@@ -756,13 +962,13 @@ impl App {
                 if mouse.row == hints_area.y {
                     let rel = mouse.column.saturating_sub(hints_area.x) as usize;
                     if self.nodes.detail_focus {
-                        // " enter session  ^r reset  ^t terminal"
+                        // " enter session  ^r reset  ^t terminal  ^w sessions(N)"
                         if rel >= 1 && rel < 16 {
                             self.start_session_with_selected_agent();
                             return;
                         }
                     } else {
-                        // " enter select  ^r reset  ^t terminal"
+                        // " enter select  ^r reset  ^t terminal  ^w sessions(N)"
                         if rel >= 1 && rel < 14 {
                             self.nodes.detail_focus = true;
                             self.nodes.agent_selected = 0;
@@ -774,8 +980,13 @@ impl App {
                         self.confirm_reset_node();
                         return;
                     }
-                    if rel >= 24 {
+                    if rel >= 24 && rel < 36 {
                         self.open_terminal();
+                        return;
+                    }
+                    if rel >= 36 {
+                        // "^w sessions(N)"
+                        self.toggle_sessions_list();
                         return;
                     }
                 }
@@ -857,6 +1068,37 @@ impl App {
             }
             _ => {}
         }
-        return;
+    }
+
+    //
+    // Hit-test a click against the sessions list overlay. Returns the
+    // row index within the list, or None if the click is outside the
+    // panel. Keep this in sync with crate::ui::nodes::sessions_list.
+    //
+
+    fn sessions_list_hit_test(
+        row: u16,
+        col: u16,
+        content_area: Rect,
+        count: usize,
+    ) -> Option<usize> {
+        use crate::ui::nodes::sessions_list_rect;
+        let panel = sessions_list_rect(content_area, count);
+        //
+        // Panel layout: border(1) + title(1) + separator(1) = rows start
+        // at panel.y + 3. Each session row is one line.
+        //
+        if col < panel.x || col >= panel.x + panel.width {
+            return None;
+        }
+        if row < panel.y || row >= panel.y + panel.height {
+            return None;
+        }
+        let rows_start = panel.y + 3;
+        let rows_end = panel.y + panel.height - 2; // -border -hints
+        if row < rows_start || row >= rows_end {
+            return None;
+        }
+        Some((row - rows_start) as usize)
     }
 }

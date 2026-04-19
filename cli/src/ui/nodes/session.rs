@@ -304,8 +304,10 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
     let hints = Line::from(vec![
         Span::styled("  enter", Style::default().fg(ACCENT)),
         Span::styled(" send  ", Style::default().fg(MUTED)),
-        Span::styled("esc", Style::default().fg(ACCENT)),
-        Span::styled(" close session", Style::default().fg(MUTED)),
+        Span::styled("^w", Style::default().fg(ACCENT)),
+        Span::styled(" pause  ", Style::default().fg(MUTED)),
+        Span::styled("^c", Style::default().fg(ACCENT)),
+        Span::styled(" close", Style::default().fg(MUTED)),
     ]);
     f.render_widget(Paragraph::new(hints), chunks[4]);
 }

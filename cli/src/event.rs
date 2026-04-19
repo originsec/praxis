@@ -42,13 +42,23 @@ pub enum AppEvent {
 }
 
 pub enum SessionResult {
-    Created(String), // session_id
+    Created {
+        session_local_id: String,
+        session_id: String,
+    },
     Response {
+        session_local_id: String,
         transaction_id: String,
         text: String,
     },
-    Cancelled(String), // transaction_id
-    Error(String),     // error message
+    Cancelled {
+        session_local_id: String,
+        transaction_id: String,
+    },
+    Error {
+        session_local_id: String,
+        message: String,
+    },
 }
 
 pub struct EventHandler {
