@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import { createContext, useContext, useReducer, useEffect, useCallback, useRef, type ReactNode, type Dispatch } from 'react';
 import { wsClient } from '../api/websocket';
 import { generateUUID } from '../utils/uuid';
 import type { OrchestratorState, OrchestratorSessionState } from './orchestratorTypes';
@@ -85,6 +85,19 @@ interface PendingAcpRequest {
   method: string;
   sessionId?: string;
   label?: string;
+  //
+  // Optional generic resolve/reject for callers using `sendAcpNodeRequest`.
+  // When present, the response handler invokes these instead of (or in
+  // addition to) the orchestrator-specific switch.
+  //
+  resolve?: (result: unknown, text: string) => void;
+  reject?: (reason: unknown) => void;
+  //
+  // When true, accumulated `agent_message_chunk` text for the associated
+  // sessionId is appended to `textBuf` and returned on resolve.
+  //
+  collectText?: boolean;
+  textBuf?: string;
 }
 
 const initialOrchestratorState: OrchestratorState = {
@@ -247,6 +260,12 @@ interface AppState {
   // Recently accessed node IDs (most recent first).
   //
   recentlyAccessedNodeIds: string[];
+  //
+  // Per-node agent sessions. Keyed by node_id because the web UI currently
+  // supports one live session per node card. Stores the ACP sessionId plus
+  // the agent connector short name that owns it.
+  //
+  nodeSessions: Record<string, { sessionId: string; agentShortName: string }>;
 }
 
 //
@@ -276,6 +295,7 @@ function createInitialState(): AppState {
     agentSessionMessages: {},
     agentSessionStreaming: {},
     recentlyAccessedNodeIds: loadRecentNodes(MAX_RECENT_NODES),
+    nodeSessions: {},
   };
 }
 
@@ -336,6 +356,9 @@ type Action =
   | { type: 'AGENT_SESSION_STREAMING_UPDATE'; nodeId: string; transactionId: string; update: import('../api/types').SessionUpdateKind }
   | { type: 'AGENT_SESSION_STREAMING_COMPLETE'; nodeId: string; transactionId: string }
   | { type: 'AGENT_SESSION_STREAMING_CLEAR'; nodeId: string }
+  | { type: 'AGENT_SESSION_STREAMING_CHUNK'; nodeId: string; text: string }
+  | { type: 'NODE_SESSION_SET'; nodeId: string; sessionId: string; agentShortName: string }
+  | { type: 'NODE_SESSION_CLEAR'; nodeId: string }
   //
   // Chain actions.
   //
@@ -907,6 +930,37 @@ function reduceAgentSessions(state: AppState, action: Action): AppState | null {
       const { [action.nodeId]: _, ...rest } = state.agentSessionStreaming;
       return { ...state, agentSessionStreaming: rest };
     }
+    case 'AGENT_SESSION_STREAMING_CHUNK': {
+      const key = action.nodeId;
+      const existing = state.agentSessionStreaming[key] || {
+        content: '',
+        transactionId: '',
+        toolCalls: [],
+        pendingPermission: null,
+        agentStatus: null,
+        hadToolCall: false,
+      };
+      return {
+        ...state,
+        agentSessionStreaming: {
+          ...state.agentSessionStreaming,
+          [key]: { ...existing, content: existing.content + action.text, hadToolCall: false },
+        },
+      };
+    }
+    case 'NODE_SESSION_SET': {
+      return {
+        ...state,
+        nodeSessions: {
+          ...state.nodeSessions,
+          [action.nodeId]: { sessionId: action.sessionId, agentShortName: action.agentShortName },
+        },
+      };
+    }
+    case 'NODE_SESSION_CLEAR': {
+      const { [action.nodeId]: _, ...rest } = state.nodeSessions;
+      return { ...state, nodeSessions: rest };
+    }
     default:
       return null;
   }
@@ -1256,6 +1310,12 @@ function reducer(state: AppState, action: Action): AppState {
 interface AppContextValue {
   state: AppState;
   //
+  // Raw reducer dispatch — exposed for components that need to update
+  // multi-slice state (e.g. per-node session tracking) without us adding a
+  // one-off setter for each action.
+  //
+  dispatch: Dispatch<Action>;
+  //
   // Helpers.
   //
   getNode: (nodeId: string) => NodeState | undefined;
@@ -1263,6 +1323,23 @@ interface AppContextValue {
   // Commands.
   //
   sendCommand: (nodeId: string, command: CommandRequest['command']) => Promise<CommandResponse>;
+  //
+  // Send an ACP JSON-RPC request targeted at a specific node. The node is
+  // identified via `_meta.praxis.nodeId` in the params (the service proxy
+  // routes any ACP frame carrying that marker to the owning node). When
+  // `collectText` is true the helper also buffers streamed
+  // `agent_message_chunk` text for the session and returns it in `text`.
+  //
+  sendAcpNodeRequest: (
+    nodeId: string,
+    method: string,
+    params: Record<string, unknown>,
+    collectText?: boolean,
+  ) => Promise<{ result: unknown; text: string }>;
+  //
+  // Send an ACP JSON-RPC notification (no response) to a specific node.
+  //
+  sendAcpNodeNotification: (nodeId: string, method: string, params: Record<string, unknown>) => void;
   //
   // Terminal.
   //
@@ -1544,11 +1621,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 case 'agent_message_chunk': {
                   const text = extractText(update);
                   if (text) {
-                    dispatch({
-                      type: 'ORCHESTRATOR_ADD_CONTENT',
-                      sessionId,
-                      content: text,
-                    });
+                    //
+                    // Dispatch to orchestrator for WEB_ prefixed orchestrator
+                    // sessions (matches existing behavior). Node-bound agent
+                    // sessions feed the per-node streaming UI instead.
+                    //
+                    const nodeEntry = Object.entries(nodeSessionsRef.current)
+                      .find(([, s]) => s.sessionId === sessionId);
+                    if (nodeEntry) {
+                      dispatch({
+                        type: 'AGENT_SESSION_STREAMING_CHUNK',
+                        nodeId: nodeEntry[0],
+                        text,
+                      });
+                    } else {
+                      dispatch({
+                        type: 'ORCHESTRATOR_ADD_CONTENT',
+                        sessionId,
+                        content: text,
+                      });
+                    }
+                    //
+                    // Buffer into any pending ACP request with `collectText`
+                    // targeting this session so `sendAcpNodeRequest` can
+                    // return the concatenated reply.
+                    //
+                    for (const [, pending] of pendingAcpRequestsRef.current) {
+                      if (pending.collectText && pending.sessionId === sessionId) {
+                        pending.textBuf = (pending.textBuf ?? '') + text;
+                      }
+                    }
                   }
                   break;
                 }
@@ -1609,6 +1711,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
               const pending = pendingAcpRequestsRef.current.get(rpc.id);
               if (!pending) break;
               pendingAcpRequestsRef.current.delete(rpc.id);
+
+              //
+              // Generic resolver path used by `sendAcpNodeRequest`. Matches
+              // before the orchestrator-specific switch so callers outside
+              // the orchestrator chat flow get their promise settled.
+              //
+              if (pending.resolve || pending.reject) {
+                if (rpc.error) {
+                  pending.reject?.(new Error(rpc.error.message));
+                } else {
+                  pending.resolve?.(rpc.result ?? null, pending.textBuf ?? '');
+                }
+                break;
+              }
 
               if (rpc.error) {
                 const sessionId = pending.sessionId;
@@ -2111,6 +2227,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   orchestratorSessionsRef.current = state.orchestrator.sessions;
   const orchestratorActiveIdRef = useRef(state.orchestrator.activeSessionId);
   orchestratorActiveIdRef.current = state.orchestrator.activeSessionId;
+  const nodeSessionsRef = useRef(state.nodeSessions);
+  nodeSessionsRef.current = state.nodeSessions;
 
   const orchestratorSetActiveSession = useCallback((sessionId: string | null) => {
     dispatch({ type: 'ORCHESTRATOR_SET_ACTIVE_SESSION', sessionId });
@@ -2133,6 +2251,73 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const orchestratorClearMessages = useCallback((sessionId: string) => {
     dispatch({ type: 'ORCHESTRATOR_CLEAR_MESSAGES', sessionId });
   }, []);
+
+  //
+  // Send an ACP JSON-RPC request targeted at a specific node. Merges the
+  // provided params with `_meta.praxis.nodeId` so the service proxy routes
+  // the frame to the owning node. Returns the response result alongside any
+  // streamed `agent_message_chunk` text collected while the request was in
+  // flight (when `collectText` is true).
+  //
+  const sendAcpNodeRequest = useCallback(
+    (
+      nodeId: string,
+      method: string,
+      params: Record<string, unknown>,
+      collectText = false,
+    ): Promise<{ result: unknown; text: string }> => {
+      const existingMeta = (typeof params._meta === 'object' && params._meta !== null)
+        ? (params._meta as Record<string, unknown>)
+        : {};
+      const existingPraxis = (typeof existingMeta.praxis === 'object' && existingMeta.praxis !== null)
+        ? (existingMeta.praxis as Record<string, unknown>)
+        : {};
+      const merged = {
+        ...params,
+        _meta: {
+          ...existingMeta,
+          praxis: { ...existingPraxis, nodeId },
+        },
+      };
+      const jsonRpc = acpRequest(method, merged);
+      const parsed = JSON.parse(jsonRpc);
+      const sessionId = typeof params.sessionId === 'string' ? params.sessionId : undefined;
+
+      return new Promise<{ result: unknown; text: string }>((resolve, reject) => {
+        pendingAcpRequestsRef.current.set(parsed.id, {
+          method,
+          sessionId,
+          collectText,
+          textBuf: '',
+          resolve: (result, text) => resolve({ result, text }),
+          reject,
+        });
+        wsClient.send({ type: 'acp_message', json_rpc: jsonRpc });
+      });
+    },
+    [],
+  );
+
+  const sendAcpNodeNotification = useCallback(
+    (nodeId: string, method: string, params: Record<string, unknown>) => {
+      const existingMeta = (typeof params._meta === 'object' && params._meta !== null)
+        ? (params._meta as Record<string, unknown>)
+        : {};
+      const existingPraxis = (typeof existingMeta.praxis === 'object' && existingMeta.praxis !== null)
+        ? (existingMeta.praxis as Record<string, unknown>)
+        : {};
+      const merged = {
+        ...params,
+        _meta: {
+          ...existingMeta,
+          praxis: { ...existingPraxis, nodeId },
+        },
+      };
+      const jsonRpc = JSON.stringify({ jsonrpc: '2.0', method, params: merged });
+      wsClient.send({ type: 'acp_message', json_rpc: jsonRpc });
+    },
+    [],
+  );
 
   //
   // Traffic interception functions.
@@ -2453,8 +2638,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const value: AppContextValue = {
     state,
+    dispatch,
     getNode,
     sendCommand,
+    sendAcpNodeRequest,
+    sendAcpNodeNotification,
     registerTerminalHandler,
     sendTerminalInput,
     requestOperations,

@@ -4,7 +4,6 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { FloatingPanel } from './FloatingPanel';
 import { useApp, type AgentSessionMessage } from '../../context/AppContext';
-import { generateUUID } from '../../utils/uuid';
 import { exportAgentSession, downloadTextFile } from '../../utils/export';
 import type { NodeState, PermissionDecision } from '../../api/types';
 
@@ -16,15 +15,27 @@ interface AgentSessionModalProps {
 }
 
 export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: AgentSessionModalProps) {
-  const { state, sendCommand, addAgentSessionMessage, clearAgentSessionStreaming } = useApp();
+  const {
+    state,
+    dispatch,
+    sendAcpNodeRequest,
+    addAgentSessionMessage,
+    clearAgentSessionStreaming,
+  } = useApp();
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  //
+  // The authoritative per-node session id now lives in state.nodeSessions.
+  // `node.selected_agent` is still read for display-only process/working_dir
+  // hints when the legacy path happens to have populated them.
+  //
+  const nodeSession = state.nodeSessions[nodeId];
+  const sessionId = nodeSession?.sessionId;
+  const hasSession = !!sessionId && nodeSession.agentShortName === agentShortName;
   const selectedAgent = node.selected_agent?.short_name === agentShortName ? node.selected_agent : null;
-  const sessionId = selectedAgent?.session_id;
-  const hasSession = !!sessionId;
   const messages: AgentSessionMessage[] = useMemo(
     () => sessionId ? (state.agentSessionMessages[sessionId] || []) : [],
     [sessionId, state.agentSessionMessages],
@@ -35,23 +46,19 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
   const pendingPermission = streaming?.pendingPermission || null;
   const agentStatus = streaming?.agentStatus || null;
   const toolCalls = streaming?.toolCalls || [];
-  const streamingTransactionId = streaming?.transactionId || '';
 
   const [permissionSent, setPermissionSent] = useState<string | null>(null);
 
-  const handlePermissionResponse = useCallback((decision: PermissionDecision) => {
-    if (!pendingPermission || !streamingTransactionId) return;
+  //
+  // Permission responses are not yet wired through ACP on the node side. For
+  // now this just clears the local pending UI so the user can dismiss the
+  // prompt. TODO: send `session/request_permission` response over ACP once
+  // the node-side permission plumbing lands.
+  //
+  const handlePermissionResponse = useCallback((_decision: PermissionDecision) => {
+    if (!pendingPermission) return;
     setPermissionSent(pendingPermission.permissionId);
-    sendCommand(nodeId, {
-      Session: {
-        PermissionResponse: {
-          transaction_id: streamingTransactionId,
-          permission_id: pendingPermission.permissionId,
-          decision,
-        },
-      },
-    });
-  }, [nodeId, pendingPermission, streamingTransactionId, sendCommand]);
+  }, [pendingPermission]);
 
   const showPermission = pendingPermission && permissionSent !== pendingPermission.permissionId;
 
@@ -80,42 +87,34 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
     });
 
     try {
-      const transactionId = generateUUID();
-      const response = await sendCommand(nodeId, {
-        Session: { Prompt: { text, transaction_id: transactionId } },
-      });
-
-      if (response?.result) {
-        const result = response.result;
-        if ('Session' in result) {
-          const sessionResult = result.Session;
-          if (typeof sessionResult === 'object' && 'PromptResponse' in sessionResult) {
-            addAgentSessionMessage(sessionId, {
-              role: 'assistant',
-              content: sessionResult.PromptResponse.response,
-              timestamp: new Date(),
-            });
-          } else if (typeof sessionResult === 'object' && 'TransactionCancelled' in sessionResult) {
-            //
-            // Save any streamed content before clearing.
-            //
-
-            const partial = state.agentSessionStreaming[nodeId]?.content || '';
-            if (partial) {
-              addAgentSessionMessage(sessionId, {
-                role: 'assistant',
-                content: partial,
-                timestamp: new Date(),
-              });
-            }
-            addAgentSessionMessage(sessionId, {
-              role: 'user',
-              content: 'Cancelled',
-              timestamp: new Date(),
-            });
-          }
-        }
+      const { text: reply } = await sendAcpNodeRequest(
+        nodeId,
+        'session/prompt',
+        {
+          sessionId,
+          prompt: [{ type: 'text', text }],
+        },
+        true,
+      );
+      //
+      // Prefer the buffered streamed text; fall back to whatever the live
+      // streaming slot accumulated if the collector missed any chunks.
+      //
+      const streamed = reply || state.agentSessionStreaming[nodeId]?.content || '';
+      if (streamed) {
+        addAgentSessionMessage(sessionId, {
+          role: 'assistant',
+          content: streamed,
+          timestamp: new Date(),
+        });
       }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      addAgentSessionMessage(sessionId, {
+        role: 'assistant',
+        content: `Error: ${msg}`,
+        timestamp: new Date(),
+      });
     } finally {
       setIsLoading(false);
       clearAgentSessionStreaming(nodeId);
@@ -124,9 +123,13 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
   };
 
   const handleCloseSession = async () => {
-    if (!hasSession) return;
-    await sendCommand(nodeId, { Session: 'Close' });
-    onClose();
+    if (!sessionId) return;
+    try {
+      await sendAcpNodeRequest(nodeId, 'session/close', { sessionId });
+    } finally {
+      dispatch({ type: 'NODE_SESSION_CLEAR', nodeId });
+      onClose();
+    }
   };
 
   const handleExport = () => {

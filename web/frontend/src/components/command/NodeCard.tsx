@@ -214,7 +214,9 @@ function ActivePromptEntry({ promptText, agentName }: { promptText: string | nul
 export function NodeCard({ node }: NodeCardProps) {
   const {
     state,
+    dispatch,
     sendCommand,
+    sendAcpNodeRequest,
     runOperation,
     runChain,
     enableIntercept,
@@ -272,10 +274,6 @@ export function NodeCard({ node }: NodeCardProps) {
   useEffect(() => {
     if (showRunChainModal) requestChainDefList();
   }, [showRunChainModal, requestChainDefList]);
-
-  const handleSelectAgent = async (shortName: string) => {
-    await sendCommand(node.node_id, { Agent: { Select: { short_name: shortName } } });
-  };
 
   //
   // Initiate session creation — fetch recon for project paths first. If paths
@@ -343,10 +341,24 @@ export function NodeCard({ node }: NodeCardProps) {
     setSessionCreateAgent(null);
     setCreatingSessionFor(shortName);
     try {
-      await handleSelectAgent(shortName);
-      await sendCommand(node.node_id, {
-        Session: { Create: { context: { yolo_mode: yoloMode, working_dir: workingDir, prompt_timeout_secs: state.config.prompt_timeout_secs ? parseInt(state.config.prompt_timeout_secs, 10) : null, interactive: true } } },
+      const timeoutSecs = state.config.prompt_timeout_secs
+        ? parseInt(state.config.prompt_timeout_secs, 10)
+        : null;
+      const { result } = await sendAcpNodeRequest(node.node_id, 'session/new', {
+        cwd: workingDir ?? '/tmp',
+        mcpServers: [],
+        _meta: {
+          praxis: {
+            connector: shortName,
+            yolo: yoloMode,
+            promptTimeoutSecs: timeoutSecs,
+            interactive: true,
+          },
+        },
       });
+      const sessionId = (result as { sessionId?: string } | null)?.sessionId;
+      if (!sessionId) throw new Error('session/new returned no sessionId');
+      dispatch({ type: 'NODE_SESSION_SET', nodeId: node.node_id, sessionId, agentShortName: shortName });
       setShowSessionModal({ agentShortName: shortName });
     } finally {
       setCreatingSessionFor(null);
@@ -359,10 +371,12 @@ export function NodeCard({ node }: NodeCardProps) {
   };
 
   const handleCloseSession = async (shortName: string) => {
+    const session = state.nodeSessions[node.node_id];
+    if (!session) return;
     setClosingSessionFor(shortName);
     try {
-      await handleSelectAgent(shortName);
-      await sendCommand(node.node_id, { Session: 'Close' });
+      await sendAcpNodeRequest(node.node_id, 'session/close', { sessionId: session.sessionId });
+      dispatch({ type: 'NODE_SESSION_CLEAR', nodeId: node.node_id });
     } finally {
       setClosingSessionFor(null);
     }
@@ -574,8 +588,13 @@ export function NodeCard({ node }: NodeCardProps) {
 
           <div className="space-y-1">
             {visibleAgents.map(agent => {
-              const isSelected = node.selected_agent?.short_name === agent.short_name;
-              const hasSession = isSelected && !!node.selected_agent?.session_id;
+              //
+              // ACP sessions are tracked in `state.nodeSessions`, keyed by
+              // node_id. The legacy `selected_agent.session_id` path is no
+              // longer used for web-initiated sessions.
+              //
+              const nodeSession = state.nodeSessions[node.node_id];
+              const hasSession = nodeSession?.agentShortName === agent.short_name;
 
               return (
                 <div
