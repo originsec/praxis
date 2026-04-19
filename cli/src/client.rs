@@ -590,7 +590,13 @@ impl Client {
 
         if !has_method {
             let Some(request_id) = id_str else { return };
-            let Some(mut pending) = state.pending_acp.remove(&request_id) else {
+            //
+            // Take only the response_tx — leave the PendingAcp entry (with its
+            // text_buf) in place so do_acp_request can collect the buffered
+            // chunk text after awaiting the response. do_acp_request removes
+            // the entry once it's read the text.
+            //
+            let Some(pending) = state.pending_acp.get_mut(&request_id) else {
                 return;
             };
             let Some(tx) = pending.response_tx.take() else { return };
