@@ -63,11 +63,6 @@ pub struct LuaAgent {
     fingerprint_process_path: RwLock<Option<String>>,
     fingerprint_version: RwLock<Option<String>>,
     fingerprint_at: RwLock<Option<Instant>>,
-    //
-    // Legacy single-session slot used by the bespoke NodeCommand handler
-    // path. Removed once that path is cut over to ACP.
-    //
-    session: RwLock<Option<Arc<dyn AgentSession>>>,
 }
 
 impl LuaAgent {
@@ -98,7 +93,6 @@ impl LuaAgent {
             fingerprint_process_path: RwLock::new(None),
             fingerprint_version: RwLock::new(None),
             fingerprint_at: RwLock::new(None),
-            session: RwLock::new(None),
         })
     }
 }
@@ -174,45 +168,6 @@ impl Agent for LuaAgent {
 
     fn version(&self) -> Option<String> {
         self.fingerprint_version.read().unwrap().clone()
-    }
-
-    fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>> {
-        let process_path = self.fingerprint_process_path.read().unwrap().clone();
-        common::log_info!(
-            "Lua agent '{}': create_session (process_path={:?}, working_dir={:?}, yolo={}, prompt_timeout={:?})",
-            self.short_name, process_path, context.working_dir, context.yolo_mode, context.prompt_timeout_secs
-        );
-        match LuaAgentSession::new(
-            Arc::clone(&self.vm),
-            context,
-            process_path,
-        ) {
-            Ok(session) => {
-                let session_arc = Arc::new(session) as Arc<dyn AgentSession>;
-                *self.session.write().unwrap() = Some(session_arc.clone());
-                Some(session_arc)
-            }
-            Err(e) => {
-                common::log_error!(
-                    "Lua agent '{}': failed to create session: {}",
-                    self.short_name,
-                    e
-                );
-                None
-            }
-        }
-    }
-
-    fn close_session(&self) {
-        let mut guard = self.session.write().unwrap();
-        if let Some(session) = guard.as_ref() {
-            session.close();
-        }
-        *guard = None;
-    }
-
-    fn get_session(&self) -> Option<Arc<dyn AgentSession>> {
-        self.session.read().unwrap().clone()
     }
 
     fn create_session_with_id(
@@ -315,15 +270,6 @@ impl AgentIntercept for LuaAgent {
 #[async_trait]
 impl AgentRecon for LuaAgent {
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
-        if is_semantic {
-            let session = self.session.write().unwrap().take();
-            if let Some(session) = session {
-                let _ = tokio::task::spawn_blocking(move || {
-                    session.close();
-                }).await;
-            }
-        }
-
         let vm = Arc::clone(&self.vm);
         let process_path = self.fingerprint_process_path.read().unwrap().clone();
         let short_name = self.short_name.clone();

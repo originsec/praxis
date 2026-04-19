@@ -6,7 +6,8 @@ pub use session::DummySession;
 use crate::agent_connectors::traits::{Agent, AgentRecon, AgentSession};
 use async_trait::async_trait;
 use common::{AgentTool, ConfigItem, McpServer, McpTransport, ReconResult, ReconTools};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use uuid::Uuid;
 
 const AGENT_NAME: &str = "Dummy Agent";
 const AGENT_SHORTNAME: &str = "dummy";
@@ -14,16 +15,12 @@ const AGENT_SHORTNAME: &str = "dummy";
 /// A dummy agent that doesn't require any external processes.
 /// Useful for testing and validating agent abstractions.
 #[allow(dead_code)]
-pub struct DummyAgent {
-    session: RwLock<Option<Arc<dyn AgentSession>>>,
-}
+pub struct DummyAgent;
 
 #[allow(dead_code)]
 impl DummyAgent {
     pub fn new() -> Self {
-        Self {
-            session: RwLock::new(None),
-        }
+        Self
     }
 
     /// Generate demo MCP servers with tools
@@ -207,22 +204,12 @@ impl Agent for DummyAgent {
         self.do_fingerprint_impl().await
     }
 
-    fn create_session(&self, _context: &common::SessionContext) -> Option<Arc<dyn AgentSession>> {
-        let session_arc = Arc::new(DummySession::new()) as Arc<dyn AgentSession>;
-        *self.session.write().unwrap() = Some(Arc::clone(&session_arc));
-        Some(session_arc)
-    }
-
-    fn get_session(&self) -> Option<Arc<dyn AgentSession>> {
-        self.session.read().unwrap().clone()
-    }
-
-    fn close_session(&self) {
-        let mut guard = self.session.write().unwrap();
-        if let Some(session) = guard.as_ref() {
-            session.close();
-        }
-        *guard = None;
+    fn create_session_with_id(
+        &self,
+        _context: &common::SessionContext,
+        _session_id: Uuid,
+    ) -> Option<Arc<dyn AgentSession>> {
+        Some(Arc::new(DummySession::new()) as Arc<dyn AgentSession>)
     }
 }
 

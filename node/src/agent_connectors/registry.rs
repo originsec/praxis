@@ -113,11 +113,6 @@ impl AgentRegistry {
 
     #[allow(dead_code)]
     pub fn unregister(&mut self, short_name: &str) -> bool {
-        for agent in &self.agents {
-            if agent.short_name() == short_name {
-                agent.close_session();
-            }
-        }
         let len_before = self.agents.len();
         self.agents.retain(|a| a.short_name() != short_name);
         self.lua_agents.remove(short_name);

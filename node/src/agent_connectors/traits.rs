@@ -23,10 +23,13 @@ pub enum AgentMode {
 //
 
 pub trait AgentSession: Send + Sync {
+    #[allow(dead_code)]
     fn session_id(&self) -> &Uuid;
+    #[allow(dead_code)]
     fn process_path(&self) -> Option<String> {
         None
     }
+    #[allow(dead_code)]
     fn working_dir(&self) -> Option<String> {
         None
     }
@@ -35,6 +38,7 @@ pub trait AgentSession: Send + Sync {
     fn mode(&self) -> AgentMode;
     fn transact(&self, prompt: &str) -> Result<String>;
     fn close(&self);
+    #[allow(dead_code)]
     fn supports_streaming(&self) -> bool {
         false
     }
@@ -104,33 +108,16 @@ pub trait Agent: Send + Sync {
     }
 
     //
-    // Legacy single-session entrypoint. Used by the bespoke NodeCommand
-    // session handler path. To be removed once the ACP server owns all
-    // session management.
-    //
-
-    fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>>;
-    fn close_session(&self);
-    fn get_session(&self) -> Option<Arc<dyn AgentSession>>;
-    fn has_session(&self) -> bool {
-        self.get_session().is_some()
-    }
-
-    //
     // Multi-session entrypoint. The NodeAcpServer passes a server-chosen
     // session_id and the agent is responsible for building a session that
-    // does not share mutable state with any other session. Default impl
-    // falls back to legacy single-session creation for agents that have not
-    // been migrated yet.
+    // does not share mutable state with any other session.
     //
 
     fn create_session_with_id(
         &self,
         context: &SessionContext,
-        _session_id: Uuid,
-    ) -> Option<Arc<dyn AgentSession>> {
-        self.create_session(context)
-    }
+        session_id: Uuid,
+    ) -> Option<Arc<dyn AgentSession>>;
 
     //
     // Release any per-session resources (Lua VM, subprocess handles, etc.)

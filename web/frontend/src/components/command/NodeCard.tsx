@@ -215,7 +215,6 @@ export function NodeCard({ node }: NodeCardProps) {
   const {
     state,
     dispatch,
-    sendCommand,
     sendAcpNodeRequest,
     runOperation,
     runChain,
@@ -310,7 +309,10 @@ export function NodeCard({ node }: NodeCardProps) {
           }
         } else if (!reconTriggered) {
           reconTriggered = true;
-          sendCommand(node.node_id, { Agent: 'Recon' }).catch(() => {});
+          sendAcpNodeRequest(node.node_id, '_praxis/recon', {
+            agent_short_name: shortName,
+            is_semantic: false,
+          }).catch(() => {});
           pollInterval = setInterval(() => {
             if (!resolved) {
               send({ type: 'recon_get', node_id: node.node_id, agent_short_name: shortName });
