@@ -204,35 +204,73 @@ Provides PTY terminal access to the target system:
 
 ## Message Handling
 
-The runtime processes messages from the service:
+The node speaks two protocols over RabbitMQ. **Agent and session interaction
+use ACP (Agent Client Protocol).** Everything else — intercept, terminal,
+config, registration — uses the bespoke `NodeCommand` envelope.
+
+### ACP (node-as-agent)
+
+The node runs its own ACP server (`node/src/acp_server/`) and appears to the
+service as a single ACP-speaking agent. The service forwards client ACP
+frames to the node over RabbitMQ via `NodeDirectMessage::Acp(AcpFrame)`;
+responses and notifications flow back via `NodeSignalMessage::Acp`.
+
+Standard ACP methods supported:
+
+- `initialize` — capability handshake. The node advertises the connector
+  catalog and supported extensions in `InitializeResponse._meta`:
+  ```json
+  {
+    "extensions": { "_praxis/recon": { "version": 1 } },
+    "connectors": [ { "shortName": "claude-code", "name": "Claude Code" }, ... ],
+    "nodeId": "..."
+  }
+  ```
+- `session/new` — create a session. The target connector is selected via
+  `_meta.praxis.connector`. Session options (`yolo`, `promptTimeoutSecs`,
+  `interactive`) also live under `_meta.praxis`:
+  ```json
+  {
+    "cwd": "/path",
+    "_meta": {
+      "praxis": {
+        "connector": "claude-code",
+        "yolo": false,
+        "promptTimeoutSecs": 600,
+        "interactive": true
+      }
+    }
+  }
+  ```
+- `session/prompt` — send a prompt to the named session.
+- `session/cancel` — cancel an in-flight prompt.
+- `session/close` — terminate and release the session's per-session Lua VM.
+- `session/list` — enumerate live sessions on the node.
+
+Multiple concurrent sessions are supported. Each session owns a freshly
+instantiated Lua VM (loaded from connector bytecode compiled once at
+connector-load time), so no Lua-level state leaks between sessions sharing
+the same connector script.
+
+### ACP extensions
+
+- `_praxis/recon` — custom top-level method. Agent-scoped, no `session_id`
+  required. Params: `{ "agent_short_name": string, "is_semantic": bool }`.
+  Result: the serialized `ReconResult`. Replaces the legacy
+  `NodeCommand::Agent(Recon)` / `Agent(ReconSemantic)` commands.
+
+### NodeCommand (non-agent concerns)
 
 ```rust
 pub enum NodeCommand {
-    Agent(AgentCommand),
-    Session(SessionCommand),
+    Agent(AgentCommand),         // legacy — being cut over to ACP
+    Session(SessionCommand),     // legacy — being cut over to ACP
     Intercept(InterceptCommand),
     Terminal(TerminalCommand),
     Config(ConfigCommand),
     AgentRegistry(AgentRegistryCommand),
 }
 ```
-
-### Agent Commands
-
-- `Update` - refresh agent information
-- `Select` - select an agent for operations
-- `Recon` - perform static reconnaissance
-- `ReconSemantic` - perform semantic reconnaissance
-- `ReadFile` - read file contents for config or session (optional line range)
-- `WriteFile` - write config file contents (session writes are not allowed)
-- `GrepFiles` - search config/session file contents with regex (batch, glob support)
-
-### Session Commands
-
-- `Create` - start a new session
-- `Close` - end the session
-- `Prompt` - send a prompt
-- `CancelTransaction` - cancel pending operation
 
 ### Intercept Commands
 
@@ -255,7 +293,8 @@ On restart, the node cleans up stale state.
 ### Session State
 
 Kept in memory:
-- Active session per agent
+- Live ACP sessions keyed by `session_id`, each with its own Lua VM and
+  cancellation flag
 - PTY handles
 - Transaction tracking
 

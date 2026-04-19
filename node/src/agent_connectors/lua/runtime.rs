@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use mlua::{Function, Lua, LuaSerdeExt, MultiValue, Table, Value};
+use mlua::{ChunkMode, Function, Lua, LuaSerdeExt, MultiValue, Table, Value};
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 use serde_json::{json, Value as JsonValue};
@@ -101,6 +101,19 @@ struct CommandSpec {
 //
 
 pub fn create_vm(script: &str) -> Result<Lua> {
+    let lua = init_vm_shell()?;
+    let value: Value = lua.load(script).eval().map_err(lua_error)?;
+    set_connector(&lua, value)?;
+    Ok(lua)
+}
+
+//
+// Initialize a fresh Lua VM with the reset hook, shared host API, and shared
+// libraries but without a loaded connector script. Used by create_vm (which
+// then evaluates source) and make_session_vm (which then evaluates bytecode).
+//
+
+fn init_vm_shell() -> Result<Lua> {
     let lua = Lua::new();
 
     //
@@ -122,14 +135,46 @@ pub fn create_vm(script: &str) -> Result<Lua> {
 
     install_shared_api(&lua)?;
     install_shared_libraries(&lua)?;
-    let value: Value = lua.load(script).eval().map_err(lua_error)?;
+    Ok(lua)
+}
+
+fn set_connector(lua: &Lua, value: Value) -> Result<()> {
     match value {
         Value::Table(t) => {
             lua.globals().set("_connector", t).map_err(lua_error)?;
-            Ok(lua)
+            Ok(())
         }
         _ => Err(anyhow!("Lua connector script must return a table")),
     }
+}
+
+//
+// Compile a connector script to portable Lua bytecode. Done once per
+// connector at load time. The returned bytes can be loaded repeatedly via
+// make_session_vm to instantiate per-session VMs without re-parsing source.
+//
+
+pub fn compile_bytecode(script: &str) -> Result<Vec<u8>> {
+    let lua = Lua::new();
+    let func: Function = lua.load(script).into_function().map_err(lua_error)?;
+    Ok(func.dump(true))
+}
+
+//
+// Instantiate a fresh per-session Lua VM from precompiled bytecode. The
+// returned VM has its own heap, host API bindings, and an evaluated
+// _connector table independent of every other session's VM.
+//
+
+pub fn make_session_vm(bytecode: &[u8]) -> Result<Lua> {
+    let lua = init_vm_shell()?;
+    let value: Value = lua
+        .load(bytecode)
+        .set_mode(ChunkMode::Binary)
+        .eval()
+        .map_err(lua_error)?;
+    set_connector(&lua, value)?;
+    Ok(lua)
 }
 
 fn connector_table(lua: &Lua) -> Result<Table> {

@@ -2659,6 +2659,18 @@ pub struct InterceptStatus {
 // Node Messages.
 //
 
+//
+// ACP transport envelope. Carries a raw JSON-RPC frame and the external
+// client ID that originated (or should receive) the frame. Used for
+// service <-> node ACP traffic over RabbitMQ.
+//
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AcpFrame {
+    pub client_id: String,
+    pub json_rpc: String,
+}
+
 /// Messages that can be sent to a specific node
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum NodeDirectMessage {
@@ -2669,6 +2681,8 @@ pub enum NodeDirectMessage {
     /// Reset the node: cancel all operations, tear down state, re-register.
     /// Delivered on a dedicated queue so it is never blocked by handlers.
     Reset,
+    /// ACP JSON-RPC frame destined for the node's ACP server
+    Acp(AcpFrame),
 }
 
 /// Node event log entry - sent from node to service for centralized logging
@@ -2708,6 +2722,13 @@ pub enum NodeSignalMessage {
     },
     /// Streaming session update from an ACP agent transaction
     SessionUpdate(SessionUpdate),
+    /// ACP JSON-RPC frame emitted by the node's ACP server, destined for the
+    /// external client identified by client_id (forwarded by the service).
+    Acp {
+        node_id: String,
+        client_id: String,
+        json_rpc: String,
+    },
 }
 
 //

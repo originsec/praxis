@@ -1,5 +1,6 @@
 //! Praxis Service - Orchestration service for the Praxis framework
 
+mod acp_node_proxy;
 mod acp_server;
 mod banner;
 mod claude_bridge;
@@ -307,6 +308,19 @@ async fn run_main_loop() -> Result<()> {
     common::log_info!("Initialized chain executor");
 
     //
+    // Initialize Orchestrator manager, ACP server, and ACP node proxy.
+    // The proxy is constructed first because several managers depend on it.
+    //
+    let orchestrator_manager = Arc::new(OrchestratorManager::new());
+    let acp_node_proxy = acp_node_proxy::AcpNodeProxy::new();
+    let acp_server = Arc::new(acp_server::AcpServer::new(
+        orchestrator_manager.clone(),
+        service_config.clone(),
+        acp_node_proxy.clone(),
+    ));
+    common::log_info!("Initialized Orchestrator manager, ACP server, and ACP node proxy");
+
+    //
     // Initialize AgentChat manager.
     //
     let agent_chat_channel = connection.create_channel().await?;
@@ -314,19 +328,9 @@ async fn run_main_loop() -> Result<()> {
         database.clone(),
         agent_chat_channel,
         node_registry.clone(),
-        pending_commands.clone(),
+        acp_node_proxy.clone(),
     ));
     common::log_info!("Initialized AgentChat manager");
-
-    //
-    // Initialize Orchestrator manager and ACP server.
-    //
-    let orchestrator_manager = Arc::new(OrchestratorManager::new());
-    let acp_server = Arc::new(acp_server::AcpServer::new(
-        orchestrator_manager.clone(),
-        service_config.clone(),
-    ));
-    common::log_info!("Initialized Orchestrator manager and ACP server");
 
     //
     // Initialize Toolkit manager.
@@ -335,8 +339,8 @@ async fn run_main_loop() -> Result<()> {
         database.clone(),
         service_config.clone(),
         node_registry.clone(),
-        response_tracker.clone(),
         publish_channel.clone(),
+        acp_node_proxy.clone(),
     ));
     common::log_info!("Initialized Toolkit manager");
 
@@ -645,6 +649,7 @@ async fn run_main_loop() -> Result<()> {
         node_exec_lock: node_exec_lock.clone(),
         agent_chat_manager,
         acp_server,
+        acp_node_proxy,
         toolkit_manager,
         mcp_manager,
         ccrv1_manager,

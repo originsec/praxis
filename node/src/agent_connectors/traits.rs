@@ -103,12 +103,42 @@ pub trait Agent: Send + Sync {
         None
     }
 
+    //
+    // Legacy single-session entrypoint. Used by the bespoke NodeCommand
+    // session handler path. To be removed once the ACP server owns all
+    // session management.
+    //
+
     fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>>;
     fn close_session(&self);
     fn get_session(&self) -> Option<Arc<dyn AgentSession>>;
     fn has_session(&self) -> bool {
         self.get_session().is_some()
     }
+
+    //
+    // Multi-session entrypoint. The NodeAcpServer passes a server-chosen
+    // session_id and the agent is responsible for building a session that
+    // does not share mutable state with any other session. Default impl
+    // falls back to legacy single-session creation for agents that have not
+    // been migrated yet.
+    //
+
+    fn create_session_with_id(
+        &self,
+        context: &SessionContext,
+        _session_id: Uuid,
+    ) -> Option<Arc<dyn AgentSession>> {
+        self.create_session(context)
+    }
+
+    //
+    // Release any per-session resources (Lua VM, subprocess handles, etc.)
+    // owned by the agent and keyed by session_id. Called by the session
+    // store on close.
+    //
+
+    fn drop_session(&self, _session_id: Uuid) {}
 
     //
     // Read session content for a given session_file path. Agents can override

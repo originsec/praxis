@@ -136,6 +136,45 @@ async fn listen_to_queues(
     let transaction_manager = Arc::new(TransactionManager::new());
 
     //
+    // Node-side ACP server. Handles inbound ACP JSON-RPC frames arriving on
+    // NodeDirectMessage::Acp and emits outbound frames (responses and
+    // session/update notifications) through an mpsc channel drained by a
+    // forwarder task below.
+    //
+
+    let (acp_outbound_tx, mut acp_outbound_rx) = crate::acp_server::outbound_channel();
+    let acp_server = crate::acp_server::NodeAcpServer::new(
+        Arc::clone(&registry),
+        acp_outbound_tx,
+        node_id.clone(),
+    );
+
+    //
+    // Drain outbound ACP frames and publish them on NODE_SIGNAL_QUEUE as
+    // NodeSignalMessage::Acp. The service's dispatcher forwards these to
+    // the external client that originated the session.
+    //
+
+    let channel_for_acp = channel.clone();
+    let node_id_for_acp = node_id.clone();
+    tokio::spawn(async move {
+        common::log_info!("ACP outbound forwarder task started");
+        while let Some(frame) = acp_outbound_rx.recv().await {
+            let message = NodeSignalMessage::Acp {
+                node_id: node_id_for_acp.clone(),
+                client_id: frame.client_id,
+                json_rpc: frame.json_rpc,
+            };
+            if let Err(e) =
+                publish_json(&channel_for_acp, NODE_SIGNAL_QUEUE, &message).await
+            {
+                common::log_warn!("Failed to forward ACP outbound frame: {}", e);
+            }
+        }
+        common::log_info!("ACP outbound forwarder task ended");
+    });
+
+    //
     // Semantic parser tracker for async parser requests.
     //
     let semantic_parser_tracker = Arc::new(SemanticParserTracker::new());
@@ -723,6 +762,12 @@ async fn listen_to_queues(
                                 NodeDirectMessage::Reset => {
                                     common::log_info!("Reset message received on main queue (expected on reset queue)");
                                     reset_token.cancel();
+                                }
+                                NodeDirectMessage::Acp(frame) => {
+                                    let server = Arc::clone(&acp_server);
+                                    tokio::spawn(async move {
+                                        server.handle_frame(frame.client_id, frame.json_rpc).await;
+                                    });
                                 }
                             },
                             Err(e) => {

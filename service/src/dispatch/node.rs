@@ -170,22 +170,6 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                     response.command_id, pending.client_id
                 );
 
-                //
-                // Check if this is a AgentChat-related command.
-                //
-                if let Err(e) = ctx
-                    .agent_chat_manager
-                    .handle_command_response(
-                        &pending.client_id,
-                        &response.command_id,
-                        &response.node_id,
-                        &response.result,
-                    )
-                    .await
-                {
-                    common::log_warn!("AgentChat command response handling failed: {}", e);
-                }
-
                 if should_broadcast_state {
                     if let Err(e) = broadcast_state_to_clients(
                         &ctx.broadcast_channel,
@@ -429,6 +413,20 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                 common::log_error!(
                     "Failed to send session update to client {}: {}",
                     client_id, e
+                );
+            }
+        }
+
+        NodeSignalMessage::Acp { node_id, client_id, json_rpc } => {
+            if let Err(e) = ctx
+                .acp_node_proxy
+                .forward_to_client(&ctx.client_publish_channel, &node_id, &client_id, &json_rpc)
+                .await
+            {
+                common::log_error!(
+                    "Failed to forward node ACP frame to client {}: {}",
+                    &client_id[..8.min(client_id.len())],
+                    e
                 );
             }
         }
