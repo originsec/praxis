@@ -22,7 +22,7 @@ import {
   MessageSquare,
   RotateCcw,
 } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
+import { nodeSessionKey, useApp } from '../../context/AppContext';
 import { StatusBadge } from '../common/StatusBadge';
 import { RunModal, type RunItem } from '../common/RunModal';
 import { Modal } from '../common/Modal';
@@ -373,12 +373,12 @@ export function NodeCard({ node }: NodeCardProps) {
   };
 
   const handleCloseSession = async (shortName: string) => {
-    const session = state.nodeSessions[node.node_id];
+    const session = state.nodeSessions[nodeSessionKey(node.node_id, shortName)];
     if (!session) return;
     setClosingSessionFor(shortName);
     try {
       await sendAcpNodeRequest(node.node_id, 'session/close', { sessionId: session.sessionId });
-      dispatch({ type: 'NODE_SESSION_CLEAR', nodeId: node.node_id });
+      dispatch({ type: 'NODE_SESSION_CLEAR', nodeId: node.node_id, agentShortName: shortName });
     } finally {
       setClosingSessionFor(null);
     }
@@ -595,8 +595,8 @@ export function NodeCard({ node }: NodeCardProps) {
               // node_id. The legacy `selected_agent.session_id` path is no
               // longer used for web-initiated sessions.
               //
-              const nodeSession = state.nodeSessions[node.node_id];
-              const hasSession = nodeSession?.agentShortName === agent.short_name;
+              const nodeSession = state.nodeSessions[nodeSessionKey(node.node_id, agent.short_name)];
+              const hasSession = !!nodeSession;
 
               return (
                 <div

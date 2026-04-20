@@ -1,8 +1,6 @@
 use crate::app::NodesState;
 use crate::ui::common::short_id;
-use crate::ui::theme::{
-    ACCENT, DIM, MUTED, POPUP_BG, POPUP_HIGHLIGHT_BG, STATUS_DONE, STATUS_RUNNING, TEXT,
-};
+use crate::ui::theme::{ACCENT, DIM, MUTED, POPUP_BG, POPUP_HIGHLIGHT_BG, TEXT};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -60,8 +58,8 @@ pub(super) fn render(f: &mut Frame, area: Rect, state: &NodesState) {
 
     lines.push(Line::from(Span::styled(
         format!(
-            "  {:<10} {:<14} {:<10} {:<8} {}",
-            "NODE", "AGENT", "SESSION", "STATUS", "CREATED"
+            "  {:<10} {:<14} {:<10} {}",
+            "NODE", "AGENT", "SESSION", "CREATED"
         ),
         Style::default().fg(MUTED),
     )));
@@ -96,12 +94,6 @@ pub(super) fn render(f: &mut Frame, area: Rect, state: &NodesState) {
 
             let marker = if is_selected { "\u{25b8} " } else { "  " };
 
-            let (status_label, status_color) = if session.is_waiting {
-                ("waiting", STATUS_RUNNING)
-            } else {
-                ("idle", STATUS_DONE)
-            };
-
             let sid_display = session
                 .session_id
                 .as_deref()
@@ -121,10 +113,6 @@ pub(super) fn render(f: &mut Frame, area: Rect, state: &NodesState) {
                     style,
                 ),
                 Span::styled(format!("{:<10} ", sid_display), Style::default().fg(DIM)),
-                Span::styled(
-                    format!("{:<8} ", status_label),
-                    Style::default().fg(status_color),
-                ),
                 Span::styled(created_ago, Style::default().fg(DIM)),
             ]));
         }

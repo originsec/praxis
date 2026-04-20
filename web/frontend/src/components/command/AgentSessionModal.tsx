@@ -3,7 +3,7 @@ import { Send, Bot, Loader2, Download, Square, ShieldCheck, ShieldX, ShieldAlert
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { FloatingPanel } from './FloatingPanel';
-import { useApp, type AgentSessionMessage } from '../../context/AppContext';
+import { nodeSessionKey, useApp, type AgentSessionMessage } from '../../context/AppContext';
 import { exportAgentSession, downloadTextFile } from '../../utils/export';
 import type { NodeState, PermissionDecision } from '../../api/types';
 
@@ -32,9 +32,9 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
   // `node.selected_agent` is still read for display-only process/working_dir
   // hints when the legacy path happens to have populated them.
   //
-  const nodeSession = state.nodeSessions[nodeId];
+  const nodeSession = state.nodeSessions[nodeSessionKey(nodeId, agentShortName)];
   const sessionId = nodeSession?.sessionId;
-  const hasSession = !!sessionId && nodeSession.agentShortName === agentShortName;
+  const hasSession = !!sessionId;
   const selectedAgent = node.selected_agent?.short_name === agentShortName ? node.selected_agent : null;
   const messages: AgentSessionMessage[] = useMemo(
     () => sessionId ? (state.agentSessionMessages[sessionId] || []) : [],
@@ -127,7 +127,7 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
     try {
       await sendAcpNodeRequest(nodeId, 'session/close', { sessionId });
     } finally {
-      dispatch({ type: 'NODE_SESSION_CLEAR', nodeId });
+      dispatch({ type: 'NODE_SESSION_CLEAR', nodeId, agentShortName });
       onClose();
     }
   };

@@ -261,11 +261,21 @@ interface AppState {
   //
   recentlyAccessedNodeIds: string[];
   //
-  // Per-node agent sessions. Keyed by node_id because the web UI currently
-  // supports one live session per node card. Stores the ACP sessionId plus
-  // the agent connector short name that owns it.
+  // Per-node agent sessions. Keyed by `${nodeId}|${agentShortName}` so a
+  // single node can host multiple concurrent sessions, one per connector.
+  // Each entry stores the ACP sessionId plus the originating (nodeId,
+  // agentShortName) pair for ergonomic lookup.
   //
-  nodeSessions: Record<string, { sessionId: string; agentShortName: string }>;
+  nodeSessions: Record<string, { nodeId: string; agentShortName: string; sessionId: string }>;
+}
+
+//
+// Stable composite key for nodeSessions / agentSessionStreaming so the
+// same (nodeId, agentShortName) pair always hashes to one entry.
+//
+
+export function nodeSessionKey(nodeId: string, agentShortName: string): string {
+  return `${nodeId}|${agentShortName}`;
 }
 
 //
@@ -358,7 +368,7 @@ type Action =
   | { type: 'AGENT_SESSION_STREAMING_CLEAR'; nodeId: string }
   | { type: 'AGENT_SESSION_STREAMING_CHUNK'; nodeId: string; text: string }
   | { type: 'NODE_SESSION_SET'; nodeId: string; sessionId: string; agentShortName: string }
-  | { type: 'NODE_SESSION_CLEAR'; nodeId: string }
+  | { type: 'NODE_SESSION_CLEAR'; nodeId: string; agentShortName: string }
   //
   // Chain actions.
   //
@@ -949,16 +959,22 @@ function reduceAgentSessions(state: AppState, action: Action): AppState | null {
       };
     }
     case 'NODE_SESSION_SET': {
+      const key = nodeSessionKey(action.nodeId, action.agentShortName);
       return {
         ...state,
         nodeSessions: {
           ...state.nodeSessions,
-          [action.nodeId]: { sessionId: action.sessionId, agentShortName: action.agentShortName },
+          [key]: {
+            nodeId: action.nodeId,
+            agentShortName: action.agentShortName,
+            sessionId: action.sessionId,
+          },
         },
       };
     }
     case 'NODE_SESSION_CLEAR': {
-      const { [action.nodeId]: _, ...rest } = state.nodeSessions;
+      const key = nodeSessionKey(action.nodeId, action.agentShortName);
+      const { [key]: _, ...rest } = state.nodeSessions;
       return { ...state, nodeSessions: rest };
     }
     default:
@@ -1626,12 +1642,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
                     // sessions (matches existing behavior). Node-bound agent
                     // sessions feed the per-node streaming UI instead.
                     //
-                    const nodeEntry = Object.entries(nodeSessionsRef.current)
-                      .find(([, s]) => s.sessionId === sessionId);
+                    const nodeEntry = Object.values(nodeSessionsRef.current)
+                      .find((s) => s.sessionId === sessionId);
                     if (nodeEntry) {
                       dispatch({
                         type: 'AGENT_SESSION_STREAMING_CHUNK',
-                        nodeId: nodeEntry[0],
+                        nodeId: nodeEntry.nodeId,
                         text,
                       });
                     } else {
