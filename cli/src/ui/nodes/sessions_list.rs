@@ -97,9 +97,9 @@ pub(super) fn render(f: &mut Frame, area: Rect, state: &NodesState) {
             let marker = if is_selected { "\u{25b8} " } else { "  " };
 
             let (status_label, status_color) = if session.is_waiting {
-                ("waiting", STATUS_RUNNING)
+                (format!("{} working", spinner_frame()), STATUS_RUNNING)
             } else {
-                ("idle", STATUS_DONE)
+                ("idle".to_string(), STATUS_DONE)
             };
 
             let sid_display = session
@@ -176,6 +176,23 @@ fn truncate(s: &str, max: usize) -> String {
     } else {
         format!("{}\u{2026}", &s[..max.saturating_sub(1)])
     }
+}
+
+//
+// Braille spinner — rotates based on wall-clock time so animation is
+// consistent across redraws without any extra state in `NodesState`.
+//
+
+fn spinner_frame() -> &'static str {
+    const FRAMES: [&str; 10] = [
+        "\u{280B}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283C}",
+        "\u{2834}", "\u{2826}", "\u{2827}", "\u{2807}", "\u{280F}",
+    ];
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    FRAMES[((ms / 100) as usize) % FRAMES.len()]
 }
 
 fn format_ago(d: std::time::Duration) -> String {
