@@ -64,22 +64,10 @@ pub(super) fn render(f: &mut Frame, area: Rect, state: &NodesState) {
     // Header row.
     //
 
-    //
-    // Reserve enough room for the fixed-width columns, leaving the rest of
-    // the inner width for the LAST PROMPT preview. 2 space marker + columns
-    // below add up to 56 characters before PROMPT.
-    //
-
-    let marker_width = 2usize;
-    let fixed_cols_width = 11 + 15 + 11 + 13 + 12; // node agent session status created + trailing spaces
-    let prompt_width = (inner.width as usize)
-        .saturating_sub(marker_width + fixed_cols_width)
-        .max(8);
-
     lines.push(Line::from(Span::styled(
         format!(
-            "  {:<10} {:<14} {:<10} {:<12} {:<11} {}",
-            "NODE", "AGENT", "SESSION", "STATUS", "CREATED", "LAST PROMPT"
+            "  {:<10} {:<14} {:<10} {:<12} {}",
+            "NODE", "AGENT", "SESSION", "STATUS", "CREATED"
         ),
         Style::default().fg(MUTED),
     )));
@@ -128,20 +116,6 @@ pub(super) fn render(f: &mut Frame, area: Rect, state: &NodesState) {
 
             let created_ago = format_ago(now.saturating_duration_since(session.created_at));
 
-            //
-            // Last user prompt (falls back to the in-progress input buffer
-            // while typing, then to an em-dash placeholder).
-            //
-
-            let last_prompt = session
-                .messages
-                .iter()
-                .rev()
-                .find(|m| matches!(m.role, crate::app::ChatRole::User))
-                .map(|m| m.text.as_str())
-                .unwrap_or("\u{2014}");
-            let prompt_display = first_line_truncated(last_prompt, prompt_width);
-
             lines.push(Line::from(vec![
                 Span::styled(marker, style),
                 Span::styled(
@@ -157,8 +131,7 @@ pub(super) fn render(f: &mut Frame, area: Rect, state: &NodesState) {
                     format!("{:<12} ", status_label),
                     Style::default().fg(status_color),
                 ),
-                Span::styled(format!("{:<11} ", created_ago), Style::default().fg(DIM)),
-                Span::styled(prompt_display, Style::default().fg(DIM)),
+                Span::styled(created_ago, Style::default().fg(DIM)),
             ]));
         }
     }
@@ -212,21 +185,6 @@ fn truncate(s: &str, max: usize) -> String {
         out.push('\u{2026}');
         out
     }
-}
-
-//
-// Take the first non-empty line of a prompt, collapse inner runs of
-// whitespace, and truncate to fit the column width.
-//
-
-fn first_line_truncated(prompt: &str, max: usize) -> String {
-    let first = prompt
-        .lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty())
-        .unwrap_or("");
-    let collapsed: String = first.split_whitespace().collect::<Vec<_>>().join(" ");
-    truncate(&collapsed, max)
 }
 
 fn format_ago(d: std::time::Duration) -> String {
