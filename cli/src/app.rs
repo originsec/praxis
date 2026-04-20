@@ -380,7 +380,66 @@ impl App {
                 false
             }
             AppEvent::StateUpdate(state) => {
+                let had_no_nodes = self.nodes.nodes.is_empty();
                 self.handle_state_update(state);
+                //
+                // On the first state update (empty → populated), also pull
+                // existing sessions from each node. This ensures a fresh
+                // CLI picks up any sessions that were kept alive on the
+                // node side across client restarts.
+                //
+                if had_no_nodes && !self.nodes.nodes.is_empty() {
+                    self.refresh_node_sessions();
+                }
+                true
+            }
+            AppEvent::NodeSessionsRefreshed { entries } => {
+                let now = std::time::Instant::now();
+                for entry in entries {
+                    //
+                    // Skip if we already track this exact server session_id.
+                    //
+                    let already = self
+                        .nodes
+                        .sessions
+                        .values()
+                        .any(|s| s.session_id.as_deref() == Some(entry.session_id.as_str()));
+                    if already {
+                        continue;
+                    }
+                    let local_id = uuid::Uuid::new_v4().to_string();
+                    let chat = SessionChat {
+                        local_id: local_id.clone(),
+                        node_id: entry.node_id.clone(),
+                        agent_name: entry.agent_short_name.clone(),
+                        session_id: Some(entry.session_id.clone()),
+                        active_transaction_id: None,
+                        created_at: now,
+                        last_activity_at: now,
+                        messages: vec![ChatMessage {
+                            role: ChatRole::System,
+                            text: format!(
+                                "Resumed from node (session {}…)",
+                                &entry.session_id[..8.min(entry.session_id.len())]
+                            ),
+                        }],
+                        input: String::new(),
+                        cursor_pos: 0,
+                        scroll_offset: 0,
+                        is_waiting: false,
+                        history: Vec::new(),
+                        history_index: None,
+                        saved_input: String::new(),
+                        yolo: false,
+                        working_dir: entry.cwd,
+                        streaming_content: String::new(),
+                        had_tool_call: false,
+                        agent_status: None,
+                        pending_permission: None,
+                        tool_calls: Vec::new(),
+                    };
+                    self.nodes.sessions.insert(local_id, chat);
+                }
                 true
             }
             AppEvent::OperationsRefreshed {
@@ -840,6 +899,7 @@ impl App {
                 }
                 KeyCode::Char('l') => {
                     self.active_window = Window::Nodes;
+                    self.refresh_node_sessions();
                     return;
                 }
                 KeyCode::Char('p') => {
@@ -1244,6 +1304,7 @@ impl App {
                     self.load_settings().await;
                 } else if col >= nodes_pos && col < nodes_pos + nodes_label.len() as u16 {
                     self.active_window = Window::Nodes;
+                    self.refresh_node_sessions();
                 } else if col >= orch_pos && col < orch_pos + orch_label.len() as u16 {
                     self.active_window = Window::Orchestrator;
                 } else if col >= quit_pos && col < quit_pos + quit_label.len() as u16 {

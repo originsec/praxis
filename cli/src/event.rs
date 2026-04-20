@@ -38,7 +38,22 @@ pub enum AppEvent {
     TerminalCreateFailed(String),
     TerminalOutput(TerminalOutput),
     SessionStreamUpdate(SessionUpdate),
+    //
+    // Discovered sessions pulled from connected nodes' session/list when the
+    // Nodes window is opened. Each entry is merged into the local sessions
+    // map so restart-persistent sessions show up in the overlay.
+    //
+    NodeSessionsRefreshed {
+        entries: Vec<NodeSessionEntry>,
+    },
     Tick,
+}
+
+pub struct NodeSessionEntry {
+    pub node_id: String,
+    pub agent_short_name: String,
+    pub session_id: String,
+    pub cwd: Option<String>,
 }
 
 pub enum SessionResult {

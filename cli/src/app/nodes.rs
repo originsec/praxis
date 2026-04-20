@@ -1,6 +1,78 @@
 use super::*;
 
 impl App {
+    //
+    // Pull the session/list for every connected node and funnel the
+    // results back to the main loop as NodeSessionsRefreshed. Entries
+    // whose server session_id isn't already tracked locally are merged
+    // into `nodes.sessions` so existing (restart-persistent) sessions
+    // show up in the overlay.
+    //
+
+    pub(crate) fn refresh_node_sessions(&self) {
+        let nodes: Vec<String> = self.nodes.nodes.iter().map(|n| n.node_id.clone()).collect();
+        if nodes.is_empty() {
+            return;
+        }
+        let tracked: std::collections::HashSet<String> = self
+            .nodes
+            .sessions
+            .values()
+            .filter_map(|s| s.session_id.clone())
+            .collect();
+        let client = self.client.clone();
+        let tx = self.event_tx.clone();
+
+        tokio::spawn(async move {
+            let Some(tx) = tx else { return };
+            let mut entries: Vec<crate::event::NodeSessionEntry> = Vec::new();
+
+            for node_id in nodes {
+                let params = serde_json::json!({
+                    "_meta": { "praxis": { "nodeId": node_id } }
+                });
+                let value = match client.acp_request(&node_id, "session/list", params).await {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+                let Some(sessions) = value.get("sessions").and_then(|v| v.as_array()) else {
+                    continue;
+                };
+                for s in sessions {
+                    let Some(sid) = s.get("sessionId").and_then(|v| v.as_str()) else {
+                        continue;
+                    };
+                    if tracked.contains(sid) {
+                        continue;
+                    }
+                    let agent = s
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if agent.is_empty() {
+                        continue;
+                    }
+                    let cwd = s
+                        .get("cwd")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .filter(|s| s != ".");
+                    entries.push(crate::event::NodeSessionEntry {
+                        node_id: node_id.clone(),
+                        agent_short_name: agent,
+                        session_id: sid.to_string(),
+                        cwd,
+                    });
+                }
+            }
+
+            if !entries.is_empty() {
+                let _ = tx.send(AppEvent::NodeSessionsRefreshed { entries });
+            }
+        });
+    }
+
     pub(crate) async fn handle_nodes_key(&mut self, key: KeyEvent) {
         if self.nodes.terminal.is_some() {
             self.handle_terminal_key(key).await;
