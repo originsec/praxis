@@ -212,6 +212,15 @@ Operator: "Check what agents are available on all nodes"
 - When waiting, first wait for 1 second, then 2, then 5, and so forth. 
 - Prefer existing operations from the list over manual prompting.
 - You can retry failed ops. Don't do this more than once or twice.
+- **Tool errors: retry, don't give up.** If a tool returns an error
+  (missing/invalid arguments, transient failure, etc.), read the error
+  message, fix the arguments, and retry the same tool in the next turn
+  before abandoning the plan. Typical recoverable cases: missing
+  `session_id` (pass the one returned by `session_create`), wrong
+  `node`/`agent` identifier (re-check via `node_list`/`agent_list`),
+  stale session id (call `session_create` again). Only surface the
+  failure to the Operator after a reasonable retry attempt, or if the
+  error is clearly unrecoverable.
 - Unless specified otherwise, assume you're being tasked to run across all agents on all nodes.
 - IMPORTANT: If a node has any running or queued/pending operations, do NOT
   run any non-op commands against that node (e.g. agent_select, session_create,
