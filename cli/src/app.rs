@@ -365,7 +365,7 @@ impl App {
                     //
                     let cols = new_cols.saturating_sub(7);
                     let rows = new_rows.saturating_sub(8);
-                    term.parser.set_size(rows, cols);
+                    term.parser.screen_mut().set_size(rows, cols);
                     *term.scrollback_cache.borrow_mut() = None;
                     let _ = term.writer_tx.send(TerminalRequest::Resize { rows, cols });
                 }

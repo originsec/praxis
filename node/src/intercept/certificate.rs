@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use rcgen::{
-    BasicConstraints, Certificate, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose,
-    IsCa, KeyPair, KeyUsagePurpose, SanType,
+    BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose,
+    IsCa, Issuer, KeyPair, KeyUsagePurpose, SanType,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -34,10 +34,8 @@ pub struct CertificateData {
 
 /// Certificate Authority for generating and managing TLS certificates
 pub struct CertificateAuthority {
-    /// Root CA certificate
-    root_cert: Certificate,
-    /// Root CA key pair
-    root_key_pair: KeyPair,
+    /// Root CA issuer (owns params + signing key, used to sign leaf certs)
+    root_issuer: Issuer<'static, KeyPair>,
     /// Root CA certificate PEM (for easy access)
     #[allow(dead_code)]
     root_cert_pem: String,
@@ -102,19 +100,23 @@ impl CertificateAuthority {
             .unwrap_or_else(|| time::OffsetDateTime::now_utc());
 
         //
-        // Self-sign the certificate.
+        // Self-sign the certificate, then wrap the params and key pair in an
+        // Issuer for signing leaf certs later. rcgen 0.14 removed the direct
+        // (cert, key_pair) arguments to signed_by and replaced them with an
+        // Issuer handle.
         //
         let root_cert = params
             .self_signed(&root_key_pair)
             .context("Failed to self-sign root CA certificate")?;
 
         let root_cert_pem = root_cert.pem();
+        drop(root_cert);
+        let root_issuer = Issuer::new(params, root_key_pair);
 
         common::log_info!("Root CA certificate generated successfully");
 
         Ok(Self {
-            root_cert,
-            root_key_pair,
+            root_issuer,
             root_cert_pem,
             root_thumbprint: None,
             leaf_certs: HashMap::new(),
@@ -197,7 +199,7 @@ impl CertificateAuthority {
         // Sign with root CA.
         //
         let leaf_cert = params
-            .signed_by(&leaf_key_pair, &self.root_cert, &self.root_key_pair)
+            .signed_by(&leaf_key_pair, &self.root_issuer)
             .context("Failed to sign leaf certificate with root CA")?;
 
         let cert_pem = leaf_cert.pem();

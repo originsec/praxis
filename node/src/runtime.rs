@@ -50,7 +50,7 @@ async fn listen_to_queues(
     //
     channel
         .exchange_declare(
-            NODE_BROADCAST_EXCHANGE,
+            NODE_BROADCAST_EXCHANGE.into(),
             lapin::ExchangeKind::Fanout,
             ExchangeDeclareOptions::default(),
             FieldTable::default(),
@@ -59,7 +59,7 @@ async fn listen_to_queues(
 
     let broadcast_queue = channel
         .queue_declare(
-            "",
+            "".into(),
             QueueDeclareOptions {
                 exclusive: true,
                 auto_delete: true,
@@ -71,9 +71,9 @@ async fn listen_to_queues(
 
     channel
         .queue_bind(
-            broadcast_queue.name().as_str(),
-            NODE_BROADCAST_EXCHANGE,
-            "",
+            broadcast_queue.name().as_str().into(),
+            NODE_BROADCAST_EXCHANGE.into(),
+            "".into(),
             QueueBindOptions::default(),
             FieldTable::default(),
         )
@@ -81,8 +81,8 @@ async fn listen_to_queues(
 
     let mut broadcast_consumer = channel
         .basic_consume(
-            broadcast_queue.name().as_str(),
-            &format!("node-broadcast-consumer-{}", node_id),
+            broadcast_queue.name().as_str().into(),
+            format!("node-broadcast-consumer-{}", node_id).as_str().into(),
             BasicConsumeOptions::default(),
             FieldTable::default(),
         )
@@ -90,8 +90,8 @@ async fn listen_to_queues(
 
     let mut node_consumer = channel
         .basic_consume(
-            &node_queue,
-            &format!("node-direct-consumer-{}", node_id),
+            node_queue.as_str().into(),
+            format!("node-direct-consumer-{}", node_id).as_str().into(),
             BasicConsumeOptions::default(),
             FieldTable::default(),
         )
@@ -179,7 +179,7 @@ async fn listen_to_queues(
     let semantic_queue_name = common::node_semantic_queue_name(&node_id);
     channel
         .queue_declare(
-            &semantic_queue_name,
+            semantic_queue_name.as_str().into(),
             QueueDeclareOptions::default(),
             FieldTable::default(),
         )
@@ -207,8 +207,10 @@ async fn listen_to_queues(
     tokio::spawn(async move {
         let mut consumer = match semantic_channel
             .basic_consume(
-                &semantic_queue_for_consumer,
-                &format!("semantic-parser-consumer-{}", uuid::Uuid::new_v4()),
+                semantic_queue_for_consumer.as_str().into(),
+                format!("semantic-parser-consumer-{}", uuid::Uuid::new_v4())
+                    .as_str()
+                    .into(),
                 BasicConsumeOptions::default(),
                 FieldTable::default(),
             )
@@ -259,7 +261,7 @@ async fn listen_to_queues(
     let reset_queue_name = common::node_reset_queue_name(&node_id);
     channel
         .queue_declare(
-            &reset_queue_name,
+            reset_queue_name.as_str().into(),
             QueueDeclareOptions::default(),
             FieldTable::default(),
         )
@@ -273,8 +275,8 @@ async fn listen_to_queues(
         tokio::spawn(async move {
             let mut consumer = match reset_channel
                 .basic_consume(
-                    &reset_queue_for_consumer,
-                    &format!("reset-consumer-{}", uuid::Uuid::new_v4()),
+                    reset_queue_for_consumer.as_str().into(),
+                    format!("reset-consumer-{}", uuid::Uuid::new_v4()).as_str().into(),
                     BasicConsumeOptions::default(),
                     FieldTable::default(),
                 )

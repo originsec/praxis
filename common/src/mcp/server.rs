@@ -994,27 +994,17 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
     }
 }
 
-#[tool_handler]
+#[tool_handler(router = self.tool_router)]
 impl<C: McpClient + Clone + 'static> ServerHandler for PraxisServer<C> {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            server_info: Implementation {
-                name: SERVER_NAME.into(),
-                version: SERVER_VERSION.into(),
-                title: None,
-                icons: None,
-                website_url: None,
-            },
-            instructions: Some(
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new(SERVER_NAME, SERVER_VERSION))
+            .with_instructions(
                 "Praxis C2 framework for orchestrating AI coding agents. \
                 This is an orchestrator session where natural language can be used to control \
                 the Praxis network — manage nodes, run agents, execute operations, and coordinate \
-                tasks across distributed targets."
-                    .into(),
-            ),
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            ..Default::default()
-        }
+                tasks across distributed targets.",
+            )
     }
 }
 

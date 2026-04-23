@@ -470,7 +470,7 @@ pub fn create_transparent_listener(addr: &str) -> Result<StdTcpListener> {
     //
 
     socket
-        .set_ip_transparent(true)
+        .set_ip_transparent_v4(true)
         .context("Failed to set IP_TRANSPARENT")?;
 
     //

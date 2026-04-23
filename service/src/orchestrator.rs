@@ -14,8 +14,8 @@ use common::ai::{
 };
 use common::{OrchestratorPlan, PlanStep, PlanStepStatus};
 use rmcp::{
-    model::{CallToolRequestParam, RawContent},
-    transport::SseClientTransport,
+    model::{CallToolRequestParams, RawContent},
+    transport::StreamableHttpClientTransport,
     ServiceExt,
 };
 
@@ -226,21 +226,10 @@ impl OrchestratorManager {
                 // Connect to MCP SSE server (this is the slow part).
                 //
 
-                let sse_url = format!("http://127.0.0.1:{}/sse", mcp_port);
-                common::log_info!("Orchestrator connecting to MCP server at {}", sse_url);
+                let mcp_url = format!("http://127.0.0.1:{}/mcp", mcp_port);
+                common::log_info!("Orchestrator connecting to MCP server at {}", mcp_url);
 
-                let transport = match SseClientTransport::start(sse_url.clone()).await {
-                    Ok(t) => t,
-                    Err(e) => {
-                        common::log_error!("Failed to connect to MCP server at {}: {}", sse_url, e);
-                        send_and_log!(acp_error_response(
-                                Value::Null,
-                                -32000,
-                                &format!("Failed to connect to MCP server at {}: {}", sse_url, e),
-                            ));
-                        return;
-                    }
-                };
+                let transport = StreamableHttpClientTransport::from_uri(mcp_url.as_str());
 
                 let mcp_service = match ().serve(transport).await {
                     Ok(s) => s,
@@ -878,10 +867,8 @@ async fn execute_mcp_tool(
         None
     };
 
-    let request = CallToolRequestParam {
-        name: tool_name.to_string().into(),
-        arguments,
-    };
+    let mut request = CallToolRequestParams::new(tool_name.to_string());
+    request.arguments = arguments;
 
     match peer.call_tool(request).await {
         Ok(result) => {

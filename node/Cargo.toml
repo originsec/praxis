@@ -10,45 +10,45 @@ description = "Praxis node agent - runs on target systems to execute operations"
 [dependencies]
 async-trait = "0.1.89"
 regex = "1.10"
-fancy-regex = "0.14"
+fancy-regex = "0.17"
 indexmap = { version = "2.0", features = ["serde"] }
 uuid = { version = "1.7", features = ["v4"] }
 tokio = { version = "1.49.0", features = ["full"] }
 futures = "0.3"
 once_cell = "1.19"
-sysinfo = "0.37.2"
+sysinfo = "0.38"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 glob = "0.3"
 anyhow = "1.0.100"
 libc = "0.2"
-lapin = "2.5"
+lapin = "4.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sha2 = "0.10"
+sha2 = "0.11"
 tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
-dirs = "5.0"
+dirs = "6.0"
 walkdir = "2"
 common = { package = "praxis_common", path = "../common" }
-portable-pty = "0.8"
-rmcp = { version = "0.8", features = ["client", "transport-child-process"] }
+portable-pty = "0.9"
+rmcp = { version = "1", features = ["client", "transport-child-process"] }
 # Traffic interception dependencies
 flate2 = "1"
-brotli = "7"
+brotli = "8"
 zstd = "0.13"
 # VPN packet routing dependencies
-socket2 = { version = "0.5", features = ["all"] }
-etherparse = "0.16"
-hickory-resolver = { version = "0.24", features = ["tokio-runtime"] }
+socket2 = { version = "0.6", features = ["all"] }
+etherparse = "0.20"
+hickory-resolver = { version = "0.26", features = ["tokio"] }
 dashmap = "6"
 tokio-util = { version = "0.7", features = ["rt", "compat"] }
 agent-client-protocol = { version = "0.10.4", features = ["unstable_session_close", "unstable_session_model", "unstable_session_usage"] }
 time = "0.3"
-rcgen = "0.13"
+rcgen = "0.14"
 rustls = { version = "0.23", features = ["ring"] }
 tokio-rustls = "0.26"
 rustls-pemfile = "2"
-webpki-roots = "0.26"
+webpki-roots = "1"
 rustls-pki-types = "1"
 hyper = { version = "1.5", features = ["full"] }
 hyper-util = { version = "0.1", features = ["tokio", "server-auto", "server-graceful"] }
@@ -56,14 +56,14 @@ h2 = "0.4"
 http = "1"
 http-body-util = "0.1"
 bytes = "1"
-rand = "0.8"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
-toml = "0.8"
+rand = "0.10"
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+toml = "1"
 nix = { version = "0.31.1", features = ["user"] }
-mlua = { version = "0.10", features = ["lua54", "vendored", "serialize", "send"] }
+mlua = { version = "0.11", features = ["lua54", "vendored", "serialize", "send"] }
 base64 = "0.22"
-chromiumoxide = { version = "0.7", features = ["tokio-runtime"], default-features = false }
-tokio-tungstenite = "0.24"
+chromiumoxide = { version = "0.9", default-features = false }
+tokio-tungstenite = "0.29"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = ["Management_Deployment", "Foundation_Collections", "ApplicationModel", "Storage_Search", "Win32_Storage_Packaging_Appx", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_StationsAndDesktops", "Win32_Security", "Win32_System_Threading", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse"] }

@@ -131,7 +131,8 @@ fn init_vm_shell() -> Result<Lua> {
                 Ok(mlua::VmState::Continue)
             }
         },
-    );
+    )
+    .map_err(lua_error)?;
 
     install_shared_api(&lua)?;
     install_shared_libraries(&lua)?;
@@ -404,7 +405,13 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
             lua.create_function(|_, input: String| {
                 let mut hasher = Sha256::new();
                 hasher.update(input.as_bytes());
-                Ok(format!("{:x}", hasher.finalize()))
+                let digest = hasher.finalize();
+                let mut hex = String::with_capacity(digest.len() * 2);
+                for byte in digest.as_slice() {
+                    use std::fmt::Write;
+                    let _ = write!(&mut hex, "{:02x}", byte);
+                }
+                Ok(hex)
             })
             .map_err(lua_error)?,
         )
