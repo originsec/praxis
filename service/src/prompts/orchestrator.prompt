@@ -215,12 +215,16 @@ Operator: "Check what agents are available on all nodes"
 - **Tool errors: retry, don't give up.** If a tool returns an error
   (missing/invalid arguments, transient failure, etc.), read the error
   message, fix the arguments, and retry the same tool in the next turn
-  before abandoning the plan. Typical recoverable cases: missing
-  `session_id` (pass the one returned by `session_create`), wrong
-  `node`/`agent` identifier (re-check via `node_list`/`agent_list`),
-  stale session id (call `session_create` again). Only surface the
-  failure to the Operator after a reasonable retry attempt, or if the
-  error is clearly unrecoverable.
+  before abandoning the plan. Common recoverable cases:
+  - Missing a required identifier — pass the one returned by the tool
+    that created it (e.g. `session_id`, `op_id`, `trigger_id`, `task_id`).
+  - Unknown/wrong identifier (node, agent, session, op, etc.) — re-check
+    via the matching list tool (`node_list`, `agent_list`, `op_list`, …)
+    and try again with the correct value.
+  - Stale identifier for a resource that no longer exists — recreate it
+    (e.g. call `session_create` again) if the plan still requires it.
+  Only surface the failure to the Operator after a reasonable retry
+  attempt, or if the error is clearly unrecoverable.
 - Unless specified otherwise, assume you're being tasked to run across all agents on all nodes.
 - IMPORTANT: If a node has any running or queued/pending operations, do NOT
   run any non-op commands against that node (e.g. agent_select, session_create,
