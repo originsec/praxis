@@ -597,8 +597,8 @@ pub fn session_update_plan(session_id: &str, plan: &Value) -> ClientDirectMessag
             steps.iter().map(|step| {
                 let desc = step.get("description").and_then(|d| d.as_str()).unwrap_or("");
                 let status = match step.get("status").and_then(|s| s.as_str()) {
-                    Some("Done") => acp::schema::PlanEntryStatus::Completed,
-                    Some("InProgress") => acp::schema::PlanEntryStatus::InProgress,
+                    Some("done") => acp::schema::PlanEntryStatus::Completed,
+                    Some("in_progress") => acp::schema::PlanEntryStatus::InProgress,
                     _ => acp::schema::PlanEntryStatus::Pending,
                 };
                 acp::schema::PlanEntry::new(desc, acp::schema::PlanEntryPriority::Medium, status)

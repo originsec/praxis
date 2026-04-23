@@ -1690,10 +1690,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   break;
                 }
                 case 'plan': {
-                  const planData = update.plan as { entries?: Array<{ content: string; status: string }> } | undefined;
-                  if (planData?.entries) {
+                  const entries = update.entries as Array<{ content: string; status: string }> | undefined;
+                  if (entries) {
                     const plan: OrchestratorPlan = {
-                      steps: planData.entries.map(e => ({
+                      steps: entries.map(e => ({
                         description: e.content,
                         status: e.status === 'completed' ? 'done' as const
                           : e.status === 'in_progress' ? 'in_progress' as const

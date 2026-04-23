@@ -532,12 +532,9 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
 
-        let session_id = params.session_id.as_deref()
-            .ok_or_else(|| mcp_err("session_id is required. Call session_create first."))?;
-
         let (_result, text) = client
             .acp_request_collecting_text(&node_id, "session/prompt", json!({
-                "sessionId": session_id,
+                "sessionId": params.session_id,
                 "prompt": [{ "type": "text", "text": params.prompt }],
             }))
             .await.map_err(mcp_err)?;
@@ -558,12 +555,9 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
 
-        let session_id = params.session_id.as_deref()
-            .ok_or_else(|| mcp_err("session_id is required"))?;
-
         client
             .acp_request(&node_id, "session/close", json!({
-                "sessionId": session_id,
+                "sessionId": params.session_id,
             }))
             .await.map_err(mcp_err)?;
 

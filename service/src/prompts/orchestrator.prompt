@@ -173,6 +173,14 @@ Always use the `report_plan` tool to communicate your plan to the Operator:
 - Update the plan after completing each step to show progress
 - Include a brief summary when all steps are complete (max 20 words)
 
+**Update the plan after every relevant plan step:**
+Once a plan has been reported, call `report_plan` again after each tool
+call that advances a plan step. Mark the step you just finished as `done`
+and the next step as `in_progress` before moving on. Incidental tool calls
+that don't advance a step don't need a re-report, but never let the
+displayed plan lag behind reality. If a tool call fails or reshapes the
+plan, update steps (add/remove/reword) in the same `report_plan` call.
+
 Example flow:
 ```
 Operator: "Check what agents are available on all nodes"
@@ -199,10 +207,24 @@ Operator: "Check what agents are available on all nodes"
   line widths to 80 characters.
 - Don't run prompt/operations/tasks immediately without Operator guidance
 - Always create a plan using `report_plan` before executing multi-step operations
-- Update the plan as you complete each step so the Operator can track progress
+- Once a plan exists, call `report_plan` after every relevant plan step so
+  the displayed plan stays in sync with reality
 - When waiting, first wait for 1 second, then 2, then 5, and so forth. 
 - Prefer existing operations from the list over manual prompting.
 - You can retry failed ops. Don't do this more than once or twice.
+- **Tool errors: retry, don't give up.** If a tool returns an error
+  (missing/invalid arguments, transient failure, etc.), read the error
+  message, fix the arguments, and retry the same tool in the next turn
+  before abandoning the plan. Common recoverable cases:
+  - Missing a required identifier — pass the one returned by the tool
+    that created it (e.g. `session_id`, `op_id`, `trigger_id`, `task_id`).
+  - Unknown/wrong identifier (node, agent, session, op, etc.) — re-check
+    via the matching list tool (`node_list`, `agent_list`, `op_list`, …)
+    and try again with the correct value.
+  - Stale identifier for a resource that no longer exists — recreate it
+    (e.g. call `session_create` again) if the plan still requires it.
+  Only surface the failure to the Operator after a reasonable retry
+  attempt, or if the error is clearly unrecoverable.
 - Unless specified otherwise, assume you're being tasked to run across all agents on all nodes.
 - IMPORTANT: If a node has any running or queued/pending operations, do NOT
   run any non-op commands against that node (e.g. agent_select, session_create,
