@@ -15,6 +15,16 @@ pub struct CliState {
 
     #[serde(default)]
     pub sessions: HashMap<String, String>,
+
+    //
+    // Selected agent short name keyed by node id. Populated by
+    // `agent select`, consumed by `session create` and the non-interactive
+    // agent file operations. Under ACP the connector is chosen per session,
+    // so this is purely a CLI-side convenience to avoid re-typing it.
+    //
+
+    #[serde(default)]
+    pub agents: HashMap<String, String>,
 }
 
 impl CliState {
@@ -30,6 +40,16 @@ impl CliState {
 
     pub fn clear_session(&mut self, node_id: &str) -> Result<()> {
         self.sessions.remove(node_id);
+        self.save()?;
+        Ok(())
+    }
+
+    pub fn get_agent(&self, node_id: &str) -> Option<String> {
+        self.agents.get(node_id).cloned()
+    }
+
+    pub fn set_agent(&mut self, node_id: &str, short_name: &str) -> Result<()> {
+        self.agents.insert(node_id.to_string(), short_name.to_string());
         self.save()?;
         Ok(())
     }

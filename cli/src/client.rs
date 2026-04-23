@@ -235,11 +235,13 @@ impl Client {
             //
             // Operation and chain responses.
             //
-            ClientDirectMessage::ReconGetResponse { recon_result, .. } => {
-                if let Some(ref recon) = recon_result {
-                    state.cached_project_paths = recon.project_paths.clone();
-                }
+            ClientDirectMessage::ReconGetResponse {
+                recon_result: Some(recon),
+                ..
+            } => {
+                state.cached_project_paths = recon.project_paths.clone();
             }
+            ClientDirectMessage::ReconGetResponse { .. } => {}
             ClientDirectMessage::SemanticOpQueued { operation_id, .. } => {
                 state.pending_semantic_op = Some(operation_id);
             }
@@ -549,30 +551,38 @@ impl Client {
             return Err(e);
         }
 
-        let result = match tokio::time::timeout(self.timeout, rx).await {
-            Ok(Ok(Ok(value))) => Ok(value),
-            Ok(Ok(Err(message))) => Err(anyhow!(message)),
-            Ok(Err(_)) => Err(anyhow!("ACP response channel closed")),
+        let outcome = tokio::time::timeout(self.timeout, rx).await;
+
+        //
+        // Always drop the PendingAcp entry before producing a result so
+        // error paths (JSON-RPC error, dropped oneshot, timeout) don't leak
+        // the entry — handle_acp_frame would otherwise keep appending
+        // streamed chunks into its text_buf forever.
+        //
+
+        let text_buf = self
+            .state
+            .lock()
+            .await
+            .pending_acp
+            .remove(&request_id)
+            .and_then(|p| p.text_buf)
+            .unwrap_or_default();
+
+        let result = match outcome {
+            Ok(Ok(Ok(value))) => value,
+            Ok(Ok(Err(message))) => return Err(anyhow!(message)),
+            Ok(Err(_)) => return Err(anyhow!("ACP response channel closed")),
             Err(_) => {
-                self.state.lock().await.pending_acp.remove(&request_id);
-                Err(anyhow!(
+                return Err(anyhow!(
                     "Timeout waiting for ACP response to {} after {}s",
                     method,
                     self.timeout.as_secs()
-                ))
+                ));
             }
-        }?;
-
-        let text = {
-            let mut state = self.state.lock().await;
-            state
-                .pending_acp
-                .remove(&request_id)
-                .and_then(|p| p.text_buf)
-                .unwrap_or_default()
         };
 
-        Ok((result, text))
+        Ok((result, text_buf))
     }
 
     fn handle_acp_frame(state: &mut ClientState, json_rpc: &str) {
@@ -643,10 +653,10 @@ impl Client {
         };
 
         for pending in state.pending_acp.values_mut() {
-            if let (Some(buf), Some(sid)) = (&mut pending.text_buf, &pending.session_id) {
-                if sid == session_id {
-                    buf.push_str(text);
-                }
+            if let (Some(buf), Some(sid)) = (&mut pending.text_buf, &pending.session_id)
+                && sid == session_id
+            {
+                buf.push_str(text);
             }
         }
     }

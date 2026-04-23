@@ -177,6 +177,14 @@ pub async fn handle_session_prompt(
         return;
     };
 
+    //
+    // Clear any stale cancel signal from a prior session/cancel that arrived
+    // while no prompt was running. Without this, the flag would stick at
+    // true across prompts and the next transact would fail before starting.
+    //
+
+    node_session.cancel_flag.store(false, Ordering::SeqCst);
+
     let prompt_text = req
         .prompt
         .iter()
@@ -250,13 +258,6 @@ pub async fn handle_session_prompt(
             }
         }
     }
-
-    //
-    // Clear the cancel flag after the prompt completes so the session can be
-    // used for another prompt.
-    //
-
-    node_session.cancel_flag.store(false, Ordering::SeqCst);
 }
 
 pub async fn handle_session_cancel(
@@ -286,16 +287,16 @@ pub async fn handle_session_close(
     req: CloseSessionRequest,
 ) {
     let session_id_str = req.session_id.to_string();
-    if let Ok(session_id) = Uuid::parse_str(&session_id_str) {
-        if let Some(node_session) = server.store().remove(&session_id) {
-            let session = Arc::clone(&node_session.session);
-            let agent = Arc::clone(&node_session.agent);
-            let _ = tokio::task::spawn_blocking(move || {
-                session.close();
-                agent.drop_session(session_id);
-            })
-            .await;
-        }
+    if let Ok(session_id) = Uuid::parse_str(&session_id_str)
+        && let Some(node_session) = server.store().remove(&session_id)
+    {
+        let session = Arc::clone(&node_session.session);
+        let agent = Arc::clone(&node_session.agent);
+        let _ = tokio::task::spawn_blocking(move || {
+            session.close();
+            agent.drop_session(session_id);
+        })
+        .await;
     }
 
     if let Some(id) = id {

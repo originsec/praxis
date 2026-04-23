@@ -5,6 +5,7 @@ use serde_json::json;
 
 use crate::client::Client;
 use crate::output::{format_short_id, print_header, print_success};
+use crate::state::CliState;
 
 #[derive(Subcommand)]
 pub enum AgentCommand {
@@ -222,7 +223,9 @@ async fn list_agents(client: &Client, node_prefix: &str) -> Result<()> {
 async fn select_agent(client: &Client, node_prefix: &str, short_name: &str) -> Result<()> {
     //
     // Under ACP the connector is chosen per session. There is no node-side
-    // method for selection, so validate against the cached agent list.
+    // method for selection, so validate against the cached agent list and
+    // persist the choice locally in CliState so subsequent subcommands
+    // (session create, agent config read/grep, ...) can resolve it.
     //
 
     let state = client
@@ -242,6 +245,9 @@ async fn select_agent(client: &Client, node_prefix: &str, short_name: &str) -> R
             short_name
         ));
     }
+
+    let mut cli_state = CliState::load().unwrap_or_default();
+    cli_state.set_agent(&node.node_id, short_name)?;
 
     print_success(&format!("Selected agent: {}", short_name));
     Ok(())
@@ -270,14 +276,11 @@ async fn update_agent(client: &Client, node_prefix: &str) -> Result<()> {
     Ok(())
 }
 
-fn selected_agent_short_name(state: &common::SystemState, node_id: &str) -> Result<String> {
-    state
-        .nodes
-        .iter()
-        .find(|n| n.node_id == node_id)
-        .and_then(|n| n.selected_agent.as_ref())
-        .map(|a| a.short_name.clone())
-        .ok_or_else(|| anyhow!("No agent selected on node. Use `agent select` first."))
+fn selected_agent_short_name(_state: &common::SystemState, node_id: &str) -> Result<String> {
+    CliState::load()
+        .unwrap_or_default()
+        .get_agent(node_id)
+        .ok_or_else(|| anyhow!("No agent selected. Use `agent select` first."))
 }
 
 async fn read_file(
@@ -309,12 +312,6 @@ async fn read_file(
     }
 
     let result = client.acp_request(&node_id, "_praxis/read_file", params).await?;
-
-    if result.get("path").is_none() {
-        if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
-            return Err(anyhow!(err.to_string()));
-        }
-    }
 
     if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
         return Err(anyhow!(err.to_string()));
@@ -399,10 +396,10 @@ async fn grep_file(
         }))
         .await?;
 
-    if result.get("pattern").is_none() {
-        if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
-            return Err(anyhow!(err.to_string()));
-        }
+    if result.get("pattern").is_none()
+        && let Some(err) = result.get("error").and_then(|v| v.as_str())
+    {
+        return Err(anyhow!(err.to_string()));
     }
 
     let title = match file_type {
@@ -418,10 +415,10 @@ async fn grep_file(
         .map_err(|e| anyhow!("Failed to parse grep results: {}", e))?
         .unwrap_or_default();
 
-    if let Some(entry) = results.first() {
-        if let Some(error) = &entry.error {
-            return Err(anyhow!(error.clone()));
-        }
+    if let Some(entry) = results.first()
+        && let Some(error) = &entry.error
+    {
+        return Err(anyhow!(error.clone()));
     }
 
     let result_pattern = result

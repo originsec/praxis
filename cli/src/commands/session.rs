@@ -81,13 +81,10 @@ async fn create_session(
     let node_id = find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
-    let connector = state
-        .nodes
-        .iter()
-        .find(|n| n.node_id == node_id)
-        .and_then(|n| n.selected_agent.as_ref())
-        .map(|a| a.short_name.clone())
-        .ok_or_else(|| anyhow!("No agent selected on node. Use `agent select` first."))?;
+    let cli_state_for_agent = CliState::load().unwrap_or_default();
+    let connector = cli_state_for_agent
+        .get_agent(&node_id)
+        .ok_or_else(|| anyhow!("No agent selected. Use `agent select` first."))?;
 
     let prompt_timeout_secs = match timeout {
         Some(t) => Some(t),
