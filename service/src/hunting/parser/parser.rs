@@ -1,3 +1,8 @@
+// nom 8 deprecates `tuple((..))` in favour of bare tuples implementing Parser.
+// The rewrites are mechanical but touch every combinator chain in this file;
+// suppress the deprecation for now and migrate in a follow-up.
+#![allow(deprecated)]
+
 use std::str;
 
 use nom::branch::alt;
@@ -6,7 +11,7 @@ use nom::character::complete::{digit1, i32, i64, multispace0, multispace1, none_
 use nom::combinator::{map, opt, recognize, value};
 use nom::multi::{many0, separated_list0, separated_list1, fold_many0, many1};
 use nom::sequence::{tuple, preceded, delimited, separated_pair, terminated, pair};
-use nom::IResult;
+use nom::{IResult, Parser};
 
 use super::ast::*;
 use super::datetime::{iso8601_datetime, rfc822_datetime, rfc850_datetime};
@@ -23,7 +28,7 @@ fn type_tag(i: &str) -> IResult<&str, Type> {
         value(Type::Real, tag("real")),
         map(tag("string"), |_| Type::String),
         map(tag("timespan"), |_| Type::Timespan),
-    ))(i)
+    )).parse(i)
 }
 
 fn option_literal(i: &str) -> IResult<&str, OptionLiteral> {
@@ -32,7 +37,7 @@ fn option_literal(i: &str) -> IResult<&str, OptionLiteral> {
         value(OptionLiteral::Bool(false), tag("false")),
         map(i64, |x| OptionLiteral::Long(x)),
         map(take_while1(|c: char| !c.is_whitespace()), |s: &str| OptionLiteral::String(s.to_string())),
-    ))(i)
+    )).parse(i)
 }
 
 fn option_quoted_literal(i: &str) -> IResult<&str, OptionLiteral> {
@@ -42,7 +47,7 @@ fn option_quoted_literal(i: &str) -> IResult<&str, OptionLiteral> {
         map(i64, |x| OptionLiteral::Long(x)),
         map(string, |s| OptionLiteral::String(s)),
         map(identifier, |s| OptionLiteral::Identifier(s))
-    ))(i)
+    )).parse(i)
 }
 
 fn options(i: &str) -> IResult<&str, Options> {
@@ -50,7 +55,7 @@ fn options(i: &str) -> IResult<&str, Options> {
         identifier,
         trim(tag("=")),
         option_literal
-    )), |x| x.into_iter().collect())(i)
+    )), |x| x.into_iter().collect()).parse(i)
 }
 
 fn options_with_comma_and_quoted(i: &str) -> IResult<&str, Options> {
@@ -58,7 +63,7 @@ fn options_with_comma_and_quoted(i: &str) -> IResult<&str, Options> {
         trim(identifier),
         tag("="),
         trim(option_quoted_literal)
-    )), |x| x.into_iter().collect())(i)
+    )), |x| x.into_iter().collect()).parse(i)
 }
 
 fn pattern(i: &str) -> IResult<&str, Vec<PatternToken>> {
@@ -69,7 +74,7 @@ fn pattern(i: &str) -> IResult<&str, Vec<PatternToken>> {
             pair(identifier, opt(preceded(trim(tag(":")), type_tag))),
             |(n, t)| PatternToken::Column(n, t)
         )
-    ))))(i)
+    )))).parse(i)
 }
 
 fn type_mapping(i: &str) -> IResult<&str, Vec<(String, Type)>> {
@@ -77,22 +82,22 @@ fn type_mapping(i: &str) -> IResult<&str, Vec<(String, Type)>> {
         trim(identifier),
         tag(":"),
         trim(type_tag)
-    ))(i)
+    )).parse(i)
 }
 
 fn identifier(i: &str) -> IResult<&str, String> {
-    map(take_identifier, |i| i.to_string())(i)
+    map(take_identifier, |i| i.to_string()).parse(i)
 }
 
 fn wildcard_identifier(i: &str) -> IResult<&str, String> {
-    map(take_while1(is_kql_wildcard_identifier), |i: &str| i.to_string())(i)
+    map(take_while1(is_kql_wildcard_identifier), |i: &str| i.to_string()).parse(i)
 }
 
 fn string(i: &str) -> IResult<&str, String> {
     map(alt((
         delimited(tag("\""), alt((escaped(none_of::<&str, _, _>("\\\""), '\\', tag("\"")), tag(""))), tag("\"")),
         delimited(tag("'"), alt((escaped(none_of::<&str, _, _>("\\'"), '\\', tag("'")), tag(""))), tag("'"))
-    )), |s| s.to_string())(i)
+    )), |s| s.to_string()).parse(i)
 }
 
 fn boolean(i: &str) -> IResult<&str, Option<bool>> {
@@ -101,7 +106,7 @@ fn boolean(i: &str) -> IResult<&str, Option<bool>> {
         map(tag_no_case("false"), |_| Some(false)),
         map(i64, |x| Some(x != 0)),
         map(tag("null"), |_| None)
-    ))(i)
+    )).parse(i)
 }
 
 fn date(i: &str) -> IResult<&str, Option<DateTime>> {
@@ -110,7 +115,7 @@ fn date(i: &str) -> IResult<&str, Option<DateTime>> {
         map(rfc822_datetime, |x| Some(x)),
         map(rfc850_datetime, |x| Some(x)),
         map(tag("null"), |_| None)
-    ))(i)
+    )).parse(i)
 }
 
 fn decimal(i: &str) -> IResult<&str, Option<f64>> {
@@ -120,7 +125,7 @@ fn decimal(i: &str) -> IResult<&str, Option<f64>> {
         value(Some(f64::INFINITY), tag("-inf")),
         value(Some(f64::NAN), tag("nan")),
         value(None, tag("null")),
-    ))(i)
+    )).parse(i)
 }
 
 fn dynamic(i: &str) -> IResult<&str, Option<Dynamic>> {
@@ -150,7 +155,7 @@ fn dynamic(i: &str) -> IResult<&str, Option<Dynamic>> {
             value(Some(Dynamic::Bool(Some(false))), tag("false")),
             value(None, tag("null"))
         ))
-    ))(i)
+    )).parse(i)
 }
 
 fn integer(i: &str) -> IResult<&str, Option<i32>> {
@@ -158,7 +163,7 @@ fn integer(i: &str) -> IResult<&str, Option<i32>> {
         map(preceded(tag_no_case("0x"), hex_digit1), |x| Some(i32::from_str_radix(x, 16).unwrap())),
         map(i32, |x| Some(x)),
         map(tag("null"), |_| None)
-    ))(i)
+    )).parse(i)
 }
 
 fn long(i: &str) -> IResult<&str, Option<i64>> {
@@ -166,7 +171,7 @@ fn long(i: &str) -> IResult<&str, Option<i64>> {
         map(preceded(tag_no_case("0x"), hex_digit1), |x| Some(i64::from_str_radix(x, 16).unwrap())),
         map(i64, |x| Some(x)),
         map(tag("null"), |_| None)
-    ))(i)
+    )).parse(i)
 }
 
 fn real(i: &str) -> IResult<&str, Option<f32>> {
@@ -176,7 +181,7 @@ fn real(i: &str) -> IResult<&str, Option<f32>> {
         value(Some(f32::INFINITY), tag("-inf")),
         value(Some(f32::NAN), tag("nan")),
         value(None, tag("null")),
-    ))(i)
+    )).parse(i)
 }
 
 fn timespan(i: &str) -> IResult<&str, Option<i64>> {
@@ -197,7 +202,7 @@ fn timespan(i: &str) -> IResult<&str, Option<i64>> {
             |((h, m), s)| Some((h as i64 * 60 + m as i64) * (1000 * 1000 * 1000 * 60) + s.map(|x| dec_to_i64(x, 1000 * 1000 * 1000)).unwrap_or(0) as i64)
         ),
         map(tag("null"), |_| None)
-    ))(i)
+    )).parse(i)
 }
 
 fn literal(i: &str) -> IResult<&str, Literal> {
@@ -223,7 +228,7 @@ fn literal(i: &str) -> IResult<&str, Literal> {
         map(string, |s| Literal::String(s)),
         map(tag("true"), |_| Literal::Bool(Some(true))),
         map(tag("false"), |_| Literal::Bool(Some(false))),
-    ))(i)
+    )).parse(i)
 }
 
 fn ident_expr(i: &str) -> IResult<&str, Expr> {
@@ -241,14 +246,14 @@ fn ident_expr(i: &str) -> IResult<&str, Expr> {
             |(n, x)| Expr::Func(n, x),
         ),
         map(identifier, |i| Expr::Ident(i)),
-    ))(i)
+    )).parse(i)
 }
 
 fn delim_expr(i: &str) -> IResult<&str, Expr> {
     let (i, ident) = alt((
         delimited(tag("("), trim(or_expr), tag(")")),
         ident_expr,
-    ))(i)?;
+    )).parse(i)?;
 
     fold_many0(alt((
         trim(preceded(opt(trim(tag("."))), delimited(
@@ -257,7 +262,7 @@ fn delim_expr(i: &str) -> IResult<&str, Expr> {
             tag("]"),
         ))),
         map(preceded(trim(tag(".")), identifier), |i| Expr::Ident(i)),
-    )), move || ident.clone(), |f, i| Expr::Index(Box::new(f), Box::new(i)))(i)
+    )), move || ident.clone(), |f, i| Expr::Index(Box::new(f), Box::new(i))).parse(i)
 }
 
 fn muldiv_expr(i: &str) -> IResult<&str, Expr> {
@@ -267,7 +272,7 @@ fn muldiv_expr(i: &str) -> IResult<&str, Expr> {
         '/' => Expr::Divide(Box::new(acc), Box::new(g)),
         '%' => Expr::Modulo(Box::new(acc), Box::new(g)),
         _ => unreachable!()
-    })(i)
+    }).parse(i)
 }
 
 fn addsub_expr(i: &str) -> IResult<&str, Expr> {
@@ -276,7 +281,7 @@ fn addsub_expr(i: &str) -> IResult<&str, Expr> {
         '+' => Expr::Add(Box::new(acc), Box::new(g)),
         '-' => Expr::Substract(Box::new(acc), Box::new(g)),
         _ => unreachable!()
-    })(i)
+    }).parse(i)
 }
 
 //
@@ -295,7 +300,7 @@ fn string_op_keyword(i: &str) -> IResult<&str, &str> {
         tag("endswith"),
         tag("has"),
         tag("startswith"),
-    ))(i)?;
+    )).parse(i)?;
     if rest.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
         return Err(nom::Err::Error(nom::error::Error::new(i, nom::error::ErrorKind::Tag)));
     }
@@ -312,7 +317,7 @@ fn predicate(i: &str) -> IResult<&str, Expr> {
         "<=" => Expr::LessOrEqual(Box::new(acc), Box::new(g)),
         ">=" => Expr::GreaterOrEqual(Box::new(acc), Box::new(g)),
         _ => Expr::Func(o.to_string(), vec![acc, g]),
-    })))(i)?;
+    }))).parse(i)?;
     Ok((i, e?))
 }
 
@@ -322,7 +327,7 @@ fn predicate(i: &str) -> IResult<&str, Expr> {
 //
 
 fn and_keyword(i: &str) -> IResult<&str, &str> {
-    let (rest, matched) = tag("and")(i)?;
+    let (rest, matched) = tag("and").parse(i)?;
     if rest.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
         return Err(nom::Err::Error(nom::error::Error::new(i, nom::error::ErrorKind::Tag)));
     }
@@ -330,7 +335,7 @@ fn and_keyword(i: &str) -> IResult<&str, &str> {
 }
 
 fn or_keyword(i: &str) -> IResult<&str, &str> {
-    let (rest, matched) = tag("or")(i)?;
+    let (rest, matched) = tag("or").parse(i)?;
     if rest.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
         return Err(nom::Err::Error(nom::error::Error::new(i, nom::error::ErrorKind::Tag)));
     }
@@ -343,7 +348,7 @@ fn and_expr(i: &str) -> IResult<&str, Expr> {
         preceded(trim(and_keyword), predicate),
         move || initial.clone(),
         |acc, rhs| Expr::And(Box::new(acc), Box::new(rhs)),
-    )(i)
+    ).parse(i)
 }
 
 fn or_expr(i: &str) -> IResult<&str, Expr> {
@@ -352,7 +357,7 @@ fn or_expr(i: &str) -> IResult<&str, Expr> {
         preceded(trim(or_keyword), and_expr),
         move || initial.clone(),
         |acc, rhs| Expr::Or(Box::new(acc), Box::new(rhs)),
-    )(i)
+    ).parse(i)
 }
 
 pub fn expr(i: &str) -> IResult<&str, Expr> {
@@ -363,15 +368,15 @@ fn as_operator(i: &str) -> IResult<&str, (Options, String)> {
     preceded(terminated(tag("as"), multispace1), map(
         pair(opt(terminated(options, multispace1)), identifier),
         |(o, a)| (o.unwrap_or_default(), a)
-    ))(i)
+    )).parse(i)
 }
 
 fn consume_operator(i: &str) -> IResult<&str, Options> {
-    preceded(tag("consume"), options)(i)
+    preceded(tag("consume"), options).parse(i)
 }
 
 fn count_operator(i: &str) -> IResult<&str, ()> {
-    map(tag("count"), |_| ())(i)
+    map(tag("count"), |_| ()).parse(i)
 }
 
 fn datatable_operator(i: &str) -> IResult<&str, (Vec<(String, Type)>, Vec<Expr>)> {
@@ -379,14 +384,14 @@ fn datatable_operator(i: &str) -> IResult<&str, (Vec<(String, Type)>, Vec<Expr>)
         delimited(tag("("), type_mapping, tag(")")),
         multispace0,
         delimited(tag("["), separated_list1(tag(","), trim(expr)), tag("]"))
-    ))(i)
+    )).parse(i)
 }
 
 fn distinct_operator(i: &str) -> IResult<&str, Vec<String>> {
     preceded(terminated(tag("distinct"), multispace1), separated_list1(
         tag(","),
         trim(identifier)
-    ))(i)
+    )).parse(i)
 }
 
 fn evaluate_operator(i: &str) -> IResult<&str, (Options, String, Vec<Expr>)> {
@@ -394,14 +399,14 @@ fn evaluate_operator(i: &str) -> IResult<&str, (Options, String, Vec<Expr>)> {
         terminated(options, multispace1),
         terminated(identifier, multispace0),
         delimited(tag("("), separated_list0(tag(","), trim(expr)), tag(")"))
-    )))(i)
+    ))).parse(i)
 }
 
 fn extend_operator(i: &str) -> IResult<&str, Vec<(Option<String>, Expr)>> {
     preceded(terminated(tag("extend"), multispace1), separated_list0(
         tuple((multispace0, tag(","), multispace0)),
         map(separated_pair(identifier, trim(tag("=")), expr), |(n, e)| (Some(n), e)),
-    ))(i)
+    )).parse(i)
 }
 
 fn externaldata_operator(i: &str) -> IResult<&str, (Vec<(String, Type)>, Vec<String>)> {
@@ -409,7 +414,7 @@ fn externaldata_operator(i: &str) -> IResult<&str, (Vec<(String, Type)>, Vec<Str
         delimited(tag("("), type_mapping, tag(")")),
         multispace0,
         delimited(tag("["), separated_list1(tag(","), trim(string)), tag("]"))
-    ))(i)
+    )).parse(i)
 }
 
 fn facet_operator(i: &str) -> IResult<&str, (Vec<String>, Vec<Operator>)> {
@@ -420,7 +425,7 @@ fn facet_operator(i: &str) -> IResult<&str, (Vec<String>, Vec<Operator>)> {
             separated_list1(tag("|"), trim(operator)),
             tag(")")
         ))), |o| o.unwrap_or_default())
-    ))(i)
+    )).parse(i)
 }
 
 fn find_operator(i: &str) -> IResult<&str, (Options, (Option<Vec<Source>>, Expr), FindProjection)> {
@@ -441,7 +446,7 @@ fn find_operator(i: &str) -> IResult<&str, (Options, (Option<Vec<Source>>, Expr)
             map(tag("project-smart"), |_| FindProjection::ProjectSmart),
             map(preceded(terminated(tag("project"), multispace1), separated_list1(trim(tag(",")), identifier)), |c| FindProjection::Project(c))
         )))), |x| x.unwrap_or(FindProjection::ProjectSmart))
-    )))(i)
+    ))).parse(i)
 }
 
 fn fork_operator(i: &str) -> IResult<&str, Vec<(Option<String>, Vec<Operator>)>> {
@@ -455,11 +460,11 @@ fn fork_operator(i: &str) -> IResult<&str, Vec<(Option<String>, Vec<Operator>)>>
             ), |(n, e)| (Some(n), e)),
             map(delimited(tag("("), separated_list1(tag("|"), trim(operator)), tag(")")), |e| (None, e))
         )))
-    ))(i)
+    )).parse(i)
 }
 
 fn getschema_operator(i: &str) -> IResult<&str, ()> {
-    map(terminated(tag("getschema"), multispace1), |_| ())(i)
+    map(terminated(tag("getschema"), multispace1), |_| ()).parse(i)
 }
 
 //
@@ -479,7 +484,7 @@ fn join_key(i: &str) -> IResult<&str, JoinKey> {
             |(left, _, right)| JoinKey { left, right },
         ),
         map(identifier, |name| JoinKey { left: name.clone(), right: name }),
-    ))(i)
+    )).parse(i)
 }
 
 fn join_operator(i: &str) -> IResult<&str, (Options, TabularExpression, Vec<JoinKey>)> {
@@ -490,7 +495,7 @@ fn join_operator(i: &str) -> IResult<&str, (Options, TabularExpression, Vec<Join
             terminated(tag("on"), multispace1),
             separated_list0(tag(","), trim(join_key))
         )
-    )))(i)
+    ))).parse(i)
 }
 
 fn lookup_operator(i: &str) -> IResult<&str, (Options, TabularExpression, Vec<String>)> {
@@ -501,7 +506,7 @@ fn lookup_operator(i: &str) -> IResult<&str, (Options, TabularExpression, Vec<St
             terminated(tag("on"), multispace1),
             separated_list0(tag(","), trim(identifier))
         )
-    )))(i)
+    ))).parse(i)
 }
 
 fn mv_apply_operator(i: &str) -> IResult<&str, (Vec<((String, String), Option<Type>)>, Vec<Operator>)> {
@@ -517,11 +522,11 @@ fn mv_apply_operator(i: &str) -> IResult<&str, (Vec<((String, String), Option<Ty
             terminated(tag("on"), multispace1),
             delimited(tag("("), separated_list1(tag("|"), trim(operator)), tag(")"))
         )
-    )))(i)
+    ))).parse(i)
 }
 
 fn mv_expand_operator(i: &str) -> IResult<&str, String> {
-    preceded(terminated(tag("mv-expand"), multispace1), identifier)(i)
+    preceded(terminated(tag("mv-expand"), multispace1), identifier).parse(i)
 }
 
 fn parse_operator(i: &str) -> IResult<&str, (Options, Expr, Vec<PatternToken>)> {
@@ -529,7 +534,7 @@ fn parse_operator(i: &str) -> IResult<&str, (Options, Expr, Vec<PatternToken>)> 
         terminated(options, multispace0),
         terminated(expr, multispace0),
         preceded(terminated(tag("with"), multispace1), pattern)
-    )))(i)
+    ))).parse(i)
 }
 
 fn parse_where_operator(i: &str) -> IResult<&str, (Options, Expr, Vec<PatternToken>)> {
@@ -537,7 +542,7 @@ fn parse_where_operator(i: &str) -> IResult<&str, (Options, Expr, Vec<PatternTok
         terminated(options, multispace0),
         terminated(expr, multispace0),
         preceded(terminated(tag("with"), multispace1), pattern)
-    )))(i)
+    ))).parse(i)
 }
 
 fn parse_kv_operator(i: &str) -> IResult<&str, (Expr, Vec<(String, Type)>, Options)> {
@@ -545,7 +550,7 @@ fn parse_kv_operator(i: &str) -> IResult<&str, (Expr, Vec<(String, Type)>, Optio
         terminated(expr, multispace0),
         terminated(preceded(terminated(tag("as"), multispace0), delimited(tag("("), type_mapping, tag(")"))), multispace0),
         preceded(terminated(tag("with"), multispace1), delimited(tag("("), options_with_comma_and_quoted, tag(")"))))
-    ))(i)
+    )).parse(i)
 }
 
 fn partition_operator(i: &str) -> IResult<&str, (Options, String, (Option<Source>, Vec<Operator>))> {
@@ -556,7 +561,7 @@ fn partition_operator(i: &str) -> IResult<&str, (Options, String, (Option<Source
             map(preceded(multispace0, delimited(tag("("), separated_list0(tag("|"), trim(operator)), tag(")"))), |o| (None, o)),
             map(separated_pair(source, multispace0, many0(preceded(tag("|"), trim(operator)))), |(s, o)| (Some(s), o))
         ))
-    )))(i)
+    ))).parse(i)
 }
 
 fn print_operator(i: &str) -> IResult<&str, Vec<(Option<String>, Expr)>> {
@@ -566,7 +571,7 @@ fn print_operator(i: &str) -> IResult<&str, Vec<(Option<String>, Expr)>> {
             map(separated_pair(identifier, trim(tag("=")), expr), |(n, e)| (Some(n), e)),
             map(expr, |e| (None, e))
         )))
-    ))(i)
+    )).parse(i)
 }
 
 fn project_operator(i: &str) -> IResult<&str, Vec<(Option<String>, Expr)>> {
@@ -576,28 +581,28 @@ fn project_operator(i: &str) -> IResult<&str, Vec<(Option<String>, Expr)>> {
             map(separated_pair(identifier, trim(tag("=")), expr), |(n, e)| (Some(n), e)),
             map(expr, |e| (None, e))
         ))),
-    ))(i)
+    )).parse(i)
 }
 
 fn project_away_operator(i: &str) -> IResult<&str, Vec<String>> {
     preceded(terminated(tag("project-away"), multispace1), separated_list1(
         tag(","),
         trim(identifier)
-    ))(i)
+    )).parse(i)
 }
 
 fn project_keep_operator(i: &str) -> IResult<&str, Vec<String>> {
     preceded(terminated(tag("project-keep"), multispace1), separated_list1(
         tag(","),
         trim(identifier)
-    ))(i)
+    )).parse(i)
 }
 
 fn project_rename_operator(i: &str) -> IResult<&str, Vec<(String, String)>> {
     preceded(terminated(tag("project-rename"), multispace1), separated_list1(
         tag(","),
         separated_pair(trim(identifier), tag("="), trim(identifier))
-    ))(i)
+    )).parse(i)
 }
 
 fn project_reorder_operator(i: &str) -> IResult<&str, Vec<(String, Option<(bool, bool)>)>> {
@@ -609,11 +614,11 @@ fn project_reorder_operator(i: &str) -> IResult<&str, Vec<(String, Option<(bool,
             value((true, true), tag("granny-asc")),
             value((false, true), tag("granny-desc"))
         ))))))
-    ))(i)
+    )).parse(i)
 }
 
 fn where_operator(i: &str) -> IResult<&str, Expr> {
-    preceded(terminated(tag("where"), multispace1), expr)(i)
+    preceded(terminated(tag("where"), multispace1), expr).parse(i)
 }
 
 fn range_operator(i: &str) -> IResult<&str, (String, Expr, Expr, Expr)> {
@@ -622,7 +627,7 @@ fn range_operator(i: &str) -> IResult<&str, (String, Expr, Expr, Expr)> {
         terminated(preceded(terminated(tag("from"), multispace1), expr), multispace1),
         terminated(preceded(terminated(tag("to"), multispace1), expr), multispace1),
         preceded(terminated(tag("step"), multispace1), expr)
-    )))(i)
+    ))).parse(i)
 }
 
 fn reduce_operator(i: &str) -> IResult<&str, (Options, Expr, Option<Options>)> {
@@ -630,21 +635,21 @@ fn reduce_operator(i: &str) -> IResult<&str, (Options, Expr, Option<Options>)> {
         terminated(options, multispace0),
         terminated(preceded(terminated(tag("by"), multispace1), expr), multispace0),
         opt(preceded(terminated(tag("with"), multispace1), options_with_comma_and_quoted))
-    )))(i)
+    ))).parse(i)
 }
 
 fn render_operator(i: &str) -> IResult<&str, (String, Option<Options>)> {
     preceded(terminated(tag("render"), multispace1), tuple((
         terminated(identifier, multispace0),
         opt(preceded(terminated(tag("with"), multispace1), delimited(tag("("), options_with_comma_and_quoted, tag(")")))))
-    ))(i)
+    )).parse(i)
 }
 
 fn sample_operator(i: &str) -> IResult<&str, u32> {
     preceded(
         terminated(tag("sample"), multispace1),
         u32
-    )(i)
+    ).parse(i)
 }
 
 fn sample_distinct_operator(i: &str) -> IResult<&str, (u32, String)> {
@@ -655,7 +660,7 @@ fn sample_distinct_operator(i: &str) -> IResult<&str, (u32, String)> {
             delimited(multispace1, tag("by"), multispace1),
             identifier
         )
-    )(i)
+    ).parse(i)
 }
 
 fn serialize_operator(i: &str) -> IResult<&str, Vec<(Option<String>, Expr)>> {
@@ -665,7 +670,7 @@ fn serialize_operator(i: &str) -> IResult<&str, Vec<(Option<String>, Expr)>> {
             separated_pair(identifier, trim(tag("=")), expr),
             |(n, e)| (Some(n), e)
         )),
-    ))(i)
+    )).parse(i)
 }
 
 fn summarize_operator(i: &str) -> IResult<&str, (Vec<(Option<String>, Expr)>, Vec<Expr>)> {
@@ -678,21 +683,21 @@ fn summarize_operator(i: &str) -> IResult<&str, (Vec<(Option<String>, Expr)>, Ve
             terminated(tag("by"), multispace1),
             separated_list1(tag(","), trim(expr))
         )), |b| b.unwrap_or_default())
-    ))(i)
+    )).parse(i)
 }
 
 fn sort_operator(i: &str) -> IResult<&str, Vec<String>> {
     preceded(tuple((tag("sort"), multispace1, tag("by"))), separated_list1(
         tag(","),
         trim(identifier)
-    ))(i)
+    )).parse(i)
 }
 
 fn take_operator(i: &str) -> IResult<&str, u32> {
     preceded(
         terminated(alt((tag("take"), tag("limit"))), multispace1),
         u32
-    )(i)
+    ).parse(i)
 }
 
 fn top_operator(i: &str) -> IResult<&str, (u32, Expr, bool, bool)> {
@@ -710,7 +715,7 @@ fn top_operator(i: &str) -> IResult<&str, (u32, Expr, bool, bool)> {
                 value(false, tag("last"))
             )))),
         ))
-    ), |(n, e, s, o)| (n, e, s.unwrap_or(false), o.unwrap_or(s.unwrap_or(false))))(i)
+    ), |(n, e, s, o)| (n, e, s.unwrap_or(false), o.unwrap_or(s.unwrap_or(false)))).parse(i)
 }
 
 fn union_operator(i: &str) -> IResult<&str, (Options, Vec<Source>)> {
@@ -720,7 +725,7 @@ fn union_operator(i: &str) -> IResult<&str, (Options, Vec<Source>)> {
             delimited(tag("("), trim(source), tag(")")),
             map(identifier, |e| Source::Reference(e))
         )))
-    )))(i)
+    ))).parse(i)
 }
 
 fn operator(i: &str) -> IResult<&str, Operator> {
@@ -772,7 +777,7 @@ fn operator(i: &str) -> IResult<&str, Operator> {
         )),
         map(union_operator, |(o, s)| Operator::Union(o, s)),
         map(where_operator, |e| Operator::Where(e))
-    ))(i)
+    )).parse(i)
 }
 
 fn source(i: &str) -> IResult<&str, Source> {
@@ -784,7 +789,7 @@ fn source(i: &str) -> IResult<&str, Source> {
         map(range_operator, |(c, f, t, s)| Source::Range(c, f, t, s)),
         map(union_operator, |(o, s)| Source::Union(o, s)),
         map(identifier, |e| Source::Reference(e))
-    ))(i)
+    )).parse(i)
 }
 
 pub fn parse_query(i: &str) -> IResult<&str, TabularExpression> {
@@ -792,7 +797,7 @@ pub fn parse_query(i: &str) -> IResult<&str, TabularExpression> {
     |(source, operators)| TabularExpression {
         source,
         operators
-    })(i)
+    }).parse(i)
 }
 
 fn parse_let(i: &str) -> IResult<&str, (String, LetExpression)> {
@@ -806,7 +811,7 @@ fn parse_let(i: &str) -> IResult<&str, (String, LetExpression)> {
                 map(parse_query, |e| LetExpression::Tabular(e)),
             )))
         )
-    )(i)
+    ).parse(i)
 }
 
 pub fn parse(i: &str) -> IResult<&str, Vec<Statement>> {
@@ -816,5 +821,5 @@ pub fn parse(i: &str) -> IResult<&str, Vec<Statement>> {
             map(parse_let, |(n, e)| Statement::Let(n, e)),
             map(parse_query, |e| Statement::TabularExpression(e)),
         ))),
-    )(i)
+    ).parse(i)
 }

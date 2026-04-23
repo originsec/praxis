@@ -1,9 +1,11 @@
+#![allow(deprecated)]
+
 use nom::branch::alt;
 use nom::bytes::complete::tag;
 use nom::character::complete::{u32, alpha1, digit1, multispace0, multispace1, one_of};
 use nom::combinator::{map, map_res, opt, value};
 use nom::sequence::{pair, preceded, terminated, tuple};
-use nom::IResult;
+use nom::{IResult, Parser};
 
 use super::ast::DateTime;
 
@@ -25,7 +27,7 @@ pub fn iso8601_datetime(input: &str) -> IResult<&str, DateTime> {
         alt((multispace1, tag("T"))),
         iso8601_time,
         opt(preceded(multispace0, iso8601_timezone)),
-    ))(input)?;
+    )).parse(input)?;
 
     Ok((
         input,
@@ -48,7 +50,7 @@ fn iso8601_date(input: &str) -> IResult<&str, ParsedDate> {
         u32,
         tag("-"),
         u32,
-    ))(input)?;
+    )).parse(input)?;
 
     Ok((
         input,
@@ -69,7 +71,7 @@ fn iso8601_time(input: &str) -> IResult<&str, ParsedTime> {
         hour,
         minute,
         second: second.unwrap_or(0),
-    })(input)
+    }).parse(input)
 }
 
 fn iso8601_timezone(input: &str) -> IResult<&str, String> {
@@ -80,7 +82,7 @@ fn iso8601_timezone(input: &str) -> IResult<&str, String> {
         map_res(pair(opt(one_of("+-")), digit1), |(sign, value): (Option<char>, &str)| -> Result<String, nom::error::Error<&str>> {
             Ok(format!("{}{}", sign.unwrap_or('+'), value))
         }),
-    ))(input)
+    )).parse(input)
 }
 
 fn rfc822_date(input: &str) -> IResult<&str, ParsedDate> {
@@ -94,7 +96,7 @@ fn rfc822_date(input: &str) -> IResult<&str, ParsedDate> {
         year,
         month,
         day,
-    })(input)
+    }).parse(input)
 }
 
 pub fn rfc822_datetime(input: &str) -> IResult<&str, DateTime> {
@@ -114,7 +116,7 @@ pub fn rfc822_datetime(input: &str) -> IResult<&str, DateTime> {
         minute: time.minute,
         second: time.second,
         timezone: Some(timezone),
-    })(input)
+    }).parse(input)
 }
 
 fn rfc822_timezone(input: &str) -> IResult<&str, String> {
@@ -125,7 +127,7 @@ fn rfc822_timezone(input: &str) -> IResult<&str, String> {
         map(pair(opt(one_of("+-")), digit1), |(sign, value)| {
             format!("{}{}", sign.unwrap_or('+'), value)
         })
-    ))(input)
+    )).parse(input)
 }
 
 pub fn rfc850_datetime(input: &str) -> IResult<&str, DateTime> {
@@ -137,7 +139,7 @@ pub fn rfc850_datetime(input: &str) -> IResult<&str, DateTime> {
         time,
         multispace0,
         rfc850_timezone,
-    ))(input)?;
+    )).parse(input)?;
 
     Ok((
         input,
@@ -164,7 +166,7 @@ fn rfc850_date(input: &str) -> IResult<&str, ParsedDate> {
         year,
         month,
         day,
-    })(input)
+    }).parse(input)
 }
 
 fn rfc850_timezone(input: &str) -> IResult<&str, String> {
@@ -175,7 +177,7 @@ fn rfc850_timezone(input: &str) -> IResult<&str, String> {
         map(pair(opt(one_of("+-")), digit1), |(sign, value)| {
             format!("{}{}", sign.unwrap_or('+'), value)
         }),
-    ))(input)
+    )).parse(input)
 }
 
 fn time(input: &str) -> IResult<&str, ParsedTime> {
@@ -187,7 +189,7 @@ fn time(input: &str) -> IResult<&str, ParsedTime> {
         hour,
         minute,
         second: second.unwrap_or(0),
-    })(input)
+    }).parse(input)
 }
 
 fn month(input: &str) -> IResult<&str, u32> {
@@ -219,5 +221,5 @@ fn month(input: &str) -> IResult<&str, u32> {
             value(12, tag("Dec")),
             value(12, tag("December"))
         ))
-    ))(input)
+    )).parse(input)
 }

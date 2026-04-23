@@ -3553,7 +3553,7 @@ dependencies = [
  "hostname",
  "indexmap",
  "lapin",
- "nom 7.1.3",
+ "nom 8.0.0",
  "praxis_common",
  "regex",
  "rmcp",

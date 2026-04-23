@@ -3,7 +3,7 @@ use nom::character::complete::{i64, multispace0, u64};
 use nom::combinator::{map, opt, consumed};
 use nom::error::ParseError;
 use nom::sequence::{delimited, pair, preceded};
-use nom::{IResult, InputLength, Parser, InputTake, InputIter, InputTakeAtPosition, AsChar};
+use nom::{AsChar, IResult, Input, Parser};
 
 type Decimal = (i64, Option<(usize, u64)>);
 
@@ -23,7 +23,7 @@ pub fn is_kql_wildcard_identifier(chr: char) -> bool {
 }
 
 pub fn take_identifier(i: &str) -> IResult<&str, &str> {
-    let (input, identifier) = take_while1(is_kql_identifier)(i)?;
+    let (input, identifier) = take_while1(is_kql_identifier).parse(i)?;
 
     // exclude reserved keywords
     if identifier == "by" {
@@ -33,15 +33,14 @@ pub fn take_identifier(i: &str) -> IResult<&str, &str> {
 }
 
 pub fn decimal_number(i: &str) -> IResult<&str, Decimal> {
-    pair(i64, opt(preceded(tag("."), map(consumed(u64::<&str, _>), |(i, x)| (i.len(), x)))))(i)
+    pair(i64, opt(preceded(tag("."), map(consumed(u64::<&str, _>), |(i, x)| (i.len(), x))))).parse(i)
 }
 
-pub fn trim<I, O, E, F>(f: F) -> impl FnMut(I) -> IResult<I, O, E>
+pub fn trim<I, O, E, F>(f: F) -> impl Parser<I, Output = O, Error = E>
 where
-    I: Clone + InputLength + InputTake + InputIter,
-    I: InputTakeAtPosition,
-    <I as InputTakeAtPosition>::Item: AsChar + Clone,
-    F: Parser<I, O, E>,
+    I: Clone + Input,
+    <I as Input>::Item: AsChar + Clone,
+    F: Parser<I, Output = O, Error = E>,
     E: ParseError<I>,
 {
     delimited(multispace0, f, multispace0)
