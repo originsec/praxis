@@ -7,10 +7,10 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 
 use agent_client_protocol as acp;
-use acp::{
-    AgentNotification, AgentSide, ClientNotification, ClientRequest,
-    Error as AcpError, ExtNotification, ExtRequest, JsonRpcMessage,
-    Notification as AcpNotif, Response as AcpResponse, RequestId, Side,
+use acp::JsonRpcMessage;
+use acp::jsonrpcmsg::{Error as JError, Id as JId, Params as JParams, Request as JRequest, Response as JResponse};
+use acp::schema::{
+    ClientNotification, ClientRequest, ExtNotification, ExtRequest, SessionNotification,
 };
 use serde_json::value::RawValue;
 use serde_json::Value;
@@ -128,8 +128,15 @@ impl NodeAcpServer {
         // them. We hand the raw params to the extension dispatcher.
         //
 
+        let params_value: Value = serde_json::from_str(raw_params.get()).unwrap_or(Value::Null);
+
         if method.starts_with('_') {
             if id.is_some() {
+                //
+                // Pass the full underscore-prefixed method through to the
+                // extension dispatcher unchanged, matching the pre-0.11
+                // behaviour of ExtRequest-carrying the raw method name.
+                //
                 let params_arc = Arc::<RawValue>::from(raw_params);
                 let ext_req = ExtRequest::new(method.clone(), params_arc);
                 let resp = extensions::dispatch(&self.registry, ext_req).await;
@@ -154,23 +161,18 @@ impl NodeAcpServer {
                 // No extension notifications defined yet; ignored per ACP spec
                 // recommendation for unknown notifications.
                 //
-                let _ = ExtNotification::new(
-                    method.clone(),
-                    Arc::<RawValue>::from(raw_params),
-                );
+                let _ = ExtNotification::new(method.clone(), Arc::<RawValue>::from(raw_params));
             }
             return;
         }
 
-        match AgentSide::decode_request(&method, Some(&raw_params)) {
-            Ok(request) => {
-                self.clone().dispatch_request(client_id, id, request).await;
-            }
-            Err(req_err) => match AgentSide::decode_notification(&method, Some(&raw_params)) {
-                Ok(notification) => {
-                    self.clone().dispatch_notification(client_id, notification).await;
+        if id.is_some() {
+            match ClientRequest::parse_message(&method, &params_value) {
+                Ok(request) => {
+                    self.clone().dispatch_request(client_id, id, request).await;
+                    return;
                 }
-                Err(_) => {
+                Err(req_err) => {
                     let (code, msg) = if req_err.code == acp::ErrorCode::MethodNotFound {
                         (-32601, format!("Method not found: {}", method))
                     } else {
@@ -180,7 +182,18 @@ impl NodeAcpServer {
                         self.send_error(&client_id, id, code as i64, &msg);
                     }
                 }
-            },
+            }
+        } else {
+            match ClientNotification::parse_message(&method, &params_value) {
+                Ok(notification) => {
+                    self.clone().dispatch_notification(client_id, notification).await;
+                }
+                Err(_) => {
+                    //
+                    // Unknown notifications are silently dropped per ACP spec.
+                    //
+                }
+            }
         }
     }
 
@@ -250,24 +263,22 @@ impl NodeAcpServer {
     }
 
     //
-    // Outbound helpers. These wrap a JSON-RPC response/notification and push
-    // it into the outbound channel; the runtime drains and publishes.
+    // Outbound helpers. These serialize a JSON-RPC response/notification and
+    // push it into the outbound channel; the runtime drains and publishes.
     //
 
     pub fn send_response(&self, client_id: &str, id: Value, result: Value) {
         let rid = value_to_request_id(&id);
-        let resp = AcpResponse::<Value>::new(rid, Ok(result));
-        let wrapped = JsonRpcMessage::wrap(resp);
-        let Ok(json_rpc) = serde_json::to_string(&wrapped) else { return };
+        let resp = JResponse::success_v2(result, Some(rid));
+        let Ok(json_rpc) = serde_json::to_string(&resp) else { return };
         self.push(client_id, json_rpc);
     }
 
     pub fn send_error(&self, client_id: &str, id: Value, code: i64, message: &str) {
         let rid = value_to_request_id(&id);
-        let err = AcpError::new(code as i32, message);
-        let resp = AcpResponse::<Value>::new(rid, Err(err));
-        let wrapped = JsonRpcMessage::wrap(resp);
-        let Ok(json_rpc) = serde_json::to_string(&wrapped) else { return };
+        let err = JError::new(code as i32, message.to_string());
+        let resp = JResponse::error_v2(err, Some(rid));
+        let Ok(json_rpc) = serde_json::to_string(&resp) else { return };
         self.push(client_id, json_rpc);
     }
 
@@ -275,14 +286,27 @@ impl NodeAcpServer {
         &self,
         client_id: &str,
         session_id: &str,
-        update: acp::SessionUpdate,
+        update: acp::schema::SessionUpdate,
     ) {
-        let notif = acp::SessionNotification::new(session_id.to_string(), update);
-        let wrapped = JsonRpcMessage::wrap(AcpNotif::<AgentNotification> {
-            method: acp::CLIENT_METHOD_NAMES.session_update.into(),
-            params: Some(AgentNotification::SessionNotification(notif)),
-        });
-        let Ok(json_rpc) = serde_json::to_string(&wrapped) else { return };
+        let notif = SessionNotification::new(session_id.to_string(), update);
+        let params = match notif.to_untyped_message() {
+            Ok(m) => m.params,
+            Err(e) => {
+                tracing::warn!("ACP[node] failed to serialize SessionNotification: {}", e);
+                return;
+            }
+        };
+        let params_obj = match params {
+            Value::Object(m) => Some(JParams::Object(m)),
+            Value::Null => None,
+            other => {
+                let mut map = serde_json::Map::new();
+                map.insert("value".into(), other);
+                Some(JParams::Object(map))
+            }
+        };
+        let request = JRequest::notification_v2("session/update".to_string(), params_obj);
+        let Ok(json_rpc) = serde_json::to_string(&request) else { return };
         self.push(client_id, json_rpc);
     }
 
@@ -299,17 +323,17 @@ impl NodeAcpServer {
     }
 }
 
-fn value_to_request_id(v: &Value) -> RequestId {
+fn value_to_request_id(v: &Value) -> JId {
     match v {
         Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                RequestId::Number(i)
+            if let Some(i) = n.as_u64() {
+                JId::Number(i)
             } else {
-                RequestId::Str(n.to_string().into())
+                JId::String(n.to_string())
             }
         }
-        Value::String(s) => RequestId::Str(s.clone().into()),
-        _ => RequestId::Null,
+        Value::String(s) => JId::String(s.clone()),
+        _ => JId::Null,
     }
 }
 

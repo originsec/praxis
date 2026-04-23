@@ -9,10 +9,10 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use agent_client_protocol as acp;
-use acp::{
-    AgentNotification, CloseSessionResponse, Implementation, InitializeResponse,
-    JsonRpcMessage, ListSessionsResponse, NewSessionResponse, Notification as AcpNotif,
-    ProtocolVersion, PromptResponse, RequestId, Response as AcpResponse, SessionInfo,
+use acp::JsonRpcMessage;
+use acp::schema::{
+    CloseSessionResponse, Implementation, InitializeResponse, ListSessionsResponse,
+    NewSessionResponse, ProtocolVersion, PromptResponse, SessionInfo, SessionNotification,
     StopReason,
 };
 
@@ -483,29 +483,29 @@ impl BridgeSession {
         }
 
         match method.as_str() {
-            m if m == acp::AGENT_METHOD_NAMES.initialize => {
+            "initialize" => {
                 let resp = self.handle_initialize();
                 if let Some(id) = id {
                     self.send_response(pub_channel, &frame.client_id, id, json_value(&resp))
                         .await?;
                 }
             }
-            m if m == acp::AGENT_METHOD_NAMES.session_new => {
+            "session/new" => {
                 self.handle_session_new(pub_channel, &frame.client_id, id, &params)
                     .await?;
             }
-            m if m == acp::AGENT_METHOD_NAMES.session_prompt => {
+            "session/prompt" => {
                 self.handle_session_prompt(transport, pub_channel, &frame.client_id, id, &params)
                     .await?;
             }
-            m if m == acp::AGENT_METHOD_NAMES.session_cancel => {
+            "session/cancel" => {
                 self.handle_session_cancel(transport, pub_channel, &params).await?;
             }
-            m if m == acp::AGENT_METHOD_NAMES.session_close => {
+            "session/close" => {
                 self.handle_session_close(pub_channel, &frame.client_id, id, &params)
                     .await?;
             }
-            m if m == acp::AGENT_METHOD_NAMES.session_list => {
+            "session/list" => {
                 let resp = self.handle_session_list();
                 if let Some(id) = id {
                     self.send_response(pub_channel, &frame.client_id, id, json_value(&resp))
@@ -545,7 +545,7 @@ impl BridgeSession {
             ],
             "nodeId": self.node_id,
         });
-        let meta: acp::Meta = serde_json::from_value(meta_value)
+        let meta: acp::schema::Meta = serde_json::from_value(meta_value)
             .unwrap_or_else(|_| serde_json::from_value(json!({})).unwrap());
 
         InitializeResponse::new(ProtocolVersion::LATEST)
@@ -812,18 +812,14 @@ impl BridgeSession {
         let session_id = in_flight.acp_session_id.clone();
         let client_id = in_flight.client_id.clone();
 
-        let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(
-            acp::TextContent::new(text.to_string()),
+        let chunk = acp::schema::ContentChunk::new(acp::schema::ContentBlock::Text(
+            acp::schema::TextContent::new(text.to_string()),
         ));
-        let notif = acp::SessionNotification::new(
+        let notif = SessionNotification::new(
             session_id,
-            acp::SessionUpdate::AgentMessageChunk(chunk),
+            acp::schema::SessionUpdate::AgentMessageChunk(chunk),
         );
-        let wrapped = JsonRpcMessage::wrap(AcpNotif::<AgentNotification> {
-            method: acp::CLIENT_METHOD_NAMES.session_update.into(),
-            params: Some(AgentNotification::SessionNotification(notif)),
-        });
-        let json_rpc = serde_json::to_string(&wrapped)?;
+        let json_rpc = session_notification_to_json(&notif)?;
         self.publish_acp(pub_channel, &client_id, json_rpc).await
     }
 
@@ -968,9 +964,8 @@ impl BridgeSession {
         result: Value,
     ) -> Result<()> {
         let rid = value_to_request_id(&id);
-        let resp = AcpResponse::<Value>::new(rid, Ok(result));
-        let wrapped = JsonRpcMessage::wrap(resp);
-        let json_rpc = serde_json::to_string(&wrapped)?;
+        let resp = acp::jsonrpcmsg::Response::success_v2(result, Some(rid));
+        let json_rpc = serde_json::to_string(&resp)?;
         self.publish_acp(pub_channel, client_id, json_rpc).await
     }
 
@@ -983,10 +978,9 @@ impl BridgeSession {
         message: &str,
     ) -> Result<()> {
         let rid = value_to_request_id(&id);
-        let err = acp::Error::new(code as i32, message);
-        let resp = AcpResponse::<Value>::new(rid, Err(err));
-        let wrapped = JsonRpcMessage::wrap(resp);
-        let json_rpc = serde_json::to_string(&wrapped)?;
+        let err = acp::jsonrpcmsg::Error::new(code as i32, message.to_string());
+        let resp = acp::jsonrpcmsg::Response::error_v2(err, Some(rid));
+        let json_rpc = serde_json::to_string(&resp)?;
         self.publish_acp(pub_channel, client_id, json_rpc).await
     }
 
@@ -1011,22 +1005,46 @@ impl BridgeSession {
     }
 }
 
-fn value_to_request_id(v: &Value) -> RequestId {
+fn value_to_request_id(v: &Value) -> acp::jsonrpcmsg::Id {
     match v {
         Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                RequestId::Number(i)
+            if let Some(i) = n.as_u64() {
+                acp::jsonrpcmsg::Id::Number(i)
             } else {
-                RequestId::Str(n.to_string().into())
+                acp::jsonrpcmsg::Id::String(n.to_string())
             }
         }
-        Value::String(s) => RequestId::Str(s.clone().into()),
-        _ => RequestId::Null,
+        Value::String(s) => acp::jsonrpcmsg::Id::String(s.clone()),
+        _ => acp::jsonrpcmsg::Id::Null,
     }
 }
 
 fn json_value<T: serde::Serialize>(v: &T) -> Value {
     serde_json::to_value(v).unwrap_or(Value::Null)
+}
+
+//
+// Serialize a SessionNotification as a jsonrpcmsg::Request notification on
+// the "session/update" method. Replaces the 0.10
+// `JsonRpcMessage::wrap(AcpNotif::<AgentNotification> { ... })` helper.
+//
+fn session_notification_to_json(notif: &SessionNotification) -> Result<String> {
+    let untyped = notif.to_untyped_message()
+        .map_err(|e| anyhow::anyhow!("failed to serialize SessionNotification: {}", e))?;
+    let params_obj = match untyped.params {
+        Value::Object(m) => Some(acp::jsonrpcmsg::Params::Object(m)),
+        Value::Null => None,
+        other => {
+            let mut map = serde_json::Map::new();
+            map.insert("value".into(), other);
+            Some(acp::jsonrpcmsg::Params::Object(map))
+        }
+    };
+    let request = acp::jsonrpcmsg::Request::notification_v2(
+        "session/update".to_string(),
+        params_obj,
+    );
+    Ok(serde_json::to_string(&request)?)
 }
 
 fn truncate_id(id: &str) -> &str {

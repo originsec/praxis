@@ -222,7 +222,7 @@ impl AcpNodeProxy {
         // session_id -> node_id map is populated when the response comes back.
         //
 
-        if method == agent_client_protocol::AGENT_METHOD_NAMES.session_new {
+        if method == "session/new" {
             self.pending_new
                 .write()
                 .await
@@ -321,7 +321,7 @@ impl AcpNodeProxy {
         // to the same node.
         //
 
-        if method == agent_client_protocol::AGENT_METHOD_NAMES.session_new {
+        if method == "session/new" {
             if let Some(id) = id.as_ref() {
                 self.record_pending_new(client_id, id, &node_id).await;
             }

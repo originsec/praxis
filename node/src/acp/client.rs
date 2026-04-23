@@ -1,16 +1,20 @@
 use agent_client_protocol as acp;
-use acp::Agent as _;
+use acp::schema::{
+    CancelNotification, ContentBlock, Implementation, InitializeRequest, NewSessionRequest,
+    PermissionOptionId, PermissionOptionKind, PromptRequest, ProtocolVersion,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate, TextContent,
+    ToolCallStatus,
+};
 use anyhow::{anyhow, bail, Context, Result};
 use common::{PermissionDecision, SessionUpdateKind};
-use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 //
-// Commands sent from the AcpHandle (Send) to the LocalSet task hosting
-// the !Send ClientSideConnection.
+// Commands sent from the AcpHandle (Send) to the bridge task.
 //
 
 enum AcpCommand {
@@ -38,7 +42,7 @@ enum AcpCommand {
 
 //
 // Send-safe handle that Lua code (on a blocking thread) can use to
-// interact with the !Send ClientSideConnection running on a LocalSet.
+// interact with the background ACP driver.
 //
 
 #[derive(Clone)]
@@ -137,243 +141,25 @@ impl AcpHandle {
 }
 
 //
-// Client trait implementation that bridges ACP notifications/requests
-// to the SessionUpdateKind channel and permission decision flow.
+// Per-prompt state shared between the notification handler, the permission
+// request handler, and the command processing loop. Each BridgeCommand::
+// Prompt installs its own update/permission plumbing by locking the mutex
+// and swapping the fields before sending the prompt.
 //
 
-struct PraxisClient {
-    update_tx: RefCell<Option<mpsc::UnboundedSender<SessionUpdateKind>>>,
-    permission_rx: RefCell<Option<std::sync::mpsc::Receiver<(String, PermissionDecision)>>>,
-    yolo: RefCell<bool>,
-    interactive: RefCell<bool>,
-    cancel_flag: RefCell<Option<Arc<AtomicBool>>>,
-    assembled_text: RefCell<String>,
-}
-
-impl PraxisClient {
-    fn new() -> Self {
-        Self {
-            update_tx: RefCell::new(None),
-            permission_rx: RefCell::new(None),
-            yolo: RefCell::new(false),
-            interactive: RefCell::new(false),
-            cancel_flag: RefCell::new(None),
-            assembled_text: RefCell::new(String::new()),
-        }
-    }
-
-    fn set_prompt_context(
-        &self,
-        update_tx: mpsc::UnboundedSender<SessionUpdateKind>,
-        permission_rx: std::sync::mpsc::Receiver<(String, PermissionDecision)>,
-        yolo: bool,
-        interactive: bool,
-        cancel_flag: Arc<AtomicBool>,
-    ) {
-        *self.update_tx.borrow_mut() = Some(update_tx);
-        *self.permission_rx.borrow_mut() = Some(permission_rx);
-        *self.yolo.borrow_mut() = yolo;
-        *self.interactive.borrow_mut() = interactive;
-        *self.cancel_flag.borrow_mut() = Some(cancel_flag);
-        self.assembled_text.borrow_mut().clear();
-    }
-
-    fn take_assembled_text(&self) -> String {
-        std::mem::take(&mut *self.assembled_text.borrow_mut())
-    }
-
-    fn clear_prompt_context(&self) {
-        *self.update_tx.borrow_mut() = None;
-        *self.permission_rx.borrow_mut() = None;
-        *self.cancel_flag.borrow_mut() = None;
-        self.assembled_text.borrow_mut().clear();
-    }
-}
-
-#[async_trait::async_trait(?Send)]
-impl acp::Client for PraxisClient {
-    async fn session_notification(&self, args: acp::SessionNotification) -> acp::Result<()> {
-        tracing::debug!("ACP session_notification: {:?}", args.update);
-        let update_tx = self.update_tx.borrow();
-        let Some(tx) = update_tx.as_ref() else {
-            return Ok(());
-        };
-
-        match &args.update {
-            acp::SessionUpdate::AgentMessageChunk(chunk) => {
-                if let acp::ContentBlock::Text(text_content) = &chunk.content {
-                    self.assembled_text
-                        .borrow_mut()
-                        .push_str(&text_content.text);
-                    let _ = tx.send(SessionUpdateKind::TextChunk {
-                        text: text_content.text.clone(),
-                    });
-                }
-            }
-            acp::SessionUpdate::ToolCall(tool_call) => {
-                let input = tool_call
-                    .raw_input
-                    .as_ref()
-                    .map(|v| v.to_string())
-                    .unwrap_or_default();
-                let _ = tx.send(SessionUpdateKind::ToolCall {
-                    tool_name: tool_call.title.clone(),
-                    tool_id: tool_call.tool_call_id.0.to_string(),
-                    input,
-                });
-            }
-            acp::SessionUpdate::ToolCallUpdate(update) => {
-                if update.fields.status == Some(acp::ToolCallStatus::Completed)
-                    || update.fields.status == Some(acp::ToolCallStatus::Failed)
-                {
-                    let is_error =
-                        update.fields.status == Some(acp::ToolCallStatus::Failed);
-                    let output = update
-                        .fields
-                        .raw_output
-                        .as_ref()
-                        .map(|v| v.to_string())
-                        .unwrap_or_default();
-                    let _ = tx.send(SessionUpdateKind::ToolResult {
-                        tool_id: update.tool_call_id.0.to_string(),
-                        output,
-                        is_error,
-                    });
-                }
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    async fn request_permission(
-        &self,
-        args: acp::RequestPermissionRequest,
-    ) -> acp::Result<acp::RequestPermissionResponse> {
-        tracing::debug!("ACP request_permission: {:?}", args);
-
-        let yolo = *self.yolo.borrow();
-        let interactive = *self.interactive.borrow();
-
-        let tool_call_id = args.tool_call.tool_call_id.0.to_string();
-        let tool_name = args
-            .tool_call
-            .fields
-            .title
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string());
-        let tool_input = args
-            .tool_call
-            .fields
-            .raw_input
-            .as_ref()
-            .map(|v| v.to_string())
-            .unwrap_or_default();
-
-        //
-        // Find option IDs by kind for deterministic selection.
-        //
-
-        let allow_always_id = args
-            .options
-            .iter()
-            .find(|o| o.kind == acp::PermissionOptionKind::AllowAlways)
-            .map(|o| o.option_id.clone());
-        let allow_once_id = args
-            .options
-            .iter()
-            .find(|o| o.kind == acp::PermissionOptionKind::AllowOnce)
-            .map(|o| o.option_id.clone());
-        let deny_id = args
-            .options
-            .iter()
-            .find(|o| {
-                o.kind == acp::PermissionOptionKind::RejectOnce
-                    || o.kind == acp::PermissionOptionKind::RejectAlways
-            })
-            .map(|o| o.option_id.clone());
-
-        let empty_id = || acp::PermissionOptionId::new("");
-
-        let option_id = if yolo {
-            allow_always_id
-                .or(allow_once_id)
-                .unwrap_or_else(|| {
-                    args.options
-                        .first()
-                        .map(|o| o.option_id.clone())
-                        .unwrap_or_else(empty_id)
-                })
-        } else if !interactive {
-            deny_id.unwrap_or_else(empty_id)
-        } else {
-            //
-            // Forward to the client and wait for a decision.
-            //
-
-            if let Some(tx) = self.update_tx.borrow().as_ref() {
-                let _ = tx.send(SessionUpdateKind::PermissionRequest {
-                    permission_id: tool_call_id.clone(),
-                    tool_name,
-                    tool_input,
-                });
-            }
-
-            let cancel_flag = self.cancel_flag.borrow().clone();
-            let mut decision = PermissionDecision::Deny;
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-
-            //
-            // Poll the sync channel with short timeouts so cancellation
-            // can interrupt the wait.
-            //
-
-            if let Some(ref perm_rx) = *self.permission_rx.borrow() {
-                loop {
-                    match perm_rx.recv_timeout(std::time::Duration::from_millis(250)) {
-                        Ok((_id, d)) => {
-                            decision = d;
-                            break;
-                        }
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                            let cancelled = cancel_flag
-                                .as_ref()
-                                .map(|f| f.load(Ordering::Relaxed))
-                                .unwrap_or(false);
-                            if cancelled || std::time::Instant::now() >= deadline {
-                                return Ok(acp::RequestPermissionResponse::new(
-                                    acp::RequestPermissionOutcome::Cancelled,
-                                ));
-                            }
-                        }
-                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-                    }
-                }
-            }
-
-            match decision {
-                PermissionDecision::AllowAlways => {
-                    allow_always_id.or(allow_once_id).unwrap_or_else(empty_id)
-                }
-                PermissionDecision::Allow => {
-                    allow_once_id.or(allow_always_id).unwrap_or_else(empty_id)
-                }
-                PermissionDecision::Deny => deny_id.unwrap_or_else(empty_id),
-            }
-        };
-
-        Ok(acp::RequestPermissionResponse::new(
-            acp::RequestPermissionOutcome::Selected(
-                acp::SelectedPermissionOutcome::new(option_id),
-            ),
-        ))
-    }
+#[derive(Default)]
+struct PromptCtx {
+    update_tx: Option<mpsc::UnboundedSender<SessionUpdateKind>>,
+    permission_rx: Option<Arc<Mutex<Option<std::sync::mpsc::Receiver<(String, PermissionDecision)>>>>>,
+    yolo: bool,
+    interactive: bool,
+    cancel_flag: Option<Arc<AtomicBool>>,
+    assembled_text: String,
 }
 
 //
-// Spawn an ACP subprocess and return a Send-safe handle. The
-// ClientSideConnection runs on a dedicated OS thread with its own
-// single-threaded tokio runtime + LocalSet, since the connection is !Send.
+// Spawn an ACP subprocess and return a Send-safe handle. The ACP
+// connection driver runs on the ambient tokio runtime.
 //
 
 pub fn spawn_acp_client(
@@ -390,6 +176,13 @@ pub fn spawn_acp_client(
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<AcpCommand>();
     let (init_tx, init_rx) = oneshot::channel::<Result<u32>>();
 
+    //
+    // The driver needs its own tokio runtime for synchronous callers
+    // (blocking Lua threads) to be able to block on replies without
+    // occupying the caller's runtime. A dedicated std::thread +
+    // current_thread runtime keeps the ACP stdio reader isolated.
+    //
+
     std::thread::Builder::new()
         .name("acp-client".into())
         .spawn(move || {
@@ -398,19 +191,14 @@ pub fn spawn_acp_client(
                 .build()
                 .expect("Failed to create ACP tokio runtime");
 
-            rt.block_on(async {
-                let local = tokio::task::LocalSet::new();
-                local
-                    .run_until(run_acp_task(
-                        program,
-                        args,
-                        cwd,
-                        cancelled_clone,
-                        cmd_rx,
-                        init_tx,
-                    ))
-                    .await;
-            });
+            rt.block_on(run_acp_driver(
+                program,
+                args,
+                cwd,
+                cancelled_clone,
+                cmd_rx,
+                init_tx,
+            ));
         })
         .context("Failed to spawn ACP client thread")?;
 
@@ -425,7 +213,7 @@ pub fn spawn_acp_client(
     })
 }
 
-async fn run_acp_task(
+async fn run_acp_driver(
     program: String,
     args: Vec<String>,
     cwd: String,
@@ -433,178 +221,425 @@ async fn run_acp_task(
     mut cmd_rx: mpsc::UnboundedReceiver<AcpCommand>,
     init_tx: oneshot::Sender<Result<u32>>,
 ) {
-    let result = spawn_and_init(program, args, cwd).await;
-
-    let (conn, client, mut child, pid) = match result {
+    let (mut child, stdin, stdout, pid) = match spawn_child(&program, &args, &cwd) {
         Ok(v) => v,
         Err(e) => {
             let _ = init_tx.send(Err(e));
             return;
         }
     };
-    let _ = init_tx.send(Ok(pid));
 
-    let mut session_id: Option<acp::SessionId> = None;
+    let ctx: Arc<Mutex<PromptCtx>> = Arc::new(Mutex::new(PromptCtx::default()));
+    let ctx_notif = Arc::clone(&ctx);
+    let ctx_perm = Arc::clone(&ctx);
 
-    while let Some(cmd) = cmd_rx.recv().await {
-        match cmd {
-            AcpCommand::CreateSession { cwd, reply } => {
-                let result = conn
-                    .new_session(acp::NewSessionRequest::new(cwd))
-                    .await;
-                match result {
-                    Ok(resp) => {
-                        session_id = Some(resp.session_id.clone());
-                        let _ = reply.send(Ok(resp.session_id.0.to_string()));
-                    }
-                    Err(e) => {
-                        let _ = reply.send(Err(anyhow!("ACP session/new failed: {}", e)));
+    //
+    // Channel of session_id set by the CreateSession command so the Cancel
+    // / Prompt commands know which session to address. A Mutex+Option is
+    // simpler than wiring a separate channel.
+    //
+
+    let session_id: Arc<Mutex<Option<SessionId>>> = Arc::new(Mutex::new(None));
+    let session_id_for_driver = Arc::clone(&session_id);
+
+    let cancelled_for_driver = Arc::clone(&cancelled);
+
+    let init_tx = Mutex::new(Some(init_tx));
+    let init_tx_main = Arc::new(init_tx);
+    let init_tx_for_main = Arc::clone(&init_tx_main);
+
+    let transport = acp::ByteStreams::new(stdin.compat_write(), stdout.compat());
+
+    let drive_result = acp::Client
+        .builder()
+        .name("praxis-acp-client")
+        .on_receive_notification(
+            {
+                let ctx_notif = Arc::clone(&ctx_notif);
+                move |notif: SessionNotification, _cx| {
+                    let ctx_notif = Arc::clone(&ctx_notif);
+                    async move {
+                        let mut guard = ctx_notif.lock().unwrap();
+                        let Some(tx) = guard.update_tx.as_ref().cloned() else {
+                            return Ok(());
+                        };
+                        match &notif.update {
+                            SessionUpdate::AgentMessageChunk(chunk) => {
+                                if let ContentBlock::Text(text_content) = &chunk.content {
+                                    guard.assembled_text.push_str(&text_content.text);
+                                    let _ = tx.send(SessionUpdateKind::TextChunk {
+                                        text: text_content.text.clone(),
+                                    });
+                                }
+                            }
+                            SessionUpdate::ToolCall(tool_call) => {
+                                let input = tool_call
+                                    .raw_input
+                                    .as_ref()
+                                    .map(|v| v.to_string())
+                                    .unwrap_or_default();
+                                let _ = tx.send(SessionUpdateKind::ToolCall {
+                                    tool_name: tool_call.title.clone(),
+                                    tool_id: tool_call.tool_call_id.0.to_string(),
+                                    input,
+                                });
+                            }
+                            SessionUpdate::ToolCallUpdate(update) => {
+                                if update.fields.status == Some(ToolCallStatus::Completed)
+                                    || update.fields.status == Some(ToolCallStatus::Failed)
+                                {
+                                    let is_error =
+                                        update.fields.status == Some(ToolCallStatus::Failed);
+                                    let output = update
+                                        .fields
+                                        .raw_output
+                                        .as_ref()
+                                        .map(|v| v.to_string())
+                                        .unwrap_or_default();
+                                    let _ = tx.send(SessionUpdateKind::ToolResult {
+                                        tool_id: update.tool_call_id.0.to_string(),
+                                        output,
+                                        is_error,
+                                    });
+                                }
+                            }
+                            _ => {}
+                        }
+                        Ok(())
                     }
                 }
-            }
-            AcpCommand::Prompt {
-                prompt,
-                update_tx,
-                permission_rx,
-                yolo,
-                interactive,
-                cancel_flag,
-                reply,
-            } => {
-                let Some(ref sid) = session_id else {
-                    let _ = reply.send(Err(anyhow!("No ACP session created")));
-                    continue;
-                };
+            },
+            acp::on_receive_notification!(),
+        )
+        .on_receive_request(
+            {
+                let ctx_perm = Arc::clone(&ctx_perm);
+                move |req: RequestPermissionRequest,
+                      responder: acp::Responder<RequestPermissionResponse>,
+                      _cx: acp::ConnectionTo<acp::Agent>| {
+                    let ctx_perm = Arc::clone(&ctx_perm);
+                    async move {
+                        let (yolo, interactive, update_tx, permission_rx, cancel_flag) = {
+                            let guard = ctx_perm.lock().unwrap();
+                            (
+                                guard.yolo,
+                                guard.interactive,
+                                guard.update_tx.clone(),
+                                guard.permission_rx.clone(),
+                                guard.cancel_flag.clone(),
+                            )
+                        };
 
-                client.set_prompt_context(
-                    update_tx,
-                    permission_rx,
-                    yolo,
-                    interactive,
-                    cancel_flag.clone(),
-                );
+                        let tool_call_id = req.tool_call.tool_call_id.0.to_string();
+                        let tool_name = req
+                            .tool_call
+                            .fields
+                            .title
+                            .clone()
+                            .unwrap_or_else(|| "unknown".to_string());
+                        let tool_input = req
+                            .tool_call
+                            .fields
+                            .raw_input
+                            .as_ref()
+                            .map(|v| v.to_string())
+                            .unwrap_or_default();
 
-                //
-                // Spawn a cancel watcher that monitors the flag and sends
-                // session/cancel via the connection. Since we're on a LocalSet,
-                // spawn_local can reference the !Send conn through an Rc.
-                //
+                        let allow_always_id = req
+                            .options
+                            .iter()
+                            .find(|o| o.kind == PermissionOptionKind::AllowAlways)
+                            .map(|o| o.option_id.clone());
+                        let allow_once_id = req
+                            .options
+                            .iter()
+                            .find(|o| o.kind == PermissionOptionKind::AllowOnce)
+                            .map(|o| o.option_id.clone());
+                        let deny_id = req
+                            .options
+                            .iter()
+                            .find(|o| {
+                                o.kind == PermissionOptionKind::RejectOnce
+                                    || o.kind == PermissionOptionKind::RejectAlways
+                            })
+                            .map(|o| o.option_id.clone());
 
-                let cancel_flag_clone = cancel_flag.clone();
-                let cancel_cancelled = cancelled.clone();
-                let cancel_sid = sid.clone();
+                        let empty_id = || PermissionOptionId::new("");
 
-                //
-                // We use a shared Rc<Cell> to allow the cancel watcher and
-                // the main prompt to both call methods on conn. Since this
-                // is a single-threaded LocalSet, there's no actual concurrency
-                // — the cancel fires when prompt yields (e.g. awaiting I/O).
-                //
+                        let option_id = if yolo {
+                            allow_always_id.or(allow_once_id).unwrap_or_else(|| {
+                                req.options
+                                    .first()
+                                    .map(|o| o.option_id.clone())
+                                    .unwrap_or_else(empty_id)
+                            })
+                        } else if !interactive {
+                            deny_id.unwrap_or_else(empty_id)
+                        } else {
+                            if let Some(tx) = update_tx.as_ref() {
+                                let _ = tx.send(SessionUpdateKind::PermissionRequest {
+                                    permission_id: tool_call_id.clone(),
+                                    tool_name,
+                                    tool_input,
+                                });
+                            }
 
-                let cancel_done = std::rc::Rc::new(RefCell::new(false));
-                let cancel_done_clone = cancel_done.clone();
+                            //
+                            // Wait for the decision on the std::sync::mpsc
+                            // receiver inside spawn_blocking so we don't
+                            // block the ACP connection's async executor.
+                            //
 
-                let prompt_result = {
-                    //
-                    // Pin the prompt future so we can poll it with select.
-                    //
+                            let decision = if let Some(perm_slot) = permission_rx {
+                                let cancel_for_wait = cancel_flag.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    let Some(rx) = perm_slot.lock().unwrap().take() else {
+                                        return PermissionDecision::Deny;
+                                    };
+                                    let deadline = std::time::Instant::now()
+                                        + std::time::Duration::from_secs(60);
+                                    loop {
+                                        match rx.recv_timeout(
+                                            std::time::Duration::from_millis(250),
+                                        ) {
+                                            Ok((_id, d)) => return d,
+                                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                                                let cancelled = cancel_for_wait
+                                                    .as_ref()
+                                                    .map(|f| f.load(Ordering::Relaxed))
+                                                    .unwrap_or(false);
+                                                if cancelled
+                                                    || std::time::Instant::now() >= deadline
+                                                {
+                                                    return PermissionDecision::Deny;
+                                                }
+                                            }
+                                            Err(
+                                                std::sync::mpsc::RecvTimeoutError::Disconnected,
+                                            ) => return PermissionDecision::Deny,
+                                        }
+                                    }
+                                })
+                                .await
+                                .unwrap_or(PermissionDecision::Deny)
+                            } else {
+                                PermissionDecision::Deny
+                            };
 
-                    let prompt_fut = conn.prompt(acp::PromptRequest::new(
-                        sid.clone(),
-                        vec![acp::ContentBlock::Text(acp::TextContent::new(prompt))],
-                    ));
+                            let cancelled = cancel_flag
+                                .as_ref()
+                                .map(|f| f.load(Ordering::Relaxed))
+                                .unwrap_or(false);
+                            if cancelled {
+                                return responder.respond(RequestPermissionResponse::new(
+                                    RequestPermissionOutcome::Cancelled,
+                                ));
+                            }
 
-                    let cancel_fut = async {
-                        loop {
-                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                            if cancel_flag_clone.load(Ordering::Relaxed)
-                                || cancel_cancelled.load(Ordering::Relaxed)
-                            {
-                                if !*cancel_done_clone.borrow() {
-                                    *cancel_done_clone.borrow_mut() = true;
-                                    tracing::debug!("ACP sending cancel for session");
-                                    let _ = conn
-                                        .cancel(acp::CancelNotification::new(
-                                            cancel_sid.clone(),
-                                        ))
-                                        .await;
+                            match decision {
+                                PermissionDecision::AllowAlways => {
+                                    allow_always_id.or(allow_once_id).unwrap_or_else(empty_id)
                                 }
-                                return;
+                                PermissionDecision::Allow => {
+                                    allow_once_id.or(allow_always_id).unwrap_or_else(empty_id)
+                                }
+                                PermissionDecision::Deny => deny_id.unwrap_or_else(empty_id),
+                            }
+                        };
+
+                        responder.respond(RequestPermissionResponse::new(
+                            RequestPermissionOutcome::Selected(
+                                SelectedPermissionOutcome::new(option_id),
+                            ),
+                        ))
+                    }
+                }
+            },
+            acp::on_receive_request!(),
+        )
+        .connect_with(transport, async move |cx| {
+            //
+            // Initialize the subprocess.
+            //
+
+            if let Err(e) = cx
+                .send_request(
+                    InitializeRequest::new(ProtocolVersion::V1).client_info(
+                        Implementation::new("praxis", env!("CARGO_PKG_VERSION")).title("Praxis"),
+                    ),
+                )
+                .block_task()
+                .await
+            {
+                if let Some(tx) = init_tx_for_main.lock().unwrap().take() {
+                    let _ = tx.send(Err(anyhow!("ACP initialize failed: {}", e)));
+                }
+                return Ok(());
+            }
+
+            if let Some(tx) = init_tx_for_main.lock().unwrap().take() {
+                let _ = tx.send(Ok(pid));
+            }
+
+            //
+            // Process commands sequentially — the Lua caller blocks on a
+            // reply per command, so no concurrency is needed within the
+            // driver.
+            //
+
+            while let Some(cmd) = cmd_rx.recv().await {
+                match cmd {
+                    AcpCommand::CreateSession { cwd, reply } => {
+                        match cx
+                            .send_request(NewSessionRequest::new(cwd))
+                            .block_task()
+                            .await
+                        {
+                            Ok(resp) => {
+                                *session_id_for_driver.lock().unwrap() =
+                                    Some(resp.session_id.clone());
+                                let _ = reply.send(Ok(resp.session_id.0.to_string()));
+                            }
+                            Err(e) => {
+                                let _ = reply.send(Err(anyhow!("ACP session/new failed: {}", e)));
                             }
                         }
-                    };
+                    }
+                    AcpCommand::Prompt {
+                        prompt,
+                        update_tx,
+                        permission_rx,
+                        yolo,
+                        interactive,
+                        cancel_flag,
+                        reply,
+                    } => {
+                        let Some(sid) = session_id_for_driver.lock().unwrap().clone() else {
+                            let _ = reply.send(Err(anyhow!("No ACP session created")));
+                            continue;
+                        };
 
-                    tokio::pin!(prompt_fut);
-                    tokio::pin!(cancel_fut);
+                        {
+                            let mut guard = ctx.lock().unwrap();
+                            guard.update_tx = Some(update_tx);
+                            guard.permission_rx =
+                                Some(Arc::new(Mutex::new(Some(permission_rx))));
+                            guard.yolo = yolo;
+                            guard.interactive = interactive;
+                            guard.cancel_flag = Some(cancel_flag.clone());
+                            guard.assembled_text.clear();
+                        }
 
-                    //
-                    // First, race the prompt against the cancel. If cancel
-                    // fires first, we still need to await the prompt response.
-                    //
+                        //
+                        // Cancel watcher: polls the flag and sends a
+                        // session/cancel notification when set. Uses
+                        // cx.spawn so it runs concurrently with the
+                        // prompt request.
+                        //
 
-                    tokio::select! {
-                        biased;
-                        result = &mut prompt_fut => result,
-                        _ = &mut cancel_fut => {
-                            prompt_fut.await
+                        let cancel_done = Arc::new(AtomicBool::new(false));
+                        let cancel_done_watcher = Arc::clone(&cancel_done);
+                        let cancel_flag_watcher = cancel_flag.clone();
+                        let cancelled_watcher = Arc::clone(&cancelled_for_driver);
+                        let sid_for_cancel = sid.clone();
+                        let cx_for_cancel = cx.clone();
+                        let _ = cx.spawn(async move {
+                            loop {
+                                tokio::time::sleep(std::time::Duration::from_millis(100))
+                                    .await;
+                                if cancel_done_watcher.load(Ordering::Relaxed) {
+                                    return Ok(());
+                                }
+                                if cancel_flag_watcher.load(Ordering::Relaxed)
+                                    || cancelled_watcher.load(Ordering::Relaxed)
+                                {
+                                    let _ = cx_for_cancel.send_notification(
+                                        CancelNotification::new(sid_for_cancel.clone()),
+                                    );
+                                    cancel_done_watcher.store(true, Ordering::Relaxed);
+                                    return Ok(());
+                                }
+                            }
+                        });
+
+                        let prompt_result = cx
+                            .send_request(PromptRequest::new(
+                                sid,
+                                vec![ContentBlock::Text(TextContent::new(prompt))],
+                            ))
+                            .block_task()
+                            .await;
+
+                        cancel_done.store(true, Ordering::Relaxed);
+
+                        let text = {
+                            let mut guard = ctx.lock().unwrap();
+                            let text = std::mem::take(&mut guard.assembled_text);
+                            guard.update_tx = None;
+                            guard.permission_rx = None;
+                            guard.cancel_flag = None;
+                            text
+                        };
+
+                        match prompt_result {
+                            Ok(_resp) => {
+                                let _ = reply.send(Ok(text));
+                            }
+                            Err(e) => {
+                                let _ = reply.send(Err(anyhow!("ACP prompt failed: {}", e)));
+                            }
                         }
                     }
-                };
-
-                let text = client.take_assembled_text();
-                client.clear_prompt_context();
-
-                match prompt_result {
-                    Ok(_resp) => {
-                        let _ = reply.send(Ok(text));
+                    AcpCommand::Cancel { reply } => {
+                        cancelled_for_driver.store(true, Ordering::SeqCst);
+                        if let Some(sid) = session_id_for_driver.lock().unwrap().clone() {
+                            let _ = cx.send_notification(CancelNotification::new(sid));
+                        }
+                        let _ = reply.send(Ok(()));
                     }
-                    Err(e) => {
-                        let _ = reply.send(Err(anyhow!("ACP prompt failed: {}", e)));
+                    AcpCommand::IsAlive { reply } => {
+                        let alive = matches!(child.try_wait(), Ok(None));
+                        let _ = reply.send(alive);
+                    }
+                    AcpCommand::Close => {
+                        let _ = child.kill().await;
+                        break;
                     }
                 }
             }
-            AcpCommand::Cancel { reply } => {
-                cancelled.store(true, Ordering::SeqCst);
-                if let Some(ref sid) = session_id {
-                    let _ = conn
-                        .cancel(acp::CancelNotification::new(sid.clone()))
-                        .await;
-                }
-                let _ = reply.send(Ok(()));
-            }
-            AcpCommand::IsAlive { reply } => {
-                let alive = matches!(child.try_wait(), Ok(None));
-                let _ = reply.send(alive);
-            }
-            AcpCommand::Close => {
-                let _ = child.kill().await;
-                break;
-            }
+
+            let _ = child.kill().await;
+            Ok(())
+        })
+        .await;
+
+    if let Err(e) = drive_result {
+        tracing::debug!("ACP driver ended: {}", e);
+        if let Some(tx) = init_tx_main.lock().unwrap().take() {
+            let _ = tx.send(Err(anyhow!("ACP driver ended: {}", e)));
         }
     }
-
-    let _ = child.kill().await;
 }
 
-async fn spawn_and_init(
-    program: String,
-    args: Vec<String>,
-    cwd: String,
+fn spawn_child(
+    program: &str,
+    args: &[String],
+    cwd: &str,
 ) -> Result<(
-    acp::ClientSideConnection,
-    std::rc::Rc<PraxisClient>,
     tokio::process::Child,
+    tokio::process::ChildStdin,
+    tokio::process::ChildStdout,
     u32,
 )> {
-    let mut cmd = tokio::process::Command::new(&program);
-    cmd.args(&args)
+    let mut cmd = tokio::process::Command::new(program);
+    cmd.args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::inherit())
         .kill_on_drop(true);
 
     if !cwd.is_empty() {
-        cmd.current_dir(&cwd);
+        cmd.current_dir(cwd);
     }
 
     let mut child = cmd
@@ -613,32 +648,7 @@ async fn spawn_and_init(
 
     let stdin = child.stdin.take().ok_or_else(|| anyhow!("No stdin"))?;
     let stdout = child.stdout.take().ok_or_else(|| anyhow!("No stdout"))?;
-
     let pid = child.id().ok_or_else(|| anyhow!("No PID for ACP child"))?;
 
-    let client = std::rc::Rc::new(PraxisClient::new());
-    let (conn, io_task) = acp::ClientSideConnection::new(
-        client.clone(),
-        stdin.compat_write(),
-        stdout.compat(),
-        |fut| {
-            tokio::task::spawn_local(fut);
-        },
-    );
-
-    tokio::task::spawn_local(async move {
-        if let Err(e) = io_task.await {
-            tracing::debug!("ACP I/O task ended: {}", e);
-        }
-    });
-
-    conn.initialize(
-        acp::InitializeRequest::new(acp::ProtocolVersion::V1).client_info(
-            acp::Implementation::new("praxis", env!("CARGO_PKG_VERSION")).title("Praxis"),
-        ),
-    )
-    .await
-    .map_err(|e| anyhow!("ACP initialize failed: {}", e))?;
-
-    Ok((conn, client, child, pid))
+    Ok((child, stdin, stdout, pid))
 }

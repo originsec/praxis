@@ -548,8 +548,8 @@ impl OrchestratorManager {
 
                     send_and_log!(acp_response(
                         prompt_id_to_json_rpc_id(&prompt_id),
-                        serde_json::to_value(agent_client_protocol::PromptResponse::new(
-                            agent_client_protocol::StopReason::EndTurn,
+                        serde_json::to_value(agent_client_protocol::schema::PromptResponse::new(
+                            agent_client_protocol::schema::StopReason::EndTurn,
                         )).unwrap(),
                     ));
                 }
@@ -693,8 +693,8 @@ impl OrchestratorManager {
                 client_id,
                 acp_response(
                     prompt_id_to_json_rpc_id(&prompt_id),
-                    serde_json::to_value(agent_client_protocol::PromptResponse::new(
-                        agent_client_protocol::StopReason::Cancelled,
+                    serde_json::to_value(agent_client_protocol::schema::PromptResponse::new(
+                        agent_client_protocol::schema::StopReason::Cancelled,
                     )).unwrap(),
                 ),
             ).await;

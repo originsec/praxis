@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use agent_client_protocol as acp;
-use acp::{ExtRequest, ExtResponse};
+use acp::schema::{ExtRequest, ExtResponse};
 use common::AgentFileType;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
