@@ -438,23 +438,42 @@ impl ServiceMcpClient {
         // Wait for initial state.
         //
 
-        let poll_interval = Duration::from_millis(100);
         let max_polls = (self.timeout.as_millis() / 100) as usize;
-
-        for _ in 0..max_polls {
-            tokio::time::sleep(poll_interval).await;
-            let state = self.state.lock().await;
-            if state.system_state.is_some() {
-                return Ok(());
-            }
-        }
-
-        Err(anyhow!("Timeout waiting for initial state from service"))
+        self.poll_pending(
+            max_polls,
+            |s| s.system_state.as_ref().map(|_| ()),
+            "initial state from service",
+        )
+        .await
     }
 
     async fn publish_signal(&self, message: ClientSignalMessage) -> Result<()> {
         publish_json(&self.channel, CLIENT_SIGNAL_QUEUE, &message).await?;
         Ok(())
+    }
+
+    //
+    // Poll the shared `ClientState` every 100 ms, up to `max_polls` times,
+    // returning the first value extracted by `extract`. Used to wait for
+    // responses that arrive via the RabbitMQ consumer loop and are parked
+    // in dedicated `pending_*` slots.
+    //
+
+    async fn poll_pending<T>(
+        &self,
+        max_polls: usize,
+        mut extract: impl FnMut(&mut ClientState) -> Option<T>,
+        label: &str,
+    ) -> Result<T> {
+        let poll_interval = Duration::from_millis(100);
+        for _ in 0..max_polls {
+            tokio::time::sleep(poll_interval).await;
+            let mut state = self.state.lock().await;
+            if let Some(v) = extract(&mut state) {
+                return Ok(v);
+            }
+        }
+        Err(anyhow!("Timeout waiting for {}", label))
     }
 
     //
@@ -654,18 +673,12 @@ impl McpClient for ServiceMcpClient {
 
         self.publish_signal(message).await?;
 
-        let poll_interval = Duration::from_millis(100);
-        let max_polls = 100;
-
-        for _ in 0..max_polls {
-            tokio::time::sleep(poll_interval).await;
-            let mut state = self.state.lock().await;
-            if let Some(response) = state.pending_traffic_search.take() {
-                return Ok(response);
-            }
-        }
-
-        Err(anyhow!("Timeout waiting for traffic search response"))
+        self.poll_pending(
+            100,
+            |s| s.pending_traffic_search.take(),
+            "traffic search response",
+        )
+        .await
     }
 
     async fn run_semantic_op(
@@ -693,23 +706,39 @@ impl McpClient for ServiceMcpClient {
 
         self.publish_signal(message).await?;
 
-        let poll_interval = Duration::from_millis(100);
-        let max_polls = 50;
+        let request_id_for_poll = request_id.clone();
+        let result = self
+            .poll_pending(
+                50,
+                move |s| match s.pending_semantic_ops.get(&request_id_for_poll) {
+                    Some(Some(_)) => {
+                        if let Some(Some(id)) = s.pending_semantic_ops.remove(&request_id_for_poll)
+                        {
+                            Some(id)
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                },
+                "operation to be queued",
+            )
+            .await;
 
-        for _ in 0..max_polls {
-            tokio::time::sleep(poll_interval).await;
-            let mut state = self.state.lock().await;
-            if let Some(Some(operation_id)) = state.pending_semantic_ops.remove(&request_id) {
-                return Ok(operation_id);
-            }
+        //
+        // Drop the placeholder entry on timeout so a stale `Some(None)`
+        // doesn't mislead the dispatcher if a late response arrives.
+        //
+
+        if result.is_err() {
+            self.state
+                .lock()
+                .await
+                .pending_semantic_ops
+                .remove(&request_id);
         }
 
-        {
-            let mut state = self.state.lock().await;
-            state.pending_semantic_ops.remove(&request_id);
-        }
-
-        Err(anyhow!("Timeout waiting for operation to be queued"))
+        result
     }
 
     async fn cancel_semantic_op(&self, operation_id: String) -> Result<()> {
@@ -814,18 +843,12 @@ impl McpClient for ServiceMcpClient {
         };
         self.publish_signal(message).await?;
 
-        let poll_interval = Duration::from_millis(100);
-        let max_polls = 50;
-
-        for _ in 0..max_polls {
-            tokio::time::sleep(poll_interval).await;
-            let mut state = self.state.lock().await;
-            if let Some(result) = state.pending_recon_get.take() {
-                return Ok(result);
-            }
-        }
-
-        Err(anyhow!("Timeout waiting for stored recon result"))
+        self.poll_pending(
+            50,
+            |s| s.pending_recon_get.take(),
+            "stored recon result",
+        )
+        .await
     }
 
     async fn request_chain_trigger_list(&self, chain_id: Option<String>) -> Result<()> {
@@ -910,18 +933,13 @@ impl McpClient for ServiceMcpClient {
         };
         self.publish_signal(message).await?;
 
-        let poll_interval = Duration::from_millis(100);
-        let max_polls = 50;
-
-        for _ in 0..max_polls {
-            tokio::time::sleep(poll_interval).await;
-            let mut state = self.state.lock().await;
-            if let Some(result) = state.pending_op_def_add.take() {
-                return result.map_err(|e| anyhow!(e));
-            }
-        }
-
-        Err(anyhow!("Timeout waiting for operation definition to be created"))
+        self.poll_pending(
+            50,
+            |s| s.pending_op_def_add.take(),
+            "operation definition to be created",
+        )
+        .await?
+        .map_err(|e| anyhow!(e))
     }
 
     async fn delete_op_def(&self, full_name: &str) -> Result<()> {
@@ -936,18 +954,14 @@ impl McpClient for ServiceMcpClient {
         };
         self.publish_signal(message).await?;
 
-        let poll_interval = Duration::from_millis(100);
-        let max_polls = 50;
-
-        for _ in 0..max_polls {
-            tokio::time::sleep(poll_interval).await;
-            let mut state = self.state.lock().await;
-            if let Some(result) = state.pending_op_def_delete.take() {
-                return result.map(|_| ()).map_err(|e| anyhow!(e));
-            }
-        }
-
-        Err(anyhow!("Timeout waiting for operation definition to be deleted"))
+        self.poll_pending(
+            50,
+            |s| s.pending_op_def_delete.take(),
+            "operation definition to be deleted",
+        )
+        .await?
+        .map(|_| ())
+        .map_err(|e| anyhow!(e))
     }
 
     async fn reset_node(&self, node_id: &str) -> Result<()> {

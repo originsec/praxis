@@ -71,7 +71,7 @@ pub async fn handle_semantic_parser_request(
 
     common::log_info!(
         "Semantic parser request {} using {:?}/{}",
-        &request.request_id[..8.min(request.request_id.len())],
+        common::short_id(&request.request_id),
         provider,
         model_def.model
     );

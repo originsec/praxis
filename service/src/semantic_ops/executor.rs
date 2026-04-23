@@ -40,7 +40,7 @@ pub async fn create_session(
 ) -> Result<String> {
     common::log_info!(
         "Creating ACP session on node {} (connector: {}, yolo: {}, working_dir: {:?}, prompt_timeout: {:?})",
-        &node_id[..8.min(node_id.len())],
+        common::short_id(node_id),
         agent_short_name,
         yolo_mode,
         working_dir,
@@ -77,8 +77,8 @@ pub async fn create_session(
 
     common::log_info!(
         "Created ACP session {} on node {}",
-        &session_id[..8.min(session_id.len())],
-        &node_id[..8.min(node_id.len())]
+        common::short_id(&session_id),
+        common::short_id(node_id)
     );
 
     Ok(session_id)
@@ -106,8 +106,8 @@ pub async fn close_session(
         .map_err(|e| {
             common::log_warn!(
                 "session/close for {} on {} failed: {}",
-                &session_id[..8.min(session_id.len())],
-                &node_id[..8.min(node_id.len())],
+                common::short_id(&session_id),
+                common::short_id(node_id),
                 e
             );
             e
@@ -180,6 +180,64 @@ async fn send_session_prompt(
 // session and close it on the way out. Returns (reply_text, result_status).
 //
 
+//
+// Dispatch to `execute_agent_mode` or `execute_one_shot` based on
+// `spec.mode` and normalize both return shapes to
+// `(summary, result, semantic_success)`. `semantic_success` is always
+// `None` for the one-shot path. Callers can use this to avoid
+// duplicating the mode switch.
+//
+
+#[allow(clippy::too_many_arguments)]
+pub async fn execute_by_mode(
+    operation_id: &str,
+    node_id: &str,
+    agent_short_name: &str,
+    spec: &SemanticOperationSpec,
+    working_dir: Option<String>,
+    prompt_timeout_secs: Option<u64>,
+    existing_session_id: Option<String>,
+    config: &Arc<TokioRwLock<ServiceConfig>>,
+    channel: &Channel,
+    proxy: &Arc<AcpNodeProxy>,
+    database: Arc<Database>,
+    cancel_rx: oneshot::Receiver<()>,
+) -> Result<(String, String, Option<bool>)> {
+    if spec.mode == "agent" {
+        execute_agent_mode(
+            operation_id,
+            node_id,
+            agent_short_name,
+            spec,
+            working_dir,
+            prompt_timeout_secs,
+            existing_session_id,
+            config,
+            channel,
+            proxy,
+            database,
+            cancel_rx,
+        )
+        .await
+    } else {
+        execute_one_shot(
+            operation_id,
+            node_id,
+            agent_short_name,
+            spec,
+            working_dir,
+            prompt_timeout_secs,
+            existing_session_id,
+            channel,
+            proxy,
+            database,
+            cancel_rx,
+        )
+        .await
+        .map(|(summary, result)| (summary, result, None))
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_one_shot(
     operation_id: &str,
@@ -196,7 +254,7 @@ pub async fn execute_one_shot(
 ) -> Result<(String, String)> {
     common::log_debug!(
         "[semop {}] START one-shot '{}' | input: {} bytes",
-        &operation_id[..8.min(operation_id.len())],
+        common::short_id(&operation_id),
         spec.name,
         spec.operation_prompt.len()
     );
@@ -233,8 +291,8 @@ pub async fn execute_one_shot(
     let prompt_preview: String = spec.operation_prompt.chars().take(100).collect();
     common::log_info!(
         "SemanticPromptSent: op={} node={} prompt={}",
-        &operation_id[..8.min(operation_id.len())],
-        &node_id[..8.min(node_id.len())],
+        common::short_id(&operation_id),
+        common::short_id(node_id),
         prompt_preview
     );
 
@@ -257,7 +315,7 @@ pub async fn execute_one_shot(
                     let preview: String = text.chars().take(100).collect();
                     common::log_info!(
                         "SemanticResponseReceived: op={} len={} response={}",
-                        &operation_id[..8.min(operation_id.len())],
+                        common::short_id(&operation_id),
                         text.len(),
                         preview
                     );
@@ -269,7 +327,7 @@ pub async fn execute_one_shot(
                         .await;
                     common::log_error!(
                         "SemanticResponseError: op={} error={}",
-                        &operation_id[..8.min(operation_id.len())],
+                        common::short_id(&operation_id),
                         e
                     );
                     Err(e)
@@ -286,7 +344,7 @@ pub async fn execute_one_shot(
                         .await;
                     common::log_error!(
                         "SemanticResponseError: op={} error=timeout",
-                        &operation_id[..8.min(operation_id.len())]
+                        common::short_id(&operation_id)
                     );
                     if let Err(e) = cancel_session_prompt(node_id, &session_id, channel, proxy).await {
                         common::log_error!("Failed to cancel session prompt on timeout: {}", e);
@@ -302,12 +360,12 @@ pub async fn execute_one_shot(
             let _ = database.append_output(operation_id, &fmt_error("Operation cancelled")).await;
             common::log_error!(
                 "SemanticResponseError: op={} error=cancelled",
-                &operation_id[..8.min(operation_id.len())]
+                common::short_id(&operation_id)
             );
             if let Err(e) = cancel_session_prompt(node_id, &session_id, channel, proxy).await {
                 common::log_error!("Failed to cancel session prompt: {}", e);
             }
-            Err(anyhow!("Operation cancelled"))
+            Err(anyhow::Error::new(crate::semantic_ops::Cancelled))
         }
     };
 
@@ -319,7 +377,7 @@ pub async fn execute_one_shot(
 
     common::log_debug!(
         "[semop {}] END   one-shot '{}' | output: {} bytes",
-        &operation_id[..8.min(operation_id.len())],
+        common::short_id(&operation_id),
         spec.name,
         response.0.len()
     );
@@ -351,7 +409,7 @@ pub async fn execute_agent_mode(
 ) -> Result<(String, String, Option<bool>)> {
     common::log_debug!(
         "[semop {}] START agent '{}' | iterations: {} | input: {} bytes",
-        &operation_id[..8.min(operation_id.len())],
+        common::short_id(&operation_id),
         spec.name,
         spec.agent_iterations,
         spec.operation_prompt.len()
@@ -502,12 +560,12 @@ pub async fn execute_agent_mode(
                 .append_output(operation_id, &fmt_error("Operation cancelled"))
                 .await;
             cleanup_on_exit(owns_session, &session_id).await;
-            return Err(anyhow!("Operation cancelled"));
+            return Err(anyhow::Error::new(crate::semantic_ops::Cancelled));
         }
 
         common::log_debug!(
             "[semop {}] iteration {}/{}",
-            &operation_id[..8.min(operation_id.len())],
+            common::short_id(&operation_id),
             iteration,
             spec.agent_iterations
         );
@@ -528,14 +586,14 @@ pub async fn execute_agent_mode(
             _ = &mut cancel_rx => {
                 let _ = database.append_output(operation_id, &fmt_error("Operation cancelled")).await;
                 cleanup_on_exit(owns_session, &session_id).await;
-                return Err(anyhow!("Operation cancelled"));
+                return Err(anyhow::Error::new(crate::semantic_ops::Cancelled));
             }
         };
 
         let text_content = response.text().unwrap_or_default().to_string();
         common::log_debug!(
             "[semop {}] AI response: {} bytes\n{}",
-            &operation_id[..8.min(operation_id.len())],
+            common::short_id(&operation_id),
             text_content.len(),
             text_content
         );
@@ -561,7 +619,7 @@ pub async fn execute_agent_mode(
                     .unwrap_or("");
                 common::log_debug!(
                     "[semop {}] tool call session_prompt: {} bytes\n{}",
-                    &operation_id[..8.min(operation_id.len())],
+                    common::short_id(&operation_id),
                     prompt_text.len(),
                     prompt_text
                 );
@@ -586,7 +644,7 @@ pub async fn execute_agent_mode(
                             Ok(response_text) => {
                                 common::log_debug!(
                                     "[semop {}] tool result: {} bytes\n{}",
-                                    &operation_id[..8.min(operation_id.len())],
+                                    common::short_id(&operation_id),
                                     response_text.len(),
                                     response_text
                                 );
@@ -597,7 +655,7 @@ pub async fn execute_agent_mode(
                                 let error_msg = format!("Tool error: {}", e);
                                 common::log_debug!(
                                     "[semop {}] tool error: {}",
-                                    &operation_id[..8.min(operation_id.len())],
+                                    common::short_id(&operation_id),
                                     error_msg
                                 );
                                 let _ = database.append_output(operation_id, &fmt_error(&error_msg)).await;
@@ -608,7 +666,7 @@ pub async fn execute_agent_mode(
                     _ = &mut cancel_rx => {
                         let _ = database.append_output(operation_id, &fmt_error("Operation cancelled")).await;
                         cleanup_on_exit(owns_session, &session_id).await;
-                        return Err(anyhow!("Operation cancelled"));
+                        return Err(anyhow::Error::new(crate::semantic_ops::Cancelled));
                     }
                 }
             } else {
@@ -635,7 +693,7 @@ pub async fn execute_agent_mode(
                 semantic_success = success;
                 common::log_info!(
                     "SemanticOpComplete: op={} result={} summary={}",
-                    &operation_id[..8.min(operation_id.len())],
+                    common::short_id(&operation_id),
                     final_result,
                     final_summary
                 );
@@ -669,7 +727,7 @@ pub async fn execute_agent_mode(
 
     common::log_debug!(
         "[semop {}] END   agent '{}' | success: {:?} | summary: {} bytes | result: {}",
-        &operation_id[..8.min(operation_id.len())],
+        common::short_id(&operation_id),
         spec.name,
         semantic_success,
         final_summary.len(),
@@ -701,8 +759,8 @@ async fn send_remote_prompt(
     let preview: String = prompt.chars().take(100).collect();
     common::log_info!(
         "SemanticToolPrompt: op={} node={} prompt={}",
-        &operation_id[..8.min(operation_id.len())],
-        &node_id[..8.min(node_id.len())],
+        common::short_id(&operation_id),
+        common::short_id(node_id),
         preview
     );
 
@@ -714,7 +772,7 @@ async fn send_remote_prompt(
             let response_preview: String = text.chars().take(100).collect();
             common::log_info!(
                 "SemanticToolResponse: op={} len={} response={}",
-                &operation_id[..8.min(operation_id.len())],
+                common::short_id(&operation_id),
                 text.len(),
                 response_preview
             );
@@ -723,7 +781,7 @@ async fn send_remote_prompt(
         Ok(Err(e)) => {
             common::log_error!(
                 "SemanticToolError: op={} error={}",
-                &operation_id[..8.min(operation_id.len())],
+                common::short_id(&operation_id),
                 e
             );
             Err(e)
@@ -731,7 +789,7 @@ async fn send_remote_prompt(
         Err(_) => {
             common::log_error!(
                 "SemanticToolError: op={} error=timeout",
-                &operation_id[..8.min(operation_id.len())]
+                common::short_id(&operation_id)
             );
             if let Err(e) = cancel_session_prompt(node_id, session_id, channel, proxy).await {
                 common::log_error!("Failed to cancel session prompt on timeout: {}", e);

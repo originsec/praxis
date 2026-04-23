@@ -10,7 +10,6 @@ use uuid::Uuid;
 use crate::acp_node_proxy::AcpNodeProxy;
 use crate::config::ServiceConfig;
 use crate::database::{Database, OperationRecord};
-use crate::semantic_ops::executor::{execute_agent_mode, execute_one_shot};
 
 //
 // A running operation with cancellation support. Keyed by operation_id in
@@ -42,12 +41,6 @@ pub struct SemanticOpsManager {
     //
     running: Arc<StdRwLock<HashMap<String, RunningOperation>>>,
 
-    //
-    // Operation_id -> node_id mapping (used for cancellation lookup when we
-    // only have the op id at hand).
-    //
-    op_to_node: Arc<StdRwLock<HashMap<String, String>>>,
-
     database: Arc<Database>,
     config: Arc<TokioRwLock<ServiceConfig>>,
     rabbitmq_channel: Channel,
@@ -63,7 +56,6 @@ impl SemanticOpsManager {
     ) -> Self {
         Self {
             running: Arc::new(StdRwLock::new(HashMap::new())),
-            op_to_node: Arc::new(StdRwLock::new(HashMap::new())),
             database,
             config,
             rabbitmq_channel,
@@ -139,11 +131,6 @@ impl SemanticOpsManager {
             chain_execution_id: None,
         };
         self.database.insert_operation(&record).await?;
-
-        self.op_to_node
-            .write()
-            .unwrap()
-            .insert(operation_id.clone(), node_id.clone());
 
         self.spawn_execution(
             operation_id.clone(),
@@ -230,18 +217,6 @@ impl SemanticOpsManager {
                     "Cannot remove running operation. Cancel it first."
                 ));
             }
-            SemanticOpStatus::Queued => {
-                //
-                // In ACP mode queued operations shouldn't exist in memory
-                // (everything dispatches immediately). Just clean up any
-                // mapping and delete from DB.
-                //
-                self.op_to_node.write().unwrap().remove(operation_id);
-                self.database
-                    .delete_operation(operation_id)
-                    .await
-                    .context("Failed to delete operation")?;
-            }
             _ => {
                 self.database
                     .delete_operation(operation_id)
@@ -278,8 +253,6 @@ impl SemanticOpsManager {
         let mut cleared_count = 0;
         for op in queued_ops {
             if !active_node_ids.contains(&op.node_id) {
-                self.op_to_node.write().unwrap().remove(&op.operation_id);
-
                 self.database
                     .update_status(
                         &op.operation_id,
@@ -371,7 +344,6 @@ impl SemanticOpsManager {
         let rabbitmq_channel = self.rabbitmq_channel.clone();
         let acp_node_proxy = self.acp_node_proxy.clone();
         let running = self.running.clone();
-        let op_to_node = self.op_to_node.clone();
 
         tokio::spawn(Self::run_operation(
             operation_id,
@@ -385,7 +357,6 @@ impl SemanticOpsManager {
             rabbitmq_channel,
             acp_node_proxy,
             running,
-            op_to_node,
         ));
     }
 
@@ -407,7 +378,6 @@ impl SemanticOpsManager {
         rabbitmq_channel: Channel,
         acp_node_proxy: Arc<AcpNodeProxy>,
         running: Arc<StdRwLock<HashMap<String, RunningOperation>>>,
-        op_to_node: Arc<StdRwLock<HashMap<String, String>>>,
     ) {
         let _ = database
             .append_output(
@@ -415,7 +385,7 @@ impl SemanticOpsManager {
                 &format!(
                     "Setting up ACP session for connector '{}' on node {}...\n",
                     agent_short_name,
-                    &node_id[..8.min(node_id.len())]
+                    common::short_id(&node_id)
                 ),
             )
             .await;
@@ -450,7 +420,6 @@ impl SemanticOpsManager {
                     )
                     .await;
                 running.write().unwrap().remove(&operation_id);
-                op_to_node.write().unwrap().remove(&operation_id);
                 return;
             }
         };
@@ -459,39 +428,22 @@ impl SemanticOpsManager {
             .append_output(&operation_id, "Session created.\n")
             .await;
 
-        let result = if spec.mode == "agent" {
-            execute_agent_mode(
-                &operation_id,
-                &node_id,
-                &agent_short_name,
-                &spec,
-                working_dir.clone(),
-                prompt_timeout_secs,
-                Some(session_id.clone()),
-                &config,
-                &rabbitmq_channel,
-                &acp_node_proxy,
-                database.clone(),
-                cancel_rx,
-            )
-            .await
-            .map(|(summary, result, _semantic_success)| (summary, result))
-        } else {
-            execute_one_shot(
-                &operation_id,
-                &node_id,
-                &agent_short_name,
-                &spec,
-                working_dir.clone(),
-                prompt_timeout_secs,
-                Some(session_id.clone()),
-                &rabbitmq_channel,
-                &acp_node_proxy,
-                database.clone(),
-                cancel_rx,
-            )
-            .await
-        };
+        let result = crate::semantic_ops::execute_by_mode(
+            &operation_id,
+            &node_id,
+            &agent_short_name,
+            &spec,
+            working_dir.clone(),
+            prompt_timeout_secs,
+            Some(session_id.clone()),
+            &config,
+            &rabbitmq_channel,
+            &acp_node_proxy,
+            database.clone(),
+            cancel_rx,
+        )
+        .await
+        .map(|(summary, result, _semantic_success)| (summary, result));
 
         //
         // Always close the session we created.
@@ -519,7 +471,7 @@ impl SemanticOpsManager {
             }
             Err(e) => {
                 let error_msg = e.to_string();
-                if error_msg.contains("cancelled") {
+                if crate::semantic_ops::is_cancelled(&e) {
                     (SemanticOpStatus::Cancelled, None, Some(error_msg))
                 } else {
                     (SemanticOpStatus::Failed, None, Some(error_msg))
@@ -538,7 +490,6 @@ impl SemanticOpsManager {
             .await;
 
         running.write().unwrap().remove(&operation_id);
-        op_to_node.write().unwrap().remove(&operation_id);
     }
 }
 
@@ -546,7 +497,6 @@ impl Clone for SemanticOpsManager {
     fn clone(&self) -> Self {
         Self {
             running: self.running.clone(),
-            op_to_node: self.op_to_node.clone(),
             database: self.database.clone(),
             config: self.config.clone(),
             rabbitmq_channel: self.rabbitmq_channel.clone(),

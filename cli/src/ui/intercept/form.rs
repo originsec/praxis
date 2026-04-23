@@ -11,7 +11,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 
 use crate::app::intercept::{FormMode, RuleForm, RuleFormField};
-use crate::ui::theme::{ACCENT, DIM, MUTED, STATUS_FAIL, TEXT};
+use crate::ui::theme::{ACCENT, DIM, MUTED, STATUS_FAIL, STATUS_RUNNING, TEXT};
 
 pub fn render(f: &mut Frame, area: Rect, form: &RuleForm) {
     let chunks = Layout::vertical([
@@ -153,7 +153,7 @@ fn render_field(out: &mut Vec<Line<'static>>, form: &RuleForm, field: RuleFormFi
                     " \u{25cf} on ",
                     Style::default()
                         .fg(Color::Black)
-                        .bg(Color::Rgb(180, 160, 60)),
+                        .bg(STATUS_RUNNING),
                 )
             } else {
                 Span::styled(" \u{25cb} off ", Style::default().fg(DIM))

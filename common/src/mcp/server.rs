@@ -10,6 +10,7 @@ use tokio::sync::Mutex;
 
 use super::client::McpClient;
 use super::params::*;
+use crate::acp_ext::{EXT_PRAXIS_RECON, EXT_PRAXIS_WRITE_FILE};
 use crate::{AgentFileType, ReconResult};
 
 const SERVER_NAME: &str = "praxis";
@@ -152,7 +153,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let nodes: Vec<_> = state.nodes.iter().map(|n| {
             json!({
                 "node_id": n.node_id,
-                "node_id_short": &n.node_id[..8.min(n.node_id.len())],
+                "node_id_short": crate::short_id(&n.node_id),
                 "hostname": n.machine_name,
                 "os": n.os_details,
                 "status": n.status,
@@ -307,7 +308,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let agent_short_name = selected_agent(client, &node_id).await?;
 
         let value = client
-            .acp_request(&node_id, "_praxis/recon", json!({
+            .acp_request(&node_id, EXT_PRAXIS_RECON, json!({
                 "agent_short_name": agent_short_name,
                 "is_semantic": false,
             }))
@@ -339,7 +340,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let agent_short_name = selected_agent(client, &node_id).await?;
 
         let value = client
-            .acp_request(&node_id, "_praxis/recon", json!({
+            .acp_request(&node_id, EXT_PRAXIS_RECON, json!({
                 "agent_short_name": agent_short_name,
                 "is_semantic": true,
             }))
@@ -582,7 +583,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         json_result(json!({
             "status": "success",
             "session_id": session_id,
-            "session_id_short": &session_id[..8.min(session_id.len())],
+            "session_id_short": crate::short_id(&session_id),
             "yolo_mode": params.yolo,
             "project": params.project
         }))
@@ -652,7 +653,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         };
 
         let result = client
-            .acp_request(&node_id, "_praxis/write_file", json!({
+            .acp_request(&node_id, EXT_PRAXIS_WRITE_FILE, json!({
                 "file_type": file_type,
                 "path": params.path,
                 "contents": params.contents,
@@ -748,7 +749,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
 
         let chains: Vec<_> = result.chains.iter().map(|c| json!({
             "type": "chain",
-            "id": &c.id[..8.min(c.id.len())],
+            "id": crate::short_id(&c.id),
             "name": c.name,
             "description": c.description,
             "category": c.category,
@@ -832,11 +833,11 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let response = match result {
             super::ops::OpRunResult::Operation { id, name } => json!({
                 "status": "success", "type": "operation",
-                "id": &id[..8.min(id.len())], "name": name
+                "id": crate::short_id(&id), "name": name
             }),
             super::ops::OpRunResult::Chain { name, execution_id } => json!({
                 "status": "success", "type": "chain", "name": name,
-                "execution_id": execution_id.as_deref().map(|id| &id[..8.min(id.len())])
+                "execution_id": execution_id.as_deref().map(crate::short_id)
             }),
         };
 
@@ -856,10 +857,10 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let response = match result {
             super::ops::OpInfoResult::Operation(op) => json!({
                 "type": "operation",
-                "id": &op.operation_id[..8.min(op.operation_id.len())],
+                "id": crate::short_id(&op.operation_id),
                 "name": op.spec.name,
                 "status": format!("{:?}", op.status),
-                "node_id": &op.node_id[..8.min(op.node_id.len())],
+                "node_id": crate::short_id(&op.node_id),
                 "agent": op.agent_short_name,
                 "result": op.result,
                 "output": op.output,
@@ -873,11 +874,11 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
                 let final_output: String = exec.outputs.values().cloned().collect::<Vec<_>>().join("\n");
                 json!({
                     "type": "chain",
-                    "id": &exec.execution_id[..8.min(exec.execution_id.len())],
+                    "id": crate::short_id(&exec.execution_id),
                     "chain_name": exec.chain_name,
                     "chain_id": exec.chain_id,
                     "status": exec.status.to_string(),
-                    "node_id": &exec.node_id[..8.min(exec.node_id.len())],
+                    "node_id": crate::short_id(&exec.node_id),
                     "agent": exec.agent_short_name,
                     "element_count": exec.elements.len(),
                     "elements": elements,
@@ -969,20 +970,20 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
 
         let ops: Vec<_> = result.operations.iter().map(|o| json!({
             "type": "operation",
-            "id": &o.operation_id[..8.min(o.operation_id.len())],
+            "id": crate::short_id(&o.operation_id),
             "name": o.spec.name,
             "status": format!("{:?}", o.status),
-            "node_id": &o.node_id[..8.min(o.node_id.len())],
+            "node_id": crate::short_id(&o.node_id),
             "agent": o.agent_short_name,
             "queue_position": o.queue_position
         })).collect();
 
         let chains: Vec<_> = result.chains.iter().map(|e| json!({
             "type": "chain",
-            "id": &e.execution_id[..8.min(e.execution_id.len())],
+            "id": crate::short_id(&e.execution_id),
             "chain_name": e.chain_name,
             "status": e.status.to_string(),
-            "node_id": &e.node_id[..8.min(e.node_id.len())],
+            "node_id": crate::short_id(&e.node_id),
             "agent": e.agent_short_name,
             "element_count": e.elements.len()
         })).collect();

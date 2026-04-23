@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useEffect, useCallback, useRef, type ReactNode, type Dispatch } from 'react';
+import { createContext, useContext, useReducer, useEffect, useCallback, useMemo, useRef, type ReactNode, type Dispatch } from 'react';
 import { wsClient } from '../api/websocket';
 import { generateUUID } from '../utils/uuid';
 import type { OrchestratorState, OrchestratorSessionState } from './orchestratorTypes';
@@ -1520,15 +1520,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           break;
         }
         case 'state_update':
-          //
-          // Debug: Log selected_agent info from state updates.
-          //
-          if (message.state.nodes?.length > 0) {
-            const nodeWithSession = message.state.nodes.find(n => n.selected_agent?.session_id);
-            if (nodeWithSession) {
-              console.log('[state_update] Node with session:', nodeWithSession.node_id, 'selected_agent:', nodeWithSession.selected_agent);
-            }
-          }
           dispatch({ type: 'SET_STATE', state: message.state });
           break;
         case 'command_response': {
@@ -2652,7 +2643,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     wsClient.send({ type: 'lua_agent_script_toggle_disabled', script_id: scriptId, disabled });
   }, []);
 
-  const value: AppContextValue = {
+  const value = useMemo<AppContextValue>(() => ({
     state,
     dispatch,
     getNode,
@@ -2743,7 +2734,83 @@ export function AppProvider({ children }: { children: ReactNode }) {
     deleteLuaAgentScript,
     resetLuaAgentScriptDefaults,
     toggleLuaAgentScriptDisabled,
-  };
+  }), [
+    state,
+    dispatch,
+    getNode,
+    sendCommand,
+    sendAcpNodeRequest,
+    sendAcpNodeNotification,
+    registerTerminalHandler,
+    sendTerminalInput,
+    requestOperations,
+    runOperation,
+    cancelOperation,
+    removeOperation,
+    clearOperations,
+    clearEventLog,
+    removeNode,
+    resetNode,
+    getConfig,
+    setConfig,
+    clearOpDefStatus,
+    orchestratorCreateSession,
+    orchestratorCloseSession,
+    orchestratorCancelPrompt,
+    orchestratorSendPrompt,
+    orchestratorSetActiveSession,
+    orchestratorClearMessages,
+    send,
+    requestTrafficLog,
+    requestTrafficMatches,
+    clearTraffic,
+    requestInterceptRules,
+    createInterceptRule,
+    updateInterceptRule,
+    deleteInterceptRule,
+    enableIntercept,
+    disableIntercept,
+    clearInterceptRuleError,
+    addAgentSessionMessage,
+    clearAgentSessionMessages,
+    clearAgentSessionStreaming,
+    requestChainDefList,
+    requestChain,
+    createChain,
+    updateChain,
+    deleteChain,
+    runChain,
+    cancelChainExecution,
+    removeChainExecution,
+    clearChainExecutions,
+    requestChainExecutions,
+    clearChainStatus,
+    clearLastCreatedChain,
+    requestChainTriggers,
+    createChainTrigger,
+    updateChainTrigger,
+    deleteChainTrigger,
+    trackNodeAccess,
+    agentChatStart,
+    agentChatStop,
+    agentChatAddAgent,
+    agentChatRemoveAgent,
+    agentChatReorderAgents,
+    agentChatSendMessage,
+    agentChatJoinChannel,
+    agentChatGetHistory,
+    agentChatGetState,
+    agentChatSetCurrentChannel,
+    agentChatClearError,
+    logQuerySetQuery,
+    logQueryRun,
+    listLuaAgentScripts,
+    addLuaAgentScript,
+    updateLuaAgentScript,
+    deleteLuaAgentScript,
+    resetLuaAgentScriptDefaults,
+    toggleLuaAgentScriptDisabled,
+  ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

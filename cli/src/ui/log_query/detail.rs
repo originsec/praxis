@@ -12,27 +12,27 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use serde_json::Value;
 
-use crate::app::App;
+use crate::app::LogQueryState;
 use crate::ui::common::titled_panel;
 use crate::ui::theme::{
     ACCENT, DIM, JSON_KEY, JSON_NUMBER, JSON_PUNCT, JSON_STRING, MUTED, TEXT,
 };
 
-pub fn render(f: &mut Frame, area: Rect, app: &App) {
-    let title = row_title(app);
+pub fn render(f: &mut Frame, area: Rect, state: &LogQueryState) {
+    let title = row_title(state);
     let block = titled_panel(&title);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let Some(src_idx) = app.log_query.selected_source_index() else {
+    let Some(src_idx) = state.selected_source_index() else {
         return;
     };
-    let Some(row) = app.log_query.rows.get(src_idx) else {
+    let Some(row) = state.rows.get(src_idx) else {
         return;
     };
 
     let mut lines: Vec<Line> = Vec::new();
-    for (i, name) in app.log_query.columns.iter().enumerate() {
+    for (i, name) in state.columns.iter().enumerate() {
         if !lines.is_empty() {
             lines.push(Line::from(""));
         }
@@ -43,15 +43,15 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         render_value(row.get(i), &mut lines);
     }
 
-    let para = Paragraph::new(lines).scroll((app.log_query.detail_scroll, 0));
+    let para = Paragraph::new(lines).scroll((state.detail_scroll, 0));
     f.render_widget(para, inner);
 }
 
-fn row_title(app: &App) -> String {
-    let visible = app.log_query.visible_row_count();
+fn row_title(state: &LogQueryState) -> String {
+    let visible = state.visible_row_count();
     format!(
         " Row {} / {} (esc: close) ",
-        app.log_query.selected_row + 1,
+        state.selected_row + 1,
         visible
     )
 }

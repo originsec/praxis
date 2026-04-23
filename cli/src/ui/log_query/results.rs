@@ -12,7 +12,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row, Table};
 use serde_json::Value;
 
-use crate::app::App;
+use crate::app::LogQueryState;
 use crate::app::log_query::{LogQueryFocus, SortDirection, cell_to_string};
 use crate::ui::common::focused_titled_panel;
 use crate::ui::theme::{
@@ -26,24 +26,24 @@ const MAX_COL_WIDTH: u16 = 40;
 const MIN_COL_WIDTH: u16 = 4;
 const COL_SAMPLE_ROWS: usize = 200;
 
-pub fn render(f: &mut Frame, area: Rect, app: &App) {
-    if app.log_query.row_expanded && !app.log_query.rows.is_empty() {
+pub fn render(f: &mut Frame, area: Rect, state: &LogQueryState) {
+    if state.row_expanded && !state.rows.is_empty() {
         let cols = Layout::horizontal([
             Constraint::Percentage(60),
             Constraint::Percentage(40),
         ])
         .split(area);
-        render_table(f, cols[0], app);
-        detail::render(f, cols[1], app);
+        render_table(f, cols[0], state);
+        detail::render(f, cols[1], state);
     } else {
-        render_table(f, area, app);
+        render_table(f, area, state);
     }
 }
 
-fn render_table(f: &mut Frame, area: Rect, app: &App) {
-    let focused = app.log_query.focus == LogQueryFocus::Results;
+fn render_table(f: &mut Frame, area: Rect, state: &LogQueryState) {
+    let focused = state.focus == LogQueryFocus::Results;
 
-    let title = build_title(app);
+    let title = build_title(state);
     let block = focused_titled_panel(&title, focused);
     let outer_inner = block.inner(area);
     f.render_widget(block, area);
@@ -58,8 +58,8 @@ fn render_table(f: &mut Frame, area: Rect, app: &App) {
         height: outer_inner.height,
     };
 
-    if app.log_query.columns.is_empty() {
-        let hint = if app.log_query.is_running {
+    if state.columns.is_empty() {
+        let hint = if state.is_running {
             "Running…"
         } else {
             "Write a query above and press Ctrl+R to see results."
@@ -71,16 +71,15 @@ fn render_table(f: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
-    let widths = compute_column_widths(app, inner.width);
+    let widths = compute_column_widths(state, inner.width);
 
-    let header_cells: Vec<Cell> = app
-        .log_query
+    let header_cells: Vec<Cell> = state
         .columns
         .iter()
         .enumerate()
         .map(|(i, name)| {
-            let indicator = if Some(i) == app.log_query.sort_column {
-                match app.log_query.sort_direction {
+            let indicator = if Some(i) == state.sort_column {
+                match state.sort_direction {
                     SortDirection::Asc => " ▲",
                     SortDirection::Desc => " ▼",
                 }
@@ -98,12 +97,12 @@ fn render_table(f: &mut Frame, area: Rect, app: &App) {
         .collect();
     let header = Row::new(header_cells).height(1);
 
-    let visible = app.log_query.visible_row_count();
+    let visible = state.visible_row_count();
     let rows_iter: Vec<Row> = (0..visible)
         .filter_map(|v| {
-            let src_idx = app.log_query.visible_to_source(v)?;
-            let row = app.log_query.rows.get(src_idx)?;
-            Some(build_row(row, &app.log_query.columns, &widths, v == app.log_query.selected_row))
+            let src_idx = state.visible_to_source(v)?;
+            let row = state.rows.get(src_idx)?;
+            Some(build_row(row, &state.columns, &widths, v == state.selected_row))
         })
         .collect();
 
@@ -114,7 +113,7 @@ fn render_table(f: &mut Frame, area: Rect, app: &App) {
     let constraints: Vec<Constraint> = widths.iter().map(|w| Constraint::Length(*w)).collect();
 
     let mut table_state = ratatui::widgets::TableState::default();
-    table_state.select(Some(app.log_query.selected_row));
+    table_state.select(Some(state.selected_row));
 
     let table = Table::new(rows_iter, constraints)
         .header(header)
@@ -124,21 +123,21 @@ fn render_table(f: &mut Frame, area: Rect, app: &App) {
     f.render_stateful_widget(table, inner, &mut table_state);
 }
 
-fn build_title(app: &App) -> String {
-    let visible = app.log_query.visible_row_count();
-    let total = app.log_query.rows.len();
-    let reported = app.log_query.total_count;
+fn build_title(state: &LogQueryState) -> String {
+    let visible = state.visible_row_count();
+    let total = state.rows.len();
+    let reported = state.total_count;
 
-    let filter_bit = if app.log_query.search_active && !app.log_query.search_input.is_empty() {
-        format!(" · filter “{}”", app.log_query.search_input)
+    let filter_bit = if state.search_active && !state.search_input.is_empty() {
+        format!(" · filter “{}”", state.search_input)
     } else {
         String::new()
     };
 
-    let sort_bit = match (app.log_query.sort_column, app.log_query.sort_direction) {
+    let sort_bit = match (state.sort_column, state.sort_direction) {
         (Some(i), SortDirection::Asc) => format!(
             " · sort {} ▲",
-            app.log_query
+            state
                 .columns
                 .get(i)
                 .cloned()
@@ -146,7 +145,7 @@ fn build_title(app: &App) -> String {
         ),
         (Some(i), SortDirection::Desc) => format!(
             " · sort {} ▼",
-            app.log_query
+            state
                 .columns
                 .get(i)
                 .cloned()
@@ -252,21 +251,19 @@ fn text_style(column: &str) -> Style {
 // column proportionally down to its minimum so the ratio is preserved.
 //
 
-fn compute_column_widths(app: &App, area_width: u16) -> Vec<u16> {
-    let n = app.log_query.columns.len();
+fn compute_column_widths(state: &LogQueryState, area_width: u16) -> Vec<u16> {
+    let n = state.columns.len();
     if n == 0 {
         return Vec::new();
     }
 
-    let mut widths: Vec<u16> = app
-        .log_query
+    let mut widths: Vec<u16> = state
         .columns
         .iter()
         .map(|c| (c.chars().count() as u16 + 2).max(MIN_COL_WIDTH))
         .collect();
 
-    let sample = app
-        .log_query
+    let sample = state
         .rows
         .iter()
         .take(COL_SAMPLE_ROWS)

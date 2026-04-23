@@ -2,7 +2,7 @@ use crate::app::{
     Popup, PopupKind, ScheduleKind, TriggerForm, TriggerFormSection, TriggerKind,
 };
 use crate::ui::common::centered_rect_fixed;
-use crate::ui::theme::{ACCENT, DIM, MUTED, POPUP_BG, POPUP_HIGHLIGHT_BG, TEXT};
+use crate::ui::theme::{ACCENT, DIM, MUTED, POPUP_BG, POPUP_HIGHLIGHT_BG, STATUS_RUNNING, TEXT};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -220,7 +220,7 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
                         " \u{25cf} true ",
                         Style::default()
                             .fg(Color::Black)
-                            .bg(Color::Rgb(180, 160, 60)),
+                            .bg(STATUS_RUNNING),
                     )
                 } else {
                     Span::styled(" \u{25cb} false ", Style::default().fg(DIM))
@@ -482,7 +482,7 @@ pub fn render_run_options(f: &mut Frame, area: Rect, opts: &crate::app::RunOptio
         let style = if is_cursor {
             Style::default()
                 .fg(TEXT)
-                .bg(Color::Rgb(35, 40, 35))
+                .bg(POPUP_HIGHLIGHT_BG)
                 .add_modifier(Modifier::BOLD)
         } else if *selected {
             Style::default().fg(TEXT)
@@ -525,7 +525,7 @@ pub fn render_run_options(f: &mut Frame, area: Rect, opts: &crate::app::RunOptio
         let style = if is_cursor {
             Style::default()
                 .fg(TEXT)
-                .bg(Color::Rgb(35, 40, 35))
+                .bg(POPUP_HIGHLIGHT_BG)
                 .add_modifier(Modifier::BOLD)
         } else if *selected {
             Style::default().fg(TEXT)
@@ -554,7 +554,7 @@ pub fn render_run_options(f: &mut Frame, area: Rect, opts: &crate::app::RunOptio
                 " \u{25cf} enabled ",
                 Style::default()
                     .fg(Color::Black)
-                    .bg(Color::Rgb(180, 160, 60)),
+                    .bg(STATUS_RUNNING),
             )
         } else {
             Span::styled(" \u{25cb} disabled ", Style::default().fg(DIM))
@@ -1010,7 +1010,7 @@ fn row_style(is_cursor: bool, selected: bool) -> Style {
     if is_cursor {
         Style::default()
             .fg(TEXT)
-            .bg(Color::Rgb(35, 40, 35))
+            .bg(POPUP_HIGHLIGHT_BG)
             .add_modifier(Modifier::BOLD)
     } else if selected {
         Style::default().fg(TEXT)
@@ -1030,7 +1030,7 @@ fn toggle_line(label: &str, value: bool, focused: bool) -> Line<'static> {
             " \u{25cf} yes ",
             Style::default()
                 .fg(Color::Black)
-                .bg(Color::Rgb(180, 160, 60)),
+                .bg(STATUS_RUNNING),
         )
     } else {
         Span::styled(" \u{25cb} no ", Style::default().fg(DIM))

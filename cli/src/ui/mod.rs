@@ -46,7 +46,7 @@ pub fn render(f: &mut Frame, app: &App) {
             &app.operations.chain_executions,
         ),
         Window::Intercept => intercept::render(f, chunks[1], app),
-        Window::LogQuery => log_query::render(f, chunks[1], app),
+        Window::LogQuery => log_query::render(f, chunks[1], &app.log_query),
         Window::Operations => {
             if let Some(ref form) = app.new_op_form {
                 popup::render_new_op_form(f, chunks[1], form);

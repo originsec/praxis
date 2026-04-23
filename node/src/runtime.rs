@@ -236,7 +236,7 @@ async fn listen_to_queues(
                     {
                         common::log_info!(
                             "Received semantic parser response {} success={}",
-                            &response.request_id[..8.min(response.request_id.len())],
+                            common::short_id(&response.request_id),
                             response.success
                         );
                         semantic_tracker.complete(response);
@@ -325,7 +325,7 @@ async fn listen_to_queues(
             }
 
             if let Some(data) = event.data {
-                common::log_info!("Forwarding {} bytes of terminal output to server", data.len());
+                common::log_debug!("Forwarding {} bytes of terminal output to server", data.len());
                 let output = TerminalOutput {
                     node_id: node_id_for_terminal.clone(),
                     terminal_id: event.terminal_id,
@@ -336,7 +336,6 @@ async fn listen_to_queues(
                 let message = NodeSignalMessage::TerminalOutput(output);
                 match publish_json(&channel_for_terminal, NODE_SIGNAL_QUEUE, &message).await {
                     Ok(_) => {
-                        common::log_info!("Terminal output sent to server successfully");
                         if consecutive_failures > 0 {
                             common::log_info!(
                                 "Terminal forwarder recovered after {} failures",
@@ -379,7 +378,7 @@ async fn listen_to_queues(
         let mut last_error_log_time = std::time::Instant::now();
 
         while let Some(entry) = traffic_rx.recv().await {
-            common::log_info!(
+            common::log_debug!(
                 "Forwarding intercepted traffic: {} {} to {}",
                 entry.method.as_deref().unwrap_or("?"),
                 entry.url,
@@ -685,7 +684,7 @@ async fn listen_to_queues(
                                 NodeDirectMessage::SemanticParserResponse(response) => {
                                     common::log_warn!(
                                         "Received semantic parser response {} on main queue (expected on semantic queue)",
-                                        &response.request_id[..8.min(response.request_id.len())]
+                                        common::short_id(&response.request_id)
                                     );
                                     semantic_parser_tracker.complete(response);
                                 }

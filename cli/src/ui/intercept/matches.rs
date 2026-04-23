@@ -145,8 +145,7 @@ fn render_detail(f: &mut Frame, area: Rect, app: &App) {
         .border_style(Style::default().fg(border_color))
         .title(title);
 
-    let filtered = app.intercept.filtered_matches();
-    let Some(m) = filtered.get(app.intercept.match_selected) else {
+    let Some(m) = app.intercept.filtered_match_at(app.intercept.match_selected) else {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "No match selected.",

@@ -356,18 +356,15 @@ impl InterceptState {
         self.search_regex = if self.search_input.is_empty() {
             None
         } else {
-            Regex::new(&format!("(?i){}", regex::escape(&self.search_input)))
+            //
+            // Prefer the user's literal regex when it compiles; fall
+            // back to the escaped form so typing `(` mid-stream doesn't
+            // drop the filter.
+            //
+            Regex::new(&format!("(?i){}", self.search_input))
                 .ok()
-                .or_else(|| Regex::new(&format!("(?i){}", self.search_input)).ok())
+                .or_else(|| Regex::new(&format!("(?i){}", regex::escape(&self.search_input))).ok())
         };
-        //
-        // Prefer the user's literal regex when it compiles; fall back to
-        // the escaped form for an otherwise-invalid pattern so typing
-        // `(` doesn't break the input mid-stream.
-        //
-        if let Ok(r) = Regex::new(&format!("(?i){}", self.search_input)) {
-            self.search_regex = Some(r);
-        }
         self.display_dirty = true;
     }
 
@@ -620,8 +617,36 @@ impl InterceptState {
         }
     }
 
+    //
+    // Non-allocating alternatives for the hot paths that only need a
+    // count or a single entry — avoids rebuilding the whole Vec<&T> per
+    // frame.
+    //
+
+    pub fn filtered_matches_len(&self) -> usize {
+        match self.match_rule_filter {
+            Some(rid) => self
+                .matches
+                .iter()
+                .filter(|m| m.match_info.rule_id == rid)
+                .count(),
+            None => self.matches.len(),
+        }
+    }
+
+    pub fn filtered_match_at(&self, idx: usize) -> Option<&TrafficMatchWithDetails> {
+        match self.match_rule_filter {
+            Some(rid) => self
+                .matches
+                .iter()
+                .filter(|m| m.match_info.rule_id == rid)
+                .nth(idx),
+            None => self.matches.get(idx),
+        }
+    }
+
     pub fn move_match_selection(&mut self, delta: i32) {
-        let total = self.filtered_matches().len();
+        let total = self.filtered_matches_len();
         if total == 0 {
             self.match_selected = 0;
             return;
@@ -1239,7 +1264,7 @@ impl App {
             message: format!(
                 "{} interception on node {}...?",
                 if currently_on { "Disable" } else { "Enable" },
-                &node_id[..8.min(node_id.len())]
+                common::short_id(&node_id)
             ),
             action: ConfirmKind::ToggleIntercept {
                 node_id,
@@ -1352,14 +1377,13 @@ impl App {
                     height: body_area.height.saturating_sub(1),
                     ..body_area
                 });
-                let border_x = split[0].x.saturating_add(split[0].width);
                 match mouse.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
-                        if mouse.column >= border_x.saturating_sub(1)
-                            && mouse.column <= border_x + 1
-                            && mouse.row >= split[0].y
-                            && mouse.row < split[0].y + split[0].height
-                        {
+                        if crate::ui::common::hit_vertical_border(
+                            split[0],
+                            mouse.column,
+                            mouse.row,
+                        ) {
                             self.intercept.log_dragging = true;
                             return;
                         }
@@ -1399,10 +1423,11 @@ impl App {
                         }
                     }
                     MouseEventKind::Drag(MouseButton::Left) if self.intercept.log_dragging => {
-                        let w = body_area.width.max(1) as i32;
-                        let rel = (mouse.column as i32 - body_area.x as i32).clamp(0, w);
-                        let pct = ((rel * 100) / w) as u16;
-                        self.intercept.log_split_percent = pct.clamp(20, 80);
+                        self.intercept.log_split_percent = crate::ui::common::drag_split_percent(
+                            body_area.x,
+                            body_area.width,
+                            mouse.column,
+                        );
                         return;
                     }
                     MouseEventKind::Up(MouseButton::Left) => {
@@ -1422,14 +1447,13 @@ impl App {
                     height: body_area.height.saturating_sub(1),
                     ..body_area
                 });
-                let border_x = split[0].x.saturating_add(split[0].width);
                 match mouse.kind {
                     MouseEventKind::Down(MouseButton::Left) => {
-                        if mouse.column >= border_x.saturating_sub(1)
-                            && mouse.column <= border_x + 1
-                            && mouse.row >= split[0].y
-                            && mouse.row < split[0].y + split[0].height
-                        {
+                        if crate::ui::common::hit_vertical_border(
+                            split[0],
+                            mouse.column,
+                            mouse.row,
+                        ) {
                             self.intercept.match_dragging = true;
                             return;
                         }
@@ -1450,7 +1474,7 @@ impl App {
                             let list_start = split[0].y + 2;
                             if mouse.row >= list_start {
                                 let clicked = (mouse.row - list_start) as usize;
-                                let total = self.intercept.filtered_matches().len();
+                                let total = self.intercept.filtered_matches_len();
                                 if clicked < total {
                                     self.intercept.match_selected = clicked;
                                     self.intercept.match_detail_scroll = 0;
@@ -1460,10 +1484,11 @@ impl App {
                         }
                     }
                     MouseEventKind::Drag(MouseButton::Left) if self.intercept.match_dragging => {
-                        let w = body_area.width.max(1) as i32;
-                        let rel = (mouse.column as i32 - body_area.x as i32).clamp(0, w);
-                        let pct = ((rel * 100) / w) as u16;
-                        self.intercept.match_split_percent = pct.clamp(20, 80);
+                        self.intercept.match_split_percent = crate::ui::common::drag_split_percent(
+                            body_area.x,
+                            body_area.width,
+                            mouse.column,
+                        );
                         return;
                     }
                     MouseEventKind::Up(MouseButton::Left) => {

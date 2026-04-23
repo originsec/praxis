@@ -101,7 +101,7 @@ impl ExecutionGraph {
                 group_id,
                 sg.color,
                 sg.yolo_mode,
-                element_ids.iter().map(|id| &id[..8.min(id.len())]).collect::<Vec<_>>()
+                element_ids.iter().map(|id| common::short_id(id)).collect::<Vec<_>>()
             );
         }
 

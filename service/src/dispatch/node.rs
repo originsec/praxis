@@ -190,8 +190,8 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
         NodeSignalMessage::SemanticParserRequest { node_id, request } => {
             common::log_info!(
                 "Received semantic parser request {} from node {}",
-                &request.request_id[..8.min(request.request_id.len())],
-                &node_id[..8.min(node_id.len())]
+                common::short_id(&request.request_id),
+                common::short_id(&node_id)
             );
 
             //
@@ -221,7 +221,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
         NodeSignalMessage::InterceptedTraffic(mut entry) => {
             common::log_info!(
                 "Received intercepted traffic: node={} agent={} {} {} {} (status={})",
-                &entry.node_id[..8.min(entry.node_id.len())],
+                common::short_id(&entry.node_id),
                 entry.agent_short_name,
                 entry.direction,
                 entry.method.as_deref().unwrap_or("-"),
@@ -370,7 +370,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
         NodeSignalMessage::InterceptStatusUpdate(status) => {
             common::log_info!(
                 "Received intercept status update from node {}: enabled={}",
-                &status.node_id[..8.min(status.node_id.len())],
+                common::short_id(&status.node_id),
                 status.enabled
             );
             ctx.node_registry
@@ -392,7 +392,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             {
                 common::log_error!(
                     "Failed to forward node ACP frame to client {}: {}",
-                    &client_id[..8.min(client_id.len())],
+                    common::short_id(&client_id),
                     e
                 );
             }

@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use serde_json::json;
 use std::time::Duration;
 
+use crate::acp_ext::{EXT_PRAXIS_GREP_FILES, EXT_PRAXIS_READ_FILE};
 use crate::mcp::McpClient;
 use crate::{
     AgentFileType, AgentTool, ChainDefinitionFull, ChainDefinitionInfo, ChainExecutionUpdate,
@@ -538,7 +539,7 @@ async fn read_file_inner(
     }
 
     let result = client
-        .acp_request(node_id, "_praxis/read_file", params)
+        .acp_request(node_id, EXT_PRAXIS_READ_FILE, params)
         .await?;
 
     if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
@@ -670,7 +671,7 @@ async fn grep_files_inner(
     });
 
     let result = client
-        .acp_request(node_id, "_praxis/grep_files", params)
+        .acp_request(node_id, EXT_PRAXIS_GREP_FILES, params)
         .await?;
 
     //

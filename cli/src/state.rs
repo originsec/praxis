@@ -92,7 +92,7 @@ impl CliState {
     pub fn get_or_create_client_id(&mut self) -> Result<String> {
         if let Some(ref id) = self.client_id {
             if !id.starts_with("cli_") {
-                let prefixed = format!("cli_{}", &id[..8.min(id.len())]);
+                let prefixed = format!("cli_{}", common::short_id(id));
                 self.client_id = Some(prefixed.clone());
                 self.save()?;
                 return Ok(prefixed);

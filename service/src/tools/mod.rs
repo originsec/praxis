@@ -3,6 +3,7 @@ mod session_poisoning;
 
 use anyhow::{anyhow, Result};
 use chrono::Utc;
+use common::acp_ext::{EXT_PRAXIS_READ_FILE, EXT_PRAXIS_RECON, EXT_PRAXIS_WRITE_SESSION_CONTENT};
 use common::{
     AgentFileType, ReconResult, TargetSpec, ToolConfigField, ToolConfigOption,
     ToolkitApplyItem, ToolkitApplyOutcome, ToolkitDiffHunk, ToolkitDiffLine, ToolkitDiffLineKind,
@@ -392,7 +393,7 @@ impl ToolkitManager {
         });
         let result = self
             .acp_node_proxy
-            .request(&self.publish_channel, node_id, "_praxis/recon", params)
+            .request(&self.publish_channel, node_id, EXT_PRAXIS_RECON, params)
             .await?;
         if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
             return Err(anyhow!(err.to_string()));
@@ -419,7 +420,7 @@ impl ToolkitManager {
         });
         let result = self
             .acp_node_proxy
-            .request(&self.publish_channel, node_id, "_praxis/read_file", params)
+            .request(&self.publish_channel, node_id, EXT_PRAXIS_READ_FILE, params)
             .await?;
         if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
             return Err(anyhow!(err.to_string()));
@@ -449,7 +450,7 @@ impl ToolkitManager {
             .request(
                 &self.publish_channel,
                 node_id,
-                "_praxis/write_session_content",
+                EXT_PRAXIS_WRITE_SESSION_CONTENT,
                 params,
             )
             .await?;

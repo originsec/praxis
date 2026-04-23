@@ -9,19 +9,19 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use crate::app::App;
+use crate::app::LogQueryState;
 use crate::ui::theme::{ACCENT, DIM, POPUP_BG, POPUP_HIGHLIGHT_BG, TEXT};
 
 const MAX_VISIBLE: usize = 10;
 const POPUP_WIDTH: u16 = 28;
 
-pub fn render(f: &mut Frame, editor_area: Rect, app: &App) {
-    if app.log_query.suggestions.is_empty() {
+pub fn render(f: &mut Frame, editor_area: Rect, state: &LogQueryState) {
+    if state.suggestions.is_empty() {
         return;
     }
 
     let width = POPUP_WIDTH.min(editor_area.width.saturating_sub(4));
-    let height = (app.log_query.suggestions.len().min(MAX_VISIBLE) as u16 + 2).min(
+    let height = (state.suggestions.len().min(MAX_VISIBLE) as u16 + 2).min(
         editor_area.height.saturating_sub(2),
     );
     if height < 3 {
@@ -34,7 +34,7 @@ pub fn render(f: &mut Frame, editor_area: Rect, app: &App) {
     // editor.rs. Place the popup one row below the cursor if there is
     // room, otherwise above.
     //
-    let editor = &app.log_query.editor;
+    let editor = &state.editor;
     let text_x = editor_area.x + 2; // border(1) + left padding(1)
     let text_y = editor_area.y + 1; // border(1), editor body sits at y+1
     let body_height = editor_area.height.saturating_sub(2) as usize;
@@ -76,7 +76,7 @@ pub fn render(f: &mut Frame, editor_area: Rect, app: &App) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let selected = app.log_query.suggestion_index;
+    let selected = state.suggestion_index;
     let offset = if selected >= MAX_VISIBLE {
         selected + 1 - MAX_VISIBLE
     } else {
@@ -84,8 +84,7 @@ pub fn render(f: &mut Frame, editor_area: Rect, app: &App) {
     };
 
     let mut lines: Vec<Line> = Vec::new();
-    for (i, s) in app
-        .log_query
+    for (i, s) in state
         .suggestions
         .iter()
         .enumerate()

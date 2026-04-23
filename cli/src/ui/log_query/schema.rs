@@ -10,12 +10,12 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-use crate::app::App;
+use crate::app::LogQueryState;
 use crate::app::log_query::schema::TABLES;
 use crate::ui::common::centered_rect_fixed;
 use crate::ui::theme::{ACCENT, DIM, MUTED, POPUP_BG, POPUP_HIGHLIGHT_BG, TEXT};
 
-pub fn render_popup(f: &mut Frame, area: Rect, app: &App) {
+pub fn render_popup(f: &mut Frame, area: Rect, state: &LogQueryState) {
     //
     // Popup takes ~80% of the window area, capped to sensible bounds.
     //
@@ -36,8 +36,8 @@ pub fn render_popup(f: &mut Frame, area: Rect, app: &App) {
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
-    let expanded = app.log_query.schema_expanded;
-    let selected = app.log_query.schema_selected;
+    let expanded = state.schema_expanded;
+    let selected = state.schema_selected;
 
     let mut lines: Vec<Line> = Vec::new();
     for (i, table) in TABLES.iter().enumerate() {
@@ -100,7 +100,7 @@ pub fn render_popup(f: &mut Frame, area: Rect, app: &App) {
         height: hint_height,
     };
 
-    let para = Paragraph::new(lines).scroll((app.log_query.schema_scroll, 0));
+    let para = Paragraph::new(lines).scroll((state.schema_scroll, 0));
     f.render_widget(para, body_area);
 
     let hints = Line::from(vec![
