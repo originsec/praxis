@@ -34,7 +34,7 @@ where
 {
     async fn send(&mut self, msg: &Value) -> Result<()> {
         let text = format!("{}\n", msg);
-        self.tx.send(Message::Text(text))
+        self.tx.send(Message::Text(text.into()))
             .await
             .map_err(|e| anyhow::anyhow!("WS send error: {}", e))
     }

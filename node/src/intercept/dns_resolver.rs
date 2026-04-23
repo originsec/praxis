@@ -2,15 +2,16 @@
 
 use anyhow::{Context, Result};
 use dashmap::DashMap;
+use hickory_resolver::TokioResolver;
 use hickory_resolver::config::{ResolverConfig, ResolverOpts};
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::net::runtime::TokioRuntimeProvider;
 use std::collections::HashSet;
 use std::net::IpAddr;
 
 /// DNS resolver that tracks domain-to-IP mappings for interception
 pub struct DomainResolver {
     /// Async DNS resolver
-    resolver: TokioAsyncResolver,
+    resolver: TokioResolver,
     /// Mapping of domain to resolved IPs
     domain_to_ips: DashMap<String, HashSet<IpAddr>>,
     /// Reverse mapping of IP to domain (for packet engine lookups)
@@ -20,10 +21,13 @@ pub struct DomainResolver {
 impl DomainResolver {
     /// Create a new domain resolver using system DNS configuration
     pub async fn new() -> Result<Self> {
-        let resolver = TokioAsyncResolver::tokio(
+        let resolver = TokioResolver::builder_with_config(
             ResolverConfig::default(),
-            ResolverOpts::default(),
-        );
+            TokioRuntimeProvider::default(),
+        )
+        .with_options(ResolverOpts::default())
+        .build()
+        .context("Failed to build DNS resolver")?;
 
         Ok(Self {
             resolver,

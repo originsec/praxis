@@ -131,7 +131,8 @@ fn init_vm_shell() -> Result<Lua> {
                 Ok(mlua::VmState::Continue)
             }
         },
-    );
+    )
+    .map_err(lua_error)?;
 
     install_shared_api(&lua)?;
     install_shared_libraries(&lua)?;
