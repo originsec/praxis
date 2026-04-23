@@ -48,15 +48,15 @@
 - For PostgreSQL, use `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`.
 - The `service_config` table can store version tracking keys (e.g., `builtin_scripts_version`) to coordinate data migrations across service upgrades.
 
-## Hunting Tables
+## Log Query Tables
 
-- Any hunting table changes (additions, removals, or field changes) require updating the table schemas in all three locations:
-  - `service/src/hunting/tables.rs` — backend column definitions and `resolve_table()`
-  - `service/src/hunting/sql.rs` — SQL config for DB-backed tables
-  - `web/frontend/src/components/hunting/KqlCodeEditor.tsx` — `TABLE_SCHEMAS` for autocomplete
-  - `web/frontend/src/pages/HuntingPage.tsx` — `TABLES` schema sidebar
-  - `web/frontend/src/components/command/HuntingModal.tsx` — `TABLES` schema sidebar (command center)
-  - `docs/src/usage/hunting.md` — documentation
+- Any log-query table changes (additions, removals, or field changes) require updating the table schemas in all locations:
+  - `service/src/log_query/tables.rs` — backend column definitions and `resolve_table()`
+  - `service/src/log_query/sql.rs` — SQL config for DB-backed tables
+  - `web/frontend/src/components/log-query/KqlCodeEditor.tsx` — `TABLE_SCHEMAS` for autocomplete
+  - `web/frontend/src/components/command/LogQueryModal.tsx` — `TABLES` schema sidebar (command center)
+  - `cli/src/app/log_query/schema.rs` — `TABLES` constant for TUI schema sidebar + autocomplete
+  - `docs/src/usage/log-query.md` — documentation
 - All table lists must be in **alphabetical order** by table name.
 
 ## CLI

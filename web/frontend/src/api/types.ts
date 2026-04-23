@@ -784,9 +784,9 @@ export type BrowserMessage =
   | { type: 'lua_agent_script_list' }
   | { type: 'lua_agent_script_toggle_disabled'; script_id: string; disabled: boolean }
   //
-  // Hunting messages.
+  // LogQuery messages.
   //
-  | { type: 'hunting_query'; query: string }
+  | { type: 'log_query'; query: string }
   //
   // Agent Chat messages.
   //
@@ -903,10 +903,10 @@ export type ServerMessage =
   | { type: 'lua_agent_script_list'; scripts: LuaAgentScriptInfo[] }
   | { type: 'lua_agent_script_disabled_toggled'; script_id: string; disabled: boolean }
   //
-  // Hunting messages.
+  // LogQuery messages.
   //
-  | { type: 'hunting_query_response'; columns: string[]; rows: unknown[][]; total_count: number }
-  | { type: 'hunting_query_error'; message: string }
+  | { type: 'log_query_response'; columns: string[]; rows: unknown[][]; total_count: number }
+  | { type: 'log_query_error'; message: string }
   //
   // Agent Chat messages.
   //

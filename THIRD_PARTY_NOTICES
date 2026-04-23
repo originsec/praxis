@@ -14,5 +14,5 @@ This project includes third-party components.
 - Author: Iwan Timmer
 - Source: https://github.com/irtimmer/rust-kql
 - License: Apache-2.0
-- Component location: `service/src/hunting/parser/`
+- Component location: `service/src/log_query/parser/`
 - Modifications: multiline join whitespace handling, $left/$right join key syntax

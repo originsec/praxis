@@ -3,4 +3,4 @@ mod parser;
 pub(crate) mod sql;
 mod tables;
 
-pub use executor::execute_hunting_query;
+pub use executor::execute_log_query;

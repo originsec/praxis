@@ -216,11 +216,11 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             handle_lua_script_toggle_disabled(ctx, client_id, script_id, disabled).await,
 
         //
-        // Hunting.
+        // LogQuery.
         //
 
-        ClientSignalMessage::HuntingQuery { client_id, query } =>
-            handle_hunting_query(ctx, client_id, query).await,
+        ClientSignalMessage::LogQuery { client_id, query } =>
+            handle_log_query(ctx, client_id, query).await,
 
         //
         // ACP (Agent Control Protocol).
@@ -2709,16 +2709,16 @@ async fn handle_lua_script_toggle_disabled(
 }
 
 // ---------------------------------------------------------------------------
-// Hunting
+// LogQuery
 // ---------------------------------------------------------------------------
 
-async fn handle_hunting_query(ctx: &ServiceContext, client_id: String, query: String) {
+async fn handle_log_query(ctx: &ServiceContext, client_id: String, query: String) {
     common::log_info!(
-        "Received HuntingQuery from client {}",
+        "Received LogQuery from client {}",
         &client_id[..8.min(client_id.len())]
     );
 
-    match crate::hunting::execute_hunting_query(
+    match crate::log_query::execute_log_query(
         &query,
         &ctx.database,
         &ctx.node_registry,
@@ -2727,7 +2727,7 @@ async fn handle_hunting_query(ctx: &ServiceContext, client_id: String, query: St
     .await
     {
         Ok(result) => {
-            let message = ClientDirectMessage::HuntingQueryResponse {
+            let message = ClientDirectMessage::LogQueryResponse {
                 columns: result.columns,
                 rows: result.rows,
                 total_count: result.total_count,
@@ -2736,13 +2736,13 @@ async fn handle_hunting_query(ctx: &ServiceContext, client_id: String, query: St
                 send_to_client(&ctx.client_publish_channel, &client_id, message).await
             {
                 common::log_error!(
-                    "Failed to send HuntingQueryResponse to client {}: {}",
+                    "Failed to send LogQueryResponse to client {}: {}",
                     client_id, e
                 );
             }
         }
         Err(e) => {
-            let message = ClientDirectMessage::HuntingQueryError {
+            let message = ClientDirectMessage::LogQueryError {
                 message: e.to_string(),
             };
             let _ =

@@ -307,9 +307,9 @@ pub enum BrowserMessage {
     },
 
     //
-    // Hunting messages.
+    // LogQuery messages.
     //
-    HuntingQuery {
+    LogQuery {
         query: String,
     },
 
@@ -654,14 +654,14 @@ pub enum ServerMessage {
     },
 
     //
-    // Hunting messages.
+    // LogQuery messages.
     //
-    HuntingQueryResponse {
+    LogQueryResponse {
         columns: Vec<String>,
         rows: Vec<Vec<serde_json::Value>>,
         total_count: usize,
     },
-    HuntingQueryError {
+    LogQueryError {
         message: String,
     },
 

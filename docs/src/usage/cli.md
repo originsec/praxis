@@ -36,7 +36,7 @@ Running `praxis_cli` with no arguments launches the interactive terminal UI:
 $ praxis_cli
 ```
 
-The terminal UI provides four main windows, switched with keyboard shortcuts:
+The terminal UI provides five main windows, switched with keyboard shortcuts:
 
 ### Orchestrator (`Ctrl+O`)
 
@@ -124,6 +124,39 @@ optional LLM summary prompt. `Tab` moves between fields, `Space` /
 | `Esc` | Clear rule filter / unfocus detail |
 | `r` | Refresh |
 
+### Log Query (`Ctrl+G`)
+
+KQL-style query interface over captured logs (intercepted traffic, event
+logs, recon results, operations history, and more — 12 virtual tables in
+total). See [Log Query](./log-query.md) for the full query reference.
+
+- Multi-line editor with basic KQL keyword highlighting
+- `Ctrl+Enter` runs the query; the spinner in the hint line indicates
+  in-flight execution
+- `Tab` opens a context-aware autocomplete popup (tables at start of
+  query, operators after `|`, columns inside `where` / `project` /
+  `sort`, functions & keywords inline). `↑`/`↓` navigate, `Enter`
+  accepts, `Esc` dismisses
+- `?` toggles a schema sidebar listing every available table with its
+  columns and descriptions
+- `Esc` from the editor moves focus to the results; `i` from the results
+  moves focus back to the editor
+
+Results pane:
+
+| Key | Action |
+|-----|--------|
+| `↑` `↓` `PgUp` `PgDn` `g` `G` | Row navigation |
+| `Enter` | Expand the selected row into a key/value detail pane (JSON fields pretty-printed) |
+| `/` | Open a row-search filter (substring match across all cells) |
+| `s` | Cycle the sort column |
+| `S` | Toggle sort direction |
+| `r` | Re-run the last query |
+| `Esc` | Close expanded row / clear search / return to editor |
+
+Response bodies in `TrafficLogs` and JSON columns like
+`ToolkitActionsLog.details_json` auto-pretty-print in the detail pane.
+
 ### Operations (`Ctrl+P`)
 
 Operation and chain management with two tabs:
@@ -136,7 +169,7 @@ Operation and chain management with two tabs:
 
 Configuration management:
 - **LLM** — model definitions, provider selection, API keys, and feature assignment (orchestrator, semantic ops, semantic parser, traffic parser)
-- **Service** — MCP server toggle, MCP port, Claude Bridge settings (CCRv1/CCRv2 enable and port configuration), logging, hunting row limits, prompt timeout
+- **Service** — MCP server toggle, MCP port, Claude Bridge settings (CCRv1/CCRv2 enable and port configuration), logging, log query row limits, prompt timeout
 - **About** — connection info
 
 ### Mouse Support

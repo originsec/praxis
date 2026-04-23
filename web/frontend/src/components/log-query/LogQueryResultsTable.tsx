@@ -3,13 +3,13 @@ import { DataTable, type ColumnDef } from '../common/DataTable';
 
 const ROWS_PER_PAGE = 100;
 
-interface HuntingResultsTableProps {
+interface LogQueryResultsTableProps {
   columns: string[];
   rows: unknown[][];
   totalCount: number;
 }
 
-export function HuntingResultsTable({ columns, rows, totalCount }: HuntingResultsTableProps) {
+export function LogQueryResultsTable({ columns, rows, totalCount }: LogQueryResultsTableProps) {
   const columnDefs = useMemo<ColumnDef<unknown[]>[]>(() =>
     columns.map((col, colIdx) => ({
       key: String(colIdx),

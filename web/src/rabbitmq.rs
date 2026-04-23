@@ -670,11 +670,11 @@ impl RabbitMqClient {
     }
 
     //
-    // Hunting methods.
+    // LogQuery methods.
     //
 
-    pub async fn hunting_query(&self, query: String) -> Result<()> {
-        let message = ClientSignalMessage::HuntingQuery {
+    pub async fn log_query(&self, query: String) -> Result<()> {
+        let message = ClientSignalMessage::LogQuery {
             client_id: self.state.client_id.clone(),
             query,
         };
@@ -1215,13 +1215,13 @@ impl RabbitMqClient {
             }
 
             //
-            // Hunting responses.
+            // LogQuery responses.
             //
-            ClientDirectMessage::HuntingQueryResponse { columns, rows, total_count } => {
-                self.state.broadcast(ServerMessage::HuntingQueryResponse { columns, rows, total_count });
+            ClientDirectMessage::LogQueryResponse { columns, rows, total_count } => {
+                self.state.broadcast(ServerMessage::LogQueryResponse { columns, rows, total_count });
             }
-            ClientDirectMessage::HuntingQueryError { message } => {
-                self.state.broadcast(ServerMessage::HuntingQueryError { message });
+            ClientDirectMessage::LogQueryError { message } => {
+                self.state.broadcast(ServerMessage::LogQueryError { message });
             }
 
             //

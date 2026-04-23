@@ -15,7 +15,7 @@
 - [Sessions](./usage/sessions.md)
 - [Terminal](./usage/terminal.md)
 - [Interception](./usage/interception.md)
-- [Hunting](./usage/hunting.md)
+- [Log Query](./usage/log-query.md)
 - [Orchestrator](./usage/orchestrator.md)
 - [Semantic Operations](./usage/semantic-operations.md)
 - [Toolkit](./usage/toolkit.md)

@@ -53,6 +53,11 @@ pub enum AppEvent {
     InterceptEntriesAppended(Vec<InterceptedTrafficEntry>),
     InterceptMatchesAppended(Vec<TrafficMatchWithDetails>),
     InterceptStatusChanged(InterceptStatus),
+    //
+    // LogQuery result — either a successful result set or an error message
+    // returned from the service.
+    //
+    LogQueryResult(Result<crate::client::LogQueryResults, String>),
     Tick,
 }
 

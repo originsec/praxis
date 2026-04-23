@@ -20,9 +20,9 @@ pub const LLM_FEATURE_ORCHESTRATOR: &str = "llm_feature_orchestrator";
 /// Centralized application/event logging toggle
 pub const APPLICATION_LOGS_ENABLED: &str = "application_logs_enabled";
 
-/// Max rows returned from database tables in hunting queries
-pub const HUNTING_QUERY_ROW_LIMIT: &str = "hunting_query_row_limit";
-pub const HUNTING_QUERY_ROW_LIMIT_DEFAULT: usize = 10_000_000;
+/// Max rows returned from database tables in log-query searches
+pub const LOG_QUERY_ROW_LIMIT: &str = "log_query_row_limit";
+pub const LOG_QUERY_ROW_LIMIT_DEFAULT: usize = 10_000_000;
 
 /// MCP server configuration keys
 pub const MCP_SERVER_ENABLED: &str = "mcp_server_enabled";
@@ -53,7 +53,7 @@ pub const KNOWN_CONFIG_KEYS: &[&str] = &[
     LLM_FEATURE_SEMANTIC_OPS,
     LLM_FEATURE_ORCHESTRATOR,
     APPLICATION_LOGS_ENABLED,
-    HUNTING_QUERY_ROW_LIMIT,
+    LOG_QUERY_ROW_LIMIT,
     MCP_SERVER_ENABLED,
     MCP_SERVER_PORT,
     PROMPT_TIMEOUT_SECS,

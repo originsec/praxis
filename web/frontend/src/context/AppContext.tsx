@@ -181,9 +181,9 @@ interface ToolkitState {
 }
 
 //
-// Hunting state.
+// LogQuery state.
 //
-interface HuntingState {
+interface LogQueryState {
   query: string;
   isRunning: boolean;
   columns: string[];
@@ -192,7 +192,7 @@ interface HuntingState {
   error: string | null;
 }
 
-const initialHuntingState: HuntingState = {
+const initialLogQueryState: LogQueryState = {
   query: '',
   isRunning: false,
   columns: [],
@@ -235,7 +235,7 @@ interface AppState {
   opDefSuccess: string | null;
   orchestrator: OrchestratorState;
   intercept: InterceptState;
-  hunting: HuntingState;
+  logQuery: LogQueryState;
   chains: ChainState;
   agentChat: AgentChatState;
   toolkit: ToolkitState;
@@ -296,7 +296,7 @@ function createInitialState(): AppState {
     opDefSuccess: null,
     orchestrator: loadPersistedOrchestratorState(initialOrchestratorState),
     intercept: initialInterceptState,
-    hunting: initialHuntingState,
+    logQuery: initialLogQueryState,
     chains: initialChainState,
     agentChat: initialAgentChatState,
     toolkit: initialToolkitState,
@@ -340,12 +340,12 @@ type Action =
   | { type: 'ORCHESTRATOR_CLEAR_MESSAGES'; sessionId: string }
   | { type: 'ORCHESTRATOR_TOKEN_USAGE'; sessionId: string; promptTokens: number; completionTokens: number; totalTokens: number }
   //
-  // Hunting actions.
+  // LogQuery actions.
   //
-  | { type: 'HUNTING_SET_QUERY'; query: string }
-  | { type: 'HUNTING_QUERY_START' }
-  | { type: 'HUNTING_QUERY_RESPONSE'; columns: string[]; rows: unknown[][]; totalCount: number }
-  | { type: 'HUNTING_QUERY_ERROR'; message: string }
+  | { type: 'LOG_QUERY_SET_QUERY'; query: string }
+  | { type: 'LOG_QUERY_START' }
+  | { type: 'LOG_QUERY_RESPONSE'; columns: string[]; rows: unknown[][]; totalCount: number }
+  | { type: 'LOG_QUERY_ERROR'; message: string }
   //
   // Intercept actions.
   //
@@ -804,23 +804,23 @@ function reduceIntercept(state: AppState, action: Action): AppState | null {
   }
 }
 
-function reduceHunting(state: AppState, action: Action): AppState | null {
+function reduceLogQuery(state: AppState, action: Action): AppState | null {
   switch (action.type) {
-    case 'HUNTING_SET_QUERY':
+    case 'LOG_QUERY_SET_QUERY':
       return {
         ...state,
-        hunting: { ...state.hunting, query: action.query },
+        logQuery: { ...state.logQuery, query: action.query },
       };
-    case 'HUNTING_QUERY_START':
+    case 'LOG_QUERY_START':
       return {
         ...state,
-        hunting: { ...state.hunting, isRunning: true, error: null },
+        logQuery: { ...state.logQuery, isRunning: true, error: null },
       };
-    case 'HUNTING_QUERY_RESPONSE':
+    case 'LOG_QUERY_RESPONSE':
       return {
         ...state,
-        hunting: {
-          ...state.hunting,
+        logQuery: {
+          ...state.logQuery,
           isRunning: false,
           columns: action.columns,
           rows: action.rows,
@@ -828,10 +828,10 @@ function reduceHunting(state: AppState, action: Action): AppState | null {
           error: null,
         },
       };
-    case 'HUNTING_QUERY_ERROR':
+    case 'LOG_QUERY_ERROR':
       return {
         ...state,
-        hunting: { ...state.hunting, isRunning: false, error: action.message },
+        logQuery: { ...state.logQuery, isRunning: false, error: action.message },
       };
     default:
       return null;
@@ -1310,7 +1310,7 @@ function reducer(state: AppState, action: Action): AppState {
     reduceCore(state, action)
     ?? reduceOrchestrator(state, action)
     ?? reduceIntercept(state, action)
-    ?? reduceHunting(state, action)
+    ?? reduceLogQuery(state, action)
     ?? reduceAgentSessions(state, action)
     ?? reduceChains(state, action)
     ?? reduceRecentNodes(state, action)
@@ -1457,10 +1457,10 @@ interface AppContextValue {
   agentChatSetCurrentChannel: (channelId: string | null) => void;
   agentChatClearError: () => void;
   //
-  // Hunting.
+  // LogQuery.
   //
-  huntingSetQuery: (query: string) => void;
-  huntingQuery: (query: string) => void;
+  logQuerySetQuery: (query: string) => void;
+  logQueryRun: (query: string) => void;
   //
   // Lua agent scripts.
   //
@@ -1921,13 +1921,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           break;
 
         //
-        // Hunting messages.
+        // LogQuery messages.
         //
-        case 'hunting_query_response':
-          dispatch({ type: 'HUNTING_QUERY_RESPONSE', columns: message.columns, rows: message.rows, totalCount: message.total_count });
+        case 'log_query_response':
+          dispatch({ type: 'LOG_QUERY_RESPONSE', columns: message.columns, rows: message.rows, totalCount: message.total_count });
           break;
-        case 'hunting_query_error':
-          dispatch({ type: 'HUNTING_QUERY_ERROR', message: message.message });
+        case 'log_query_error':
+          dispatch({ type: 'LOG_QUERY_ERROR', message: message.message });
           break;
 
         //
@@ -2614,15 +2614,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   //
-  // Hunting functions.
+  // LogQuery functions.
   //
-  const huntingSetQuery = useCallback((query: string) => {
-    dispatch({ type: 'HUNTING_SET_QUERY', query });
+  const logQuerySetQuery = useCallback((query: string) => {
+    dispatch({ type: 'LOG_QUERY_SET_QUERY', query });
   }, []);
 
-  const huntingQuery = useCallback((query: string) => {
-    dispatch({ type: 'HUNTING_QUERY_START' });
-    wsClient.send({ type: 'hunting_query', query });
+  const logQueryRun = useCallback((query: string) => {
+    dispatch({ type: 'LOG_QUERY_START' });
+    wsClient.send({ type: 'log_query', query });
   }, []);
 
   //
@@ -2730,10 +2730,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     agentChatSetCurrentChannel,
     agentChatClearError,
     //
-    // Hunting.
+    // LogQuery.
     //
-    huntingSetQuery,
-    huntingQuery,
+    logQuerySetQuery,
+    logQueryRun,
     //
     // Lua agent scripts.
     //

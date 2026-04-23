@@ -8,7 +8,7 @@ use super::parser::ast::{Expr, JoinKey, Literal, Operator, Source, Statement, Ta
 use super::parser::parser::parse;
 use super::sql::{build_sql_where, materialize_sql_table};
 
-use crate::config::service_config::{HUNTING_QUERY_ROW_LIMIT, HUNTING_QUERY_ROW_LIMIT_DEFAULT};
+use crate::config::service_config::{LOG_QUERY_ROW_LIMIT, LOG_QUERY_ROW_LIMIT_DEFAULT};
 use crate::config::ServiceConfig;
 use crate::database::Database;
 use crate::state::NodeRegistry;
@@ -19,18 +19,18 @@ use super::tables::{
     materialize_recon_tool_logs, materialize_toolkit_actions_log, resolve_table,
 };
 
-pub struct HuntingResult {
+pub struct LogQueryResult {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<Value>>,
     pub total_count: usize,
 }
 
-pub async fn execute_hunting_query(
+pub async fn execute_log_query(
     query: &str,
     database: &Arc<Database>,
     node_registry: &Arc<NodeRegistry>,
     service_config: &Arc<RwLock<ServiceConfig>>,
-) -> Result<HuntingResult> {
+) -> Result<LogQueryResult> {
     let statements = parse(query)
         .map(|(_, stmts)| stmts)
         .map_err(|e| anyhow!("KQL parse error: {}", e))?;
@@ -77,9 +77,9 @@ pub async fn execute_hunting_query(
 
     let row_cap = {
         let cfg = service_config.read().await;
-        cfg.get(HUNTING_QUERY_ROW_LIMIT)
+        cfg.get(LOG_QUERY_ROW_LIMIT)
             .and_then(|s| s.parse().ok())
-            .unwrap_or(HUNTING_QUERY_ROW_LIMIT_DEFAULT)
+            .unwrap_or(LOG_QUERY_ROW_LIMIT_DEFAULT)
     };
 
     let (columns, mut rows) = materialize_table(
@@ -268,7 +268,7 @@ pub async fn execute_hunting_query(
         rows.truncate(row_cap);
     }
 
-    Ok(HuntingResult {
+    Ok(LogQueryResult {
         columns: current_columns,
         rows,
         total_count,

@@ -102,7 +102,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   //
 
   const [eventLoggingEnabled, setEventLoggingEnabled] = useState(false);
-  const [huntingQueryRowLimit, setHuntingQueryRowLimit] = useState('10000000');
+  const [logQueryRowLimit, setLogQueryRowLimit] = useState('10000000');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [mcpServerEnabled, setMcpServerEnabled] = useState(true);
   const [mcpServerPort, setMcpServerPort] = useState('8585');
@@ -142,7 +142,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       'llm_feature_traffic_parser',
       'llm_orchestrator_max_tokens',
       'application_logs_enabled',
-      'hunting_query_row_limit',
+      'log_query_row_limit',
       'mcp_server_enabled',
       'mcp_server_port',
       'prompt_timeout_secs',
@@ -220,7 +220,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       setEventLoggingEnabled(false);
     }
 
-    setHuntingQueryRowLimit(cfg.hunting_query_row_limit || '10000000');
+    setLogQueryRowLimit(cfg.log_query_row_limit || '10000000');
 
     if (cfg.mcp_server_enabled) {
       const v = cfg.mcp_server_enabled.toLowerCase();
@@ -1284,11 +1284,11 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                   <label className="text-[10px] text-muted">Row limit</label>
                   <input
                     type="number"
-                    value={huntingQueryRowLimit}
-                    onChange={e => setHuntingQueryRowLimit(e.target.value)}
+                    value={logQueryRowLimit}
+                    onChange={e => setLogQueryRowLimit(e.target.value)}
                     onBlur={() => {
-                      const n = parseInt(huntingQueryRowLimit, 10);
-                      if (n > 0) setConfig({ hunting_query_row_limit: huntingQueryRowLimit });
+                      const n = parseInt(logQueryRowLimit, 10);
+                      if (n > 0) setConfig({ log_query_row_limit: logQueryRowLimit });
                     }}
                     min="1"
                     className={`w-28 ${inputCls}`}
