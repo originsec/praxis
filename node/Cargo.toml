@@ -31,7 +31,7 @@ dirs = "6.0"
 walkdir = "2"
 common = { package = "praxis_common", path = "../common" }
 portable-pty = "0.9"
-rmcp = { version = "0.8", features = ["client", "transport-child-process"] }
+rmcp = { version = "1", features = ["client", "transport-child-process"] }
 # Traffic interception dependencies
 flate2 = "1"
 brotli = "8"

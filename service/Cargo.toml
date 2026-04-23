@@ -32,7 +32,7 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-r
 regex = "1"
 dirs = "6.0"
 hostname = "0.4"
-rmcp = { version = "0.8", features = ["server", "transport-sse-server", "client", "transport-sse-client-reqwest", "schemars"] }
+rmcp = { version = "1", features = ["server", "transport-streamable-http-server", "client", "transport-streamable-http-client-reqwest", "schemars"] }
 async-trait = "0.1"
 async-stream = "0.3"
 axum = { version = "0.8", features = ["json"] }

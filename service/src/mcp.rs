@@ -981,33 +981,56 @@ impl McpServerManager {
         self.stop().await;
 
         let bind_addr: SocketAddr = format!("0.0.0.0:{}", port).parse()?;
-        common::log_info!("Starting MCP SSE server on {}", bind_addr);
+        common::log_info!("Starting MCP streamable-http server on {}", bind_addr);
 
-        let sse_server = rmcp::transport::sse_server::SseServer::serve(bind_addr).await?;
+        //
+        // rmcp 1.x replaced SSE transport with streamable-http. The server
+        // mounts at /mcp (was /sse) and we build it as an axum service
+        // instead of letting rmcp own the listener loop.
+        //
 
+        let ct = CancellationToken::new();
         let rabbitmq_url = rabbitmq_url.to_string();
-        let ct = sse_server.with_service(move || {
-            let url = rabbitmq_url.clone();
-            let client = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    ServiceMcpClient::connect(&url, 600).await
-                })
-            });
-            match client {
-                Ok(c) => PraxisServer::with_client(c),
-                Err(e) => {
-                    common::log_error!("Failed to create MCP client: {}", e);
-                    //
-                    // Return a server that will fail - there's no good fallback.
-                    //
-                    panic!("Failed to create MCP client: {}", e);
+
+        let service_ct = ct.clone();
+        let service: rmcp::transport::streamable_http_server::StreamableHttpService<
+            PraxisServer<ServiceMcpClient>,
+            rmcp::transport::streamable_http_server::session::local::LocalSessionManager,
+        > = rmcp::transport::streamable_http_server::StreamableHttpService::new(
+            move || {
+                let url = rabbitmq_url.clone();
+                let client = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        ServiceMcpClient::connect(&url, 600).await
+                    })
+                });
+                match client {
+                    Ok(c) => Ok(PraxisServer::with_client(c)),
+                    Err(e) => {
+                        common::log_error!("Failed to create MCP client: {}", e);
+                        Err(std::io::Error::other(format!("Failed to create MCP client: {}", e)))
+                    }
                 }
-            }
+            },
+            std::sync::Arc::new(
+                rmcp::transport::streamable_http_server::session::local::LocalSessionManager::default(),
+            ),
+            rmcp::transport::streamable_http_server::StreamableHttpServerConfig::default()
+                .with_cancellation_token(service_ct),
+        );
+
+        let router = axum::Router::new().nest_service("/mcp", service);
+        let listener = tokio::net::TcpListener::bind(bind_addr).await?;
+        let shutdown_ct = ct.clone();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router)
+                .with_graceful_shutdown(async move { shutdown_ct.cancelled_owned().await })
+                .await;
         });
 
         *self.cancellation_token.write().await = Some(ct);
 
-        common::log_info!("MCP SSE server started on port {}", port);
+        common::log_info!("MCP streamable-http server started on port {} (endpoint /mcp)", port);
         Ok(())
     }
 

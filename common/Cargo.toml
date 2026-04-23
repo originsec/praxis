@@ -22,7 +22,7 @@ lapin = "4.5"
 tokio = { version = "1", features = ["sync", "io-util"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tracing = "0.1"
-rmcp = { version = "0.8", features = ["server", "transport-io", "transport-sse-server", "schemars"] }
+rmcp = { version = "1", features = ["server", "transport-io", "transport-streamable-http-server", "schemars"] }
 schemars = "1"
 uuid = { version = "1", features = ["v4"] }
 async-trait = "0.1"

@@ -38,4 +38,4 @@ tower-http = { version = "0.6", features = ["cors"] }
 dirs = "6"
 rust-embed = { version = "8", features = ["axum"] }
 mime_guess = "2"
-rmcp = { version = "0.8", features = ["client", "transport-sse-client-reqwest"] }
+rmcp = { version = "1", features = ["client", "transport-streamable-http-client-reqwest"] }
