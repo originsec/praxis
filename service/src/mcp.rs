@@ -88,14 +88,17 @@ impl ServiceMcpClient {
 
         channel
             .queue_declare(
-                &client_queue,
+                client_queue.as_str().into(),
                 QueueDeclareOptions::default(),
                 FieldTable::default(),
             )
             .await?;
 
         channel
-            .queue_purge(&client_queue, lapin::options::QueuePurgeOptions::default())
+            .queue_purge(
+                client_queue.as_str().into(),
+                lapin::options::QueuePurgeOptions::default(),
+            )
             .await?;
 
         //
@@ -104,7 +107,7 @@ impl ServiceMcpClient {
 
         channel
             .exchange_declare(
-                CLIENT_BROADCAST_EXCHANGE,
+                CLIENT_BROADCAST_EXCHANGE.into(),
                 ExchangeKind::Fanout,
                 ExchangeDeclareOptions::default(),
                 FieldTable::default(),
@@ -113,7 +116,7 @@ impl ServiceMcpClient {
 
         let broadcast_queue = channel
             .queue_declare(
-                "",
+                "".into(),
                 QueueDeclareOptions {
                     exclusive: true,
                     auto_delete: true,
@@ -125,9 +128,9 @@ impl ServiceMcpClient {
 
         channel
             .queue_bind(
-                broadcast_queue.name().as_str(),
-                CLIENT_BROADCAST_EXCHANGE,
-                "",
+                broadcast_queue.name().as_str().into(),
+                CLIENT_BROADCAST_EXCHANGE.into(),
+                "".into(),
                 lapin::options::QueueBindOptions::default(),
                 FieldTable::default(),
             )
@@ -167,8 +170,8 @@ impl ServiceMcpClient {
             let consumer_tag = format!("mcp_direct_{}", Uuid::new_v4());
             let mut direct_consumer = match channel
                 .basic_consume(
-                    &client_queue,
-                    &consumer_tag,
+                    client_queue.as_str().into(),
+                    consumer_tag.as_str().into(),
                     BasicConsumeOptions::default(),
                     FieldTable::default(),
                 )
@@ -184,8 +187,8 @@ impl ServiceMcpClient {
             let broadcast_tag = format!("mcp_broadcast_{}", Uuid::new_v4());
             let mut broadcast_consumer = match channel
                 .basic_consume(
-                    &broadcast_queue,
-                    &broadcast_tag,
+                    broadcast_queue.as_str().into(),
+                    broadcast_tag.as_str().into(),
                     BasicConsumeOptions::default(),
                     FieldTable::default(),
                 )

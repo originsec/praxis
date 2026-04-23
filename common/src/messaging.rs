@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use uuid::Uuid;
 use lapin::{
-    BasicProperties, Channel, options::BasicPublishOptions, publisher_confirm::PublisherConfirm,
+    BasicProperties, Channel, PublisherConfirm, options::BasicPublishOptions,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -53,8 +53,8 @@ pub async fn publish_json<T: Serialize>(
     let payload = serde_json::to_vec(message)?;
     let confirm = channel
         .basic_publish(
-            "",
-            routing_key,
+            "".into(),
+            routing_key.into(),
             BasicPublishOptions::default(),
             &payload,
             BasicProperties::default(),
@@ -146,8 +146,8 @@ pub async fn publish_json_exchange<T: Serialize>(
     let payload = serde_json::to_vec(message)?;
     let confirm = channel
         .basic_publish(
-            exchange,
-            "",
+            exchange.into(),
+            "".into(),
             BasicPublishOptions::default(),
             &payload,
             BasicProperties::default(),

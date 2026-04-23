@@ -52,8 +52,8 @@ pub async fn wait_for_registration_ack(
     let consumer_tag = "node-registration-consumer";
     let mut consumer = channel
         .basic_consume(
-            node_queue,
-            consumer_tag,
+            node_queue.into(),
+            consumer_tag.into(),
             BasicConsumeOptions::default(),
             FieldTable::default(),
         )
@@ -96,7 +96,7 @@ pub async fn wait_for_registration_ack(
     // Cancel the consumer so messages aren't routed to it anymore.
     //
     channel
-        .basic_cancel(consumer_tag, BasicCancelOptions::default())
+        .basic_cancel(consumer_tag.into(), BasicCancelOptions::default())
         .await
         .ok();
 
@@ -177,7 +177,7 @@ pub async fn register_with_service(
         //
         if let Err(e) = channel
             .queue_declare(
-                &node_queue,
+                node_queue.as_str().into(),
                 QueueDeclareOptions::default(),
                 FieldTable::default(),
             )

@@ -114,7 +114,7 @@ async fn run_main_loop() -> Result<()> {
 
     node_signal_channel
         .queue_declare(
-            NODE_SIGNAL_QUEUE,
+            NODE_SIGNAL_QUEUE.into(),
             QueueDeclareOptions::default(),
             FieldTable::default(),
         )
@@ -124,13 +124,13 @@ async fn run_main_loop() -> Result<()> {
     // Purge stale messages from previous service run.
     //
     let purged = node_signal_channel
-        .queue_purge(NODE_SIGNAL_QUEUE, QueuePurgeOptions::default())
+        .queue_purge(NODE_SIGNAL_QUEUE.into(), QueuePurgeOptions::default())
         .await?;
     common::log_info!("Declared queue: {} (purged {} stale messages)", NODE_SIGNAL_QUEUE, purged);
 
     broadcast_channel
         .exchange_declare(
-            NODE_BROADCAST_EXCHANGE,
+            NODE_BROADCAST_EXCHANGE.into(),
             ExchangeKind::Fanout,
             ExchangeDeclareOptions::default(),
             FieldTable::default(),
@@ -141,7 +141,7 @@ async fn run_main_loop() -> Result<()> {
     let client_signal_channel = connection.create_channel().await?;
     client_signal_channel
         .queue_declare(
-            CLIENT_SIGNAL_QUEUE,
+            CLIENT_SIGNAL_QUEUE.into(),
             QueueDeclareOptions::default(),
             FieldTable::default(),
         )
@@ -151,13 +151,13 @@ async fn run_main_loop() -> Result<()> {
     // Purge stale messages from previous service run.
     //
     let purged = client_signal_channel
-        .queue_purge(CLIENT_SIGNAL_QUEUE, QueuePurgeOptions::default())
+        .queue_purge(CLIENT_SIGNAL_QUEUE.into(), QueuePurgeOptions::default())
         .await?;
     common::log_info!("Declared queue: {} (purged {} stale messages)", CLIENT_SIGNAL_QUEUE, purged);
 
     broadcast_channel
         .exchange_declare(
-            CLIENT_BROADCAST_EXCHANGE,
+            CLIENT_BROADCAST_EXCHANGE.into(),
             ExchangeKind::Fanout,
             ExchangeDeclareOptions::default(),
             FieldTable::default(),
@@ -370,7 +370,7 @@ async fn run_main_loop() -> Result<()> {
     let web_event_log_channel = connection.create_channel().await?;
     web_event_log_channel
         .queue_declare(
-            common::WEB_EVENT_LOG_QUEUE,
+            common::WEB_EVENT_LOG_QUEUE.into(),
             QueueDeclareOptions::default(),
             FieldTable::default(),
         )
@@ -380,7 +380,7 @@ async fn run_main_loop() -> Result<()> {
     let node_event_log_channel = connection.create_channel().await?;
     node_event_log_channel
         .queue_declare(
-            common::NODE_EVENT_LOG_QUEUE,
+            common::NODE_EVENT_LOG_QUEUE.into(),
             QueueDeclareOptions::default(),
             FieldTable::default(),
         )
@@ -389,8 +389,8 @@ async fn run_main_loop() -> Result<()> {
 
     let mut web_event_log_consumer = web_event_log_channel
         .basic_consume(
-            common::WEB_EVENT_LOG_QUEUE,
-            "service_web_event_log_consumer",
+            common::WEB_EVENT_LOG_QUEUE.into(),
+            "service_web_event_log_consumer".into(),
             BasicConsumeOptions::default(),
             FieldTable::default(),
         )
@@ -398,8 +398,8 @@ async fn run_main_loop() -> Result<()> {
 
     let mut node_event_log_consumer = node_event_log_channel
         .basic_consume(
-            common::NODE_EVENT_LOG_QUEUE,
-            "service_node_event_log_consumer",
+            common::NODE_EVENT_LOG_QUEUE.into(),
+            "service_node_event_log_consumer".into(),
             BasicConsumeOptions::default(),
             FieldTable::default(),
         )
@@ -490,8 +490,8 @@ async fn run_main_loop() -> Result<()> {
 
     let mut node_signal_consumer = node_signal_channel
         .basic_consume(
-            NODE_SIGNAL_QUEUE,
-            "server_node_signal_consumer",
+            NODE_SIGNAL_QUEUE.into(),
+            "server_node_signal_consumer".into(),
             BasicConsumeOptions::default(),
             FieldTable::default(),
         )
@@ -499,8 +499,8 @@ async fn run_main_loop() -> Result<()> {
 
     let mut client_signal_consumer = client_signal_channel
         .basic_consume(
-            CLIENT_SIGNAL_QUEUE,
-            "server_client_signal_consumer",
+            CLIENT_SIGNAL_QUEUE.into(),
+            "server_client_signal_consumer".into(),
             BasicConsumeOptions::default(),
             FieldTable::default(),
         )

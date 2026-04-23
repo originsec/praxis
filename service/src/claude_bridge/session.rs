@@ -196,7 +196,7 @@ impl BridgeSession {
 
         con_channel
             .queue_declare(
-                &node_queue,
+                node_queue.as_str().into(),
                 QueueDeclareOptions {
                     auto_delete: true,
                     ..Default::default()
@@ -207,8 +207,8 @@ impl BridgeSession {
 
         let mut consumer = con_channel
             .basic_consume(
-                &node_queue,
-                &format!("bridge_{}", self.node_id),
+                node_queue.as_str().into(),
+                format!("bridge_{}", self.node_id).as_str().into(),
                 BasicConsumeOptions::default(),
                 FieldTable::default(),
             )
