@@ -225,7 +225,7 @@ Use `-C` to run a single command and exit:
 
 ```bash
 praxis_cli -C "node list"
-praxis_cli -C "session create --node abc123 --yolo"
+praxis_cli -C "session create --node abc123 --agent codex --yolo"
 ```
 
 ### Direct Subcommands
@@ -234,7 +234,7 @@ Subcommands can also be passed directly:
 
 ```bash
 praxis_cli node list
-praxis_cli session create --node abc123 --yolo
+praxis_cli session create --node abc123 --agent codex --yolo
 ```
 
 ### Available Commands
