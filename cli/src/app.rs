@@ -158,6 +158,11 @@ pub struct SessionChat {
     pub yolo: bool,
     pub working_dir: Option<String>,
     pub streaming_content: String,
+    //
+    // Typewriter reveal: number of *chars* of `streaming_content`
+    // currently visible while `is_waiting`. Reset on new turn.
+    //
+    pub revealed_chars: usize,
     pub had_tool_call: bool,
     pub agent_status: Option<String>,
     pub pending_permission: Option<PendingPermission>,
@@ -463,6 +468,7 @@ impl App {
                         yolo: false,
                         working_dir: entry.cwd,
                         streaming_content: String::new(),
+                        revealed_chars: 0,
                         had_tool_call: false,
                         agent_status: None,
                         pending_permission: None,
@@ -832,6 +838,58 @@ impl App {
                         self.settings.status_message = None;
                         self.settings.status_message_at = None;
                         redraw = true;
+                    }
+                }
+                redraw
+            }
+            AppEvent::AnimationTick => {
+                //
+                // Typewriter reveal. Advance per-session reveal counters
+                // toward the tail of the current streaming text. Speed
+                // scales with backlog so a big chunk doesn't leave the
+                // reveal trailing far behind. Kept on a dedicated 30 ms
+                // timer so character cadence stays smooth without pulling
+                // the rest of the app into a high-frequency refresh.
+                //
+
+                fn advance(revealed: &mut usize, target: usize) -> bool {
+                    if *revealed >= target {
+                        return false;
+                    }
+                    let gap = target - *revealed;
+                    let step = if gap > 400 {
+                        54
+                    } else if gap > 160 {
+                        24
+                    } else if gap > 50 {
+                        6
+                    } else {
+                        2
+                    };
+                    *revealed = (*revealed + step).min(target);
+                    true
+                }
+
+                let mut redraw = false;
+                for session in &mut self.orchestrator.sessions {
+                    if !session.is_streaming {
+                        continue;
+                    }
+                    if let Some(ConversationEntry::AssistantText(text)) =
+                        session.messages.last()
+                    {
+                        let target = text.chars().count();
+                        if advance(&mut session.revealed_chars, target) {
+                            redraw = true;
+                        }
+                    }
+                }
+                for session in self.nodes.sessions.values_mut() {
+                    if session.is_waiting && !session.streaming_content.is_empty() {
+                        let target = session.streaming_content.chars().count();
+                        if advance(&mut session.revealed_chars, target) {
+                            redraw = true;
+                        }
                     }
                 }
                 redraw

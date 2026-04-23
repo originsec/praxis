@@ -37,6 +37,13 @@ pub struct OrchestratorSessionState {
     pub is_streaming: bool,
     pub prompt_seq: u64,
     pub pending_tools: Vec<ToolCall>,
+    //
+    // Typewriter reveal: number of *chars* of the current (last)
+    // AssistantText entry that are visible while `is_streaming`.
+    // Reset to 0 when a new AssistantText entry opens; advanced on
+    // AnimationTick toward the entry's char length.
+    //
+    pub revealed_chars: usize,
     pub active_tool: Option<String>,
     pub active_tool_input: Option<String>,
     pub current_plan: Option<OrchestratorPlan>,
@@ -61,6 +68,7 @@ impl OrchestratorSessionState {
             is_streaming: false,
             prompt_seq: 0,
             pending_tools: Vec::new(),
+            revealed_chars: 0,
             active_tool: None,
             active_tool_input: None,
             current_plan: None,
@@ -574,6 +582,12 @@ impl App {
                             existing.push_str(&text);
                         }
                         _ => {
+                            //
+                            // A fresh AssistantText entry opens — restart the
+                            // typewriter reveal so characters type in instead
+                            // of popping in as a chunk.
+                            //
+                            session.revealed_chars = 0;
                             session
                                 .messages
                                 .push(ConversationEntry::AssistantText(text));

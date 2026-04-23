@@ -92,6 +92,37 @@ input, select, textarea {
   animation: blink 1s step-end infinite;
 }
 
+/*
+ * Streaming text: blinking caret on the tail of the last block in an
+ * in-flight markdown region, plus a short fade to soften the DOM swap
+ * when the last paragraph re-parses during fast streams.
+ */
+.stream-active {
+  position: relative;
+}
+.stream-active > *:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 0.95em;
+  vertical-align: middle;
+  margin-left: 3px;
+  background: currentColor;
+  opacity: 0.7;
+  animation: stream-caret-blink 1s steps(2, end) infinite;
+  transform: translateY(-0.08em);
+}
+@keyframes stream-caret-blink {
+  50% { opacity: 0; }
+}
+.stream-active > *:last-child {
+  animation: stream-tail-fade 120ms ease-out;
+}
+@keyframes stream-tail-fade {
+  from { opacity: 0.75; }
+  to   { opacity: 1; }
+}
+
 @keyframes pulse-glow {
   0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }

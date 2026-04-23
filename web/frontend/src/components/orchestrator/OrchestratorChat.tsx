@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import type { OrchestratorMessage, OrchestratorToolExecution } from '../../context/orchestratorTypes';
 import type { OrchestratorPlan, PlanStep } from '../../api/types';
+import { useTypewriter } from '../../utils/useTypewriter';
 
 //
 // Plan step status icon.
@@ -505,6 +506,12 @@ export function StreamingMessage({
   const { thinking, response } = parseThinkingContent(content);
   const padding = compact ? 'px-2 py-2' : 'px-3 md:px-4 py-3';
 
+  //
+  // Reveal the response text typewriter-style. The thinking blocks above
+  // are shown in full — the caret trails the visible reply.
+  //
+  const revealedResponse = useTypewriter(response, true);
+
   return (
     <div className="flex justify-start">
       <div className={`w-full ${compact ? '' : 'md:max-w-[85%]'} ascii-box ${padding} bg-[var(--bg-secondary)] text-[var(--text-highlight)]/80`}>
@@ -518,8 +525,8 @@ export function StreamingMessage({
         <ThinkingDisplay blocks={thinking} />
 
         {response && (
-          <div className={`prose prose-invert max-w-none break-words ${compact ? 'text-[10px] leading-relaxed [&_p]:my-1' : 'text-[11px] leading-relaxed [&_p]:my-1.5'}`}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{response}</ReactMarkdown>
+          <div className={`stream-active prose prose-invert max-w-none break-words ${compact ? 'text-[10px] leading-relaxed [&_p]:my-1' : 'text-[11px] leading-relaxed [&_p]:my-1.5'}`}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{revealedResponse}</ReactMarkdown>
           </div>
         )}
 

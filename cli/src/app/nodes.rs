@@ -537,6 +537,7 @@ impl App {
         session.active_transaction_id = Some(uuid::Uuid::new_v4().to_string());
         session.scroll_offset = 0;
         session.streaming_content.clear();
+        session.revealed_chars = 0;
         session.had_tool_call = false;
         session.tool_calls.clear();
         session.agent_status = None;
@@ -715,6 +716,7 @@ impl App {
             yolo,
             working_dir: working_dir.clone(),
             streaming_content: String::new(),
+            revealed_chars: 0,
             had_tool_call: false,
             agent_status: None,
             pending_permission: None,

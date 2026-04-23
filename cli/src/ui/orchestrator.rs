@@ -156,7 +156,8 @@ fn render_conversation(f: &mut Frame, area: Rect, session: &OrchestratorSessionS
         return;
     }
 
-    for entry in &session.messages {
+    let last_idx = session.messages.len().saturating_sub(1);
+    for (ei, entry) in session.messages.iter().enumerate() {
         match entry {
             ConversationEntry::UserPrompt(text) => {
                 lines.push(Line::from(""));
@@ -173,9 +174,29 @@ fn render_conversation(f: &mut Frame, area: Rect, session: &OrchestratorSessionS
             }
             ConversationEntry::AssistantText(raw) => {
                 //
+                // While this is the active streaming entry, slice to the
+                // typewriter's revealed-char count so characters appear
+                // gradually instead of in chunk-pops. Finished entries
+                // (earlier in the conversation or after streaming ends)
+                // render in full.
+                //
+                let sliced_owned: String;
+                let display: &str = if session.is_streaming
+                    && ei == last_idx
+                    && session.revealed_chars < raw.chars().count()
+                {
+                    sliced_owned = raw
+                        .chars()
+                        .take(session.revealed_chars)
+                        .collect();
+                    &sliced_owned
+                } else {
+                    raw
+                };
+                //
                 // Split into think/visible segments and render each.
                 //
-                let segments = split_think_segments(raw);
+                let segments = split_think_segments(display);
                 for seg in &segments {
                     match seg {
                         ThinkSegment::Thinking(text) => {

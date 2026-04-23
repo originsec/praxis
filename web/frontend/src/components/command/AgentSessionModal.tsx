@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import { FloatingPanel } from './FloatingPanel';
 import { nodeSessionKey, useApp, type AgentSessionMessage } from '../../context/AppContext';
 import { exportAgentSession, downloadTextFile } from '../../utils/export';
+import { useTypewriter } from '../../utils/useTypewriter';
 import type { NodeState, PermissionDecision } from '../../api/types';
 
 interface AgentSessionModalProps {
@@ -46,6 +47,11 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
   const pendingPermission = streaming?.pendingPermission || null;
   const agentStatus = streaming?.agentStatus || null;
   const toolCalls = streaming?.toolCalls || [];
+
+  //
+  // Typewriter reveal of the in-flight assistant reply.
+  //
+  const revealedStreamingContent = useTypewriter(streamingContent, isLoading);
 
   const [permissionSent, setPermissionSent] = useState<string | null>(null);
 
@@ -219,8 +225,8 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
               <div className="flex justify-start">
                 <div className="max-w-[90%] px-2 py-1.5 bg-[var(--bg-secondary)] border-l-2 border-l-[var(--accent-success)]">
                   {streamingContent ? (
-                    <div className="prose prose-invert max-w-none break-words text-[10px] leading-relaxed text-[var(--text-secondary)] [&_p]:my-0.5 [&_pre]:text-[9px] [&_code]:text-[9px]">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingContent}</ReactMarkdown>
+                    <div className="stream-active prose prose-invert max-w-none break-words text-[10px] leading-relaxed text-[var(--text-secondary)] [&_p]:my-0.5 [&_pre]:text-[9px] [&_code]:text-[9px]">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{revealedStreamingContent}</ReactMarkdown>
                     </div>
                   ) : (
                     <div className="flex items-center gap-1.5 text-muted text-[10px]">
