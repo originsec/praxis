@@ -34,6 +34,9 @@ pub enum ConfirmKind {
     ResetAgentScripts,
     ResetNode(String), // node_id
     CloseOrchestratorSession,
+    ClearAllTraffic,
+    DeleteInterceptRule(i64),
+    ToggleIntercept { node_id: String, enable: bool },
     Info,
 }
 
@@ -181,6 +184,22 @@ impl App {
             }
             ConfirmKind::CloseOrchestratorSession => {
                 self.close_active_orchestrator_session().await;
+            }
+            ConfirmKind::ClearAllTraffic => {
+                self.clear_intercept_traffic().await;
+            }
+            ConfirmKind::DeleteInterceptRule(id) => {
+                self.delete_intercept_rule(id).await;
+            }
+            ConfirmKind::ToggleIntercept { node_id, enable } => {
+                let result = if enable {
+                    self.client.enable_intercept(node_id, None).await
+                } else {
+                    self.client.disable_intercept(node_id).await
+                };
+                if let Err(e) = result {
+                    self.intercept.set_error(format!("Intercept toggle: {}", e));
+                }
             }
             ConfirmKind::Info => {}
         }

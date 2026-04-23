@@ -2,9 +2,11 @@
 
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD, Engine};
+use chrono::Utc;
 use common::{
     node_semantic_queue_name, publish_json, publish_json_exchange, ClientBroadcastMessage,
-    ClientDirectMessage, NodeSignalMessage, CLIENT_BROADCAST_EXCHANGE,
+    ClientDirectMessage, NodeSignalMessage, TrafficMatch, TrafficMatchWithDetails,
+    CLIENT_BROADCAST_EXCHANGE,
 };
 
 use crate::config::service_config::APPLICATION_LOGS_ENABLED;
@@ -216,7 +218,7 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             });
         }
 
-        NodeSignalMessage::InterceptedTraffic(entry) => {
+        NodeSignalMessage::InterceptedTraffic(mut entry) => {
             common::log_info!(
                 "Received intercepted traffic: node={} agent={} {} {} {} (status={})",
                 &entry.node_id[..8.min(entry.node_id.len())],
@@ -236,6 +238,13 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             match ctx.database.insert_traffic(&entry).await {
                 Ok(traffic_id) => {
                     common::log_info!("Stored traffic entry id={} for {}", traffic_id, entry.url);
+                    entry.id = Some(traffic_id);
+
+                    //
+                    // Push the newly-stored entry onto the live broadcaster.
+                    // The broadcaster strips bodies before publishing.
+                    //
+                    ctx.intercept_broadcaster.push_entry(entry.clone());
 
                     //
                     // Check against rules and insert matches.
@@ -270,18 +279,38 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                             }
 
                             //
-                            // Process summarization for matches with
-                            // summarization_prompt.
+                            // Broadcast and process summarization for each match.
                             //
                             for (match_id, rule) in matches {
+                                let match_info = TrafficMatch {
+                                    id: match_id,
+                                    traffic_id,
+                                    rule_id: rule.id,
+                                    rule_name: rule.name.clone(),
+                                    matched_at: Utc::now(),
+                                    summary: None,
+                                };
+                                ctx.intercept_broadcaster.push_match(
+                                    TrafficMatchWithDetails {
+                                        match_info: match_info.clone(),
+                                        traffic: entry.clone(),
+                                    },
+                                );
+
                                 if let Some(ref prompt) = rule.summarization_prompt {
                                     let db = ctx.database.clone();
                                     let cfg = ctx.service_config.clone();
                                     let entry_clone = entry.clone();
                                     let prompt_clone = prompt.clone();
+                                    let broadcaster = ctx.intercept_broadcaster.clone();
+                                    let rule_id = rule.id;
+                                    let rule_name = rule.name.clone();
 
                                     //
-                                    // Spawn async task for summarization.
+                                    // Spawn async task for summarization. On
+                                    // success, both persist the summary and
+                                    // re-broadcast the match so live viewers
+                                    // see the updated summary without refresh.
                                     //
                                     tokio::spawn(async move {
                                         let result = semantic_helpers::summarize_traffic(
@@ -300,6 +329,17 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                                                         e
                                                     );
                                                 }
+                                                broadcaster.push_match(TrafficMatchWithDetails {
+                                                    match_info: TrafficMatch {
+                                                        id: match_id,
+                                                        traffic_id,
+                                                        rule_id,
+                                                        rule_name,
+                                                        matched_at: match_info.matched_at,
+                                                        summary: Some(summary),
+                                                    },
+                                                    traffic: entry_clone,
+                                                });
                                             }
                                         } else if let Some(err) = result.error {
                                             common::log_warn!(

@@ -1,8 +1,9 @@
 use crate::acp::AcpNotification;
 use crate::client::Client;
 use common::{
-    ChainDefinitionInfo, ChainExecutionUpdate, OperationDefinitionInfo, SemanticOpUpdate,
-    SessionUpdate, SystemState, TerminalOutput,
+    ChainDefinitionInfo, ChainExecutionUpdate, InterceptStatus, InterceptedTrafficEntry,
+    OperationDefinitionInfo, SemanticOpUpdate, SessionUpdate, SystemState, TerminalOutput,
+    TrafficMatchWithDetails,
 };
 use crossterm::event::{Event, EventStream};
 use futures_util::StreamExt;
@@ -46,6 +47,12 @@ pub enum AppEvent {
     NodeSessionsRefreshed {
         entries: Vec<NodeSessionEntry>,
     },
+    //
+    // Live intercept stream updates.
+    //
+    InterceptEntriesAppended(Vec<InterceptedTrafficEntry>),
+    InterceptMatchesAppended(Vec<TrafficMatchWithDetails>),
+    InterceptStatusChanged(InterceptStatus),
     Tick,
 }
 
@@ -154,6 +161,48 @@ impl EventHandler {
             while let Some(update) = session_rx.recv().await {
                 if tx_session
                     .send(AppEvent::SessionStreamUpdate(update))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+
+        //
+        // Live intercept stream subscribers.
+        //
+        let tx_intercept = tx.clone();
+        let mut intercept_rx = client.subscribe_intercept_entries();
+        tokio::spawn(async move {
+            while let Some(batch) = intercept_rx.recv().await {
+                if tx_intercept
+                    .send(AppEvent::InterceptEntriesAppended(batch))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+
+        let tx_intercept_matches = tx.clone();
+        let mut intercept_matches_rx = client.subscribe_intercept_matches();
+        tokio::spawn(async move {
+            while let Some(batch) = intercept_matches_rx.recv().await {
+                if tx_intercept_matches
+                    .send(AppEvent::InterceptMatchesAppended(batch))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+
+        let tx_intercept_status = tx.clone();
+        let mut intercept_status_rx = client.subscribe_intercept_status();
+        tokio::spawn(async move {
+            while let Some(status) = intercept_status_rx.recv().await {
+                if tx_intercept_status
+                    .send(AppEvent::InterceptStatusChanged(status))
                     .is_err()
                 {
                     break;

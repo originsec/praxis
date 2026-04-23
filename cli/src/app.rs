@@ -1,6 +1,7 @@
 mod agent_scripts;
 mod forms;
 mod input;
+pub mod intercept;
 mod nodes;
 mod operations;
 mod orchestrator;
@@ -8,6 +9,7 @@ mod popups;
 mod settings;
 
 pub use self::forms::*;
+pub use self::intercept::InterceptState;
 pub use self::orchestrator::*;
 pub use self::popups::*;
 pub use self::settings::*;
@@ -31,6 +33,7 @@ use tokio::sync::mpsc;
 pub enum Window {
     Orchestrator,
     Nodes,
+    Intercept,
     Operations,
     Settings,
 }
@@ -39,6 +42,7 @@ pub struct App {
     pub active_window: Window,
     pub orchestrator: OrchestratorState,
     pub nodes: NodesState,
+    pub intercept: InterceptState,
     pub operations: OperationsState,
     pub settings: SettingsState,
     pub client: Arc<Client>,
@@ -298,6 +302,7 @@ impl App {
             active_window: Window::Orchestrator,
             orchestrator: OrchestratorState::default(),
             nodes: NodesState::default(),
+            intercept: InterceptState::default(),
             operations: OperationsState::default(),
             settings: SettingsState {
                 rabbitmq_url: rabbitmq_url.clone(),
@@ -703,6 +708,21 @@ impl App {
                 }
                 true
             }
+            AppEvent::InterceptEntriesAppended(entries) => {
+                self.intercept.push_entries(entries);
+                self.active_window == Window::Intercept
+            }
+            AppEvent::InterceptMatchesAppended(matches) => {
+                self.intercept.push_matches(matches);
+                self.active_window == Window::Intercept
+                    && self.intercept.tab == crate::app::intercept::InterceptTab::Matches
+            }
+            AppEvent::InterceptStatusChanged(status) => {
+                self.intercept
+                    .intercept_statuses
+                    .insert(status.node_id.clone(), status);
+                self.active_window == Window::Intercept
+            }
             AppEvent::Tick => {
                 //
                 // Periodically refresh operations data when viewing that window.
@@ -907,6 +927,11 @@ impl App {
                     self.refresh_operations();
                     return;
                 }
+                KeyCode::Char('i') => {
+                    self.active_window = Window::Intercept;
+                    self.enter_intercept().await;
+                    return;
+                }
                 KeyCode::Char('s') => {
                     self.active_window = Window::Settings;
                     self.load_settings().await;
@@ -919,6 +944,7 @@ impl App {
         match self.active_window {
             Window::Orchestrator => self.handle_orchestrator_key(key).await,
             Window::Nodes => self.handle_nodes_key(key).await,
+            Window::Intercept => self.handle_intercept_key(key).await,
             Window::Operations => self.handle_operations_key(key).await,
             Window::Settings => self.handle_settings_key(key).await,
         }
@@ -992,6 +1018,13 @@ impl App {
                             session.scroll_offset = session.scroll_offset.saturating_add(3);
                         }
                     }
+                    Window::Intercept if self.intercept.detail_focus => {
+                        self.intercept.detail_scroll =
+                            self.intercept.detail_scroll.saturating_sub(3);
+                    }
+                    Window::Intercept => {
+                        self.intercept.move_selection(-3);
+                    }
                     _ => {}
                 }
                 return;
@@ -1011,6 +1044,13 @@ impl App {
                         if let Some(session) = self.nodes.active_session_mut() {
                             session.scroll_offset = session.scroll_offset.saturating_sub(3);
                         }
+                    }
+                    Window::Intercept if self.intercept.detail_focus => {
+                        self.intercept.detail_scroll =
+                            self.intercept.detail_scroll.saturating_add(3);
+                    }
+                    Window::Intercept => {
+                        self.intercept.move_selection(3);
                     }
                     _ => {}
                 }

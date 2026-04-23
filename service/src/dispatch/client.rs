@@ -87,6 +87,8 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             handle_traffic_clear(ctx, client_id).await,
         ClientSignalMessage::TrafficSearchRequest { client_id, filters } =>
             handle_traffic_search(ctx, client_id, filters).await,
+        ClientSignalMessage::TrafficGetRequest { client_id, id } =>
+            handle_traffic_get(ctx, client_id, id).await,
 
         //
         // Intercept rules.
@@ -1122,6 +1124,31 @@ async fn handle_traffic_search(
         Err(e) => {
             common::log_error!("Failed to search traffic: {}", e);
         }
+    }
+}
+
+async fn handle_traffic_get(ctx: &ServiceContext, client_id: String, id: i64) {
+    common::log_info!(
+        "Received TrafficGetRequest from client {} for id {}",
+        &client_id[..8.min(client_id.len())],
+        id
+    );
+
+    let entry = match ctx.database.get_traffic(id).await {
+        Ok(entry) => entry,
+        Err(e) => {
+            common::log_error!("Failed to fetch traffic entry {}: {}", id, e);
+            None
+        }
+    };
+
+    let message = ClientDirectMessage::TrafficGetResponse { id, entry };
+    if let Err(e) = send_to_client(&ctx.client_publish_channel, &client_id, message).await {
+        common::log_error!(
+            "Failed to send TrafficGetResponse to client {}: {}",
+            client_id,
+            e
+        );
     }
 }
 

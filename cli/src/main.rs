@@ -328,6 +328,15 @@ async fn run_tui(rabbitmq_url: &str, timeout: u64) -> Result<()> {
         }
 
         if should_draw {
+            //
+            // Pre-render housekeeping: rebuild the intercept display
+            // rows when filters or buffer changed, and expire stale
+            // error banners. Done here so render() can stay
+            // &App-pure.
+            //
+            app.intercept.rebuild_display();
+            app.intercept.clear_stale_error();
+
             terminal.draw(|f| {
                 app.terminal_width = f.area().width;
                 ui::render(f, &app);

@@ -631,6 +631,14 @@ async fn run_main_loop() -> Result<()> {
     common::log_info!("Initialized trigger engine");
 
     //
+    // Spawn the live intercept broadcaster. Coalesces new traffic
+    // entries and rule matches into small batches before publishing
+    // them to the client broadcast exchange.
+    //
+    let intercept_broadcaster =
+        dispatch::traffic_broadcast::InterceptBroadcaster::spawn(broadcast_channel.clone());
+
+    //
     // Create the service context for message dispatch.
     //
     let ctx = ServiceContext {
@@ -651,6 +659,7 @@ async fn run_main_loop() -> Result<()> {
         ccrv1_manager,
         ccrv2_manager,
         trigger_engine: Some(trigger_engine.clone()),
+        intercept_broadcaster,
         publish_channel,
         client_publish_channel,
         broadcast_channel,
