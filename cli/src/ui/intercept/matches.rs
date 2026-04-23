@@ -22,8 +22,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
     render_filter_bar(f, chunks[0], app);
 
-    let split = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
-        .split(chunks[1]);
+    let pct = app.intercept.match_split_percent.clamp(20, 80);
+    let split = Layout::horizontal([
+        Constraint::Percentage(pct),
+        Constraint::Percentage(100 - pct),
+    ])
+    .split(chunks[1]);
     render_list(f, split[0], app);
     render_detail(f, split[1], app);
 }
@@ -102,9 +106,14 @@ fn render_list(f: &mut Frame, area: Rect, app: &App) {
         })
         .collect();
 
+    let border_color = if app.intercept.match_detail_focus {
+        INPUT_BORDER
+    } else {
+        ACCENT
+    };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(INPUT_BORDER))
+        .border_style(Style::default().fg(border_color))
         .title(Span::styled(" Matches ", Style::default().fg(MUTED)));
 
     let table = Table::new(rows, widths)
@@ -121,6 +130,11 @@ fn render_list(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_detail(f: &mut Frame, area: Rect, app: &App) {
+    let border_color = if app.intercept.match_detail_focus {
+        ACCENT
+    } else {
+        INPUT_BORDER
+    };
     let title = if app.intercept.match_detail_focus {
         Span::styled(" Match detail \u{25c4} ", Style::default().fg(ACCENT))
     } else {
@@ -128,7 +142,7 @@ fn render_detail(f: &mut Frame, area: Rect, app: &App) {
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(INPUT_BORDER))
+        .border_style(Style::default().fg(border_color))
         .title(title);
 
     let filtered = app.intercept.filtered_matches();
@@ -145,9 +159,13 @@ fn render_detail(f: &mut Frame, area: Rect, app: &App) {
     };
 
     let lines = detail_lines(&app.intercept, m);
+    let inner_h = area.height.saturating_sub(2) as usize;
+    let max_scroll = lines.len().saturating_sub(inner_h) as u16;
+    app.intercept.match_detail_max_scroll.set(max_scroll);
+    let effective = app.intercept.match_detail_scroll.min(max_scroll);
     let para = Paragraph::new(lines)
         .wrap(Wrap { trim: false })
-        .scroll((app.intercept.match_detail_scroll, 0))
+        .scroll((effective, 0))
         .block(block);
     f.render_widget(para, area);
 }
@@ -223,8 +241,6 @@ fn truncate(s: &str, max: usize) -> String {
 pub fn hints(_app: &App) -> Line<'static> {
     Line::from(vec![
         Span::raw(" "),
-        Span::styled("enter", Style::default().fg(ACCENT)),
-        Span::styled(" focus detail  ", Style::default().fg(MUTED)),
         Span::styled("f", Style::default().fg(ACCENT)),
         Span::styled(" cycle rule  ", Style::default().fg(MUTED)),
         Span::styled("r", Style::default().fg(ACCENT)),

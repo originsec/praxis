@@ -51,12 +51,13 @@ pub(super) fn render_node_list(f: &mut Frame, area: Rect, state: &NodesState) {
         Constraint::Length(8),
     ];
 
+    let border_color = if state.detail_focus { DIM } else { ACCENT };
     let table = Table::new(rows, widths)
         .header(header)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(DIM))
+                .border_style(Style::default().fg(border_color))
                 .title_style(Style::default().fg(MUTED))
                 .title(" Nodes "),
         )

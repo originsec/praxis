@@ -45,14 +45,24 @@ fn render_table(f: &mut Frame, area: Rect, app: &App) {
 
     let title = build_title(app);
     let block = focused_titled_panel(&title, focused);
-    let inner = block.inner(area);
+    let outer_inner = block.inner(area);
     f.render_widget(block, area);
+
+    //
+    // Inner padding so the table doesn't butt right up against the border.
+    //
+    let inner = Rect {
+        x: outer_inner.x + 1,
+        y: outer_inner.y,
+        width: outer_inner.width.saturating_sub(2),
+        height: outer_inner.height,
+    };
 
     if app.log_query.columns.is_empty() {
         let hint = if app.log_query.is_running {
             "Running…"
         } else {
-            "Write a query above and press Ctrl+Enter to see results."
+            "Write a query above and press Ctrl+R to see results."
         };
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(hint, Style::default().fg(MUTED)))),

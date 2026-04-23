@@ -72,6 +72,9 @@ pub fn render(f: &mut Frame, app: &App) {
     if let Some(ref confirm) = app.confirm {
         popup::render_confirm(f, confirm);
     }
+    if let Some(ref picker) = app.intercept_method_picker {
+        popup::render_intercept_method_picker(f, picker);
+    }
 }
 
 fn render_header(f: &mut Frame, area: ratatui::layout::Rect) {

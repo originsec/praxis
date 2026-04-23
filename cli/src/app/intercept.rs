@@ -5,6 +5,7 @@
 // broadcast payload strips them.
 //
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 
@@ -46,37 +47,27 @@ pub enum InterceptTab {
 impl InterceptTab {
     pub fn next(self) -> Self {
         match self {
-            Self::Log => Self::Rules,
-            Self::Rules => Self::Matches,
-            Self::Matches => Self::Log,
+            Self::Log => Self::Matches,
+            Self::Matches => Self::Rules,
+            Self::Rules => Self::Log,
         }
     }
     pub fn prev(self) -> Self {
         match self {
-            Self::Log => Self::Matches,
-            Self::Rules => Self::Log,
-            Self::Matches => Self::Rules,
+            Self::Log => Self::Rules,
+            Self::Matches => Self::Log,
+            Self::Rules => Self::Matches,
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum ProtocolFilter {
     All,
     Http,
     WebSocket,
     Http2,
-}
-
-impl ProtocolFilter {
-    pub fn cycle(self) -> Self {
-        match self {
-            Self::All => Self::Http,
-            Self::Http => Self::WebSocket,
-            Self::WebSocket => Self::Http2,
-            Self::Http2 => Self::All,
-        }
-    }
 }
 
 //
@@ -122,6 +113,12 @@ pub struct InterceptState {
     pub selected: usize,
     pub detail_focus: bool,
     pub detail_scroll: u16,
+    //
+    // Last-rendered maximum legal scroll for the detail pane. Updated
+    // by the render path so key handlers can clamp PageDown/Down.
+    //
+    pub detail_max_scroll: Cell<u16>,
+    pub match_detail_max_scroll: Cell<u16>,
     pub body_mode: BodyMode,
     pub paused: bool,
     pub search_focused: bool,
@@ -155,6 +152,16 @@ pub struct InterceptState {
     pub rule_selected: usize,
     pub rule_form: Option<RuleForm>,
     pub rules_loaded: bool,
+    pub rule_filter: String,
+    pub rule_filter_focused: bool,
+
+    //
+    // Resizable split percentage for the Log tab (list vs detail). 0-100.
+    //
+    pub log_split_percent: u16,
+    pub log_dragging: bool,
+    pub match_split_percent: u16,
+    pub match_dragging: bool,
 
     //
     // Matches tab.
@@ -183,6 +190,8 @@ impl Default for InterceptState {
             selected: 0,
             detail_focus: false,
             detail_scroll: 0,
+            detail_max_scroll: Cell::new(0),
+            match_detail_max_scroll: Cell::new(0),
             body_mode: BodyMode::Pretty,
             paused: false,
             search_focused: false,
@@ -200,6 +209,12 @@ impl Default for InterceptState {
             rule_selected: 0,
             rule_form: None,
             rules_loaded: false,
+            rule_filter: String::new(),
+            rule_filter_focused: false,
+            log_split_percent: 55,
+            log_dragging: false,
+            match_split_percent: 55,
+            match_dragging: false,
             matches: Vec::new(),
             match_rule_filter: None,
             match_selected: 0,
@@ -362,6 +377,7 @@ impl InterceptState {
         self.display_dirty = true;
     }
 
+    #[allow(dead_code)]
     pub fn set_protocol(&mut self, p: ProtocolFilter) {
         self.protocol = p;
         self.display_dirty = true;
@@ -878,6 +894,22 @@ impl App {
                     self.intercept.clear_search();
                 }
             }
+            KeyCode::Left => {
+                //
+                // Move from detail back to the list pane. Mirrors the
+                // Enter-focuses-detail / Esc-unfocuses-detail pattern and
+                // matches the nodes window's left/right navigation.
+                //
+                if self.intercept.detail_focus {
+                    self.intercept.detail_focus = false;
+                }
+            }
+            KeyCode::Right => {
+                if !self.intercept.detail_focus {
+                    self.intercept.detail_focus = true;
+                    self.fetch_body_for_selected().await;
+                }
+            }
             KeyCode::Up => {
                 if self.intercept.detail_focus {
                     self.intercept.detail_scroll =
@@ -889,8 +921,9 @@ impl App {
             }
             KeyCode::Down => {
                 if self.intercept.detail_focus {
+                    let max = self.intercept.detail_max_scroll.get();
                     self.intercept.detail_scroll =
-                        self.intercept.detail_scroll.saturating_add(1);
+                        self.intercept.detail_scroll.saturating_add(1).min(max);
                 } else {
                     self.intercept.move_selection(1);
                     self.fetch_body_for_selected().await;
@@ -907,8 +940,9 @@ impl App {
             }
             KeyCode::PageDown => {
                 if self.intercept.detail_focus {
+                    let max = self.intercept.detail_max_scroll.get();
                     self.intercept.detail_scroll =
-                        self.intercept.detail_scroll.saturating_add(10);
+                        self.intercept.detail_scroll.saturating_add(10).min(max);
                 } else {
                     self.intercept.move_selection(10);
                     self.fetch_body_for_selected().await;
@@ -922,9 +956,6 @@ impl App {
             }
             KeyCode::Char('/') => {
                 self.intercept.search_focused = true;
-            }
-            KeyCode::Char('f') => {
-                self.intercept.set_protocol(self.intercept.protocol.cycle());
             }
             KeyCode::Char('n') => {
                 self.cycle_node_filter();
@@ -944,30 +975,24 @@ impl App {
                     action: ConfirmKind::ClearAllTraffic,
                 });
             }
-            KeyCode::Char('H') => {
-                self.intercept.body_mode = self.intercept.body_mode.cycle();
-            }
-            KeyCode::Char('i') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.toggle_intercept_for_selected().await;
-            }
             _ => {}
         }
     }
 
     async fn handle_intercept_rules_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Up => self.intercept.move_rule_selection(-1),
-            KeyCode::Down => self.intercept.move_rule_selection(1),
-            KeyCode::Char(' ') => self.toggle_selected_rule_enabled().await,
-            KeyCode::Char('n') => {
+        match (key.code, key.modifiers) {
+            (KeyCode::Up, _) => self.intercept.move_rule_selection(-1),
+            (KeyCode::Down, _) => self.intercept.move_rule_selection(1),
+            (KeyCode::Char(' '), _) => self.toggle_selected_rule_enabled().await,
+            (KeyCode::Char('n'), m) if m.contains(KeyModifiers::CONTROL) => {
                 self.intercept.rule_form = Some(RuleForm::new_create());
             }
-            KeyCode::Char('e') => {
+            (KeyCode::Char('e'), m) if m.contains(KeyModifiers::CONTROL) => {
                 if let Some(rule) = self.intercept.selected_rule() {
                     self.intercept.rule_form = Some(RuleForm::from_rule(rule));
                 }
             }
-            KeyCode::Char('d') => {
+            (KeyCode::Char('d'), m) if m.contains(KeyModifiers::CONTROL) => {
                 if let Some(rule) = self.intercept.selected_rule() {
                     self.confirm = Some(ConfirmAction {
                         message: format!("Delete rule '{}'?", rule.name),
@@ -975,12 +1000,35 @@ impl App {
                     });
                 }
             }
-            KeyCode::Char('r') => self.refresh_intercept_rules().await,
-            KeyCode::Enter => {
-                //
-                // Jump to Matches tab filtered to this rule.
-                //
-                if let Some(rule) = self.intercept.selected_rule() {
+            (KeyCode::Char('/'), _) => {
+                self.intercept.rule_filter_focused = true;
+            }
+            (KeyCode::Char('r'), m) if !m.contains(KeyModifiers::CONTROL) => {
+                if self.intercept.rule_filter_focused {
+                    self.intercept.rule_filter.push('r');
+                } else {
+                    self.refresh_intercept_rules().await;
+                }
+            }
+            (KeyCode::Esc, _) => {
+                if self.intercept.rule_filter_focused {
+                    self.intercept.rule_filter_focused = false;
+                } else if !self.intercept.rule_filter.is_empty() {
+                    self.intercept.rule_filter.clear();
+                }
+            }
+            (KeyCode::Backspace, _) if self.intercept.rule_filter_focused => {
+                self.intercept.rule_filter.pop();
+            }
+            (KeyCode::Char(c), m)
+                if self.intercept.rule_filter_focused && !m.contains(KeyModifiers::CONTROL) =>
+            {
+                self.intercept.rule_filter.push(c);
+            }
+            (KeyCode::Enter, _) => {
+                if self.intercept.rule_filter_focused {
+                    self.intercept.rule_filter_focused = false;
+                } else if let Some(rule) = self.intercept.selected_rule() {
                     let rid = rule.id;
                     self.intercept.match_rule_filter = Some(rid);
                     self.intercept.tab = InterceptTab::Matches;
@@ -993,6 +1041,16 @@ impl App {
 
     async fn handle_intercept_matches_key(&mut self, key: KeyEvent) {
         match key.code {
+            KeyCode::Left => {
+                if self.intercept.match_detail_focus {
+                    self.intercept.match_detail_focus = false;
+                }
+            }
+            KeyCode::Right => {
+                if !self.intercept.match_detail_focus {
+                    self.intercept.match_detail_focus = true;
+                }
+            }
             KeyCode::Up => {
                 if self.intercept.match_detail_focus {
                     self.intercept.match_detail_scroll =
@@ -1003,8 +1061,9 @@ impl App {
             }
             KeyCode::Down => {
                 if self.intercept.match_detail_focus {
+                    let max = self.intercept.match_detail_max_scroll.get();
                     self.intercept.match_detail_scroll =
-                        self.intercept.match_detail_scroll.saturating_add(1);
+                        self.intercept.match_detail_scroll.saturating_add(1).min(max);
                 } else {
                     self.intercept.move_match_selection(1);
                 }
@@ -1164,6 +1223,7 @@ impl App {
         }
     }
 
+    #[allow(dead_code)]
     async fn toggle_intercept_for_selected(&mut self) {
         let Some(entry) = self.intercept.selected_primary_entry() else {
             return;
@@ -1232,6 +1292,214 @@ impl App {
             }
         };
         self.intercept.set_agent_filter(new);
+    }
+
+    pub(crate) async fn handle_intercept_mouse(
+        &mut self,
+        mouse: MouseEvent,
+        content_area: Rect,
+    ) {
+        use ratatui::layout::{Constraint, Layout};
+
+        let chunks = Layout::vertical([
+            Constraint::Length(1), // tab header
+            Constraint::Length(1), // spacer
+            Constraint::Min(1),    // content
+            Constraint::Length(1), // hints
+        ])
+        .split(content_area);
+        let tabs_area = chunks[0];
+        let body_area = chunks[2];
+
+        //
+        // Tab click.
+        //
+        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+            if mouse.row == tabs_area.y {
+                let rel = mouse.column.saturating_sub(tabs_area.x);
+                //
+                // Labels rendered as:
+                // "  " + " Log " + "<count> " + " │ " + " Matches " + ...
+                // Hit-box by approximate column ranges kept in sync with
+                // ui::intercept::mod::render_tabs.
+                //
+                if rel < 10 {
+                    self.intercept.tab = InterceptTab::Log;
+                    return;
+                } else if rel < 22 {
+                    self.intercept.tab = InterceptTab::Matches;
+                    return;
+                } else if rel < 34 {
+                    self.intercept.tab = InterceptTab::Rules;
+                    return;
+                }
+            }
+        }
+
+        //
+        // Per-tab body handling — for Log and Matches we support a
+        // horizontal split drag and pane focus click.
+        //
+        match self.intercept.tab {
+            InterceptTab::Log => {
+                let pct = self.intercept.log_split_percent.clamp(20, 80);
+                let split = Layout::horizontal([
+                    Constraint::Percentage(pct),
+                    Constraint::Percentage(100 - pct),
+                ])
+                .split(Rect {
+                    y: body_area.y + 1,
+                    height: body_area.height.saturating_sub(1),
+                    ..body_area
+                });
+                let border_x = split[0].x.saturating_add(split[0].width);
+                match mouse.kind {
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        if mouse.column >= border_x.saturating_sub(1)
+                            && mouse.column <= border_x + 1
+                            && mouse.row >= split[0].y
+                            && mouse.row < split[0].y + split[0].height
+                        {
+                            self.intercept.log_dragging = true;
+                            return;
+                        }
+                        //
+                        // Detail pane click -> focus.
+                        //
+                        if mouse.column >= split[1].x
+                            && mouse.column < split[1].x + split[1].width
+                            && mouse.row >= split[1].y
+                            && mouse.row < split[1].y + split[1].height
+                        {
+                            self.intercept.detail_focus = true;
+                            return;
+                        }
+                        //
+                        // List pane click -> unfocus detail + select row.
+                        //
+                        if mouse.column >= split[0].x
+                            && mouse.column < split[0].x + split[0].width
+                            && mouse.row >= split[0].y
+                            && mouse.row < split[0].y + split[0].height
+                        {
+                            self.intercept.detail_focus = false;
+                            //
+                            // List has border(1) + header(1), rows start at y+2.
+                            //
+                            let list_start = split[0].y + 2;
+                            if mouse.row >= list_start {
+                                let clicked = (mouse.row - list_start) as usize;
+                                if clicked < self.intercept.display_rows.len() {
+                                    self.intercept.selected = clicked;
+                                    self.intercept.detail_scroll = 0;
+                                    self.fetch_body_for_selected().await;
+                                }
+                            }
+                            return;
+                        }
+                    }
+                    MouseEventKind::Drag(MouseButton::Left) if self.intercept.log_dragging => {
+                        let w = body_area.width.max(1) as i32;
+                        let rel = (mouse.column as i32 - body_area.x as i32).clamp(0, w);
+                        let pct = ((rel * 100) / w) as u16;
+                        self.intercept.log_split_percent = pct.clamp(20, 80);
+                        return;
+                    }
+                    MouseEventKind::Up(MouseButton::Left) => {
+                        self.intercept.log_dragging = false;
+                    }
+                    _ => {}
+                }
+            }
+            InterceptTab::Matches => {
+                let pct = self.intercept.match_split_percent.clamp(20, 80);
+                let split = Layout::horizontal([
+                    Constraint::Percentage(pct),
+                    Constraint::Percentage(100 - pct),
+                ])
+                .split(Rect {
+                    y: body_area.y + 1,
+                    height: body_area.height.saturating_sub(1),
+                    ..body_area
+                });
+                let border_x = split[0].x.saturating_add(split[0].width);
+                match mouse.kind {
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        if mouse.column >= border_x.saturating_sub(1)
+                            && mouse.column <= border_x + 1
+                            && mouse.row >= split[0].y
+                            && mouse.row < split[0].y + split[0].height
+                        {
+                            self.intercept.match_dragging = true;
+                            return;
+                        }
+                        if mouse.column >= split[1].x
+                            && mouse.column < split[1].x + split[1].width
+                            && mouse.row >= split[1].y
+                            && mouse.row < split[1].y + split[1].height
+                        {
+                            self.intercept.match_detail_focus = true;
+                            return;
+                        }
+                        if mouse.column >= split[0].x
+                            && mouse.column < split[0].x + split[0].width
+                            && mouse.row >= split[0].y
+                            && mouse.row < split[0].y + split[0].height
+                        {
+                            self.intercept.match_detail_focus = false;
+                            let list_start = split[0].y + 2;
+                            if mouse.row >= list_start {
+                                let clicked = (mouse.row - list_start) as usize;
+                                let total = self.intercept.filtered_matches().len();
+                                if clicked < total {
+                                    self.intercept.match_selected = clicked;
+                                    self.intercept.match_detail_scroll = 0;
+                                }
+                            }
+                            return;
+                        }
+                    }
+                    MouseEventKind::Drag(MouseButton::Left) if self.intercept.match_dragging => {
+                        let w = body_area.width.max(1) as i32;
+                        let rel = (mouse.column as i32 - body_area.x as i32).clamp(0, w);
+                        let pct = ((rel * 100) / w) as u16;
+                        self.intercept.match_split_percent = pct.clamp(20, 80);
+                        return;
+                    }
+                    MouseEventKind::Up(MouseButton::Left) => {
+                        self.intercept.match_dragging = false;
+                    }
+                    _ => {}
+                }
+            }
+            InterceptTab::Rules => {
+                if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                    //
+                    // Rules tab layout: filter bar (1) + table. Click a
+                    // row to select it.
+                    //
+                    let table_y = body_area.y + 1;
+                    let header_offset = 2u16; // border + header
+                    if mouse.row >= table_y + header_offset {
+                        let clicked = (mouse.row - (table_y + header_offset)) as usize;
+                        let filter = self.intercept.rule_filter.to_lowercase();
+                        let visible_count = self
+                            .intercept
+                            .rules
+                            .iter()
+                            .filter(|r| {
+                                filter.is_empty()
+                                    || r.name.to_lowercase().contains(&filter)
+                                    || r.regex_pattern.to_lowercase().contains(&filter)
+                            })
+                            .count();
+                        if clicked < visible_count {
+                            self.intercept.rule_selected = clicked;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn cycle_match_rule_filter(&mut self) {

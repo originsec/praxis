@@ -1,6 +1,6 @@
 use super::{CHAIN_COLOR, OP_COLOR};
 use crate::app::{App, OperationsState};
-use crate::ui::common::titled_panel;
+use crate::ui::common::focused_titled_panel;
 use crate::ui::theme::{ACCENT, DIM, MUTED, PANEL_HIGHLIGHT_BG, STATUS_RUNNING, TEXT};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -64,7 +64,10 @@ pub(super) fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsS
 
     let table = Table::new(rows, widths)
         .header(header)
-        .block(titled_panel(" Operations & Chains "))
+        .block(focused_titled_panel(
+            " Operations & Chains ",
+            !state.detail_focus,
+        ))
         .row_highlight_style(Style::default().bg(PANEL_HIGHLIGHT_BG));
 
     let mut table_state = TableState::default();
@@ -74,7 +77,7 @@ pub(super) fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsS
 }
 
 pub(super) fn render_library_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
-    let block = titled_panel(" Detail ");
+    let block = focused_titled_panel(" Detail ", state.detail_focus);
 
     let inner = block.inner(area);
     f.render_widget(block, area);

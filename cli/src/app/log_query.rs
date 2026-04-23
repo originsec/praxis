@@ -90,10 +90,13 @@ pub struct LogQueryState {
     pub suggestion_index: usize,
 
     //
-    // Schema sidebar.
+    // Schema popup (overlay). When open, up/down scroll the list, esc
+    // closes.
     //
     pub schema_open: bool,
     pub schema_expanded: Option<usize>,
+    pub schema_selected: usize,
+    pub schema_scroll: u16,
 }
 
 impl Default for LogQueryState {
@@ -120,6 +123,8 @@ impl Default for LogQueryState {
             suggestion_index: 0,
             schema_open: false,
             schema_expanded: None,
+            schema_selected: 0,
+            schema_scroll: 0,
         }
     }
 }
@@ -282,12 +287,88 @@ fn compare_cells(a: Option<&Value>, b: Option<&Value>) -> std::cmp::Ordering {
 impl crate::app::App {
     pub async fn handle_log_query_key(&mut self, key: KeyEvent) {
         //
-        // Ctrl+Enter always runs, even when the user is in the results
-        // pane, so it behaves like "keyboard shortcut" rather than
-        // pane-local action.
+        // Schema popup, when open, captures navigation keys.
         //
-        if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if self.log_query.schema_open {
+            match key.code {
+                KeyCode::Esc => {
+                    self.log_query.schema_open = false;
+                    return;
+                }
+                KeyCode::Up => {
+                    if self.log_query.schema_selected > 0 {
+                        self.log_query.schema_selected -= 1;
+                        self.log_query.schema_scroll =
+                            self.log_query.schema_scroll.saturating_sub(1);
+                    }
+                    return;
+                }
+                KeyCode::Down => {
+                    let max = crate::app::log_query::schema::TABLES.len().saturating_sub(1);
+                    if self.log_query.schema_selected < max {
+                        self.log_query.schema_selected += 1;
+                        self.log_query.schema_scroll =
+                            self.log_query.schema_scroll.saturating_add(1);
+                    }
+                    return;
+                }
+                KeyCode::PageUp => {
+                    self.log_query.schema_scroll =
+                        self.log_query.schema_scroll.saturating_sub(10);
+                    self.log_query.schema_selected =
+                        self.log_query.schema_selected.saturating_sub(10);
+                    return;
+                }
+                KeyCode::PageDown => {
+                    let max = crate::app::log_query::schema::TABLES.len().saturating_sub(1);
+                    self.log_query.schema_selected =
+                        (self.log_query.schema_selected + 10).min(max);
+                    self.log_query.schema_scroll =
+                        self.log_query.schema_scroll.saturating_add(10);
+                    return;
+                }
+                KeyCode::Enter => {
+                    let sel = self.log_query.schema_selected;
+                    if self.log_query.schema_expanded == Some(sel) {
+                        self.log_query.schema_expanded = None;
+                    } else {
+                        self.log_query.schema_expanded = Some(sel);
+                    }
+                    return;
+                }
+                KeyCode::Char('?') => {
+                    self.log_query.schema_open = false;
+                    return;
+                }
+                _ => return,
+            }
+        }
+
+        //
+        // Ctrl+R runs the current query from any focus. Ctrl+Enter kept
+        // as an alias so the old muscle memory keeps working.
+        //
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && (key.code == KeyCode::Char('r') || key.code == KeyCode::Enter)
+        {
             self.run_log_query().await;
+            return;
+        }
+
+        //
+        // Shift-Tab and Ctrl+J/K flip focus between editor and results so
+        // the user has an explicit, non-destructive way to move panes.
+        // Autocomplete still consumes a bare Tab in the editor.
+        //
+        if key.code == KeyCode::BackTab
+            || (key.modifiers.contains(KeyModifiers::CONTROL)
+                && matches!(key.code, KeyCode::Char('j') | KeyCode::Char('k')))
+        {
+            self.log_query.focus = match self.log_query.focus {
+                LogQueryFocus::Editor => LogQueryFocus::Results,
+                LogQueryFocus::Results => LogQueryFocus::Editor,
+                LogQueryFocus::RowSearch => LogQueryFocus::Results,
+            };
             return;
         }
 
@@ -492,6 +573,59 @@ impl crate::app::App {
                 self.log_query.recompute_filter();
             }
             _ => {}
+        }
+    }
+
+    pub(crate) async fn handle_log_query_mouse(
+        &mut self,
+        mouse: crossterm::event::MouseEvent,
+        content_area: ratatui::layout::Rect,
+    ) {
+        use crossterm::event::{MouseButton, MouseEventKind};
+        use ratatui::layout::{Constraint, Layout};
+
+        //
+        // Schema popup click: any click outside dismisses it.
+        //
+        if self.log_query.schema_open {
+            if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                self.log_query.schema_open = false;
+            }
+            return;
+        }
+
+        let show_error = self.log_query.last_error.is_some();
+        let chunks = Layout::vertical([
+            Constraint::Length(9),
+            Constraint::Length(if show_error { 1 } else { 0 }),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
+        .split(content_area);
+        let editor_area = chunks[0];
+        let results_area = chunks[2];
+
+        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+            if mouse.row >= editor_area.y && mouse.row < editor_area.y + editor_area.height {
+                self.log_query.focus = LogQueryFocus::Editor;
+                return;
+            }
+            if mouse.row >= results_area.y && mouse.row < results_area.y + results_area.height {
+                self.log_query.focus = LogQueryFocus::Results;
+                //
+                // Click on a specific row in the results table: inner has
+                // border(1) + header(1) = data starts at +2.
+                //
+                let data_start = results_area.y + 2;
+                if mouse.row >= data_start && !self.log_query.rows.is_empty() {
+                    let clicked = (mouse.row - data_start) as usize;
+                    let n = self.log_query.visible_row_count();
+                    if clicked < n {
+                        self.log_query.selected_row = clicked;
+                    }
+                }
+                return;
+            }
         }
     }
 

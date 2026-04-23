@@ -1,54 +1,77 @@
 //
-// Schema sidebar for the Log Query window. Compact list of available
-// tables with a MEM/DB badge; expands the table the sidebar's cursor is
-// on to show its columns. The sidebar never holds focus on its own — it's
-// a read-only reference — but the caller could wire `Up`/`Down` to
-// schema_selected if desired. For now we just show the first table's
-// columns as a jumping-off point.
+// Schema popup for the Log Query window. Overlays the whole query area
+// when open. Up/down navigate, enter toggles a table's column list, esc
+// closes.
 //
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::app::App;
 use crate::app::log_query::schema::TABLES;
-use crate::ui::common::titled_panel;
-use crate::ui::theme::{ACCENT, DIM, MUTED, TEXT};
+use crate::ui::common::centered_rect_fixed;
+use crate::ui::theme::{ACCENT, DIM, MUTED, POPUP_BG, POPUP_HIGHLIGHT_BG, TEXT};
 
-pub fn render(f: &mut Frame, area: Rect, app: &App) {
-    let block = titled_panel(" Schema ");
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+pub fn render_popup(f: &mut Frame, area: Rect, app: &App) {
+    //
+    // Popup takes ~80% of the window area, capped to sensible bounds.
+    //
+    let width = area.width.saturating_sub(8).min(80).max(40);
+    let height = area.height.saturating_sub(4).min(30).max(10);
+    let popup = centered_rect_fixed(width, height, area);
+
+    f.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(ACCENT))
+        .title(Span::styled(
+            " Schema ",
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ))
+        .style(Style::default().bg(POPUP_BG));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
 
     let expanded = app.log_query.schema_expanded;
+    let selected = app.log_query.schema_selected;
 
     let mut lines: Vec<Line> = Vec::new();
     for (i, table) in TABLES.iter().enumerate() {
         let is_expanded = expanded == Some(i);
+        let is_selected = i == selected;
         let chevron = if is_expanded { "▾" } else { "▸" };
+
+        let row_bg = if is_selected {
+            POPUP_HIGHLIGHT_BG
+        } else {
+            POPUP_BG
+        };
+        let name_style = Style::default()
+            .fg(ACCENT)
+            .bg(row_bg)
+            .add_modifier(Modifier::BOLD);
+
         lines.push(Line::from(vec![
-            Span::styled(format!("{} ", chevron), Style::default().fg(MUTED)),
+            Span::styled(format!(" {} ", chevron), Style::default().fg(MUTED).bg(row_bg)),
+            Span::styled(table.name.to_string(), name_style),
             Span::styled(
-                table.name.to_string(),
-                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                format!("  {}", table.source),
+                Style::default().fg(DIM).bg(row_bg),
             ),
-            Span::raw(" "),
             Span::styled(
-                table.source.to_string(),
-                Style::default().fg(DIM),
+                format!("  {}", table.description),
+                Style::default().fg(MUTED).bg(row_bg),
             ),
         ]));
-        lines.push(Line::from(vec![
-            Span::raw("  "),
-            Span::styled(table.description.to_string(), Style::default().fg(DIM)),
-        ]));
+
         if is_expanded {
             for col in table.columns {
                 lines.push(Line::from(vec![
-                    Span::raw("    "),
+                    Span::raw("     "),
                     Span::styled(col.name.to_string(), Style::default().fg(TEXT)),
                     Span::raw(" "),
                     Span::styled(
@@ -61,19 +84,32 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     }
 
     //
-    // If nothing is explicitly expanded, show a short usage hint.
+    // Hints at bottom.
     //
-    if expanded.is_none() {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "Start a query with a table name",
-            Style::default().fg(DIM),
-        )));
-        lines.push(Line::from(Span::styled(
-            "then press `|` to chain operators.",
-            Style::default().fg(DIM),
-        )));
-    }
+    let hint_height = 1u16;
+    let body_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: inner.height.saturating_sub(hint_height),
+    };
+    let hints_area = Rect {
+        x: inner.x,
+        y: inner.y + inner.height.saturating_sub(hint_height),
+        width: inner.width,
+        height: hint_height,
+    };
 
-    f.render_widget(Paragraph::new(lines), inner);
+    let para = Paragraph::new(lines).scroll((app.log_query.schema_scroll, 0));
+    f.render_widget(para, body_area);
+
+    let hints = Line::from(vec![
+        Span::styled("↑↓", Style::default().fg(ACCENT)),
+        Span::styled(" navigate  ", Style::default().fg(MUTED)),
+        Span::styled("⏎", Style::default().fg(ACCENT)),
+        Span::styled(" expand  ", Style::default().fg(MUTED)),
+        Span::styled("esc", Style::default().fg(ACCENT)),
+        Span::styled(" close", Style::default().fg(MUTED)),
+    ]);
+    f.render_widget(Paragraph::new(hints), hints_area);
 }

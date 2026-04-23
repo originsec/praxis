@@ -29,6 +29,12 @@ pub const STATUS_5XX: Color = Color::Rgb(220, 80, 80);
 pub const PROTO_WS: Color = Color::Rgb(100, 180, 210);
 pub const PROTO_H2: Color = Color::Rgb(180, 120, 210);
 
+//
+// KQL keyword colour — warm amber so it stands apart from ACCENT green,
+// which is reserved for table names and the active focus.
+//
+pub const KEYWORD: Color = Color::Rgb(220, 170, 90);
+
 pub const CODE_FG: Color = Color::Rgb(120, 190, 120);
 #[allow(dead_code)]
 pub const CODE_BG: Color = Color::Rgb(35, 35, 40);

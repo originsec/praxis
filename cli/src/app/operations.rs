@@ -134,6 +134,36 @@ impl App {
     }
 
     pub(crate) async fn handle_operations_key(&mut self, key: KeyEvent) {
+        //
+        // Tab switches tabs regardless of pane focus — the user should
+        // always be able to jump from Library to Executions without
+        // first escaping the detail pane.
+        //
+        if key.code == KeyCode::Tab {
+            self.operations.tab = match self.operations.tab {
+                OpsTab::Executions => OpsTab::Library,
+                OpsTab::Library => OpsTab::Triggers,
+                OpsTab::Triggers => OpsTab::Executions,
+            };
+            self.operations.filter.clear();
+            if self.operations.tab == OpsTab::Triggers {
+                self.refresh_triggers_after(Duration::ZERO);
+            }
+            return;
+        }
+        if key.code == KeyCode::BackTab {
+            self.operations.tab = match self.operations.tab {
+                OpsTab::Executions => OpsTab::Triggers,
+                OpsTab::Library => OpsTab::Executions,
+                OpsTab::Triggers => OpsTab::Library,
+            };
+            self.operations.filter.clear();
+            if self.operations.tab == OpsTab::Triggers {
+                self.refresh_triggers_after(Duration::ZERO);
+            }
+            return;
+        }
+
         if self.operations.detail_focus {
             match key.code {
                 KeyCode::Esc | KeyCode::Left => {
@@ -162,8 +192,9 @@ impl App {
                         self.operations.detail_scroll.saturating_sub(10);
                 }
                 KeyCode::PageDown => {
+                    let max = self.operations.exec_detail_max_scroll.get();
                     self.operations.detail_scroll =
-                        self.operations.detail_scroll.saturating_add(10);
+                        self.operations.detail_scroll.saturating_add(10).min(max);
                 }
                 _ => {}
             }
@@ -171,28 +202,6 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Tab => {
-                self.operations.tab = match self.operations.tab {
-                    OpsTab::Executions => OpsTab::Library,
-                    OpsTab::Library => OpsTab::Triggers,
-                    OpsTab::Triggers => OpsTab::Executions,
-                };
-                self.operations.filter.clear();
-                if self.operations.tab == OpsTab::Triggers {
-                    self.refresh_triggers_after(Duration::ZERO);
-                }
-            }
-            KeyCode::BackTab => {
-                self.operations.tab = match self.operations.tab {
-                    OpsTab::Executions => OpsTab::Triggers,
-                    OpsTab::Library => OpsTab::Executions,
-                    OpsTab::Triggers => OpsTab::Library,
-                };
-                self.operations.filter.clear();
-                if self.operations.tab == OpsTab::Triggers {
-                    self.refresh_triggers_after(Duration::ZERO);
-                }
-            }
             KeyCode::Up => match self.operations.tab {
                 OpsTab::Library => {
                     if self.operations.library_selected > 0 {
@@ -236,9 +245,16 @@ impl App {
                 self.operations.detail_focus = true;
                 self.operations.detail_scroll = 0;
             }
+            KeyCode::Enter if self.operations.filter_focused => {
+                self.operations.filter_focused = false;
+            }
             KeyCode::Enter => match self.operations.tab {
-                OpsTab::Library => self.open_run_target_popup(),
-                OpsTab::Executions => {
+                //
+                // Enter focuses the detail pane for Library/Executions
+                // (^r runs the op/chain from Library). On the Triggers
+                // tab Enter keeps its original toggle-enabled meaning.
+                //
+                OpsTab::Library | OpsTab::Executions => {
                     self.operations.detail_focus = true;
                     self.operations.detail_scroll = 0;
                 }
@@ -246,6 +262,11 @@ impl App {
                     self.toggle_selected_trigger_enabled().await;
                 }
             },
+            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if self.operations.tab == OpsTab::Library {
+                    self.open_run_target_popup();
+                }
+            }
             KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 match self.operations.tab {
                     OpsTab::Library => self.open_new_op_form(),
@@ -283,21 +304,31 @@ impl App {
                 });
             }
             KeyCode::Esc => {
-                if !self.operations.filter.is_empty() {
+                if self.operations.filter_focused {
+                    self.operations.filter_focused = false;
+                } else if !self.operations.filter.is_empty() {
                     self.operations.filter.clear();
                     self.operations.library_selected = 0;
                     self.operations.exec_selected = 0;
                 }
             }
             KeyCode::Backspace => {
-                if !self.operations.filter.is_empty() && !self.operations.detail_focus {
+                if self.operations.filter_focused && !self.operations.filter.is_empty() {
                     self.operations.filter.pop();
                     self.operations.library_selected = 0;
                     self.operations.exec_selected = 0;
                 }
             }
+            KeyCode::Char('/') if !self.operations.detail_focus => {
+                //
+                // `/` enters filter-input mode; subsequent chars append to
+                // the filter until Enter/Esc. Matches the intercept
+                // behaviour so both windows share a muscle memory.
+                //
+                self.operations.filter_focused = true;
+            }
             KeyCode::Char(c) => {
-                if !self.operations.detail_focus {
+                if self.operations.filter_focused && !self.operations.detail_focus {
                     self.operations.filter.push(c);
                     self.operations.library_selected = 0;
                     self.operations.exec_selected = 0;
@@ -928,17 +959,16 @@ impl App {
         let tabs_area = ops_chunks[0];
         let hints_area = ops_chunks[3];
         let main_area = ops_chunks[2];
-        let split = match self.operations.tab {
-            OpsTab::Library => Layout::horizontal([
-                Constraint::Percentage(self.operations.split_percent),
-                Constraint::Percentage(100 - self.operations.split_percent),
-            ])
-            .split(main_area),
-            OpsTab::Executions | OpsTab::Triggers => {
-                Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
-                    .split(main_area)
-            }
-        };
+        //
+        // All three tabs share a single resizable split so the border
+        // drag handle and list/detail hit-testing are consistent.
+        //
+        let pct = self.operations.split_percent.clamp(20, 80);
+        let split = Layout::horizontal([
+            Constraint::Percentage(pct),
+            Constraint::Percentage(100 - pct),
+        ])
+        .split(main_area);
         let list_area = split[0];
         let detail_area = split[1];
         let detail_inner = Rect::new(
@@ -1010,15 +1040,15 @@ impl App {
                     let rel = mouse.column.saturating_sub(hints_area.x) as usize;
                     match self.operations.tab {
                         OpsTab::Library => {
-                            // " enter execute  ^n new  ^e edit  ^d delete  "
-                            //  0    5       15 17   23 25   31 33   42
-                            if rel >= 1 && rel < 16 {
+                            // " ^r execute  ^n new  ^e edit  ^d delete"
+                            //  0  2      12 13  20 21  28 29
+                            if rel >= 1 && rel < 13 {
                                 self.open_run_target_popup();
-                            } else if rel >= 16 && rel < 24 {
+                            } else if rel >= 13 && rel < 21 {
                                 self.open_new_op_form();
-                            } else if rel >= 24 && rel < 32 {
+                            } else if rel >= 21 && rel < 29 {
                                 self.edit_selected_op();
-                            } else if rel >= 32 && rel < 43 {
+                            } else if rel >= 29 && rel < 40 {
                                 self.delete_selected_op().await;
                             }
                         }
@@ -1070,6 +1100,23 @@ impl App {
                         }
                     }
                     return;
+                }
+
+                //
+                // Pane border drag start — check before list/detail
+                // hit-tests so a border-column click doesn't get eaten
+                // by the neighbouring pane.
+                //
+                {
+                    let border_x = list_area.x.saturating_add(list_area.width);
+                    if mouse.column >= border_x.saturating_sub(1)
+                        && mouse.column <= border_x + 1
+                        && mouse.row >= main_area.y
+                        && mouse.row < main_area.y + main_area.height
+                    {
+                        self.operations.dragging = true;
+                        return;
+                    }
                 }
 
                 //
@@ -1155,18 +1202,6 @@ impl App {
                     return;
                 }
 
-                //
-                // Pane border drag start.
-                //
-                if self.operations.tab == OpsTab::Library {
-                    let border_x = list_area.x.saturating_add(list_area.width);
-                    if mouse.column >= border_x.saturating_sub(1)
-                        && mouse.column <= border_x + 1
-                        && mouse.row >= main_area.y
-                    {
-                        self.operations.dragging = true;
-                    }
-                }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 let h = self.terminal_width;
