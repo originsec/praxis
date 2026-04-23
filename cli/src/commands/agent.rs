@@ -6,7 +6,6 @@ use serde_json::json;
 
 use crate::client::Client;
 use crate::output::{format_short_id, print_header, print_success};
-use crate::state::CliState;
 
 #[derive(Subcommand)]
 pub enum AgentCommand {
@@ -15,16 +14,6 @@ pub enum AgentCommand {
         /// Node ID prefix
         #[arg(short, long)]
         node: String,
-    },
-
-    /// Select an agent
-    Select {
-        /// Node ID prefix
-        #[arg(short, long)]
-        node: String,
-
-        /// Agent short name
-        short_name: String,
     },
 
     /// Request agent info update
@@ -53,6 +42,8 @@ pub enum AgentConfigCommand {
     Read {
         #[arg(short, long)]
         node: String,
+        #[arg(short, long)]
+        agent: String,
         path: String,
         #[arg(long)]
         line_start: Option<usize>,
@@ -72,6 +63,8 @@ pub enum AgentConfigCommand {
     Grep {
         #[arg(short, long)]
         node: String,
+        #[arg(short, long)]
+        agent: String,
         path: String,
         pattern: String,
     },
@@ -83,6 +76,8 @@ pub enum AgentSessionCommand {
     Read {
         #[arg(short, long)]
         node: String,
+        #[arg(short, long)]
+        agent: String,
         session_file: String,
         #[arg(long)]
         line_start: Option<usize>,
@@ -94,6 +89,8 @@ pub enum AgentSessionCommand {
     Grep {
         #[arg(short, long)]
         node: String,
+        #[arg(short, long)]
+        agent: String,
         session_file: String,
         pattern: String,
     },
@@ -102,11 +99,11 @@ pub enum AgentSessionCommand {
 pub async fn execute(client: &Client, command: AgentCommand) -> Result<()> {
     match command {
         AgentCommand::List { node } => list_agents(client, &node).await,
-        AgentCommand::Select { node, short_name } => select_agent(client, &node, &short_name).await,
         AgentCommand::Update { node } => update_agent(client, &node).await,
         AgentCommand::Config { command } => match command {
             AgentConfigCommand::Read {
                 node,
+                agent,
                 path,
                 line_start,
                 line_end,
@@ -114,6 +111,7 @@ pub async fn execute(client: &Client, command: AgentCommand) -> Result<()> {
                 read_file(
                     client,
                     &node,
+                    &agent,
                     NodeFileType::Config,
                     &path,
                     line_start,
@@ -128,13 +126,15 @@ pub async fn execute(client: &Client, command: AgentCommand) -> Result<()> {
             } => write_file(client, &node, NodeFileType::Config, &path, &contents).await,
             AgentConfigCommand::Grep {
                 node,
+                agent,
                 path,
                 pattern,
-            } => grep_file(client, &node, NodeFileType::Config, &path, &pattern).await,
+            } => grep_file(client, &node, &agent, NodeFileType::Config, &path, &pattern).await,
         },
         AgentCommand::Session { command } => match command {
             AgentSessionCommand::Read {
                 node,
+                agent,
                 session_file,
                 line_start,
                 line_end,
@@ -142,6 +142,7 @@ pub async fn execute(client: &Client, command: AgentCommand) -> Result<()> {
                 read_file(
                     client,
                     &node,
+                    &agent,
                     NodeFileType::Session,
                     &session_file,
                     line_start,
@@ -151,12 +152,14 @@ pub async fn execute(client: &Client, command: AgentCommand) -> Result<()> {
             }
             AgentSessionCommand::Grep {
                 node,
+                agent,
                 session_file,
                 pattern,
             } => {
                 grep_file(
                     client,
                     &node,
+                    &agent,
                     NodeFileType::Session,
                     &session_file,
                     &pattern,
@@ -221,39 +224,6 @@ async fn list_agents(client: &Client, node_prefix: &str) -> Result<()> {
     Ok(())
 }
 
-async fn select_agent(client: &Client, node_prefix: &str, short_name: &str) -> Result<()> {
-    //
-    // Under ACP the connector is chosen per session. There is no node-side
-    // method for selection, so validate against the cached agent list and
-    // persist the choice locally in CliState so subsequent subcommands
-    // (session create, agent config read/grep, ...) can resolve it.
-    //
-
-    let state = client
-        .get_state()
-        .await
-        .ok_or_else(|| anyhow!("No state available"))?;
-    let node = state
-        .nodes
-        .iter()
-        .find(|n| n.node_id.to_lowercase().starts_with(&node_prefix.to_lowercase()))
-        .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
-
-    let exists = node.discovered_agents.iter().any(|a| a.short_name == short_name);
-    if !exists {
-        return Err(anyhow!(
-            "Agent '{}' not available on node. Use `agent list` to see discovered agents.",
-            short_name
-        ));
-    }
-
-    let mut cli_state = CliState::load().unwrap_or_default();
-    cli_state.set_agent(&node.node_id, short_name)?;
-
-    print_success(&format!("Selected agent: {}", short_name));
-    Ok(())
-}
-
 async fn update_agent(client: &Client, node_prefix: &str) -> Result<()> {
     //
     // Agent info is refreshed automatically via NodeInformationUpdate
@@ -277,16 +247,10 @@ async fn update_agent(client: &Client, node_prefix: &str) -> Result<()> {
     Ok(())
 }
 
-fn selected_agent_short_name(_state: &common::SystemState, node_id: &str) -> Result<String> {
-    CliState::load()
-        .unwrap_or_default()
-        .get_agent(node_id)
-        .ok_or_else(|| anyhow!("No agent selected. Use `agent select` first."))
-}
-
 async fn read_file(
     client: &Client,
     node_prefix: &str,
+    agent: &str,
     file_type: NodeFileType,
     path: &str,
     line_start: Option<usize>,
@@ -298,10 +262,9 @@ async fn read_file(
         .ok_or_else(|| anyhow!("No state available"))?;
     let node_id = find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
-    let agent_short_name = selected_agent_short_name(&state, &node_id)?;
 
     let mut params = json!({
-        "agent_short_name": agent_short_name,
+        "agent_short_name": agent,
         "file_type": file_type,
         "path": path,
     });
@@ -376,6 +339,7 @@ async fn write_file(
 async fn grep_file(
     client: &Client,
     node_prefix: &str,
+    agent: &str,
     file_type: NodeFileType,
     path: &str,
     pattern: &str,
@@ -386,11 +350,10 @@ async fn grep_file(
         .ok_or_else(|| anyhow!("No state available"))?;
     let node_id = find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
-    let agent_short_name = selected_agent_short_name(&state, &node_id)?;
 
     let result = client
         .acp_request(&node_id, EXT_PRAXIS_GREP_FILES, json!({
-            "agent_short_name": agent_short_name,
+            "agent_short_name": agent,
             "file_type": file_type,
             "paths": vec![path.to_string()],
             "pattern": pattern,

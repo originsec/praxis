@@ -248,22 +248,25 @@ node reset <prefix>                # Reset a node
 
 **Agent Management:**
 ```bash
-agent list --node <prefix>         # List agents on a node
-agent select --node <prefix> <name>  # Select agent
-agent update --node <prefix>       # Request agent info update
-agent config read --node <prefix> <path>    # Read config file
-agent config write --node <prefix> <path> <contents>  # Write config file
-agent config grep --node <prefix> <path> <pattern>    # Grep config file
-agent session read --node <prefix> <file>   # Read session file
-agent session grep --node <prefix> <file> <pattern>   # Grep session file
+agent list --node <prefix>                   # List agents on a node
+agent update --node <prefix>                 # Request agent info update
+agent config read --node <prefix> --agent <name> <path>     # Read config file
+agent config write --node <prefix> <path> <contents>        # Write config file (agent-independent)
+agent config grep --node <prefix> --agent <name> <path> <pattern>  # Grep config file
+agent session read --node <prefix> --agent <name> <file>    # Read session file
+agent session grep --node <prefix> --agent <name> <file> <pattern> # Grep session file
 ```
 
 **Session Management:**
 ```bash
-session create --node <prefix> [--yolo] [--project <path>] [--timeout <secs>]
+session create --node <prefix> --agent <name> [--yolo] [--project <path>] [--timeout <secs>]
 session prompt --node <prefix> <text>
 session close --node <prefix>
 ```
+
+Every command that needs an agent takes `--agent` explicitly; ACP
+sessions are per-agent, so the same node can host concurrent sessions
+under different agents.
 
 Non-interactive mode persists a single session id per node in
 `~/.praxis/cli.json` — `session create` stores it, `session prompt` and
