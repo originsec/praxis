@@ -3398,6 +3398,7 @@ dependencies = [
  "lapin",
  "praxis_common",
  "ratatui",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

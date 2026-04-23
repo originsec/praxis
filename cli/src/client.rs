@@ -2,8 +2,10 @@ use anyhow::{Result, anyhow};
 use common::{
     CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE, ChainDefinitionFull, ChainDefinitionInfo,
     ChainExecutionUpdate, ClientBroadcastMessage, ClientDirectMessage, ClientRegistration,
-    ClientSignalMessage, LuaAgentScriptInfo, OperationDefinitionInfo, SemanticOpUpdate,
-    SystemState, TerminalOutput,
+    ClientSignalMessage, InterceptMethod, InterceptRule, InterceptStatus,
+    InterceptedTrafficEntry, LuaAgentScriptInfo, OperationDefinitionInfo, RuleScope,
+    SemanticOpUpdate, SystemState, TargetDirection, TerminalOutput, TrafficLogFilters,
+    TrafficMatchWithDetails, TrafficSearchFilters,
     client_queue_name,
     mcp::{build_notification_frame, build_request_frame},
     publish_json, publish_terminal_command,
@@ -29,6 +31,24 @@ pub struct Client {
     timeout: Duration,
     state: Arc<Mutex<ClientState>>,
     consumer_handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+//
+// Outcome of an intercept-rule create/update/delete signal. Folded into a
+// single enum because the service emits a different ClientDirectMessage
+// variant per outcome and callers just need the result.
+//
+
+#[derive(Debug, Clone)]
+pub enum RuleOpOutcome {
+    Created(InterceptRule),
+    Updated(InterceptRule),
+    Deleted {
+        #[allow(dead_code)]
+        id: i64,
+        success: bool,
+    },
+    Error(String),
 }
 
 //
@@ -59,6 +79,24 @@ struct ClientState {
     pending_semantic_op: Option<String>,
     lua_agent_scripts: Vec<LuaAgentScriptInfo>,
     session_update_tx: Option<tokio::sync::mpsc::UnboundedSender<common::SessionUpdate>>,
+
+    //
+    // Intercept traffic: per-request one-shot senders and live streaming
+    // subscribers. Only one request of each kind is expected in flight at
+    // a time; a newer request overwrites the older sender.
+    //
+    pending_traffic_log: Option<oneshot::Sender<(Vec<InterceptedTrafficEntry>, usize)>>,
+    pending_traffic_search: Option<oneshot::Sender<(Vec<InterceptedTrafficEntry>, usize)>>,
+    pending_traffic_matches: Option<oneshot::Sender<(Vec<TrafficMatchWithDetails>, usize)>>,
+    pending_traffic_clear: Option<oneshot::Sender<usize>>,
+    pending_rules_list: Option<oneshot::Sender<Vec<InterceptRule>>>,
+    pending_rule_op: Option<oneshot::Sender<RuleOpOutcome>>,
+    pending_traffic_get: HashMap<i64, oneshot::Sender<Option<InterceptedTrafficEntry>>>,
+    intercept_entries_tx:
+        Option<tokio::sync::mpsc::UnboundedSender<Vec<InterceptedTrafficEntry>>>,
+    intercept_matches_tx:
+        Option<tokio::sync::mpsc::UnboundedSender<Vec<TrafficMatchWithDetails>>>,
+    intercept_status_tx: Option<tokio::sync::mpsc::UnboundedSender<InterceptStatus>>,
 }
 
 impl Client {
@@ -322,6 +360,74 @@ impl Client {
                 }
             }
 
+            //
+            // Intercept traffic responses.
+            //
+            ClientDirectMessage::TrafficLogResponse {
+                entries,
+                total_count,
+            } => {
+                if let Some(tx) = state.pending_traffic_log.take() {
+                    let _ = tx.send((entries, total_count));
+                }
+            }
+            ClientDirectMessage::TrafficSearchResponse {
+                entries,
+                total_count,
+            } => {
+                if let Some(tx) = state.pending_traffic_search.take() {
+                    let _ = tx.send((entries, total_count));
+                }
+            }
+            ClientDirectMessage::TrafficMatchesResponse {
+                matches,
+                total_count,
+            } => {
+                if let Some(tx) = state.pending_traffic_matches.take() {
+                    let _ = tx.send((matches, total_count));
+                }
+            }
+            ClientDirectMessage::TrafficCleared { deleted_count } => {
+                if let Some(tx) = state.pending_traffic_clear.take() {
+                    let _ = tx.send(deleted_count);
+                }
+            }
+            ClientDirectMessage::TrafficGetResponse { id, entry } => {
+                if let Some(tx) = state.pending_traffic_get.remove(&id) {
+                    let _ = tx.send(entry);
+                }
+            }
+            ClientDirectMessage::InterceptRuleListResponse { rules } => {
+                if let Some(tx) = state.pending_rules_list.take() {
+                    let _ = tx.send(rules);
+                }
+            }
+            ClientDirectMessage::InterceptRuleCreated { rule } => {
+                if let Some(tx) = state.pending_rule_op.take() {
+                    let _ = tx.send(RuleOpOutcome::Created(rule));
+                }
+            }
+            ClientDirectMessage::InterceptRuleUpdated { rule } => {
+                if let Some(tx) = state.pending_rule_op.take() {
+                    let _ = tx.send(RuleOpOutcome::Updated(rule));
+                }
+            }
+            ClientDirectMessage::InterceptRuleDeleted { id, success } => {
+                if let Some(tx) = state.pending_rule_op.take() {
+                    let _ = tx.send(RuleOpOutcome::Deleted { id, success });
+                }
+            }
+            ClientDirectMessage::InterceptRuleError { message } => {
+                if let Some(tx) = state.pending_rule_op.take() {
+                    let _ = tx.send(RuleOpOutcome::Error(message));
+                }
+            }
+            ClientDirectMessage::InterceptStatusUpdate(status) => {
+                if let Some(ref tx) = state.intercept_status_tx {
+                    let _ = tx.send(status);
+                }
+            }
+
             _ => {}
         }
     }
@@ -359,6 +465,26 @@ impl Client {
                     state.chain_executions.push(exec);
                 }
             }
+
+            //
+            // Live intercept streams from the service broadcaster.
+            //
+            ClientBroadcastMessage::InterceptedTrafficBatch { entries } => {
+                if let Some(ref tx) = state.intercept_entries_tx {
+                    let _ = tx.send(entries);
+                }
+            }
+            ClientBroadcastMessage::TrafficMatchBatch { matches } => {
+                if let Some(ref tx) = state.intercept_matches_tx {
+                    let _ = tx.send(matches);
+                }
+            }
+            ClientBroadcastMessage::InterceptStatusUpdate(status) => {
+                if let Some(ref tx) = state.intercept_status_tx {
+                    let _ = tx.send(status);
+                }
+            }
+
             _ => {}
         }
     }
@@ -1021,5 +1147,321 @@ impl Client {
             client_id: self.client_id.clone(),
         };
         self.publish_signal(message).await
+    }
+
+    //
+    // Intercept traffic: live streams.
+    //
+
+    pub fn subscribe_intercept_entries(
+        &self,
+    ) -> tokio::sync::mpsc::UnboundedReceiver<Vec<InterceptedTrafficEntry>> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            state.lock().await.intercept_entries_tx = Some(tx);
+        });
+        rx
+    }
+
+    pub fn subscribe_intercept_matches(
+        &self,
+    ) -> tokio::sync::mpsc::UnboundedReceiver<Vec<TrafficMatchWithDetails>> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            state.lock().await.intercept_matches_tx = Some(tx);
+        });
+        rx
+    }
+
+    pub fn subscribe_intercept_status(
+        &self,
+    ) -> tokio::sync::mpsc::UnboundedReceiver<InterceptStatus> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            state.lock().await.intercept_status_tx = Some(tx);
+        });
+        rx
+    }
+
+    //
+    // Intercept traffic: request/response helpers.
+    //
+
+    pub async fn request_traffic_log(
+        &self,
+        filters: TrafficLogFilters,
+    ) -> Result<(Vec<InterceptedTrafficEntry>, usize)> {
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut state = self.state.lock().await;
+            state.pending_traffic_log = Some(tx);
+        }
+        self.publish_signal(ClientSignalMessage::TrafficLogRequest {
+            client_id: self.client_id.clone(),
+            filters,
+        })
+        .await?;
+
+        match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(r)) => Ok(r),
+            Ok(Err(_)) => Err(anyhow!("Traffic log response channel closed")),
+            Err(_) => {
+                self.state.lock().await.pending_traffic_log = None;
+                Err(anyhow!("Timeout waiting for traffic log response"))
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub async fn request_traffic_search(
+        &self,
+        filters: TrafficSearchFilters,
+    ) -> Result<(Vec<InterceptedTrafficEntry>, usize)> {
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut state = self.state.lock().await;
+            state.pending_traffic_search = Some(tx);
+        }
+        self.publish_signal(ClientSignalMessage::TrafficSearchRequest {
+            client_id: self.client_id.clone(),
+            filters,
+        })
+        .await?;
+
+        match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(r)) => Ok(r),
+            Ok(Err(_)) => Err(anyhow!("Traffic search response channel closed")),
+            Err(_) => {
+                self.state.lock().await.pending_traffic_search = None;
+                Err(anyhow!("Timeout waiting for traffic search response"))
+            }
+        }
+    }
+
+    pub async fn request_traffic_matches(
+        &self,
+        rule_id: Option<i64>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(Vec<TrafficMatchWithDetails>, usize)> {
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut state = self.state.lock().await;
+            state.pending_traffic_matches = Some(tx);
+        }
+        self.publish_signal(ClientSignalMessage::TrafficMatchesRequest {
+            client_id: self.client_id.clone(),
+            rule_id,
+            limit,
+            offset,
+        })
+        .await?;
+
+        match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(r)) => Ok(r),
+            Ok(Err(_)) => Err(anyhow!("Traffic matches response channel closed")),
+            Err(_) => {
+                self.state.lock().await.pending_traffic_matches = None;
+                Err(anyhow!("Timeout waiting for traffic matches response"))
+            }
+        }
+    }
+
+    pub async fn clear_all_traffic(&self) -> Result<usize> {
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut state = self.state.lock().await;
+            state.pending_traffic_clear = Some(tx);
+        }
+        self.publish_signal(ClientSignalMessage::TrafficClear {
+            client_id: self.client_id.clone(),
+        })
+        .await?;
+
+        match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(n)) => Ok(n),
+            Ok(Err(_)) => Err(anyhow!("Traffic clear response channel closed")),
+            Err(_) => {
+                self.state.lock().await.pending_traffic_clear = None;
+                Err(anyhow!("Timeout waiting for traffic clear response"))
+            }
+        }
+    }
+
+    pub async fn fetch_traffic_entry(
+        &self,
+        id: i64,
+    ) -> Result<Option<InterceptedTrafficEntry>> {
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut state = self.state.lock().await;
+            state.pending_traffic_get.insert(id, tx);
+        }
+        self.publish_signal(ClientSignalMessage::TrafficGetRequest {
+            client_id: self.client_id.clone(),
+            id,
+        })
+        .await?;
+
+        match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(entry)) => Ok(entry),
+            Ok(Err(_)) => Err(anyhow!("Traffic get response channel closed")),
+            Err(_) => {
+                self.state.lock().await.pending_traffic_get.remove(&id);
+                Err(anyhow!("Timeout waiting for traffic get response"))
+            }
+        }
+    }
+
+    //
+    // Intercept rules.
+    //
+
+    pub async fn list_intercept_rules(&self) -> Result<Vec<InterceptRule>> {
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut state = self.state.lock().await;
+            state.pending_rules_list = Some(tx);
+        }
+        self.publish_signal(ClientSignalMessage::InterceptRuleList {
+            client_id: self.client_id.clone(),
+        })
+        .await?;
+
+        match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(rules)) => Ok(rules),
+            Ok(Err(_)) => Err(anyhow!("Rules list response channel closed")),
+            Err(_) => {
+                self.state.lock().await.pending_rules_list = None;
+                Err(anyhow!("Timeout waiting for rules list response"))
+            }
+        }
+    }
+
+    pub async fn create_intercept_rule(
+        &self,
+        name: String,
+        regex_pattern: String,
+        target_direction: TargetDirection,
+        scope: RuleScope,
+        summarization_prompt: Option<String>,
+    ) -> Result<InterceptRule> {
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut state = self.state.lock().await;
+            state.pending_rule_op = Some(tx);
+        }
+        self.publish_signal(ClientSignalMessage::InterceptRuleCreate {
+            client_id: self.client_id.clone(),
+            name,
+            regex_pattern,
+            target_direction,
+            scope,
+            summarization_prompt,
+        })
+        .await?;
+
+        match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(RuleOpOutcome::Created(rule))) => Ok(rule),
+            Ok(Ok(RuleOpOutcome::Error(msg))) => Err(anyhow!(msg)),
+            Ok(Ok(other)) => Err(anyhow!("Unexpected rule op outcome: {:?}", other)),
+            Ok(Err(_)) => Err(anyhow!("Rule op response channel closed")),
+            Err(_) => {
+                self.state.lock().await.pending_rule_op = None;
+                Err(anyhow!("Timeout waiting for rule create response"))
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn update_intercept_rule(
+        &self,
+        id: i64,
+        name: Option<String>,
+        regex_pattern: Option<String>,
+        target_direction: Option<TargetDirection>,
+        scope: Option<RuleScope>,
+        enabled: Option<bool>,
+        summarization_prompt: Option<Option<String>>,
+    ) -> Result<InterceptRule> {
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut state = self.state.lock().await;
+            state.pending_rule_op = Some(tx);
+        }
+        self.publish_signal(ClientSignalMessage::InterceptRuleUpdate {
+            client_id: self.client_id.clone(),
+            id,
+            name,
+            regex_pattern,
+            target_direction,
+            scope,
+            enabled,
+            summarization_prompt,
+        })
+        .await?;
+
+        match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(RuleOpOutcome::Updated(rule))) => Ok(rule),
+            Ok(Ok(RuleOpOutcome::Error(msg))) => Err(anyhow!(msg)),
+            Ok(Ok(other)) => Err(anyhow!("Unexpected rule op outcome: {:?}", other)),
+            Ok(Err(_)) => Err(anyhow!("Rule op response channel closed")),
+            Err(_) => {
+                self.state.lock().await.pending_rule_op = None;
+                Err(anyhow!("Timeout waiting for rule update response"))
+            }
+        }
+    }
+
+    pub async fn delete_intercept_rule(&self, id: i64) -> Result<bool> {
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut state = self.state.lock().await;
+            state.pending_rule_op = Some(tx);
+        }
+        self.publish_signal(ClientSignalMessage::InterceptRuleDelete {
+            client_id: self.client_id.clone(),
+            id,
+        })
+        .await?;
+
+        match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(RuleOpOutcome::Deleted { success, .. })) => Ok(success),
+            Ok(Ok(RuleOpOutcome::Error(msg))) => Err(anyhow!(msg)),
+            Ok(Ok(other)) => Err(anyhow!("Unexpected rule op outcome: {:?}", other)),
+            Ok(Err(_)) => Err(anyhow!("Rule op response channel closed")),
+            Err(_) => {
+                self.state.lock().await.pending_rule_op = None;
+                Err(anyhow!("Timeout waiting for rule delete response"))
+            }
+        }
+    }
+
+    //
+    // Intercept enable/disable.
+    //
+
+    pub async fn enable_intercept(
+        &self,
+        node_id: String,
+        method: Option<InterceptMethod>,
+    ) -> Result<()> {
+        self.publish_signal(ClientSignalMessage::InterceptEnable {
+            client_id: self.client_id.clone(),
+            node_id,
+            method,
+        })
+        .await
+    }
+
+    pub async fn disable_intercept(&self, node_id: String) -> Result<()> {
+        self.publish_signal(ClientSignalMessage::InterceptDisable {
+            client_id: self.client_id.clone(),
+            node_id,
+        })
+        .await
     }
 }

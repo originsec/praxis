@@ -1744,6 +1744,12 @@ pub enum ClientSignalMessage {
     TrafficClear {
         client_id: String,
     },
+    /// Fetch a single traffic entry by ID (including full request/response bodies).
+    /// Used when live broadcast stripped bodies to keep batch payloads small.
+    TrafficGetRequest {
+        client_id: String,
+        id: i64,
+    },
     /// Search traffic with regex pattern across all fields
     TrafficSearchRequest {
         client_id: String,
@@ -1987,6 +1993,22 @@ pub enum ClientBroadcastMessage {
     InterceptStatusUpdate(InterceptStatus),
     /// Enable/disable centralized event logging for clients
     EventLoggingSet { enabled: bool },
+    //
+    // Live intercept stream.
+    //
+    // Bodies are stripped from the broadcast payload to keep message size
+    // bounded; receivers should call TrafficGetRequest to load the full body
+    // for a selected entry. Headers and metadata are preserved so receivers
+    // can render and filter the list without a round-trip.
+    //
+    /// Batch of newly-captured intercepted traffic entries (bodies stripped).
+    InterceptedTrafficBatch {
+        entries: Vec<InterceptedTrafficEntry>,
+    },
+    /// Batch of newly-created rule matches (bodies stripped on inner traffic).
+    TrafficMatchBatch {
+        matches: Vec<TrafficMatchWithDetails>,
+    },
 }
 
 /// Messages sent to a specific client queue
@@ -2125,6 +2147,11 @@ pub enum ClientDirectMessage {
     /// Traffic cleared
     TrafficCleared {
         deleted_count: usize,
+    },
+    /// Single traffic entry fetched by ID (response to TrafficGetRequest).
+    TrafficGetResponse {
+        id: i64,
+        entry: Option<InterceptedTrafficEntry>,
     },
     /// Intercept rules list
     InterceptRuleListResponse {

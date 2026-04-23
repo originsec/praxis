@@ -5,12 +5,14 @@
 
 pub mod client;
 pub mod node;
+pub mod traffic_broadcast;
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use lapin::Channel;
 
 use crate::agent_chat::AgentChatManager;
+use traffic_broadcast::InterceptBroadcaster;
 use crate::config::ServiceConfig;
 use crate::database::Database;
 use crate::handlers::{ClientMessageHandler, NodeMessageHandler};
@@ -44,6 +46,7 @@ pub struct ServiceContext {
     pub ccrv1_manager: Arc<CcrV1Manager>,
     pub ccrv2_manager: Arc<CcrV2Manager>,
     pub trigger_engine: Option<Arc<TriggerEngine>>,
+    pub intercept_broadcaster: Arc<InterceptBroadcaster>,
 
     //
     // Channels for publishing messages.

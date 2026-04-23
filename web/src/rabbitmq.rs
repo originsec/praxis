@@ -1280,6 +1280,12 @@ impl RabbitMqClient {
             ClientDirectMessage::SessionUpdate(update) => {
                 self.state.broadcast(ServerMessage::SessionUpdate { update });
             }
+
+            //
+            // Cli TUI fetches full entry bodies via TrafficGetRequest; the
+            // web UI does not use this path today.
+            //
+            ClientDirectMessage::TrafficGetResponse { .. } => {}
         }
 
         Ok(())
@@ -1315,6 +1321,13 @@ impl RabbitMqClient {
                 common::logging::set_event_log_enabled(enabled);
                 common::log_info!("Event logging {}", if enabled { "enabled" } else { "disabled" });
             }
+            //
+            // Live intercept batches are consumed by the cli TUI. The web
+            // frontend uses the existing request/response traffic API and
+            // does not render these batches today, so drop them here.
+            //
+            ClientBroadcastMessage::InterceptedTrafficBatch { .. } => {}
+            ClientBroadcastMessage::TrafficMatchBatch { .. } => {}
         }
 
         Ok(())

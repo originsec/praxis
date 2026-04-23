@@ -66,6 +66,64 @@ live. On first connect, whenever you open the Nodes window, and after a
 node reset, the TUI calls `session/list` on each node to pick up
 sessions left alive from previous runs or other clients.
 
+### Intercept (`Ctrl+I`)
+
+Live traffic interception with three tabs (`Tab` / `Shift+Tab` to switch):
+
+- **Log** — incoming traffic streams from every node into a ring buffer.
+  HTTP entries show individually; WebSocket and HTTP/2 frames group by
+  `(node, url)` so streaming endpoints don't flood the list.
+- **Rules** — create, edit, delete, and toggle intercept rules (regex
+  patterns with direction and scope). Rules can carry an optional LLM
+  summarisation prompt.
+- **Matches** — matched-traffic review with AI summaries (when a rule
+  has a summarisation prompt).
+
+#### Log tab
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Focus detail pane (then `↑`/`↓` scrolls detail) |
+| `Esc` | Unfocus detail / clear search |
+| `/` | Focus search box (regex, falls back to substring) |
+| `f` | Cycle protocol filter: all → http → ws → h2 |
+| `n` | Cycle node filter (no popup; `Esc` clears) |
+| `a` | Cycle agent filter |
+| `p` | Pause / resume the live stream |
+| `r` | Re-request the initial page from the service |
+| `c` | Clear ALL traffic (with confirmation) |
+| `H` | Cycle body render mode: pretty → raw → hex |
+| `i` | Toggle interception on the selected entry's node |
+
+Request and response bodies arrive via a second fetch on selection to
+keep the broadcast payload small — large bodies load within a few
+hundred milliseconds after you navigate to an entry.
+
+#### Rules tab
+
+| Key | Action |
+|-----|--------|
+| `n` | Create a new rule |
+| `e` | Edit the selected rule |
+| `d` | Delete the selected rule (with confirmation) |
+| `Space` | Toggle enabled / disabled |
+| `Enter` | Jump to the Matches tab filtered to this rule |
+| `r` | Refresh the rules list |
+
+The rule form (open via `n` or `e`) fields: Name, Regex, Direction
+(`send` / `receive` / `both`), Scope (`all` / `node` / `agent`), and an
+optional LLM summary prompt. `Tab` moves between fields, `Space` /
+`←` / `→` cycles select-style fields, `Ctrl+S` saves, `Esc` cancels.
+
+#### Matches tab
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Focus match detail pane |
+| `f` | Cycle rule filter |
+| `Esc` | Clear rule filter / unfocus detail |
+| `r` | Refresh |
+
 ### Operations (`Ctrl+P`)
 
 Operation and chain management with two tabs:
@@ -98,6 +156,7 @@ Mouse interactions work alongside keyboard controls in all windows and popups.
 |-----|--------|
 | `Ctrl+O` | Orchestrator window |
 | `Ctrl+L` | Nodes window |
+| `Ctrl+I` | Intercept window |
 | `Ctrl+P` | Operations window |
 | `Ctrl+S` | Settings window |
 | `Ctrl+T` | Toggle terminal mode |

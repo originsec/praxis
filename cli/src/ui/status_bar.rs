@@ -48,6 +48,8 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Span::raw("  "),
         active_label("^l nodes", app.active_window == Window::Nodes),
         Span::raw("  "),
+        active_label("^i intercept", app.active_window == Window::Intercept),
+        Span::raw("  "),
         active_label("^p ops", app.active_window == Window::Operations),
         Span::raw("  "),
         active_label("^s settings", app.active_window == Window::Settings),
