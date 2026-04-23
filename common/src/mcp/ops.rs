@@ -63,20 +63,6 @@ pub fn resolve_node_id(state: &SystemState, prefix: &str) -> Result<String> {
 }
 
 //
-// Resolve the selected agent short name for a node.
-//
-
-fn resolve_selected_agent(state: &SystemState, node_id: &str) -> Result<String> {
-    state
-        .nodes
-        .iter()
-        .find(|n| n.node_id == node_id)
-        .and_then(|n| n.selected_agent.as_ref())
-        .map(|a| a.short_name.clone())
-        .ok_or_else(|| anyhow!("No agent selected on node. Use agent_select to select one first."))
-}
-
-//
 // List all available (enabled) operations and chains.
 //
 
@@ -443,15 +429,15 @@ struct ResolvedRecon {
 async fn resolve_recon(
     client: &(impl McpClient + Sync),
     node_prefix: &str,
+    agent: &str,
     file_type: AgentFileType,
 ) -> Result<ResolvedRecon> {
     let state = client.get_state().await.ok_or_else(|| anyhow!("No state available. The service may still be starting — try again in a moment."))?;
     let node_id = resolve_node_id(&state, node_prefix)?;
-    let agent = resolve_selected_agent(&state, &node_id)?;
     let recon = client
-        .get_stored_recon(&node_id, &agent)
+        .get_stored_recon(&node_id, agent)
         .await?
-        .ok_or_else(|| anyhow!("No stored recon data. Run recon_run first, then select an agent with agent_select."))?;
+        .ok_or_else(|| anyhow!("No stored recon data for agent '{}' on this node. Run recon_run first.", agent))?;
 
     let paths: Vec<String> = match file_type {
         AgentFileType::Config => recon.config.iter().map(|c| c.path.clone()).collect(),
@@ -500,34 +486,28 @@ pub struct ReadFileResult {
 pub async fn recon_read_file(
     client: &(impl McpClient + Sync),
     node_prefix: &str,
+    agent: &str,
     file_type: AgentFileType,
     path: &str,
     line_start: Option<usize>,
     line_end: Option<usize>,
 ) -> Result<ReadFileResult> {
-    let resolved = resolve_recon(client, node_prefix, file_type).await?;
+    let resolved = resolve_recon(client, node_prefix, agent, file_type).await?;
     validate_paths(&resolved.paths, &[path.to_string()], file_type)?;
-    read_file_inner(client, &resolved.node_id, file_type, path, line_start, line_end).await
+    read_file_inner(client, &resolved.node_id, agent, file_type, path, line_start, line_end).await
 }
 
 async fn read_file_inner(
     client: &(impl McpClient + Sync),
     node_id: &str,
+    agent: &str,
     file_type: AgentFileType,
     path: &str,
     line_start: Option<usize>,
     line_end: Option<usize>,
 ) -> Result<ReadFileResult> {
-    //
-    // The node's `_praxis/read_file` extension needs to know the agent so it
-    // can resolve session content. Look up the selected agent from cached
-    // state.
-    //
-
-    let agent_short_name = selected_agent_for(client, node_id).await?;
-
     let mut params = json!({
-        "agent_short_name": agent_short_name,
+        "agent_short_name": agent,
         "file_type": file_type,
         "path": path,
     });
@@ -578,40 +558,18 @@ async fn read_file_inner(
 }
 
 //
-// Best-effort: look up the currently-selected agent short name for a node
-// from cached system state. Falls back to an error message pointing the
-// caller at agent_select.
-//
-
-async fn selected_agent_for(
-    client: &(impl McpClient + Sync),
-    node_id: &str,
-) -> Result<String> {
-    let state = client
-        .get_state()
-        .await
-        .ok_or_else(|| anyhow!("No state available"))?;
-    state
-        .nodes
-        .iter()
-        .find(|n| n.node_id == node_id)
-        .and_then(|n| n.selected_agent.as_ref())
-        .map(|a| a.short_name.clone())
-        .ok_or_else(|| anyhow!("No agent selected on node. Use agent_select to select one first."))
-}
-
-//
 // Read all files of a given type from stored recon.
 //
 
 pub async fn recon_read_all(
     client: &(impl McpClient + Sync),
     node_prefix: &str,
+    agent: &str,
     file_type: AgentFileType,
     line_start: Option<usize>,
     line_end: Option<usize>,
 ) -> Result<Vec<ReadFileResult>> {
-    let resolved = resolve_recon(client, node_prefix, file_type).await?;
+    let resolved = resolve_recon(client, node_prefix, agent, file_type).await?;
 
     if resolved.paths.is_empty() {
         return Err(anyhow!("No files found in recon data. Run recon_run to discover files."));
@@ -619,7 +577,7 @@ pub async fn recon_read_all(
 
     let mut results = Vec::new();
     for path in &resolved.paths {
-        match read_file_inner(client, &resolved.node_id, file_type, path, line_start, line_end).await {
+        match read_file_inner(client, &resolved.node_id, agent, file_type, path, line_start, line_end).await {
             Ok(r) => results.push(r),
             Err(e) => results.push(ReadFileResult {
                 path: path.clone(),
@@ -646,25 +604,25 @@ pub struct GrepFilesResult {
 pub async fn recon_grep_file(
     client: &(impl McpClient + Sync),
     node_prefix: &str,
+    agent: &str,
     file_type: AgentFileType,
     paths: &[String],
     pattern: &str,
 ) -> Result<GrepFilesResult> {
-    let resolved = resolve_recon(client, node_prefix, file_type).await?;
-    grep_files_inner(client, &resolved.node_id, file_type, paths, pattern).await
+    let resolved = resolve_recon(client, node_prefix, agent, file_type).await?;
+    grep_files_inner(client, &resolved.node_id, agent, file_type, paths, pattern).await
 }
 
 async fn grep_files_inner(
     client: &(impl McpClient + Sync),
     node_id: &str,
+    agent: &str,
     file_type: AgentFileType,
     paths: &[String],
     pattern: &str,
 ) -> Result<GrepFilesResult> {
-    let agent_short_name = selected_agent_for(client, node_id).await?;
-
     let params = json!({
-        "agent_short_name": agent_short_name,
+        "agent_short_name": agent,
         "file_type": file_type,
         "paths": paths,
         "pattern": pattern,
@@ -715,17 +673,18 @@ async fn grep_files_inner(
 pub async fn recon_grep_all(
     client: &(impl McpClient + Sync),
     node_prefix: &str,
+    agent: &str,
     file_type: AgentFileType,
     pattern: &str,
 ) -> Result<GrepFilesResult> {
-    let resolved = resolve_recon(client, node_prefix, file_type).await?;
+    let resolved = resolve_recon(client, node_prefix, agent, file_type).await?;
 
     if resolved.paths.is_empty() {
         return Err(anyhow!("No files found in recon data. Run recon_run to discover files."));
     }
 
     let mut result = grep_files_inner(
-        client, &resolved.node_id, file_type, &resolved.paths, pattern,
+        client, &resolved.node_id, agent, file_type, &resolved.paths, pattern,
     ).await?;
 
     // Filter to only files with matches

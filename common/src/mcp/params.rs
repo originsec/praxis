@@ -16,15 +16,12 @@ pub struct NodeParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct AgentSelectParams {
-    pub node: String,
-    pub agent: String,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
 pub struct SessionCreateParams {
     #[schemars(description = "Node ID prefix")]
     pub node: String,
+
+    #[schemars(description = "Agent short name (e.g. 'claude-code', 'codex'). ACP sessions are per-agent; each session is bound to the agent it was created with.")]
+    pub agent: String,
 
     #[schemars(description = "Enable YOLO mode (agent auto-approves actions)")]
     #[serde(default)]
@@ -32,6 +29,15 @@ pub struct SessionCreateParams {
 
     #[schemars(description = "Working directory / project path for the session")]
     pub project: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ReconRunParams {
+    #[schemars(description = "Node ID prefix")]
+    pub node: String,
+
+    #[schemars(description = "Agent short name whose view the recon scan is scoped to")]
+    pub agent: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -83,6 +89,9 @@ pub struct ReconReadParams {
     #[schemars(description = "Node ID prefix")]
     pub node: String,
 
+    #[schemars(description = "Agent short name whose stored recon to read from")]
+    pub agent: String,
+
     #[schemars(description = "Path to the file (omit to read all from recon)")]
     pub path: Option<String>,
 
@@ -94,6 +103,9 @@ pub struct ReconReadParams {
 pub struct ReconGrepParams {
     #[schemars(description = "Node ID prefix")]
     pub node: String,
+
+    #[schemars(description = "Agent short name whose stored recon to grep")]
+    pub agent: String,
 
     #[schemars(description = "Regex pattern to search for")]
     pub pattern: String,

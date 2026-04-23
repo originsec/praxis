@@ -63,25 +63,30 @@ The MCP server exposes the following tools:
 ### Agent Management
 
 - `agent_list` — List agents on a node
-- `agent_select` — Select an agent on a node
 - `agent_update` — Request agent info refresh
+
+> Agents are selected per-session rather than per-node. `session_create`
+> and the recon tools each take an `agent` parameter, so the same node
+> can run concurrent sessions against different agents.
 
 ### Reconnaissance
 
-- `recon_run` — Run static reconnaissance
-- `recon_run_semantic` — Run semantic reconnaissance (includes internal tools)
-- `recon_list` — List stored recon data (section: all/sessions/tools/projects/configs)
-- `recon_config_read` — Read config file content (omit path to read all)
-- `recon_session_read` — Read session file content (omit path to read all)
-- `recon_config_grep` — Grep config files with regex
-- `recon_session_grep` — Grep session files with regex
+All recon tools take a `node` prefix and an `agent` short-name.
+
+- `recon_run` — Run static reconnaissance (`node`, `agent`)
+- `recon_run_semantic` — Run semantic reconnaissance, includes internal tools (`node`, `agent`)
+- `recon_list` — List stored recon data (`node`, `agent`, `section` = all/sessions/tools/projects/configs)
+- `recon_config_read` — Read config file content discovered by recon (`node`, `agent`, optional `path`)
+- `recon_session_read` — Read session file content (`node`, `agent`, optional `path`)
+- `recon_config_grep` — Grep config files with regex (`node`, `agent`, `pattern`, optional `paths`)
+- `recon_session_grep` — Grep session files with regex (`node`, `agent`, `pattern`, optional `paths`)
 - `write_file` — Write file content
 
 ### Sessions
 
-- `session_create` — Create a new session
-- `session_prompt` — Send a prompt to the active session
-- `session_close` — Close the active session
+- `session_create` — Create a new ACP session (`node`, `agent`, optional `project`, `yolo`). Returns a `session_id`.
+- `session_prompt` — Send a prompt to a session (`node`, `session_id`, `prompt`)
+- `session_close` — Close a session (`node`, `session_id`)
 
 ### Operations & Chains
 
