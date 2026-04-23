@@ -45,16 +45,26 @@ LLM-powered conversation interface for coordinating operations across the Praxis
 - Plan tracking with step visualization
 - Token usage statistics
 - Command history and conversation scrolling
-- Save conversations (`Ctrl+W`)
-- Model selection (`Ctrl+N`)
+- Multiple concurrent orchestrator sessions — `Ctrl+N` opens a new one; `Ctrl+W` closes the current one; `Ctrl+Alt+W` saves the transcript
+- `Ctrl+C` cancels the in-flight prompt in the active session
+- `Ctrl+E` toggles the tools panel; `Ctrl+Alt+E` expands it fully
 
 ### Nodes (`Ctrl+L`)
 
 Node and agent management with integrated session chat and terminal access:
 - Node list with status indicators (active/warning/inactive), OS details, and agent counts
-- Agent selection and session management
+- Agent selection and concurrent ACP session management
 - **Session Chat** — direct conversation with agents, with YOLO mode and working directory selection
+- **Active Sessions** overlay (`Ctrl+W`) — see every live session across nodes and connectors; Enter to resume, `d` / `Del` to discard, Esc to dismiss
 - **Terminal** (`Ctrl+R` to create, `Ctrl+T` to toggle) — full PTY terminal emulation with scrollback
+
+Inside a chat view, `Esc` or `Ctrl+W` **pauses** the session (leaves it
+running on the node; resume from the Active Sessions overlay). `Ctrl+C`
+cancels an in-flight prompt, or closes the session if the agent is idle.
+The status bar shows `N sessions` whenever any concurrent sessions are
+live. On first connect, whenever you open the Nodes window, and after a
+node reset, the TUI calls `session/list` on each node to pick up
+sessions left alive from previous runs or other clients.
 
 ### Operations (`Ctrl+P`)
 
@@ -92,6 +102,10 @@ Mouse interactions work alongside keyboard controls in all windows and popups.
 | `Ctrl+S` | Settings window |
 | `Ctrl+T` | Toggle terminal mode |
 | `Ctrl+Q` | Quit |
+
+`Ctrl+W` is window-scoped: in Nodes it toggles the Active Sessions
+overlay (or pauses the current chat session), in Orchestrator it closes
+the active orchestrator session.
 
 ## Non-Interactive Mode
 
@@ -140,6 +154,11 @@ session create --node <prefix> [--yolo] [--project <path>] [--timeout <secs>]
 session prompt --node <prefix> <text>
 session close --node <prefix>
 ```
+
+Non-interactive mode persists a single session id per node in
+`~/.praxis/cli.json` — `session create` stores it, `session prompt` and
+`session close` read it. The interactive TUI runs concurrent in-memory
+sessions and does not share state with the non-interactive subcommands.
 
 ## Global Options
 

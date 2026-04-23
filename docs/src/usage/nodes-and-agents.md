@@ -57,12 +57,12 @@ If a node disconnects and you want to remove it from the list, click the remove 
 You can reset a node to cancel all in-flight operations and return it to a clean state. Reset will:
 
 - Cancel all running transactions (prompts, recon, etc.)
-- Close any active agent session
+- Drop every live ACP session and its per-session Lua VM
 - Close any terminal session
 - Disable interception and restore system settings
 - Re-register the node with the service
 
-Use the reset button (↻) in the node card header, the CLI command `node reset <id>`, or the MCP tool `node_reset`. The node briefly goes offline during reset and comes back with fresh state.
+Use the reset button (↻) in the node card header, the CLI command `node reset <id>`, or the MCP tool `node_reset`. The node briefly goes offline during reset and comes back with fresh state. Clients drop their local entries for the reset node immediately and re-pull `session/list` after a short grace period so the Active Sessions overlay reflects reality.
 
 ## Agents
 
@@ -77,22 +77,22 @@ Agents are the AI assistants detected on each node. When a node fingerprints suc
 
 ### Agent Selection
 
-Click an agent to select it. This focuses operations on that specific agent:
-- Recon targets that agent
-- Sessions connect to that agent
-- Operations execute through that agent
-
-Only one agent can be selected at a time per node.
+Click an agent to focus operations on it — recon targets that agent,
+actions in the agent's card (config read/write, session create) route to
+that agent. A node can host concurrent sessions across any combination
+of its agents; the focus is purely a UI convenience, not a routing
+constraint. Recon is agent-scoped (`_praxis/recon` is called with the
+agent's `short_name`), and each session explicitly names its connector
+via `_meta.praxis.connector` on `session/new`.
 
 ### Agent States
 
-An agent can be in different states:
+**Fingerprinted** — the agent was detected but no session is open.
 
-**Fingerprinted** - The agent was detected but no session exists.
-
-**Session Active** - There's an active session with the agent. You can send prompts and run operations.
-
-**Session (YOLO)** - Active session with auto-approve enabled.
+**Session Active** — one or more live sessions exist. The card shows a
+`LIVE` indicator and, when applicable, a `YOLO` tag for auto-approve
+sessions. The Sessions panel lists each live session with resume /
+discard controls.
 
 ## Working with Nodes and Agents
 

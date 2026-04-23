@@ -110,20 +110,28 @@ The MCP server exposes all Praxis tools via the Model Context Protocol over SSE 
 
 ### Supported Providers
 
-| Provider ID | Name | API Key Variable |
-|-------------|------|------------------|
-| `anthropic` | Anthropic | `ANTHROPIC_API_KEY` |
-| `openai` | OpenAI | `OPENAI_API_KEY` |
-| `google` | Google (Gemini) | `GOOGLE_API_KEY` |
-| `groq` | Groq | `GROQ_API_KEY` |
-| `cerebras` | Cerebras | `CEREBRAS_API_KEY` |
-| `mistral` | Mistral | `MISTRAL_API_KEY` |
-| `xai` | xAI | `XAI_API_KEY` |
-| `nvidia` | NVIDIA | `NVIDIA_API_KEY` |
-| `fireworksai` | Fireworks AI | `FIREWORKS_API_KEY` |
-| `minimax` | MiniMax | `MINIMAX_API_KEY` |
-| `openrouter` | OpenRouter | `OPENROUTER_API_KEY` |
-| `ollama` | Ollama (local) | (none) |
+| Provider ID | Name | API Key | Base URL |
+|-------------|------|---------|----------|
+| `anthropic` | Anthropic | required | fixed |
+| `openai` | OpenAI | required | fixed (overridable) |
+| `gemini` | Google (Gemini) | required | fixed |
+| `groq` | Groq | required | fixed |
+| `cerebras` | Cerebras | required | fixed |
+| `mistral` | Mistral | required | fixed |
+| `xai` | xAI | required | fixed |
+| `nvidia` | NVIDIA | required | fixed |
+| `fireworksai` | Fireworks AI | required | fixed |
+| `minimax` | MiniMax | required | fixed |
+| `moonshot` | Moonshot AI | required | fixed |
+| `openrouter` | OpenRouter | required | fixed |
+| `ollama` | Ollama (local) | optional | defaults to `http://localhost:11434/v1` |
+| `custom` | Custom (OpenAI-compatible) | optional | required |
+
+Every model definition can carry an optional `base_url` field that
+overrides the provider default. For `custom` the base URL is required
+— discovery and inference both fail without it. For `ollama` the base
+URL defaults to the local daemon; set it explicitly if you run Ollama
+remotely or on a non-default port.
 
 ### Model Reference Format
 

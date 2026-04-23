@@ -10,13 +10,31 @@ Go to **Settings** → **LLM Providers** in the web UI.
 
 1. Click **Add Model**
 2. Select a **Provider**
-3. Enter your **API Key**
-4. Click the refresh button to pull available models from the provider (not supported by all providers), or enter the model name manually
-5. Click **Save**
+3. Enter your **API Key** (optional for local providers — Ollama and Custom)
+4. For **Custom**, and optionally for **Ollama**, set a **Base URL**
+5. Click the refresh button to pull available models from the provider (not supported by all providers), or enter the model name manually
+6. Click **Save**
 
 ### Supported Providers
 
-Anthropic, OpenAI, Google, Groq, Cerebras, Mistral, xAI, Fireworks AI, MiniMax, OpenRouter, Ollama
+Anthropic, OpenAI, Google (Gemini), Groq, Cerebras, Mistral, xAI, NVIDIA, MiniMax, Moonshot, Fireworks AI, OpenRouter, Ollama (local), Custom (OpenAI-compatible).
+
+### Local Model Providers
+
+Two providers are designed for local or self-hosted inference:
+
+**Ollama** — defaults to `http://localhost:11434/v1`, so if you are
+running a stock Ollama install nothing else is needed. API key is
+optional. Model discovery uses Ollama's native `/api/tags` endpoint, so
+the refresh button works even though Ollama is strictly OpenAI-API
+compatible for inference. Override the base URL on the model definition
+if Ollama is listening elsewhere.
+
+**Custom (OpenAI-Compatible)** — for vLLM, llama.cpp, LM Studio,
+Text-Generation-Inference, or any endpoint that implements
+`/v1/chat/completions`. You must set a base URL on the model definition;
+API key is optional. Model discovery probes `/models` on the configured
+base URL.
 
 ### Feature Assignment
 

@@ -62,13 +62,8 @@ pub enum NodeSignalMessage {
     // Intercept status update
     InterceptStatusUpdate(InterceptStatus),
 
-    // Recon result update
-    ReconResultUpdate {
-        node_id: String,
-        agent_short_name: String,
-        recon_result: ReconResult,
-        is_semantic: bool,
-    },
+    // Outbound ACP frame (response or session/update notification)
+    Acp { node_id: String, client_id: String, json_rpc: String },
 }
 ```
 
@@ -86,6 +81,9 @@ pub enum NodeDirectMessage {
 
     // Semantic parser response
     SemanticParserResponse(SemanticParserResponse),
+
+    // Inbound ACP frame (request or notification destined for the node)
+    Acp(AcpFrame),
 }
 ```
 
@@ -279,22 +277,19 @@ pub struct AcpFrame {
     pub client_id: String,   // originating/receiving external client
     pub json_rpc: String,    // raw JSON-RPC 2.0 frame
 }
-
-pub enum NodeDirectMessage {
-    Acp(AcpFrame),           // service -> node
-    // ...other variants
-}
-
-pub enum NodeSignalMessage {
-    Acp { node_id, client_id, json_rpc },  // node -> service -> client
-    // ...other variants
-}
 ```
+
+`NodeDirectMessage::Acp(AcpFrame)` carries inbound frames (service → node).
+`NodeSignalMessage::Acp { node_id, client_id, json_rpc }` carries outbound
+frames (node → service → originating client).
 
 The service proxies node-bound ACP frames: an external client's frame is
 forwarded to the right node when `_meta.praxis.nodeId` is set on
 `session/new`, and subsequent frames for the returned `session_id` are
-routed automatically.
+routed automatically. Inside the service, orchestrator-originated frames
+use a `svc_*` pseudo-client-id so responses are consumed in-process by
+`AcpNodeProxy::request` instead of being fanned out to a RabbitMQ client
+queue.
 
 ### Connector selection
 
@@ -315,16 +310,26 @@ connector catalog via `InitializeResponse._meta.connectors`:
 
 ### Extension methods
 
-- `_praxis/recon` — agent-scoped reconnaissance.
-  - Params: `{ "agent_short_name": string, "is_semantic": bool }`
-  - Result: serialized `ReconResult`.
+All extensions are advertised under `InitializeResponse._meta.extensions`.
 
-### NodeCommand (legacy + non-agent concerns)
+- `_praxis/recon` — agent-scoped reconnaissance. Params
+  `{ "agent_short_name": string, "is_semantic": bool }`; result is a
+  serialized `ReconResult`. Replaces the legacy `NodeCommand::Agent(Recon)`.
+- `_praxis/read_file` — read a file on the node. Params
+  `{ "agent_short_name": string, "path": string }`.
+- `_praxis/write_file` — write a file on the node. Params
+  `{ "agent_short_name": string, "path": string, "contents": string }`.
+- `_praxis/grep_files` — regex search across one or more files. Params
+  `{ "agent_short_name": string, "path": string, "pattern": string }`.
+- `_praxis/write_session_content` — write agent-session content through
+  the connector's `write_session_content` hook (so agents with virtual
+  session stores can intercept the write). Params
+  `{ "agent_short_name": string, "session_file": string, "contents": string }`.
+
+### NodeCommand (non-agent concerns)
 
 ```rust
 pub enum NodeCommand {
-    Agent(AgentCommand),         // legacy — use ACP instead
-    Session(SessionCommand),     // legacy — use ACP instead
     Intercept(InterceptCommand),
     Terminal(TerminalCommand),
     Config(ConfigCommand),
@@ -332,9 +337,10 @@ pub enum NodeCommand {
 }
 ```
 
-The `Agent` and `Session` variants are retained during the ACP migration
-and will be removed in a follow-up once the CLI and web frontend no longer
-reference them.
+Agent and session traffic no longer flows through `NodeCommand`; the
+legacy `Agent` and `Session` variants were removed alongside the ACP
+migration. `CommandRequest` / `CommandResponse` still wrap `NodeCommand`
+for intercept, terminal, config, and registry traffic.
 
 ### InterceptCommand
 

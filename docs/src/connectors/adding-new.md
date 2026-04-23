@@ -135,6 +135,7 @@ Key points:
 - `recon` receives a context object: `recon = function(ctx) ... end`
 - Semantic vs non-semantic recon is driven by `ctx.is_semantic` inside helpers
 - Avoid mutable global process state; return `process_path` from `fingerprint` and consume it via `ctx.process_path`
+- **Every ACP session gets its own Lua VM** loaded from compiled bytecode, so Lua globals are not shared between sessions. Keep all per-session state in the `state` table returned by `create_session` — do not stash it in module-level Lua variables expecting to read it back in `session_transact`.
 
 ### `helpers.find_executable` Config
 
@@ -545,22 +546,29 @@ pub use session::ExampleAISession;
 
 use crate::agent_connectors::traits::{Agent, AgentIntercept, AgentRecon, AgentSession};
 use async_trait::async_trait;
+use common::SessionContext;
 use once_cell::sync::OnceCell;
-use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use uuid::Uuid;
 
 const AGENT_NAME: &str = "ExampleAI";
 const AGENT_SHORTNAME: &str = "exampleai";
 
 pub struct ExampleAIAgent {
     pub(crate) process_path: OnceCell<String>,
-    session: RwLock<Option<Arc<dyn AgentSession>>>,
+    //
+    // Per-session state keyed by the ACP session_id handed in by
+    // the node's ACP server. Nothing is shared between sessions.
+    //
+    sessions: Mutex<HashMap<Uuid, Arc<dyn AgentSession>>>,
 }
 
 impl ExampleAIAgent {
     pub fn new() -> Self {
         Self {
             process_path: OnceCell::new(),
-            session: RwLock::new(None),
+            sessions: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -587,11 +595,15 @@ impl Agent for ExampleAIAgent {
         self.do_fingerprint_impl().await
     }
 
-    fn create_session(&self, context: &common::SessionContext) -> Option<Arc<dyn AgentSession>> {
-        match ExampleAISession::new(self.process_path.get().cloned(), context) {
+    fn create_session_with_id(
+        &self,
+        context: &SessionContext,
+        session_id: Uuid,
+    ) -> Option<Arc<dyn AgentSession>> {
+        match ExampleAISession::new(self.process_path.get().cloned(), context, session_id) {
             Ok(session) => {
-                let session_arc = Arc::new(session) as Arc<dyn AgentSession>;
-                *self.session.write().unwrap() = Some(Arc::clone(&session_arc));
+                let session_arc: Arc<dyn AgentSession> = Arc::new(session);
+                self.sessions.lock().unwrap().insert(session_id, Arc::clone(&session_arc));
                 Some(session_arc)
             }
             Err(e) => {
@@ -601,19 +613,22 @@ impl Agent for ExampleAIAgent {
         }
     }
 
-    fn get_session(&self) -> Option<Arc<dyn AgentSession>> {
-        self.session.read().unwrap().clone()
-    }
-
-    fn close_session(&self) {
-        let mut guard = self.session.write().unwrap();
-        if let Some(session) = guard.as_ref() {
+    fn drop_session(&self, session_id: Uuid) {
+        if let Some(session) = self.sessions.lock().unwrap().remove(&session_id) {
             session.close();
         }
-        *guard = None;
     }
 }
 ```
+
+The `Agent` trait has two session-related hooks:
+
+- `create_session_with_id(ctx, session_id)` — called once per
+  `session/new` ACP request. The node's ACP server chooses the
+  `session_id`; the agent must build a session that does not share
+  mutable state with any other session.
+- `drop_session(session_id)` — called on `session/close` (and on node
+  reset). Release per-session resources keyed by that id.
 
 ## Step 3: Implement Fingerprinting
 
@@ -759,9 +774,11 @@ pub struct ExampleAISession {
 }
 
 impl ExampleAISession {
-    pub fn new(process_path: Option<String>, context: &SessionContext) -> Result<Self> {
-        let session_id = Uuid::new_v4();
-
+    pub fn new(
+        process_path: Option<String>,
+        context: &SessionContext,
+        session_id: Uuid,
+    ) -> Result<Self> {
         // Spawn the agent process
         let mut cmd = std::process::Command::new(
             process_path.as_deref().unwrap_or("exampleai")

@@ -254,23 +254,35 @@ the same connector script.
 
 ### ACP extensions
 
-- `_praxis/recon` — custom top-level method. Agent-scoped, no `session_id`
-  required. Params: `{ "agent_short_name": string, "is_semantic": bool }`.
-  Result: the serialized `ReconResult`. Replaces the legacy
-  `NodeCommand::Agent(Recon)` / `Agent(ReconSemantic)` commands.
+All are agent-scoped custom ACP methods (no `session_id` required) and are
+advertised in `InitializeResponse._meta.extensions`:
+
+- `_praxis/recon` — reconnaissance. Params
+  `{ "agent_short_name": string, "is_semantic": bool }`; returns a
+  `ReconResult`. Replaces the legacy `NodeCommand::Agent(Recon)` /
+  `Agent(ReconSemantic)` commands.
+- `_praxis/read_file`, `_praxis/write_file`, `_praxis/grep_files` —
+  agent-scoped file ops used by recon tooling and the orchestrator.
+- `_praxis/write_session_content` — writes agent-session content through
+  the connector's `write_session_content` hook so agents with virtual
+  session stores can intercept the write.
 
 ### NodeCommand (non-agent concerns)
 
 ```rust
 pub enum NodeCommand {
-    Agent(AgentCommand),         // legacy — being cut over to ACP
-    Session(SessionCommand),     // legacy — being cut over to ACP
     Intercept(InterceptCommand),
     Terminal(TerminalCommand),
     Config(ConfigCommand),
     AgentRegistry(AgentRegistryCommand),
 }
 ```
+
+Agent and session interaction have moved off `NodeCommand` entirely. The
+legacy `NodeCommand::Agent` and `NodeCommand::Session` variants — along
+with `NodeSignalMessage::ReconResultUpdate` and `::SessionUpdate` — were
+removed once the CLI, web frontend, service orchestrator, and MCP server
+had all been ported to ACP.
 
 ### Intercept Commands
 

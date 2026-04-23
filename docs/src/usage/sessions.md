@@ -44,18 +44,31 @@ Sessions can be created with context:
 
 ## What Happens During a Session
 
+Clients (CLI, web, external ACP tools) never talk to the node directly.
+Each prompt is an [Agent Client Protocol](https://agentclientprotocol.com/)
+(ACP) JSON-RPC frame that travels CLI/Web → RabbitMQ → service → RabbitMQ
+→ node. The node runs a single ACP server that multiplexes all its
+connectors; the target connector is selected per-session via
+`_meta.praxis.connector` on `session/new`, and subsequent frames for the
+returned `sessionId` are routed by the service proxy automatically.
+
 When you send a prompt:
 
-1. Text goes to the node via RabbitMQ
-2. Node writes to the agent's PTY stdin (or sends via ACP for supported agents)
-3. Agent processes the prompt
-4. Response comes back through the PTY or as streaming updates via ACP
-5. Node parses and extracts the response
-6. Response appears in the UI
+1. `session/prompt` is forwarded to the node that owns the session
+2. The node's per-session Lua VM handles the prompt — invoking the
+   connector's PTY (`claude-code`, `codex`, `m365-copilot`) or the
+   connector's embedded ACP subprocess (`cursor`, `gemini`)
+3. Streaming updates (`session/update` notifications) flow back as the
+   agent generates text, calls tools, and builds plans
+4. The final `session/prompt` response carries a `stopReason`
+   (`end_turn` or `cancelled`)
 
 ### Streaming Sessions (ACP)
 
-Agents that support the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP) -- currently Cursor and Gemini -- provide real-time streaming updates during prompt execution. Praxis uses the `agent-client-protocol` crate for typed communication. Instead of waiting for the full response, you see:
+All sessions are wrapped in ACP externally, but for agents that natively
+speak ACP inside the node (currently Cursor and Gemini) you also get
+typed streaming updates end-to-end. Regardless of the underlying
+transport, `session/update` notifications relay:
 
 - **Text chunks** — incremental output as the agent generates its response
 - **Tool calls** — tool name and input displayed as the agent invokes tools
@@ -64,17 +77,22 @@ Agents that support the [Agent Client Protocol](https://agentclientprotocol.com/
 - **Permission requests** — when the agent needs approval for an action (interactive sessions only)
 - **Token usage** — prompt/completion token counts updated in real time
 
-Streaming sessions also support cancellation -- pressing Ctrl+C (TUI) or clicking Cancel (web UI) sends a cancel signal that interrupts the agent mid-response. Any partial output is preserved in the conversation history.
+Cancellation goes through `session/cancel` (a JSON-RPC notification, no
+response) — Ctrl+C in the TUI or the Cancel button in the web UI sends
+it. The in-flight `session/prompt` then resolves with
+`stopReason: "cancelled"` and any partial output is preserved in the
+conversation history.
 
 ### Session IDs
 
-Session IDs are prefixed by the caller type:
+Sessions created on a node (via the node's ACP server) are raw UUIDs.
+Sessions hosted directly on the service — the orchestrator, MCP-driven
+sessions, and external ACP bridges — are prefixed by caller type so a
+client can filter the orchestrator session list to its own entries:
 
-- `CLI_` — sessions created from the TUI
-- `WEB_` — sessions created from the web UI
-- `ACP_` — sessions created by other ACP clients
-
-Each client only sees its own sessions in the session list.
+- `CLI_` — created by the TUI's orchestrator
+- `WEB_` — created by the web UI's orchestrator
+- `ACP_` — created by an external ACP client
 
 ## Session Messages
 
@@ -86,20 +104,19 @@ The UI tracks messages per session:
 
 ## Ending a Session
 
-Click **Close Session** to terminate. This:
-
-1. Sends a close command to the node
-2. Terminates the agent process
-3. Clears the session state
-4. Updates the UI
-
-The agent returns to the fingerprinted state.
+Click **Close Session** (web), or use Ctrl+C / `d` on the sessions list
+(TUI) to terminate. This sends `session/close` to the node, which drops
+the per-session Lua VM and any owned subprocess. Only the targeted
+session is affected — any other live sessions on the same connector keep
+running.
 
 ## Sessions and Operations
 
-Semantic operations always create their own dedicated sessions. When an operation runs, it spawns a fresh session, executes, and closes it.
-
-**Warning**: Running an operation will implicitly end any open interactive session you have with that agent. Interactive sessions and operation sessions should not be expected to run concurrently - an agent supports one session at a time.
+Semantic operations always create their own dedicated session. When an
+operation runs it calls `session/new`, executes, and then closes. Because
+each ACP session owns its own Lua VM (and, where applicable, its own ACP
+subprocess or PTY), operations run concurrently with interactive sessions
+on the same agent without interfering.
 
 ## Bridge Sessions
 
@@ -115,13 +132,47 @@ Bridge sessions are otherwise used the same way -- you can send prompts, run ope
 
 ## Multiple Sessions
 
-Each agent can have one active session at a time. To work with a different agent:
+A single node can host any number of concurrent ACP sessions across any
+combination of connectors. Each `session/new` returns a fresh `sessionId`,
+and every session gets its own isolated per-session Lua VM built from
+bytecode compiled once at connector-load time, so there is no global
+state shared between sessions even when they target the same connector.
 
-1. Close the current session (or leave it open)
-2. Select the other agent
-3. Create a new session
+### Listing and resuming
 
-Sessions are per-node, per-agent.
+The clients refresh their view of live sessions by calling `session/list`
+on each connected node. The CLI does this on first connect, when you
+open the Nodes window (`Ctrl+L`), and ~1.5s after a node reset; the web
+UI does it when a node card mounts and again whenever the node reports a
+new `last_update`. Any server-side sessions the client hadn't yet seen —
+for example a session left alive across a CLI restart — are merged into
+the local sessions list and become resumable.
+
+### In the TUI
+
+`Ctrl+W` in the Nodes window toggles the **Active Sessions** overlay. It
+lists every live session with node, agent, session id preview, status
+(`idle` / `working`), and how long ago it was created.
+
+- `Enter` resumes the selected session
+- `d` or `Del` discards (sends `session/cancel` if the session is
+  mid-prompt, then `session/close`)
+- `Esc` or `Ctrl+W` dismisses the overlay
+
+Inside a chat view, `Esc` or `Ctrl+W` **pauses** the session (hides the
+chat; the session stays alive on the node and can be resumed from the
+overlay). `Ctrl+C` cancels the in-flight prompt when the agent is
+working, and closes the session when the agent is idle. The status bar
+shows an `N sessions` counter when any concurrent sessions are live.
+
+### In the web UI
+
+Each node card has a **Sessions** panel listing every ACP session the web
+client knows about for that node. Hover actions let you resume (open the
+agent modal) or discard (send `session/close`) a session. Multiple agent
+session modals can be open side-by-side on the same node card — one per
+connector — so you can drive Claude Code, Codex, and Cursor sessions in
+parallel from a single node.
 
 ## Troubleshooting
 
