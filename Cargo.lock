@@ -772,6 +772,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
+name = "chacha20"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f8d983286843e49675a4b7a2d174efe136dc93a18d69130dd18198a6c167601"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.3.0",
+ "rand_core 0.10.1",
+]
+
+[[package]]
 name = "chromiumoxide"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1526,9 +1537,9 @@ dependencies = [
 
 [[package]]
 name = "fancy-regex"
-version = "0.14.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e24cb5a94bcae1e5408b0effca5cd7172ea3c5755049c5f3af4cd283a165298"
+checksum = "72cf461f865c862bb7dc573f643dd6a2b6842f7c30b07882b56bd148cc2761b8"
 dependencies = [
  "bit-set 0.8.0",
  "regex-automata",
@@ -1833,6 +1844,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "r-efi 6.0.0",
+ "rand_core 0.10.1",
  "wasip2",
  "wasip3",
 ]
@@ -3495,7 +3507,7 @@ dependencies = [
  "dashmap",
  "dirs",
  "etherparse",
- "fancy-regex 0.14.0",
+ "fancy-regex 0.17.0",
  "flate2",
  "futures",
  "glob",
@@ -3514,7 +3526,7 @@ dependencies = [
  "once_cell",
  "portable-pty",
  "praxis_common",
- "rand 0.8.6",
+ "rand 0.10.1",
  "rcgen",
  "regex",
  "reqwest",
@@ -3539,7 +3551,7 @@ dependencies = [
  "uiautomation",
  "uuid",
  "walkdir",
- "webpki-roots 0.26.11",
+ "webpki-roots 1.0.7",
  "windows 0.62.2",
  "windows-env",
  "winreg 0.55.0",
@@ -3738,6 +3750,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2e8e8bcc7961af1fdac401278c6a831614941f6164ee3bf4ce61b7edb162207"
+dependencies = [
+ "chacha20",
+ "getrandom 0.4.2",
+ "rand_core 0.10.1",
+]
+
+[[package]]
 name = "rand_chacha"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3776,6 +3799,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_core"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
+
+[[package]]
 name = "ratatui"
 version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3806,7 +3835,7 @@ dependencies = [
  "thiserror 2.0.18",
  "unicode-segmentation",
  "unicode-truncate",
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
 
 [[package]]
@@ -3857,7 +3886,7 @@ dependencies = [
  "strum 0.27.2",
  "time",
  "unicode-segmentation",
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
 
 [[package]]
@@ -4491,11 +4520,11 @@ dependencies = [
 
 [[package]]
 name = "serde_spanned"
-version = "0.6.9"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3"
+checksum = "6662b5879511e06e8999a8a235d848113e942c9124f211511b16466ee2995f26"
 dependencies = [
- "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -4634,9 +4663,12 @@ checksum = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214"
 
 [[package]]
 name = "similar"
-version = "2.7.0"
+version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
+checksum = "04d93e861ede2e497b47833469b8ec9d5c07fa4c78ce7a00f6eb7dd8168b4b3f"
+dependencies = [
+ "bstr",
+]
 
 [[package]]
 name = "siphasher"
@@ -5026,16 +5058,16 @@ dependencies = [
 
 [[package]]
 name = "sysinfo"
-version = "0.37.2"
+version = "0.38.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16607d5caffd1c07ce073528f9ed972d88db15dd44023fa57142963be3feb11f"
+checksum = "92ab6a2f8bfe508deb3c6406578252e491d299cbbf3bc0529ecc3313aee4a52f"
 dependencies = [
  "libc",
  "memchr",
  "ntapi",
  "objc2-core-foundation",
  "objc2-io-kit",
- "windows 0.61.3",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -5356,44 +5388,42 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.8.23"
+version = "1.1.2+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362"
-dependencies = [
- "serde",
- "serde_spanned",
- "toml_datetime",
- "toml_edit",
-]
-
-[[package]]
-name = "toml_datetime"
-version = "0.6.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "toml_edit"
-version = "0.22.27"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
+checksum = "81f3d15e84cbcd896376e6730314d59fb5a87f31e4b038454184435cd57defee"
 dependencies = [
  "indexmap",
- "serde",
+ "serde_core",
  "serde_spanned",
  "toml_datetime",
- "toml_write",
+ "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
 [[package]]
-name = "toml_write"
-version = "0.1.2"
+name = "toml_datetime"
+version = "1.1.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
+checksum = "3165f65f62e28e0115a00b2ebdd37eb6f3b641855f9d636d3cd4103767159ad7"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
+name = "toml_parser"
+version = "1.1.2+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526"
+dependencies = [
+ "winnow",
+]
+
+[[package]]
+name = "toml_writer"
+version = "1.1.1+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db"
 
 [[package]]
 name = "tower"
@@ -5668,14 +5698,8 @@ checksum = "16b380a1238663e5f8a691f9039c73e1cdae598a30e9855f541d29b08b53e9a5"
 dependencies = [
  "itertools",
  "unicode-segmentation",
- "unicode-width 0.2.2",
+ "unicode-width",
 ]
-
-[[package]]
-name = "unicode-width"
-version = "0.1.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
 
 [[package]]
 name = "unicode-width"
@@ -5758,35 +5782,23 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vt100"
-version = "0.15.2"
+version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84cd863bf0db7e392ba3bd04994be3473491b31e66340672af5d11943c6274de"
+checksum = "054ff75fb8fa83e609e685106df4faeffdf3a735d3c74ebce97ec557d5d36fd9"
 dependencies = [
  "itoa",
- "log",
- "unicode-width 0.1.14",
+ "unicode-width",
  "vte",
 ]
 
 [[package]]
 name = "vte"
-version = "0.11.1"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5022b5fbf9407086c180e9557be968742d839e68346af7792b8592489732197"
+checksum = "a5924018406ce0063cd67f8e008104968b74b563ee1b85dde3ed1f7cb87d3dbd"
 dependencies = [
  "arrayvec",
- "utf8parse",
- "vte_generate_state_changes",
-]
-
-[[package]]
-name = "vte_generate_state_changes"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e369bee1b05d510a7b4ed645f5faa90619e05437111783ea5848f28d97d3c2e"
-dependencies = [
- "proc-macro2",
- "quote",
+ "memchr",
 ]
 
 [[package]]
@@ -6589,12 +6601,9 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 
 [[package]]
 name = "winnow"
-version = "0.7.15"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
-dependencies = [
- "memchr",
-]
+checksum = "2ee1708bef14716a11bae175f579062d4554d95be2c6829f518df847b7b3fdd0"
 
 [[package]]
 name = "winreg"

@@ -28,5 +28,5 @@ async-trait = "0.1"
 dirs = "6"
 ratatui = "0.30"
 crossterm = { version = "0.29", features = ["event-stream"] }
-vt100 = "0.15"
+vt100 = "0.16"
 tempfile = "3"
