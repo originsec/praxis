@@ -334,11 +334,15 @@ impl ServiceMcpClient {
 
         if !has_method {
             //
-            // Response: { id, result } or { id, error }
+            // Response: { id, result } or { id, error }. Take only
+            // response_tx — leave the PendingAcp entry (with its text_buf) in
+            // place so do_acp_request can collect the buffered chunk text
+            // after awaiting the response. do_acp_request removes the entry
+            // once it's read the text.
             //
 
             let Some(request_id) = id_str else { return };
-            let Some(mut pending) = state.pending_acp.remove(&request_id) else {
+            let Some(pending) = state.pending_acp.get_mut(&request_id) else {
                 return;
             };
             let Some(tx) = pending.response_tx.take() else { return };
@@ -533,25 +537,13 @@ impl ServiceMcpClient {
             return Err(e);
         }
 
-        let result = match tokio::time::timeout(self.timeout, rx).await {
-            Ok(Ok(Ok(value))) => Ok(value),
-            Ok(Ok(Err(message))) => Err(anyhow!(message)),
-            Ok(Err(_)) => Err(anyhow!("ACP response channel closed")),
-            Err(_) => {
-                self.state.lock().await.pending_acp.remove(&request_id);
-                Err(anyhow!(
-                    "Timeout waiting for ACP response to {} after {}s",
-                    method,
-                    self.timeout.as_secs()
-                ))
-            }
-        }?;
+        let outcome = tokio::time::timeout(self.timeout, rx).await;
 
         //
-        // Drain any text collected. If the response body contains a fresh
-        // sessionId (e.g. session/new) and the caller cares about text,
-        // that's not meaningful for this request since chunks would have
-        // arrived for a different session; skip.
+        // Always drain the PendingAcp entry before producing a result so
+        // error paths (JSON-RPC error, dropped oneshot, timeout) don't leak
+        // the entry — handle_acp_frame would otherwise keep appending
+        // streamed chunks into its text_buf forever.
         //
 
         let text = {
@@ -561,6 +553,19 @@ impl ServiceMcpClient {
                 .remove(&request_id)
                 .and_then(|p| p.text_buf)
                 .unwrap_or_default()
+        };
+
+        let result = match outcome {
+            Ok(Ok(Ok(value))) => value,
+            Ok(Ok(Err(message))) => return Err(anyhow!(message)),
+            Ok(Err(_)) => return Err(anyhow!("ACP response channel closed")),
+            Err(_) => {
+                return Err(anyhow!(
+                    "Timeout waiting for ACP response to {} after {}s",
+                    method,
+                    self.timeout.as_secs()
+                ));
+            }
         };
 
         Ok((result, text))
