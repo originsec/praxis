@@ -8,11 +8,15 @@ use crate::state::CliState;
 
 #[derive(Subcommand)]
 pub enum SessionCommand {
-    /// Create a new session with the selected agent
+    /// Create a new ACP session on a node with a specific agent
     Create {
         /// Node ID prefix
         #[arg(short, long)]
         node: String,
+
+        /// Agent short name (e.g. 'claude-code', 'codex')
+        #[arg(short, long)]
+        agent: String,
 
         /// Enable YOLO mode (auto-approve actions)
         #[arg(short, long)]
@@ -49,10 +53,11 @@ pub async fn execute(client: &Client, command: SessionCommand) -> Result<()> {
     match command {
         SessionCommand::Create {
             node,
+            agent,
             yolo,
             project,
             timeout,
-        } => create_session(client, &node, yolo, project, timeout).await,
+        } => create_session(client, &node, &agent, yolo, project, timeout).await,
         SessionCommand::Prompt { node, text } => send_prompt(client, &node, &text).await,
         SessionCommand::Close { node } => close_session(client, &node).await,
     }
@@ -70,6 +75,7 @@ fn find_node_id(state: &common::SystemState, prefix: &str) -> Option<String> {
 async fn create_session(
     client: &Client,
     node_prefix: &str,
+    agent: &str,
     yolo: bool,
     project: Option<String>,
     timeout: Option<u64>,
@@ -80,11 +86,6 @@ async fn create_session(
         .ok_or_else(|| anyhow!("No state available"))?;
     let node_id = find_node_id(&state, node_prefix)
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
-
-    let cli_state_for_agent = CliState::load().unwrap_or_default();
-    let connector = cli_state_for_agent
-        .get_agent(&node_id)
-        .ok_or_else(|| anyhow!("No agent selected. Use `agent select` first."))?;
 
     let prompt_timeout_secs = match timeout {
         Some(t) => Some(t),
@@ -99,7 +100,7 @@ async fn create_session(
 
     let mut praxis_meta = json!({
         "nodeId": node_id,
-        "connector": connector,
+        "connector": agent,
         "yolo": yolo,
         "interactive": false,
     });
