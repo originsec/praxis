@@ -86,17 +86,52 @@ See [Web Architecture](./web.md) for details.
 
 ## Communication
 
+### No direct client↔node traffic
+
+The service is the only component that talks to nodes. Clients (CLI, web,
+external ACP tools) speak to the **service**; the service forwards to the
+relevant node over RabbitMQ. This keeps access control, session routing,
+and request correlation in one place and means node failure modes never
+leak into clients.
+
+```
+ CLI ─▶ RabbitMQ ─▶ Service ─▶ RabbitMQ ─▶ Node
+        Web SPA ─▶
+        External ACP client ─▶
+```
+
+### ACP (Agent Client Protocol)
+
+Each node exposes a **single ACP server** (`node/src/acp_server/`) over
+RabbitMQ. That one endpoint is how every local agent on the node is
+driven — the connector to use is selected per-session via
+`_meta.praxis.connector` on the `session/new` request. Multiple concurrent
+sessions are supported on the same node, each with its own freshly-built
+Lua VM.
+
+The service-side proxy (`service/src/acp_node_proxy.rs`) routes frames:
+
+- External client → service → `_meta.praxis.nodeId` → target node.
+- Node → service → originating client (by correlated `client_id`).
+- Service's internal orchestrator → node, using a `svc_*` pseudo-client-id
+  so responses are consumed in-process instead of being forwarded.
+
+Recon is a custom ACP extension (`_praxis/recon`) plus four file-op
+extensions (`_praxis/read_file`, `_praxis/write_file`, `_praxis/grep_files`,
+`_praxis/write_session_content`). The node advertises them in
+`InitializeResponse._meta.extensions` along with the connector catalog.
+
 ### RabbitMQ
 
 All communication between nodes, service, and web clients flows through RabbitMQ:
 
 | Queue | Direction | Purpose |
 |-------|-----------|---------|
-| `NodeSignal` | Node → Service | Registration, traffic, recon results |
-| `Node_{id}` | Service → Node | Commands, parser responses |
+| `NodeSignal` | Node → Service | Registration, traffic, recon results, outbound ACP frames |
+| `Node_{id}` | Service → Node | Commands, parser responses, inbound ACP frames |
 | `NodeBroadcast` | Service → All Nodes | Refresh requests (fanout exchange) |
-| `ClientSignal` | Client → Service | UI requests |
-| `Client_{id}` | Service → Client | Direct responses |
+| `ClientSignal` | Client → Service | UI requests, inbound ACP frames |
+| `Client_{id}` | Service → Client | Direct responses, outbound ACP frames |
 | `ClientBroadcast` | Service → All Clients | State updates (fanout exchange) |
 
 RabbitMQ provides:
@@ -107,16 +142,17 @@ RabbitMQ provides:
 
 ### Message Flow Example
 
-Here's what happens when you run an operation from the UI:
+Here's what happens when a CLI driver runs a prompt over ACP:
 
-1. **Browser** → WebSocket → **Web**
-2. **Web** → `ClientSignal` queue → **Service**
-3. **Service** queues operation, sends to node
-4. **Service** → `Node_{id}` queue → **Node**
-5. **Node** creates session, executes operation
-6. **Node** → `NodeSignal` queue → **Service** (updates)
-7. **Service** → `Client_{id}` queue → **Web**
-8. **Web** → WebSocket → **Browser**
+1. **CLI** (ACP proxy) → `ClientSignal` → **Service**
+2. **Service** (`AcpNodeProxy`) sees `_meta.praxis.nodeId`, forwards the
+   raw JSON-RPC frame via `Node_{id}` → **Node**
+3. **Node** (`NodeAcpServer`) processes `session/new` / `session/prompt` /
+   etc., running on a per-session Lua VM
+4. **Node** emits response + `session/update` notifications on `NodeSignal`
+5. **Service** (`AcpNodeProxy::forward_to_client`) routes them to the
+   originating `Client_{id}` queue
+6. **CLI** reads responses from its client queue and emits them on stdout
 
 ## Data Flow
 

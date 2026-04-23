@@ -1,6 +1,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod acp;
+mod acp_server;
 mod agent_connectors;
 mod app;
 mod handlers;
@@ -9,9 +10,9 @@ mod runtime;
 mod terminal;
 mod utils;
 
-use agent_connectors::{Agent, AgentFactory, AgentRegistry};
+use agent_connectors::{AgentFactory, AgentRegistry};
 use app::register_with_service;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
@@ -131,8 +132,6 @@ async fn async_main() {
             break;
         }
 
-        let selected_agent: Arc<Mutex<Option<Arc<dyn Agent>>>> = Arc::new(Mutex::new(None));
-
         let result = match register_with_service(node_id.clone(), shutdown_token.clone()).await {
             Ok(Some(result)) => {
                 common::log_info!(
@@ -175,7 +174,6 @@ async fn async_main() {
             result.node_id,
             result.node_queue,
             registry.clone(),
-            selected_agent,
             factory.clone(),
             shutdown_token.clone(),
             result.lua_scripts,

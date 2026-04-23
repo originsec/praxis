@@ -267,16 +267,64 @@ pub enum ClientBroadcastMessage {
 }
 ```
 
-## Node Commands
+## Node Protocol
 
-### NodeCommand
+Agent and session interaction with the node uses **ACP (Agent Client
+Protocol)** over RabbitMQ. Everything else uses the `NodeCommand` envelope.
 
-Commands sent to nodes for execution.
+### ACP transport envelope
+
+```rust
+pub struct AcpFrame {
+    pub client_id: String,   // originating/receiving external client
+    pub json_rpc: String,    // raw JSON-RPC 2.0 frame
+}
+
+pub enum NodeDirectMessage {
+    Acp(AcpFrame),           // service -> node
+    // ...other variants
+}
+
+pub enum NodeSignalMessage {
+    Acp { node_id, client_id, json_rpc },  // node -> service -> client
+    // ...other variants
+}
+```
+
+The service proxies node-bound ACP frames: an external client's frame is
+forwarded to the right node when `_meta.praxis.nodeId` is set on
+`session/new`, and subsequent frames for the returned `session_id` are
+routed automatically.
+
+### Connector selection
+
+`session/new` requires a `_meta.praxis.connector` field naming the local
+agent connector to use (e.g. `"claude-code"`, `"codex"`). Discover the
+connector catalog via `InitializeResponse._meta.connectors`:
+
+```json
+{
+  "extensions": { "_praxis/recon": { "version": 1 } },
+  "connectors": [
+    { "shortName": "claude-code", "name": "Claude Code" },
+    { "shortName": "codex",       "name": "OpenAI Codex" }
+  ],
+  "nodeId": "..."
+}
+```
+
+### Extension methods
+
+- `_praxis/recon` — agent-scoped reconnaissance.
+  - Params: `{ "agent_short_name": string, "is_semantic": bool }`
+  - Result: serialized `ReconResult`.
+
+### NodeCommand (legacy + non-agent concerns)
 
 ```rust
 pub enum NodeCommand {
-    Agent(AgentCommand),
-    Session(SessionCommand),
+    Agent(AgentCommand),         // legacy — use ACP instead
+    Session(SessionCommand),     // legacy — use ACP instead
     Intercept(InterceptCommand),
     Terminal(TerminalCommand),
     Config(ConfigCommand),
@@ -284,41 +332,9 @@ pub enum NodeCommand {
 }
 ```
 
-### AgentCommand
-
-```rust
-pub enum AgentCommand {
-    Update,                                    // Request info update
-    Select { short_name: String },             // Select an agent
-    Recon,                                     // Static reconnaissance
-    ReconSemantic,                             // Semantic reconnaissance
-    ReadFile { file_type, path, line_start, line_end }, // Read file content
-    WriteFile { file_type, path, contents },            // Write file content
-    GrepFiles { file_type, paths, pattern },             // Search files with regex (batch, glob support)
-}
-```
-
-`file_type` is either `Config` or `Session`.
-
-`ReadFile` uses 1-based inclusive line bounds (`line_start` and `line_end`).
-If no bounds are provided, the entire file is returned.
-
-`GrepFiles` accepts multiple paths (including glob patterns like `/etc/*.conf`)
-and returns per-file results with 1-based line numbers in a single round-trip.
-If no lines match for a file, it returns an entry with an empty `matches` list.
-
-`WriteFile` is only allowed for `file_type=Config`. Session writes are rejected.
-
-### SessionCommand
-
-```rust
-pub enum SessionCommand {
-    Create { context: SessionContext },        // Create session
-    Close,                                     // Close session
-    Prompt { text, transaction_id },           // Send prompt
-    CancelTransaction { transaction_id },      // Cancel pending
-}
-```
+The `Agent` and `Session` variants are retained during the ACP migration
+and will be removed in a follow-up once the CLI and web frontend no longer
+reference them.
 
 ### InterceptCommand
 

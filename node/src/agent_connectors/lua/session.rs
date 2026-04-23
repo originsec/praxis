@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::agent_connectors::traits::{AgentMode, AgentSession};
 
 pub struct LuaAgentSession {
+    #[allow(dead_code)]
     internal_id: Uuid,
     vm: Arc<Mutex<Lua>>,
     context: SessionContext,
@@ -36,6 +37,7 @@ impl LuaAgentSession {
 }
 
 impl LuaAgentSession {
+    #[allow(dead_code)]
     fn is_acp(&self) -> bool {
         self.state
             .lock()
@@ -45,6 +47,7 @@ impl LuaAgentSession {
             .is_some()
     }
 
+    #[allow(dead_code)]
     pub fn acp_handle(&self) -> Option<String> {
         self.state
             .lock()

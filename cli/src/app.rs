@@ -16,7 +16,7 @@ use crate::acp::{AcpBridgeHandle, AcpNotification};
 use crate::client::Client;
 use crate::event::AppEvent;
 use chrono::Utc;
-use common::{NodeCommand, NodeCommandResult, NodeState, OrchestratorPlan, SystemState};
+use common::{NodeState, OrchestratorPlan, SystemState};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
@@ -63,7 +63,33 @@ pub struct NodesState {
     pub selected: usize,
     pub split_percent: u16,
     pub dragging: bool,
-    pub session: Option<SessionChat>,
+
+    //
+    // All live sessions keyed by their client-side local_id (a uuid
+    // generated when the SessionChat is created). The server-side ACP
+    // sessionId is stored inside SessionChat.session_id once the
+    // session/new response arrives.
+    //
+
+    pub sessions: HashMap<String, SessionChat>,
+
+    //
+    // The session currently foregrounded in the chat view. When None,
+    // the user is in the Nodes browse view (possibly with the sessions
+    // list overlay open).
+    //
+
+    pub active_session_id: Option<String>,
+
+    //
+    // Whether the sessions list overlay is visible. Independent of
+    // whether a chat is foregrounded — when the list is open it is
+    // drawn on top.
+    //
+
+    pub sessions_list_open: bool,
+    pub sessions_list_selected: usize,
+
     pub session_options: Option<SessionOptions>,
     pub terminal_opening: bool,
     pub terminal: Option<TerminalState>,
@@ -104,10 +130,13 @@ pub struct SessionOptions {
 }
 
 pub struct SessionChat {
+    pub local_id: String,
     pub node_id: String,
     pub agent_name: String,
     pub session_id: Option<String>,
     pub active_transaction_id: Option<String>,
+    pub created_at: std::time::Instant,
+    pub last_activity_at: std::time::Instant,
     pub messages: Vec<ChatMessage>,
     pub input: String,
     pub cursor_pos: usize,
@@ -160,13 +189,40 @@ impl Default for NodesState {
             selected: 0,
             split_percent: 55,
             dragging: false,
-            session: None,
+            sessions: HashMap::new(),
+            active_session_id: None,
+            sessions_list_open: false,
+            sessions_list_selected: 0,
             session_options: None,
             terminal_opening: false,
             terminal: None,
             detail_focus: false,
             agent_selected: 0,
         }
+    }
+}
+
+impl NodesState {
+    pub fn active_session(&self) -> Option<&SessionChat> {
+        self.active_session_id
+            .as_ref()
+            .and_then(|id| self.sessions.get(id))
+    }
+
+    pub fn active_session_mut(&mut self) -> Option<&mut SessionChat> {
+        let id = self.active_session_id.clone()?;
+        self.sessions.get_mut(&id)
+    }
+
+    //
+    // Returns sessions sorted newest-first by creation time. Used by the
+    // sessions list overlay and by tab ordering logic.
+    //
+
+    pub fn sessions_sorted(&self) -> Vec<&SessionChat> {
+        let mut v: Vec<&SessionChat> = self.sessions.values().collect();
+        v.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        v
     }
 }
 
@@ -324,7 +380,66 @@ impl App {
                 false
             }
             AppEvent::StateUpdate(state) => {
+                let had_no_nodes = self.nodes.nodes.is_empty();
                 self.handle_state_update(state);
+                //
+                // On the first state update (empty → populated), also pull
+                // existing sessions from each node. This ensures a fresh
+                // CLI picks up any sessions that were kept alive on the
+                // node side across client restarts.
+                //
+                if had_no_nodes && !self.nodes.nodes.is_empty() {
+                    self.refresh_node_sessions();
+                }
+                true
+            }
+            AppEvent::NodeSessionsRefreshed { entries } => {
+                let now = std::time::Instant::now();
+                for entry in entries {
+                    //
+                    // Skip if we already track this exact server session_id.
+                    //
+                    let already = self
+                        .nodes
+                        .sessions
+                        .values()
+                        .any(|s| s.session_id.as_deref() == Some(entry.session_id.as_str()));
+                    if already {
+                        continue;
+                    }
+                    let local_id = uuid::Uuid::new_v4().to_string();
+                    let chat = SessionChat {
+                        local_id: local_id.clone(),
+                        node_id: entry.node_id.clone(),
+                        agent_name: entry.agent_short_name.clone(),
+                        session_id: Some(entry.session_id.clone()),
+                        active_transaction_id: None,
+                        created_at: now,
+                        last_activity_at: now,
+                        messages: vec![ChatMessage {
+                            role: ChatRole::System,
+                            text: format!(
+                                "Resumed from node (session {}…)",
+                                &entry.session_id[..8.min(entry.session_id.len())]
+                            ),
+                        }],
+                        input: String::new(),
+                        cursor_pos: 0,
+                        scroll_offset: 0,
+                        is_waiting: false,
+                        history: Vec::new(),
+                        history_index: None,
+                        saved_input: String::new(),
+                        yolo: false,
+                        working_dir: entry.cwd,
+                        streaming_content: String::new(),
+                        had_tool_call: false,
+                        agent_status: None,
+                        pending_permission: None,
+                        tool_calls: Vec::new(),
+                    };
+                    self.nodes.sessions.insert(local_id, chat);
+                }
                 true
             }
             AppEvent::OperationsRefreshed {
@@ -368,94 +483,128 @@ impl App {
             }
             AppEvent::SessionResponse(result) => {
                 use crate::event::SessionResult;
-                if let Some(ref mut session) = self.nodes.session {
-                    match result {
-                        SessionResult::Created(sid) => {
-                            session.session_id = Some(sid.clone());
+                match result {
+                    SessionResult::Created {
+                        session_local_id,
+                        session_id,
+                    } => {
+                        if let Some(session) = self.nodes.sessions.get_mut(&session_local_id) {
+                            session.session_id = Some(session_id.clone());
+                            session.last_activity_at = std::time::Instant::now();
                             session.messages.push(ChatMessage {
                                 role: ChatRole::System,
-                                text: format!("Session created ({})", &sid[..8.min(sid.len())]),
+                                text: format!(
+                                    "Session created ({})",
+                                    &session_id[..8.min(session_id.len())]
+                                ),
                             });
                         }
-                        SessionResult::Response {
-                            transaction_id,
-                            text,
-                        } => {
-                            if session.active_transaction_id.as_deref()
-                                != Some(transaction_id.as_str())
-                            {
-                                return false;
-                            }
+                    }
+                    SessionResult::Response {
+                        session_local_id,
+                        transaction_id,
+                        text,
+                    } => {
+                        let Some(session) = self.nodes.sessions.get_mut(&session_local_id) else {
+                            return false;
+                        };
+                        if session.active_transaction_id.as_deref()
+                            != Some(transaction_id.as_str())
+                        {
+                            return false;
+                        }
 
-                            //
-                            // Use streaming content if we accumulated any,
-                            // otherwise use the final response text.
-                            //
+                        //
+                        // Use streaming content if we accumulated any,
+                        // otherwise use the final response text.
+                        //
 
-                            let final_text = if !session.streaming_content.is_empty() {
-                                std::mem::take(&mut session.streaming_content)
-                            } else {
-                                text
-                            };
+                        let final_text = if !session.streaming_content.is_empty() {
+                            std::mem::take(&mut session.streaming_content)
+                        } else {
+                            text
+                        };
 
+                        session.messages.push(ChatMessage {
+                            role: ChatRole::Agent,
+                            text: final_text,
+                        });
+                        session.is_waiting = false;
+                        session.active_transaction_id = None;
+                        session.scroll_offset = 0;
+                        session.agent_status = None;
+                        session.pending_permission = None;
+                        session.tool_calls.clear();
+                        session.last_activity_at = std::time::Instant::now();
+                    }
+                    SessionResult::Cancelled {
+                        session_local_id,
+                        transaction_id,
+                    } => {
+                        let Some(session) = self.nodes.sessions.get_mut(&session_local_id) else {
+                            return false;
+                        };
+                        if session.active_transaction_id.as_deref()
+                            != Some(transaction_id.as_str())
+                        {
+                            return false;
+                        }
+
+                        //
+                        // Flush any streamed text before the cancel so
+                        // it's preserved in the message history.
+                        //
+
+                        if !session.streaming_content.is_empty() {
+                            let partial = std::mem::take(&mut session.streaming_content);
                             session.messages.push(ChatMessage {
                                 role: ChatRole::Agent,
-                                text: final_text,
+                                text: partial,
                             });
-                            session.is_waiting = false;
-                            session.active_transaction_id = None;
-                            session.scroll_offset = 0;
-                            session.agent_status = None;
-                            session.pending_permission = None;
-                            session.tool_calls.clear();
                         }
-                        SessionResult::Cancelled(transaction_id) => {
-                            if session.active_transaction_id.as_deref()
-                                != Some(transaction_id.as_str())
-                            {
-                                return false;
-                            }
-
-                            //
-                            // Flush any streamed text before the cancel so
-                            // it's preserved in the message history.
-                            //
-
-                            if !session.streaming_content.is_empty() {
-                                let partial = std::mem::take(&mut session.streaming_content);
-                                session.messages.push(ChatMessage {
-                                    role: ChatRole::Agent,
-                                    text: partial,
-                                });
-                            }
+                        session.messages.push(ChatMessage {
+                            role: ChatRole::System,
+                            text: "Cancelled".to_string(),
+                        });
+                        session.is_waiting = false;
+                        session.active_transaction_id = None;
+                        session.tool_calls.clear();
+                        session.had_tool_call = false;
+                        session.agent_status = None;
+                        session.pending_permission = None;
+                        session.last_activity_at = std::time::Instant::now();
+                    }
+                    SessionResult::Error {
+                        session_local_id,
+                        message,
+                    } => {
+                        if let Some(session) = self.nodes.sessions.get_mut(&session_local_id) {
                             session.messages.push(ChatMessage {
                                 role: ChatRole::System,
-                                text: "Cancelled".to_string(),
+                                text: format!("Error: {}", message),
                             });
                             session.is_waiting = false;
                             session.active_transaction_id = None;
-                            session.tool_calls.clear();
-                            session.had_tool_call = false;
-                            session.agent_status = None;
-                            session.pending_permission = None;
-                        }
-                        SessionResult::Error(msg) => {
-                            session.messages.push(ChatMessage {
-                                role: ChatRole::System,
-                                text: format!("Error: {}", msg),
-                            });
-                            session.is_waiting = false;
-                            session.active_transaction_id = None;
+                            session.last_activity_at = std::time::Instant::now();
                         }
                     }
                 }
                 true
             }
             AppEvent::SessionStreamUpdate(update) => {
-                if let Some(ref mut session) = self.nodes.session {
-                    if session.node_id != update.node_id {
-                        return false;
-                    }
+                //
+                // Route the stream update to the session that owns the
+                // in-flight prompt matching transaction_id. If no session
+                // matches (e.g. a late update after cancel/close) ignore.
+                //
+
+                let session = self.nodes.sessions.values_mut().find(|s| {
+                    s.node_id == update.node_id
+                        && s.active_transaction_id.as_deref() == Some(update.transaction_id.as_str())
+                });
+
+                if let Some(session) = session {
+                    session.last_activity_at = std::time::Instant::now();
                     use common::SessionUpdateKind;
                     match update.update {
                         SessionUpdateKind::TextChunk { text } => {
@@ -627,11 +776,7 @@ impl App {
 
     fn is_animating(&self) -> bool {
         self.orchestrator.active_session().map(|s| s.is_streaming).unwrap_or(false)
-            || self
-                .nodes
-                .session
-                .as_ref()
-                .is_some_and(|session| session.is_waiting)
+            || self.nodes.sessions.values().any(|s| s.is_waiting)
     }
 
     fn has_live_execution_timers(&self) -> bool {
@@ -754,6 +899,7 @@ impl App {
                 }
                 KeyCode::Char('l') => {
                     self.active_window = Window::Nodes;
+                    self.refresh_node_sessions();
                     return;
                 }
                 KeyCode::Char('p') => {
@@ -841,8 +987,8 @@ impl App {
                         self.operations.detail_scroll =
                             self.operations.detail_scroll.saturating_sub(3);
                     }
-                    Window::Nodes if self.nodes.session.is_some() => {
-                        if let Some(ref mut session) = self.nodes.session {
+                    Window::Nodes if self.nodes.active_session().is_some() => {
+                        if let Some(session) = self.nodes.active_session_mut() {
                             session.scroll_offset = session.scroll_offset.saturating_add(3);
                         }
                     }
@@ -861,8 +1007,8 @@ impl App {
                         self.operations.detail_scroll =
                             self.operations.detail_scroll.saturating_add(3);
                     }
-                    Window::Nodes if self.nodes.session.is_some() => {
-                        if let Some(ref mut session) = self.nodes.session {
+                    Window::Nodes if self.nodes.active_session().is_some() => {
+                        if let Some(session) = self.nodes.active_session_mut() {
                             session.scroll_offset = session.scroll_offset.saturating_sub(3);
                         }
                     }
@@ -1117,14 +1263,31 @@ impl App {
                 } else {
                     format!("{} nodes", node_count)
                 };
+                let session_count = self.nodes.sessions.len();
+                let session_segment = if session_count > 0 {
+                    format!(" \u{00b7} {} sessions ", session_count)
+                } else {
+                    String::new()
+                };
                 let orch_label = "^o orchestrator";
                 let nodes_label = "^l nodes";
                 let ops_label = "^p ops";
                 let settings_label = "^s settings";
                 let quit_label = "^q quit";
+                //
+                // Reconstruct the rendered status text so find() produces
+                // the correct column offsets for each label. Keep this in
+                // sync with crate::ui::status_bar::render.
+                //
                 let status_text = format!(
-                    " {}  \u{00b7} {}  {}  {}  {} \u{00b7} {}",
-                    node_text, orch_label, nodes_label, ops_label, settings_label, quit_label
+                    " {} {} \u{00b7} {}  {}  {}  {} \u{00b7} {}",
+                    node_text,
+                    session_segment,
+                    orch_label,
+                    nodes_label,
+                    ops_label,
+                    settings_label,
+                    quit_label
                 );
                 let orch_pos = status_area.x + status_text.find(orch_label).unwrap_or(999) as u16;
                 let nodes_pos = status_area.x + status_text.find(nodes_label).unwrap_or(999) as u16;
@@ -1141,6 +1304,7 @@ impl App {
                     self.load_settings().await;
                 } else if col >= nodes_pos && col < nodes_pos + nodes_label.len() as u16 {
                     self.active_window = Window::Nodes;
+                    self.refresh_node_sessions();
                 } else if col >= orch_pos && col < orch_pos + orch_label.len() as u16 {
                     self.active_window = Window::Orchestrator;
                 } else if col >= quit_pos && col < quit_pos + quit_label.len() as u16 {

@@ -3,32 +3,63 @@ use chrono::Utc;
 use futures_util::StreamExt;
 use lapin::{Connection, ConnectionProperties};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use common::{
-    node_queue_name, publish_json, DiscoveredAgent, NodeCapability, NodeDirectMessage,
-    NodeInformationUpdate, NodeRegistration, NodeSignalMessage, SelectedAgent,
-    NODE_SIGNAL_QUEUE,
+use agent_client_protocol as acp;
+use acp::{
+    AgentNotification, CloseSessionResponse, Implementation, InitializeResponse,
+    JsonRpcMessage, ListSessionsResponse, NewSessionResponse, Notification as AcpNotif,
+    ProtocolVersion, PromptResponse, RequestId, Response as AcpResponse, SessionInfo,
+    StopReason,
 };
 
-use crate::state::NodeRegistry;
+use common::{
+    node_queue_name, publish_json, AcpFrame, DiscoveredAgent, NodeCapability,
+    NodeDirectMessage, NodeInformationUpdate, NodeRegistration, NodeSignalMessage,
+    SelectedAgent, NODE_SIGNAL_QUEUE,
+};
+
 use super::Transport;
+use crate::state::NodeRegistry;
+
+const BRIDGE_CONNECTOR_SHORT_NAME: &str = "claude-code";
+const BRIDGE_CONNECTOR_NAME: &str = "Claude Code";
+const BRIDGE_AGENT_NAME: &str = "praxis-claude-bridge";
+
+//
+// In-flight prompt state: identifies who to respond to, which ACP session
+// the prompt belongs to, and accumulates streamed assistant text. When the
+// Claude worker emits assistant content blocks we fan them out as
+// session/update notifications; when the worker emits `result` we send the
+// PromptResponse.
+//
+
+struct InFlightPrompt {
+    client_id: String,
+    request_id: Value,
+    acp_session_id: String,
+    response_buf: String,
+}
 
 pub struct BridgeSession {
     node_id: String,
     node_type: String,
-    session_id: Option<String>,
+    claude_session_id: Option<String>,
     peer_ip: Option<String>,
     account_email: Option<String>,
     cwd: Option<String>,
     model: Option<String>,
     claude_version: Option<String>,
-    command_id: Option<String>,
-    transaction_id: Option<String>,
-    response_buf: String,
+    acp_sessions: HashMap<String, AcpSessionEntry>,
+    in_flight: Option<InFlightPrompt>,
     node_registry: Arc<NodeRegistry>,
+}
+
+struct AcpSessionEntry {
+    cwd: Option<String>,
 }
 
 impl BridgeSession {
@@ -36,15 +67,14 @@ impl BridgeSession {
         Self {
             node_id: Uuid::new_v4().to_string(),
             node_type: node_type.to_string(),
-            session_id: Some(Uuid::new_v4().to_string()),
+            claude_session_id: Some(Uuid::new_v4().to_string()),
             peer_ip,
             account_email: None,
             cwd: None,
             model: None,
             claude_version: None,
-            command_id: None,
-            transaction_id: None,
-            response_buf: String::new(),
+            acp_sessions: HashMap::new(),
+            in_flight: None,
             node_registry,
         }
     }
@@ -56,17 +86,16 @@ impl BridgeSession {
         cancel: CancellationToken,
     ) -> Result<()> {
         let system_init = self.handshake(transport).await?;
-        self.run_connected(transport, rabbitmq_url, system_init, cancel).await
+        self.run_connected(transport, rabbitmq_url, system_init, cancel)
+            .await
     }
 
-    async fn handshake(
-        &mut self,
-        transport: &mut impl Transport,
-    ) -> Result<Option<Value>> {
+    async fn handshake(&mut self, transport: &mut impl Transport) -> Result<Option<Value>> {
         //
         // Send initialize control_request. Claude responds with system/init
         // and control_response (in either order, possibly same frame).
         //
+
         let init_msg = json!({
             "type": "control_request",
             "request_id": Uuid::new_v4().to_string(),
@@ -84,9 +113,6 @@ impl BridgeSession {
         });
         transport.send(&init_msg).await?;
 
-        //
-        // Wait for control_response. Buffer system/init if it arrives first.
-        //
         let mut system_init_msg: Option<Value> = None;
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
 
@@ -116,6 +142,7 @@ impl BridgeSession {
         // per the validated protocol spec). Wait for the control_response to
         // confirm the mode was accepted.
         //
+
         let perm_msg = json!({
             "type": "control_request",
             "request_id": Uuid::new_v4().to_string(),
@@ -161,31 +188,32 @@ impl BridgeSession {
         use lapin::options::{BasicAckOptions, BasicConsumeOptions, QueueDeclareOptions};
         use lapin::types::FieldTable;
 
-        //
-        // Connect to RabbitMQ with dedicated channels for this session.
-        //
         let conn = Connection::connect(rabbitmq_url, ConnectionProperties::default()).await?;
         let pub_channel = conn.create_channel().await?;
         let con_channel = conn.create_channel().await?;
 
         let node_queue = node_queue_name(&self.node_id);
 
-        con_channel.queue_declare(
-            &node_queue,
-            QueueDeclareOptions { auto_delete: true, ..Default::default() },
-            FieldTable::default(),
-        ).await?;
+        con_channel
+            .queue_declare(
+                &node_queue,
+                QueueDeclareOptions {
+                    auto_delete: true,
+                    ..Default::default()
+                },
+                FieldTable::default(),
+            )
+            .await?;
 
-        let mut consumer = con_channel.basic_consume(
-            &node_queue,
-            &format!("bridge_{}", self.node_id),
-            BasicConsumeOptions::default(),
-            FieldTable::default(),
-        ).await?;
+        let mut consumer = con_channel
+            .basic_consume(
+                &node_queue,
+                &format!("bridge_{}", self.node_id),
+                BasicConsumeOptions::default(),
+                FieldTable::default(),
+            )
+            .await?;
 
-        //
-        // Publish Registration.
-        //
         let registration = NodeSignalMessage::Registration(NodeRegistration {
             node_id: self.node_id.clone(),
             node_type: self.node_type.clone(),
@@ -195,10 +223,6 @@ impl BridgeSession {
         });
         publish_json(&pub_channel, NODE_SIGNAL_QUEUE, &registration).await?;
 
-        //
-        // Wait for RegistrationAck with a timeout to avoid hanging forever
-        // if the dispatcher is down or the ack is lost.
-        //
         let ack_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
         loop {
             tokio::select! {
@@ -219,9 +243,6 @@ impl BridgeSession {
             }
         }
 
-        //
-        // Apply system/init fields then advertise the agent.
-        //
         if let Some(init) = &system_init {
             self.apply_system_init(init);
         }
@@ -283,19 +304,17 @@ impl BridgeSession {
             }
             Some("assistant") => {
                 //
-                // Accumulate content blocks as text. The SDK protocol puts
-                // content at the top level, not nested under "message".
+                // Stream assistant text content as session/update notifications
+                // (one per text block) and also accumulate into the in-flight
+                // prompt buffer as a fallback when the worker emits a `result`
+                // but no assistant blocks.
                 //
-                if let Some(content) = v.get("content") {
-                    if let Some(blocks) = content.as_array() {
-                        for block in blocks {
-                            if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                                if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
-                                    if !self.response_buf.is_empty() {
-                                        self.response_buf.push('\n');
-                                    }
-                                    self.response_buf.push_str(text);
-                                }
+
+                if let Some(content) = v.get("content").and_then(|c| c.as_array()) {
+                    for block in content {
+                        if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                            if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                                self.emit_assistant_chunk(pub_channel, text).await?;
                             }
                         }
                     }
@@ -303,23 +322,30 @@ impl BridgeSession {
             }
             Some("result") => {
                 //
-                // If no assistant content was accumulated (e.g. single-turn
-                // short response), fall back to the result's "result" field.
+                // Fallback: if no assistant text was streamed (e.g. a very
+                // short response that came back only in the result field),
+                // emit a single chunk with the result text before finalising.
                 //
-                if self.response_buf.is_empty() {
-                    if let Some(text) = v.get("result").and_then(|r| r.as_str()) {
-                        self.response_buf.push_str(text);
+
+                if let Some(in_flight) = self.in_flight.as_ref() {
+                    if in_flight.response_buf.is_empty() {
+                        if let Some(text) = v.get("result").and_then(|r| r.as_str()) {
+                            let text = text.to_string();
+                            self.emit_assistant_chunk(pub_channel, &text).await?;
+                        }
                     }
                 }
-                self.publish_prompt_response(pub_channel).await?;
+                self.finish_prompt(pub_channel, StopReason::EndTurn).await?;
             }
             Some("control_request") => {
-                let subtype = v.get("request")
+                let subtype = v
+                    .get("request")
                     .and_then(|r| r.get("subtype"))
                     .and_then(|s| s.as_str());
 
                 if subtype == Some("can_use_tool") {
-                    let tool_name = v.get("request")
+                    let tool_name = v
+                        .get("request")
                         .and_then(|r| r.get("toolName"))
                         .and_then(|t| t.as_str())
                         .unwrap_or("unknown");
@@ -331,7 +357,7 @@ impl BridgeSession {
                     self.handle_can_use_tool(transport, &v).await?;
                 }
             }
-            _ => {} // keep_alive, hook_started, hook_response -- ignore
+            _ => {}
         }
         Ok(())
     }
@@ -341,9 +367,6 @@ impl BridgeSession {
         transport: &mut impl Transport,
         request: &Value,
     ) -> Result<()> {
-        //
-        // Extract request_id and original tool input to echo back.
-        //
         let request_id = request
             .get("request_id")
             .and_then(|v| v.as_str())
@@ -371,167 +394,460 @@ impl BridgeSession {
     }
 
     //
-    // Returns false when the main loop should exit (e.g. session closed).
+    // Returns false when the main loop should exit (e.g. bridge shutdown
+    // was requested by the peer).
     //
+
     async fn handle_rmq_message(
         &mut self,
         transport: &mut impl Transport,
         pub_channel: &lapin::Channel,
         data: &[u8],
     ) -> Result<bool> {
-        use common::{
-            CommandResponse, NodeCommand, NodeCommandResult, NodeDirectMessage,
-            SessionCommand, SessionCommandResult,
-        };
-
         let msg: NodeDirectMessage = match serde_json::from_slice(data) {
             Ok(m) => m,
-            Err(_) => return Ok(true),
+            Err(e) => {
+                common::log_warn!("Bridge: failed to parse NodeDirectMessage: {}", e);
+                return Ok(true);
+            }
         };
 
         match msg {
-            NodeDirectMessage::RegistrationAck(_) => {
-                // Already handled in run_connected; ignore if we see it again.
+            NodeDirectMessage::RegistrationAck(_) => {}
+            NodeDirectMessage::Acp(frame) => {
+                self.handle_acp_frame(transport, pub_channel, frame).await?;
             }
-
-            NodeDirectMessage::Command(req) => {
-                match req.command {
-                    NodeCommand::Agent(common::AgentCommand::Select { .. }) => {
-                        let response = NodeSignalMessage::CommandResponse(CommandResponse {
-                            command_id: req.command_id,
-                            node_id: self.node_id.clone(),
-                            result: NodeCommandResult::Agent(
-                                common::AgentCommandResult::Selected {
-                                    short_name: "claude-code".to_string(),
-                                },
-                            ),
-                        });
-                        publish_json(pub_channel, NODE_SIGNAL_QUEUE, &response).await?;
-                    }
-
-                    NodeCommand::Session(SessionCommand::Create { .. }) => {
-                        //
-                        // Session already exists from connect-time. Respond immediately.
-                        //
-                        let response = NodeSignalMessage::CommandResponse(CommandResponse {
-                            command_id: req.command_id,
-                            node_id: self.node_id.clone(),
-                            result: NodeCommandResult::Session(SessionCommandResult::Created {
-                                session_id: self.session_id.clone().unwrap_or_default(),
-                            }),
-                        });
-                        publish_json(pub_channel, NODE_SIGNAL_QUEUE, &response).await?;
-                    }
-
-                    NodeCommand::Session(SessionCommand::Prompt { text, transaction_id }) => {
-                        if self.command_id.is_some() {
-                            //
-                            // Another prompt is in-flight -- reject immediately.
-                            //
-                            let response = NodeSignalMessage::CommandResponse(CommandResponse {
-                                command_id: req.command_id,
-                                node_id: self.node_id.clone(),
-                                result: NodeCommandResult::Session(SessionCommandResult::PromptResponse {
-                                    transaction_id,
-                                    response: "[error: prompt already in-flight]".to_string(),
-                                }),
-                            });
-                            publish_json(pub_channel, NODE_SIGNAL_QUEUE, &response).await?;
-                            return Ok(true);
-                        }
-
-                        self.command_id = Some(req.command_id);
-                        self.transaction_id = Some(transaction_id);
-                        self.response_buf.clear();
-
-                        let user_msg = json!({
-                            "type": "user",
-                            "session_id": self.session_id,
-                            "message": { "role": "user", "content": text },
-                            "uuid": Uuid::new_v4().to_string()
-                        });
-                        transport.send(&user_msg).await?;
-                    }
-
-                    NodeCommand::Session(SessionCommand::Close) => {
-                        let is_cleanup = req.client_id.is_empty() || req.client_id == "service";
-
-                        if is_cleanup {
-
-                            //
-                            // Operation/chain executor cleanup -- ACK but keep
-                            // the session alive. Bridge lifecycle is owned by the
-                            // transport connection, not by individual operations.
-                            //
-
-                            let response = NodeSignalMessage::CommandResponse(CommandResponse {
-                                command_id: req.command_id,
-                                node_id: self.node_id.clone(),
-                                result: NodeCommandResult::Session(SessionCommandResult::Closed),
-                            });
-                            publish_json(pub_channel, NODE_SIGNAL_QUEUE, &response).await?;
-                            return Ok(true);
-                        }
-
-                        //
-                        // Deliberate user-initiated close -- tear down the node.
-                        //
-
-                        let end = json!({
-                            "type": "control_request",
-                            "request_id": Uuid::new_v4().to_string(),
-                            "request": { "subtype": "end_session", "reason": "done" }
-                        });
-                        transport.send(&end).await?;
-
-                        let response = NodeSignalMessage::CommandResponse(CommandResponse {
-                            command_id: req.command_id,
-                            node_id: self.node_id.clone(),
-                            result: NodeCommandResult::Session(SessionCommandResult::Closed),
-                        });
-                        publish_json(pub_channel, NODE_SIGNAL_QUEUE, &response).await?;
-
-                        return Ok(false);
-                    }
-
-                    NodeCommand::Session(SessionCommand::CancelTransaction { transaction_id, .. }) => {
-                        let end = json!({
-                            "type": "control_request",
-                            "request_id": Uuid::new_v4().to_string(),
-                            "request": { "subtype": "end_session", "reason": "cancelled" }
-                        });
-                        transport.send(&end).await?;
-
-                        let response = NodeSignalMessage::CommandResponse(CommandResponse {
-                            command_id: req.command_id,
-                            node_id: self.node_id.clone(),
-                            result: NodeCommandResult::Session(SessionCommandResult::TransactionCancelled {
-                                transaction_id,
-                            }),
-                        });
-                        publish_json(pub_channel, NODE_SIGNAL_QUEUE, &response).await?;
-                    }
-
-                    unsupported => {
-                        let response = NodeSignalMessage::CommandResponse(CommandResponse {
-                            command_id: req.command_id,
-                            node_id: self.node_id.clone(),
-                            result: NodeCommandResult::Error {
-                                message: format!(
-                                    "{} bridge does not support: {:?}",
-                                    self.node_type, unsupported
-                                ),
-                            },
-                        });
-                        publish_json(pub_channel, NODE_SIGNAL_QUEUE, &response).await?;
-                    }
-                }
-            }
-
             _ => {}
         }
 
         Ok(true)
+    }
+
+    //
+    // Dispatch a single ACP JSON-RPC frame received over RabbitMQ. Mirrors
+    // node::acp_server::NodeAcpServer::handle_frame: parse, classify, branch
+    // on method, call handler.
+    //
+
+    async fn handle_acp_frame(
+        &mut self,
+        transport: &mut impl Transport,
+        pub_channel: &lapin::Channel,
+        frame: AcpFrame,
+    ) -> Result<()> {
+        let Ok(msg): Result<Value, _> = serde_json::from_str(&frame.json_rpc) else {
+            common::log_warn!(
+                "Bridge ACP: invalid JSON-RPC from {}: {}",
+                truncate_id(&frame.client_id),
+                common::truncate_str(&frame.json_rpc, 240),
+            );
+            return Ok(());
+        };
+
+        let id = msg.get("id").cloned();
+        let method = msg
+            .get("method")
+            .and_then(|m| m.as_str())
+            .map(String::from);
+
+        if id.is_some() && method.is_none() {
+            //
+            // Responses to bridge-initiated requests are not expected; drop.
+            //
+
+            return Ok(());
+        }
+
+        let Some(method) = method else { return Ok(()) };
+        let params = msg.get("params").cloned().unwrap_or(Value::Null);
+
+        //
+        // Extension methods (leading underscore) are not supported on the
+        // bridge: it has no Lua VM, no filesystem probe, no recon. Return
+        // -32601 Method not found for requests and silently ignore
+        // notifications per the ACP spec.
+        //
+
+        if method.starts_with('_') {
+            if let Some(id) = id {
+                self.send_error(
+                    pub_channel,
+                    &frame.client_id,
+                    id,
+                    -32601,
+                    &format!("Method not found: {}", method),
+                )
+                .await?;
+            }
+            return Ok(());
+        }
+
+        match method.as_str() {
+            m if m == acp::AGENT_METHOD_NAMES.initialize => {
+                let resp = self.handle_initialize();
+                if let Some(id) = id {
+                    self.send_response(pub_channel, &frame.client_id, id, json_value(&resp))
+                        .await?;
+                }
+            }
+            m if m == acp::AGENT_METHOD_NAMES.session_new => {
+                self.handle_session_new(pub_channel, &frame.client_id, id, &params)
+                    .await?;
+            }
+            m if m == acp::AGENT_METHOD_NAMES.session_prompt => {
+                self.handle_session_prompt(transport, pub_channel, &frame.client_id, id, &params)
+                    .await?;
+            }
+            m if m == acp::AGENT_METHOD_NAMES.session_cancel => {
+                self.handle_session_cancel(transport, pub_channel, &params).await?;
+            }
+            m if m == acp::AGENT_METHOD_NAMES.session_close => {
+                self.handle_session_close(pub_channel, &frame.client_id, id, &params)
+                    .await?;
+            }
+            m if m == acp::AGENT_METHOD_NAMES.session_list => {
+                let resp = self.handle_session_list();
+                if let Some(id) = id {
+                    self.send_response(pub_channel, &frame.client_id, id, json_value(&resp))
+                        .await?;
+                }
+            }
+            other => {
+                if let Some(id) = id {
+                    self.send_error(
+                        pub_channel,
+                        &frame.client_id,
+                        id,
+                        -32601,
+                        &format!("Method not found: {}", other),
+                    )
+                    .await?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_initialize(&self) -> InitializeResponse {
+        //
+        // Advertise no extensions (the bridge has no Lua VM / filesystem
+        // ops) and a single connector that matches the Claude Code worker.
+        //
+
+        let meta_value = json!({
+            "extensions": {},
+            "connectors": [
+                {
+                    "shortName": BRIDGE_CONNECTOR_SHORT_NAME,
+                    "name": BRIDGE_CONNECTOR_NAME,
+                }
+            ],
+            "nodeId": self.node_id,
+        });
+        let meta: acp::Meta = serde_json::from_value(meta_value)
+            .unwrap_or_else(|_| serde_json::from_value(json!({})).unwrap());
+
+        InitializeResponse::new(ProtocolVersion::LATEST)
+            .agent_info(Implementation::new(
+                BRIDGE_AGENT_NAME,
+                env!("CARGO_PKG_VERSION"),
+            ))
+            .meta(meta)
+    }
+
+    async fn handle_session_new(
+        &mut self,
+        pub_channel: &lapin::Channel,
+        client_id: &str,
+        id: Option<Value>,
+        params: &Value,
+    ) -> Result<()> {
+        //
+        // Validate _meta.praxis.connector (if present) matches the advertised
+        // Claude Code connector. cwd is recorded on the session; other session
+        // options are ignored by the bridge (the Claude worker has fixed
+        // yolo/permission semantics established during handshake).
+        //
+
+        let praxis = params
+            .get("_meta")
+            .and_then(|m| m.get("praxis"))
+            .cloned()
+            .unwrap_or(Value::Null);
+
+        if let Some(connector) = praxis.get("connector").and_then(|v| v.as_str()) {
+            if connector != BRIDGE_CONNECTOR_SHORT_NAME {
+                if let Some(id) = id {
+                    self.send_error(
+                        pub_channel,
+                        client_id,
+                        id,
+                        -32602,
+                        &format!("Unknown connector '{}'", connector),
+                    )
+                    .await?;
+                }
+                return Ok(());
+            }
+        }
+
+        let cwd = params
+            .get("cwd")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .or_else(|| self.cwd.clone());
+
+        let acp_session_id = Uuid::new_v4().to_string();
+        self.acp_sessions
+            .insert(acp_session_id.clone(), AcpSessionEntry { cwd });
+
+        if let Some(id) = id {
+            let resp = NewSessionResponse::new(acp_session_id);
+            self.send_response(pub_channel, client_id, id, json_value(&resp))
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn handle_session_prompt(
+        &mut self,
+        transport: &mut impl Transport,
+        pub_channel: &lapin::Channel,
+        client_id: &str,
+        id: Option<Value>,
+        params: &Value,
+    ) -> Result<()> {
+        let session_id = match params.get("sessionId").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => {
+                if let Some(id) = id {
+                    self.send_error(pub_channel, client_id, id, -32602, "Missing sessionId")
+                        .await?;
+                }
+                return Ok(());
+            }
+        };
+
+        if !self.acp_sessions.contains_key(&session_id) {
+            if let Some(id) = id {
+                self.send_error(pub_channel, client_id, id, -32602, "Session not found")
+                    .await?;
+            }
+            return Ok(());
+        }
+
+        let prompt_text = params
+            .get("prompt")
+            .and_then(|p| p.as_array())
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .filter_map(|b| {
+                        if b.get("type").and_then(|t| t.as_str()) == Some("text") {
+                            b.get("text").and_then(|t| t.as_str()).map(String::from)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .unwrap_or_default();
+
+        if prompt_text.is_empty() {
+            if let Some(id) = id {
+                self.send_error(pub_channel, client_id, id, -32602, "Empty prompt")
+                    .await?;
+            }
+            return Ok(());
+        }
+
+        if self.in_flight.is_some() {
+            if let Some(id) = id {
+                self.send_error(
+                    pub_channel,
+                    client_id,
+                    id,
+                    -32603,
+                    "Another prompt is already in-flight on this bridge",
+                )
+                .await?;
+            }
+            return Ok(());
+        }
+
+        let Some(request_id) = id else {
+            //
+            // session/prompt without an id is meaningless -- nowhere to send
+            // the PromptResponse back to.
+            //
+
+            return Ok(());
+        };
+
+        self.in_flight = Some(InFlightPrompt {
+            client_id: client_id.to_string(),
+            request_id,
+            acp_session_id: session_id,
+            response_buf: String::new(),
+        });
+
+        let user_msg = json!({
+            "type": "user",
+            "session_id": self.claude_session_id,
+            "message": { "role": "user", "content": prompt_text },
+            "uuid": Uuid::new_v4().to_string()
+        });
+        transport.send(&user_msg).await?;
+        Ok(())
+    }
+
+    async fn handle_session_cancel(
+        &mut self,
+        transport: &mut impl Transport,
+        pub_channel: &lapin::Channel,
+        params: &Value,
+    ) -> Result<()> {
+        let session_id = params
+            .get("sessionId")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+
+        //
+        // If there's an in-flight prompt for this session (or any prompt if
+        // no session is specified), ask the Claude worker to end the
+        // transaction and emit a Cancelled PromptResponse.
+        //
+
+        let should_cancel = match (&self.in_flight, &session_id) {
+            (Some(in_flight), Some(sid)) => in_flight.acp_session_id == *sid,
+            (Some(_), None) => true,
+            (None, _) => false,
+        };
+
+        if !should_cancel {
+            return Ok(());
+        }
+
+        let end = json!({
+            "type": "control_request",
+            "request_id": Uuid::new_v4().to_string(),
+            "request": { "subtype": "end_session", "reason": "cancelled" }
+        });
+        transport.send(&end).await?;
+
+        self.finish_prompt(pub_channel, StopReason::Cancelled).await?;
+        Ok(())
+    }
+
+    async fn handle_session_close(
+        &mut self,
+        pub_channel: &lapin::Channel,
+        client_id: &str,
+        id: Option<Value>,
+        params: &Value,
+    ) -> Result<()> {
+        if let Some(session_id) = params.get("sessionId").and_then(|v| v.as_str()) {
+            self.acp_sessions.remove(session_id);
+
+            //
+            // If the closed session had an in-flight prompt, finalise it as
+            // cancelled so the caller isn't left waiting.
+            //
+
+            let matches_in_flight = self
+                .in_flight
+                .as_ref()
+                .map(|f| f.acp_session_id == session_id)
+                .unwrap_or(false);
+            if matches_in_flight {
+                self.finish_prompt(pub_channel, StopReason::Cancelled).await?;
+            }
+        }
+
+        if let Some(id) = id {
+            self.send_response(
+                pub_channel,
+                client_id,
+                id,
+                json_value(&CloseSessionResponse::default()),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    fn handle_session_list(&self) -> ListSessionsResponse {
+        let sessions: Vec<SessionInfo> = self
+            .acp_sessions
+            .iter()
+            .map(|(sid, entry)| {
+                let cwd = entry.cwd.clone().unwrap_or_else(|| ".".into());
+                SessionInfo::new(sid.clone(), cwd).title(BRIDGE_CONNECTOR_NAME.to_string())
+            })
+            .collect();
+        ListSessionsResponse::new(sessions)
+    }
+
+    //
+    // Emit a session/update notification carrying an AgentMessageChunk text
+    // block and append it to the in-flight prompt's response buffer.
+    //
+
+    async fn emit_assistant_chunk(
+        &mut self,
+        pub_channel: &lapin::Channel,
+        text: &str,
+    ) -> Result<()> {
+        let Some(in_flight) = self.in_flight.as_mut() else {
+            return Ok(());
+        };
+
+        if !in_flight.response_buf.is_empty() {
+            in_flight.response_buf.push('\n');
+        }
+        in_flight.response_buf.push_str(text);
+
+        let session_id = in_flight.acp_session_id.clone();
+        let client_id = in_flight.client_id.clone();
+
+        let chunk = acp::ContentChunk::new(acp::ContentBlock::Text(
+            acp::TextContent::new(text.to_string()),
+        ));
+        let notif = acp::SessionNotification::new(
+            session_id,
+            acp::SessionUpdate::AgentMessageChunk(chunk),
+        );
+        let wrapped = JsonRpcMessage::wrap(AcpNotif::<AgentNotification> {
+            method: acp::CLIENT_METHOD_NAMES.session_update.into(),
+            params: Some(AgentNotification::SessionNotification(notif)),
+        });
+        let json_rpc = serde_json::to_string(&wrapped)?;
+        self.publish_acp(pub_channel, &client_id, json_rpc).await
+    }
+
+    //
+    // Finalise the current in-flight prompt with the given stop reason. A
+    // no-op if no prompt is in-flight.
+    //
+
+    async fn finish_prompt(
+        &mut self,
+        pub_channel: &lapin::Channel,
+        stop: StopReason,
+    ) -> Result<()> {
+        let Some(in_flight) = self.in_flight.take() else {
+            return Ok(());
+        };
+        let resp = PromptResponse::new(stop);
+        self.send_response(
+            pub_channel,
+            &in_flight.client_id,
+            in_flight.request_id,
+            json_value(&resp),
+        )
+        .await
     }
 
     async fn publish_agent_update(&self, pub_channel: &lapin::Channel) -> Result<()> {
@@ -539,14 +855,14 @@ impl BridgeSession {
             node_id: self.node_id.clone(),
             timestamp: Utc::now(),
             discovered_agents: vec![DiscoveredAgent {
-                name: "Claude Code".to_string(),
-                short_name: "claude-code".to_string(),
+                name: BRIDGE_CONNECTOR_NAME.to_string(),
+                short_name: BRIDGE_CONNECTOR_SHORT_NAME.to_string(),
                 available: true,
                 version: self.claude_version.clone(),
             }],
             selected_agent: Some(SelectedAgent {
-                short_name: "claude-code".to_string(),
-                session_id: self.session_id.clone(),
+                short_name: BRIDGE_CONNECTOR_SHORT_NAME.to_string(),
+                session_id: self.claude_session_id.clone(),
                 process_name: None,
                 yolo_mode: true,
                 working_dir: self.cwd.clone(),
@@ -583,10 +899,11 @@ impl BridgeSession {
 
     fn apply_system_init(&mut self, init: &Value) {
         //
-        // Don't overwrite session_id -- the bridge's UUID is the stable
-        // identifier the service/UI uses to track this session. Claude's
-        // internal session_id is a separate concept.
+        // Don't overwrite claude_session_id -- the bridge's UUID is the
+        // stable identifier used in user messages to the Claude worker.
+        // Claude's internal session_id is a separate concept.
         //
+
         if let Some(cwd) = init.get("cwd").and_then(|v| v.as_str()) {
             self.cwd = Some(cwd.to_string());
         }
@@ -598,44 +915,15 @@ impl BridgeSession {
         }
     }
 
-    async fn publish_prompt_response(&mut self, pub_channel: &lapin::Channel) -> Result<()> {
-        let (command_id, transaction_id) = match (self.command_id.take(), self.transaction_id.take()) {
-            (Some(c), Some(t)) => (c, t),
-            _ => return Ok(()), // no in-flight prompt
-        };
-        let response = self.response_buf.drain(..).collect::<String>();
-
-        use common::{CommandResponse, NodeCommandResult, SessionCommandResult};
-        let msg = NodeSignalMessage::CommandResponse(CommandResponse {
-            command_id,
-            node_id: self.node_id.clone(),
-            result: NodeCommandResult::Session(SessionCommandResult::PromptResponse {
-                transaction_id,
-                response,
-            }),
-        });
-        publish_json(pub_channel, NODE_SIGNAL_QUEUE, &msg).await?;
-        Ok(())
-    }
-
     async fn on_disconnect(&mut self, pub_channel: &lapin::Channel) {
         //
-        // If a prompt is in-flight, send a disconnection response so the
-        // orchestrator is not left waiting.
+        // If a prompt is in-flight when the transport dies, emit a
+        // disconnection error so the ACP caller isn't left waiting.
         //
-        if let (Some(command_id), Some(transaction_id)) =
-            (self.command_id.take(), self.transaction_id.take())
-        {
-            use common::{CommandResponse, NodeCommandResult, SessionCommandResult};
-            let msg = NodeSignalMessage::CommandResponse(CommandResponse {
-                command_id,
-                node_id: self.node_id.clone(),
-                result: NodeCommandResult::Session(SessionCommandResult::PromptResponse {
-                    transaction_id,
-                    response: format!("[{} disconnected]", self.node_type),
-                }),
-            });
-            if let Err(e) = publish_json(pub_channel, NODE_SIGNAL_QUEUE, &msg).await {
+
+        if self.in_flight.is_some() {
+            let msg = format!("[{} disconnected]", self.node_type);
+            if let Err(e) = self.send_in_flight_error(pub_channel, &msg).await {
                 common::log_error!("Failed to publish disconnect response: {}", e);
             }
         }
@@ -647,4 +935,100 @@ impl BridgeSession {
             self.node_type
         );
     }
+
+    async fn send_in_flight_error(
+        &mut self,
+        pub_channel: &lapin::Channel,
+        message: &str,
+    ) -> Result<()> {
+        let Some(in_flight) = self.in_flight.take() else {
+            return Ok(());
+        };
+        self.send_error(
+            pub_channel,
+            &in_flight.client_id,
+            in_flight.request_id,
+            -32603,
+            message,
+        )
+        .await
+    }
+
+    //
+    // Outbound helpers. Each wraps a JSON-RPC response/notification and
+    // publishes NodeSignalMessage::Acp so the service proxy can forward it
+    // to the originating client.
+    //
+
+    async fn send_response(
+        &self,
+        pub_channel: &lapin::Channel,
+        client_id: &str,
+        id: Value,
+        result: Value,
+    ) -> Result<()> {
+        let rid = value_to_request_id(&id);
+        let resp = AcpResponse::<Value>::new(rid, Ok(result));
+        let wrapped = JsonRpcMessage::wrap(resp);
+        let json_rpc = serde_json::to_string(&wrapped)?;
+        self.publish_acp(pub_channel, client_id, json_rpc).await
+    }
+
+    async fn send_error(
+        &self,
+        pub_channel: &lapin::Channel,
+        client_id: &str,
+        id: Value,
+        code: i64,
+        message: &str,
+    ) -> Result<()> {
+        let rid = value_to_request_id(&id);
+        let err = acp::Error::new(code as i32, message);
+        let resp = AcpResponse::<Value>::new(rid, Err(err));
+        let wrapped = JsonRpcMessage::wrap(resp);
+        let json_rpc = serde_json::to_string(&wrapped)?;
+        self.publish_acp(pub_channel, client_id, json_rpc).await
+    }
+
+    async fn publish_acp(
+        &self,
+        pub_channel: &lapin::Channel,
+        client_id: &str,
+        json_rpc: String,
+    ) -> Result<()> {
+        tracing::debug!(
+            "Bridge ACP send to {}: {}",
+            truncate_id(client_id),
+            common::truncate_str(&json_rpc, 400),
+        );
+        let signal = NodeSignalMessage::Acp {
+            node_id: self.node_id.clone(),
+            client_id: client_id.to_string(),
+            json_rpc,
+        };
+        publish_json(pub_channel, NODE_SIGNAL_QUEUE, &signal).await?;
+        Ok(())
+    }
+}
+
+fn value_to_request_id(v: &Value) -> RequestId {
+    match v {
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                RequestId::Number(i)
+            } else {
+                RequestId::Str(n.to_string().into())
+            }
+        }
+        Value::String(s) => RequestId::Str(s.clone().into()),
+        _ => RequestId::Null,
+    }
+}
+
+fn json_value<T: serde::Serialize>(v: &T) -> Value {
+    serde_json::to_value(v).unwrap_or(Value::Null)
+}
+
+fn truncate_id(id: &str) -> &str {
+    id.get(..8.min(id.len())).unwrap_or(id)
 }

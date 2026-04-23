@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 
 use super::client::McpClient;
 use super::params::*;
-use crate::{AgentCommandResult, AgentFileType, NodeCommand, NodeCommandResult, SessionCommandResult};
+use crate::{AgentFileType, ReconResult};
 
 const SERVER_NAME: &str = "praxis";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -110,6 +110,25 @@ macro_rules! resolve_node {
 
 fn mcp_err(e: impl std::fmt::Display) -> rmcp::ErrorData {
     rmcp::ErrorData::internal_error(e.to_string(), None)
+}
+
+//
+// Look up the selected agent short name for a node from cached state.
+//
+
+async fn selected_agent<C: McpClient>(
+    client: &C,
+    node_id: &str,
+) -> Result<String, rmcp::ErrorData> {
+    let state = client.get_state().await
+        .ok_or_else(|| mcp_err("No state available"))?;
+    state
+        .nodes
+        .iter()
+        .find(|n| n.node_id == node_id)
+        .and_then(|n| n.selected_agent.as_ref())
+        .map(|a| a.short_name.clone())
+        .ok_or_else(|| mcp_err("No agent selected on node. Use agent_select first."))
 }
 
 fn json_result(value: serde_json::Value) -> Result<CallToolResult, rmcp::ErrorData> {
@@ -222,7 +241,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         json_result(json!({ "agents": agents, "count": agents.len() }))
     }
 
-    #[tool(description = "Select an agent on a node")]
+    #[tool(description = "Select an agent on a node. With ACP, selection is performed per session at session/new time via _meta.praxis.connector; this tool simply validates that the agent exists on the node.")]
     async fn agent_select(
         &self,
         Parameters(params): Parameters<AgentSelectParams>,
@@ -231,22 +250,26 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
 
-        let response = client
-            .send_command(&node_id, NodeCommand::Agent(crate::AgentCommand::Select {
-                short_name: params.agent.clone(),
-            }))
-            .await.map_err(mcp_err)?;
+        let state = client.get_state().await
+            .ok_or_else(|| mcp_err("No state available"))?;
+        let exists = state
+            .nodes
+            .iter()
+            .find(|n| n.node_id == node_id)
+            .map(|n| n.discovered_agents.iter().any(|a| a.short_name == params.agent))
+            .unwrap_or(false);
 
-        match response.result {
-            NodeCommandResult::Agent(AgentCommandResult::Selected { short_name }) => {
-                json_result(json!({ "status": "success", "short_name": short_name }))
-            }
-            NodeCommandResult::Error { message } => Err(mcp_err(message)),
-            _ => Err(mcp_err("Unexpected response")),
+        if !exists {
+            return Err(mcp_err(format!(
+                "Agent '{}' not found on node. Use agent_list to see available agents.",
+                params.agent
+            )));
         }
+
+        json_result(json!({ "status": "success", "short_name": params.agent }))
     }
 
-    #[tool(description = "Request agent info update from a node")]
+    #[tool(description = "Request agent info update from a node. Agent discovery is now pushed from the node via periodic NodeInformationUpdate broadcasts; this tool reports the current cached state.")]
     async fn agent_update(
         &self,
         Parameters(params): Parameters<NodeParams>,
@@ -255,17 +278,20 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
 
-        let response = client
-            .send_command(&node_id, NodeCommand::Agent(crate::AgentCommand::Update))
-            .await.map_err(mcp_err)?;
+        let state = client.get_state().await
+            .ok_or_else(|| mcp_err("No state available"))?;
+        let agent_count = state
+            .nodes
+            .iter()
+            .find(|n| n.node_id == node_id)
+            .map(|n| n.discovered_agents.len())
+            .unwrap_or(0);
 
-        match response.result {
-            NodeCommandResult::Agent(AgentCommandResult::UpdateSent) => {
-                json_result(json!({ "status": "success", "message": "Update request sent" }))
-            }
-            NodeCommandResult::Error { message } => Err(mcp_err(message)),
-            _ => Err(mcp_err("Unexpected response")),
-        }
+        json_result(json!({
+            "status": "success",
+            "message": "Agent info is refreshed automatically; reporting cached state.",
+            "agent_count": agent_count,
+        }))
     }
 
     // ── Reconnaissance ───────────────────────────────────────────────────
@@ -278,27 +304,28 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let guard = acquire_client!(self);
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
+        let agent_short_name = selected_agent(client, &node_id).await?;
 
-        let response = client
-            .send_command(&node_id, NodeCommand::Agent(crate::AgentCommand::Recon))
+        let value = client
+            .acp_request(&node_id, "_praxis/recon", json!({
+                "agent_short_name": agent_short_name,
+                "is_semantic": false,
+            }))
             .await.map_err(mcp_err)?;
 
-        match response.result {
-            NodeCommandResult::Agent(AgentCommandResult::ReconComplete { result }) => {
-                let mcp_tools_count: usize = result.tools.mcp_servers.iter().map(|s| s.tools.len()).sum();
-                json_result(json!({
-                    "status": "success",
-                    "mcp_servers": result.tools.mcp_servers.len(),
-                    "mcp_tools": mcp_tools_count,
-                    "skills": result.tools.skills.len(),
-                    "config_items": result.config.len(),
-                    "sessions": result.sessions.len(),
-                    "project_paths": result.project_paths.len()
-                }))
-            }
-            NodeCommandResult::Error { message } => Err(mcp_err(message)),
-            _ => Err(mcp_err("Unexpected response")),
-        }
+        let recon: ReconResult = serde_json::from_value(value)
+            .map_err(|e| mcp_err(format!("Recon failed: {}", e)))?;
+
+        let mcp_tools_count: usize = recon.tools.mcp_servers.iter().map(|s| s.tools.len()).sum();
+        json_result(json!({
+            "status": "success",
+            "mcp_servers": recon.tools.mcp_servers.len(),
+            "mcp_tools": mcp_tools_count,
+            "skills": recon.tools.skills.len(),
+            "config_items": recon.config.len(),
+            "sessions": recon.sessions.len(),
+            "project_paths": recon.project_paths.len()
+        }))
     }
 
     #[tool(description = "Run semantic reconnaissance on a node (includes internal tools)")]
@@ -309,28 +336,29 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let guard = acquire_client!(self);
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
+        let agent_short_name = selected_agent(client, &node_id).await?;
 
-        let response = client
-            .send_command(&node_id, NodeCommand::Agent(crate::AgentCommand::ReconSemantic))
+        let value = client
+            .acp_request(&node_id, "_praxis/recon", json!({
+                "agent_short_name": agent_short_name,
+                "is_semantic": true,
+            }))
             .await.map_err(mcp_err)?;
 
-        match response.result {
-            NodeCommandResult::Agent(AgentCommandResult::ReconComplete { result }) => {
-                let mcp_tools_count: usize = result.tools.mcp_servers.iter().map(|s| s.tools.len()).sum();
-                json_result(json!({
-                    "status": "success",
-                    "mcp_servers": result.tools.mcp_servers.len(),
-                    "mcp_tools": mcp_tools_count,
-                    "skills": result.tools.skills.len(),
-                    "internal_tools": result.tools.internal_tools.len(),
-                    "config_items": result.config.len(),
-                    "sessions": result.sessions.len(),
-                    "project_paths": result.project_paths.len()
-                }))
-            }
-            NodeCommandResult::Error { message } => Err(mcp_err(message)),
-            _ => Err(mcp_err("Unexpected response")),
-        }
+        let recon: ReconResult = serde_json::from_value(value)
+            .map_err(|e| mcp_err(format!("Recon failed: {}", e)))?;
+
+        let mcp_tools_count: usize = recon.tools.mcp_servers.iter().map(|s| s.tools.len()).sum();
+        json_result(json!({
+            "status": "success",
+            "mcp_servers": recon.tools.mcp_servers.len(),
+            "mcp_tools": mcp_tools_count,
+            "skills": recon.tools.skills.len(),
+            "internal_tools": recon.tools.internal_tools.len(),
+            "config_items": recon.config.len(),
+            "sessions": recon.sessions.len(),
+            "project_paths": recon.project_paths.len()
+        }))
     }
 
     #[tool(description = "List stored recon data. Section: all, sessions, tools, projects, configs (default: all)")]
@@ -518,7 +546,7 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
 
     // ── Sessions ─────────────────────────────────────────────────────────
 
-    #[tool(description = "Create a session with the selected agent. Optionally enable yolo mode and set a working directory.")]
+    #[tool(description = "Create a session with the selected agent. Returns a session_id that must be passed to session_prompt and session_close.")]
     async fn session_create(
         &self,
         Parameters(params): Parameters<SessionCreateParams>,
@@ -526,35 +554,41 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let guard = acquire_client!(self);
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
+        let connector = selected_agent(client, &node_id).await?;
 
-        use crate::{SessionCommand, SessionContext};
-        let response = client
-            .send_command(&node_id, NodeCommand::Session(SessionCommand::Create {
-                context: SessionContext {
-                    working_dir: params.project.clone(),
-                    yolo_mode: params.yolo,
-                    prompt_timeout_secs: None,
-                    interactive: false,
-                },
+        let cwd = params.project.clone().unwrap_or_else(|| "/".to_string());
+
+        let result = client
+            .acp_request(&node_id, "session/new", json!({
+                "cwd": cwd,
+                "mcpServers": [],
+                "_meta": {
+                    "praxis": {
+                        "nodeId": node_id,
+                        "connector": connector,
+                        "yolo": params.yolo,
+                        "interactive": false,
+                    }
+                }
             }))
             .await.map_err(mcp_err)?;
 
-        match response.result {
-            NodeCommandResult::Session(SessionCommandResult::Created { session_id }) => {
-                json_result(json!({
-                    "status": "success",
-                    "session_id": session_id,
-                    "session_id_short": &session_id[..8.min(session_id.len())],
-                    "yolo_mode": params.yolo,
-                    "project": params.project
-                }))
-            }
-            NodeCommandResult::Error { message } => Err(mcp_err(message)),
-            _ => Err(mcp_err("Unexpected response")),
-        }
+        let session_id = result
+            .get("sessionId")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| mcp_err("session/new response missing sessionId"))?
+            .to_string();
+
+        json_result(json!({
+            "status": "success",
+            "session_id": session_id,
+            "session_id_short": &session_id[..8.min(session_id.len())],
+            "yolo_mode": params.yolo,
+            "project": params.project
+        }))
     }
 
-    #[tool(description = "Send a prompt to the active session")]
+    #[tool(description = "Send a prompt to a session. Requires the session_id returned from session_create.")]
     async fn session_prompt(
         &self,
         Parameters(params): Parameters<SessionPromptParams>,
@@ -563,49 +597,42 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
 
-        use crate::SessionCommand;
-        let transaction_id = uuid::Uuid::new_v4().to_string();
-        let response = client
-            .send_command(&node_id, NodeCommand::Session(SessionCommand::Prompt {
-                text: params.prompt.clone(),
-                transaction_id,
+        let session_id = params.session_id.as_deref()
+            .ok_or_else(|| mcp_err("session_id is required. Call session_create first."))?;
+
+        let (_result, text) = client
+            .acp_request_collecting_text(&node_id, "session/prompt", json!({
+                "sessionId": session_id,
+                "prompt": [{ "type": "text", "text": params.prompt }],
             }))
             .await.map_err(mcp_err)?;
 
-        match response.result {
-            NodeCommandResult::Session(SessionCommandResult::PromptResponse { response, .. }) => {
-                json_result(json!({
-                    "status": "success",
-                    "prompt": params.prompt,
-                    "response": response
-                }))
-            }
-            NodeCommandResult::Error { message } => Err(mcp_err(message)),
-            _ => Err(mcp_err("Unexpected response")),
-        }
+        json_result(json!({
+            "status": "success",
+            "prompt": params.prompt,
+            "response": text
+        }))
     }
 
-    #[tool(description = "Close the active session")]
+    #[tool(description = "Close a session. Requires the session_id returned from session_create.")]
     async fn session_close(
         &self,
-        Parameters(params): Parameters<NodeParams>,
+        Parameters(params): Parameters<SessionCloseParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let guard = acquire_client!(self);
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
 
-        use crate::SessionCommand;
-        let response = client
-            .send_command(&node_id, NodeCommand::Session(SessionCommand::Close))
+        let session_id = params.session_id.as_deref()
+            .ok_or_else(|| mcp_err("session_id is required"))?;
+
+        client
+            .acp_request(&node_id, "session/close", json!({
+                "sessionId": session_id,
+            }))
             .await.map_err(mcp_err)?;
 
-        match response.result {
-            NodeCommandResult::Session(SessionCommandResult::Closed) => {
-                json_result(json!({ "status": "success", "message": "Session closed" }))
-            }
-            NodeCommandResult::Error { message } => Err(mcp_err(message)),
-            _ => Err(mcp_err("Unexpected response")),
-        }
+        json_result(json!({ "status": "success", "message": "Session closed" }))
     }
 
     // ── File Write ───────────────────────────────────────────────────────
@@ -619,27 +646,36 @@ impl<C: McpClient + Clone + 'static> PraxisServer<C> {
         let client = guard.as_ref().ok_or_else(|| mcp_err("No client"))?;
         let node_id = resolve_node!(client, params.node);
 
-        let response = client
-            .send_command(&node_id, NodeCommand::Agent(crate::AgentCommand::WriteFile {
-                file_type: match params.file_type {
-                    McpFileType::Config => AgentFileType::Config,
-                    McpFileType::Session => AgentFileType::Session,
-                },
-                path: params.path.clone(),
-                contents: params.contents.clone(),
+        let file_type = match params.file_type {
+            McpFileType::Config => AgentFileType::Config,
+            McpFileType::Session => AgentFileType::Session,
+        };
+
+        let result = client
+            .acp_request(&node_id, "_praxis/write_file", json!({
+                "file_type": file_type,
+                "path": params.path,
+                "contents": params.contents,
             }))
             .await.map_err(mcp_err)?;
 
-        match response.result {
-            NodeCommandResult::Agent(AgentCommandResult::WriteFileResult {
-                file_type, path, success, error,
-            }) => json_result(json!({
-                "file_type": format!("{:?}", file_type),
-                "path": path, "success": success, "error": error
-            })),
-            NodeCommandResult::Error { message } => Err(mcp_err(message)),
-            _ => Err(mcp_err("Unexpected response")),
+        //
+        // Node returns a WriteFileResult shape or an error-only shape on
+        // method-level errors.
+        //
+
+        if result.get("path").is_none() {
+            if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
+                return Err(mcp_err(err));
+            }
         }
+
+        json_result(json!({
+            "file_type": result.get("file_type"),
+            "path": result.get("path"),
+            "success": result.get("success"),
+            "error": result.get("error"),
+        }))
     }
 
     // ── Traffic ──────────────────────────────────────────────────────────

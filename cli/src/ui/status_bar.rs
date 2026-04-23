@@ -24,9 +24,25 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         format!("{} nodes", node_count)
     };
 
-    let left = Line::from(vec![
+    let session_count = app.nodes.sessions.len();
+    let session_text = if session_count > 0 {
+        Some(format!("{} sessions", session_count))
+    } else {
+        None
+    };
+
+    let mut left_spans = vec![
         Span::raw(" "),
         Span::styled(format!("{} ", node_text), Style::default().fg(MUTED)),
+    ];
+    if let Some(text) = session_text {
+        left_spans.push(sep.clone());
+        left_spans.push(Span::styled(
+            format!("{} ", text),
+            Style::default().fg(ACCENT),
+        ));
+    }
+    left_spans.extend(vec![
         sep.clone(),
         active_label("^o orchestrator", app.active_window == Window::Orchestrator),
         Span::raw("  "),
@@ -38,6 +54,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         sep.clone(),
         Span::styled("^q quit", Style::default().fg(DIM)),
     ]);
+    let left = Line::from(left_spans);
 
     let right = Line::from(vec![
         if app.connected {

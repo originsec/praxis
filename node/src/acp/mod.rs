@@ -80,6 +80,7 @@ static ACP_PERMISSION_RECEIVERS: Lazy<
     Mutex<HashMap<String, std::sync::mpsc::Receiver<(String, PermissionDecision)>>>,
 > = Lazy::new(|| Mutex::new(HashMap::new()));
 
+#[allow(dead_code)]
 pub fn register_update_sender(
     handle: &str,
     tx: tokio::sync::mpsc::UnboundedSender<SessionUpdateKind>,
@@ -96,6 +97,7 @@ pub fn take_update_sender(
     ACP_UPDATE_SENDERS.lock().unwrap().remove(handle)
 }
 
+#[allow(dead_code)]
 pub fn register_permission_receiver(
     handle: &str,
     rx: std::sync::mpsc::Receiver<(String, PermissionDecision)>,

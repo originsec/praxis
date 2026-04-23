@@ -1,7 +1,10 @@
 mod detail;
 mod list;
 mod session;
+mod sessions_list;
 mod terminal;
+
+pub use sessions_list::sessions_list_rect;
 
 use crate::app::NodesState;
 use crate::ui::theme::{ACCENT, MUTED};
@@ -28,7 +31,13 @@ pub fn render(
         return;
     }
 
-    if let Some(ref session) = state.session {
+    //
+    // If a session is foregrounded, draw the chat view. Otherwise fall
+    // back to the node browse view. The sessions list overlay is
+    // rendered on top of whichever view is active.
+    //
+
+    if let Some(session) = state.active_session() {
         session::render_session_chat(f, area, session);
     } else {
         let outer = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
@@ -78,7 +87,18 @@ pub fn render(
             hint_spans.push(Span::styled("  ^t", Style::default().fg(ACCENT)));
             hint_spans.push(Span::styled(" terminal", Style::default().fg(MUTED)));
         }
+
+        let session_count = state.sessions.len();
+        hint_spans.push(Span::styled("  ^w", Style::default().fg(ACCENT)));
+        hint_spans.push(Span::styled(
+            format!(" sessions({})", session_count),
+            Style::default().fg(MUTED),
+        ));
         let hints = Line::from(hint_spans);
         f.render_widget(Paragraph::new(hints), outer[1]);
+    }
+
+    if state.sessions_list_open {
+        sessions_list::render(f, area, state);
     }
 }

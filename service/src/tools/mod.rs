@@ -4,23 +4,21 @@ mod session_poisoning;
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use common::{
-    node_queue_name, publish_json, AgentCommand, AgentCommandResult, CommandRequest,
-    CommandResponse, NodeCommand, NodeCommandResult, NodeDirectMessage, TargetSpec,
-    ToolConfigField, ToolConfigOption, ToolkitApplyItem, ToolkitApplyOutcome, ToolkitDiffHunk,
-    ToolkitDiffLine, ToolkitDiffLineKind, ToolkitExecuteResult, ToolkitModelOption,
-    ToolkitReconTarget, ToolkitTargetPreview, ToolkitTargetRef, ToolkitToolInfo,
+    AgentFileType, ReconResult, TargetSpec, ToolConfigField, ToolConfigOption,
+    ToolkitApplyItem, ToolkitApplyOutcome, ToolkitDiffHunk, ToolkitDiffLine, ToolkitDiffLineKind,
+    ToolkitExecuteResult, ToolkitModelOption, ToolkitReconTarget, ToolkitTargetPreview,
+    ToolkitTargetRef, ToolkitToolInfo,
 };
 use lapin::Channel;
-use serde_json::Value;
+use serde_json::{json, Value};
 use similar::{ChangeTag, TextDiff};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::time::{timeout, Duration};
 use uuid::Uuid;
 
+use crate::acp_node_proxy::AcpNodeProxy;
 use crate::config::ServiceConfig;
 use crate::database::{Database, ToolkitActionRecord};
-use crate::semantic_ops::ResponseTracker;
 use crate::state::NodeRegistry;
 
 const SESSION_HISTORY_POISONING_TOOL: &str = "session_history_poisoning";
@@ -79,8 +77,8 @@ pub struct ToolkitManager {
     pub database: Arc<Database>,
     pub service_config: Arc<RwLock<ServiceConfig>>,
     pub node_registry: Arc<NodeRegistry>,
-    pub response_tracker: Arc<ResponseTracker>,
     pub publish_channel: Channel,
+    pub acp_node_proxy: Arc<AcpNodeProxy>,
     chain_tools: Vec<Box<dyn ToolkitTool>>,
 }
 
@@ -89,8 +87,8 @@ impl ToolkitManager {
         database: Arc<Database>,
         service_config: Arc<RwLock<ServiceConfig>>,
         node_registry: Arc<NodeRegistry>,
-        response_tracker: Arc<ResponseTracker>,
         publish_channel: Channel,
+        acp_node_proxy: Arc<AcpNodeProxy>,
     ) -> Self {
         let chain_tools: Vec<Box<dyn ToolkitTool>> = vec![
             Box::new(MessageEncoderTool),
@@ -99,8 +97,8 @@ impl ToolkitManager {
             database,
             service_config,
             node_registry,
-            response_tracker,
             publish_channel,
+            acp_node_proxy,
             chain_tools,
         }
     }
@@ -158,26 +156,16 @@ impl ToolkitManager {
                 t.node_id,
                 t.agent_short_name
             );
-            self.select_agent(&t.node_id, &t.agent_short_name).await?;
-            let response = self
-                .send_agent_command(&t.node_id, NodeCommand::Agent(AgentCommand::Recon))
-                .await?;
+            let result = self
+                .acp_recon(&t.node_id, &t.agent_short_name, false)
+                .await
+                .map_err(|e| anyhow!("Recon failed on node {}: {}", t.node_id, e))?;
 
-            match response.result {
-                NodeCommandResult::Agent(AgentCommandResult::ReconComplete { result }) => {
-                    out.push(ToolkitReconTarget {
-                        node_id: t.node_id,
-                        agent_short_name: t.agent_short_name,
-                        sessions: result.sessions,
-                    });
-                }
-                NodeCommandResult::Error { message } => {
-                    return Err(anyhow!("Recon failed on node {}: {}", t.node_id, message));
-                }
-                _ => {
-                    return Err(anyhow!("Unexpected response for toolkit recon"));
-                }
-            }
+            out.push(ToolkitReconTarget {
+                node_id: t.node_id,
+                agent_short_name: t.agent_short_name,
+                sessions: result.sessions,
+            });
         }
 
         Ok(out)
@@ -318,38 +306,24 @@ impl ToolkitManager {
                 &item.target.session_id
             );
 
-            self.select_agent(&item.target.node_id, &item.target.agent_short_name)
-                .await?;
-
-            let response = self
-                .send_agent_command(
+            let outcome = match self
+                .acp_write_session_content(
                     &item.target.node_id,
-                    NodeCommand::Agent(AgentCommand::WriteSessionContent {
-                        path: item.target.session_file.clone(),
-                        contents: item.content.clone(),
-                    }),
+                    &item.target.agent_short_name,
+                    &item.target.session_file,
+                    &item.content,
                 )
-                .await?;
-
-            let outcome = match response.result {
-                NodeCommandResult::Agent(AgentCommandResult::WriteSessionContentResult {
-                    success,
-                    error,
-                    ..
-                }) => ToolkitApplyOutcome {
+                .await
+            {
+                Ok((success, error)) => ToolkitApplyOutcome {
                     target: item.target.clone(),
                     success,
                     error,
                 },
-                NodeCommandResult::Error { message } => ToolkitApplyOutcome {
+                Err(e) => ToolkitApplyOutcome {
                     target: item.target.clone(),
                     success: false,
-                    error: Some(message),
-                },
-                _ => ToolkitApplyOutcome {
-                    target: item.target.clone(),
-                    success: false,
-                    error: Some("Unexpected response while applying".to_string()),
+                    error: Some(e.to_string()),
                 },
             };
             outcomes.push(outcome);
@@ -382,30 +356,16 @@ impl ToolkitManager {
         max_tokens: u32,
         progress_tx: Option<&tokio::sync::mpsc::UnboundedSender<(usize, usize)>>,
     ) -> Result<(String, String)> {
-        self.select_agent(&target.node_id, &target.agent_short_name).await?;
-
-        let read_response = self
-            .send_agent_command(
+        let session_content = self
+            .acp_read_file(
                 &target.node_id,
-                NodeCommand::Agent(AgentCommand::ReadFile {
-                    file_type: common::AgentFileType::Session,
-                    path: target.session_file.clone(),
-                    line_start: None,
-                    line_end: None,
-                }),
+                &target.agent_short_name,
+                AgentFileType::Session,
+                &target.session_file,
+                None,
+                None,
             )
             .await?;
-
-        let session_content = match read_response.result {
-            NodeCommandResult::Agent(AgentCommandResult::ReadFileResult { content, error, .. }) => {
-                if let Some(err) = error {
-                    return Err(anyhow!("Failed to read session content: {}", err));
-                }
-                content.ok_or_else(|| anyhow!("No session content returned"))?
-            }
-            NodeCommandResult::Error { message } => return Err(anyhow!(message)),
-            _ => return Err(anyhow!("Unexpected read response")),
-        };
 
         let raw_transformed = session_poisoning::run_transform_per_message(
             model_ref,
@@ -419,48 +379,89 @@ impl ToolkitManager {
         Ok((session_content, transformed))
     }
 
-    async fn select_agent(&self, node_id: &str, agent_short_name: &str) -> Result<()> {
-        let resp = self
-            .send_agent_command(
-                node_id,
-                NodeCommand::Agent(AgentCommand::Select {
-                    short_name: agent_short_name.to_string(),
-                }),
-            )
+    async fn acp_recon(
+        &self,
+        node_id: &str,
+        agent_short_name: &str,
+        is_semantic: bool,
+    ) -> Result<ReconResult> {
+        let params = json!({
+            "agent_short_name": agent_short_name,
+            "is_semantic": is_semantic,
+            "_meta": { "praxis": { "nodeId": node_id } },
+        });
+        let result = self
+            .acp_node_proxy
+            .request(&self.publish_channel, node_id, "_praxis/recon", params)
             .await?;
-
-        match resp.result {
-            NodeCommandResult::Agent(AgentCommandResult::Selected { .. }) => Ok(()),
-            NodeCommandResult::Error { message } => Err(anyhow!(message)),
-            _ => Err(anyhow!("Unexpected response from agent select")),
+        if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
+            return Err(anyhow!(err.to_string()));
         }
+        Ok(serde_json::from_value(result)?)
     }
 
-    async fn send_agent_command(&self, node_id: &str, command: NodeCommand) -> Result<CommandResponse> {
-        let command_id = Uuid::new_v4().to_string();
-        let command_debug = format!("{:?}", &command);
-        let rx = self.response_tracker.register(command_id.clone());
-        let request = CommandRequest {
-            command_id: command_id.clone(),
-            client_id: "service".to_string(),
-            node_id: node_id.to_string(),
-            command,
-        };
-
-        let message = NodeDirectMessage::Command(request);
-        common::log_info!(
-            "[toolkit] dispatch command_id={} node={} command={}",
-            command_id,
-            node_id,
-            command_debug
-        );
-        publish_json(&self.publish_channel, &node_queue_name(node_id), &message).await?;
-
-        match timeout(Duration::from_secs(60), rx).await {
-            Ok(Ok(response)) => Ok(response),
-            Ok(Err(_)) => Err(anyhow!("response channel closed")),
-            Err(_) => Err(anyhow!("command timed out")),
+    async fn acp_read_file(
+        &self,
+        node_id: &str,
+        agent_short_name: &str,
+        file_type: AgentFileType,
+        path: &str,
+        line_start: Option<usize>,
+        line_end: Option<usize>,
+    ) -> Result<String> {
+        let params = json!({
+            "agent_short_name": agent_short_name,
+            "file_type": file_type,
+            "path": path,
+            "line_start": line_start,
+            "line_end": line_end,
+            "_meta": { "praxis": { "nodeId": node_id } },
+        });
+        let result = self
+            .acp_node_proxy
+            .request(&self.publish_channel, node_id, "_praxis/read_file", params)
+            .await?;
+        if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
+            return Err(anyhow!(err.to_string()));
         }
+        let content = result
+            .get("content")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow!("No session content returned"))?;
+        Ok(content.to_string())
+    }
+
+    async fn acp_write_session_content(
+        &self,
+        node_id: &str,
+        agent_short_name: &str,
+        path: &str,
+        contents: &str,
+    ) -> Result<(bool, Option<String>)> {
+        let params = json!({
+            "agent_short_name": agent_short_name,
+            "path": path,
+            "contents": contents,
+            "_meta": { "praxis": { "nodeId": node_id } },
+        });
+        let result = self
+            .acp_node_proxy
+            .request(
+                &self.publish_channel,
+                node_id,
+                "_praxis/write_session_content",
+                params,
+            )
+            .await?;
+        let success = result
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let error = result
+            .get("error")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        Ok((success, error))
     }
 
     async fn log_action(

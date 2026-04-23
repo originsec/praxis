@@ -96,12 +96,6 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
         }
 
         NodeSignalMessage::CommandResponse(response) => {
-            //
-            // Forward to response_tracker for semantic operations.
-            //
-            ctx.response_tracker
-                .complete(&response.command_id, response.clone());
-
             if let Some(pending) = ctx.pending_commands.remove(&response.command_id).await {
                 //
                 // Track whether we need to broadcast state to all clients
@@ -131,27 +125,6 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                     }
                 }
 
-                //
-                // Update session state if relevant.
-                //
-                if let common::NodeCommandResult::Session(ref result) = response.result {
-                    match result {
-                        common::SessionCommandResult::Created { session_id } => {
-                            ctx.node_registry
-                                .set_session_id(&response.node_id, Some(session_id.clone()))
-                                .await;
-                            should_broadcast_state = true;
-                        }
-                        common::SessionCommandResult::Closed => {
-                            ctx.node_registry
-                                .set_session_id(&response.node_id, None)
-                                .await;
-                            should_broadcast_state = true;
-                        }
-                        _ => {}
-                    }
-                }
-
                 let client_message = ClientDirectMessage::CommandResponse(response.clone());
                 if let Err(e) = send_to_client(
                     &ctx.client_publish_channel,
@@ -169,22 +142,6 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                     "Forwarded command response {} to client {}",
                     response.command_id, pending.client_id
                 );
-
-                //
-                // Check if this is a AgentChat-related command.
-                //
-                if let Err(e) = ctx
-                    .agent_chat_manager
-                    .handle_command_response(
-                        &pending.client_id,
-                        &response.command_id,
-                        &response.node_id,
-                        &response.result,
-                    )
-                    .await
-                {
-                    common::log_warn!("AgentChat command response handling failed: {}", e);
-                }
 
                 if should_broadcast_state {
                     if let Err(e) = broadcast_state_to_clients(
@@ -387,48 +344,16 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             let _ = publish_json_exchange(&ctx.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &message).await;
         }
 
-        NodeSignalMessage::ReconResultUpdate {
-            node_id,
-            agent_short_name,
-            recon_result,
-            is_semantic,
-        } => {
-            common::log_info!(
-                "Received recon result from node {} agent {}: {} tools, {} configs, {} sessions",
-                &node_id[..8.min(node_id.len())],
-                agent_short_name,
-                recon_result.tools.mcp_servers.len()
-                    + recon_result.tools.skills.len()
-                    + recon_result.tools.internal_tools.len(),
-                recon_result.config.len(),
-                recon_result.sessions.len()
-            );
-
-            //
-            // Store in database.
-            //
+        NodeSignalMessage::Acp { node_id, client_id, json_rpc } => {
             if let Err(e) = ctx
-                .database
-                .upsert_recon_result(&node_id, &agent_short_name, &recon_result, is_semantic)
+                .acp_node_proxy
+                .forward_to_client(&ctx.client_publish_channel, &node_id, &client_id, &json_rpc)
                 .await
             {
-                common::log_error!("Failed to store recon result: {}", e);
-            }
-        }
-
-        NodeSignalMessage::SessionUpdate(update) => {
-            common::log_info!(
-                "Forwarding session update to client {}",
-                update.client_id.get(..8).unwrap_or(&update.client_id)
-            );
-            let client_id = update.client_id.clone();
-            let client_message = ClientDirectMessage::SessionUpdate(update);
-            if let Err(e) =
-                send_to_client(&ctx.client_publish_channel, &client_id, client_message).await
-            {
                 common::log_error!(
-                    "Failed to send session update to client {}: {}",
-                    client_id, e
+                    "Failed to forward node ACP frame to client {}: {}",
+                    &client_id[..8.min(client_id.len())],
+                    e
                 );
             }
         }

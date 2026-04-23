@@ -37,7 +37,19 @@ pub struct SessionCreateParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SessionPromptParams {
     pub node: String,
+
+    #[schemars(description = "Session ID returned by session_create")]
+    pub session_id: Option<String>,
+
     pub prompt: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SessionCloseParams {
+    pub node: String,
+
+    #[schemars(description = "Session ID returned by session_create")]
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

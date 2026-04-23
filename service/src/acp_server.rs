@@ -20,6 +20,7 @@ use acp::{
 };
 use common::ClientDirectMessage;
 
+use crate::acp_node_proxy::AcpNodeProxy;
 use crate::config::ServiceConfig;
 use crate::messaging::send_to_client;
 use crate::orchestrator::OrchestratorManager;
@@ -35,14 +36,16 @@ use crate::orchestrator::OrchestratorManager;
 pub struct AcpServer {
     orchestrator_manager: Arc<OrchestratorManager>,
     service_config: Arc<RwLock<ServiceConfig>>,
+    node_proxy: Arc<AcpNodeProxy>,
 }
 
 impl AcpServer {
     pub fn new(
         orchestrator_manager: Arc<OrchestratorManager>,
         service_config: Arc<RwLock<ServiceConfig>>,
+        node_proxy: Arc<AcpNodeProxy>,
     ) -> Self {
-        Self { orchestrator_manager, service_config }
+        Self { orchestrator_manager, service_config, node_proxy }
     }
 
     pub async fn shutdown(&self) {
@@ -88,6 +91,28 @@ impl AcpServer {
         if id.is_some() && method.is_none() {
             self.handle_client_response(client_id, &msg).await;
             return;
+        }
+
+        //
+        // If this frame targets a node (session/new with _meta.praxis.nodeId
+        // or a subsequent frame for a session_id that's already mapped to a
+        // node), forward it verbatim and skip local dispatch.
+        //
+
+        match self
+            .node_proxy
+            .intercept_request(publish_channel, client_id, json_rpc_str, &msg)
+            .await
+        {
+            Ok(true) => return,
+            Ok(false) => {}
+            Err(e) => {
+                common::log_warn!(
+                    "AcpNodeProxy intercept failed for {}: {}",
+                    &client_id[..8.min(client_id.len())],
+                    e
+                );
+            }
         }
 
         let Some(method) = method else { return };

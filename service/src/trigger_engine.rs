@@ -2,9 +2,10 @@ use std::sync::Arc;
 use tokio::sync::{Notify, RwLock as TokioRwLock};
 use lapin::Channel;
 
+use crate::acp_node_proxy::AcpNodeProxy;
 use crate::config::ServiceConfig;
 use crate::database::Database;
-use crate::semantic_ops::{ChainExecutor, ResponseTracker};
+use crate::semantic_ops::ChainExecutor;
 use crate::semantic_ops::chain_execution::resolve_targets;
 use crate::state::NodeRegistry;
 use crate::tools::ToolkitManager;
@@ -18,11 +19,10 @@ pub struct TriggerEngine {
     chain_executor: Arc<ChainExecutor>,
     node_registry: Arc<NodeRegistry>,
     service_config: Arc<TokioRwLock<ServiceConfig>>,
-    response_tracker: Arc<ResponseTracker>,
+    acp_node_proxy: Arc<AcpNodeProxy>,
     semantic_ops_channel: Channel,
     broadcast_channel: Channel,
     toolkit_manager: Arc<ToolkitManager>,
-    node_exec_lock: crate::semantic_ops::NodeExecLock,
     refresh_notify: Notify,
 }
 
@@ -32,22 +32,20 @@ impl TriggerEngine {
         chain_executor: Arc<ChainExecutor>,
         node_registry: Arc<NodeRegistry>,
         service_config: Arc<TokioRwLock<ServiceConfig>>,
-        response_tracker: Arc<ResponseTracker>,
+        acp_node_proxy: Arc<AcpNodeProxy>,
         semantic_ops_channel: Channel,
         broadcast_channel: Channel,
         toolkit_manager: Arc<ToolkitManager>,
-        node_exec_lock: crate::semantic_ops::NodeExecLock,
     ) -> Self {
         Self {
             database,
             chain_executor,
             node_registry,
             service_config,
-            response_tracker,
+            acp_node_proxy,
             semantic_ops_channel,
             broadcast_channel,
             toolkit_manager,
-            node_exec_lock,
             refresh_notify: Notify::new(),
         }
     }
@@ -89,9 +87,6 @@ impl TriggerEngine {
                 trigger.chain_id
             );
 
-            //
-            // Load chain definition.
-            //
             let chain = match self.database.get_chain(&trigger.chain_id).await {
                 Ok(Some(chain)) => chain,
                 Ok(None) => {
@@ -105,9 +100,6 @@ impl TriggerEngine {
                 }
             };
 
-            //
-            // Resolve targets.
-            //
             let targets = resolve_targets(&trigger.target_spec, &self.node_registry, None).await;
             if targets.is_empty() {
                 common::log_warn!("No targets matched for trigger {}", trigger.id);
@@ -120,17 +112,12 @@ impl TriggerEngine {
                     self.service_config.clone(),
                     self.semantic_ops_channel.clone(),
                     self.broadcast_channel.clone(),
-                    self.response_tracker.clone(),
+                    self.acp_node_proxy.clone(),
                     self.database.clone(),
                     Some(self.toolkit_manager.clone()),
-                    Some(self.node_exec_lock.clone()),
                 ).await;
             }
 
-            //
-            // Update trigger: set last_fired_at, recompute next_fire_at,
-            // disable if non-recurring.
-            //
             let disable = matches!(
                 trigger.trigger_config,
                 common::TriggerConfig::Scheduled { recurring: false, .. }
@@ -167,9 +154,6 @@ impl TriggerEngine {
                 continue;
             }
 
-            //
-            // Debounce: skip if fired recently.
-            //
             if let Some(last_fired) = trigger.last_fired_at {
                 let elapsed = chrono::Utc::now() - last_fired;
                 if elapsed.num_seconds() < INTERCEPT_DEBOUNCE_SECS {
@@ -204,10 +188,9 @@ impl TriggerEngine {
                     self.service_config.clone(),
                     self.semantic_ops_channel.clone(),
                     self.broadcast_channel.clone(),
-                    self.response_tracker.clone(),
+                    self.acp_node_proxy.clone(),
                     self.database.clone(),
                     Some(self.toolkit_manager.clone()),
-                    Some(self.node_exec_lock.clone()),
                 ).await;
             }
 
@@ -253,10 +236,9 @@ impl TriggerEngine {
                     self.service_config.clone(),
                     self.semantic_ops_channel.clone(),
                     self.broadcast_channel.clone(),
-                    self.response_tracker.clone(),
+                    self.acp_node_proxy.clone(),
                     self.database.clone(),
                     Some(self.toolkit_manager.clone()),
-                    Some(self.node_exec_lock.clone()),
                 ).await;
             }
 

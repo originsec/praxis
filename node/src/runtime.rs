@@ -1,9 +1,8 @@
-use crate::agent_connectors::{Agent, AgentFactory, AgentRegistry};
+use crate::agent_connectors::{AgentFactory, AgentRegistry};
 use crate::app::{NodeState, registration::publish_registration};
 use crate::handlers::{
-    handle_agent_command, handle_agent_registry_list,
-    handle_agent_registry_update, handle_config_command, handle_intercept_command,
-    handle_session_command, handle_terminal_command, TransactionManager,
+    handle_agent_registry_list, handle_agent_registry_update, handle_config_command,
+    handle_intercept_command, handle_terminal_command,
 };
 use crate::terminal::TerminalOutputEvent;
 use crate::utils::semantic_parser::{self, SemanticParserTracker};
@@ -11,12 +10,12 @@ use chrono::Utc;
 use common::{
     publish_json, CommandRequest, CommandResponse, DiscoveredAgent,
     InterceptedTrafficEntry, NODE_BROADCAST_EXCHANGE, NODE_EVENT_LOG_QUEUE, NODE_SIGNAL_QUEUE,
-    NodeBroadcastMessage, NodeCommand, NodeCommandResult, NodeDirectMessage, NodeInformationUpdate,
-    NodeSignalMessage, SelectedAgent, SessionCommandResult, TerminalCommand, TerminalOutput,
+    NodeBroadcastMessage, NodeCommand, NodeDirectMessage, NodeInformationUpdate,
+    NodeSignalMessage, TerminalCommand, TerminalOutput,
 };
 use futures::StreamExt;
 use lapin::{options::*, types::FieldTable, Channel};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 
@@ -30,12 +29,11 @@ pub async fn run(
     node_id: String,
     node_queue: String,
     registry: Arc<RwLock<AgentRegistry>>,
-    selected_agent: Arc<Mutex<Option<Arc<dyn Agent>>>>,
     factory: Arc<AgentFactory>,
     shutdown_token: CancellationToken,
     lua_scripts: Vec<String>,
 ) -> anyhow::Result<RuntimeExit> {
-    listen_to_queues(channel, node_id, node_queue, registry, selected_agent, factory, shutdown_token, lua_scripts).await
+    listen_to_queues(channel, node_id, node_queue, registry, factory, shutdown_token, lua_scripts).await
 }
 
 async fn listen_to_queues(
@@ -43,7 +41,6 @@ async fn listen_to_queues(
     node_id: String,
     node_queue: String,
     registry: Arc<RwLock<AgentRegistry>>,
-    selected_agent: Arc<Mutex<Option<Arc<dyn Agent>>>>,
     factory: Arc<AgentFactory>,
     shutdown_token: CancellationToken,
     lua_scripts: Vec<String>,
@@ -131,9 +128,43 @@ async fn listen_to_queues(
     )));
 
     //
-    // Transaction manager for async session prompts.
+    // Node-side ACP server. Handles inbound ACP JSON-RPC frames arriving on
+    // NodeDirectMessage::Acp and emits outbound frames (responses and
+    // session/update notifications) through an mpsc channel drained by a
+    // forwarder task below.
     //
-    let transaction_manager = Arc::new(TransactionManager::new());
+
+    let (acp_outbound_tx, mut acp_outbound_rx) = crate::acp_server::outbound_channel();
+    let acp_server = crate::acp_server::NodeAcpServer::new(
+        Arc::clone(&registry),
+        acp_outbound_tx,
+        node_id.clone(),
+    );
+
+    //
+    // Drain outbound ACP frames and publish them on NODE_SIGNAL_QUEUE as
+    // NodeSignalMessage::Acp. The service's dispatcher forwards these to
+    // the external client that originated the session.
+    //
+
+    let channel_for_acp = channel.clone();
+    let node_id_for_acp = node_id.clone();
+    tokio::spawn(async move {
+        common::log_info!("ACP outbound forwarder task started");
+        while let Some(frame) = acp_outbound_rx.recv().await {
+            let message = NodeSignalMessage::Acp {
+                node_id: node_id_for_acp.clone(),
+                client_id: frame.client_id,
+                json_rpc: frame.json_rpc,
+            };
+            if let Err(e) =
+                publish_json(&channel_for_acp, NODE_SIGNAL_QUEUE, &message).await
+            {
+                common::log_warn!("Failed to forward ACP outbound frame: {}", e);
+            }
+        }
+        common::log_info!("ACP outbound forwarder task ended");
+    });
 
     //
     // Semantic parser tracker for async parser requests.
@@ -456,14 +487,6 @@ async fn listen_to_queues(
     //
 
     //
-    // Pending registry update: queued if a session is open when a broadcast
-    // AgentRegistryUpdate arrives. Executed after session close.
-    //
-
-    let mut pending_registry_update: Option<Vec<String>> = None;
-    let info_update_notify = Arc::new(tokio::sync::Notify::new());
-
-    //
     // Per-agent fingerprint cache: short_name -> available. Updated by a
     // background task every 30 seconds and on-demand when the service
     // requests an update. send_node_information_update reads from this
@@ -481,13 +504,7 @@ async fn listen_to_queues(
             "Rebuilding agent registry with {} scripts from service",
             lua_scripts.len()
         );
-        handle_agent_registry_update(
-            lua_scripts,
-            &registry,
-            &selected_agent,
-            &factory,
-        )
-        .await;
+        handle_agent_registry_update(lua_scripts, &registry, &factory).await;
     }
 
     //
@@ -497,7 +514,7 @@ async fn listen_to_queues(
     fingerprint_all_agents(&registry, &fingerprint_cache).await;
 
     if let Err(e) = send_node_information_update(
-        &channel, &node_id, &registry, &selected_agent, &node_state, &transaction_manager, &fingerprint_cache,
+        &channel, &node_id, &registry, &node_state, &fingerprint_cache,
     ).await {
         common::log_error!("Failed to send initial information update: {}", e);
     }
@@ -513,26 +530,7 @@ async fn listen_to_queues(
             _ = shutdown_token.cancelled() => {
                 common::log_info!("Shutdown signal received, cleaning up...");
 
-                //
-                // Cancel all pending transactions and close the active session
-                // so child processes are killed before the runtime exits.
-                //
-
                 crate::agent_connectors::lua::runtime::signal_reset();
-                transaction_manager.cancel_all();
-
-                {
-                    let locked = selected_agent.lock().unwrap();
-                    if let Some(agent) = locked.as_ref() {
-                        if agent.has_session() {
-                            let agent = agent.clone();
-                            drop(locked);
-                            let _ = tokio::task::spawn_blocking(move || {
-                                agent.close_session();
-                            }).await;
-                        }
-                    }
-                }
 
                 //
                 // Disable intercept to restore system settings.
@@ -565,20 +563,6 @@ async fn listen_to_queues(
                 common::log_info!("Reset signal received, tearing down...");
 
                 crate::agent_connectors::lua::runtime::signal_reset();
-                transaction_manager.cancel_all();
-
-                {
-                    let locked = selected_agent.lock().unwrap();
-                    if let Some(agent) = locked.as_ref() {
-                        if agent.has_session() {
-                            let agent = agent.clone();
-                            drop(locked);
-                            let _ = tokio::task::spawn_blocking(move || {
-                                agent.close_session();
-                            }).await;
-                        }
-                    }
-                }
 
                 {
                     let mut state = node_state.write().await;
@@ -617,21 +601,12 @@ async fn listen_to_queues(
                     &channel,
                     &node_id,
                     &registry,
-                    &selected_agent,
                     &node_state,
-                    &transaction_manager,
                     &fingerprint_cache,
                 )
                 .await
                 {
                     common::log_error!("Failed to send periodic information update: {}", e);
-                }
-            }
-            _ = info_update_notify.notified() => {
-                if let Err(e) = send_node_information_update(
-                    &channel, &node_id, &registry, &selected_agent, &node_state, &transaction_manager, &fingerprint_cache,
-                ).await {
-                    common::log_error!("Failed to send triggered info update: {}", e);
                 }
             }
             Some(delivery_result) = broadcast_consumer.next() => {
@@ -647,11 +622,8 @@ async fn listen_to_queues(
                                     &channel,
                                     &node_id,
                                     &registry,
-                                    &selected_agent,
                                     &node_state,
-                                    &transaction_manager,
                                     &factory,
-                                    &mut pending_registry_update,
                                     &fingerprint_cache,
                                 ) => {}
                             }
@@ -678,13 +650,12 @@ async fn listen_to_queues(
                                         handle_agent_registry_update(
                                             ack.lua_scripts,
                                             &registry,
-                                            &selected_agent,
                                             &factory,
                                         )
                                         .await;
                                         fingerprint_all_agents(&registry, &fingerprint_cache).await;
                                         if let Err(e) = send_node_information_update(
-                                            &channel, &node_id, &registry, &selected_agent, &node_state, &transaction_manager, &fingerprint_cache,
+                                            &channel, &node_id, &registry, &node_state, &fingerprint_cache,
                                         ).await {
                                             common::log_error!("Failed to send info update after re-registration: {}", e);
                                         }
@@ -703,12 +674,8 @@ async fn listen_to_queues(
                                             &channel,
                                             &node_id,
                                             &registry,
-                                            &selected_agent,
                                             &node_state,
-                                            &transaction_manager,
                                             &factory,
-                                            &mut pending_registry_update,
-                                            &info_update_notify,
                                             &fingerprint_cache,
                                         ) => {}
                                     }
@@ -723,6 +690,12 @@ async fn listen_to_queues(
                                 NodeDirectMessage::Reset => {
                                     common::log_info!("Reset message received on main queue (expected on reset queue)");
                                     reset_token.cancel();
+                                }
+                                NodeDirectMessage::Acp(frame) => {
+                                    let server = Arc::clone(&acp_server);
+                                    tokio::spawn(async move {
+                                        server.handle_frame(frame.client_id, frame.json_rpc).await;
+                                    });
                                 }
                             },
                             Err(e) => {
@@ -752,18 +725,15 @@ async fn handle_broadcast_message(
     channel: &Arc<Channel>,
     node_id: &str,
     registry: &Arc<RwLock<AgentRegistry>>,
-    selected_agent: &Arc<Mutex<Option<Arc<dyn Agent>>>>,
     node_state: &Arc<RwLock<NodeState>>,
-    transaction_manager: &Arc<TransactionManager>,
     factory: &AgentFactory,
-    pending_registry_update: &mut Option<Vec<String>>,
     fingerprint_cache: &Arc<tokio::sync::RwLock<std::collections::HashMap<String, bool>>>,
 ) {
     match message {
         NodeBroadcastMessage::NodeInformationUpdateRequest => {
             fingerprint_all_agents(registry, fingerprint_cache).await;
             if let Err(e) =
-                send_node_information_update(channel, node_id, registry, selected_agent, node_state, transaction_manager, fingerprint_cache)
+                send_node_information_update(channel, node_id, registry, node_state, fingerprint_cache)
                     .await
             {
                 common::log_error!("Failed to send NodeInformationUpdate: {}", e);
@@ -784,30 +754,15 @@ async fn handle_broadcast_message(
         }
         NodeBroadcastMessage::AgentRegistryUpdate { scripts } => {
             common::log_info!("Received AgentRegistryUpdate with {} scripts", scripts.len());
-            let has_session = selected_agent
-                .lock()
-                .unwrap()
-                .as_ref()
-                .map(|a| a.has_session())
-                .unwrap_or(false);
+            handle_agent_registry_update(scripts, registry, factory).await;
 
-            if has_session {
-                *pending_registry_update = Some(scripts);
-                common::log_info!("Registry update queued (session open)");
-            } else {
-                handle_agent_registry_update(
-                    scripts, registry, selected_agent, factory,
-                )
-                .await;
-
-                fingerprint_all_agents(registry, fingerprint_cache).await;
-                if let Err(e) = send_node_information_update(
-                    channel, node_id, registry, selected_agent, node_state, transaction_manager, fingerprint_cache,
-                )
-                .await
-                {
-                    common::log_error!("Failed to send info update after registry rebuild: {}", e);
-                }
+            fingerprint_all_agents(registry, fingerprint_cache).await;
+            if let Err(e) = send_node_information_update(
+                channel, node_id, registry, node_state, fingerprint_cache,
+            )
+            .await
+            {
+                common::log_error!("Failed to send info update after registry rebuild: {}", e);
             }
         }
     }
@@ -819,12 +774,8 @@ async fn handle_command(
     channel: &Arc<Channel>,
     node_id: &str,
     registry: &Arc<RwLock<AgentRegistry>>,
-    selected_agent: &Arc<Mutex<Option<Arc<dyn Agent>>>>,
     node_state: &Arc<RwLock<NodeState>>,
-    transaction_manager: &Arc<TransactionManager>,
     factory: &Arc<AgentFactory>,
-    pending_registry_update: &mut Option<Vec<String>>,
-    info_update_notify: &Arc<tokio::sync::Notify>,
     fingerprint_cache: &Arc<tokio::sync::RwLock<std::collections::HashMap<String, bool>>>,
 ) {
     //
@@ -836,230 +787,6 @@ async fn handle_command(
     );
 
     let result = match request.command.clone() {
-        NodeCommand::Agent(cmd) => {
-            let is_recon = matches!(cmd, common::AgentCommand::Recon | common::AgentCommand::ReconSemantic);
-            let is_semantic = matches!(cmd, common::AgentCommand::ReconSemantic);
-            if is_recon {
-                let selected_short = selected_agent
-                    .lock()
-                    .unwrap()
-                    .as_ref()
-                    .map(|a| a.short_name().to_string())
-                    .unwrap_or_else(|| "<none>".to_string());
-                common::log_info!(
-                    "Received recon command_id={} node={} command={:?} is_semantic={} selected_agent={}",
-                    request.command_id,
-                    node_id,
-                    cmd,
-                    is_semantic,
-                    selected_short
-                );
-            }
-            let result = handle_agent_command(cmd, registry, selected_agent, transaction_manager).await;
-
-            //
-            // If this was a recon command, also send the result to the service for persistence.
-            //
-            if is_recon {
-                if let NodeCommandResult::Agent(common::AgentCommandResult::ReconComplete { result: ref recon_res }) = result {
-                    let agent_name = selected_agent
-                        .lock()
-                        .unwrap()
-                        .as_ref()
-                        .map(|a| a.short_name().to_string())
-                        .unwrap_or_default();
-
-                    let signal = NodeSignalMessage::ReconResultUpdate {
-                        node_id: node_id.to_string(),
-                        agent_short_name: agent_name,
-                        recon_result: recon_res.clone(),
-                        is_semantic,
-                    };
-
-                    if let Err(e) = publish_json(channel, NODE_SIGNAL_QUEUE, &signal).await {
-                        common::log_error!("Failed to send recon result to service: {}", e);
-                    } else {
-                        common::log_debug!("Sent recon result to service for persistence");
-                    }
-                }
-            }
-
-            result
-        }
-        NodeCommand::Session(cmd) => {
-            //
-            // Check if this is a Prompt command that should be spawned as a task.
-            // This allows Cancel/Close commands to be processed while the prompt is running.
-            //
-
-            if let common::SessionCommand::Prompt { ref text, ref transaction_id } = cmd {
-                //
-                // Prompt handling: register the transaction on the main loop
-                // so an info update can be sent immediately, then spawn the
-                // blocking transact as a separate task. This allows
-                // Cancel/Close commands to be processed concurrently.
-                //
-
-                let session = selected_agent.lock().unwrap().as_ref()
-                    .and_then(|a: &Arc<dyn Agent>| a.get_session());
-
-                if let Some(session) = session {
-                    let cancel_rx = transaction_manager.register(
-                        transaction_id.clone(), session.clone(), text.clone(),
-                    );
-
-                    //
-                    // If the session supports streaming (ACP mode), set up
-                    // channels for forwarding updates and receiving permission
-                    // decisions.
-                    //
-
-                    let streaming = session.supports_streaming();
-                    common::log_debug!(
-                        "Prompt streaming={} for transaction {}",
-                        streaming, transaction_id
-                    );
-                    if streaming {
-                        if let Some(acp_handle) = session.as_any()
-                            .downcast_ref::<crate::agent_connectors::lua::LuaAgentSession>()
-                            .and_then(|s| s.acp_handle())
-                        {
-                            common::log_debug!(
-                                "Registering ACP channels for handle '{}' transaction '{}'",
-                                acp_handle, transaction_id
-                            );
-                            let (update_tx, mut update_rx) =
-                                tokio::sync::mpsc::unbounded_channel::<common::SessionUpdateKind>();
-                            let (perm_tx, perm_rx) =
-                                std::sync::mpsc::channel::<(String, common::PermissionDecision)>();
-
-                            crate::acp::register_update_sender(&acp_handle, update_tx);
-                            crate::acp::register_permission_receiver(&acp_handle, perm_rx);
-                            transaction_manager.set_permission_tx(&transaction_id, perm_tx);
-                            transaction_manager.set_acp_handle(&transaction_id, acp_handle.clone());
-
-                            //
-                            // Spawn update forwarder: reads from the update channel
-                            // and publishes SessionUpdate messages to the service.
-                            //
-
-                            let fwd_channel = channel.clone();
-                            let fwd_node_id = node_id.to_string();
-                            let fwd_client_id = request.client_id.clone();
-                            let fwd_transaction_id = transaction_id.clone();
-
-                            tokio::spawn(async move {
-                                while let Some(update) = update_rx.recv().await {
-                                    common::log_debug!(
-                                        "Forwarding session update for transaction {}",
-                                        fwd_transaction_id
-                                    );
-                                    let session_update = common::SessionUpdate {
-                                        node_id: fwd_node_id.clone(),
-                                        client_id: fwd_client_id.clone(),
-                                        transaction_id: fwd_transaction_id.clone(),
-                                        update,
-                                    };
-                                    let message = NodeSignalMessage::SessionUpdate(session_update);
-                                    if let Err(e) = publish_json(&fwd_channel, NODE_SIGNAL_QUEUE, &message).await {
-                                        common::log_error!("Failed to forward session update: {}", e);
-                                    }
-                                }
-                                common::log_debug!("Session update forwarder ended for {}", fwd_transaction_id);
-                            });
-                        }
-                    }
-
-                    //
-                    // Signal the main loop to broadcast state now that the
-                    // transaction is registered with the active prompt.
-                    //
-
-                    info_update_notify.notify_one();
-
-                    let normalized_text = text.replace('\r', "").replace('\n', " | ");
-                    let transaction_id = transaction_id.clone();
-                    let transaction_manager = transaction_manager.clone();
-                    let channel = channel.clone();
-                    let node_id = node_id.to_string();
-                    let command_id = request.command_id.clone();
-                    let info_update_notify = info_update_notify.clone();
-
-                    tokio::spawn(async move {
-                        let result = tokio::select! {
-                            result = tokio::task::spawn_blocking({
-                                let session = session.clone();
-                                let normalized_text = normalized_text.clone();
-                                move || session.transact(&normalized_text)
-                            }) => {
-                                match result {
-                                    Ok(Ok(response)) => {
-                                        NodeCommandResult::Session(SessionCommandResult::PromptResponse {
-                                            transaction_id: transaction_id.clone(),
-                                            response,
-                                        })
-                                    }
-                                    Ok(Err(e)) => NodeCommandResult::Error {
-                                        message: format!("Transaction failed: {}", e),
-                                    },
-                                    Err(e) => NodeCommandResult::Error {
-                                        message: format!("Task panicked: {}", e),
-                                    },
-                                }
-                            }
-                            _ = cancel_rx => {
-                                common::log_info!("Transaction {} cancelled", transaction_id);
-                                NodeCommandResult::Session(SessionCommandResult::TransactionCancelled {
-                                    transaction_id: transaction_id.clone(),
-                                })
-                            }
-                        };
-
-                        transaction_manager.complete(&transaction_id);
-
-                        let response = CommandResponse {
-                            command_id,
-                            node_id: node_id.to_string(),
-                            result,
-                        };
-
-                        let message = NodeSignalMessage::CommandResponse(response);
-                        if let Err(e) = publish_json(&channel, NODE_SIGNAL_QUEUE, &message).await {
-                            common::log_error!("Failed to send prompt response: {}", e);
-                        }
-
-                        //
-                        // Signal the main loop to broadcast state now that
-                        // the transaction is complete.
-                        //
-
-                        info_update_notify.notify_one();
-                    });
-                } else {
-                    let result = NodeCommandResult::Error {
-                        message: "No active session".to_string(),
-                    };
-                    let response = CommandResponse {
-                        command_id: request.command_id,
-                        node_id: node_id.to_string(),
-                        result,
-                    };
-                    let message = NodeSignalMessage::CommandResponse(response);
-                    if let Err(e) = publish_json(channel, NODE_SIGNAL_QUEUE, &message).await {
-                        common::log_error!("Failed to send error response: {}", e);
-                    }
-                }
-
-                return;
-            }
-
-            //
-            // Non-Prompt session commands (Create, Close, CancelTransaction)
-            // are handled inline since they're quick.
-            //
-
-            handle_session_command(cmd, selected_agent, transaction_manager).await
-        }
         NodeCommand::Intercept(cmd) => {
             let agents = registry.read().await.get_all();
             handle_intercept_command(cmd, &agents, node_state).await
@@ -1070,7 +797,7 @@ async fn handle_command(
         NodeCommand::Config(cmd) => handle_config_command(cmd, node_state).await,
         NodeCommand::AgentRegistry(cmd) => match cmd {
             common::AgentRegistryCommand::Update { scripts } => {
-                handle_agent_registry_update(scripts, registry, selected_agent, &factory).await
+                handle_agent_registry_update(scripts, registry, factory).await
             }
             common::AgentRegistryCommand::List => {
                 handle_agent_registry_list(registry).await
@@ -1084,11 +811,6 @@ async fn handle_command(
     if is_fire_and_forget {
         return;
     }
-
-    let is_session_close = matches!(
-        result,
-        NodeCommandResult::Session(common::SessionCommandResult::Closed)
-    );
 
     //
     // Send response back to the server.
@@ -1108,28 +830,9 @@ async fn handle_command(
     // Send an information update after every command so the UI has fresh state.
     //
     if let Err(e) =
-        send_node_information_update(channel, node_id, registry, selected_agent, node_state, transaction_manager, &fingerprint_cache).await
+        send_node_information_update(channel, node_id, registry, node_state, fingerprint_cache).await
     {
         common::log_error!("Failed to send information update after command: {}", e);
-    }
-
-    //
-    // After session close, drain any pending registry update.
-    //
-
-    if is_session_close {
-        if let Some(scripts) = pending_registry_update.take() {
-            common::log_info!("Executing queued registry update after session close");
-            handle_agent_registry_update(scripts, registry, selected_agent, factory).await;
-            fingerprint_all_agents(registry, &fingerprint_cache).await;
-            if let Err(e) = send_node_information_update(
-                channel, node_id, registry, selected_agent, node_state, transaction_manager, &fingerprint_cache,
-            )
-            .await
-            {
-                common::log_error!("Failed to send info update after deferred registry rebuild: {}", e);
-            }
-        }
     }
 }
 
@@ -1161,9 +864,7 @@ async fn send_node_information_update(
     channel: &Channel,
     node_id: &str,
     registry: &Arc<RwLock<AgentRegistry>>,
-    selected_agent: &Arc<Mutex<Option<Arc<dyn Agent>>>>,
     node_state: &Arc<RwLock<NodeState>>,
-    transaction_manager: &Arc<TransactionManager>,
     fingerprint_cache: &tokio::sync::RwLock<std::collections::HashMap<String, bool>>,
 ) -> anyhow::Result<()> {
     //
@@ -1188,44 +889,6 @@ async fn send_node_information_update(
     }
 
     //
-    // Nodes can work with a single selected agent at a time.
-    // Get the selected agent - if any - and related session information.
-    //
-
-    let selected: Option<SelectedAgent> = {
-        let locked = selected_agent.lock().unwrap();
-        match locked.as_ref() {
-            Some(a) => {
-                let session = a.get_session();
-                //
-                // Extract just the filename from process_path.
-                //
-                let process_name = session.as_ref().and_then(|s| {
-                    s.process_path().and_then(|path| {
-                        std::path::Path::new(&path)
-                            .file_name()
-                            .and_then(|name| name.to_str())
-                            .map(|s| s.to_string())
-                    })
-                });
-
-                let pending = transaction_manager.first_pending();
-
-                Some(SelectedAgent {
-                    short_name: a.short_name().to_string(),
-                    session_id: session.as_ref().map(|s| s.session_id().to_string()),
-                    process_name,
-                    yolo_mode: false,
-                    working_dir: session.as_ref().and_then(|s| s.working_dir()),
-                    active_transaction_id: pending.as_ref().map(|(id, _)| id.clone()),
-                    active_prompt_text: pending.map(|(_, text)| text),
-                })
-            }
-            None => None,
-        }
-    };
-
-    //
     // Check intercept status (now node-level, not per-agent).
     //
     let (intercept_enabled, intercept_method, active_terminal_id) = {
@@ -1236,7 +899,6 @@ async fn send_node_information_update(
         (enabled, method, terminal_id)
     };
 
-    //
     //
     // Determine if interception is supported on this node. Supported on
     // Windows (all methods) and Linux (system proxy only).
@@ -1260,14 +922,16 @@ async fn send_node_information_update(
     };
 
     //
-    // Build the update message and publish it to the service.
+    // Build the update message and publish it to the service. selected_agent
+    // is always None now that session state lives in the ACP server rather
+    // than on a single per-node selection.
     //
 
     let update = NodeInformationUpdate {
         node_id: node_id.to_string(),
         timestamp: Utc::now(),
         discovered_agents,
-        selected_agent: selected,
+        selected_agent: None,
         intercept_supported,
         intercept_enabled,
         intercept_method,

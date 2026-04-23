@@ -1,6 +1,9 @@
 # Service Architecture
 
-The service is the central backend that coordinates nodes, manages data, and orchestrates operations.
+The service is the central backend that coordinates nodes, manages data, and
+orchestrates operations. It is the only component that talks to nodes —
+clients (CLI, web, external ACP tools) always reach nodes through the
+service's ACP server and proxy layer.
 
 ## Overview
 
@@ -34,6 +37,22 @@ The service is the central backend that coordinates nodes, manages data, and orc
               │               │               │
            Nodes           Clients          Web
 ```
+
+## ACP server and node proxy
+
+The service hosts an **ACP server** (`service/src/acp_server.rs`) that
+external clients speak to. When a client frame carries
+`_meta.praxis.nodeId` or names a `session_id` the service has mapped to a
+node, the `AcpNodeProxy`
+(`service/src/acp_node_proxy.rs`) forwards the frame over RabbitMQ to the
+target node's ACP server. Responses and `session/update` notifications
+flow back the same way.
+
+The service's internal orchestrator subsystems (e.g. `tools`, future
+`semantic_ops`, `claude_bridge`) also drive nodes through this same proxy,
+using `AcpNodeProxy::request` / `request_collecting_text`. Internal
+callers get a `svc_*` pseudo-client-id so their responses are completed
+in-process instead of being delivered to any external client queue.
 
 ## Node Tracking
 

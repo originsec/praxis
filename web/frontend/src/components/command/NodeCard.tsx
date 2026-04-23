@@ -22,7 +22,7 @@ import {
   MessageSquare,
   RotateCcw,
 } from 'lucide-react';
-import { useApp } from '../../context/AppContext';
+import { nodeSessionKey, useApp } from '../../context/AppContext';
 import { StatusBadge } from '../common/StatusBadge';
 import { RunModal, type RunItem } from '../common/RunModal';
 import { Modal } from '../common/Modal';
@@ -214,7 +214,8 @@ function ActivePromptEntry({ promptText, agentName }: { promptText: string | nul
 export function NodeCard({ node }: NodeCardProps) {
   const {
     state,
-    sendCommand,
+    dispatch,
+    sendAcpNodeRequest,
     runOperation,
     runChain,
     enableIntercept,
@@ -255,7 +256,21 @@ export function NodeCard({ node }: NodeCardProps) {
   const [showMethodSelector, setShowMethodSelector] = useState(false);
   const [showReconModal, setShowReconModal] = useState<{ agentShortName: string } | null>(null);
   const [showTerminalModal, setShowTerminalModal] = useState(false);
-  const [showSessionModal, setShowSessionModal] = useState<{ agentShortName: string } | null>(null);
+  //
+  // Open session modals for this node, one per agent short_name. Allowing a
+  // Set means users can have claudecode + codex open side-by-side.
+  //
+  const [openSessionAgents, setOpenSessionAgents] = useState<Set<string>>(new Set());
+  const openSession = useCallback((agentShortName: string) => {
+    setOpenSessionAgents(prev => new Set(prev).add(agentShortName));
+  }, []);
+  const closeSessionModal = useCallback((agentShortName: string) => {
+    setOpenSessionAgents(prev => {
+      const next = new Set(prev);
+      next.delete(agentShortName);
+      return next;
+    });
+  }, []);
 
   //
   // Wrap node in array for RunModal — node is pre-selected but agent is choosable.
@@ -272,10 +287,6 @@ export function NodeCard({ node }: NodeCardProps) {
   useEffect(() => {
     if (showRunChainModal) requestChainDefList();
   }, [showRunChainModal, requestChainDefList]);
-
-  const handleSelectAgent = async (shortName: string) => {
-    await sendCommand(node.node_id, { Agent: { Select: { short_name: shortName } } });
-  };
 
   //
   // Initiate session creation — fetch recon for project paths first. If paths
@@ -312,7 +323,10 @@ export function NodeCard({ node }: NodeCardProps) {
           }
         } else if (!reconTriggered) {
           reconTriggered = true;
-          sendCommand(node.node_id, { Agent: 'Recon' }).catch(() => {});
+          sendAcpNodeRequest(node.node_id, '_praxis/recon', {
+            agent_short_name: shortName,
+            is_semantic: false,
+          }).catch(() => {});
           pollInterval = setInterval(() => {
             if (!resolved) {
               send({ type: 'recon_get', node_id: node.node_id, agent_short_name: shortName });
@@ -343,11 +357,25 @@ export function NodeCard({ node }: NodeCardProps) {
     setSessionCreateAgent(null);
     setCreatingSessionFor(shortName);
     try {
-      await handleSelectAgent(shortName);
-      await sendCommand(node.node_id, {
-        Session: { Create: { context: { yolo_mode: yoloMode, working_dir: workingDir, prompt_timeout_secs: state.config.prompt_timeout_secs ? parseInt(state.config.prompt_timeout_secs, 10) : null, interactive: true } } },
+      const timeoutSecs = state.config.prompt_timeout_secs
+        ? parseInt(state.config.prompt_timeout_secs, 10)
+        : null;
+      const { result } = await sendAcpNodeRequest(node.node_id, 'session/new', {
+        cwd: workingDir ?? '/tmp',
+        mcpServers: [],
+        _meta: {
+          praxis: {
+            connector: shortName,
+            yolo: yoloMode,
+            promptTimeoutSecs: timeoutSecs,
+            interactive: true,
+          },
+        },
       });
-      setShowSessionModal({ agentShortName: shortName });
+      const sessionId = (result as { sessionId?: string } | null)?.sessionId;
+      if (!sessionId) throw new Error('session/new returned no sessionId');
+      dispatch({ type: 'NODE_SESSION_SET', nodeId: node.node_id, sessionId, agentShortName: shortName });
+      openSession(shortName);
     } finally {
       setCreatingSessionFor(null);
     }
@@ -359,10 +387,12 @@ export function NodeCard({ node }: NodeCardProps) {
   };
 
   const handleCloseSession = async (shortName: string) => {
+    const session = state.nodeSessions[nodeSessionKey(node.node_id, shortName)];
+    if (!session) return;
     setClosingSessionFor(shortName);
     try {
-      await handleSelectAgent(shortName);
-      await sendCommand(node.node_id, { Session: 'Close' });
+      await sendAcpNodeRequest(node.node_id, 'session/close', { sessionId: session.sessionId });
+      dispatch({ type: 'NODE_SESSION_CLEAR', nodeId: node.node_id, agentShortName: shortName });
     } finally {
       setClosingSessionFor(null);
     }
@@ -438,6 +468,48 @@ export function NodeCard({ node }: NodeCardProps) {
   const hasActivePrompt = !!node.selected_agent?.active_transaction_id;
 
   const hasActiveWork = activeOps.length > 0 || activeChains.length > 0 || hasActivePrompt;
+
+  //
+  // Sessions on this node known to the web client. Derived from the
+  // compound-keyed nodeSessions map.
+  //
+  const nodeAcpSessions = useMemo(
+    () => Object.values(state.nodeSessions).filter(s => s.nodeId === node.node_id),
+    [state.nodeSessions, node.node_id],
+  );
+
+  //
+  // On mount (and whenever the node reconnects/changes), pull session/list
+  // from the node and seed any server-side sessions the client doesn't
+  // already track. This surfaces sessions that persisted across CLI
+  // restarts, other web tabs, or connections from other clients.
+  //
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { result } = await sendAcpNodeRequest(node.node_id, 'session/list', {});
+        if (cancelled) return;
+        const sessions = (result as { sessions?: Array<{ sessionId: string; title?: string; cwd?: string }> } | null)?.sessions ?? [];
+        for (const s of sessions) {
+          const agent = s.title?.trim();
+          if (!agent) continue;
+          const key = nodeSessionKey(node.node_id, agent);
+          if (state.nodeSessions[key]) continue;
+          dispatch({
+            type: 'NODE_SESSION_SET',
+            nodeId: node.node_id,
+            sessionId: s.sessionId,
+            agentShortName: agent,
+          });
+        }
+      } catch {
+        // node may be offline — retry next render cycle
+      }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [node.node_id, node.last_update]);
 
   return (
     <>
@@ -574,8 +646,13 @@ export function NodeCard({ node }: NodeCardProps) {
 
           <div className="space-y-1">
             {visibleAgents.map(agent => {
-              const isSelected = node.selected_agent?.short_name === agent.short_name;
-              const hasSession = isSelected && !!node.selected_agent?.session_id;
+              //
+              // ACP sessions are tracked in `state.nodeSessions`, keyed by
+              // node_id. The legacy `selected_agent.session_id` path is no
+              // longer used for web-initiated sessions.
+              //
+              const nodeSession = state.nodeSessions[nodeSessionKey(node.node_id, agent.short_name)];
+              const hasSession = !!nodeSession;
 
               return (
                 <div
@@ -593,7 +670,7 @@ export function NodeCard({ node }: NodeCardProps) {
                     {hasSession ? (
                       <>
                         <button
-                          onClick={() => setShowSessionModal({ agentShortName: agent.short_name })}
+                          onClick={() => openSession(agent.short_name)}
                           className="p-0.5 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/20 transition-colors"
                           title="Open session"
                         >
@@ -668,6 +745,54 @@ export function NodeCard({ node }: NodeCardProps) {
                 agentName={node.selected_agent!.short_name}
               />
             )}
+          </div>
+        )}
+
+        {/*
+        //
+        // Active ACP sessions on this node (resume / discard).
+        //
+        */}
+        {nodeAcpSessions.length > 0 && (
+          <div className="px-3 py-2 border-t border-subtle">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] text-[var(--accent-success)] tracking-wider">
+                SESSIONS ({nodeAcpSessions.length})
+              </span>
+            </div>
+            <div className="space-y-1">
+              {nodeAcpSessions.map(s => (
+                <div
+                  key={s.sessionId}
+                  className="flex items-center justify-between py-1 group text-xs"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Bot size={11} className="text-[var(--accent-success)]" />
+                    <span className="text-highlight truncate">{s.agentShortName}</span>
+                    <span className="text-[9px] text-muted font-mono">{s.sessionId.slice(0, 8)}</span>
+                  </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => openSession(s.agentShortName)}
+                      className="p-0.5 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/20 transition-colors"
+                      title="Resume session"
+                    >
+                      <Bot size={11} />
+                    </button>
+                    <button
+                      onClick={() => handleCloseSession(s.agentShortName)}
+                      disabled={closingSessionFor === s.agentShortName}
+                      className="p-0.5 text-[var(--accent-error)] hover:bg-[var(--accent-error)]/20 transition-colors disabled:opacity-50"
+                      title="Discard session"
+                    >
+                      {closingSessionFor === s.agentShortName
+                        ? <Loader2 size={11} className="animate-spin" />
+                        : <Square size={11} />}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -827,14 +952,15 @@ export function NodeCard({ node }: NodeCardProps) {
         />
       )}
 
-      {showSessionModal && (
+      {Array.from(openSessionAgents).map(agentShortName => (
         <AgentSessionModal
+          key={agentShortName}
           nodeId={node.node_id}
-          agentShortName={showSessionModal.agentShortName}
+          agentShortName={agentShortName}
           node={node}
-          onClose={() => setShowSessionModal(null)}
+          onClose={() => closeSessionModal(agentShortName)}
         />
-      )}
+      ))}
 
       {/*
       //

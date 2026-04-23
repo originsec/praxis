@@ -1,12 +1,12 @@
 use anyhow::{anyhow, Result};
+use serde_json::json;
 use std::time::Duration;
 
 use crate::mcp::McpClient;
 use crate::{
-    AgentCommand, AgentCommandResult, AgentFileType, AgentTool, ChainDefinitionFull,
-    ChainDefinitionInfo, ChainExecutionUpdate, ChainTriggerInfo, ConfigItem, GrepFileEntry,
-    McpServer, NodeCommand, NodeCommandResult, OperationDefinitionInfo, SemanticOperationSpec,
-    SemanticOpUpdate, SessionItem, SystemState, TargetSpec, TriggerConfig,
+    AgentFileType, AgentTool, ChainDefinitionFull, ChainDefinitionInfo, ChainExecutionUpdate,
+    ChainTriggerInfo, ConfigItem, GrepFileEntry, McpServer, OperationDefinitionInfo,
+    SemanticOperationSpec, SemanticOpUpdate, SessionItem, SystemState, TargetSpec, TriggerConfig,
 };
 
 //
@@ -517,20 +517,86 @@ async fn read_file_inner(
     line_start: Option<usize>,
     line_end: Option<usize>,
 ) -> Result<ReadFileResult> {
-    let cmd = NodeCommand::Agent(AgentCommand::ReadFile {
-        file_type,
-        path: path.to_string(),
-        line_start,
-        line_end,
+    //
+    // The node's `_praxis/read_file` extension needs to know the agent so it
+    // can resolve session content. Look up the selected agent from cached
+    // state.
+    //
+
+    let agent_short_name = selected_agent_for(client, node_id).await?;
+
+    let mut params = json!({
+        "agent_short_name": agent_short_name,
+        "file_type": file_type,
+        "path": path,
     });
-    let response = client.send_command(node_id, cmd).await?;
-    match response.result {
-        NodeCommandResult::Agent(AgentCommandResult::ReadFileResult {
-            path, content, line_start, line_end, error, ..
-        }) => Ok(ReadFileResult { path, content, line_start, line_end, error }),
-        NodeCommandResult::Error { message } => Err(anyhow!(message)),
-        _ => Err(anyhow!("Unexpected response")),
+    if let Some(v) = line_start {
+        params["line_start"] = json!(v);
     }
+    if let Some(v) = line_end {
+        params["line_end"] = json!(v);
+    }
+
+    let result = client
+        .acp_request(node_id, "_praxis/read_file", params)
+        .await?;
+
+    if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
+        // Extension errors wrapped by `ext_err` return {"error": "..."} only.
+        // A successful read_file returns the full ReadFileResult struct which
+        // also has an optional `error` field. Distinguish by presence of
+        // `path`.
+        if !result.get("path").is_some() {
+            return Err(anyhow!(err.to_string()));
+        }
+    }
+
+    Ok(ReadFileResult {
+        path: result
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .unwrap_or_else(|| path.to_string()),
+        content: result
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        line_start: result
+            .get("line_start")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize),
+        line_end: result
+            .get("line_end")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize),
+        error: result
+            .get("error")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+    })
+}
+
+//
+// Best-effort: look up the currently-selected agent short name for a node
+// from cached system state. Falls back to an error message pointing the
+// caller at agent_select.
+//
+
+async fn selected_agent_for(
+    client: &(impl McpClient + Sync),
+    node_id: &str,
+) -> Result<String> {
+    let state = client
+        .get_state()
+        .await
+        .ok_or_else(|| anyhow!("No state available"))?;
+    state
+        .nodes
+        .iter()
+        .find(|n| n.node_id == node_id)
+        .and_then(|n| n.selected_agent.as_ref())
+        .map(|a| a.short_name.clone())
+        .ok_or_else(|| anyhow!("No agent selected on node. Use agent_select to select one first."))
 }
 
 //
@@ -594,19 +660,50 @@ async fn grep_files_inner(
     paths: &[String],
     pattern: &str,
 ) -> Result<GrepFilesResult> {
-    let cmd = NodeCommand::Agent(AgentCommand::GrepFiles {
-        file_type,
-        paths: paths.to_vec(),
-        pattern: pattern.to_string(),
+    let agent_short_name = selected_agent_for(client, node_id).await?;
+
+    let params = json!({
+        "agent_short_name": agent_short_name,
+        "file_type": file_type,
+        "paths": paths,
+        "pattern": pattern,
     });
-    let response = client.send_command(node_id, cmd).await?;
-    match response.result {
-        NodeCommandResult::Agent(AgentCommandResult::GrepFilesResult {
-            pattern, results, errors, ..
-        }) => Ok(GrepFilesResult { pattern, results, errors }),
-        NodeCommandResult::Error { message } => Err(anyhow!(message)),
-        _ => Err(anyhow!("Unexpected response")),
+
+    let result = client
+        .acp_request(node_id, "_praxis/grep_files", params)
+        .await?;
+
+    //
+    // If the node returned only an `error` (ext_err shape), surface it.
+    //
+
+    if result.get("pattern").is_none() {
+        if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
+            return Err(anyhow!(err.to_string()));
+        }
     }
+
+    let pattern = result
+        .get("pattern")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .unwrap_or_else(|| pattern.to_string());
+    let results: Vec<GrepFileEntry> = result
+        .get("results")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|e| anyhow!("Failed to parse grep results: {}", e))?
+        .unwrap_or_default();
+    let errors: Vec<String> = result
+        .get("errors")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|e| anyhow!("Failed to parse grep errors: {}", e))?
+        .unwrap_or_default();
+
+    Ok(GrepFilesResult { pattern, results, errors })
 }
 
 //

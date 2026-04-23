@@ -23,10 +23,13 @@ pub enum AgentMode {
 //
 
 pub trait AgentSession: Send + Sync {
+    #[allow(dead_code)]
     fn session_id(&self) -> &Uuid;
+    #[allow(dead_code)]
     fn process_path(&self) -> Option<String> {
         None
     }
+    #[allow(dead_code)]
     fn working_dir(&self) -> Option<String> {
         None
     }
@@ -35,6 +38,7 @@ pub trait AgentSession: Send + Sync {
     fn mode(&self) -> AgentMode;
     fn transact(&self, prompt: &str) -> Result<String>;
     fn close(&self);
+    #[allow(dead_code)]
     fn supports_streaming(&self) -> bool {
         false
     }
@@ -103,12 +107,25 @@ pub trait Agent: Send + Sync {
         None
     }
 
-    fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>>;
-    fn close_session(&self);
-    fn get_session(&self) -> Option<Arc<dyn AgentSession>>;
-    fn has_session(&self) -> bool {
-        self.get_session().is_some()
-    }
+    //
+    // Multi-session entrypoint. The NodeAcpServer passes a server-chosen
+    // session_id and the agent is responsible for building a session that
+    // does not share mutable state with any other session.
+    //
+
+    fn create_session_with_id(
+        &self,
+        context: &SessionContext,
+        session_id: Uuid,
+    ) -> Option<Arc<dyn AgentSession>>;
+
+    //
+    // Release any per-session resources (Lua VM, subprocess handles, etc.)
+    // owned by the agent and keyed by session_id. Called by the session
+    // store on close.
+    //
+
+    fn drop_session(&self, _session_id: Uuid) {}
 
     //
     // Read session content for a given session_file path. Agents can override

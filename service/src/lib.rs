@@ -1,5 +1,6 @@
 //! Praxis Service - Orchestration service for the Praxis framework
 
+mod acp_node_proxy;
 mod acp_server;
 mod banner;
 mod claude_bridge;
@@ -52,7 +53,7 @@ use handlers::{ClientMessageHandler, NodeMessageHandler};
 use agent_chat::AgentChatManager;
 use orchestrator::OrchestratorManager;
 use config::service_config::APPLICATION_LOGS_ENABLED;
-use semantic_ops::{SemanticOpsManager, ResponseTracker, ChainExecutor};
+use semantic_ops::{SemanticOpsManager, ChainExecutor};
 use state::{NodeRegistry, ClientRegistry, PendingCommands};
 use tools::ToolkitManager;
 use messaging::broadcast_state_to_clients;
@@ -277,19 +278,31 @@ async fn run_main_loop() -> Result<()> {
         config.get_bool(APPLICATION_LOGS_ENABLED, false)
     };
     common::logging::set_event_log_enabled(event_logging_enabled);
-    let response_tracker = Arc::new(ResponseTracker::new());
 
     let semantic_ops_channel = connection.create_channel().await?;
+
     //
-    // Semantic operations use LLM config from service_config.
+    // Initialize Orchestrator manager, ACP server, and ACP node proxy.
+    // The proxy is constructed first because several managers depend on it.
     //
-    let node_exec_lock = semantic_ops::NodeExecLock::new();
+    let orchestrator_manager = Arc::new(OrchestratorManager::new());
+    let acp_node_proxy = acp_node_proxy::AcpNodeProxy::new();
+    let acp_server = Arc::new(acp_server::AcpServer::new(
+        orchestrator_manager.clone(),
+        service_config.clone(),
+        acp_node_proxy.clone(),
+    ));
+    common::log_info!("Initialized Orchestrator manager, ACP server, and ACP node proxy");
+
+    //
+    // Semantic operations use LLM config from service_config and drive the
+    // node over ACP via acp_node_proxy.
+    //
     let semantic_ops_manager = Arc::new(SemanticOpsManager::new(
         database.clone(),
         service_config.clone(),
         semantic_ops_channel.clone(),
-        response_tracker.clone(),
-        node_exec_lock.clone(),
+        acp_node_proxy.clone(),
     ));
 
     if let Ok(count) = semantic_ops_manager.cancel_stale_operations().await {
@@ -314,19 +327,9 @@ async fn run_main_loop() -> Result<()> {
         database.clone(),
         agent_chat_channel,
         node_registry.clone(),
-        pending_commands.clone(),
+        acp_node_proxy.clone(),
     ));
     common::log_info!("Initialized AgentChat manager");
-
-    //
-    // Initialize Orchestrator manager and ACP server.
-    //
-    let orchestrator_manager = Arc::new(OrchestratorManager::new());
-    let acp_server = Arc::new(acp_server::AcpServer::new(
-        orchestrator_manager.clone(),
-        service_config.clone(),
-    ));
-    common::log_info!("Initialized Orchestrator manager and ACP server");
 
     //
     // Initialize Toolkit manager.
@@ -335,8 +338,8 @@ async fn run_main_loop() -> Result<()> {
         database.clone(),
         service_config.clone(),
         node_registry.clone(),
-        response_tracker.clone(),
         publish_channel.clone(),
+        acp_node_proxy.clone(),
     ));
     common::log_info!("Initialized Toolkit manager");
 
@@ -619,11 +622,10 @@ async fn run_main_loop() -> Result<()> {
         chain_executor.clone(),
         node_registry.clone(),
         service_config.clone(),
-        response_tracker.clone(),
+        acp_node_proxy.clone(),
         semantic_ops_channel.clone(),
         broadcast_channel.clone(),
         toolkit_manager.clone(),
-        node_exec_lock.clone(),
     ));
     trigger_engine.start_scheduler();
     common::log_info!("Initialized trigger engine");
@@ -639,12 +641,11 @@ async fn run_main_loop() -> Result<()> {
         client_handler,
         database,
         service_config: service_config.clone(),
-        response_tracker,
         semantic_ops_manager,
         chain_executor,
-        node_exec_lock: node_exec_lock.clone(),
         agent_chat_manager,
         acp_server,
+        acp_node_proxy,
         toolkit_manager,
         mcp_manager,
         ccrv1_manager,

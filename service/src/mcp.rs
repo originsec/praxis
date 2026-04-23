@@ -8,9 +8,8 @@ use async_trait::async_trait;
 use common::{
     client_queue_name, mcp::McpClient, publish_json, ChainDefinitionInfo, ChainExecutionUpdate,
     ClientBroadcastMessage, ClientDirectMessage, ClientRegistration, ClientSignalMessage,
-    CommandRequest, CommandResponse, InterceptedTrafficEntry, NodeCommand, NodeCommandResult,
-    OperationDefinitionInfo, PraxisServer, ReconResult, SemanticOpUpdate, SystemState,
-    TrafficSearchFilters, CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE,
+    InterceptedTrafficEntry, OperationDefinitionInfo, PraxisServer, ReconResult, SemanticOpUpdate,
+    SystemState, TrafficSearchFilters, CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE,
 };
 use futures_util::StreamExt;
 use lapin::{
@@ -18,11 +17,12 @@ use lapin::{
     types::FieldTable,
     Channel, Connection, ConnectionProperties, ExchangeKind,
 };
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{oneshot, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -38,10 +38,22 @@ pub struct ServiceMcpClient {
     state: Arc<Mutex<ClientState>>,
 }
 
+//
+// In-flight ACP request. When `text_buf` is Some, `session/update`
+// notifications with matching sessionId and update.sessionUpdate ==
+// "agent_message_chunk" are appended to it.
+//
+
+struct PendingAcp {
+    response_tx: Option<oneshot::Sender<Result<Value, String>>>,
+    text_buf: Option<String>,
+    session_id: Option<String>,
+}
+
 #[derive(Default)]
 struct ClientState {
     system_state: Option<SystemState>,
-    pending_commands: HashMap<String, Option<NodeCommandResult>>,
+    pending_acp: HashMap<String, PendingAcp>,
     pending_semantic_ops: HashMap<String, Option<String>>,
     pending_traffic_search: Option<(Vec<InterceptedTrafficEntry>, usize)>,
     pending_recon_get: Option<Option<ReconResult>>,
@@ -219,10 +231,8 @@ impl ServiceMcpClient {
             ClientDirectMessage::StateUpdate(system_state) => {
                 state.system_state = Some(system_state);
             }
-            ClientDirectMessage::CommandResponse(response) => {
-                if let Some(entry) = state.pending_commands.get_mut(&response.command_id) {
-                    *entry = Some(response.result);
-                }
+            ClientDirectMessage::AcpMessage { json_rpc } => {
+                Self::handle_acp_frame(&mut state, &json_rpc);
             }
             ClientDirectMessage::SemanticOpQueued { operation_id, request_id, .. } => {
                 if let Some(entry) = state.pending_semantic_ops.get_mut(&request_id) {
@@ -300,6 +310,91 @@ impl ServiceMcpClient {
         }
     }
 
+    //
+    // Handle an incoming ACP JSON-RPC frame (either a response to a pending
+    // request, or a streamed session/update notification whose text we want
+    // to buffer for a still-pending request).
+    //
+
+    fn handle_acp_frame(state: &mut ClientState, json_rpc: &str) {
+        let msg: Value = match serde_json::from_str(json_rpc) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+
+        let has_method = msg.get("method").and_then(|m| m.as_str()).is_some();
+        let id_str = msg.get("id").map(|v| match v {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            _ => String::new(),
+        });
+
+        if !has_method {
+            //
+            // Response: { id, result } or { id, error }
+            //
+
+            let Some(request_id) = id_str else { return };
+            let Some(mut pending) = state.pending_acp.remove(&request_id) else {
+                return;
+            };
+            let Some(tx) = pending.response_tx.take() else { return };
+
+            if let Some(err) = msg.get("error") {
+                let message = err
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("ACP error")
+                    .to_string();
+                let _ = tx.send(Err(message));
+            } else {
+                let result = msg.get("result").cloned().unwrap_or(Value::Null);
+                let _ = tx.send(Ok(result));
+            }
+            return;
+        }
+
+        //
+        // Notification: session/update with agent_message_chunk. Append text
+        // to any pending request whose session_id matches.
+        //
+
+        let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
+        if method != "session/update" {
+            return;
+        }
+
+        let params = match msg.get("params") {
+            Some(p) => p,
+            None => return,
+        };
+        let session_id = match params.get("sessionId").and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => return,
+        };
+        let update = match params.get("update") {
+            Some(u) => u,
+            None => return,
+        };
+        let kind = update.get("sessionUpdate").and_then(|v| v.as_str());
+        if kind != Some("agent_message_chunk") {
+            return;
+        }
+        let text = update
+            .get("content")
+            .and_then(|c| c.get("text"))
+            .and_then(|v| v.as_str());
+        let Some(text) = text else { return };
+
+        for pending in state.pending_acp.values_mut() {
+            if let (Some(buf), Some(sid)) = (&mut pending.text_buf, &pending.session_id) {
+                if sid == session_id {
+                    buf.push_str(text);
+                }
+            }
+        }
+    }
+
     async fn handle_broadcast_message(state: &Arc<Mutex<ClientState>>, data: &[u8]) {
         let Ok(message) = serde_json::from_slice::<ClientBroadcastMessage>(data) else {
             return;
@@ -358,6 +453,146 @@ impl ServiceMcpClient {
         publish_json(&self.channel, CLIENT_SIGNAL_QUEUE, &message).await?;
         Ok(())
     }
+
+    //
+    // Send an ACP request and await the response. If `collect_text` is true,
+    // any `session/update` notifications that carry agent_message_chunk text
+    // for the session targeted by this request (either explicitly via params
+    // or discovered from the response) are buffered and returned alongside
+    // the result.
+    //
+
+    async fn do_acp_request(
+        &self,
+        node_id: &str,
+        method: &str,
+        params: Value,
+        collect_text: bool,
+    ) -> Result<(Value, String)> {
+        let request_id = Uuid::new_v4().to_string();
+        let (tx, rx) = oneshot::channel();
+
+        //
+        // session_id the caller already knows (e.g. session/prompt carries
+        // sessionId in params). When absent, we can't correlate streaming
+        // chunks at all — that's fine for non-prompt methods.
+        //
+
+        let session_id = params
+            .get("sessionId")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+
+        {
+            let mut state = self.state.lock().await;
+            state.pending_acp.insert(
+                request_id.clone(),
+                PendingAcp {
+                    response_tx: Some(tx),
+                    text_buf: if collect_text { Some(String::new()) } else { None },
+                    session_id,
+                },
+            );
+        }
+
+        let frame = build_request_frame(&request_id, node_id, method, params);
+        if let Err(e) = self
+            .publish_signal(ClientSignalMessage::AcpMessage {
+                client_id: self.client_id.clone(),
+                json_rpc: serde_json::to_string(&frame)?,
+            })
+            .await
+        {
+            //
+            // Publish failed — drop the pending entry so we don't leak it.
+            //
+
+            self.state.lock().await.pending_acp.remove(&request_id);
+            return Err(e);
+        }
+
+        let result = match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(Ok(value))) => Ok(value),
+            Ok(Ok(Err(message))) => Err(anyhow!(message)),
+            Ok(Err(_)) => Err(anyhow!("ACP response channel closed")),
+            Err(_) => {
+                self.state.lock().await.pending_acp.remove(&request_id);
+                Err(anyhow!(
+                    "Timeout waiting for ACP response to {} after {}s",
+                    method,
+                    self.timeout.as_secs()
+                ))
+            }
+        }?;
+
+        //
+        // Drain any text collected. If the response body contains a fresh
+        // sessionId (e.g. session/new) and the caller cares about text,
+        // that's not meaningful for this request since chunks would have
+        // arrived for a different session; skip.
+        //
+
+        let text = {
+            let mut state = self.state.lock().await;
+            state
+                .pending_acp
+                .remove(&request_id)
+                .and_then(|p| p.text_buf)
+                .unwrap_or_default()
+        };
+
+        Ok((result, text))
+    }
+}
+
+//
+// Build an ACP request envelope with the target node id injected into
+// `params._meta.praxis.nodeId` so the service-side AcpNodeProxy knows how
+// to route it. Existing `_meta.praxis` keys in `params` are preserved.
+//
+
+fn build_request_frame(
+    request_id: &str,
+    node_id: &str,
+    method: &str,
+    mut params: Value,
+) -> Value {
+    inject_node_id(&mut params, node_id);
+    json!({
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": method,
+        "params": params,
+    })
+}
+
+fn build_notification_frame(node_id: &str, method: &str, mut params: Value) -> Value {
+    inject_node_id(&mut params, node_id);
+    json!({
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params,
+    })
+}
+
+fn inject_node_id(params: &mut Value, node_id: &str) {
+    if !params.is_object() {
+        *params = json!({});
+    }
+    let obj = params.as_object_mut().unwrap();
+    let meta = obj.entry("_meta").or_insert_with(|| json!({}));
+    if !meta.is_object() {
+        *meta = json!({});
+    }
+    let meta_obj = meta.as_object_mut().unwrap();
+    let praxis = meta_obj.entry("praxis").or_insert_with(|| json!({}));
+    if !praxis.is_object() {
+        *praxis = json!({});
+    }
+    let praxis_obj = praxis.as_object_mut().unwrap();
+    if !praxis_obj.contains_key("nodeId") {
+        praxis_obj.insert("nodeId".to_string(), Value::String(node_id.to_string()));
+    }
 }
 
 #[async_trait]
@@ -366,57 +601,38 @@ impl McpClient for ServiceMcpClient {
         self.state.lock().await.system_state.clone()
     }
 
-    async fn send_command(&self, node_id: &str, command: NodeCommand) -> Result<CommandResponse> {
-        let command_id = Uuid::new_v4().to_string();
+    async fn acp_request(
+        &self,
+        node_id: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<Value> {
+        self.do_acp_request(node_id, method, params, false)
+            .await
+            .map(|(v, _)| v)
+    }
 
-        {
-            let mut state = self.state.lock().await;
-            state.pending_commands.insert(command_id.clone(), None);
-        }
+    async fn acp_request_collecting_text(
+        &self,
+        node_id: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<(Value, String)> {
+        self.do_acp_request(node_id, method, params, true).await
+    }
 
-        let request = CommandRequest {
-            command_id: command_id.clone(),
+    async fn acp_notification(
+        &self,
+        node_id: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<()> {
+        let frame = build_notification_frame(node_id, method, params);
+        self.publish_signal(ClientSignalMessage::AcpMessage {
             client_id: self.client_id.clone(),
-            node_id: node_id.to_string(),
-            command,
-        };
-
-        self.publish_signal(ClientSignalMessage::Command(request)).await?;
-
-        //
-        // Poll for response.
-        //
-
-        let poll_interval = Duration::from_millis(250);
-        let max_polls = (self.timeout.as_millis() / 250) as usize;
-
-        for _ in 0..max_polls {
-            tokio::time::sleep(poll_interval).await;
-            let mut state = self.state.lock().await;
-
-            let has_result = state
-                .pending_commands
-                .get(&command_id)
-                .map(|v| v.is_some())
-                .unwrap_or(false);
-
-            if has_result {
-                if let Some(Some(result)) = state.pending_commands.remove(&command_id) {
-                    return Ok(CommandResponse {
-                        command_id: command_id.clone(),
-                        node_id: node_id.to_string(),
-                        result,
-                    });
-                }
-            }
-        }
-
-        {
-            let mut state = self.state.lock().await;
-            state.pending_commands.remove(&command_id);
-        }
-
-        Err(anyhow!("Timeout waiting for command response"))
+            json_rpc: serde_json::to_string(&frame)?,
+        })
+        .await
     }
 
     async fn search_traffic(

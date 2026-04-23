@@ -85,6 +85,77 @@ impl App {
             }
             ConfirmKind::ResetNode(node_id) => {
                 let _ = self.client.reset_node(&node_id).await;
+                //
+                // Reset nukes everything on the node, including all live
+                // sessions. Drop our local entries for that node so the
+                // sessions-list count updates, then schedule a refresh
+                // (which will pull anything the node re-registered with —
+                // typically nothing fresh).
+                //
+                let to_drop: Vec<String> = self
+                    .nodes
+                    .sessions
+                    .iter()
+                    .filter(|(_, s)| s.node_id == node_id)
+                    .map(|(k, _)| k.clone())
+                    .collect();
+                for local_id in to_drop {
+                    self.nodes.sessions.remove(&local_id);
+                }
+                if self.nodes.active_session_id.as_ref().is_some_and(|id| {
+                    !self.nodes.sessions.contains_key(id)
+                }) {
+                    self.nodes.active_session_id = None;
+                }
+                //
+                // Give the node a moment to come back online, then pull
+                // session/list to reflect post-reset state.
+                //
+                let tx = self.event_tx.clone();
+                let client = self.client.clone();
+                let rid = node_id.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                    let Some(tx) = tx else { return };
+                    let params = serde_json::json!({
+                        "_meta": { "praxis": { "nodeId": rid } }
+                    });
+                    let value = match client.acp_request(&rid, "session/list", params).await {
+                        Ok(v) => v,
+                        Err(_) => return,
+                    };
+                    let Some(sessions) = value.get("sessions").and_then(|v| v.as_array()) else {
+                        return;
+                    };
+                    let mut entries: Vec<crate::event::NodeSessionEntry> = Vec::new();
+                    for s in sessions {
+                        let Some(sid) = s.get("sessionId").and_then(|v| v.as_str()) else {
+                            continue;
+                        };
+                        let agent = s
+                            .get("title")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        if agent.is_empty() {
+                            continue;
+                        }
+                        let cwd = s
+                            .get("cwd")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .filter(|s| s != ".");
+                        entries.push(crate::event::NodeSessionEntry {
+                            node_id: rid.clone(),
+                            agent_short_name: agent,
+                            session_id: sid.to_string(),
+                            cwd,
+                        });
+                    }
+                    if !entries.is_empty() {
+                        let _ = tx.send(crate::event::AppEvent::NodeSessionsRefreshed { entries });
+                    }
+                });
             }
             ConfirmKind::DeleteModel(idx) => {
                 if idx < self.settings.model_definitions.len() {

@@ -9,8 +9,10 @@ use chrono::Utc;
 use common::{LuaRegisteredAgentInfo, ReconResult, SessionContext};
 use mlua::Lua;
 use once_cell::sync::OnceCell;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
+use uuid::Uuid;
 
 use crate::agent_connectors::traits::{Agent, AgentIntercept, AgentRecon, AgentSession};
 
@@ -34,7 +36,24 @@ impl LuaSource {
 pub struct LuaAgent {
     name: String,
     short_name: String,
+    //
+    // Probe VM: long-lived, used by fingerprint, recon, intercept_domains,
+    // intercept_url_pattern, and read_session_content. Not attached to any
+    // session. Built from source at agent-load time.
+    //
     vm: Arc<Mutex<Lua>>,
+    //
+    // Precompiled Lua bytecode cached at agent-load time. Each ACP session
+    // instantiates its own VM by loading this bytecode via
+    // runtime::make_session_vm, avoiding per-session source parsing.
+    //
+    bytecode: Vec<u8>,
+    //
+    // Per-session VMs keyed by session_id. Each is independent of the probe
+    // VM and of every other session's VM. Populated by
+    // create_session_with_id and dropped by drop_session.
+    //
+    session_vms: RwLock<HashMap<Uuid, Arc<Mutex<Lua>>>>,
     has_recon: bool,
     has_intercept_domains: bool,
     has_intercept_url_pattern: bool,
@@ -44,7 +63,6 @@ pub struct LuaAgent {
     fingerprint_process_path: RwLock<Option<String>>,
     fingerprint_version: RwLock<Option<String>>,
     fingerprint_at: RwLock<Option<Instant>>,
-    session: RwLock<Option<Arc<dyn AgentSession>>>,
 }
 
 impl LuaAgent {
@@ -58,10 +76,14 @@ impl LuaAgent {
             ));
         }
 
+        let bytecode = runtime::compile_bytecode(&script)?;
+
         Ok(Self {
             name: manifest.name,
             short_name: manifest.short_name,
             vm: Arc::new(Mutex::new(lua)),
+            bytecode,
+            session_vms: RwLock::new(HashMap::new()),
             has_recon: manifest.has_recon,
             has_intercept_domains: manifest.has_intercept_domains,
             has_intercept_url_pattern: manifest.has_intercept_url_pattern,
@@ -71,7 +93,6 @@ impl LuaAgent {
             fingerprint_process_path: RwLock::new(None),
             fingerprint_version: RwLock::new(None),
             fingerprint_at: RwLock::new(None),
-            session: RwLock::new(None),
         })
     }
 }
@@ -149,43 +170,59 @@ impl Agent for LuaAgent {
         self.fingerprint_version.read().unwrap().clone()
     }
 
-    fn create_session(&self, context: &SessionContext) -> Option<Arc<dyn AgentSession>> {
+    fn create_session_with_id(
+        &self,
+        context: &SessionContext,
+        session_id: Uuid,
+    ) -> Option<Arc<dyn AgentSession>> {
         let process_path = self.fingerprint_process_path.read().unwrap().clone();
         common::log_info!(
-            "Lua agent '{}': create_session (process_path={:?}, working_dir={:?}, yolo={}, prompt_timeout={:?})",
-            self.short_name, process_path, context.working_dir, context.yolo_mode, context.prompt_timeout_secs
+            "Lua agent '{}': create_session_with_id (session_id={}, process_path={:?}, working_dir={:?}, yolo={}, prompt_timeout={:?})",
+            self.short_name, session_id, process_path, context.working_dir, context.yolo_mode, context.prompt_timeout_secs
         );
-        match LuaAgentSession::new(
-            Arc::clone(&self.vm),
-            context,
-            process_path,
-        ) {
-            Ok(session) => {
-                let session_arc = Arc::new(session) as Arc<dyn AgentSession>;
-                *self.session.write().unwrap() = Some(session_arc.clone());
-                Some(session_arc)
-            }
+
+        //
+        // Instantiate a fresh per-session VM from the cached bytecode. Each
+        // session's VM has its own heap, so Lua-level state does not leak
+        // between sessions sharing the same connector script.
+        //
+
+        let lua = match runtime::make_session_vm(&self.bytecode) {
+            Ok(lua) => lua,
             Err(e) => {
                 common::log_error!(
-                    "Lua agent '{}': failed to create session: {}",
-                    self.short_name,
-                    e
+                    "Lua agent '{}': failed to build session VM for {}: {}",
+                    self.short_name, session_id, e
                 );
+                return None;
+            }
+        };
+        let session_vm = Arc::new(Mutex::new(lua));
+        self.session_vms
+            .write()
+            .unwrap()
+            .insert(session_id, Arc::clone(&session_vm));
+
+        match LuaAgentSession::new(session_vm, context, process_path) {
+            Ok(session) => Some(Arc::new(session) as Arc<dyn AgentSession>),
+            Err(e) => {
+                common::log_error!(
+                    "Lua agent '{}': session creation failed for {}: {}",
+                    self.short_name, session_id, e
+                );
+                self.session_vms.write().unwrap().remove(&session_id);
                 None
             }
         }
     }
 
-    fn close_session(&self) {
-        let mut guard = self.session.write().unwrap();
-        if let Some(session) = guard.as_ref() {
-            session.close();
+    fn drop_session(&self, session_id: Uuid) {
+        if self.session_vms.write().unwrap().remove(&session_id).is_some() {
+            common::log_debug!(
+                "Lua agent '{}': dropped session VM for {}",
+                self.short_name, session_id
+            );
         }
-        *guard = None;
-    }
-
-    fn get_session(&self) -> Option<Arc<dyn AgentSession>> {
-        self.session.read().unwrap().clone()
     }
 
     fn read_session_content(&self, session_file: &str) -> Option<String> {
@@ -233,15 +270,6 @@ impl AgentIntercept for LuaAgent {
 #[async_trait]
 impl AgentRecon for LuaAgent {
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
-        if is_semantic {
-            let session = self.session.write().unwrap().take();
-            if let Some(session) = session {
-                let _ = tokio::task::spawn_blocking(move || {
-                    session.close();
-                }).await;
-            }
-        }
-
         let vm = Arc::clone(&self.vm);
         let process_path = self.fingerprint_process_path.read().unwrap().clone();
         let short_name = self.short_name.clone();

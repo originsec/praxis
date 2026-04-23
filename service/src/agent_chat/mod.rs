@@ -5,6 +5,15 @@
 // IRC-like chat environment. Agents can join channels, send messages,
 // DM each other, and work toward user-defined goals.
 //
+// TODO(acp-cut-over): The node-side session/prompt/close interactions in
+// this module were previously driven via NodeCommand::Session. They've been
+// stubbed out during the ACP cut-over because AgentChat is not a publicly
+// surfaced feature and a full port to `AcpNodeProxy::request_collecting_text`
+// is deferred. The public API, DB bookkeeping, and client-side notifications
+// still work; agents simply never get a real session spawned. Restoring
+// behaviour is a matter of wiring `start_agent_session` /
+// `send_prompt_to_agent` / `close_agent_session` back up against the proxy.
+//
 
 mod database;
 pub mod parser;
@@ -12,10 +21,8 @@ pub mod parser;
 use anyhow::Result;
 use chrono::Utc;
 use common::{
-    publish_json, node_queue_name, ClientDirectMessage, CommandRequest,
-    NodeCommand, NodeDirectMessage, AgentChatAgentInfo, AgentChatAgentStatus,
+    publish_json, ClientDirectMessage, AgentChatAgentInfo, AgentChatAgentStatus,
     AgentChatChannelInfo, AgentChatMessageInfo, AgentChatMessageType, AgentChatSessionState,
-    SessionCommand, SessionContext,
 };
 use lapin::Channel;
 use std::collections::{HashMap, VecDeque};
@@ -23,10 +30,9 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+use crate::acp_node_proxy::AcpNodeProxy;
 use crate::database::Database;
-use crate::state::{NodeRegistry, PendingCommands};
-
-use parser::AgentChatAction;
+use crate::state::NodeRegistry;
 
 /// User nickname in AgentChat chat
 const USER_NICKNAME: &str = "agent_chat_user";
@@ -63,8 +69,6 @@ struct AgentChatAgentState {
     status: AgentChatAgentStatus,
     agent_session_id: Option<String>,
     waiting: bool,
-    /// System prompt to send when session is created
-    pending_system_prompt: Option<String>,
 }
 
 /// In-memory state for a AgentChat channel
@@ -81,7 +85,6 @@ pub struct AgentChatManager {
     db: Arc<Database>,
     channel: Channel,
     node_registry: Arc<NodeRegistry>,
-    pending_commands: Arc<PendingCommands>,
     active_session: RwLock<Option<AgentChatSessionState_>>,
 }
 
@@ -91,13 +94,12 @@ impl AgentChatManager {
         db: Arc<Database>,
         channel: Channel,
         node_registry: Arc<NodeRegistry>,
-        pending_commands: Arc<PendingCommands>,
+        _acp_node_proxy: Arc<AcpNodeProxy>,
     ) -> Self {
         Self {
             db,
             channel,
             node_registry,
-            pending_commands,
             active_session: RwLock::new(None),
         }
     }
@@ -303,6 +305,7 @@ impl AgentChatManager {
         //
         // Add to in-memory state.
         //
+        let _ = system_prompt; // discarded until agent_chat is re-ported to ACP
         let agent_state = AgentChatAgentState {
             id: agent_id.clone(),
             node_id: node_id.to_string(),
@@ -313,7 +316,6 @@ impl AgentChatManager {
             status: AgentChatAgentStatus::Initializing,
             agent_session_id: None,
             waiting: false,
-            pending_system_prompt: Some(system_prompt),
         };
 
         session.agents.insert(agent_id.clone(), agent_state.clone());
@@ -347,6 +349,7 @@ impl AgentChatManager {
         self.start_agent_session(
             client_id,
             node_id,
+            &agent_id,
             agent_short_name,
             yolo_mode,
         ).await?;
@@ -684,156 +687,10 @@ impl AgentChatManager {
         Ok(())
     }
 
-    /// Handle a command response from a node (for agent session operations)
-    pub async fn handle_command_response(
-        &self,
-        client_id: &str,
-        command_id: &str,
-        node_id: &str,
-        result: &common::NodeCommandResult,
-    ) -> Result<bool> {
-        //
-        // Check if this is a AgentChat-related command response.
-        //
-        let session_lock = self.active_session.read().await;
-        let session = match session_lock.as_ref() {
-            Some(s) => s,
-            None => return Ok(false),
-        };
-
-        //
-        // Find agent by node_id.
-        //
-        let agent = session.agents.values()
-            .find(|a| a.node_id == node_id);
-
-        let agent = match agent {
-            Some(a) => a.clone(),
-            None => return Ok(false),
-        };
-
-        let session_id = session.id.clone();
-        drop(session_lock);
-
-        //
-        // Handle session creation response.
-        //
-        if let common::NodeCommandResult::Session(
-            common::SessionCommandResult::Created { session_id: agent_session_id }
-        ) = result {
-            common::log_info!("AgentChat agent {} session created: {}", agent.nickname, agent_session_id);
-
-            //
-            // Update agent with session ID and get pending system prompt.
-            //
-            let pending_prompt: Option<String>;
-            {
-                let mut session_lock = self.active_session.write().await;
-                if let Some(session) = session_lock.as_mut() {
-                    if let Some(agent_state) = session.agents.get_mut(&agent.id) {
-                        agent_state.agent_session_id = Some(agent_session_id.clone());
-                        agent_state.status = AgentChatAgentStatus::Prompting;
-                        pending_prompt = agent_state.pending_system_prompt.take();
-                    } else {
-                        pending_prompt = None;
-                    }
-                } else {
-                    pending_prompt = None;
-                }
-            }
-
-            //
-            // Update database.
-            //
-            self.db.update_agent_chat_agent_session_id(&agent.id, Some(&agent_session_id)).await?;
-            self.db.update_agent_chat_agent_status(&agent.id, "prompting").await?;
-
-            //
-            // Notify client.
-            //
-            self.send_to_client(client_id, ClientDirectMessage::AgentChatAgentStatusChanged {
-                session_id: session_id.clone(),
-                agent_id: agent.id.clone(),
-                status: AgentChatAgentStatus::Prompting,
-            }).await?;
-
-            //
-            // Send system prompt to the agent.
-            //
-            if let Some(system_prompt) = pending_prompt {
-                common::log_info!("Sending system prompt to agent {}", agent.nickname);
-                self.send_prompt_to_agent(
-                    client_id,
-                    &agent.node_id,
-                    &agent_session_id,
-                    &system_prompt,
-                ).await?;
-            }
-
-            //
-            // Broadcast join message.
-            //
-            if let Some(ref channel_id) = agent.current_channel_id {
-                self.broadcast_system_message(
-                    client_id,
-                    &session_id,
-                    Some(channel_id),
-                    &format!("* {} has joined", agent.nickname),
-                ).await?;
-            }
-
-            return Ok(true);
-        }
-
-        //
-        // Handle session prompt response.
-        //
-        if let common::NodeCommandResult::Session(
-            common::SessionCommandResult::PromptResponse { response, .. }
-        ) = result {
-            common::log_info!("AgentChat agent {} responded (command {})", agent.nickname, command_id);
-
-            //
-            // Parse the response.
-            //
-            let actions = parser::parse_agent_response(response);
-
-            //
-            // Process each action.
-            //
-            for action in actions {
-                self.process_agent_action(client_id, &session_id, &agent.id, action).await?;
-            }
-
-            //
-            // Update agent status back to ready.
-            //
-            let mut session_lock = self.active_session.write().await;
-            if let Some(session) = session_lock.as_mut() {
-                if let Some(agent_state) = session.agents.get_mut(&agent.id) {
-                    agent_state.status = AgentChatAgentStatus::Ready;
-                }
-            }
-            drop(session_lock);
-
-            self.db.update_agent_chat_agent_status(&agent.id, "ready").await?;
-
-            self.send_to_client(client_id, ClientDirectMessage::AgentChatAgentStatusChanged {
-                session_id: session_id.clone(),
-                agent_id: agent.id.clone(),
-                status: AgentChatAgentStatus::Ready,
-            }).await?;
-
-            //
-            // Process any pending messages.
-            //
-            self.process_message_queue(client_id, &session_id).await?;
-
-            return Ok(true);
-        }
-
-        Ok(false)
-    }
+    // on_session_created / on_prompt_response removed with the ACP cut-over.
+    // They were only called by spawned tasks that drove the legacy
+    // NodeCommand::Session flow. When AgentChat is wired back up on ACP,
+    // equivalent callbacks will be reintroduced — see the module-level TODO.
 
     //
     // Private helper methods.
@@ -847,73 +704,30 @@ impl AgentChatManager {
 
     async fn start_agent_session(
         &self,
-        client_id: &str,
+        _client_id: &str,
         node_id: &str,
+        _agent_id: &str,
         agent_short_name: &str,
-        yolo_mode: bool,
+        _yolo_mode: bool,
     ) -> Result<()> {
-        //
-        // First, select the agent on the node.
-        //
-        let select_cmd_id = Uuid::new_v4().to_string();
-        let select_message = NodeDirectMessage::Command(CommandRequest {
-            command_id: select_cmd_id.clone(),
-            client_id: client_id.to_string(),
-            node_id: node_id.to_string(),
-            command: NodeCommand::Agent(common::AgentCommand::Select {
-                short_name: agent_short_name.to_string(),
-            }),
-        });
-
-        let queue_name = node_queue_name(node_id);
-        publish_json(&self.channel, &queue_name, &select_message).await?;
-
-        self.pending_commands.add(
-            select_cmd_id.clone(),
-            client_id.to_string(),
-        ).await;
-
-        //
-        // Create a session on the selected agent.
-        //
-        let create_cmd_id = Uuid::new_v4().to_string();
-        let context = SessionContext {
-            working_dir: None,
-            yolo_mode,
-            prompt_timeout_secs: None,
-            interactive: false,
-        };
-        let create_message = NodeDirectMessage::Command(CommandRequest {
-            command_id: create_cmd_id.clone(),
-            client_id: client_id.to_string(),
-            node_id: node_id.to_string(),
-            command: NodeCommand::Session(SessionCommand::Create { context }),
-        });
-
-        publish_json(&self.channel, &queue_name, &create_message).await?;
-
-        self.pending_commands.add(
-            create_cmd_id.clone(),
-            client_id.to_string(),
-        ).await;
-
-        common::log_info!("Started agent session setup on node {} for {} (yolo_mode: {})", node_id, agent_short_name, yolo_mode);
-
+        // TODO(acp-cut-over): port to AcpNodeProxy::request_collecting_text.
+        common::log_warn!(
+            "AgentChat agent session start skipped (ACP port pending) for {} on node {}",
+            agent_short_name, node_id
+        );
         Ok(())
     }
 
-    async fn close_agent_session(&self, node_id: &str, _agent_session_id: &str) -> Result<()> {
-        let command_id = Uuid::new_v4().to_string();
-        let message = NodeDirectMessage::Command(CommandRequest {
-            command_id,
-            client_id: String::new(),
-            node_id: node_id.to_string(),
-            command: NodeCommand::Session(SessionCommand::Close),
-        });
-
-        let queue_name = node_queue_name(node_id);
-        let _ = publish_json(&self.channel, &queue_name, &message).await;
-
+    async fn close_agent_session(
+        &self,
+        node_id: &str,
+        agent_session_id: &str,
+    ) -> Result<()> {
+        // TODO(acp-cut-over): port to AcpNodeProxy::request.
+        common::log_debug!(
+            "AgentChat close skipped (ACP port pending): node={} session={}",
+            node_id, agent_session_id
+        );
         Ok(())
     }
 
@@ -1102,457 +916,19 @@ impl AgentChatManager {
 
     async fn send_prompt_to_agent(
         &self,
-        client_id: &str,
+        _client_id: &str,
         node_id: &str,
-        _agent_session_id: &str,
-        prompt: &str,
+        agent_session_id: &str,
+        _prompt: &str,
     ) -> Result<()> {
-        let command_id = Uuid::new_v4().to_string();
-        let transaction_id = Uuid::new_v4().to_string();
-
-        let message = NodeDirectMessage::Command(CommandRequest {
-            command_id: command_id.clone(),
-            client_id: client_id.to_string(),
-            node_id: node_id.to_string(),
-            command: NodeCommand::Session(SessionCommand::Prompt {
-                text: prompt.to_string(),
-                transaction_id,
-            }),
-        });
-
-        let queue_name = node_queue_name(node_id);
-        publish_json(&self.channel, &queue_name, &message).await?;
-
-        self.pending_commands.add(
-            command_id,
-            client_id.to_string(),
-        ).await;
-
+        // TODO(acp-cut-over): port to AcpNodeProxy::request_collecting_text.
+        common::log_debug!(
+            "AgentChat prompt skipped (ACP port pending): node={} session={}",
+            node_id, agent_session_id
+        );
         Ok(())
     }
 
-    async fn process_agent_action(
-        &self,
-        client_id: &str,
-        session_id: &str,
-        agent_id: &str,
-        action: AgentChatAction,
-    ) -> Result<()> {
-        match action {
-            AgentChatAction::SendMessage { content } => {
-                self.handle_agent_message(client_id, session_id, agent_id, &content).await?;
-            }
-            AgentChatAction::JoinChannel { channel_name } => {
-                self.handle_agent_join_channel(client_id, session_id, agent_id, &channel_name).await?;
-            }
-            AgentChatAction::LeaveChannel => {
-                self.handle_agent_leave_channel(client_id, session_id, agent_id).await?;
-            }
-            AgentChatAction::SetTopic { topic } => {
-                self.handle_agent_set_topic(client_id, session_id, agent_id, &topic).await?;
-            }
-            AgentChatAction::ListChannels => {
-                self.handle_agent_list_channels(client_id, session_id, agent_id).await?;
-            }
-            AgentChatAction::DirectMessage { nickname, message } => {
-                self.handle_agent_dm(client_id, session_id, agent_id, &nickname, &message).await?;
-            }
-            AgentChatAction::Wait => {
-                self.handle_agent_wait(session_id, agent_id).await?;
-            }
-        }
-        Ok(())
-    }
-
-    async fn handle_agent_message(
-        &self,
-        client_id: &str,
-        session_id: &str,
-        agent_id: &str,
-        content: &str,
-    ) -> Result<()> {
-        let session_lock = self.active_session.read().await;
-        let session = session_lock.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
-
-        let agent = session.agents.get(agent_id)
-            .ok_or_else(|| anyhow::anyhow!("Agent not found"))?;
-
-        let channel_id = agent.current_channel_id.clone();
-        let nickname = agent.nickname.clone();
-
-        drop(session_lock);
-
-        if let Some(ref channel_id) = channel_id {
-            //
-            // Insert message into database.
-            //
-            let message_id = self.db.insert_agent_chat_message(
-                session_id,
-                Some(channel_id),
-                &nickname,
-                None,
-                "channel",
-                content,
-            ).await?;
-
-            let message_info = AgentChatMessageInfo {
-                id: message_id,
-                channel_id: Some(channel_id.clone()),
-                sender_nickname: nickname.clone(),
-                recipient_nickname: None,
-                message_type: AgentChatMessageType::Channel,
-                content: content.to_string(),
-                timestamp: Utc::now(),
-            };
-
-            //
-            // Notify client.
-            //
-            self.send_to_client(client_id, ClientDirectMessage::AgentChatMessage {
-                session_id: session_id.to_string(),
-                message: message_info,
-            }).await?;
-
-            //
-            // Queue for other agents in the channel.
-            //
-            self.queue_message_for_agents(session_id, Some(channel_id), None, &nickname, content).await?;
-        }
-
-        Ok(())
-    }
-
-    async fn handle_agent_join_channel(
-        &self,
-        client_id: &str,
-        session_id: &str,
-        agent_id: &str,
-        channel_name: &str,
-    ) -> Result<()> {
-        //
-        // Ensure channel exists.
-        //
-        let channel_id = self.join_channel(client_id, session_id, channel_name).await?;
-
-        //
-        // Update agent's channel.
-        //
-        let mut session_lock = self.active_session.write().await;
-        let session = session_lock.as_mut()
-            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
-
-        let old_channel_id = if let Some(agent) = session.agents.get_mut(agent_id) {
-            let old = agent.current_channel_id.clone();
-            agent.current_channel_id = Some(channel_id.clone());
-            old
-        } else {
-            return Err(anyhow::anyhow!("Agent not found"));
-        };
-
-        let agent = session.agents.get(agent_id).unwrap().clone();
-        drop(session_lock);
-
-        //
-        // Update database.
-        //
-        self.db.update_agent_chat_agent_channel(agent_id, Some(&channel_id)).await?;
-
-        //
-        // Notify client.
-        //
-        self.send_to_client(client_id, ClientDirectMessage::AgentChatAgentJoinedChannel {
-            session_id: session_id.to_string(),
-            agent_id: agent_id.to_string(),
-            channel_id: channel_id.clone(),
-        }).await?;
-
-        //
-        // Broadcast leave message to old channel.
-        //
-        if let Some(old_id) = old_channel_id {
-            if old_id != channel_id {
-                self.broadcast_system_message(
-                    client_id,
-                    session_id,
-                    Some(&old_id),
-                    &format!("* {} has left", agent.nickname),
-                ).await?;
-            }
-        }
-
-        //
-        // Broadcast join message to new channel.
-        //
-        self.broadcast_system_message(
-            client_id,
-            session_id,
-            Some(&channel_id),
-            &format!("* {} has joined", agent.nickname),
-        ).await?;
-
-        Ok(())
-    }
-
-    async fn handle_agent_leave_channel(
-        &self,
-        client_id: &str,
-        session_id: &str,
-        agent_id: &str,
-    ) -> Result<()> {
-        let mut session_lock = self.active_session.write().await;
-        let session = session_lock.as_mut()
-            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
-
-        let old_channel_id = if let Some(agent) = session.agents.get_mut(agent_id) {
-            let old = agent.current_channel_id.take();
-            old
-        } else {
-            return Err(anyhow::anyhow!("Agent not found"));
-        };
-
-        let agent = session.agents.get(agent_id).unwrap().clone();
-        drop(session_lock);
-
-        //
-        // Update database.
-        //
-        self.db.update_agent_chat_agent_channel(agent_id, None).await?;
-
-        //
-        // Notify client.
-        //
-        if let Some(ref channel_id) = old_channel_id {
-            self.send_to_client(client_id, ClientDirectMessage::AgentChatAgentLeftChannel {
-                session_id: session_id.to_string(),
-                agent_id: agent_id.to_string(),
-                channel_id: channel_id.clone(),
-            }).await?;
-
-            //
-            // Broadcast leave message.
-            //
-            self.broadcast_system_message(
-                client_id,
-                session_id,
-                Some(channel_id),
-                &format!("* {} has left", agent.nickname),
-            ).await?;
-        }
-
-        Ok(())
-    }
-
-    async fn handle_agent_set_topic(
-        &self,
-        client_id: &str,
-        session_id: &str,
-        agent_id: &str,
-        topic: &str,
-    ) -> Result<()> {
-        let session_lock = self.active_session.read().await;
-        let session = session_lock.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
-
-        let agent = session.agents.get(agent_id)
-            .ok_or_else(|| anyhow::anyhow!("Agent not found"))?;
-
-        let channel_id = agent.current_channel_id.clone()
-            .ok_or_else(|| anyhow::anyhow!("Agent not in a channel"))?;
-
-        let channel = session.channels.get(&channel_id)
-            .ok_or_else(|| anyhow::anyhow!("Channel not found"))?;
-
-        let nickname = agent.nickname.clone();
-        let channel_name = channel.name.clone();
-
-        drop(session_lock);
-
-        //
-        // Update database.
-        //
-        self.db.update_agent_chat_channel_topic(&channel_id, Some(topic)).await?;
-
-        //
-        // Update in-memory state.
-        //
-        let mut session_lock = self.active_session.write().await;
-        if let Some(session) = session_lock.as_mut() {
-            if let Some(channel) = session.channels.get_mut(&channel_id) {
-                channel.topic = Some(topic.to_string());
-            }
-        }
-        drop(session_lock);
-
-        //
-        // Notify client.
-        //
-        let member_count = self.db.count_agent_chat_channel_members(&channel_id).await?;
-        self.send_to_client(client_id, ClientDirectMessage::AgentChatChannelUpdated {
-            session_id: session_id.to_string(),
-            channel: AgentChatChannelInfo {
-                id: channel_id.clone(),
-                name: channel_name,
-                topic: Some(topic.to_string()),
-                member_count,
-                created_by: USER_NICKNAME.to_string(),
-            },
-        }).await?;
-
-        //
-        // Broadcast topic change.
-        //
-        self.broadcast_system_message(
-            client_id,
-            session_id,
-            Some(&channel_id),
-            &format!("* {} has changed the topic to: {}", nickname, topic),
-        ).await?;
-
-        Ok(())
-    }
-
-    async fn handle_agent_list_channels(
-        &self,
-        client_id: &str,
-        session_id: &str,
-        agent_id: &str,
-    ) -> Result<()> {
-        let session_lock = self.active_session.read().await;
-        let session = session_lock.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
-
-        let agent = session.agents.get(agent_id)
-            .ok_or_else(|| anyhow::anyhow!("Agent not found"))?;
-
-        let nickname = agent.nickname.clone();
-        let channels: Vec<_> = session.channels.values()
-            .map(|c| format!("{} - {}", c.name, c.topic.as_deref().unwrap_or("(no topic)")))
-            .collect();
-
-        drop(session_lock);
-
-        let list_msg = format!("Available channels:\n{}", channels.join("\n"));
-
-        //
-        // Send as a command result DM to the agent.
-        //
-        let message_id = self.db.insert_agent_chat_message(
-            session_id,
-            None,
-            "system",
-            Some(&nickname),
-            "command_result",
-            &list_msg,
-        ).await?;
-
-        self.send_to_client(client_id, ClientDirectMessage::AgentChatMessage {
-            session_id: session_id.to_string(),
-            message: AgentChatMessageInfo {
-                id: message_id,
-                channel_id: None,
-                sender_nickname: "system".to_string(),
-                recipient_nickname: Some(nickname.clone()),
-                message_type: AgentChatMessageType::CommandResult,
-                content: list_msg.clone(),
-                timestamp: Utc::now(),
-            },
-        }).await?;
-
-        //
-        // Queue for the agent.
-        //
-        self.queue_message_for_agents(session_id, None, Some(&nickname), "system", &list_msg).await?;
-
-        Ok(())
-    }
-
-    async fn handle_agent_dm(
-        &self,
-        client_id: &str,
-        session_id: &str,
-        agent_id: &str,
-        recipient_nickname: &str,
-        content: &str,
-    ) -> Result<()> {
-        let session_lock = self.active_session.read().await;
-        let session = session_lock.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
-
-        let agent = session.agents.get(agent_id)
-            .ok_or_else(|| anyhow::anyhow!("Agent not found"))?;
-
-        let sender_nickname = agent.nickname.clone();
-
-        //
-        // Verify recipient exists.
-        //
-        let recipient_exists = session.agents.values()
-            .any(|a| a.nickname == recipient_nickname) || recipient_nickname == USER_NICKNAME;
-
-        if !recipient_exists {
-            common::log_warn!("Agent {} tried to DM non-existent user {}", sender_nickname, recipient_nickname);
-            return Ok(());
-        }
-
-        drop(session_lock);
-
-        //
-        // Insert message.
-        //
-        let message_id = self.db.insert_agent_chat_message(
-            session_id,
-            None,
-            &sender_nickname,
-            Some(recipient_nickname),
-            "dm",
-            content,
-        ).await?;
-
-        let message_info = AgentChatMessageInfo {
-            id: message_id,
-            channel_id: None,
-            sender_nickname: sender_nickname.clone(),
-            recipient_nickname: Some(recipient_nickname.to_string()),
-            message_type: AgentChatMessageType::DirectMessage,
-            content: content.to_string(),
-            timestamp: Utc::now(),
-        };
-
-        //
-        // Notify client.
-        //
-        self.send_to_client(client_id, ClientDirectMessage::AgentChatMessage {
-            session_id: session_id.to_string(),
-            message: message_info,
-        }).await?;
-
-        //
-        // Queue for recipient if it's an agent.
-        //
-        if recipient_nickname != USER_NICKNAME {
-            self.queue_message_for_agents(session_id, None, Some(recipient_nickname), &sender_nickname, content).await?;
-        }
-
-        Ok(())
-    }
-
-    async fn handle_agent_wait(&self, session_id: &str, agent_id: &str) -> Result<()> {
-        let mut session_lock = self.active_session.write().await;
-        let session = session_lock.as_mut()
-            .ok_or_else(|| anyhow::anyhow!("No active AgentChat session"))?;
-
-        if session.id != session_id {
-            return Err(anyhow::anyhow!("Session ID mismatch"));
-        }
-
-        if let Some(agent) = session.agents.get_mut(agent_id) {
-            agent.waiting = true;
-            agent.status = AgentChatAgentStatus::Waiting;
-        }
-
-        Ok(())
-    }
 
     async fn broadcast_system_message(
         &self,
