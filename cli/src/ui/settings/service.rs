@@ -36,8 +36,8 @@ pub(super) fn render_service(f: &mut Frame, area: Rect, state: &SettingsState) {
         state.selected == 2,
     ));
     lines.push(setting_row(
-        "Hunting Query Row Limit",
-        &state.hunting_row_limit,
+        "Log Query Row Limit",
+        &state.log_query_row_limit,
         state.selected == 3,
         state.editing,
         &state.edit_buffer,

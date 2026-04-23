@@ -20,7 +20,7 @@ import { ChainExecutionFloating } from './ChainExecutionFloating';
 import { LibraryModal } from './LibraryModal';
 import { TriggersModal } from './TriggersModal';
 import { TrafficModal } from './TrafficModal';
-import { HuntingModal } from './HuntingModal';
+import { LogQueryModal } from './LogQueryModal';
 import { ToolkitModal } from './ToolkitModal';
 
 
@@ -43,7 +43,7 @@ export function ActivityBar() {
   const [showLibrary, setShowLibrary] = useState(false);
   const [showTriggers, setShowTriggers] = useState(false);
   const [showTraffic, setShowTraffic] = useState(false);
-  const [showHunting, setShowHunting] = useState(false);
+  const [showLogQuery, setShowLogQuery] = useState(false);
   const [showToolkit, setShowToolkit] = useState(false);
 
   const runningOps = state.operations.filter(op => op.status === 'Running');
@@ -290,10 +290,10 @@ export function ActivityBar() {
               <Shield size={10} /> Traffic
             </button>
             <button
-              onClick={() => setShowHunting(true)}
+              onClick={() => setShowLogQuery(true)}
               className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-muted hover:text-[var(--text-primary)] transition-colors"
             >
-              <Crosshair size={10} /> Hunting
+              <Crosshair size={10} /> Log Query
             </button>
             <div className="w-px h-3.5 bg-[var(--text-muted)]" />
             <button
@@ -337,8 +337,8 @@ export function ActivityBar() {
         <TrafficModal onClose={() => setShowTraffic(false)} />
       )}
 
-      {showHunting && (
-        <HuntingModal onClose={() => setShowHunting(false)} />
+      {showLogQuery && (
+        <LogQueryModal onClose={() => setShowLogQuery(false)} />
       )}
 
       {showToolkit && (

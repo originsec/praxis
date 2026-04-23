@@ -1903,9 +1903,9 @@ pub enum ClientSignalMessage {
     },
 
     //
-    // Hunting - KQL query interface.
+    // LogQuery - KQL query interface over captured logs.
     //
-    HuntingQuery {
+    LogQuery {
         client_id: String,
         query: String,
     },
@@ -2277,14 +2277,14 @@ pub enum ClientDirectMessage {
     },
 
     //
-    // Hunting responses.
+    // LogQuery responses.
     //
-    HuntingQueryResponse {
+    LogQueryResponse {
         columns: Vec<String>,
         rows: Vec<Vec<serde_json::Value>>,
         total_count: usize,
     },
-    HuntingQueryError {
+    LogQueryError {
         message: String,
     },
 

@@ -2,6 +2,7 @@ mod agent_scripts;
 mod forms;
 mod input;
 pub mod intercept;
+pub mod log_query;
 mod nodes;
 mod operations;
 mod orchestrator;
@@ -10,6 +11,7 @@ mod settings;
 
 pub use self::forms::*;
 pub use self::intercept::InterceptState;
+pub use self::log_query::LogQueryState;
 pub use self::orchestrator::*;
 pub use self::popups::*;
 pub use self::settings::*;
@@ -34,6 +36,7 @@ pub enum Window {
     Orchestrator,
     Nodes,
     Intercept,
+    LogQuery,
     Operations,
     Settings,
 }
@@ -43,6 +46,7 @@ pub struct App {
     pub orchestrator: OrchestratorState,
     pub nodes: NodesState,
     pub intercept: InterceptState,
+    pub log_query: LogQueryState,
     pub operations: OperationsState,
     pub settings: SettingsState,
     pub client: Arc<Client>,
@@ -303,6 +307,7 @@ impl App {
             orchestrator: OrchestratorState::default(),
             nodes: NodesState::default(),
             intercept: InterceptState::default(),
+            log_query: LogQueryState::default(),
             operations: OperationsState::default(),
             settings: SettingsState {
                 rabbitmq_url: rabbitmq_url.clone(),
@@ -723,6 +728,14 @@ impl App {
                     .insert(status.node_id.clone(), status);
                 self.active_window == Window::Intercept
             }
+            AppEvent::LogQueryResult(result) => {
+                self.log_query.is_running = false;
+                match result {
+                    Ok(results) => self.log_query.apply_results(results),
+                    Err(message) => self.log_query.apply_error(message),
+                }
+                self.active_window == Window::LogQuery
+            }
             AppEvent::Tick => {
                 //
                 // Periodically refresh operations data when viewing that window.
@@ -932,6 +945,10 @@ impl App {
                     self.enter_intercept().await;
                     return;
                 }
+                KeyCode::Char('g') => {
+                    self.active_window = Window::LogQuery;
+                    return;
+                }
                 KeyCode::Char('s') => {
                     self.active_window = Window::Settings;
                     self.load_settings().await;
@@ -945,6 +962,7 @@ impl App {
             Window::Orchestrator => self.handle_orchestrator_key(key).await,
             Window::Nodes => self.handle_nodes_key(key).await,
             Window::Intercept => self.handle_intercept_key(key).await,
+            Window::LogQuery => self.handle_log_query_key(key).await,
             Window::Operations => self.handle_operations_key(key).await,
             Window::Settings => self.handle_settings_key(key).await,
         }
@@ -1025,6 +1043,14 @@ impl App {
                     Window::Intercept => {
                         self.intercept.move_selection(-3);
                     }
+                    Window::LogQuery if self.log_query.row_expanded => {
+                        self.log_query.detail_scroll =
+                            self.log_query.detail_scroll.saturating_sub(3);
+                    }
+                    Window::LogQuery => {
+                        self.log_query.selected_row =
+                            self.log_query.selected_row.saturating_sub(3);
+                    }
                     _ => {}
                 }
                 return;
@@ -1051,6 +1077,15 @@ impl App {
                     }
                     Window::Intercept => {
                         self.intercept.move_selection(3);
+                    }
+                    Window::LogQuery if self.log_query.row_expanded => {
+                        self.log_query.detail_scroll =
+                            self.log_query.detail_scroll.saturating_add(3);
+                    }
+                    Window::LogQuery => {
+                        let n = self.log_query.visible_row_count();
+                        self.log_query.selected_row =
+                            (self.log_query.selected_row + 3).min(n.saturating_sub(1));
                     }
                     _ => {}
                 }

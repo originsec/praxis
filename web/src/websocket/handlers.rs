@@ -294,10 +294,10 @@ pub async fn handle_browser_message(
         }
 
         //
-        // Hunting messages.
+        // LogQuery messages.
         //
-        BrowserMessage::HuntingQuery { query } => {
-            state.rabbitmq.hunting_query(query).await?;
+        BrowserMessage::LogQuery { query } => {
+            state.rabbitmq.log_query(query).await?;
         }
 
         //

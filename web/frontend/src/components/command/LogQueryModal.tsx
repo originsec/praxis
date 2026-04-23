@@ -2,8 +2,8 @@ import { useState, useCallback, useRef } from 'react';
 import { Play, Loader2, AlertTriangle, BookOpen, ChevronRight, GripHorizontal } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { useApp } from '../../context/AppContext';
-import { KqlCodeEditor } from '../hunting/KqlCodeEditor';
-import { HuntingResultsTable } from '../hunting/HuntingResultsTable';
+import { KqlCodeEditor } from '../log-query/KqlCodeEditor';
+import { LogQueryResultsTable } from '../log-query/LogQueryResultsTable';
 
 const DEFAULT_EDITOR_HEIGHT = 160;
 const MIN_EDITOR_HEIGHT = 60;
@@ -243,21 +243,21 @@ function HorizontalResizeHandle({ onDrag }: { onDrag: (deltaY: number) => void }
   );
 }
 
-interface HuntingModalProps {
+interface LogQueryModalProps {
   onClose: () => void;
 }
 
-export function HuntingModal({ onClose }: HuntingModalProps) {
-  const { state, huntingQuery, huntingSetQuery } = useApp();
-  const query = state.hunting.query;
+export function LogQueryModal({ onClose }: LogQueryModalProps) {
+  const { state, logQueryRun, logQuerySetQuery } = useApp();
+  const query = state.logQuery.query;
   const [showReference, setShowReference] = useState(false);
   const [editorHeight, setEditorHeight] = useState(DEFAULT_EDITOR_HEIGHT);
 
   const handleRun = useCallback(() => {
-    if (query.trim() && !state.hunting.isRunning) {
-      huntingQuery(query.trim());
+    if (query.trim() && !state.logQuery.isRunning) {
+      logQueryRun(query.trim());
     }
-  }, [query, state.hunting.isRunning, huntingQuery]);
+  }, [query, state.logQuery.isRunning, logQueryRun]);
 
   const handleEditorResize = useCallback((deltaY: number) => {
     setEditorHeight(prev => Math.min(MAX_EDITOR_HEIGHT, Math.max(MIN_EDITOR_HEIGHT, prev + deltaY)));
@@ -267,11 +267,11 @@ export function HuntingModal({ onClose }: HuntingModalProps) {
     <Modal
       isOpen={true}
       onClose={onClose}
-      title="Hunting"
+      title="Log Query"
       size="full"
       noPadding
       resizable
-      storageKey="cmd-hunting"
+      storageKey="cmd-log-query"
       defaultWidth={Math.round(window.innerWidth * 0.9)}
       defaultHeight={Math.round(window.innerHeight * 0.8)}
     >
@@ -286,11 +286,11 @@ export function HuntingModal({ onClose }: HuntingModalProps) {
             <div className="flex items-center gap-2 px-3 py-1 border-b border-subtle bg-[var(--bg-secondary)]">
               <button
                 onClick={handleRun}
-                disabled={state.hunting.isRunning || !query.trim()}
+                disabled={state.logQuery.isRunning || !query.trim()}
                 className="flex items-center gap-1 px-2 py-0.5 text-[10px] bg-[var(--accent-success)]/20 text-[var(--accent-success)] border border-[var(--accent-success)]/30 hover:bg-[var(--accent-success)]/30 disabled:opacity-30 transition-colors"
                 title="Run query (Ctrl+Enter)"
               >
-                {state.hunting.isRunning
+                {state.logQuery.isRunning
                   ? <Loader2 size={10} className="animate-spin" />
                   : <Play size={10} />}
                 RUN
@@ -311,9 +311,9 @@ export function HuntingModal({ onClose }: HuntingModalProps) {
             </div>
             <KqlCodeEditor
               value={query}
-              onChange={huntingSetQuery}
+              onChange={logQuerySetQuery}
               onCtrlEnter={handleRun}
-              readOnly={state.hunting.isRunning}
+              readOnly={state.logQuery.isRunning}
             />
           </div>
 
@@ -336,10 +336,10 @@ export function HuntingModal({ onClose }: HuntingModalProps) {
         // Error.
         //
         */}
-        {state.hunting.error && (
+        {state.logQuery.error && (
           <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--accent-error)]/10 border-b border-[var(--accent-error)]/30 text-[10px] text-[var(--accent-error)] flex-shrink-0">
             <AlertTriangle size={10} />
-            {state.hunting.error}
+            {state.logQuery.error}
           </div>
         )}
 
@@ -349,10 +349,10 @@ export function HuntingModal({ onClose }: HuntingModalProps) {
         //
         */}
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-          <HuntingResultsTable
-            columns={state.hunting.columns}
-            rows={state.hunting.rows}
-            totalCount={state.hunting.totalCount}
+          <LogQueryResultsTable
+            columns={state.logQuery.columns}
+            rows={state.logQuery.rows}
+            totalCount={state.logQuery.totalCount}
           />
         </div>
       </div>

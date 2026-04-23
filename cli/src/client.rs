@@ -97,6 +97,19 @@ struct ClientState {
     intercept_matches_tx:
         Option<tokio::sync::mpsc::UnboundedSender<Vec<TrafficMatchWithDetails>>>,
     intercept_status_tx: Option<tokio::sync::mpsc::UnboundedSender<InterceptStatus>>,
+
+    //
+    // LogQuery: single in-flight request; the Err side carries the service
+    // error message so the TUI can show it verbatim.
+    //
+    pending_log_query: Option<oneshot::Sender<Result<LogQueryResults, String>>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct LogQueryResults {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<Value>>,
+    pub total_count: usize,
 }
 
 impl Client {
@@ -425,6 +438,24 @@ impl Client {
             ClientDirectMessage::InterceptStatusUpdate(status) => {
                 if let Some(ref tx) = state.intercept_status_tx {
                     let _ = tx.send(status);
+                }
+            }
+
+            //
+            // LogQuery responses. Only one query is in flight at a time.
+            //
+            ClientDirectMessage::LogQueryResponse { columns, rows, total_count } => {
+                if let Some(tx) = state.pending_log_query.take() {
+                    let _ = tx.send(Ok(LogQueryResults {
+                        columns,
+                        rows,
+                        total_count,
+                    }));
+                }
+            }
+            ClientDirectMessage::LogQueryError { message } => {
+                if let Some(tx) = state.pending_log_query.take() {
+                    let _ = tx.send(Err(message));
                 }
             }
 
@@ -1463,5 +1494,38 @@ impl Client {
             node_id,
         })
         .await
+    }
+
+    //
+    // LogQuery: run a KQL query on the service and wait for the result.
+    // The Ok side is a materialized result set; the Err side carries either
+    // the service-provided error message or a transport failure.
+    //
+
+    pub async fn run_log_query(&self, query: String) -> Result<LogQueryResults, String> {
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut state = self.state.lock().await;
+            state.pending_log_query = Some(tx);
+        }
+        if let Err(e) = self
+            .publish_signal(ClientSignalMessage::LogQuery {
+                client_id: self.client_id.clone(),
+                query,
+            })
+            .await
+        {
+            self.state.lock().await.pending_log_query = None;
+            return Err(format!("Failed to send query: {}", e));
+        }
+
+        match tokio::time::timeout(self.timeout, rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err("Log query response channel closed".to_string()),
+            Err(_) => {
+                self.state.lock().await.pending_log_query = None;
+                Err("Timeout waiting for log query response".to_string())
+            }
+        }
     }
 }

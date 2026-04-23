@@ -38,7 +38,7 @@ pub struct SettingsState {
     pub mcp_enabled: bool,
     pub mcp_port: String,
     pub logging_enabled: bool,
-    pub hunting_row_limit: String,
+    pub log_query_row_limit: String,
     pub prompt_timeout_secs: String,
 
     //
@@ -111,7 +111,7 @@ impl Default for SettingsState {
             mcp_enabled: true,
             mcp_port: "8585".to_string(),
             logging_enabled: false,
-            hunting_row_limit: "10000000".to_string(),
+            log_query_row_limit: "10000000".to_string(),
             prompt_timeout_secs: "600".to_string(),
             claude_ccrv1_enabled: false,
             claude_ccrv1_port: "8586".to_string(),
@@ -140,7 +140,7 @@ impl App {
             "mcp_server_enabled".to_string(),
             "mcp_server_port".to_string(),
             "application_logs_enabled".to_string(),
-            "hunting_query_row_limit".to_string(),
+            "log_query_row_limit".to_string(),
             "prompt_timeout_secs".to_string(),
             "claude_ccrv1_enabled".to_string(),
             "claude_ccrv1_port".to_string(),
@@ -192,8 +192,8 @@ impl App {
                     .get("application_logs_enabled")
                     .map(|v| v == "true" || v == "1" || v == "yes")
                     .unwrap_or(false);
-                s.hunting_row_limit = config
-                    .get("hunting_query_row_limit")
+                s.log_query_row_limit = config
+                    .get("log_query_row_limit")
                     .cloned()
                     .unwrap_or("10000000".to_string());
                 s.prompt_timeout_secs = config
@@ -252,7 +252,7 @@ impl App {
                 // Scripts list + "Add new" + "Reset defaults"
                 self.settings.agent_scripts.len() + 2
             }
-            SettingsTab::Service => 9, // mcp_enabled, mcp_port, logging, hunting_row_limit, prompt_timeout_secs, ccrv1_enabled, ccrv1_port, ccrv2_enabled, ccrv2_port
+            SettingsTab::Service => 9, // mcp_enabled, mcp_port, logging, log_query_row_limit, prompt_timeout_secs, ccrv1_enabled, ccrv1_port, ccrv2_enabled, ccrv2_port
             SettingsTab::About => 0,
         }
     }
@@ -267,7 +267,7 @@ impl App {
             }
             SettingsTab::Agents => false,
             SettingsTab::Service => {
-                // 1 = MCP port, 3 = hunting row limit, 4 = prompt timeout,
+                // 1 = MCP port, 3 = log query row limit, 4 = prompt timeout,
                 // 6 = CCRv1 port, 8 = CCRv2 port
                 sel == 1 || sel == 3 || sel == 4 || sel == 6 || sel == 8
             }
@@ -351,7 +351,7 @@ impl App {
             SettingsTab::Agents => String::new(),
             SettingsTab::Service => match sel {
                 1 => self.settings.mcp_port.clone(),
-                3 => self.settings.hunting_row_limit.clone(),
+                3 => self.settings.log_query_row_limit.clone(),
                 4 => self.settings.prompt_timeout_secs.clone(),
                 6 => self.settings.claude_ccrv1_port.clone(),
                 8 => self.settings.claude_ccrv2_port.clone(),
@@ -637,9 +637,9 @@ impl App {
                         self.save_setting("application_logs_enabled", val).await;
                     }
                     3 => {
-                        // Edit hunting row limit.
+                        // Edit log query row limit.
                         self.settings.editing = true;
-                        self.settings.edit_buffer = self.settings.hunting_row_limit.clone();
+                        self.settings.edit_buffer = self.settings.log_query_row_limit.clone();
                     }
                     4 => {
                         // Edit prompt timeout.
@@ -707,8 +707,8 @@ impl App {
                     self.save_setting("mcp_server_port", &val).await;
                 }
                 3 => {
-                    self.settings.hunting_row_limit = val.clone();
-                    self.save_setting("hunting_query_row_limit", &val).await;
+                    self.settings.log_query_row_limit = val.clone();
+                    self.save_setting("log_query_row_limit", &val).await;
                 }
                 4 => {
                     self.settings.prompt_timeout_secs = val.clone();
@@ -957,7 +957,7 @@ impl App {
                         // Row 0: "MCP Server" header, 1: blank
                         // Row 2: MCP Server toggle (0), 3: MCP Port (1)
                         // Row 4: blank, 5: "Logging" header, 6: blank
-                        // Row 7: Event Logging (2), 8: Hunting limit (3), 9: Prompt timeout (4)
+                        // Row 7: Event Logging (2), 8: Log Query limit (3), 9: Prompt timeout (4)
                         // Row 10: blank, 11: "Claude Bridge" header, 12: description, 13: blank
                         // Row 14: CCRv1 enabled (5), 15: CCRv1 port (6)
                         // Row 16: CCRv2 enabled (7), 17: CCRv2 port (8)
