@@ -19,7 +19,7 @@ anyhow = "1.0"
 
 [dependencies]
 common = { package = "praxis_common", path = "../common" }
-agent-client-protocol = { version = "0.10.4", features = ["unstable_session_close", "unstable_session_model", "unstable_session_usage"] }
+agent-client-protocol = { version = "0.11", features = ["unstable_session_close", "unstable_session_model", "unstable_session_usage"] }
 async-trait = "0.1"
 tokio-util = { version = "0.7", features = ["compat"] }
 tokio = { version = "1", features = ["full"] }

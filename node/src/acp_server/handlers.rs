@@ -3,7 +3,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use agent_client_protocol as acp;
-use acp::{
+use acp::schema::{
     CancelNotification, CloseSessionRequest, CloseSessionResponse, ContentBlock, ContentChunk,
     Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
     ListSessionsResponse, NewSessionRequest, NewSessionResponse, PromptRequest, ProtocolVersion,
@@ -48,7 +48,7 @@ pub async fn handle_initialize(
         "connectors": connectors,
         "nodeId": server.node_id(),
     });
-    let meta: acp::Meta = serde_json::from_value(meta_value)
+    let meta: acp::schema::Meta = serde_json::from_value(meta_value)
         .unwrap_or_else(|_| serde_json::from_value(json!({})).unwrap());
 
     Ok(InitializeResponse::new(ProtocolVersion::LATEST)
@@ -234,7 +234,7 @@ pub async fn handle_session_prompt(
                 } else {
                     StopReason::EndTurn
                 };
-                let resp = acp::PromptResponse::new(stop);
+                let resp = acp::schema::PromptResponse::new(stop);
                 server.send_response(
                     client_id,
                     id,

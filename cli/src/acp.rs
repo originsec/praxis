@@ -1,9 +1,15 @@
 use agent_client_protocol as acp;
-use acp::Agent as _;
-use crate::client::Client;
+use acp::schema::{
+    CancelNotification, CloseSessionRequest, CloseSessionResponse, ContentBlock, Implementation,
+    InitializeRequest, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+    LoadSessionResponse, Meta, NewSessionRequest, NewSessionResponse, PlanEntryStatus,
+    PromptRequest, PromptResponse, ProtocolVersion, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SessionId, SessionNotification,
+    SessionUpdate, TextContent, ToolCallContent, ToolCallStatus,
+};
+use crate::client::Client as PraxisRpcClient;
 use crate::event::AppEvent;
 use common::{OrchestratorPlan, PlanStep, PlanStepStatus};
-use std::rc::Rc;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
@@ -72,30 +78,30 @@ pub enum AcpNotification {
 }
 
 //
-// Commands sent from the Send-safe handle to the LocalSet-bound bridge.
+// Commands sent from the Send-safe handle to the bridge task.
 //
 
 enum BridgeCommand {
     ListSessions {
-        reply: oneshot::Sender<acp::Result<acp::ListSessionsResponse>>,
+        reply: oneshot::Sender<acp::Result<ListSessionsResponse>>,
     },
     CreateSession {
         cwd: String,
         model_ref: Option<String>,
-        reply: oneshot::Sender<acp::Result<acp::NewSessionResponse>>,
+        reply: oneshot::Sender<acp::Result<NewSessionResponse>>,
     },
     LoadSession {
         session_id: String,
-        reply: oneshot::Sender<acp::Result<acp::LoadSessionResponse>>,
+        reply: oneshot::Sender<acp::Result<LoadSessionResponse>>,
     },
     CloseSession {
         session_id: String,
-        reply: oneshot::Sender<acp::Result<acp::CloseSessionResponse>>,
+        reply: oneshot::Sender<acp::Result<CloseSessionResponse>>,
     },
     Prompt {
         session_id: String,
         text: String,
-        reply: oneshot::Sender<acp::Result<acp::PromptResponse>>,
+        reply: oneshot::Sender<acp::Result<PromptResponse>>,
     },
     Cancel {
         session_id: String,
@@ -103,8 +109,10 @@ enum BridgeCommand {
 }
 
 //
-// Send-safe handle for the TUI to interact with the typed ACP connection.
-// The ClientSideConnection runs on a dedicated thread with a LocalSet.
+// Send-safe handle for the TUI to interact with the ACP connection. The
+// connection itself runs inside a tokio::spawn'd task driven by
+// `Client.builder().connect_with(...)`; commands are dispatched via the
+// cmd_tx channel below.
 //
 
 #[derive(Clone)]
@@ -181,196 +189,172 @@ impl AcpBridgeHandle {
     }
 
     //
-    // Start the bridge. Spawns a dedicated thread with a LocalSet that hosts
-    // the !Send ClientSideConnection. Incoming RabbitMQ messages are pumped
-    // through a DuplexStream to the connection; outgoing messages are read
-    // from the connection and sent back via RabbitMQ.
+    // Start the bridge. Spawns the ACP connection driver on the ambient
+    // tokio runtime. The driver pumps NDJSON between a DuplexStream pair
+    // and RabbitMQ; the main_fn given to `connect_with` processes bridge
+    // commands and forwards session notifications to the TUI.
     //
 
     pub fn start(
-        client: Arc<Client>,
+        client: Arc<PraxisRpcClient>,
         event_tx: mpsc::UnboundedSender<AppEvent>,
     ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let acp_rx = client.subscribe_acp_events();
 
-        std::thread::Builder::new()
-            .name("cli-acp-bridge".into())
-            .spawn(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("Failed to create ACP bridge runtime");
-
-                let local = tokio::task::LocalSet::new();
-                local.block_on(&rt, run_bridge(client, event_tx, acp_rx, cmd_rx));
-            })
-            .expect("Failed to spawn ACP bridge thread");
+        tokio::spawn(async move {
+            if let Err(e) = run_bridge(client, event_tx.clone(), acp_rx, cmd_rx).await {
+                tracing::debug!("ACP bridge ended: {}", e);
+                let _ = event_tx.send(AppEvent::AcpNotification(AcpNotification::Error {
+                    request_id: None,
+                    message: format!("ACP bridge ended: {}", e),
+                }));
+            }
+        });
 
         Self { cmd_tx }
     }
 }
 
 //
-// Client trait implementation. Receives agent-to-client notifications and
-// requests and converts them to typed AcpNotification events.
+// Convert a SessionNotification into the TUI's typed AcpNotification enum.
+// Returns None for updates that the TUI doesn't render.
 //
 
-struct CliAcpHandler {
-    event_tx: mpsc::UnboundedSender<AppEvent>,
-}
-
-#[async_trait::async_trait(?Send)]
-impl acp::Client for CliAcpHandler {
-    async fn session_notification(
-        &self,
-        args: acp::SessionNotification,
-    ) -> acp::Result<()> {
-        let sid = args.session_id.to_string();
-
-        let notif = match args.update {
-            acp::SessionUpdate::AgentMessageChunk(chunk) => {
-                if let acp::ContentBlock::Text(tc) = &chunk.content {
-                    AcpNotification::TextContent {
-                        session_id: sid,
-                        text: tc.text.clone(),
-                    }
-                } else {
-                    return Ok(());
-                }
-            }
-
-            acp::SessionUpdate::UserMessageChunk(chunk) => {
-                if let acp::ContentBlock::Text(tc) = &chunk.content {
-                    AcpNotification::UserPrompt {
-                        session_id: sid,
-                        text: tc.text.clone(),
-                    }
-                } else {
-                    return Ok(());
-                }
-            }
-
-            acp::SessionUpdate::ToolCall(tc) => {
-                AcpNotification::ToolCall {
+fn session_update_to_event(notif: SessionNotification) -> Option<AcpNotification> {
+    let sid = notif.session_id.to_string();
+    match notif.update {
+        SessionUpdate::AgentMessageChunk(chunk) => {
+            if let ContentBlock::Text(tc) = &chunk.content {
+                Some(AcpNotification::TextContent {
                     session_id: sid,
-                    name: tc.title.clone(),
-                    input: Some(tc.tool_call_id.to_string()),
-                }
+                    text: tc.text.clone(),
+                })
+            } else {
+                None
             }
+        }
 
-            acp::SessionUpdate::ToolCallUpdate(update) => {
-                let completed = matches!(
-                    update.fields.status,
-                    Some(acp::ToolCallStatus::Completed) | Some(acp::ToolCallStatus::Failed)
-                );
-                if !completed {
-                    return Ok(());
-                }
-                let output = update.fields.content.as_ref()
-                    .map(|contents| {
-                        contents.iter().filter_map(|c| {
-                            if let acp::ToolCallContent::Content(content) = c {
-                                if let acp::ContentBlock::Text(t) = &content.content {
+        SessionUpdate::UserMessageChunk(chunk) => {
+            if let ContentBlock::Text(tc) = &chunk.content {
+                Some(AcpNotification::UserPrompt {
+                    session_id: sid,
+                    text: tc.text.clone(),
+                })
+            } else {
+                None
+            }
+        }
+
+        SessionUpdate::ToolCall(tc) => Some(AcpNotification::ToolCall {
+            session_id: sid,
+            name: tc.title.clone(),
+            input: Some(tc.tool_call_id.to_string()),
+        }),
+
+        SessionUpdate::ToolCallUpdate(update) => {
+            let completed = matches!(
+                update.fields.status,
+                Some(ToolCallStatus::Completed) | Some(ToolCallStatus::Failed)
+            );
+            if !completed {
+                return None;
+            }
+            let output = update
+                .fields
+                .content
+                .as_ref()
+                .map(|contents| {
+                    contents
+                        .iter()
+                        .filter_map(|c| {
+                            if let ToolCallContent::Content(content) = c {
+                                if let ContentBlock::Text(t) = &content.content {
                                     Some(t.text.as_str())
-                                } else { None }
-                            } else { None }
-                        }).collect::<Vec<_>>().join("\n")
-                    })
-                    .unwrap_or_default();
-                let is_error = matches!(
-                    update.fields.status,
-                    Some(acp::ToolCallStatus::Failed)
-                );
-                AcpNotification::ToolResult {
-                    session_id: sid,
-                    name: update.tool_call_id.to_string(),
-                    success: !is_error,
-                    result: output,
-                }
-            }
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .unwrap_or_default();
+            let is_error = matches!(update.fields.status, Some(ToolCallStatus::Failed));
+            Some(AcpNotification::ToolResult {
+                session_id: sid,
+                name: update.tool_call_id.to_string(),
+                success: !is_error,
+                result: output,
+            })
+        }
 
-            acp::SessionUpdate::Plan(plan) => {
-                let steps: Vec<PlanStep> = plan.entries.iter().map(|e| {
-                    PlanStep {
-                        description: e.content.clone(),
-                        status: match e.status {
-                            acp::PlanEntryStatus::Completed => PlanStepStatus::Done,
-                            acp::PlanEntryStatus::InProgress => PlanStepStatus::InProgress,
-                            _ => PlanStepStatus::NotStarted,
-                        },
-                    }
-                }).collect();
-                AcpNotification::PlanUpdate {
-                    session_id: sid,
-                    plan: OrchestratorPlan {
-                        steps,
-                        summary: None,
-                        current_step_description: None,
+        SessionUpdate::Plan(plan) => {
+            let steps: Vec<PlanStep> = plan
+                .entries
+                .iter()
+                .map(|e| PlanStep {
+                    description: e.content.clone(),
+                    status: match e.status {
+                        PlanEntryStatus::Completed => PlanStepStatus::Done,
+                        PlanEntryStatus::InProgress => PlanStepStatus::InProgress,
+                        _ => PlanStepStatus::NotStarted,
                     },
-                }
-            }
+                })
+                .collect();
+            Some(AcpNotification::PlanUpdate {
+                session_id: sid,
+                plan: OrchestratorPlan {
+                    steps,
+                    summary: None,
+                    current_step_description: None,
+                },
+            })
+        }
 
-            acp::SessionUpdate::SessionInfoUpdate(_) => {
-                return Ok(());
-            }
+        SessionUpdate::SessionInfoUpdate(_) => None,
 
-            acp::SessionUpdate::UsageUpdate(usage) => {
-                let meta_val = usage.meta
-                    .as_ref()
-                    .map(|m| serde_json::to_value(m).unwrap_or_default())
-                    .unwrap_or_default();
-                let prompt_tokens = meta_val.get("promptTokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-                let completion_tokens = meta_val.get("completionTokens")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as u32;
-                AcpNotification::TokenUsage {
-                    session_id: sid,
-                    prompt_tokens,
-                    completion_tokens,
-                    total_tokens: usage.used as u32,
-                }
-            }
+        SessionUpdate::UsageUpdate(usage) => {
+            let meta_val = usage
+                .meta
+                .as_ref()
+                .map(|m| serde_json::to_value(m).unwrap_or_default())
+                .unwrap_or_default();
+            let prompt_tokens = meta_val
+                .get("promptTokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            let completion_tokens = meta_val
+                .get("completionTokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+            Some(AcpNotification::TokenUsage {
+                session_id: sid,
+                prompt_tokens,
+                completion_tokens,
+                total_tokens: usage.used as u32,
+            })
+        }
 
-            _ => return Ok(()),
-        };
-
-        self.send(notif)
-    }
-
-    async fn request_permission(
-        &self,
-        _args: acp::RequestPermissionRequest,
-    ) -> acp::Result<acp::RequestPermissionResponse> {
-        //
-        // TODO: Forward to TUI for user decision.
-        //
-        Ok(acp::RequestPermissionResponse::new(
-            acp::RequestPermissionOutcome::Cancelled,
-        ))
-    }
-}
-
-impl CliAcpHandler {
-    fn send(&self, notif: AcpNotification) -> acp::Result<()> {
-        let _ = self.event_tx.send(AppEvent::AcpNotification(notif));
-        Ok(())
+        _ => None,
     }
 }
 
 //
-// Bridge loop running on a dedicated thread with LocalSet. Hosts the
-// ClientSideConnection and pumps NDJSON between it and RabbitMQ.
+// Bridge driver: sets up a DuplexStream pair bridging the ACP connection to
+// RabbitMQ, builds an ACP Client with notification/request handlers, and
+// hands it a main_fn that initializes the connection and processes bridge
+// commands.
 //
 
 async fn run_bridge(
-    client: Arc<Client>,
+    client: Arc<PraxisRpcClient>,
     event_tx: mpsc::UnboundedSender<AppEvent>,
     mut acp_rx: mpsc::UnboundedReceiver<String>,
-    mut cmd_rx: mpsc::UnboundedReceiver<BridgeCommand>,
-) {
+    cmd_rx: mpsc::UnboundedReceiver<BridgeCommand>,
+) -> anyhow::Result<()> {
     //
     // DuplexStream pair: the connection reads from conn_read (data from
     // service) and writes to conn_write (data to service).
@@ -379,47 +363,30 @@ async fn run_bridge(
     let (conn_write, mut bridge_read) = tokio::io::duplex(64 * 1024);
     let (mut bridge_write, conn_read) = tokio::io::duplex(64 * 1024);
 
-    let handler = CliAcpHandler {
-        event_tx: event_tx.clone(),
-    };
-
-    let (conn, io_task) = acp::ClientSideConnection::new(
-        handler,
-        conn_write.compat_write(),
-        conn_read.compat(),
-        |fut| { tokio::task::spawn_local(fut); },
-    );
-
-    let conn = Rc::new(conn);
-
     //
-    // Drive the connection's I/O.
+    // Pump: RabbitMQ incoming -> connection's read side.
     //
 
-    tokio::task::spawn_local(async move {
-        if let Err(e) = io_task.await {
-            tracing::debug!("ACP connection I/O ended: {}", e);
-        }
-    });
-
-    //
-    // Pump: RabbitMQ incoming → connection's read side.
-    //
-
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         while let Some(line) = acp_rx.recv().await {
-            if bridge_write.write_all(line.as_bytes()).await.is_err() { break; }
-            if bridge_write.write_all(b"\n").await.is_err() { break; }
-            if bridge_write.flush().await.is_err() { break; }
+            if bridge_write.write_all(line.as_bytes()).await.is_err() {
+                break;
+            }
+            if bridge_write.write_all(b"\n").await.is_err() {
+                break;
+            }
+            if bridge_write.flush().await.is_err() {
+                break;
+            }
         }
     });
 
     //
-    // Pump: connection's write side → RabbitMQ outgoing.
+    // Pump: connection's write side -> RabbitMQ outgoing.
     //
 
     let client_out = client.clone();
-    tokio::task::spawn_local(async move {
+    tokio::spawn(async move {
         let mut reader = tokio::io::BufReader::new(&mut bridge_read);
         let mut line = String::new();
         loop {
@@ -437,142 +404,214 @@ async fn run_bridge(
         }
     });
 
-    //
-    // Initialize the connection.
-    //
+    let transport = acp::ByteStreams::new(conn_write.compat_write(), conn_read.compat());
 
-    match conn.initialize(
-        acp::InitializeRequest::new(acp::ProtocolVersion::V1)
-            .client_info(acp::Implementation::new("praxis", env!("CARGO_PKG_VERSION")))
-    ).await {
-        Ok(_) => {
-            let _ = event_tx.send(AppEvent::AcpNotification(AcpNotification::InitializeResult));
-        }
-        Err(e) => {
-            let _ = event_tx.send(AppEvent::AcpNotification(AcpNotification::Error {
-                request_id: None,
-                message: format!("ACP initialize failed: {}", e),
-            }));
-            return;
-        }
-    }
+    let event_tx_notif = event_tx.clone();
 
     //
-    // Process commands from the handle.
+    // `connect_with` drives the ACP IO loop. Handlers for inbound
+    // server->client messages are registered on the builder; outbound
+    // requests are issued from inside main_fn via `cx.send_request(...)`.
     //
 
-    while let Some(cmd) = cmd_rx.recv().await {
-        let conn = conn.clone();
-        let event_tx = event_tx.clone();
+    let cmd_rx = std::sync::Mutex::new(Some(cmd_rx));
 
-        match cmd {
-            BridgeCommand::ListSessions { reply } => {
-                tokio::task::spawn_local(async move {
-                    let result = conn.list_sessions(acp::ListSessionsRequest::new()).await;
-                    if let Ok(ref resp) = result {
-                        let sessions: Vec<(String, String)> = resp.sessions.iter()
-                            .map(|s| {
-                                let sid = s.session_id.to_string();
-                                let name = s.title.clone().unwrap_or_else(|| sid.clone());
-                                (sid, name)
-                            })
-                            .collect();
-                        let _ = event_tx.send(AppEvent::AcpNotification(
-                            AcpNotification::SessionList { sessions },
-                        ));
+    acp::Client
+        .builder()
+        .name("praxis-cli")
+        .on_receive_notification(
+            async move |notif: SessionNotification, _cx| {
+                if let Some(event) = session_update_to_event(notif) {
+                    let _ = event_tx_notif.send(AppEvent::AcpNotification(event));
+                }
+                Ok(())
+            },
+            acp::on_receive_notification!(),
+        )
+        .on_receive_request(
+            async move |_req: RequestPermissionRequest, responder, _cx| {
+                //
+                // TODO: forward to TUI for interactive approval. For now,
+                // auto-cancel to preserve the 0.10 behaviour.
+                //
+                responder.respond(RequestPermissionResponse::new(
+                    RequestPermissionOutcome::Cancelled,
+                ))
+            },
+            acp::on_receive_request!(),
+        )
+        .connect_with(transport, async move |cx| {
+            //
+            // Initialize the connection.
+            //
+
+            match cx
+                .send_request(
+                    InitializeRequest::new(ProtocolVersion::V1).client_info(
+                        Implementation::new("praxis", env!("CARGO_PKG_VERSION")),
+                    ),
+                )
+                .block_task()
+                .await
+            {
+                Ok(_) => {
+                    let _ = event_tx.send(AppEvent::AcpNotification(
+                        AcpNotification::InitializeResult,
+                    ));
+                }
+                Err(e) => {
+                    let _ = event_tx.send(AppEvent::AcpNotification(AcpNotification::Error {
+                        request_id: None,
+                        message: format!("ACP initialize failed: {}", e),
+                    }));
+                    return Ok(());
+                }
+            }
+
+            //
+            // Process commands from the handle. Each command is spawned on
+            // the connection's task scope so the main loop can keep
+            // draining cmd_rx while ACP requests are in flight.
+            //
+
+            let mut cmd_rx = cmd_rx.lock().unwrap().take().ok_or_else(|| {
+                acp::util::internal_error("ACP bridge cmd_rx missing")
+            })?;
+
+            while let Some(cmd) = cmd_rx.recv().await {
+                let event_tx = event_tx.clone();
+                let cx_clone = cx.clone();
+                let _ = cx.spawn(async move {
+                    match cmd {
+                        BridgeCommand::ListSessions { reply } => {
+                            let result = cx_clone
+                                .send_request(ListSessionsRequest::new())
+                                .block_task()
+                                .await;
+                            if let Ok(resp) = &result {
+                                let sessions: Vec<(String, String)> = resp
+                                    .sessions
+                                    .iter()
+                                    .map(|s| {
+                                        let sid = s.session_id.to_string();
+                                        let name =
+                                            s.title.clone().unwrap_or_else(|| sid.clone());
+                                        (sid, name)
+                                    })
+                                    .collect();
+                                let _ = event_tx.send(AppEvent::AcpNotification(
+                                    AcpNotification::SessionList { sessions },
+                                ));
+                            }
+                            let _ = reply.send(result);
+                        }
+
+                        BridgeCommand::CreateSession {
+                            cwd,
+                            model_ref,
+                            reply,
+                        } => {
+                            let mut req = NewSessionRequest::new(cwd);
+                            if let Some(mr) = &model_ref {
+                                req = req.meta(
+                                    serde_json::from_value::<Meta>(
+                                        serde_json::json!({ "modelRef": mr }),
+                                    )
+                                    .unwrap(),
+                                );
+                            }
+
+                            let result = cx_clone.send_request(req).block_task().await;
+                            if let Ok(resp) = &result {
+                                let (provider, model) = resp
+                                    .models
+                                    .as_ref()
+                                    .map(|m| {
+                                        let id = m.current_model_id.to_string();
+                                        let (p, m) = id.split_once('/').unwrap_or(("unknown", &id));
+                                        (Some(p.to_string()), Some(m.to_string()))
+                                    })
+                                    .unwrap_or((None, None));
+
+                                let _ = event_tx.send(AppEvent::AcpNotification(
+                                    AcpNotification::SessionCreated {
+                                        session_id: resp.session_id.to_string(),
+                                        provider,
+                                        model,
+                                    },
+                                ));
+                            }
+                            let _ = reply.send(result);
+                        }
+
+                        BridgeCommand::LoadSession { session_id, reply } => {
+                            let result = cx_clone
+                                .send_request(LoadSessionRequest::new(
+                                    SessionId::from(session_id.clone()),
+                                    ".",
+                                ))
+                                .block_task()
+                                .await;
+                            if result.is_ok() {
+                                let _ = event_tx.send(AppEvent::AcpNotification(
+                                    AcpNotification::SessionLoaded { session_id },
+                                ));
+                            }
+                            let _ = reply.send(result);
+                        }
+
+                        BridgeCommand::CloseSession { session_id, reply } => {
+                            let result = cx_clone
+                                .send_request(CloseSessionRequest::new(SessionId::from(
+                                    session_id.clone(),
+                                )))
+                                .block_task()
+                                .await;
+                            if result.is_ok() {
+                                let _ = event_tx.send(AppEvent::AcpNotification(
+                                    AcpNotification::SessionClosed { session_id },
+                                ));
+                            }
+                            let _ = reply.send(result);
+                        }
+
+                        BridgeCommand::Prompt {
+                            session_id,
+                            text,
+                            reply,
+                        } => {
+                            let result = cx_clone
+                                .send_request(PromptRequest::new(
+                                    SessionId::from(session_id),
+                                    vec![ContentBlock::Text(TextContent::new(text))],
+                                ))
+                                .block_task()
+                                .await;
+                            if result.is_ok() {
+                                let _ = event_tx.send(AppEvent::AcpNotification(
+                                    AcpNotification::PromptComplete {
+                                        request_id: String::new(),
+                                    },
+                                ));
+                            }
+                            let _ = reply.send(result);
+                        }
+
+                        BridgeCommand::Cancel { session_id } => {
+                            let _ = cx_clone
+                                .send_notification(CancelNotification::new(SessionId::from(
+                                    session_id,
+                                )));
+                        }
                     }
-                    let _ = reply.send(result);
+                    Ok(())
                 });
             }
 
-            BridgeCommand::CreateSession { cwd, model_ref, reply } => {
-                tokio::task::spawn_local(async move {
-                    let mut req = acp::NewSessionRequest::new(cwd);
-                    if let Some(mr) = &model_ref {
-                        req = req.meta(serde_json::from_value::<acp::Meta>(
-                            serde_json::json!({ "modelRef": mr })
-                        ).unwrap());
-                    }
+            Ok(())
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("ACP connection ended: {}", e))?;
 
-                    let result = conn.new_session(req).await;
-                    if let Ok(ref resp) = result {
-                        //
-                        // Extract provider/model from the models field. The
-                        // current_model_id is "provider/model".
-                        //
-
-                        let (provider, model) = resp.models.as_ref()
-                            .map(|m| {
-                                let id = m.current_model_id.to_string();
-                                let (p, m) = id.split_once('/')
-                                    .unwrap_or(("unknown", &id));
-                                (Some(p.to_string()), Some(m.to_string()))
-                            })
-                            .unwrap_or((None, None));
-
-                        let _ = event_tx.send(AppEvent::AcpNotification(
-                            AcpNotification::SessionCreated {
-                                session_id: resp.session_id.to_string(),
-                                provider,
-                                model,
-                            },
-                        ));
-                    }
-                    let _ = reply.send(result);
-                });
-            }
-
-            BridgeCommand::LoadSession { session_id, reply } => {
-                tokio::task::spawn_local(async move {
-                    let result = conn.load_session(
-                        acp::LoadSessionRequest::new(session_id.clone(), ".")
-                    ).await;
-                    if result.is_ok() {
-                        let _ = event_tx.send(AppEvent::AcpNotification(
-                            AcpNotification::SessionLoaded { session_id },
-                        ));
-                    }
-                    let _ = reply.send(result);
-                });
-            }
-
-            BridgeCommand::CloseSession { session_id, reply } => {
-                tokio::task::spawn_local(async move {
-                    let result = conn.close_session(
-                        acp::CloseSessionRequest::new(acp::SessionId::from(session_id.clone()))
-                    ).await;
-                    if result.is_ok() {
-                        let _ = event_tx.send(AppEvent::AcpNotification(
-                            AcpNotification::SessionClosed { session_id },
-                        ));
-                    }
-                    let _ = reply.send(result);
-                });
-            }
-
-            BridgeCommand::Prompt { session_id, text, reply } => {
-                tokio::task::spawn_local(async move {
-                    let result = conn.prompt(acp::PromptRequest::new(
-                        acp::SessionId::from(session_id),
-                        vec![acp::ContentBlock::Text(acp::TextContent::new(text))],
-                    )).await;
-                    if result.is_ok() {
-                        let _ = event_tx.send(AppEvent::AcpNotification(
-                            AcpNotification::PromptComplete { request_id: String::new() },
-                        ));
-                    }
-                    let _ = reply.send(result);
-                });
-            }
-
-            BridgeCommand::Cancel { session_id } => {
-                let conn = conn.clone();
-                tokio::task::spawn_local(async move {
-                    let _ = conn.cancel(acp::CancelNotification::new(
-                        acp::SessionId::from(session_id),
-                    )).await;
-                });
-            }
-        }
-    }
+    Ok(())
 }

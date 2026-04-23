@@ -41,4 +41,4 @@ base64 = "0.22"
 nom = "8"
 similar = "3"
 tokio-tungstenite = { version = "0.29", features = ["native-tls"] }
-agent-client-protocol = { version = "0.10.4", features = ["unstable_session_close", "unstable_session_model", "unstable_session_usage"] }
+agent-client-protocol = { version = "0.11", features = ["unstable_session_close", "unstable_session_model", "unstable_session_usage"] }
