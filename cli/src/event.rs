@@ -63,6 +63,7 @@ pub enum AppEvent {
     //
     LogQueryResult(Result<crate::client::LogQueryResults, String>),
     Tick,
+    AnimationTick,
 }
 
 pub struct NodeSessionEntry {
@@ -243,14 +244,31 @@ impl EventHandler {
         });
 
         //
-        // Animation / housekeeping tick.
+        // Housekeeping tick (operations refresh, spinner animation).
         //
-        let tx_tick = tx;
+        let tx_tick = tx.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(125));
             loop {
                 interval.tick().await;
                 if tx_tick.send(AppEvent::Tick).is_err() {
+                    break;
+                }
+            }
+        });
+
+        //
+        // Animation tick — drives the typewriter reveal for streaming
+        // assistant text. Kept separate from the housekeeping tick so
+        // reveal feels smooth (~33 fps) without pulling the rest of the
+        // app into a high-frequency refresh.
+        //
+        let tx_anim = tx;
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(30));
+            loop {
+                interval.tick().await;
+                if tx_anim.send(AppEvent::AnimationTick).is_err() {
                     break;
                 }
             }

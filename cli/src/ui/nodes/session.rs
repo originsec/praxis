@@ -118,8 +118,27 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
         //
 
         if !session.streaming_content.is_empty() {
-            let md_lines = crate::markdown::render(session.streaming_content.trim(), "");
-            lines.extend(md_lines);
+            //
+            // Typewriter reveal while waiting. After completion, the
+            // finalized text is pushed as a ChatMessage and rendered
+            // in full above.
+            //
+            let total_chars = session.streaming_content.chars().count();
+            let sliced_owned: String;
+            let display: &str = if session.revealed_chars < total_chars {
+                sliced_owned = session
+                    .streaming_content
+                    .chars()
+                    .take(session.revealed_chars)
+                    .collect();
+                &sliced_owned
+            } else {
+                &session.streaming_content
+            };
+            if !display.trim().is_empty() {
+                let md_lines = crate::markdown::render(display.trim(), "");
+                lines.extend(md_lines);
+            }
         }
 
         //
