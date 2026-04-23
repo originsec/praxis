@@ -44,8 +44,8 @@ pub struct ReconRunParams {
 pub struct SessionPromptParams {
     pub node: String,
 
-    #[schemars(description = "Session ID returned by session_create")]
-    pub session_id: Option<String>,
+    #[schemars(description = "Session ID returned by session_create. Required.")]
+    pub session_id: String,
 
     pub prompt: String,
 }
@@ -54,8 +54,8 @@ pub struct SessionPromptParams {
 pub struct SessionCloseParams {
     pub node: String,
 
-    #[schemars(description = "Session ID returned by session_create")]
-    pub session_id: Option<String>,
+    #[schemars(description = "Session ID returned by session_create. Required.")]
+    pub session_id: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
