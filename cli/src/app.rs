@@ -20,7 +20,7 @@ use crate::acp::{AcpBridgeHandle, AcpNotification};
 use crate::client::Client;
 use crate::event::AppEvent;
 use chrono::Utc;
-use common::{NodeState, OrchestratorPlan, SystemState};
+use common::{ChainTriggerInfo, InterceptRule, NodeState, OrchestratorPlan, SystemState};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
@@ -56,6 +56,7 @@ pub struct App {
     pub popup: Option<Popup>,
     pub new_op_form: Option<NewOpForm>,
     pub run_options: Option<RunOptions>,
+    pub trigger_form: Option<TriggerForm>,
     pub confirm: Option<ConfirmAction>,
     pub terminal_width: u16,
     pub event_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::event::AppEvent>>,
@@ -236,8 +237,9 @@ impl NodesState {
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum OpsTab {
-    Library,
     Executions,
+    Library,
+    Triggers,
 }
 
 pub struct OperationsState {
@@ -246,8 +248,11 @@ pub struct OperationsState {
     pub chain_definitions: Vec<common::ChainDefinitionInfo>,
     pub operations: Vec<common::SemanticOpUpdate>,
     pub chain_executions: Vec<common::ChainExecutionUpdate>,
+    pub triggers: Vec<ChainTriggerInfo>,
+    pub intercept_rules: Vec<InterceptRule>,
     pub library_selected: usize,
     pub exec_selected: usize,
+    pub trigger_selected: usize,
     pub detail_scroll: u16,
     pub detail_focus: bool,
     pub collapsed: CollapsedSections,
@@ -272,13 +277,16 @@ impl CollapsedSections {
 impl Default for OperationsState {
     fn default() -> Self {
         Self {
-            tab: OpsTab::Library,
+            tab: OpsTab::Executions,
             op_definitions: Vec::new(),
             chain_definitions: Vec::new(),
             operations: Vec::new(),
             chain_executions: Vec::new(),
+            triggers: Vec::new(),
+            intercept_rules: Vec::new(),
             library_selected: 0,
             exec_selected: 0,
+            trigger_selected: 0,
             detail_scroll: 0,
             detail_focus: false,
             collapsed: CollapsedSections {
@@ -321,6 +329,7 @@ impl App {
             popup: None,
             new_op_form: None,
             run_options: None,
+            trigger_form: None,
             confirm: None,
             terminal_width: 0,
             event_tx: Some(event_tx),
@@ -487,6 +496,22 @@ impl App {
                     self.operations.exec_selected = 0;
                 } else if self.operations.exec_selected >= total {
                     self.operations.exec_selected = total - 1;
+                }
+
+                true
+            }
+            AppEvent::TriggersRefreshed {
+                triggers,
+                intercept_rules,
+            } => {
+                self.operations.triggers = triggers;
+                self.operations.intercept_rules = intercept_rules;
+
+                let total = self.operations.triggers.len();
+                if total == 0 {
+                    self.operations.trigger_selected = 0;
+                } else if self.operations.trigger_selected >= total {
+                    self.operations.trigger_selected = total - 1;
                 }
 
                 true
@@ -868,6 +893,14 @@ impl App {
         //
         if self.new_op_form.is_some() {
             self.handle_new_op_form_key(key).await;
+            return;
+        }
+
+        //
+        // Trigger create/edit form intercepts all keys.
+        //
+        if self.trigger_form.is_some() {
+            self.handle_trigger_form_key(key).await;
             return;
         }
 
@@ -1320,6 +1353,62 @@ impl App {
                     if let Some(idx) = field {
                         form.focused_field = idx;
                         Self::toggle_new_op_field(form);
+                    }
+                }
+            }
+            return;
+        }
+
+        //
+        // TriggerForm popup mouse handling.
+        //
+        if self.trigger_form.is_some() {
+            if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+                let chunks = Layout::vertical([
+                    Constraint::Length(2),
+                    Constraint::Min(1),
+                    Constraint::Length(1),
+                ])
+                .split(content_area);
+                let form_inner = Rect {
+                    x: chunks[1].x + 2,
+                    width: chunks[1].width.saturating_sub(4),
+                    ..chunks[1]
+                };
+                let hints_area = chunks[2];
+
+                //
+                // Hint bar clicks: " ^s save  esc cancel ".
+                //
+                if mouse.row == hints_area.y {
+                    let rel = mouse.column.saturating_sub(hints_area.x) as usize;
+                    if rel < 12 {
+                        self.submit_trigger_form().await;
+                    } else {
+                        self.trigger_form = None;
+                    }
+                    return;
+                }
+
+                //
+                // Body clicks: map visual row to a form section + cursor
+                // using the layout the renderer produces in
+                // ui::popup::render_trigger_form.
+                //
+                let rel_row = mouse.row.saturating_sub(form_inner.y) as i32;
+                if rel_row < 0 {
+                    return;
+                }
+                let visual = rel_row as usize;
+                if let Some(form) = self.trigger_form.as_mut() {
+                    let sections = crate::ui::popup::trigger_form_section_rows(form);
+                    for (row, section, cursor) in sections {
+                        if row == visual {
+                            form.focused_section = section;
+                            form.cursor = cursor;
+                            Self::toggle_trigger_form_selection(form);
+                            return;
+                        }
                     }
                 }
             }

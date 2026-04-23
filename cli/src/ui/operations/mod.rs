@@ -1,5 +1,6 @@
 mod executions;
 mod library;
+mod triggers;
 
 use crate::app::{OperationsState, OpsTab};
 use crate::ui::theme::{ACCENT, DIM, MUTED};
@@ -28,6 +29,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &OperationsState) {
     match state.tab {
         OpsTab::Library => library::render_library(f, chunks[2], state),
         OpsTab::Executions => executions::render_executions(f, chunks[2], state),
+        OpsTab::Triggers => triggers::render_triggers(f, chunks[2], state),
     }
 
     render_hints(f, chunks[3], state);
@@ -41,6 +43,7 @@ fn render_tabs(f: &mut Frame, area: Rect, state: &OperationsState) {
             .filter(|c| !c.disabled)
             .count();
     let exec_count = state.operations.len() + state.chain_executions.len();
+    let trig_count = state.triggers.len();
 
     let tab_style = |active: bool| -> Style {
         if active {
@@ -54,11 +57,17 @@ fn render_tabs(f: &mut Frame, area: Rect, state: &OperationsState) {
 
     let tabs = Line::from(vec![
         Span::raw("  "),
+        Span::styled(
+            " Executions ",
+            tab_style(state.tab == OpsTab::Executions),
+        ),
+        Span::styled(format!("{} ", exec_count), count_style),
+        Span::styled("  \u{2502}  ", Style::default().fg(DIM)),
         Span::styled(" Library ", tab_style(state.tab == OpsTab::Library)),
         Span::styled(format!("{} ", lib_count), count_style),
         Span::styled("  \u{2502}  ", Style::default().fg(DIM)),
-        Span::styled(" Executions ", tab_style(state.tab == OpsTab::Executions)),
-        Span::styled(format!("{} ", exec_count), count_style),
+        Span::styled(" Triggers ", tab_style(state.tab == OpsTab::Triggers)),
+        Span::styled(format!("{} ", trig_count), count_style),
         Span::raw("      "),
         Span::styled("tab", Style::default().fg(DIM)),
         Span::styled(" switch", Style::default().fg(MUTED)),
@@ -88,6 +97,25 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
                 spans.push(Span::styled("  esc clear", Style::default().fg(DIM)));
             } else {
                 spans.push(Span::styled("type to filter", Style::default().fg(DIM)));
+            }
+            Line::from(spans)
+        }
+        OpsTab::Triggers => {
+            let mut spans = vec![
+                Span::raw(" "),
+                Span::styled("enter", Style::default().fg(ACCENT)),
+                Span::styled(" toggle  ", Style::default().fg(MUTED)),
+                Span::styled("^n", Style::default().fg(ACCENT)),
+                Span::styled(" new  ", Style::default().fg(MUTED)),
+                Span::styled("^e", Style::default().fg(ACCENT)),
+                Span::styled(" edit  ", Style::default().fg(MUTED)),
+                Span::styled("^d", Style::default().fg(ACCENT)),
+                Span::styled(" delete  ", Style::default().fg(MUTED)),
+            ];
+            if !state.filter.is_empty() {
+                spans.push(Span::styled("filter: ", Style::default().fg(DIM)));
+                spans.push(Span::styled(&state.filter, Style::default().fg(ACCENT)));
+                spans.push(Span::styled("  esc clear", Style::default().fg(DIM)));
             }
             Line::from(spans)
         }
