@@ -1096,16 +1096,9 @@ impl App {
                 //
                 // Pane border drag start — must run before list/detail
                 // hit-tests so a click on the border column isn't eaten
-                // by the neighbouring pane. Borders::ALL puts the border
-                // on the last column of list_area, so any column within
-                // ±1 of that line counts as a drag handle.
+                // by the neighbouring pane.
                 //
-                let border_x = list_area.x.saturating_add(list_area.width).saturating_sub(1);
-                if mouse.column >= border_x.saturating_sub(1)
-                    && mouse.column <= border_x + 1
-                    && mouse.row >= list_area.y
-                    && mouse.row < list_area.y + list_area.height
-                {
+                if crate::ui::common::hit_vertical_border(list_area, mouse.column, mouse.row) {
                     self.nodes.dragging = true;
                     return;
                 }
@@ -1204,19 +1197,12 @@ impl App {
 
             }
             MouseEventKind::Drag(MouseButton::Left) => {
-                //
-                // Map the mouse column to a split percentage relative to
-                // the list pane's origin. Using list_area.x (not 0) makes
-                // the drag track the actual content-area column, which
-                // matters when the overall frame has left padding.
-                //
                 if self.nodes.dragging {
-                    let w = (list_area.width + detail_area.width) as i32;
-                    if w > 0 {
-                        let rel = (mouse.column as i32 - list_area.x as i32).clamp(0, w);
-                        let pct = ((rel * 100) / w) as u16;
-                        self.nodes.split_percent = pct.clamp(20, 80);
-                    }
+                    self.nodes.split_percent = crate::ui::common::drag_split_percent(
+                        list_area.x,
+                        list_area.width + detail_area.width,
+                        mouse.column,
+                    );
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {

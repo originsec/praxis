@@ -1048,5 +1048,5 @@ fn session_notification_to_json(notif: &SessionNotification) -> Result<String> {
 }
 
 fn truncate_id(id: &str) -> &str {
-    id.get(..8.min(id.len())).unwrap_or(id)
+    common::short_id(id)
 }

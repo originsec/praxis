@@ -267,7 +267,7 @@ impl AcpNodeProxy {
                 Err(anyhow!(
                     "ACP request {} on node {} dropped before response",
                     method,
-                    &node_id[..8.min(node_id.len())]
+                    common::short_id(&node_id)
                 ))
             }
             Err(_) => {
@@ -277,7 +277,7 @@ impl AcpNodeProxy {
                 Err(anyhow!(
                     "ACP request {} on node {} timed out after {:?}",
                     method,
-                    &node_id[..8.min(node_id.len())],
+                    common::short_id(&node_id),
                     timeout
                 ))
             }
@@ -311,8 +311,8 @@ impl AcpNodeProxy {
         common::log_debug!(
             "AcpNodeProxy: forwarding {} from {} to node {}",
             method,
-            &client_id[..8.min(client_id.len())],
-            &node_id[..8.min(node_id.len())],
+            common::short_id(client_id),
+            common::short_id(&node_id),
         );
 
         //

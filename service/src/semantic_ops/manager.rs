@@ -10,7 +10,6 @@ use uuid::Uuid;
 use crate::acp_node_proxy::AcpNodeProxy;
 use crate::config::ServiceConfig;
 use crate::database::{Database, OperationRecord};
-use crate::semantic_ops::executor::{execute_agent_mode, execute_one_shot};
 
 //
 // A running operation with cancellation support. Keyed by operation_id in
@@ -386,7 +385,7 @@ impl SemanticOpsManager {
                 &format!(
                     "Setting up ACP session for connector '{}' on node {}...\n",
                     agent_short_name,
-                    &node_id[..8.min(node_id.len())]
+                    common::short_id(&node_id)
                 ),
             )
             .await;
@@ -429,39 +428,22 @@ impl SemanticOpsManager {
             .append_output(&operation_id, "Session created.\n")
             .await;
 
-        let result = if spec.mode == "agent" {
-            execute_agent_mode(
-                &operation_id,
-                &node_id,
-                &agent_short_name,
-                &spec,
-                working_dir.clone(),
-                prompt_timeout_secs,
-                Some(session_id.clone()),
-                &config,
-                &rabbitmq_channel,
-                &acp_node_proxy,
-                database.clone(),
-                cancel_rx,
-            )
-            .await
-            .map(|(summary, result, _semantic_success)| (summary, result))
-        } else {
-            execute_one_shot(
-                &operation_id,
-                &node_id,
-                &agent_short_name,
-                &spec,
-                working_dir.clone(),
-                prompt_timeout_secs,
-                Some(session_id.clone()),
-                &rabbitmq_channel,
-                &acp_node_proxy,
-                database.clone(),
-                cancel_rx,
-            )
-            .await
-        };
+        let result = crate::semantic_ops::execute_by_mode(
+            &operation_id,
+            &node_id,
+            &agent_short_name,
+            &spec,
+            working_dir.clone(),
+            prompt_timeout_secs,
+            Some(session_id.clone()),
+            &config,
+            &rabbitmq_channel,
+            &acp_node_proxy,
+            database.clone(),
+            cancel_rx,
+        )
+        .await
+        .map(|(summary, result, _semantic_success)| (summary, result));
 
         //
         // Always close the session we created.
@@ -489,7 +471,7 @@ impl SemanticOpsManager {
             }
             Err(e) => {
                 let error_msg = e.to_string();
-                if error_msg.contains("cancelled") {
+                if crate::semantic_ops::is_cancelled(&e) {
                     (SemanticOpStatus::Cancelled, None, Some(error_msg))
                 } else {
                     (SemanticOpStatus::Failed, None, Some(error_msg))

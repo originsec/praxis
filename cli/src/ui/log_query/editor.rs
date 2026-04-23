@@ -11,7 +11,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use crate::app::App;
+use crate::app::LogQueryState;
 use crate::app::log_query::LogQueryFocus;
 use crate::ui::common::{focused_titled_panel, spinner_char};
 use crate::ui::theme::{ACCENT, DIM, INPUT_BORDER, JSON_NUMBER, JSON_STRING, KEYWORD, MUTED, TEXT};
@@ -45,13 +45,13 @@ const KEYWORDS: &[&str] = &[
     "!has",
 ];
 
-pub fn render(f: &mut Frame, area: Rect, app: &App) {
-    let focused = app.log_query.focus == LogQueryFocus::Editor;
+pub fn render(f: &mut Frame, area: Rect, state: &LogQueryState) {
+    let focused = state.focus == LogQueryFocus::Editor;
 
     //
     // Title shows a spinner when a query is in flight.
     //
-    let spinner = if app.log_query.is_running {
+    let spinner = if state.is_running {
         format!(" {} ", spinner_char())
     } else {
         String::new()
@@ -71,11 +71,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         height: inner.height,
     };
 
-    render_body(f, padded, app, focused);
+    render_body(f, padded, state, focused);
 }
 
-fn render_body(f: &mut Frame, area: Rect, app: &App, focused: bool) {
-    let editor = &app.log_query.editor;
+fn render_body(f: &mut Frame, area: Rect, state: &LogQueryState, focused: bool) {
+    let editor = &state.editor;
     let cursor_row = editor.cursor_row;
     let cursor_col = editor.cursor_col;
 

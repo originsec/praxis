@@ -66,7 +66,7 @@ fn render_tabs(f: &mut Frame, area: Rect, app: &App) {
     };
     let count = app.intercept.buffer.len();
     let rules_count = app.intercept.rules.len();
-    let matches_count = app.intercept.filtered_matches().len();
+    let matches_count = app.intercept.filtered_matches_len();
 
     let mut spans = vec![
         Span::raw("  "),

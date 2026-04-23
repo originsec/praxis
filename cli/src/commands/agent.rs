@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use common::AgentFileType as NodeFileType;
+use common::acp_ext::{EXT_PRAXIS_GREP_FILES, EXT_PRAXIS_READ_FILE, EXT_PRAXIS_WRITE_FILE};
 use serde_json::json;
 
 use crate::client::Client;
@@ -311,7 +312,7 @@ async fn read_file(
         params["line_end"] = json!(v);
     }
 
-    let result = client.acp_request(&node_id, "_praxis/read_file", params).await?;
+    let result = client.acp_request(&node_id, EXT_PRAXIS_READ_FILE, params).await?;
 
     if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
         return Err(anyhow!(err.to_string()));
@@ -352,7 +353,7 @@ async fn write_file(
         .ok_or_else(|| anyhow!("No node found matching '{}'", node_prefix))?;
 
     let result = client
-        .acp_request(&node_id, "_praxis/write_file", json!({
+        .acp_request(&node_id, EXT_PRAXIS_WRITE_FILE, json!({
             "file_type": file_type,
             "path": path,
             "contents": contents,
@@ -388,7 +389,7 @@ async fn grep_file(
     let agent_short_name = selected_agent_short_name(&state, &node_id)?;
 
     let result = client
-        .acp_request(&node_id, "_praxis/grep_files", json!({
+        .acp_request(&node_id, EXT_PRAXIS_GREP_FILES, json!({
             "agent_short_name": agent_short_name,
             "file_type": file_type,
             "paths": vec![path.to_string()],

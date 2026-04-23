@@ -450,7 +450,7 @@ impl App {
                             role: ChatRole::System,
                             text: format!(
                                 "Resumed from node (session {}…)",
-                                &entry.session_id[..8.min(entry.session_id.len())]
+                                common::short_id(&entry.session_id)
                             ),
                         }],
                         input: String::new(),
@@ -541,7 +541,7 @@ impl App {
                                 role: ChatRole::System,
                                 text: format!(
                                     "Session created ({})",
-                                    &session_id[..8.min(session_id.len())]
+                                    common::short_id(&session_id)
                                 ),
                             });
                         }

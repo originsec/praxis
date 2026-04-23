@@ -16,14 +16,14 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use crate::app::App;
+use crate::app::LogQueryState;
 use crate::app::log_query::LogQueryFocus;
 use crate::ui::theme::{ACCENT, DIM, MUTED, STATUS_FAIL};
 
 const EDITOR_HEIGHT: u16 = 9;
 
-pub fn render(f: &mut Frame, area: Rect, app: &App) {
-    let show_error = app.log_query.last_error.is_some();
+pub fn render(f: &mut Frame, area: Rect, state: &LogQueryState) {
+    let show_error = state.last_error.is_some();
 
     let chunks = Layout::vertical([
         Constraint::Length(EDITOR_HEIGHT),              // editor
@@ -33,34 +33,34 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     ])
     .split(area);
 
-    editor::render(f, chunks[0], app);
+    editor::render(f, chunks[0], state);
 
     if show_error {
-        render_error(f, chunks[1], app);
+        render_error(f, chunks[1], state);
     }
 
-    results::render(f, chunks[2], app);
+    results::render(f, chunks[2], state);
 
-    render_hints(f, chunks[3], app);
+    render_hints(f, chunks[3], state);
 
     //
     // Autocomplete popup must render last so it layers on top of the
     // editor.
     //
-    if app.log_query.autocomplete_open {
-        autocomplete::render(f, chunks[0], app);
+    if state.autocomplete_open {
+        autocomplete::render(f, chunks[0], state);
     }
 
     //
     // Schema popup overlays the whole window when open.
     //
-    if app.log_query.schema_open {
-        schema::render_popup(f, area, app);
+    if state.schema_open {
+        schema::render_popup(f, area, state);
     }
 }
 
-fn render_error(f: &mut Frame, area: Rect, app: &App) {
-    let Some((msg, _)) = &app.log_query.last_error else {
+fn render_error(f: &mut Frame, area: Rect, state: &LogQueryState) {
+    let Some((msg, _)) = &state.last_error else {
         return;
     };
     let line = Line::from(vec![
@@ -70,14 +70,14 @@ fn render_error(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(Paragraph::new(line), area);
 }
 
-fn render_hints(f: &mut Frame, area: Rect, app: &App) {
+fn render_hints(f: &mut Frame, area: Rect, state: &LogQueryState) {
     let sep = Span::styled("  ", Style::default().fg(DIM));
 
     let mut spans: Vec<Span> = Vec::new();
 
-    match app.log_query.focus {
+    match state.focus {
         LogQueryFocus::Editor => {
-            if app.log_query.autocomplete_open {
+            if state.autocomplete_open {
                 spans.extend([
                     hint_key("↑↓"),
                     hint_txt(" select"),
@@ -132,7 +132,7 @@ fn render_hints(f: &mut Frame, area: Rect, app: &App) {
             spans.extend([
                 hint_txt("filter: "),
                 Span::styled(
-                    app.log_query.search_input.clone(),
+                    state.search_input.clone(),
                     Style::default().fg(ACCENT),
                 ),
                 Span::styled("▏", Style::default().fg(ACCENT)),
@@ -146,7 +146,7 @@ fn render_hints(f: &mut Frame, area: Rect, app: &App) {
         }
     }
 
-    if app.log_query.is_running {
+    if state.is_running {
         spans.push(sep.clone());
         spans.push(Span::styled(
             format!(" {} running…", crate::ui::common::spinner_char()),

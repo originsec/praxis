@@ -55,7 +55,7 @@ impl AcpServer {
     ) {
         common::log_info!(
             "ACP recv from {}: {}",
-            &client_id[..8.min(client_id.len())],
+            common::short_id(client_id),
             common::truncate_str(json_rpc_str, 600),
         );
 
@@ -69,7 +69,7 @@ impl AcpServer {
             Err(e) => {
                 common::log_warn!(
                     "ACP: invalid JSON-RPC from {}: {}",
-                    &client_id[..8.min(client_id.len())],
+                    common::short_id(client_id),
                     e
                 );
                 return;
@@ -104,7 +104,7 @@ impl AcpServer {
             Err(e) => {
                 common::log_warn!(
                     "AcpNodeProxy intercept failed for {}: {}",
-                    &client_id[..8.min(client_id.len())],
+                    common::short_id(client_id),
                     e
                 );
             }
@@ -155,7 +155,7 @@ impl AcpServer {
                     common::log_warn!(
                         "ACP: {} from {}: {}",
                         if code == -32601 { "unknown method" } else { "invalid params" },
-                        &client_id[..8.min(client_id.len())],
+                        common::short_id(client_id),
                         msg,
                     );
                     if let Some(id) = id {

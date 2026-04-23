@@ -342,5 +342,5 @@ fn json_value<T: serde::Serialize>(v: &T) -> Value {
 }
 
 fn truncate_id(id: &str) -> &str {
-    id.get(..8.min(id.len())).unwrap_or(id)
+    common::short_id(id)
 }

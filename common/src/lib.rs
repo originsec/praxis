@@ -1,6 +1,8 @@
 pub mod messaging;
+pub mod acp_ext;
 pub mod ai;
 pub mod config;
+pub mod id;
 pub mod logging;
 pub mod mcp;
 
@@ -22,6 +24,8 @@ pub use ai::{
 };
 
 pub use config::{FileConfig, find_config_file, load_from_paths};
+
+pub use id::short_id;
 
 pub use mcp::{McpClient, PraxisServer, run_stdio_server};
 

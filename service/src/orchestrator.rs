@@ -268,7 +268,7 @@ impl OrchestratorManager {
 
                 common::log_info!(
                     "Orchestrator ready for client {} session {} with provider {:?}, model {}, max_tokens {}, tools {}",
-                    &client_id_owned[..8.min(client_id_owned.len())], &sid[..8.min(sid.len())],
+                    common::short_id(&client_id_owned), common::short_id(&sid),
                     provider, model, max_tokens, tools.len()
                 );
 
@@ -288,7 +288,7 @@ impl OrchestratorManager {
 
                     common::log_info!(
                         "Orchestrator received prompt for {}: {}...",
-                        &client_id_owned[..8.min(client_id_owned.len())],
+                        common::short_id(&client_id_owned),
                         common::truncate_str(&prompt, 50)
                     );
 

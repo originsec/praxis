@@ -13,5 +13,5 @@ pub fn print_header(title: &str) {
 }
 
 pub fn format_short_id(id: &str) -> String {
-    id[..8.min(id.len())].to_string()
+    common::short_id(id).to_string()
 }

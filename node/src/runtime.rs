@@ -236,7 +236,7 @@ async fn listen_to_queues(
                     {
                         common::log_info!(
                             "Received semantic parser response {} success={}",
-                            &response.request_id[..8.min(response.request_id.len())],
+                            common::short_id(&response.request_id),
                             response.success
                         );
                         semantic_tracker.complete(response);
@@ -684,7 +684,7 @@ async fn listen_to_queues(
                                 NodeDirectMessage::SemanticParserResponse(response) => {
                                     common::log_warn!(
                                         "Received semantic parser response {} on main queue (expected on semantic queue)",
-                                        &response.request_id[..8.min(response.request_id.len())]
+                                        common::short_id(&response.request_id)
                                     );
                                     semantic_parser_tracker.complete(response);
                                 }

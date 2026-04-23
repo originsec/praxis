@@ -1108,12 +1108,16 @@ impl App {
                 // by the neighbouring pane.
                 //
                 {
-                    let border_x = list_area.x.saturating_add(list_area.width);
-                    if mouse.column >= border_x.saturating_sub(1)
-                        && mouse.column <= border_x + 1
-                        && mouse.row >= main_area.y
-                        && mouse.row < main_area.y + main_area.height
-                    {
+                    let border_rect = Rect {
+                        height: main_area.height,
+                        y: main_area.y,
+                        ..list_area
+                    };
+                    if crate::ui::common::hit_vertical_border(
+                        border_rect,
+                        mouse.column,
+                        mouse.row,
+                    ) {
                         self.operations.dragging = true;
                         return;
                     }
@@ -1204,10 +1208,12 @@ impl App {
 
             }
             MouseEventKind::Drag(MouseButton::Left) => {
-                let h = self.terminal_width;
-                if self.operations.dragging && h > 0 {
-                    let pct = (mouse.column as u32 * 100 / h as u32) as u16;
-                    self.operations.split_percent = pct.clamp(20, 80);
+                if self.operations.dragging {
+                    self.operations.split_percent = crate::ui::common::drag_split_percent(
+                        0,
+                        self.terminal_width,
+                        mouse.column,
+                    );
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {

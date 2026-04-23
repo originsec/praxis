@@ -17,7 +17,7 @@ use crate::acp_node_proxy::AcpNodeProxy;
 use crate::config::ServiceConfig;
 use crate::database::Database;
 use crate::database::{ChainDefinition, ChainElement, ChainExecutionRecord, OperationRecord, SessionGroup};
-use crate::semantic_ops::{close_session, create_session, execute_agent_mode, execute_one_shot};
+use crate::semantic_ops::{close_session, create_session, execute_one_shot};
 use crate::tools::ToolkitManager;
 
 use super::graph::ExecutionGraph;
@@ -206,7 +206,7 @@ impl ChainExecutor {
                         common::log_info!("Chain execution {} completed successfully", &exec_id[..8]);
                     }
                     Err(ref e) => {
-                        if e.to_string().contains("cancelled") {
+                        if crate::semantic_ops::is_cancelled(e) {
                             state.mark_cancelled();
                             common::log_info!("Chain execution {} was cancelled", &exec_id[..8]);
                         } else {
@@ -537,10 +537,10 @@ impl ChainExecutor {
             let element_session_group_id = graph.get_session_group_id(&element_id);
             common::log_info!(
                 "Chain element {}: session_group_id={:?}, current_session_group_id={:?}, active_session={:?}",
-                &element_id[..8.min(element_id.len())],
+                common::short_id(&element_id),
                 element_session_group_id,
                 current_session_group_id,
-                active_session.as_ref().map(|s| &s[..8.min(s.len())])
+                active_session.as_ref().map(|s| common::short_id(s))
             );
 
             if element_session_group_id != current_session_group_id {
@@ -759,7 +759,7 @@ impl ChainExecutor {
                 ChainElement::Payload { .. } => "Payload",
                 ChainElement::Termination { .. } => "Termination",
             };
-            let eid_short = &element_id[..8.min(element_id.len())];
+            let eid_short = common::short_id(&element_id);
 
             {
                 let mut s = state.write().unwrap();
@@ -1125,45 +1125,26 @@ impl ChainExecutor {
 
         let (_op_cancel_tx, op_cancel_rx) = oneshot::channel::<()>();
 
+        let prompt_timeout_secs = Some(config.read().await.get_prompt_timeout_secs());
         let (op_result, semantic_success): (Result<(String, String)>, Option<bool>) =
-            if spec.mode == "agent" {
-                let prompt_timeout_secs = Some(config.read().await.get_prompt_timeout_secs());
-                match execute_agent_mode(
-                    &op_id,
-                    node_id,
-                    agent_short_name,
-                    &spec,
-                    working_dir.clone(),
-                    prompt_timeout_secs,
-                    active_session.clone(),
-                    config,
-                    rabbitmq_channel,
-                    acp_node_proxy,
-                    database.clone(),
-                    op_cancel_rx,
-                )
-                .await
-                {
-                    Ok((summary, result, success)) => (Ok((summary, result)), success),
-                    Err(e) => (Err(e), None),
-                }
-            } else {
-                let prompt_timeout_secs = Some(config.read().await.get_prompt_timeout_secs());
-                let result = execute_one_shot(
-                    &op_id,
-                    node_id,
-                    agent_short_name,
-                    &spec,
-                    working_dir.clone(),
-                    prompt_timeout_secs,
-                    active_session.clone(),
-                    rabbitmq_channel,
-                    acp_node_proxy,
-                    database.clone(),
-                    op_cancel_rx,
-                )
-                .await;
-                (result, None)
+            match crate::semantic_ops::execute_by_mode(
+                &op_id,
+                node_id,
+                agent_short_name,
+                &spec,
+                working_dir.clone(),
+                prompt_timeout_secs,
+                active_session.clone(),
+                config,
+                rabbitmq_channel,
+                acp_node_proxy,
+                database.clone(),
+                op_cancel_rx,
+            )
+            .await
+            {
+                Ok((summary, result, success)) => (Ok((summary, result)), success),
+                Err(e) => (Err(e), None),
             };
 
         let end_time = Utc::now();

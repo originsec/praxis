@@ -251,7 +251,7 @@ impl AgentChatManager {
         let node_prefix = node_info
             .as_ref()
             .map(|n| n.machine_name.clone())
-            .unwrap_or_else(|| node_id[..8.min(node_id.len())].to_string())
+            .unwrap_or_else(|| common::short_id(node_id).to_string())
             .to_lowercase()
             .chars()
             .filter(|c| c.is_alphanumeric())

@@ -20,11 +20,23 @@ pub(super) fn render_executions(f: &mut Frame, area: Rect, state: &OperationsSta
     ])
     .split(area);
 
-    render_exec_list(f, chunks[0], state);
-    render_exec_detail(f, chunks[1], state);
+    //
+    // Compute the sorted/filtered view once per frame and share it
+    // between the list and detail panes.
+    //
+    let sorted =
+        App::sorted_exec_static(&state.operations, &state.chain_executions, &state.filter);
+
+    render_exec_list(f, chunks[0], state, &sorted);
+    render_exec_detail(f, chunks[1], state, &sorted);
 }
 
-fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
+fn render_exec_list(
+    f: &mut Frame,
+    area: Rect,
+    state: &OperationsState,
+    entries: &[(bool, usize)],
+) {
     let header = Row::new(vec![
         Cell::from(""),
         Cell::from("Name"),
@@ -37,12 +49,10 @@ fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
     .style(Style::default().fg(ACCENT));
 
     let now = chrono::Utc::now();
-    let entries =
-        App::sorted_exec_static(&state.operations, &state.chain_executions, &state.filter);
 
     let mut rows: Vec<Row> = Vec::new();
 
-    for (is_op, idx) in entries {
+    for &(is_op, idx) in entries {
         if is_op {
             let op = &state.operations[idx];
             let (status_str, status_color) = op_status_display(&op.status);
@@ -105,17 +115,16 @@ fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
     f.render_stateful_widget(table, area, &mut table_state);
 }
 
-fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
+fn render_exec_detail(
+    f: &mut Frame,
+    area: Rect,
+    state: &OperationsState,
+    sorted: &[(bool, usize)],
+) {
     let block = focused_titled_panel(" Detail ", state.detail_focus);
 
     let inner = block.inner(area);
     f.render_widget(block, area);
-
-    let sorted = crate::app::App::sorted_exec_static(
-        &state.operations,
-        &state.chain_executions,
-        &state.filter,
-    );
 
     if sorted.is_empty() || state.exec_selected >= sorted.len() {
         f.render_widget(
@@ -364,7 +373,7 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
             elements.sort_by_key(|(_, el)| el.started_at);
 
             for (id, el) in &elements {
-                let short_el_id = &id[..8.min(id.len())];
+                let short_el_id = short_id(id);
                 let (icon, color) = element_status_display(&el.status);
 
                 //

@@ -83,7 +83,7 @@ impl TriggerEngine {
         for trigger in due_triggers {
             common::log_info!(
                 "Firing scheduled trigger {} for chain {}",
-                &trigger.id[..8.min(trigger.id.len())],
+                common::short_id(&trigger.id),
                 trigger.chain_id
             );
 
@@ -163,9 +163,9 @@ impl TriggerEngine {
 
             common::log_info!(
                 "Firing intercept-match trigger {} for rule {} on node {}",
-                &trigger.id[..8.min(trigger.id.len())],
+                common::short_id(&trigger.id),
                 rule_id,
-                &node_id[..8.min(node_id.len())]
+                common::short_id(&node_id)
             );
 
             let chain = match self.database.get_chain(&trigger.chain_id).await {
@@ -212,8 +212,8 @@ impl TriggerEngine {
         for trigger in triggers {
             common::log_info!(
                 "Firing new-node trigger {} for node {}",
-                &trigger.id[..8.min(trigger.id.len())],
-                &node_id[..8.min(node_id.len())]
+                common::short_id(&trigger.id),
+                common::short_id(node_id)
             );
 
             let chain = match self.database.get_chain(&trigger.chain_id).await {

@@ -397,7 +397,7 @@ async fn handle_command(ctx: &ServiceContext, request: CommandRequest) {
 async fn handle_remove_node(ctx: &ServiceContext, node_id: String) {
     common::log_info!(
         "Received RemoveNode request for node {}",
-        &node_id[..8.min(node_id.len())]
+        common::short_id(&node_id)
     );
 
     if ctx.node_registry.remove(&node_id).await.is_some() {
@@ -420,7 +420,7 @@ async fn handle_remove_node(ctx: &ServiceContext, node_id: String) {
 async fn handle_reset_node(ctx: &ServiceContext, node_id: String) {
     common::log_info!(
         "Received ResetNode request for node {}",
-        &node_id[..8.min(node_id.len())]
+        common::short_id(&node_id)
     );
 
     //
@@ -566,14 +566,14 @@ async fn handle_semantic_op_cancel(ctx: &ServiceContext, operation_id: String) {
 async fn handle_semantic_op_remove(ctx: &ServiceContext, operation_id: String) {
     common::log_info!(
         "Received SemanticOpRemove for operation {}",
-        &operation_id[..8.min(operation_id.len())]
+        common::short_id(&operation_id)
     );
 
     match ctx.semantic_ops_manager.remove_operation(&operation_id).await {
         Ok(()) => {
             common::log_info!(
                 "Removed operation {}",
-                &operation_id[..8.min(operation_id.len())]
+                common::short_id(&operation_id)
             );
 
             //
@@ -685,7 +685,7 @@ async fn handle_semantic_op_list(ctx: &ServiceContext) {
 async fn handle_config_get(ctx: &ServiceContext, client_id: String, keys: Vec<String>) {
     common::log_info!(
         "Received ServiceConfigGet from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
 
     //
@@ -714,7 +714,7 @@ async fn handle_config_set(
 ) {
     common::log_info!(
         "Received ServiceConfigSet from client {} with {} values",
-        &client_id[..8.min(client_id.len())],
+        common::short_id(&client_id),
         values.len()
     );
 
@@ -834,7 +834,7 @@ async fn handle_config_set(
 async fn handle_opdef_add(ctx: &ServiceContext, client_id: String, content: String) {
     common::log_info!(
         "Received OpDefAdd from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
     common::log_debug!("OpDefAdd: content={}", common::truncate_str(&content, 2000));
 
@@ -877,7 +877,7 @@ async fn handle_opdef_add(ctx: &ServiceContext, client_id: String, content: Stri
 async fn handle_opdef_list(ctx: &ServiceContext, client_id: String) {
     common::log_info!(
         "Received OpDefList from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
 
     match ctx.database.list_operation_definitions().await {
@@ -909,7 +909,7 @@ async fn handle_opdef_delete(ctx: &ServiceContext, client_id: String, full_name:
     common::log_info!(
         "Received OpDefDelete for {} from client {}",
         full_name,
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
 
     match ctx.database.delete_operation_definition(&full_name).await {
@@ -942,7 +942,7 @@ async fn handle_opdef_get(ctx: &ServiceContext, client_id: String, full_name: St
     common::log_info!(
         "Received OpDefGet for {} from client {}",
         full_name,
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
 
     match ctx.database.get_operation_definition(&full_name).await {
@@ -972,7 +972,7 @@ async fn handle_opdef_get(ctx: &ServiceContext, client_id: String, full_name: St
 async fn handle_opdef_set_disabled(ctx: &ServiceContext, client_id: String, full_name: String, disabled: bool) {
     common::log_info!(
         "Received OpDefSetDisabled for {} (disabled={}) from client {}",
-        full_name, disabled, &client_id[..8.min(client_id.len())]
+        full_name, disabled, common::short_id(&client_id)
     );
 
     match ctx.database.set_operation_definition_disabled(&full_name, disabled).await {
@@ -1012,7 +1012,7 @@ async fn handle_traffic_log(
 ) {
     common::log_info!(
         "Received TrafficLogRequest from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
 
     match ctx.database.query_traffic(&filters).await {
@@ -1045,7 +1045,7 @@ async fn handle_traffic_matches(
 ) {
     common::log_info!(
         "Received TrafficMatchesRequest from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
 
     match ctx.database.query_matches(rule_id, limit, offset).await {
@@ -1072,7 +1072,7 @@ async fn handle_traffic_matches(
 async fn handle_traffic_clear(ctx: &ServiceContext, client_id: String) {
     common::log_info!(
         "Received TrafficClear from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
 
     match ctx.database.clear_all_traffic().await {
@@ -1101,7 +1101,7 @@ async fn handle_traffic_search(
 ) {
     common::log_info!(
         "Received TrafficSearchRequest from client {} with pattern: {}",
-        &client_id[..8.min(client_id.len())],
+        common::short_id(&client_id),
         filters.regex_pattern
     );
 
@@ -1130,7 +1130,7 @@ async fn handle_traffic_search(
 async fn handle_traffic_get(ctx: &ServiceContext, client_id: String, id: i64) {
     common::log_info!(
         "Received TrafficGetRequest from client {} for id {}",
-        &client_id[..8.min(client_id.len())],
+        common::short_id(&client_id),
         id
     );
 
@@ -1167,7 +1167,7 @@ async fn handle_intercept_rule_create(
 ) {
     common::log_info!(
         "Received InterceptRuleCreate from client {}: {}",
-        &client_id[..8.min(client_id.len())],
+        common::short_id(&client_id),
         name
     );
 
@@ -1218,7 +1218,7 @@ async fn handle_intercept_rule_update(
 ) {
     common::log_info!(
         "Received InterceptRuleUpdate from client {} for rule {}",
-        &client_id[..8.min(client_id.len())],
+        common::short_id(&client_id),
         id
     );
 
@@ -1269,7 +1269,7 @@ async fn handle_intercept_rule_update(
 async fn handle_intercept_rule_delete(ctx: &ServiceContext, client_id: String, id: i64) {
     common::log_info!(
         "Received InterceptRuleDelete from client {} for rule {}",
-        &client_id[..8.min(client_id.len())],
+        common::short_id(&client_id),
         id
     );
 
@@ -1302,7 +1302,7 @@ async fn handle_intercept_rule_delete(ctx: &ServiceContext, client_id: String, i
 async fn handle_intercept_rule_list(ctx: &ServiceContext, client_id: String) {
     common::log_info!(
         "Received InterceptRuleList from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
 
     match ctx.database.list_rules().await {
@@ -1340,8 +1340,8 @@ async fn handle_intercept_enable(
 ) {
     common::log_info!(
         "Received InterceptEnable from client {} for node {} (method: {:?})",
-        &client_id[..8.min(client_id.len())],
-        &node_id[..8.min(node_id.len())],
+        common::short_id(&client_id),
+        common::short_id(&node_id),
         method
     );
 
@@ -1396,8 +1396,8 @@ async fn handle_intercept_enable(
 async fn handle_intercept_disable(ctx: &ServiceContext, client_id: String, node_id: String) {
     common::log_info!(
         "Received InterceptDisable from client {} for node {}",
-        &client_id[..8.min(client_id.len())],
-        &node_id[..8.min(node_id.len())]
+        common::short_id(&client_id),
+        common::short_id(&node_id)
     );
 
     //
@@ -1494,7 +1494,7 @@ async fn handle_app_log_request(
 async fn handle_app_log_clear(ctx: &ServiceContext, client_id: String, node_id: Option<String>) {
     common::log_info!(
         "Received ApplicationLogClear from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
 
     match ctx.database.clear_event_log(node_id.as_deref()).await {
@@ -1524,8 +1524,8 @@ async fn handle_recon_get(
 ) {
     common::log_info!(
         "ReconGet request from client {} for node {} agent {}",
-        &client_id[..8.min(client_id.len())],
-        &node_id[..8.min(node_id.len())],
+        common::short_id(&client_id),
+        common::short_id(&node_id),
         agent_short_name
     );
     match ctx
@@ -1536,7 +1536,7 @@ async fn handle_recon_get(
         Ok(Some(stored)) => {
             common::log_info!(
                 "ReconGet response: found recon for {} {} (performed_at: {}, semantic: {})",
-                &node_id[..8.min(node_id.len())],
+                common::short_id(&node_id),
                 agent_short_name,
                 stored.performed_at,
                 stored.is_semantic
@@ -1557,7 +1557,7 @@ async fn handle_recon_get(
         Ok(None) => {
             common::log_info!(
                 "ReconGet response: no stored recon for {} {}",
-                &node_id[..8.min(node_id.len())],
+                common::short_id(&node_id),
                 agent_short_name
             );
             let _ = send_to_client(
@@ -1739,7 +1739,7 @@ async fn handle_toolkit_apply(
 async fn handle_chain_list(ctx: &ServiceContext, client_id: String) {
     common::log_info!(
         "Received ChainDefList from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
     let chains = ctx.database.list_chains().await.unwrap_or_default();
     let chain_infos: Vec<common::ChainDefinitionInfo> = chains
@@ -1771,7 +1771,7 @@ async fn handle_chain_list(ctx: &ServiceContext, client_id: String) {
 async fn handle_chain_get(ctx: &ServiceContext, client_id: String, chain_id: String) {
     common::log_info!(
         "Received ChainGet from client {} for chain {}",
-        &client_id[..8.min(client_id.len())],
+        common::short_id(&client_id),
         chain_id
     );
     let chain = ctx.database.get_chain(&chain_id).await.ok().flatten();
@@ -1820,7 +1820,7 @@ async fn handle_chain_create(
 ) {
     common::log_info!(
         "Received ChainCreate from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
     common::log_debug!("ChainCreate: definition={}", serde_json::to_string(&definition).unwrap_or_default());
     let now = chrono::Utc::now();
@@ -1917,7 +1917,7 @@ async fn handle_chain_update(
 ) {
     common::log_info!(
         "Received ChainUpdate from client {} for chain {}",
-        &client_id[..8.min(client_id.len())],
+        common::short_id(&client_id),
         chain_id
     );
     common::log_debug!("ChainUpdate {}: definition={}", chain_id, serde_json::to_string(&definition).unwrap_or_default());
@@ -2017,7 +2017,7 @@ async fn handle_chain_update(
 async fn handle_chain_delete(ctx: &ServiceContext, client_id: String, chain_id: String) {
     common::log_info!(
         "Received ChainDelete from client {} for chain {}",
-        &client_id[..8.min(client_id.len())],
+        common::short_id(&client_id),
         chain_id
     );
     let success = ctx.database.delete_chain(&chain_id).await.unwrap_or(false);
@@ -2032,7 +2032,7 @@ async fn handle_chain_delete(ctx: &ServiceContext, client_id: String, chain_id: 
 async fn handle_chain_set_disabled(ctx: &ServiceContext, client_id: String, chain_id: String, disabled: bool) {
     common::log_info!(
         "Received ChainSetDisabled for {} (disabled={}) from client {}",
-        chain_id, disabled, &client_id[..8.min(client_id.len())]
+        chain_id, disabled, common::short_id(&client_id)
     );
 
     match ctx.database.set_chain_disabled(&chain_id, disabled).await {
@@ -2091,9 +2091,9 @@ async fn handle_chain_run(
 ) {
     common::log_info!(
         "Received ChainRun from client {} for chain {} on node {} (working_dir: {:?}, targeting: {})",
-        &client_id[..8.min(client_id.len())],
+        common::short_id(&client_id),
         chain_id,
-        &node_id[..8.min(node_id.len())],
+        common::short_id(&node_id),
         working_dir,
         target_spec.is_some()
     );
@@ -2248,7 +2248,7 @@ async fn handle_chain_run(
 async fn handle_chain_cancel(ctx: &ServiceContext, client_id: String, execution_id: String) {
     common::log_info!(
         "Received ChainCancel from client {} for execution {}",
-        &client_id[..8.min(client_id.len())],
+        common::short_id(&client_id),
         execution_id
     );
     let cancelled = ctx.chain_executor.cancel(&execution_id).await;
@@ -2300,7 +2300,7 @@ async fn handle_chain_cancel(ctx: &ServiceContext, client_id: String, execution_
 async fn handle_chain_execution_list(ctx: &ServiceContext, client_id: String) {
     common::log_info!(
         "Received ChainExecutionList from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
 
     //
@@ -2327,7 +2327,7 @@ async fn handle_chain_execution_list(ctx: &ServiceContext, client_id: String) {
 async fn handle_chain_execution_remove(ctx: &ServiceContext, execution_id: String) {
     common::log_info!(
         "Received ChainExecutionRemove for {}",
-        &execution_id[..8.min(execution_id.len())]
+        common::short_id(&execution_id)
     );
     if let Err(e) = ctx.database.delete_chain_execution(&execution_id).await {
         common::log_error!("Failed to delete chain execution: {}", e);
@@ -2363,7 +2363,7 @@ async fn handle_chain_trigger_create(
 ) {
     common::log_info!(
         "Received ChainTriggerCreate from client {} for chain {}",
-        &client_id[..8.min(client_id.len())],
+        common::short_id(&client_id),
         chain_id
     );
 
@@ -2402,7 +2402,7 @@ async fn handle_chain_trigger_update(
 ) {
     common::log_info!(
         "Received ChainTriggerUpdate from client {} for trigger {}",
-        &client_id[..8.min(client_id.len())],
+        common::short_id(&client_id),
         trigger_id
     );
 
@@ -2448,7 +2448,7 @@ async fn handle_chain_trigger_delete(
 ) {
     common::log_info!(
         "Received ChainTriggerDelete from client {} for trigger {}",
-        &client_id[..8.min(client_id.len())],
+        common::short_id(&client_id),
         trigger_id
     );
 
@@ -2494,7 +2494,7 @@ async fn handle_chain_trigger_list(
 ) {
     common::log_info!(
         "Received ChainTriggerList from client {} (chain_id: {:?})",
-        &client_id[..8.min(client_id.len())],
+        common::short_id(&client_id),
         chain_id
     );
 
@@ -2538,7 +2538,7 @@ async fn handle_lua_script_add(
 ) {
     common::log_info!(
         "Received LuaAgentScriptAdd from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
 
     let id = uuid::Uuid::new_v4().to_string();
@@ -2564,7 +2564,7 @@ async fn handle_lua_script_add(
 async fn handle_lua_script_delete(ctx: &ServiceContext, client_id: String, script_id: String) {
     common::log_info!(
         "Received LuaAgentScriptDelete from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
 
     match ctx.database.delete_lua_agent_script(&script_id).await {
@@ -2598,7 +2598,7 @@ async fn handle_lua_script_update(
 ) {
     common::log_info!(
         "Received LuaAgentScriptUpdate from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
 
     match ctx.database.update_lua_agent_script_content(&script_id, &name, &script).await {
@@ -2623,7 +2623,7 @@ async fn handle_lua_script_update(
 async fn handle_lua_script_reset_defaults(ctx: &ServiceContext, client_id: String) {
     common::log_info!(
         "Received LuaAgentScriptResetDefaults from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
 
     match ctx.database.clear_lua_agent_scripts().await {
@@ -2657,7 +2657,7 @@ async fn handle_lua_script_reset_defaults(ctx: &ServiceContext, client_id: Strin
 async fn handle_lua_script_list(ctx: &ServiceContext, client_id: String) {
     common::log_info!(
         "Received LuaAgentScriptList from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
 
     match ctx.database.list_lua_agent_scripts().await {
@@ -2683,7 +2683,7 @@ async fn handle_lua_script_toggle_disabled(
 ) {
     common::log_info!(
         "Received LuaAgentScriptToggleDisabled from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
 
     match ctx.database.set_lua_agent_script_disabled(&script_id, disabled).await {
@@ -2715,7 +2715,7 @@ async fn handle_lua_script_toggle_disabled(
 async fn handle_log_query(ctx: &ServiceContext, client_id: String, query: String) {
     common::log_info!(
         "Received LogQuery from client {}",
-        &client_id[..8.min(client_id.len())]
+        common::short_id(&client_id)
     );
 
     match crate::log_query::execute_log_query(
