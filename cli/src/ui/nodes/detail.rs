@@ -138,11 +138,7 @@ pub(super) fn render_node_detail(
                     .find(|l| !l.trim().is_empty())
                     .unwrap_or("");
                 if !last_line.is_empty() {
-                    let short = if last_line.len() > 60 {
-                        &last_line[..60]
-                    } else {
-                        last_line
-                    };
+                    let short: String = last_line.chars().take(60).collect();
                     activity_lines.push(Line::from(Span::styled(
                         format!("    {}", short),
                         Style::default().fg(MUTED),

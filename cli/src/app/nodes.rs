@@ -28,10 +28,10 @@ impl App {
             let mut entries: Vec<crate::event::NodeSessionEntry> = Vec::new();
 
             for node_id in nodes {
-                let params = serde_json::json!({
-                    "_meta": { "praxis": { "nodeId": node_id } }
-                });
-                let value = match client.acp_request(&node_id, "session/list", params).await {
+                let value = match client
+                    .acp_request(&node_id, "session/list", serde_json::json!({}))
+                    .await
+                {
                     Ok(v) => v,
                     Err(_) => continue,
                 };

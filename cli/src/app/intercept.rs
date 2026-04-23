@@ -356,18 +356,15 @@ impl InterceptState {
         self.search_regex = if self.search_input.is_empty() {
             None
         } else {
-            Regex::new(&format!("(?i){}", regex::escape(&self.search_input)))
+            //
+            // Prefer the user's literal regex when it compiles; fall
+            // back to the escaped form so typing `(` mid-stream doesn't
+            // drop the filter.
+            //
+            Regex::new(&format!("(?i){}", self.search_input))
                 .ok()
-                .or_else(|| Regex::new(&format!("(?i){}", self.search_input)).ok())
+                .or_else(|| Regex::new(&format!("(?i){}", regex::escape(&self.search_input))).ok())
         };
-        //
-        // Prefer the user's literal regex when it compiles; fall back to
-        // the escaped form for an otherwise-invalid pattern so typing
-        // `(` doesn't break the input mid-stream.
-        //
-        if let Ok(r) = Regex::new(&format!("(?i){}", self.search_input)) {
-            self.search_regex = Some(r);
-        }
         self.display_dirty = true;
     }
 

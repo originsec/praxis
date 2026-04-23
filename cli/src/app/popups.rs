@@ -181,10 +181,10 @@ impl App {
                 tokio::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
                     let Some(tx) = tx else { return };
-                    let params = serde_json::json!({
-                        "_meta": { "praxis": { "nodeId": rid } }
-                    });
-                    let value = match client.acp_request(&rid, "session/list", params).await {
+                    let value = match client
+                        .acp_request(&rid, "session/list", serde_json::json!({}))
+                        .await
+                    {
                         Ok(v) => v,
                         Err(_) => return,
                     };

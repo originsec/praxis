@@ -774,12 +774,10 @@ impl App {
             }
             AppEvent::Tick => {
                 //
-                // Periodically refresh operations data when viewing that window.
-                //
-                //
-                // Always keep operations data fresh. Periodically
-                // re-request the full list to catch ops started by
-                // other clients (e.g. orchestrator tool calls).
+                // Every ~3 seconds while the Executions tab is open, re-pull
+                // the full list so ops started by other clients (e.g. the
+                // orchestrator's tool calls) show up without a manual
+                // refresh.
                 //
                 static REFRESH_COUNTER: std::sync::atomic::AtomicU32 =
                     std::sync::atomic::AtomicU32::new(0);
@@ -788,7 +786,6 @@ impl App {
                     && self.operations.tab == OpsTab::Executions
                     && count % 24 == 0
                 {
-                    // Every ~3 seconds (24 * 125ms tick)
                     self.refresh_execution_lists_after(Duration::ZERO, false);
                 }
 

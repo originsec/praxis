@@ -42,12 +42,6 @@ pub struct SemanticOpsManager {
     //
     running: Arc<StdRwLock<HashMap<String, RunningOperation>>>,
 
-    //
-    // Operation_id -> node_id mapping (used for cancellation lookup when we
-    // only have the op id at hand).
-    //
-    op_to_node: Arc<StdRwLock<HashMap<String, String>>>,
-
     database: Arc<Database>,
     config: Arc<TokioRwLock<ServiceConfig>>,
     rabbitmq_channel: Channel,
@@ -63,7 +57,6 @@ impl SemanticOpsManager {
     ) -> Self {
         Self {
             running: Arc::new(StdRwLock::new(HashMap::new())),
-            op_to_node: Arc::new(StdRwLock::new(HashMap::new())),
             database,
             config,
             rabbitmq_channel,
@@ -139,11 +132,6 @@ impl SemanticOpsManager {
             chain_execution_id: None,
         };
         self.database.insert_operation(&record).await?;
-
-        self.op_to_node
-            .write()
-            .unwrap()
-            .insert(operation_id.clone(), node_id.clone());
 
         self.spawn_execution(
             operation_id.clone(),
@@ -230,18 +218,6 @@ impl SemanticOpsManager {
                     "Cannot remove running operation. Cancel it first."
                 ));
             }
-            SemanticOpStatus::Queued => {
-                //
-                // In ACP mode queued operations shouldn't exist in memory
-                // (everything dispatches immediately). Just clean up any
-                // mapping and delete from DB.
-                //
-                self.op_to_node.write().unwrap().remove(operation_id);
-                self.database
-                    .delete_operation(operation_id)
-                    .await
-                    .context("Failed to delete operation")?;
-            }
             _ => {
                 self.database
                     .delete_operation(operation_id)
@@ -278,8 +254,6 @@ impl SemanticOpsManager {
         let mut cleared_count = 0;
         for op in queued_ops {
             if !active_node_ids.contains(&op.node_id) {
-                self.op_to_node.write().unwrap().remove(&op.operation_id);
-
                 self.database
                     .update_status(
                         &op.operation_id,
@@ -371,7 +345,6 @@ impl SemanticOpsManager {
         let rabbitmq_channel = self.rabbitmq_channel.clone();
         let acp_node_proxy = self.acp_node_proxy.clone();
         let running = self.running.clone();
-        let op_to_node = self.op_to_node.clone();
 
         tokio::spawn(Self::run_operation(
             operation_id,
@@ -385,7 +358,6 @@ impl SemanticOpsManager {
             rabbitmq_channel,
             acp_node_proxy,
             running,
-            op_to_node,
         ));
     }
 
@@ -407,7 +379,6 @@ impl SemanticOpsManager {
         rabbitmq_channel: Channel,
         acp_node_proxy: Arc<AcpNodeProxy>,
         running: Arc<StdRwLock<HashMap<String, RunningOperation>>>,
-        op_to_node: Arc<StdRwLock<HashMap<String, String>>>,
     ) {
         let _ = database
             .append_output(
@@ -450,7 +421,6 @@ impl SemanticOpsManager {
                     )
                     .await;
                 running.write().unwrap().remove(&operation_id);
-                op_to_node.write().unwrap().remove(&operation_id);
                 return;
             }
         };
@@ -538,7 +508,6 @@ impl SemanticOpsManager {
             .await;
 
         running.write().unwrap().remove(&operation_id);
-        op_to_node.write().unwrap().remove(&operation_id);
     }
 }
 
@@ -546,7 +515,6 @@ impl Clone for SemanticOpsManager {
     fn clone(&self) -> Self {
         Self {
             running: self.running.clone(),
-            op_to_node: self.op_to_node.clone(),
             database: self.database.clone(),
             config: self.config.clone(),
             rabbitmq_channel: self.rabbitmq_channel.clone(),
