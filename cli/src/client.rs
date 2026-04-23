@@ -1,11 +1,11 @@
 use anyhow::{Result, anyhow};
 use common::{
     CLIENT_BROADCAST_EXCHANGE, CLIENT_SIGNAL_QUEUE, ChainDefinitionFull, ChainDefinitionInfo,
-    ChainExecutionUpdate, ClientBroadcastMessage, ClientDirectMessage, ClientRegistration,
-    ClientSignalMessage, InterceptMethod, InterceptRule, InterceptStatus,
+    ChainExecutionUpdate, ChainTriggerInfo, ClientBroadcastMessage, ClientDirectMessage,
+    ClientRegistration, ClientSignalMessage, InterceptMethod, InterceptRule, InterceptStatus,
     InterceptedTrafficEntry, LuaAgentScriptInfo, OperationDefinitionInfo, RuleScope,
-    SemanticOpUpdate, SystemState, TargetDirection, TerminalOutput, TrafficLogFilters,
-    TrafficMatchWithDetails, TrafficSearchFilters,
+    SemanticOpUpdate, SystemState, TargetDirection, TargetSpec, TerminalOutput,
+    TrafficLogFilters, TrafficMatchWithDetails, TrafficSearchFilters, TriggerConfig,
     client_queue_name,
     mcp::{build_notification_frame, build_request_frame},
     publish_json, publish_terminal_command,
@@ -75,6 +75,7 @@ struct ClientState {
     operation_definitions: Vec<OperationDefinitionInfo>,
     chain_definitions: Vec<ChainDefinitionInfo>,
     chain_executions: Vec<ChainExecutionUpdate>,
+    chain_triggers: Vec<ChainTriggerInfo>,
     current_chain: Option<ChainDefinitionFull>,
     pending_semantic_op: Option<String>,
     lua_agent_scripts: Vec<LuaAgentScriptInfo>,
@@ -335,6 +336,39 @@ impl Client {
             }
             ClientDirectMessage::ChainExecutionListResponse { executions } => {
                 state.chain_executions = executions;
+            }
+
+            //
+            // Chain trigger responses. The full list response replaces the
+            // cache; per-item create/update/delete patch the cache in place.
+            //
+            ClientDirectMessage::ChainTriggerListResponse { triggers } => {
+                state.chain_triggers = triggers;
+            }
+            ClientDirectMessage::ChainTriggerCreated { trigger } => {
+                if let Some(existing) = state
+                    .chain_triggers
+                    .iter_mut()
+                    .find(|t| t.id == trigger.id)
+                {
+                    *existing = trigger;
+                } else {
+                    state.chain_triggers.push(trigger);
+                }
+            }
+            ClientDirectMessage::ChainTriggerUpdated { trigger } => {
+                if let Some(existing) = state
+                    .chain_triggers
+                    .iter_mut()
+                    .find(|t| t.id == trigger.id)
+                {
+                    *existing = trigger;
+                } else {
+                    state.chain_triggers.push(trigger);
+                }
+            }
+            ClientDirectMessage::ChainTriggerDeleted { trigger_id } => {
+                state.chain_triggers.retain(|t| t.id != trigger_id);
             }
 
             //
@@ -1110,6 +1144,62 @@ impl Client {
 
     pub async fn remove_chain_execution(&self, execution_id: String) -> Result<()> {
         let message = ClientSignalMessage::ChainExecutionRemove { execution_id };
+        self.publish_signal(message).await
+    }
+
+    //
+    // Chain triggers.
+    //
+
+    pub async fn request_chain_triggers(&self) -> Result<()> {
+        let message = ClientSignalMessage::ChainTriggerList {
+            client_id: self.client_id.clone(),
+            chain_id: None,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn get_chain_triggers(&self) -> Vec<ChainTriggerInfo> {
+        self.state.lock().await.chain_triggers.clone()
+    }
+
+    pub async fn create_chain_trigger(
+        &self,
+        chain_id: String,
+        trigger_config: TriggerConfig,
+        target_spec: TargetSpec,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::ChainTriggerCreate {
+            client_id: self.client_id.clone(),
+            chain_id,
+            trigger_config,
+            target_spec,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn update_chain_trigger(
+        &self,
+        trigger_id: String,
+        enabled: Option<bool>,
+        trigger_config: Option<TriggerConfig>,
+        target_spec: Option<TargetSpec>,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::ChainTriggerUpdate {
+            client_id: self.client_id.clone(),
+            trigger_id,
+            enabled,
+            trigger_config,
+            target_spec,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn delete_chain_trigger(&self, trigger_id: String) -> Result<()> {
+        let message = ClientSignalMessage::ChainTriggerDelete {
+            client_id: self.client_id.clone(),
+            trigger_id,
+        };
         self.publish_signal(message).await
     }
 

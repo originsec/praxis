@@ -37,6 +37,7 @@ pub enum ConfirmKind {
     ClearAllTraffic,
     DeleteInterceptRule(i64),
     ToggleIntercept { node_id: String, enable: bool },
+    DeleteTrigger(String), // trigger_id
     Info,
 }
 
@@ -200,6 +201,17 @@ impl App {
                 if let Err(e) = result {
                     self.intercept.set_error(format!("Intercept toggle: {}", e));
                 }
+            }
+            ConfirmKind::DeleteTrigger(trigger_id) => {
+                let _ = self.client.delete_chain_trigger(trigger_id.clone()).await;
+                self.operations.triggers.retain(|t| t.id != trigger_id);
+                let total = self.operations.triggers.len();
+                if total == 0 {
+                    self.operations.trigger_selected = 0;
+                } else if self.operations.trigger_selected >= total {
+                    self.operations.trigger_selected = total - 1;
+                }
+                self.refresh_triggers_after(Duration::from_millis(200));
             }
             ConfirmKind::Info => {}
         }

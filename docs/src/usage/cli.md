@@ -159,11 +159,29 @@ Response bodies in `TrafficLogs` and JSON columns like
 
 ### Operations (`Ctrl+P`)
 
-Operation and chain management with two tabs:
-- **Library** — browse operation and chain definitions with search filtering and detail view
+Operation and chain management with three tabs (`Tab` / `Shift+Tab` to switch):
+
 - **Executions** — live tracking of running/queued/completed operations and chains with duration timers
+- **Library** — browse operation and chain definitions with search filtering and detail view
+- **Triggers** — automated chain firing rules, same feature set as the web UI
+
+Common actions:
 - Create new operations inline
 - Run operations with node/agent selection and YOLO mode
+- Create, edit, enable/disable and delete chain triggers
+
+#### Triggers tab
+
+Triggers fire a chain on a schedule, when an intercept rule matches, or when a new node connects. Each trigger picks a target chain, a trigger type, and a target spec (nodes + agents, with an optional OS substring filter and, for event triggers, an "include triggering node" toggle).
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Toggle enabled/disabled for the selected trigger |
+| `Ctrl+N` | New trigger |
+| `Ctrl+E` | Edit selected trigger |
+| `Ctrl+D` | Delete selected trigger |
+
+In the trigger form, `↑/↓` or `Tab`/`Shift+Tab` move between fields, `←/→` cycle picker options, `Space`/`Enter` toggle checkboxes and list items, `Ctrl+S` saves, and `Esc` cancels. The form is fully mouse-driven: click a row to focus/toggle it, click `Ctrl+S`/`Esc` in the hint bar to save or cancel.
 
 ### Settings (`Ctrl+S`)
 

@@ -52,6 +52,8 @@ pub fn render(f: &mut Frame, app: &App) {
                 popup::render_new_op_form(f, chunks[1], form);
             } else if let Some(ref opts) = app.run_options {
                 popup::render_run_options(f, chunks[1], opts);
+            } else if let Some(ref tform) = app.trigger_form {
+                popup::render_trigger_form(f, chunks[1], tform);
             } else {
                 operations::render(f, chunks[1], &app.operations);
             }

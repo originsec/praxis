@@ -1,4 +1,6 @@
-use crate::app::{Popup, PopupKind};
+use crate::app::{
+    Popup, PopupKind, ScheduleKind, TriggerForm, TriggerFormSection, TriggerKind,
+};
 use crate::ui::common::centered_rect_fixed;
 use crate::ui::theme::{ACCENT, DIM, MUTED, POPUP_BG, POPUP_HIGHLIGHT_BG, TEXT};
 use ratatui::Frame;
@@ -525,4 +527,460 @@ pub fn render_run_options(f: &mut Frame, area: Rect, opts: &crate::app::RunOptio
         Span::styled(" cancel", Style::default().fg(MUTED)),
     ]);
     f.render_widget(Paragraph::new(hints), chunks[2]);
+}
+
+//
+// Trigger create/edit form. Layout drives both render and mouse hit
+// testing; `trigger_form_section_rows` emits the same row→section mapping
+// without drawing so the mouse handler stays in sync.
+//
+
+pub fn render_trigger_form(f: &mut Frame, area: Rect, form: &TriggerForm) {
+    let chunks = ratatui::layout::Layout::vertical([
+        ratatui::layout::Constraint::Length(2),
+        ratatui::layout::Constraint::Min(1),
+        ratatui::layout::Constraint::Length(1),
+    ])
+    .split(area);
+
+    let title_text = if form.editing_id.is_some() {
+        " Edit Trigger"
+    } else {
+        " New Trigger"
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            title_text,
+            Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+        ))),
+        chunks[0],
+    );
+
+    let inner = Rect {
+        x: chunks[1].x + 2,
+        width: chunks[1].width.saturating_sub(4),
+        ..chunks[1]
+    };
+
+    let lines = trigger_form_lines(form);
+    f.render_widget(Paragraph::new(lines), inner);
+
+    let hints = Line::from(vec![
+        Span::styled(" ^s", Style::default().fg(ACCENT)),
+        Span::styled(" save  ", Style::default().fg(MUTED)),
+        Span::styled("esc", Style::default().fg(ACCENT)),
+        Span::styled(" cancel  ", Style::default().fg(MUTED)),
+        Span::styled("space", Style::default().fg(ACCENT)),
+        Span::styled(" toggle  ", Style::default().fg(MUTED)),
+        Span::styled("\u{2190}\u{2192}", Style::default().fg(ACCENT)),
+        Span::styled(" cycle  ", Style::default().fg(MUTED)),
+        Span::styled("\u{2191}\u{2193}", Style::default().fg(ACCENT)),
+        Span::styled(" field", Style::default().fg(MUTED)),
+    ]);
+    f.render_widget(Paragraph::new(hints), chunks[2]);
+}
+
+//
+// Emit (row_index, section, cursor_index_within_section) for every visual
+// row in the trigger form body. Cursor index is 0 unless the row is part
+// of a list pane (Nodes / Agents), in which case it points at the
+// rendered item.
+//
+pub fn trigger_form_section_rows(
+    form: &TriggerForm,
+) -> Vec<(usize, TriggerFormSection, usize)> {
+    let mut rows = Vec::new();
+    let mut row: usize = 0;
+
+    //
+    // Chain row.
+    //
+    rows.push((row, TriggerFormSection::Chain, 0));
+    row += 1;
+    row += 1; // spacer
+
+    //
+    // Type row.
+    //
+    rows.push((row, TriggerFormSection::Type, 0));
+    row += 1;
+
+    match form.kind {
+        TriggerKind::Scheduled => {
+            row += 1;
+            rows.push((row, TriggerFormSection::ScheduleKindRow, 0));
+            row += 1;
+            rows.push((row, TriggerFormSection::ScheduleValueRow, 0));
+            row += 1;
+            rows.push((row, TriggerFormSection::Recurring, 0));
+            row += 1;
+        }
+        TriggerKind::InterceptMatch => {
+            row += 1;
+            rows.push((row, TriggerFormSection::Rule, 0));
+            row += 1;
+        }
+        TriggerKind::NewNode => {}
+    }
+
+    row += 1; // spacer before Target header
+
+    //
+    // "Target" header (non-clickable).
+    //
+    row += 1;
+
+    //
+    // Nodes header + one row per node.
+    //
+    row += 1; // header row
+    for i in 0..form.nodes.len() {
+        rows.push((row, TriggerFormSection::Nodes, i));
+        row += 1;
+    }
+    row += 1; // spacer
+
+    //
+    // OS filter row.
+    //
+    rows.push((row, TriggerFormSection::OsFilter, 0));
+    row += 1;
+    row += 1; // spacer
+
+    //
+    // Agents header + one row per agent.
+    //
+    row += 1; // header row
+    for i in 0..form.agents.len() {
+        rows.push((row, TriggerFormSection::Agents, i));
+        row += 1;
+    }
+
+    //
+    // Include triggering node (only for event-style triggers).
+    //
+    if matches!(
+        form.kind,
+        TriggerKind::InterceptMatch | TriggerKind::NewNode
+    ) {
+        row += 1; // spacer
+        rows.push((row, TriggerFormSection::IncludeTriggering, 0));
+    }
+
+    rows
+}
+
+fn trigger_form_lines(form: &TriggerForm) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    let section_focus =
+        |section: TriggerFormSection| -> bool { form.focused_section == section };
+
+    //
+    // Row 0: Chain picker.
+    //
+    lines.push(chain_line(form, section_focus(TriggerFormSection::Chain)));
+    lines.push(Line::from(""));
+
+    //
+    // Type picker.
+    //
+    lines.push(type_line(form, section_focus(TriggerFormSection::Type)));
+
+    //
+    // Type-specific rows.
+    //
+    match form.kind {
+        TriggerKind::Scheduled => {
+            lines.push(Line::from(""));
+            lines.push(schedule_kind_line(
+                form,
+                section_focus(TriggerFormSection::ScheduleKindRow),
+            ));
+            lines.push(schedule_value_line(
+                form,
+                section_focus(TriggerFormSection::ScheduleValueRow),
+            ));
+            lines.push(recurring_line(
+                form,
+                section_focus(TriggerFormSection::Recurring),
+            ));
+        }
+        TriggerKind::InterceptMatch => {
+            lines.push(Line::from(""));
+            lines.push(rule_line(form, section_focus(TriggerFormSection::Rule)));
+        }
+        TriggerKind::NewNode => {}
+    }
+
+    //
+    // Target.
+    //
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "Target",
+        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+    )));
+
+    //
+    // Nodes.
+    //
+    lines.push(section_header(
+        "Nodes",
+        section_focus(TriggerFormSection::Nodes),
+        &format!(
+            "({}/{})",
+            form.nodes.iter().filter(|(_, _, s)| *s).count(),
+            form.nodes.len()
+        ),
+    ));
+    for (i, (_, label, selected)) in form.nodes.iter().enumerate() {
+        let is_cursor = section_focus(TriggerFormSection::Nodes) && i == form.cursor;
+        let check = if *selected { "[\u{2713}]" } else { "[ ]" };
+        let style = row_style(is_cursor, *selected);
+        lines.push(Line::from(Span::styled(
+            format!("  {} {}", check, label),
+            style,
+        )));
+    }
+
+    lines.push(Line::from(""));
+
+    //
+    // OS filter text field.
+    //
+    {
+        let focus = section_focus(TriggerFormSection::OsFilter);
+        let label = if focus {
+            Style::default().fg(ACCENT)
+        } else {
+            Style::default().fg(MUTED)
+        };
+        let value = if form.os_filter.is_empty() {
+            Span::styled("(none)", Style::default().fg(DIM))
+        } else {
+            Span::styled(form.os_filter.clone(), Style::default().fg(TEXT))
+        };
+        let cursor = if focus { "\u{258f}" } else { "" };
+        lines.push(Line::from(vec![
+            Span::styled("OS filter: ", label),
+            value,
+            Span::styled(cursor.to_string(), Style::default().fg(ACCENT)),
+        ]));
+    }
+    lines.push(Line::from(""));
+
+    //
+    // Agents.
+    //
+    lines.push(section_header(
+        "Agents",
+        section_focus(TriggerFormSection::Agents),
+        &format!(
+            "({}/{})",
+            form.agents.iter().filter(|(_, s)| *s).count(),
+            form.agents.len()
+        ),
+    ));
+    for (i, (name, selected)) in form.agents.iter().enumerate() {
+        let is_cursor = section_focus(TriggerFormSection::Agents) && i == form.cursor;
+        let check = if *selected { "[\u{2713}]" } else { "[ ]" };
+        let style = row_style(is_cursor, *selected);
+        lines.push(Line::from(Span::styled(
+            format!("  {} {}", check, name),
+            style,
+        )));
+    }
+
+    //
+    // Include triggering node.
+    //
+    if matches!(
+        form.kind,
+        TriggerKind::InterceptMatch | TriggerKind::NewNode
+    ) {
+        lines.push(Line::from(""));
+        lines.push(toggle_line(
+            "Include triggering node",
+            form.include_triggering_node,
+            section_focus(TriggerFormSection::IncludeTriggering),
+        ));
+    }
+
+    lines
+}
+
+fn chain_line(form: &TriggerForm, focused: bool) -> Line<'static> {
+    let label_style = if focused {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(MUTED)
+    };
+    let name = form
+        .chains
+        .get(form.chain_cursor)
+        .map(|(_, n)| n.as_str())
+        .unwrap_or("(none)");
+    Line::from(vec![
+        Span::styled("Chain: ", label_style),
+        Span::styled(
+            format!("\u{25c0} {} \u{25b6}", name),
+            Style::default().fg(TEXT),
+        ),
+    ])
+}
+
+fn type_line(form: &TriggerForm, focused: bool) -> Line<'static> {
+    let label_style = if focused {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(MUTED)
+    };
+    let variants = [
+        (TriggerKind::Scheduled, "Scheduled"),
+        (TriggerKind::InterceptMatch, "InterceptMatch"),
+        (TriggerKind::NewNode, "NewNode"),
+    ];
+    let mut spans = vec![Span::styled("Type: ", label_style)];
+    for (kind, label) in variants {
+        if kind == form.kind {
+            spans.push(Span::styled(
+                format!(" {} ", label),
+                Style::default().fg(Color::Black).bg(ACCENT),
+            ));
+        } else {
+            spans.push(Span::styled(
+                format!(" {} ", label),
+                Style::default().fg(DIM),
+            ));
+        }
+        spans.push(Span::raw(" "));
+    }
+    Line::from(spans)
+}
+
+fn schedule_kind_line(form: &TriggerForm, focused: bool) -> Line<'static> {
+    let label_style = if focused {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(MUTED)
+    };
+    let mut spans = vec![Span::styled("Schedule: ", label_style)];
+    for (variant, label) in [
+        (ScheduleKind::Interval, "Interval"),
+        (ScheduleKind::DailyAt, "DailyAt"),
+    ] {
+        if variant == form.schedule_kind {
+            spans.push(Span::styled(
+                format!(" {} ", label),
+                Style::default().fg(Color::Black).bg(ACCENT),
+            ));
+        } else {
+            spans.push(Span::styled(
+                format!(" {} ", label),
+                Style::default().fg(DIM),
+            ));
+        }
+        spans.push(Span::raw(" "));
+    }
+    Line::from(spans)
+}
+
+fn schedule_value_line(form: &TriggerForm, focused: bool) -> Line<'static> {
+    let label_style = if focused {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(MUTED)
+    };
+    match form.schedule_kind {
+        ScheduleKind::Interval => Line::from(vec![
+            Span::styled("Interval (min): ", label_style),
+            Span::styled(
+                format!("{}", form.interval_minutes),
+                Style::default().fg(TEXT),
+            ),
+        ]),
+        ScheduleKind::DailyAt => Line::from(vec![
+            Span::styled("At: ", label_style),
+            Span::styled(
+                format!("{:02}:{:02}", form.hour, form.minute),
+                Style::default().fg(TEXT),
+            ),
+        ]),
+    }
+}
+
+fn recurring_line(form: &TriggerForm, focused: bool) -> Line<'static> {
+    toggle_line("Recurring", form.recurring, focused)
+}
+
+fn rule_line(form: &TriggerForm, focused: bool) -> Line<'static> {
+    let label_style = if focused {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(MUTED)
+    };
+    let value = if form.rules.is_empty() {
+        "(no intercept rules — create one first)".to_string()
+    } else {
+        form.rules
+            .get(form.rule_cursor)
+            .map(|(_, n)| n.clone())
+            .unwrap_or_default()
+    };
+    Line::from(vec![
+        Span::styled("Rule: ", label_style),
+        Span::styled(
+            format!("\u{25c0} {} \u{25b6}", value),
+            Style::default().fg(TEXT),
+        ),
+    ])
+}
+
+fn section_header(label: &str, focused: bool, suffix: &str) -> Line<'static> {
+    let label_style = if focused {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(MUTED)
+    };
+    Line::from(vec![
+        Span::styled(label.to_string(), label_style),
+        Span::raw("  "),
+        Span::styled(suffix.to_string(), Style::default().fg(DIM)),
+    ])
+}
+
+fn row_style(is_cursor: bool, selected: bool) -> Style {
+    if is_cursor {
+        Style::default()
+            .fg(TEXT)
+            .bg(Color::Rgb(35, 40, 35))
+            .add_modifier(Modifier::BOLD)
+    } else if selected {
+        Style::default().fg(TEXT)
+    } else {
+        Style::default().fg(DIM)
+    }
+}
+
+fn toggle_line(label: &str, value: bool, focused: bool) -> Line<'static> {
+    let label_style = if focused {
+        Style::default().fg(ACCENT)
+    } else {
+        Style::default().fg(MUTED)
+    };
+    let indicator = if value {
+        Span::styled(
+            " \u{25cf} yes ",
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Rgb(180, 160, 60)),
+        )
+    } else {
+        Span::styled(" \u{25cb} no ", Style::default().fg(DIM))
+    };
+    Line::from(vec![
+        Span::styled(format!("{}: ", label), label_style),
+        indicator,
+    ])
 }

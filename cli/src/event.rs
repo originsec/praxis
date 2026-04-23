@@ -1,9 +1,9 @@
 use crate::acp::AcpNotification;
 use crate::client::Client;
 use common::{
-    ChainDefinitionInfo, ChainExecutionUpdate, InterceptStatus, InterceptedTrafficEntry,
-    OperationDefinitionInfo, SemanticOpUpdate, SessionUpdate, SystemState, TerminalOutput,
-    TrafficMatchWithDetails,
+    ChainDefinitionInfo, ChainExecutionUpdate, ChainTriggerInfo, InterceptRule, InterceptStatus,
+    InterceptedTrafficEntry, OperationDefinitionInfo, SemanticOpUpdate, SessionUpdate,
+    SystemState, TerminalOutput, TrafficMatchWithDetails,
 };
 use crossterm::event::{Event, EventStream};
 use futures_util::StreamExt;
@@ -30,6 +30,10 @@ pub enum AppEvent {
         operations: Vec<SemanticOpUpdate>,
         chain_executions: Vec<ChainExecutionUpdate>,
         reset_selection: bool,
+    },
+    TriggersRefreshed {
+        triggers: Vec<ChainTriggerInfo>,
+        intercept_rules: Vec<InterceptRule>,
     },
     SessionResponse(SessionResult),
     TerminalCreated {
