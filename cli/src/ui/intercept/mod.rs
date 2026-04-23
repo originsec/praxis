@@ -20,7 +20,7 @@ use crate::app::App;
 pub(super) fn body_lines(bytes: &[u8], mode: BodyMode) -> Vec<ratatui::text::Line<'static>> {
     crate::app::intercept::body::render_body(bytes, mode)
 }
-use crate::ui::theme::{ACCENT, DIM, MUTED, STATUS_DONE, STATUS_FAIL};
+use crate::ui::theme::{ACCENT, DIM, MUTED, STATUS_FAIL};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -44,7 +44,6 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     //
     if let Some(ref rf) = app.intercept.rule_form {
         form::render(f, chunks[2], rf);
-        form::render_hints(f, chunks[3]);
         return;
     }
 
@@ -69,13 +68,7 @@ fn render_tabs(f: &mut Frame, area: Rect, app: &App) {
     let rules_count = app.intercept.rules.len();
     let matches_count = app.intercept.filtered_matches().len();
 
-    let pause = if app.intercept.paused {
-        Span::styled("  \u{23f8} PAUSED", Style::default().fg(ACCENT))
-    } else {
-        Span::styled("  \u{25cf} LIVE", Style::default().fg(STATUS_DONE))
-    };
-
-    let spans = vec![
+    let mut spans = vec![
         Span::raw("  "),
         Span::styled(
             " Log ",
@@ -84,21 +77,24 @@ fn render_tabs(f: &mut Frame, area: Rect, app: &App) {
         Span::styled(format!("{} ", count), Style::default().fg(DIM)),
         Span::styled(" \u{2502} ", Style::default().fg(DIM)),
         Span::styled(
-            " Rules ",
-            tab_style(app.intercept.tab == InterceptTab::Rules),
-        ),
-        Span::styled(format!("{} ", rules_count), Style::default().fg(DIM)),
-        Span::styled(" \u{2502} ", Style::default().fg(DIM)),
-        Span::styled(
             " Matches ",
             tab_style(app.intercept.tab == InterceptTab::Matches),
         ),
         Span::styled(format!("{} ", matches_count), Style::default().fg(DIM)),
-        pause,
-        Span::raw("   "),
-        Span::styled("tab", Style::default().fg(DIM)),
-        Span::styled(" switch", Style::default().fg(MUTED)),
+        Span::styled(" \u{2502} ", Style::default().fg(DIM)),
+        Span::styled(
+            " Rules ",
+            tab_style(app.intercept.tab == InterceptTab::Rules),
+        ),
+        Span::styled(format!("{} ", rules_count), Style::default().fg(DIM)),
     ];
+
+    if app.intercept.paused {
+        spans.push(Span::styled("  \u{23f8} PAUSED", Style::default().fg(ACCENT)));
+    }
+    spans.push(Span::raw("   "));
+    spans.push(Span::styled("tab", Style::default().fg(DIM)));
+    spans.push(Span::styled(" switch", Style::default().fg(MUTED)));
 
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }

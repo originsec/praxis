@@ -200,11 +200,30 @@ pub(super) fn render_node_detail(
         }
     }
 
-    if node.intercept_active {
-        activity_lines.push(Line::from(Span::styled(
-            "  intercept: active",
-            Style::default().fg(STATUS_RUNNING),
-        )));
+    //
+    // Only surface the intercept toggle for nodes that advertise the
+    // Interception capability. Empty capabilities list is treated as
+    // "supports everything" for backward compatibility with nodes that
+    // haven't reported capabilities yet.
+    //
+    let supports_intercept = node.capabilities.is_empty()
+        || node
+            .capabilities
+            .contains(&common::NodeCapability::Interception);
+
+    if supports_intercept {
+        activity_lines.push(Line::from(vec![
+            Span::styled("  intercept: ", Style::default().fg(MUTED)),
+            if node.intercept_active {
+                Span::styled(
+                    "active",
+                    Style::default().fg(STATUS_RUNNING).add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Span::styled("off", Style::default().fg(DIM))
+            },
+            Span::styled("   i toggle", Style::default().fg(DIM)),
+        ]));
     }
 
     let activity_height = if activity_lines.is_empty() {

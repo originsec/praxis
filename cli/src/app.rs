@@ -58,6 +58,7 @@ pub struct App {
     pub run_options: Option<RunOptions>,
     pub trigger_form: Option<TriggerForm>,
     pub confirm: Option<ConfirmAction>,
+    pub intercept_method_picker: Option<InterceptMethodPicker>,
     pub terminal_width: u16,
     pub event_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::event::AppEvent>>,
     pub needs_full_redraw: bool,
@@ -259,6 +260,13 @@ pub struct OperationsState {
     pub split_percent: u16,
     pub dragging: bool,
     pub filter: String,
+    pub filter_focused: bool,
+    //
+    // Last-rendered maximum legal scroll for the execution detail pane.
+    // Set by the renderer (accounting for wrap) so the key handler can
+    // clamp Down/PageDown before they run past the content.
+    //
+    pub exec_detail_max_scroll: std::cell::Cell<u16>,
     pub last_live_duration_redraw: std::time::Instant,
 }
 
@@ -296,6 +304,8 @@ impl Default for OperationsState {
             split_percent: 40,
             dragging: false,
             filter: String::new(),
+            filter_focused: false,
+            exec_detail_max_scroll: std::cell::Cell::new(0),
             last_live_duration_redraw: std::time::Instant::now(),
         }
     }
@@ -331,6 +341,7 @@ impl App {
             run_options: None,
             trigger_form: None,
             confirm: None,
+            intercept_method_picker: None,
             terminal_width: 0,
             event_tx: Some(event_tx),
             needs_full_redraw: false,
@@ -873,6 +884,14 @@ impl App {
         }
 
         //
+        // Intercept method picker intercepts all keys while open.
+        //
+        if self.intercept_method_picker.is_some() {
+            self.handle_intercept_method_picker_key(key).await;
+            return;
+        }
+
+        //
         // Confirm dialog intercepts all keys.
         //
         if self.confirm.is_some() {
@@ -1096,8 +1115,9 @@ impl App {
                         }
                     }
                     Window::Operations if self.operations.detail_focus => {
+                        let max = self.operations.exec_detail_max_scroll.get();
                         self.operations.detail_scroll =
-                            self.operations.detail_scroll.saturating_add(3);
+                            self.operations.detail_scroll.saturating_add(3).min(max);
                     }
                     Window::Nodes if self.nodes.active_session().is_some() => {
                         if let Some(session) = self.nodes.active_session_mut() {
@@ -1416,7 +1436,9 @@ impl App {
         }
 
         //
-        // Status bar clicks.
+        // Status bar clicks. Reconstruct the exact rendered text (kept
+        // in sync with crate::ui::status_bar::render) so each hit-box
+        // lines up with the label on screen.
         //
         if mouse.row == status_area.y {
             if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
@@ -1428,51 +1450,60 @@ impl App {
                     format!("{} nodes", node_count)
                 };
                 let session_count = self.nodes.sessions.len();
-                let session_segment = if session_count > 0 {
-                    format!(" \u{00b7} {} sessions ", session_count)
-                } else {
-                    String::new()
-                };
-                let orch_label = "^o orchestrator";
-                let nodes_label = "^l nodes";
-                let ops_label = "^p ops";
-                let settings_label = "^s settings";
-                let quit_label = "^q quit";
-                //
-                // Reconstruct the rendered status text so find() produces
-                // the correct column offsets for each label. Keep this in
-                // sync with crate::ui::status_bar::render.
-                //
-                let status_text = format!(
-                    " {} {} \u{00b7} {}  {}  {}  {} \u{00b7} {}",
-                    node_text,
-                    session_segment,
-                    orch_label,
-                    nodes_label,
-                    ops_label,
-                    settings_label,
-                    quit_label
-                );
-                let orch_pos = status_area.x + status_text.find(orch_label).unwrap_or(999) as u16;
-                let nodes_pos = status_area.x + status_text.find(nodes_label).unwrap_or(999) as u16;
-                let ops_pos = status_area.x + status_text.find(ops_label).unwrap_or(999) as u16;
-                let settings_pos =
-                    status_area.x + status_text.find(settings_label).unwrap_or(999) as u16;
-                let quit_pos = status_area.x + status_text.find(quit_label).unwrap_or(999) as u16;
 
-                if col >= ops_pos && col < ops_pos + ops_label.len() as u16 {
-                    self.active_window = Window::Operations;
-                    self.refresh_operations();
-                } else if col >= settings_pos && col < settings_pos + settings_label.len() as u16 {
-                    self.active_window = Window::Settings;
-                    self.load_settings().await;
-                } else if col >= nodes_pos && col < nodes_pos + nodes_label.len() as u16 {
-                    self.active_window = Window::Nodes;
-                    self.refresh_node_sessions();
-                } else if col >= orch_pos && col < orch_pos + orch_label.len() as u16 {
-                    self.active_window = Window::Orchestrator;
-                } else if col >= quit_pos && col < quit_pos + quit_label.len() as u16 {
+                //
+                // Reconstruct the rendered text exactly as status_bar.rs
+                // writes it. Leading " " + node_text + " " + optional
+                // session segment + separators + labels.
+                //
+                let mut status_text = format!(" {} ", node_text);
+                if session_count > 0 {
+                    status_text.push_str(&format!(" \u{00b7} {} sessions ", session_count));
+                }
+                status_text.push_str(" \u{00b7} ");
+                let labels: [(&str, Window); 6] = [
+                    ("^o orchestrator", Window::Orchestrator),
+                    ("^l nodes", Window::Nodes),
+                    ("^p ops", Window::Operations),
+                    ("^i intercept", Window::Intercept),
+                    ("^g logs", Window::LogQuery),
+                    ("^s settings", Window::Settings),
+                ];
+                let mut label_positions: Vec<(Window, usize, usize)> = Vec::new();
+                for (i, (lbl, win)) in labels.iter().enumerate() {
+                    let start = status_text.chars().count();
+                    status_text.push_str(lbl);
+                    label_positions.push((*win, start, start + lbl.chars().count()));
+                    if i + 1 < labels.len() {
+                        status_text.push_str("  ");
+                    }
+                }
+                status_text.push_str(" \u{00b7} ");
+                let quit_start = status_text.chars().count();
+                status_text.push_str("^q quit");
+                let quit_end = status_text.chars().count();
+
+                //
+                // Column -> character index within status_area.
+                //
+                let rel = col.saturating_sub(status_area.x) as usize;
+
+                for (win, s, e) in &label_positions {
+                    if rel >= *s && rel < *e {
+                        self.active_window = *win;
+                        match *win {
+                            Window::Nodes => self.refresh_node_sessions(),
+                            Window::Operations => self.refresh_operations(),
+                            Window::Intercept => self.enter_intercept().await,
+                            Window::Settings => self.load_settings().await,
+                            _ => {}
+                        }
+                        return;
+                    }
+                }
+                if rel >= quit_start && rel < quit_end {
                     self.should_quit = true;
+                    return;
                 }
                 return;
             }
@@ -1483,6 +1514,22 @@ impl App {
         //
         if self.active_window == Window::Operations {
             self.handle_operations_mouse(mouse, content_area).await;
+            return;
+        }
+
+        //
+        // Intercept window mouse handling (tab click, pane resize, row click).
+        //
+        if self.active_window == Window::Intercept {
+            self.handle_intercept_mouse(mouse, content_area).await;
+            return;
+        }
+
+        //
+        // Log Query mouse handling (pane focus, schema close).
+        //
+        if self.active_window == Window::LogQuery {
+            self.handle_log_query_mouse(mouse, content_area).await;
             return;
         }
 

@@ -1,6 +1,6 @@
 use super::{CHAIN_COLOR, OP_COLOR};
 use crate::app::{App, OperationsState};
-use crate::ui::common::{focused_titled_panel, short_id, titled_panel};
+use crate::ui::common::{focused_titled_panel, short_id};
 use crate::ui::theme::{
     ACCENT, DIM, MUTED, PANEL_HIGHLIGHT_BG, POPUP_HIGHLIGHT_BG, STATUS_DONE, STATUS_FAIL,
     STATUS_QUEUED, STATUS_RUNNING, TEXT,
@@ -13,8 +13,12 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 
 pub(super) fn render_executions(f: &mut Frame, area: Rect, state: &OperationsState) {
-    let chunks =
-        Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).split(area);
+    let pct = state.split_percent.clamp(20, 80);
+    let chunks = Layout::horizontal([
+        Constraint::Percentage(pct),
+        Constraint::Percentage(100 - pct),
+    ])
+    .split(area);
 
     render_exec_list(f, chunks[0], state);
     render_exec_detail(f, chunks[1], state);
@@ -92,7 +96,7 @@ fn render_exec_list(f: &mut Frame, area: Rect, state: &OperationsState) {
 
     let table = Table::new(rows, widths)
         .header(header)
-        .block(titled_panel(" Executions "))
+        .block(focused_titled_panel(" Executions ", !state.detail_focus))
         .row_highlight_style(Style::default().bg(PANEL_HIGHLIGHT_BG));
 
     let mut table_state = TableState::default();
@@ -456,9 +460,25 @@ fn render_exec_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
         }
     }
 
+    //
+    // Estimate the wrapped row count so we can clamp detail_scroll and
+    // publish a max for the key handler. With Wrap{trim:false} each
+    // logical Line takes ceil(line_width / inner.width) visual rows.
+    //
+    let wrap_width = inner.width.max(1) as usize;
+    let mut wrapped_rows: usize = 0;
+    for line in &lines {
+        let line_w = line.width().max(1);
+        wrapped_rows += line_w.div_ceil(wrap_width);
+    }
+    let visible = inner.height as usize;
+    let max_scroll = wrapped_rows.saturating_sub(visible) as u16;
+    state.exec_detail_max_scroll.set(max_scroll);
+    let effective = state.detail_scroll.min(max_scroll);
+
     let paragraph = Paragraph::new(Text::from(lines))
         .wrap(Wrap { trim: false })
-        .scroll((state.detail_scroll, 0));
+        .scroll((effective, 0));
 
     f.render_widget(paragraph, inner);
 }

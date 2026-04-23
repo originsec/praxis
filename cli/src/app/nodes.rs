@@ -156,6 +156,14 @@ impl App {
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.confirm_reset_node();
             }
+            KeyCode::Char('i') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                //
+                // `i` while focused in the Nodes window (not in detail
+                // pane) toggles intercept for the selected node. The
+                // existing ^i global shortcut still opens the window.
+                //
+                self.toggle_intercept_for_selected_node().await;
+            }
             KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 if let Some(node) = self.nodes.nodes.get(self.nodes.selected) {
                     if node.capabilities.is_empty()
@@ -168,6 +176,63 @@ impl App {
                 }
             }
             _ => {}
+        }
+    }
+
+    //
+    // Toggle intercept for the currently-selected node from the Nodes
+    // window. Fires the same ConfirmAction as the old ^i handler in the
+    // intercept window did, but sourced from the selected node row
+    // rather than the selected traffic entry.
+    //
+    pub(crate) async fn toggle_intercept_for_selected_node(&mut self) {
+        let Some(node) = self.nodes.nodes.get(self.nodes.selected) else {
+            return;
+        };
+        //
+        // Only allow toggling intercept on nodes that report the
+        // Interception capability. Empty capabilities list is treated as
+        // "supports everything" for backward-compat.
+        //
+        if !node.capabilities.is_empty()
+            && !node
+                .capabilities
+                .contains(&common::NodeCapability::Interception)
+        {
+            return;
+        }
+        let node_id = node.node_id.clone();
+        let machine = node.machine_name.clone();
+        let os_lower = node.os_details.to_lowercase();
+        let currently_on = self
+            .intercept
+            .intercept_statuses
+            .get(&node_id)
+            .map(|s| s.enabled)
+            .unwrap_or(node.intercept_active);
+
+        if currently_on {
+            //
+            // Disable path just needs a confirm prompt.
+            //
+            self.confirm = Some(ConfirmAction {
+                message: format!("Disable interception on {}?", machine),
+                action: ConfirmKind::ToggleIntercept {
+                    node_id,
+                    enable: false,
+                },
+            });
+        } else {
+            //
+            // Enable path opens the method picker — mirrors the web UI.
+            //
+            self.intercept_method_picker = Some(InterceptMethodPicker {
+                node_id,
+                machine_name: machine,
+                is_windows: os_lower.contains("windows"),
+                is_linux: os_lower.contains("linux"),
+                selected: 0,
+            });
         }
     }
 
@@ -1029,6 +1094,23 @@ impl App {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 //
+                // Pane border drag start — must run before list/detail
+                // hit-tests so a click on the border column isn't eaten
+                // by the neighbouring pane. Borders::ALL puts the border
+                // on the last column of list_area, so any column within
+                // ±1 of that line counts as a drag handle.
+                //
+                let border_x = list_area.x.saturating_add(list_area.width).saturating_sub(1);
+                if mouse.column >= border_x.saturating_sub(1)
+                    && mouse.column <= border_x + 1
+                    && mouse.row >= list_area.y
+                    && mouse.row < list_area.y + list_area.height
+                {
+                    self.nodes.dragging = true;
+                    return;
+                }
+
+                //
                 // Node hint bar clicks.
                 //
                 if mouse.row == hints_area.y {
@@ -1120,19 +1202,21 @@ impl App {
                     return;
                 }
 
-                //
-                // Pane border drag start.
-                //
-                let border_x = list_area.x.saturating_add(list_area.width);
-                if mouse.column >= border_x.saturating_sub(1) && mouse.column <= border_x + 1 {
-                    self.nodes.dragging = true;
-                }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
-                let h = self.terminal_width;
-                if self.nodes.dragging && h > 0 {
-                    let pct = (mouse.column as u32 * 100 / h as u32) as u16;
-                    self.nodes.split_percent = pct.clamp(20, 80);
+                //
+                // Map the mouse column to a split percentage relative to
+                // the list pane's origin. Using list_area.x (not 0) makes
+                // the drag track the actual content-area column, which
+                // matters when the overall frame has left padding.
+                //
+                if self.nodes.dragging {
+                    let w = (list_area.width + detail_area.width) as i32;
+                    if w > 0 {
+                        let rel = (mouse.column as i32 - list_area.x as i32).clamp(0, w);
+                        let pct = ((rel * 100) / w) as u16;
+                        self.nodes.split_percent = pct.clamp(20, 80);
+                    }
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {

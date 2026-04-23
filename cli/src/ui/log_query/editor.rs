@@ -6,7 +6,7 @@
 //
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -14,7 +14,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use crate::app::App;
 use crate::app::log_query::LogQueryFocus;
 use crate::ui::common::{focused_titled_panel, spinner_char};
-use crate::ui::theme::{ACCENT, DIM, INPUT_BORDER, JSON_NUMBER, JSON_STRING, MUTED, STATUS_RUNNING};
+use crate::ui::theme::{ACCENT, DIM, INPUT_BORDER, JSON_NUMBER, JSON_STRING, KEYWORD, MUTED, TEXT};
 
 const KEYWORDS: &[&str] = &[
     "where",
@@ -62,39 +62,16 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(block, area);
 
     //
-    // Layout: header strip (run button + hint) on top, editable body below.
+    // Inner padding: 1 col on each side, 0 rows so every row is editor.
     //
-    let sections = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(inner);
-
-    render_header(f, sections[0], app);
-    render_body(f, sections[1], app, focused);
-}
-
-fn render_header(f: &mut Frame, area: Rect, app: &App) {
-    let running = app.log_query.is_running;
-    let run_style = if running {
-        Style::default().fg(STATUS_RUNNING).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+    let padded = Rect {
+        x: inner.x + 1,
+        y: inner.y,
+        width: inner.width.saturating_sub(2),
+        height: inner.height,
     };
 
-    let mut spans = vec![
-        Span::styled(" ▶ RUN ", run_style),
-        Span::styled("^⏎", Style::default().fg(DIM)),
-    ];
-
-    if let Some(q) = &app.log_query.last_query {
-        if !running {
-            spans.push(Span::styled("  ·  ", Style::default().fg(DIM)));
-            spans.push(Span::styled("last: ", Style::default().fg(MUTED)));
-            spans.push(Span::styled(
-                truncate(q.replace('\n', " ").as_str(), 40),
-                Style::default().fg(DIM),
-            ));
-        }
-    }
-
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+    render_body(f, padded, app, focused);
 }
 
 fn render_body(f: &mut Frame, area: Rect, app: &App, focused: bool) {
@@ -320,10 +297,12 @@ fn tokenize(line: &str) -> Vec<Token> {
 
         let style = if word.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
             Style::default().fg(JSON_NUMBER)
-        } else if KEYWORDS.contains(&word.to_lowercase().as_str()) {
+        } else if is_known_table(word) {
             Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
+        } else if KEYWORDS.contains(&word.to_lowercase().as_str()) {
+            Style::default().fg(KEYWORD).add_modifier(Modifier::BOLD)
         } else {
-            Style::default()
+            Style::default().fg(TEXT)
         };
         out.push(Token {
             text: word.to_string(),
@@ -347,12 +326,8 @@ fn split_at_char(s: &str, idx: usize) -> (String, String) {
     (s[..split].to_string(), s[split..].to_string())
 }
 
-fn truncate(s: &str, limit: usize) -> String {
-    if s.chars().count() <= limit {
-        s.to_string()
-    } else {
-        let mut out: String = s.chars().take(limit.saturating_sub(1)).collect();
-        out.push('…');
-        out
-    }
+fn is_known_table(word: &str) -> bool {
+    crate::app::log_query::schema::TABLES
+        .iter()
+        .any(|t| t.name.eq_ignore_ascii_case(word))
 }

@@ -14,7 +14,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap};
 
 use crate::app::App;
-use crate::app::intercept::{DisplayRow, InterceptState, ProtocolFilter};
+use crate::app::intercept::{DisplayRow, InterceptState};
 use crate::ui::intercept::body_lines;
 use crate::ui::theme::{
     ACCENT, DIM, INPUT_BORDER, MUTED, PANEL_HIGHLIGHT_BG, PROTO_H2, PROTO_WS, STATUS_2XX,
@@ -28,16 +28,21 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     ])
     .split(area);
 
-    render_filter_bar(f, chunks[0], &app.intercept);
+    render_filter_bar(f, chunks[0], app);
 
-    let split = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
-        .split(chunks[1]);
+    let pct = app.intercept.log_split_percent.clamp(20, 80);
+    let split = Layout::horizontal([
+        Constraint::Percentage(pct),
+        Constraint::Percentage(100 - pct),
+    ])
+    .split(chunks[1]);
 
     render_table(f, split[0], &app.intercept);
     render_detail(f, split[1], &app.intercept);
 }
 
-fn render_filter_bar(f: &mut Frame, area: Rect, state: &InterceptState) {
+fn render_filter_bar(f: &mut Frame, area: Rect, app: &App) {
+    let state = &app.intercept;
     let search_span = if state.search_focused {
         Span::styled(
             if state.search_input.is_empty() {
@@ -53,16 +58,22 @@ fn render_filter_bar(f: &mut Frame, area: Rect, state: &InterceptState) {
         Span::styled(state.search_input.clone(), Style::default().fg(ACCENT))
     };
 
-    let protocol = match state.protocol {
-        ProtocolFilter::All => Span::styled("all", Style::default().fg(MUTED)),
-        ProtocolFilter::Http => Span::styled("http", Style::default().fg(ACCENT)),
-        ProtocolFilter::WebSocket => Span::styled("ws", Style::default().fg(PROTO_WS)),
-        ProtocolFilter::Http2 => Span::styled("h2", Style::default().fg(PROTO_H2)),
-    };
-
+    //
+    // Show the node by its machine name (falling back to short id for
+    // nodes that haven't reported one yet).
+    //
     let node_label = match state.node_filter.as_deref() {
         None => "all".to_string(),
-        Some(id) => id[..8.min(id.len())].to_string(),
+        Some(id) => {
+            let name = app
+                .nodes
+                .nodes
+                .iter()
+                .find(|n| n.node_id == id)
+                .map(|n| n.machine_name.clone())
+                .filter(|n| !n.is_empty());
+            name.unwrap_or_else(|| id[..8.min(id.len())].to_string())
+        }
     };
     let agent_label = match state.agent_filter.as_deref() {
         None => "all".to_string(),
@@ -74,10 +85,6 @@ fn render_filter_bar(f: &mut Frame, area: Rect, state: &InterceptState) {
         Span::styled(" search: ", Style::default().fg(MUTED)),
         search_span,
         Span::raw("   "),
-        Span::styled("proto ", Style::default().fg(MUTED)),
-        Span::styled("[", Style::default().fg(DIM)),
-        protocol,
-        Span::styled("]  ", Style::default().fg(DIM)),
         Span::styled("node ", Style::default().fg(MUTED)),
         Span::styled("[", Style::default().fg(DIM)),
         Span::styled(node_label, Style::default().fg(TEXT)),
@@ -112,9 +119,15 @@ fn render_table(f: &mut Frame, area: Rect, state: &InterceptState) {
         .map(|row| build_row(state, row))
         .collect();
 
+    //
+    // When the detail pane isn't focused the list pane is the active
+    // pane: show it with the green accent so the user can always see
+    // which pane is "live".
+    //
+    let border_color = if state.detail_focus { INPUT_BORDER } else { ACCENT };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(INPUT_BORDER))
+        .border_style(Style::default().fg(border_color))
         .title(Span::styled(" Traffic ", Style::default().fg(MUTED)));
 
     let table = Table::new(rows, widths)
@@ -212,6 +225,7 @@ fn build_row(state: &InterceptState, row: &DisplayRow) -> Row<'static> {
 }
 
 fn render_detail(f: &mut Frame, area: Rect, state: &InterceptState) {
+    let border_color = if state.detail_focus { ACCENT } else { INPUT_BORDER };
     let title = if state.detail_focus {
         Span::styled(" Detail \u{25c4} ", Style::default().fg(ACCENT))
     } else {
@@ -219,12 +233,12 @@ fn render_detail(f: &mut Frame, area: Rect, state: &InterceptState) {
     };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(INPUT_BORDER))
+        .border_style(Style::default().fg(border_color))
         .title(title);
 
     let Some(selected) = state.selected_row() else {
         let empty = Paragraph::new(Line::from(Span::styled(
-            "No traffic selected. Press ^i then ↓/↑ to navigate.",
+            "No traffic selected. Press ↓/↑ to navigate.",
             Style::default().fg(MUTED),
         )))
         .block(block);
@@ -245,17 +259,18 @@ fn render_detail(f: &mut Frame, area: Rect, state: &InterceptState) {
         } => group_detail_lines(state, url, indices),
     };
 
-    let body_mode_line = Line::from(vec![
-        Span::styled("[body: ", Style::default().fg(DIM)),
-        Span::styled(state.body_mode.label(), Style::default().fg(ACCENT)),
-        Span::styled(" — H cycle]", Style::default().fg(DIM)),
-    ]);
-    let mut all = vec![body_mode_line, Line::raw("")];
-    all.extend(lines);
+    //
+    // Clamp detail_scroll to the last legal offset so a runaway
+    // PageDown can't scroll past the end.
+    //
+    let inner_h = area.height.saturating_sub(2) as usize;
+    let max_scroll = lines.len().saturating_sub(inner_h) as u16;
+    state.detail_max_scroll.set(max_scroll);
+    let effective = state.detail_scroll.min(max_scroll);
 
-    let para = Paragraph::new(all)
+    let para = Paragraph::new(lines)
         .wrap(Wrap { trim: false })
-        .scroll((state.detail_scroll, 0))
+        .scroll((effective, 0))
         .block(block);
     f.render_widget(para, area);
 }
@@ -465,21 +480,10 @@ fn short_id(id: &str) -> String {
 }
 
 pub fn hints(app: &App) -> Line<'static> {
-    let mut spans = vec![
+    let spans = vec![
         Span::raw(" "),
-        Span::styled("enter", Style::default().fg(ACCENT)),
-        Span::styled(
-            if app.intercept.detail_focus {
-                " unfocus  "
-            } else {
-                " focus detail  "
-            },
-            Style::default().fg(MUTED),
-        ),
         Span::styled("/", Style::default().fg(ACCENT)),
         Span::styled(" search  ", Style::default().fg(MUTED)),
-        Span::styled("f", Style::default().fg(ACCENT)),
-        Span::styled(" proto  ", Style::default().fg(MUTED)),
         Span::styled("n", Style::default().fg(ACCENT)),
         Span::styled(" node  ", Style::default().fg(MUTED)),
         Span::styled("a", Style::default().fg(ACCENT)),
@@ -494,15 +498,7 @@ pub fn hints(app: &App) -> Line<'static> {
             Style::default().fg(MUTED),
         ),
         Span::styled("c", Style::default().fg(ACCENT)),
-        Span::styled(" clear  ", Style::default().fg(MUTED)),
-        Span::styled("H", Style::default().fg(ACCENT)),
-        Span::styled(
-            format!(" body:{}  ", app.intercept.body_mode.label()),
-            Style::default().fg(MUTED),
-        ),
-        Span::styled("i", Style::default().fg(ACCENT)),
-        Span::styled(" toggle intercept", Style::default().fg(MUTED)),
+        Span::styled(" clear", Style::default().fg(MUTED)),
     ];
-    spans.insert(0, Span::raw(""));
     Line::from(spans)
 }

@@ -9,8 +9,12 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 
 pub(super) fn render_triggers(f: &mut Frame, area: Rect, state: &OperationsState) {
-    let chunks =
-        Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).split(area);
+    let pct = state.split_percent.clamp(20, 80);
+    let chunks = Layout::horizontal([
+        Constraint::Percentage(pct),
+        Constraint::Percentage(100 - pct),
+    ])
+    .split(area);
     render_triggers_list(f, chunks[0], state);
     render_trigger_detail(f, chunks[1], state);
 }

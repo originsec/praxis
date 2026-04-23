@@ -17,6 +17,31 @@ use crate::ui::theme::{
 };
 
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
+    use ratatui::layout::Layout;
+    let chunks = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).split(area);
+
+    //
+    // Filter bar.
+    //
+    let filter_span = if app.intercept.rule_filter_focused {
+        let v = if app.intercept.rule_filter.is_empty() {
+            "_".to_string()
+        } else {
+            format!("{}_", app.intercept.rule_filter)
+        };
+        Span::styled(v, Style::default().fg(ACCENT))
+    } else if app.intercept.rule_filter.is_empty() {
+        Span::styled("(/ to filter)", Style::default().fg(DIM))
+    } else {
+        Span::styled(app.intercept.rule_filter.clone(), Style::default().fg(ACCENT))
+    };
+    let filter_line = Line::from(vec![
+        Span::styled(" /", Style::default().fg(DIM)),
+        Span::styled(" filter: ", Style::default().fg(MUTED)),
+        filter_span,
+    ]);
+    f.render_widget(ratatui::widgets::Paragraph::new(filter_line), chunks[0]);
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(INPUT_BORDER))
@@ -40,10 +65,16 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Constraint::Length(5),
     ];
 
+    let filter = app.intercept.rule_filter.to_lowercase();
     let rows: Vec<Row> = app
         .intercept
         .rules
         .iter()
+        .filter(|rule| {
+            filter.is_empty()
+                || rule.name.to_lowercase().contains(&filter)
+                || rule.regex_pattern.to_lowercase().contains(&filter)
+        })
         .map(|rule| {
             let on_cell = if rule.enabled {
                 Span::styled("\u{25cf}", Style::default().fg(STATUS_DONE))
@@ -92,27 +123,24 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         })
         .collect();
 
+    let row_count = rows.len();
     let table = Table::new(rows, widths)
         .header(header)
         .block(block)
         .row_highlight_style(Style::default().bg(PANEL_HIGHLIGHT_BG));
 
     let mut state = TableState::default();
-    if !app.intercept.rules.is_empty() {
-        state.select(Some(
-            app.intercept
-                .rule_selected
-                .min(app.intercept.rules.len() - 1),
-        ));
+    if row_count > 0 {
+        state.select(Some(app.intercept.rule_selected.min(row_count - 1)));
     }
-    f.render_stateful_widget(table, area, &mut state);
+    f.render_stateful_widget(table, chunks[1], &mut state);
 
     if app.intercept.rules.is_empty() {
         let empty = Span::styled(
-            "No rules yet — press N to create one.",
+            "No rules yet — press ^n to create one.",
             Style::default().fg(MUTED),
         );
-        let mut empty_area = area;
+        let mut empty_area = chunks[1];
         empty_area.y += 2;
         empty_area.x += 3;
         empty_area.height = 1;
@@ -125,20 +153,29 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let _ = STATUS_FAIL;
 }
 
-pub fn hints(_app: &App) -> Line<'static> {
-    Line::from(vec![
+pub fn hints(app: &App) -> Line<'static> {
+    let mut spans = vec![
         Span::raw(" "),
-        Span::styled("n", Style::default().fg(ACCENT)),
+        Span::styled("^n", Style::default().fg(ACCENT)),
         Span::styled(" new  ", Style::default().fg(MUTED)),
-        Span::styled("e", Style::default().fg(ACCENT)),
+        Span::styled("^e", Style::default().fg(ACCENT)),
         Span::styled(" edit  ", Style::default().fg(MUTED)),
-        Span::styled("d", Style::default().fg(ACCENT)),
+        Span::styled("^d", Style::default().fg(ACCENT)),
         Span::styled(" delete  ", Style::default().fg(MUTED)),
         Span::styled("space", Style::default().fg(ACCENT)),
         Span::styled(" toggle  ", Style::default().fg(MUTED)),
         Span::styled("enter", Style::default().fg(ACCENT)),
         Span::styled(" matches  ", Style::default().fg(MUTED)),
-        Span::styled("r", Style::default().fg(ACCENT)),
-        Span::styled(" refresh", Style::default().fg(MUTED)),
-    ])
+    ];
+    if !app.intercept.rule_filter.is_empty() {
+        spans.push(Span::styled("filter: ", Style::default().fg(DIM)));
+        spans.push(Span::styled(
+            app.intercept.rule_filter.clone(),
+            Style::default().fg(ACCENT),
+        ));
+        spans.push(Span::styled("  esc clear", Style::default().fg(DIM)));
+    } else {
+        spans.push(Span::styled("/ to filter", Style::default().fg(DIM)));
+    }
+    Line::from(spans)
 }

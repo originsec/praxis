@@ -21,20 +21,19 @@ use crate::app::log_query::LogQueryFocus;
 use crate::ui::theme::{ACCENT, DIM, MUTED, STATUS_FAIL};
 
 const EDITOR_HEIGHT: u16 = 9;
-const SCHEMA_SIDEBAR_WIDTH: u16 = 30;
 
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let show_error = app.log_query.last_error.is_some();
 
     let chunks = Layout::vertical([
-        Constraint::Length(EDITOR_HEIGHT),              // editor + optional schema sidebar
+        Constraint::Length(EDITOR_HEIGHT),              // editor
         Constraint::Length(if show_error { 1 } else { 0 }), // error banner
         Constraint::Min(1),                             // results
         Constraint::Length(1),                          // hint line
     ])
     .split(area);
 
-    render_editor_row(f, chunks[0], app);
+    editor::render(f, chunks[0], app);
 
     if show_error {
         render_error(f, chunks[1], app);
@@ -51,19 +50,12 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
     if app.log_query.autocomplete_open {
         autocomplete::render(f, chunks[0], app);
     }
-}
 
-fn render_editor_row(f: &mut Frame, area: Rect, app: &App) {
+    //
+    // Schema popup overlays the whole window when open.
+    //
     if app.log_query.schema_open {
-        let cols = Layout::horizontal([
-            Constraint::Min(10),
-            Constraint::Length(SCHEMA_SIDEBAR_WIDTH),
-        ])
-        .split(area);
-        editor::render(f, cols[0], app);
-        schema::render(f, cols[1], app);
-    } else {
-        editor::render(f, area, app);
+        schema::render_popup(f, area, app);
     }
 }
 
@@ -98,7 +90,7 @@ fn render_hints(f: &mut Frame, area: Rect, app: &App) {
                 ]);
             } else {
                 spans.extend([
-                    hint_key("^⏎"),
+                    hint_key("^r"),
                     hint_txt(" run"),
                     sep.clone(),
                     hint_key("tab"),
@@ -107,7 +99,7 @@ fn render_hints(f: &mut Frame, area: Rect, app: &App) {
                     hint_key("?"),
                     hint_txt(" schema"),
                     sep.clone(),
-                    hint_key("esc"),
+                    hint_key("^j"),
                     hint_txt(" → results"),
                 ]);
             }

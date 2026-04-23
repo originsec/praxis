@@ -82,7 +82,7 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
         OpsTab::Library => {
             let mut spans = vec![
                 Span::raw(" "),
-                Span::styled("enter", Style::default().fg(ACCENT)),
+                Span::styled("^r", Style::default().fg(ACCENT)),
                 Span::styled(" execute  ", Style::default().fg(MUTED)),
                 Span::styled("^n", Style::default().fg(ACCENT)),
                 Span::styled(" new  ", Style::default().fg(MUTED)),
@@ -91,12 +91,17 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
                 Span::styled("^d", Style::default().fg(ACCENT)),
                 Span::styled(" delete  ", Style::default().fg(MUTED)),
             ];
-            if !state.filter.is_empty() {
+            if state.filter_focused {
+                spans.push(Span::styled("/", Style::default().fg(ACCENT)));
+                spans.push(Span::styled(&state.filter, Style::default().fg(ACCENT)));
+                spans.push(Span::styled("▏", Style::default().fg(ACCENT)));
+                spans.push(Span::styled("  enter apply  esc dismiss", Style::default().fg(DIM)));
+            } else if !state.filter.is_empty() {
                 spans.push(Span::styled("filter: ", Style::default().fg(DIM)));
                 spans.push(Span::styled(&state.filter, Style::default().fg(ACCENT)));
                 spans.push(Span::styled("  esc clear", Style::default().fg(DIM)));
             } else {
-                spans.push(Span::styled("type to filter", Style::default().fg(DIM)));
+                spans.push(Span::styled("/ to filter", Style::default().fg(DIM)));
             }
             Line::from(spans)
         }
@@ -161,12 +166,17 @@ fn render_hints(f: &mut Frame, area: Rect, state: &OperationsState) {
             spans.push(Span::styled(" delete  ", Style::default().fg(MUTED)));
             spans.push(Span::styled("^x", Style::default().fg(ACCENT)));
             spans.push(Span::styled(" clear all  ", Style::default().fg(MUTED)));
-            if !state.filter.is_empty() {
+            if state.filter_focused {
+                spans.push(Span::styled("/", Style::default().fg(ACCENT)));
+                spans.push(Span::styled(&state.filter, Style::default().fg(ACCENT)));
+                spans.push(Span::styled("▏", Style::default().fg(ACCENT)));
+                spans.push(Span::styled("  enter apply  esc dismiss", Style::default().fg(DIM)));
+            } else if !state.filter.is_empty() {
                 spans.push(Span::styled("filter: ", Style::default().fg(DIM)));
                 spans.push(Span::styled(&state.filter, Style::default().fg(ACCENT)));
                 spans.push(Span::styled("  esc clear", Style::default().fg(DIM)));
             } else {
-                spans.push(Span::styled("type to filter", Style::default().fg(DIM)));
+                spans.push(Span::styled("/ to filter", Style::default().fg(DIM)));
             }
             Line::from(spans)
         }

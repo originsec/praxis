@@ -10,27 +10,11 @@ use ratatui::text::{Line, Span};
 use crate::ui::theme::{CODE_FG, DIM, JSON_KEY, JSON_NUMBER, JSON_PUNCT, JSON_STRING, MUTED, TEXT};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum BodyMode {
     Pretty,
     Raw,
     Hex,
-}
-
-impl BodyMode {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Pretty => "pretty",
-            Self::Raw => "raw",
-            Self::Hex => "hex",
-        }
-    }
-    pub fn cycle(self) -> Self {
-        match self {
-            Self::Pretty => Self::Raw,
-            Self::Raw => Self::Hex,
-            Self::Hex => Self::Pretty,
-        }
-    }
 }
 
 pub fn render_body(bytes: &[u8], mode: BodyMode) -> Vec<Line<'static>> {
