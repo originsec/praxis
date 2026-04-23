@@ -12,7 +12,7 @@ serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1.0"
 regex = "1.10"
-dirs = "5.0"
+dirs = "6.0"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 futures-core = "0.3"
 futures-util = "0.3"

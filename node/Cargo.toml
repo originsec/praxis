@@ -24,27 +24,27 @@ libc = "0.2"
 lapin = "2.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sha2 = "0.10"
+sha2 = "0.11"
 tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
-dirs = "5.0"
+dirs = "6.0"
 walkdir = "2"
 common = { package = "praxis_common", path = "../common" }
-portable-pty = "0.8"
+portable-pty = "0.9"
 rmcp = { version = "0.8", features = ["client", "transport-child-process"] }
 # Traffic interception dependencies
 flate2 = "1"
-brotli = "7"
+brotli = "8"
 zstd = "0.13"
 # VPN packet routing dependencies
-socket2 = { version = "0.5", features = ["all"] }
+socket2 = { version = "0.6", features = ["all"] }
 etherparse = "0.16"
 hickory-resolver = { version = "0.24", features = ["tokio-runtime"] }
 dashmap = "6"
 tokio-util = { version = "0.7", features = ["rt", "compat"] }
 agent-client-protocol = { version = "0.10.4", features = ["unstable_session_close", "unstable_session_model", "unstable_session_usage"] }
 time = "0.3"
-rcgen = "0.13"
+rcgen = "0.14"
 rustls = { version = "0.23", features = ["ring"] }
 tokio-rustls = "0.26"
 rustls-pemfile = "2"

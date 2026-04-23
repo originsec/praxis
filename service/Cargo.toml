@@ -30,7 +30,7 @@ tracing-subscriber = "0.3"
 futures-util = "0.3"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "postgres", "chrono", "json"] }
 regex = "1"
-dirs = "5.0"
+dirs = "6.0"
 hostname = "0.4"
 rmcp = { version = "0.8", features = ["server", "transport-sse-server", "client", "transport-sse-client-reqwest", "schemars"] }
 async-trait = "0.1"
