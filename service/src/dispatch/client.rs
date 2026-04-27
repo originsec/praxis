@@ -34,6 +34,10 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             handle_remove_node(ctx, node_id).await,
         ClientSignalMessage::ResetNode { node_id } =>
             handle_reset_node(ctx, node_id).await,
+        ClientSignalMessage::AddRemoteNode { label, url, token } =>
+            handle_add_remote_node(ctx, label, url, token).await,
+        ClientSignalMessage::RemoveRemoteNode { node_id } =>
+            handle_remove_remote_node(ctx, node_id).await,
 
         //
         // Semantic operations.
@@ -433,6 +437,40 @@ async fn handle_reset_node(ctx: &ServiceContext, node_id: String) {
     let message = NodeDirectMessage::Reset;
     if let Err(e) = common::publish_json(&ctx.publish_channel, &reset_queue, &message).await {
         common::log_error!("Failed to send reset to node {}: {}", node_id, e);
+    }
+}
+
+async fn handle_add_remote_node(
+    ctx: &ServiceContext,
+    label: String,
+    url: String,
+    token: Option<String>,
+) {
+    common::log_info!("Adding remote Codex node: {} ({})", label, url);
+
+    match ctx.database.insert_remote_node(&label, &url, token.as_deref()).await {
+        Ok(record) => {
+            ctx.codex_bridge_manager
+                .start_bridge(record.id, url, token, ctx.rabbitmq_url.clone())
+                .await;
+        }
+        Err(e) => {
+            common::log_error!("Failed to save remote node to database: {}", e);
+        }
+    }
+}
+
+async fn handle_remove_remote_node(ctx: &ServiceContext, node_id: String) {
+    common::log_info!("Removing remote node {}", common::short_id(&node_id));
+
+    ctx.codex_bridge_manager.stop_bridge(&node_id).await;
+    ctx.node_registry.remove(&node_id).await;
+    if let Err(e) = ctx.database.delete_remote_node(&node_id).await {
+        common::log_warn!("Failed to delete remote node from database: {}", e);
+    }
+
+    if let Err(e) = broadcast_state_to_clients(&ctx.broadcast_channel, &ctx.node_registry).await {
+        common::log_error!("Failed to broadcast state after remote node removal: {}", e);
     }
 }
 

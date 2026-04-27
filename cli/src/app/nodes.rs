@@ -74,6 +74,14 @@ impl App {
     }
 
     pub(crate) async fn handle_nodes_key(&mut self, key: KeyEvent) {
+        //
+        // Add Remote Node form takes priority when open.
+        //
+        if self.add_remote_node_form.is_some() {
+            self.handle_add_remote_node_form_key(key).await;
+            return;
+        }
+
         if self.nodes.terminal.is_some() {
             self.handle_terminal_key(key).await;
             return;
@@ -155,6 +163,21 @@ impl App {
             }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.confirm_reset_node();
+            }
+            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.add_remote_node_form = Some(crate::app::AddRemoteNodeForm::default());
+            }
+            KeyCode::Delete | KeyCode::Backspace if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(node) = self.nodes.nodes.get(self.nodes.selected) {
+                    if node.node_type == "remote-codex" {
+                        let node_id = node.node_id.clone();
+                        let label = node.machine_name.clone();
+                        self.confirm = Some(crate::app::popups::ConfirmAction {
+                            message: format!("Remove remote node '{}'?", label),
+                            action: crate::app::popups::ConfirmKind::DeleteRemoteNode(node_id),
+                        });
+                    }
+                }
             }
             KeyCode::Char('i') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 //
@@ -1244,5 +1267,118 @@ impl App {
             return None;
         }
         Some((row - rows_start) as usize)
+    }
+
+    //
+    // Add Remote Node form key handler.
+    //
+
+    pub(crate) async fn handle_add_remote_node_form_key(&mut self, key: KeyEvent) {
+        use crate::app::input;
+        use crate::app::AddRemoteNodeForm;
+
+        if self.add_remote_node_form.is_none() {
+            return;
+        }
+
+        match key.code {
+            KeyCode::Esc => {
+                self.add_remote_node_form = None;
+            }
+            KeyCode::Up => {
+                if let Some(f) = &mut self.add_remote_node_form {
+                    if f.focused_field > 0 { f.focused_field -= 1; }
+                }
+            }
+            KeyCode::Down | KeyCode::Tab => {
+                if let Some(f) = &mut self.add_remote_node_form {
+                    if f.focused_field + 1 < AddRemoteNodeForm::FIELD_COUNT {
+                        f.focused_field += 1;
+                    }
+                }
+            }
+            KeyCode::BackTab => {
+                if let Some(f) = &mut self.add_remote_node_form {
+                    if f.focused_field > 0 { f.focused_field -= 1; }
+                }
+            }
+            KeyCode::Left => {
+                if let Some(f) = &mut self.add_remote_node_form {
+                    let (_, c) = f.active_str_and_cursor_mut();
+                    input::move_left(c);
+                }
+            }
+            KeyCode::Right => {
+                if let Some(f) = &mut self.add_remote_node_form {
+                    let (s, c) = f.active_str_and_cursor_mut();
+                    input::move_right(s, c);
+                }
+            }
+            KeyCode::Home => {
+                if let Some(f) = &mut self.add_remote_node_form {
+                    let (_, c) = f.active_str_and_cursor_mut();
+                    input::move_home(c);
+                }
+            }
+            KeyCode::End => {
+                if let Some(f) = &mut self.add_remote_node_form {
+                    let (s, c) = f.active_str_and_cursor_mut();
+                    input::move_end(s, c);
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(f) = &mut self.add_remote_node_form {
+                    let (s, c) = f.active_str_and_cursor_mut();
+                    input::backspace(s, c);
+                }
+            }
+            KeyCode::Delete => {
+                if let Some(f) = &mut self.add_remote_node_form {
+                    let (s, c) = f.active_str_and_cursor_mut();
+                    input::delete(s, c);
+                }
+            }
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.submit_add_remote_node_form().await;
+            }
+            KeyCode::Enter => {
+                let at_last = self.add_remote_node_form.as_ref()
+                    .map(|f| f.focused_field + 1 >= AddRemoteNodeForm::FIELD_COUNT)
+                    .unwrap_or(false);
+                if at_last {
+                    self.submit_add_remote_node_form().await;
+                } else if let Some(f) = &mut self.add_remote_node_form {
+                    if f.focused_field + 1 < AddRemoteNodeForm::FIELD_COUNT {
+                        f.focused_field += 1;
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(f) = &mut self.add_remote_node_form {
+                    let (s, cur) = f.active_str_and_cursor_mut();
+                    input::insert_char(s, cur, c);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    async fn submit_add_remote_node_form(&mut self) {
+        let Some(form) = self.add_remote_node_form.take() else { return };
+
+        let label = form.label.trim().to_string();
+        let url = form.url.trim().to_string();
+        let token = if form.token.trim().is_empty() {
+            None
+        } else {
+            Some(form.token.trim().to_string())
+        };
+
+        if label.is_empty() || url.is_empty() {
+            self.add_remote_node_form = Some(form);
+            return;
+        }
+
+        let _ = self.client.add_remote_node(label, url, token).await;
     }
 }

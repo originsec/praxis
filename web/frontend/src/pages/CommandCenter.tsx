@@ -1,14 +1,17 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Server, AlertCircle } from 'lucide-react';
+import { Server, AlertCircle, Plus } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { CommandTopBar } from '../components/command/CommandTopBar';
 import { NodeCard } from '../components/command/NodeCard';
+import { AddRemoteNodeModal } from '../components/command/AddRemoteNodeModal';
 import { OrchestratorPanel } from '../components/command/OrchestratorPanel';
 import { ActivityBar } from '../components/command/ActivityBar';
 const ORCHESTRATOR_PANEL_KEY = 'commandCenter.orchestratorOpen';
 
 export function CommandCenter() {
   const { state, requestOperations, requestChainExecutions } = useApp();
+
+  const [showAddRemoteNode, setShowAddRemoteNode] = useState(false);
 
   const [orchestratorOpen, setOrchestratorOpen] = useState(() => {
     const stored = localStorage.getItem(ORCHESTRATOR_PANEL_KEY);
@@ -103,10 +106,16 @@ export function CommandCenter() {
               </div>
             ) : sortedNodes.length === 0 ? (
               <div className="flex items-center justify-center h-full">
-                <div className="text-center">
-                  <Server size={48} className="mx-auto mb-4 text-muted opacity-50" />
+                <div className="text-center space-y-4">
+                  <Server size={48} className="mx-auto text-muted opacity-50" />
                   <p className="text-muted text-sm">No nodes connected</p>
-                  <p className="text-xs text-muted mt-1">Waiting for nodes to check in...</p>
+                  <p className="text-xs text-muted">Waiting for nodes to check in...</p>
+                  <button
+                    onClick={() => setShowAddRemoteNode(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[10px] border border-dashed border-dim hover:border-subtle text-muted hover:text-[var(--text-secondary)] transition-colors"
+                  >
+                    <Plus size={11} /> Add Remote Codex Node
+                  </button>
                 </div>
               </div>
             ) : filteredNodes.length === 0 ? (
@@ -116,10 +125,20 @@ export function CommandCenter() {
                 </div>
               </div>
             ) : (
-              <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 380px))' }}>
-                {filteredNodes.map(node => (
-                  <NodeCard key={node.node_id} node={node} />
-                ))}
+              <div className="space-y-4">
+                <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 380px))' }}>
+                  {filteredNodes.map(node => (
+                    <NodeCard key={node.node_id} node={node} />
+                  ))}
+                  <button
+                    onClick={() => setShowAddRemoteNode(true)}
+                    className="flex flex-col items-center justify-center gap-2 p-6 border border-dashed border-dim hover:border-subtle text-muted hover:text-[var(--text-secondary)] transition-colors min-h-[80px]"
+                    title="Add remote Codex node"
+                  >
+                    <Plus size={16} />
+                    <span className="text-[10px]">Add Remote Codex Node</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -134,6 +153,11 @@ export function CommandCenter() {
         */}
         <OrchestratorPanel isOpen={orchestratorOpen} onToggle={toggleOrchestrator} />
       </div>
+
+      <AddRemoteNodeModal
+        isOpen={showAddRemoteNode}
+        onClose={() => setShowAddRemoteNode(false)}
+      />
     </div>
   );
 }

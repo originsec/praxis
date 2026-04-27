@@ -104,6 +104,44 @@ impl NodeRegistry {
         }
     }
 
+    /// Register a synthetic node (e.g. Codex bridge) that has no RabbitMQ queue.
+    pub async fn register_synthetic(
+        &self,
+        id: String,
+        node_type: String,
+        machine_name: String,
+        os_details: String,
+        capabilities: Vec<NodeCapability>,
+        initial_update: NodeInformationUpdate,
+    ) -> RegisteredNode {
+        let now = Utc::now();
+        let node = RegisteredNode {
+            id: id.clone(),
+            node_type,
+            capabilities,
+            machine_name,
+            os_details,
+            queue_name: String::new(),
+            registered_at: now,
+            last_update: Some(initial_update),
+            last_update_received: now,
+            intercept_active: false,
+            intercept_supported: false,
+            privileged: false,
+        };
+        self.agents.write().await.insert(id.clone(), node.clone());
+        common::log_info!("Registered synthetic node: {}", id);
+        node
+    }
+
+    /// Touch last_update_received to keep a synthetic node Online.
+    pub async fn touch_timestamp(&self, node_id: &str) {
+        let mut agents = self.agents.write().await;
+        if let Some(node) = agents.get_mut(node_id) {
+            node.last_update_received = Utc::now();
+        }
+    }
+
     pub async fn get(&self, id: &str) -> Option<RegisteredNode> {
         let agents = self.agents.read().await;
         agents.get(id).cloned()

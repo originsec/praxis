@@ -4,6 +4,7 @@ mod acp_node_proxy;
 mod acp_server;
 mod banner;
 mod claude_bridge;
+mod codex_bridge;
 mod config;
 mod conversions;
 mod database;
@@ -639,6 +640,24 @@ async fn run_main_loop() -> Result<()> {
         dispatch::traffic_broadcast::InterceptBroadcaster::spawn(broadcast_channel.clone());
 
     //
+    // Initialize the Codex bridge manager and restore persisted remote nodes.
+    //
+    let codex_bridge_manager = codex_bridge::CodexBridgeManager::new();
+    let rmq_url = rabbitmq_url().to_string();
+    if let Ok(records) = database.list_remote_nodes().await {
+        for record in records {
+            common::log_info!(
+                "Restoring remote Codex node: {} ({})",
+                record.label, record.url,
+            );
+            codex_bridge_manager
+                .start_bridge(record.id, record.url, record.token, rmq_url.clone())
+                .await;
+        }
+    }
+    common::log_info!("Initialized Codex bridge manager");
+
+    //
     // Create the service context for message dispatch.
     //
     let ctx = ServiceContext {
@@ -660,6 +679,8 @@ async fn run_main_loop() -> Result<()> {
         ccrv2_manager,
         trigger_engine: Some(trigger_engine.clone()),
         intercept_broadcaster,
+        codex_bridge_manager,
+        rabbitmq_url: rmq_url,
         publish_channel,
         client_publish_channel,
         broadcast_channel,

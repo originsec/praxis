@@ -1,3 +1,66 @@
+pub struct AddRemoteNodeForm {
+    pub label: String,
+    pub url: String,
+    pub token: String,
+    pub focused_field: usize, // 0=label, 1=url, 2=token
+    pub label_cursor: usize,
+    pub url_cursor: usize,
+    pub token_cursor: usize,
+}
+
+impl Default for AddRemoteNodeForm {
+    fn default() -> Self {
+        Self {
+            label: String::new(),
+            url: String::new(),
+            token: String::new(),
+            focused_field: 0,
+            label_cursor: 0,
+            url_cursor: 0,
+            token_cursor: 0,
+        }
+    }
+}
+
+impl AddRemoteNodeForm {
+    pub const FIELD_COUNT: usize = 3;
+
+    pub fn field_label(idx: usize) -> &'static str {
+        match idx {
+            0 => "Label",
+            1 => "URL",
+            2 => "Token (optional)",
+            _ => "",
+        }
+    }
+
+    pub fn active_str(&self) -> &str {
+        match self.focused_field {
+            0 => &self.label,
+            1 => &self.url,
+            2 => &self.token,
+            _ => "",
+        }
+    }
+
+    pub fn active_cursor(&self) -> usize {
+        match self.focused_field {
+            0 => self.label_cursor,
+            1 => self.url_cursor,
+            2 => self.token_cursor,
+            _ => 0,
+        }
+    }
+
+    pub fn active_str_and_cursor_mut(&mut self) -> (&mut String, &mut usize) {
+        match self.focused_field {
+            0 => (&mut self.label, &mut self.label_cursor),
+            1 => (&mut self.url, &mut self.url_cursor),
+            _ => (&mut self.token, &mut self.token_cursor),
+        }
+    }
+}
+
 pub struct NewOpForm {
     pub name: String,
     pub short_name: String,

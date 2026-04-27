@@ -92,7 +92,8 @@ pub enum ConfirmKind {
     DeleteModel(usize),        // index into model_definitions
     DeleteAgentScript(String), // script_id
     ResetAgentScripts,
-    ResetNode(String), // node_id
+    ResetNode(String),        // node_id
+    DeleteRemoteNode(String), // node_id
     CloseOrchestratorSession,
     ClearAllTraffic,
     DeleteInterceptRule(i64),
@@ -220,6 +221,9 @@ impl App {
                         let _ = tx.send(crate::event::AppEvent::NodeSessionsRefreshed { entries });
                     }
                 });
+            }
+            ConfirmKind::DeleteRemoteNode(node_id) => {
+                let _ = self.client.remove_remote_node(&node_id).await;
             }
             ConfirmKind::DeleteModel(idx) => {
                 if idx < self.settings.model_definitions.len() {

@@ -13,6 +13,7 @@ mod lua_agent_scripts;
 mod recon;
 mod service_config;
 mod toolkit_actions;
+mod remote_nodes;
 pub mod config;
 mod queries;
 
@@ -381,6 +382,36 @@ impl Database {
                         content TEXT NOT NULL,
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL
+                    )"
+                ).execute(pool).await;
+            }
+        }
+
+        //
+        // Migration: Create remote_nodes table for persisting remote Codex node configs.
+        //
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let _ = sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS remote_nodes (
+                        id TEXT PRIMARY KEY,
+                        node_type TEXT NOT NULL DEFAULT 'remote-codex',
+                        label TEXT NOT NULL,
+                        url TEXT NOT NULL,
+                        token TEXT,
+                        created_at TEXT NOT NULL
+                    )"
+                ).execute(pool).await;
+            }
+            DatabasePool::Postgres(pool) => {
+                let _ = sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS remote_nodes (
+                        id TEXT PRIMARY KEY,
+                        node_type TEXT NOT NULL DEFAULT 'remote-codex',
+                        label TEXT NOT NULL,
+                        url TEXT NOT NULL,
+                        token TEXT,
+                        created_at TEXT NOT NULL
                     )"
                 ).execute(pool).await;
             }

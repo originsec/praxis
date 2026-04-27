@@ -75,6 +75,9 @@ pub fn render(f: &mut Frame, app: &App) {
     if let Some(ref picker) = app.intercept_method_picker {
         popup::render_intercept_method_picker(f, picker);
     }
+    if let Some(ref form) = app.add_remote_node_form {
+        popup::render_add_remote_node_form(f, f.area(), form);
+    }
 }
 
 fn render_header(f: &mut Frame, area: ratatui::layout::Rect) {

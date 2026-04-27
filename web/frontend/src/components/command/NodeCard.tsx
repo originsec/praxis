@@ -223,8 +223,11 @@ export function NodeCard({ node }: NodeCardProps) {
     requestChainDefList,
     removeNode,
     resetNode,
+    removeRemoteNode,
     send,
   } = useApp();
+
+  const isRemoteCodex = node.node_type === 'remote-codex';
 
   //
   // Capability check — empty list (legacy node) means all capabilities.
@@ -557,6 +560,7 @@ export function NodeCard({ node }: NodeCardProps) {
           </div>
           <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
             <StatusBadge status={status} />
+            {!isRemoteCodex && (
             <button
               onClick={() => resetNode(node.node_id)}
               className="p-0.5 text-muted/30 hover:text-[var(--accent-warning)] transition-colors opacity-0 group-hover/header:opacity-100"
@@ -564,10 +568,11 @@ export function NodeCard({ node }: NodeCardProps) {
             >
               <RotateCcw size={11} />
             </button>
+            )}
             <button
-              onClick={() => removeNode(node.node_id)}
+              onClick={() => isRemoteCodex ? removeRemoteNode(node.node_id) : removeNode(node.node_id)}
               className="p-0.5 text-muted/30 hover:text-[var(--accent-error)] transition-colors opacity-0 group-hover/header:opacity-100"
-              title="Remove node"
+              title={isRemoteCodex ? 'Remove remote node' : 'Remove node'}
             >
               <X size={12} />
             </button>
@@ -600,7 +605,7 @@ export function NodeCard({ node }: NodeCardProps) {
         // Intercept status.
         //
         */}
-        {node.intercept_supported && hasCapability('Interception') && (
+        {!isRemoteCodex && node.intercept_supported && hasCapability('Interception') && (
           <div className="px-3 py-1.5 flex items-center justify-between border-b border-subtle">
             <div className="flex items-center gap-1.5 text-[10px]">
               <Shield size={11} className={node.intercept_active ? 'text-[var(--accent-warning)]' : 'text-muted'} />
@@ -798,10 +803,10 @@ export function NodeCard({ node }: NodeCardProps) {
 
         {/*
         //
-        // Quick actions bar.
+        // Quick actions bar — hidden for remote-codex nodes (no Ops/Chains/Terminal).
         //
         */}
-        <div className="px-3 py-2 border-t border-subtle flex flex-wrap gap-1.5">
+        {!isRemoteCodex && <div className="px-3 py-2 border-t border-subtle flex flex-wrap gap-1.5">
           <button
             onClick={() => setShowRunOpModal(true)}
             className="inline-flex items-center gap-1 px-2 py-1 text-[10px] bg-[var(--accent-purple)]/10 text-[var(--accent-purple)] hover:bg-[var(--accent-purple)]/20 transition-colors"
@@ -830,7 +835,7 @@ export function NodeCard({ node }: NodeCardProps) {
           >
             <TerminalIcon size={10} /> Term
           </button>
-        </div>
+        </div>}
         </>)}
 
       </div>

@@ -55,6 +55,16 @@ pub enum BrowserMessage {
     ResetNode {
         node_id: String,
     },
+    /// Add a remote Codex node
+    AddRemoteNode {
+        label: String,
+        url: String,
+        token: Option<String>,
+    },
+    /// Remove a remote Codex node
+    RemoveRemoteNode {
+        node_id: String,
+    },
     /// Get service configuration
     ConfigGet {
         keys: Vec<String>,
