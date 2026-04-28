@@ -933,17 +933,21 @@ async fn handle_acp_frame(
 
         "session/list" => {
             //
-            // Return the ACP sessions tracked by this bridge. The web
-            // frontend polls this on every node every few seconds, so
-            // returning method-not-found just spams the logs.
+            // Return the ACP sessions tracked by this bridge. The
+            // frontend uses `title` as the agent short_name when
+            // hydrating local nodeSessions from a list response, so
+            // it must equal the short_name we ship in
+            // `discovered_agents` (`codex`) — otherwise the frontend
+            // treats a list entry for the same sessionId as a second
+            // session under a different agent name.
             //
             let sessions: Vec<Value> = state
                 .sessions
-                .iter()
-                .map(|(sid, info)| {
+                .keys()
+                .map(|sid| {
                     json!({
                         "sessionId": sid,
-                        "title": format!("codex/{}", info.codex_thread_id),
+                        "title": "codex",
                         "cwd": ".",
                     })
                 })
@@ -1410,7 +1414,73 @@ async fn handle_codex_notification(
         }
 
         "error" => {
-            let pending_id = state.pending_turn_start.keys().min().copied();
+            //
+            // Codex's `error` notification shape (per app-server-protocol
+            // v2 ErrorNotification): {
+            //   error: { message, codexErrorInfo?, additionalDetails? },
+            //   willRetry: bool,
+            //   threadId,
+            //   turnId
+            // }
+            //
+            // If willRetry is true, the codex server will reconnect /
+            // retry on its own — we log and keep the turn alive. Only
+            // willRetry=false errors terminate the turn.
+            //
+            let will_retry = params
+                .get("willRetry")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let message = params
+                .get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("Codex error")
+                .to_string();
+            let details = params
+                .get("error")
+                .and_then(|e| e.get("additionalDetails"))
+                .and_then(|v| v.as_str());
+            let full_message = match details {
+                Some(d) if !d.is_empty() => format!("{}: {}", message, d),
+                _ => message,
+            };
+
+            common::log_warn!(
+                "Codex error notification (will_retry={}): {}",
+                will_retry,
+                full_message
+            );
+
+            if will_retry {
+                return;
+            }
+
+            //
+            // Match the failing turn by threadId when present, else
+            // oldest pending — same pattern as turn/completed.
+            //
+            let thread_id = params
+                .get("threadId")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let pending_id = if let Some(tid) = thread_id.as_deref() {
+                state
+                    .sessions
+                    .iter()
+                    .find(|(_, s)| s.codex_thread_id == tid)
+                    .map(|(sid, _)| sid.clone())
+                    .and_then(|acp_sid| {
+                        state
+                            .pending_turn_start
+                            .iter()
+                            .find(|(_, p)| p.acp_session_id == acp_sid)
+                            .map(|(k, _)| *k)
+                    })
+            } else {
+                state.pending_turn_start.keys().min().copied()
+            };
+
             if let Some(pending_id) = pending_id {
                 if let Some(pending) = state.pending_turn_start.remove(&pending_id) {
                     state
@@ -1419,12 +1489,8 @@ async fn handle_codex_notification(
                     if let Some(session) = state.sessions.get_mut(&pending.acp_session_id) {
                         session.current_turn_id = None;
                     }
-                    let message = params
-                        .get("message")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("Codex error");
                     let _ = send_acp_to_client(&ctx, &node_id, &pending.client_id,
-                        acp_error_response(pending.acp_id, -32000, message),
+                        acp_error_response(pending.acp_id, -32000, &full_message),
                     )
                     .await;
                 }

@@ -477,9 +477,19 @@ export function NodeCard({ node }: NodeCardProps) {
         const { result } = await sendAcpNodeRequest(node.node_id, 'session/list', {});
         if (cancelled) return;
         const sessions = (result as { sessions?: Array<{ sessionId: string; title?: string; cwd?: string }> } | null)?.sessions ?? [];
+        //
+        // Skip entries whose sessionId is already tracked anywhere in
+        // nodeSessions — sessions can flow in via two paths (create
+        // response + this list poll), and we don't want the same
+        // session showing twice under slightly different titles.
+        //
+        const trackedSessionIds = new Set(
+          Object.values(state.nodeSessions).map(s => s.sessionId),
+        );
         for (const s of sessions) {
           const agent = s.title?.trim();
           if (!agent) continue;
+          if (trackedSessionIds.has(s.sessionId)) continue;
           const key = nodeSessionKey(node.node_id, agent);
           if (state.nodeSessions[key]) continue;
           dispatch({
