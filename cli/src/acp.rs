@@ -34,9 +34,10 @@ pub enum AcpNotification {
     SessionClosed {
         session_id: String,
     },
-    #[allow(dead_code)]
     SessionLoaded {
         session_id: String,
+        provider: Option<String>,
+        model: Option<String>,
     },
     UserPrompt {
         session_id: String,
@@ -656,9 +657,23 @@ async fn run_bridge(
                                 ))
                                 .block_task()
                                 .await;
-                            if result.is_ok() {
+                            if let Ok(resp) = &result {
+                                let (provider, model) = resp
+                                    .models
+                                    .as_ref()
+                                    .map(|m| {
+                                        let id = m.current_model_id.to_string();
+                                        let (p, m) =
+                                            id.split_once('/').unwrap_or(("unknown", &id));
+                                        (Some(p.to_string()), Some(m.to_string()))
+                                    })
+                                    .unwrap_or((None, None));
                                 let _ = event_tx.send(AppEvent::AcpNotification(
-                                    AcpNotification::SessionLoaded { session_id },
+                                    AcpNotification::SessionLoaded {
+                                        session_id,
+                                        provider,
+                                        model,
+                                    },
                                 ));
                             }
                             let _ = reply.send(result);

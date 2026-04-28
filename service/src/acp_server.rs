@@ -463,11 +463,30 @@ impl AcpServer {
         }
 
         if let Some(id) = id {
+            //
+            // Mirror handle_session_new: include the orchestrator's
+            // current model state so the client UI can render the
+            // model name on resumed sessions instead of stalling at
+            // "Connecting...".
+            //
+            let config = self.service_config.read().await;
+            let model_def = config.get_orchestrator_model_def();
+            let (provider, model_name) = model_def
+                .map(|d| (d.provider.clone(), d.model.clone()))
+                .unwrap_or_else(|| ("unknown".into(), "unknown".into()));
+            drop(config);
+            let model_id = format!("{}/{}", provider, model_name);
+            let model_state = acp::schema::SessionModelState::new(
+                model_id.clone(),
+                vec![acp::schema::ModelInfo::new(model_id, model_name.clone())],
+            );
+
             let _ = send_to_client(
                 publish_channel,
                 client_id,
                 acp_response(id, serde_json::to_value(
                     LoadSessionResponse::new()
+                        .models(model_state)
                         .meta(serde_json::from_value::<acp::schema::Meta>(json!({
                             "loaded": true,
                             "eventCount": events.len(),

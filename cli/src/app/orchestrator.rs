@@ -658,7 +658,31 @@ impl App {
                 }
             }
 
-            AcpNotification::SessionLoaded { .. } => {}
+            AcpNotification::SessionLoaded {
+                session_id,
+                provider,
+                model,
+            } => {
+                //
+                // Resumed an existing session — apply the model state
+                // the service returned. Without this the footer stays
+                // stuck on "Connecting..." even though the session is
+                // fully usable.
+                //
+                if let Some(session) = self
+                    .orchestrator
+                    .sessions
+                    .iter_mut()
+                    .find(|s| s.session_id == session_id)
+                {
+                    if provider.is_some() {
+                        session.provider = provider;
+                    }
+                    if model.is_some() {
+                        session.model = model;
+                    }
+                }
+            }
 
             AcpNotification::PermissionRequest {
                 session_id,
