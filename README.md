@@ -1,172 +1,68 @@
-# Praxis
+<p align="center"><code>curl -fsSL https://praxis.originhq.com/install.sh | bash</code><br />or <code>docker run originsec/praxis</code><br />or <code>yay -S praxis</code></p>
 
-**Semantic Command & Control Framework for AI Agents**
-
-As AI computer-use/coding agents become more prevalent - with tools that can read files, execute commands, and interact directly with systems - understanding their security properties becomes critical.
-
-Praxis is an open-source research and experimentation platform for discovering, controlling, and orchestrating computer-use AI agents across endpoints.
-
-We're hoping to enrich our understanding of what's possible when you have legitimate access to the systems these agents run on, and what that means for endpoint security.
-
-Built by [Origin](https://originhq.com) for security research and red team operations.
+<p align="center"><strong>Praxis</strong> is an open-source research platform for discovering, controlling, and orchestrating AI agents on endpoints.</p>
 
 <p align="center">
   <img src="assets/demo.gif" width="800">
 </p>
 
-## Features
-
-**Discover** and fingerprint agents on endpoints. **Recon** their tools, configs, and session histories. **Intercept** agent-to-LLM traffic with a built-in MITM proxy. Open **interactive sessions** to dialog with agents, or define **semantic operations** that chain natural language tasks with automatic triggers. Includes a **toolkit** of built-in offensive operations, **terminal access** to remote nodes, and an experimental **orchestrator** for coordinating across agents.
-
 ## Quick Start
 
-### One-Liner (Docker)
+### Install
 
+**Linux/macOS:**
 ```bash
-curl -fsSL https://praxis.originhq.com/docker.sh | bash
-```
-
-This clones the latest release, builds with Docker Compose, and starts the service, web UI, and RabbitMQ. Open **http://localhost:8080** in your browser.
-
-The CLI binary is built into the Docker image. Extract it with:
-
-```bash
-docker cp praxis-praxis-1:/app/praxis_cli ./praxis_cli
-```
-
-### Native Install
-
-```bash
-# Linux/macOS
 curl -fsSL https://praxis.originhq.com/install.sh | bash
 ```
 
-This installs Rust if needed, builds from source, and sets up binaries in `~/.praxis/bin/` including `praxis_cli`.
+**Arch Linux (AUR):**
+```bash
+yay -S praxis
+```
 
-### Windows
-
+**Windows:**
 ```powershell
 irm https://praxis.originhq.com/install.ps1 | iex
 ```
 
-> For detailed installation instructions (cross-compilation, deployment patterns), see the [full documentation](https://originsec.github.io/praxis/).
-
-### Deploy Nodes
-
-Once the service is running, deploy nodes to target systems:
-
-1. Go to **Settings** → **Service** in the web UI
-2. Download the appropriate node binary (Linux or Windows)
-3. Run the node on the target system:
-
+**Docker:**
 ```bash
-# Linux (localhost RabbitMQ URL for testing)
-./praxis_node
+curl -fsSL https://praxis.originhq.com/docker.sh | bash
+```
 
-# Or with custom RabbitMQ URL
+Then open <http://localhost:8080> in your browser.
+
+> For detailed install options (cross-compilation, deployment patterns), see the [full documentation](https://originsec.github.io/praxis/).
+
+### Deploy a node
+
+1. In the web UI, go to **Settings** → **Service** and download a node binary
+2. Run it on the target system:
+```bash
 PRAXIS_RABBITMQ_URL=amqp://user:pass@your-server:5672 ./praxis_node
 ```
 
-```powershell
-# Windows (localhost RabbitMQ URL for testing)
-.\praxis_node.exe
+### Configure an LLM provider
 
-# Or with custom RabbitMQ URL
-$env:PRAXIS_RABBITMQ_URL="amqp://user:pass@your-server:5672"; .\praxis_node.exe
-```
-
-Node binaries are also available from [GitHub Releases](https://github.com/originsec/praxis/releases).
-
-## Initial Configuration
-
-After starting Praxis, configure at least one LLM provider in **Settings** → **LLM Providers**:
-
-1. Add a model definition (provider + model + API key)
-2. Assign it to the features you want to use:
-   - **Semantic Operations** - for executing operations
-   - **Semantic Parser** - for tool discovery during recon
-   - **Traffic Parser** - for summarizing intercepted traffic
-   - **Orchestrator** - for the high-level task coordination assistant
-
-We recommend low-latency providers (for example **Groq** or **Cerebras**) for parser-heavy workflows.
-
-## CLI
-
-The Praxis CLI (`praxis_cli`) provides a full-featured interactive terminal UI and a non-interactive command surface.
-
-Running `praxis_cli` with no arguments launches the terminal UI with four main windows:
-- **Orchestrator** (`Ctrl+O`) — LLM-powered conversation interface with tool execution and plan tracking
-- **Nodes** (`Ctrl+L`) — node/agent management, session chat, and PTY terminal access
-- **Operations** (`Ctrl+P`) — operation library, chain definitions, and live execution tracking
-- **Settings** (`Ctrl+S`) — LLM provider management and service configuration
-
-Non-interactive commands are also available for scripting:
-```bash
-praxis_cli -C "node list"
-praxis_cli session create --node abc123 --yolo
-```
-
-See [CLI documentation](https://originsec.github.io/praxis/usage/cli.html) for the full reference.
-
-## Architecture At A Glance
-
-Praxis has three core components:
-
-- **Node**: runs on target systems, discovers agents, handles sessions/recon/interception
-- **Service**: central backend + database + operation/chain orchestration
-- **Web**: React frontend and WebSocket bridge
-
-See [Architecture Overview](https://originsec.github.io/praxis/architecture/overview.html) for detailed internals.
+Go to **Settings** → **LLM Providers** in the web UI, add a model, and assign it to the features you want (semantic operations, recon, traffic parsing, orchestrator).
 
 ## Documentation
 
-Full documentation is available at **[originsec.github.io/praxis](https://originsec.github.io/praxis/)**
+Full docs: **[originsec.github.io/praxis](https://originsec.github.io/praxis)**
 
-- [Installation](https://originsec.github.io/praxis/getting-started/installation.html) - Docker, local development builds, cross-compilation
-- [Quick Start](https://originsec.github.io/praxis/getting-started/quick-start.html) - First steps walkthrough
-- [Nodes & Agents](https://originsec.github.io/praxis/usage/nodes-and-agents.html) - Working with nodes and agents
-- [Reconnaissance](https://originsec.github.io/praxis/usage/recon.html) - Tool and configuration discovery
-- [Sessions](https://originsec.github.io/praxis/usage/sessions.html) - Interactive agent sessions
-- [Agent Connectors](https://originsec.github.io/praxis/connectors/overview.html) - Supported agents and adding new ones
-- [CLI](https://originsec.github.io/praxis/usage/cli.html) - Terminal UI and non-interactive commands
-- [MCP Server](https://originsec.github.io/praxis/usage/mcp.html) - AI agent integration via Model Context Protocol
-- [Interception](https://originsec.github.io/praxis/usage/interception.html) - Traffic capture setup and options
-- [Architecture](https://originsec.github.io/praxis/architecture/overview.html) - How it all fits together
+- [Architecture](https://originsec.github.io/praxis/architecture/overview.html)
+- [Quick Start](https://originsec.github.io/praxis/getting-started/quick-start.html)
+- [CLI](https://originsec.github.io/praxis/usage/cli.html)
+- [MCP Server](https://originsec.github.io/praxis/usage/mcp.html)
 
 ## Early Release Notice
 
-This is an early release to showcase initial capabilities. It is **not yet ready** for full-scale red teaming or production use - although you can certainly experiment to your hearts content!
-
-The platform is under active development and:
-
-- Some features are incomplete or experimental
-- The codebase is evolving rapidly
-- **This is not designed to be stealthy** it installs root certificates, modifies system settings, and is generally quite noisy
-
-We're releasing early to get feedback and contributions from the community.
+This is an early release for research and experimentation. Some features are incomplete, the codebase is evolving rapidly, and it is **not designed to be stealthy** (installs root certificates, modifies system settings, etc.).
 
 ## License
 
 Apache 2.0 — see [LICENSE](https://github.com/originsec/praxis/blob/main/LICENSE) and [NOTICE](https://github.com/originsec/praxis/blob/main/NOTICE)
 
-To explore alternate licensing arrangements, please contact legal@preludesecurity.com
+Built by [Origin](https://originhq.com) for security research and red team operations.
 
-## By Origin
-
-[Origin](https://originhq.com) is an endpoint security company building protection for the semantic era of computing. As AI agents become integral to enterprise workflows, Origin provides the visibility and control organizations need to safely grant agents the permissions they require.
-
-## Contributing
-
-Contributions are very welcome! Please feel free to:
-
-- Open issues for bugs or feature requests
-- Submit pull requests
-- Share ideas for new agent connectors or capabilities
-
-We're particularly interested in contributions around new agent support and offensive techniques.
-
-## Contact
-
-- **Email**: david.kaplan@preludesecurity.com
-- **Twitter/X**: [@depletionmode](https://twitter.com/depletionmode)
-- **GitHub Issues**: [originsec/praxis/issues](https://github.com/originsec/praxis/issues)
+Contributions are very welcome — open issues or submit pull requests.
