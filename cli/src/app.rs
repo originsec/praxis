@@ -20,7 +20,7 @@ use crate::acp::{AcpBridgeHandle, AcpNotification};
 use crate::client::Client;
 use crate::event::AppEvent;
 use chrono::Utc;
-use common::{ChainTriggerInfo, InterceptRule, NodeState, OrchestratorPlan, SystemState};
+use common::{ChainTriggerInfo, InterceptRule, NodeState, OrchestratorPlan, SystemState, REMOTE_NODE_KINDS};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
@@ -175,6 +175,11 @@ pub struct PendingPermission {
     pub permission_id: String,
     pub tool_name: String,
     pub tool_input: String,
+    //
+    // Options offered for this permission. The session key handler
+    // picks one by `kind` when the user presses a/l/d.
+    //
+    pub options: Vec<crate::acp::PermissionOption>,
 }
 
 pub struct ToolCallEntry {
@@ -701,10 +706,19 @@ impl App {
                             tool_name,
                             tool_input,
                         } => {
+                            //
+                            // Regular-node permission flow predates the
+                            // ACP request_permission wire-up; it doesn't
+                            // ship per-prompt options, so the response
+                            // path can't actually be resolved through
+                            // the bridge handle. The UI still surfaces
+                            // the prompt for visibility.
+                            //
                             session.pending_permission = Some(PendingPermission {
                                 permission_id,
                                 tool_name,
                                 tool_input,
+                                options: Vec::new(),
                             });
                         }
                         SessionUpdateKind::AgentStatus { status } => {
@@ -985,6 +999,15 @@ impl App {
         //
         if self.settings.model_form.is_some() {
             self.handle_model_form_key(key).await;
+            return;
+        }
+
+        //
+        // Add-remote-node form intercepts all keys (including ^s save)
+        // before the window-switching shortcuts fire.
+        //
+        if self.add_remote_node_form.is_some() {
+            self.handle_add_remote_node_form_key(key).await;
             return;
         }
 

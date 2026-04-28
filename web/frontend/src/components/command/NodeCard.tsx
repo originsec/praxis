@@ -234,12 +234,6 @@ export function NodeCard({ node }: NodeCardProps) {
     [node.capabilities],
   );
 
-  //
-  // Remote agent nodes (e.g. Codex over WS) only support sessions.
-  // Intercept, Recon, Terminal, Op, and Chain features are hidden.
-  //
-  const isRemoteAgent = node.node_type === 'remote-codex';
-
   const [agentsExpanded, setAgentsExpanded] = useState(node.discovered_agents.length <= 3);
   const [collapsed, setCollapsed] = useState(false);
   const [creatingSessionFor, setCreatingSessionFor] = useState<string | null>(null);
@@ -251,7 +245,7 @@ export function NodeCard({ node }: NodeCardProps) {
   const [sessionCreateAgent, setSessionCreateAgent] = useState<string | null>(null);
   const [sessionProjectPaths, setSessionProjectPaths] = useState<string[]>([]);
   const [sessionSelectedPath, setSessionSelectedPath] = useState<string | null>(null);
-  const [sessionPathsLoading, setSessionPathsLoading] = useState(false);
+  const [, setSessionPathsLoading] = useState(false);
   const [sessionYoloMode, setSessionYoloMode] = useState(false);
 
   //
@@ -295,8 +289,10 @@ export function NodeCard({ node }: NodeCardProps) {
   }, [showRunChainModal, requestChainDefList]);
 
   //
-  // Initiate session creation — fetch recon for project paths first. If paths
-  // are found, show the picker modal. Otherwise create immediately.
+  // Initiate session creation. Try to read cached recon results once
+  // and show the working-directory picker if any paths are available.
+  // If recon hasn't been run before, don't trigger it and don't block —
+  // start the session with the default cwd immediately.
   //
   const handleInitCreateSession = (shortName: string) => {
     setSessionCreateAgent(shortName);
@@ -306,8 +302,6 @@ export function NodeCard({ node }: NodeCardProps) {
     setSessionPathsLoading(true);
 
     let resolved = false;
-    let pollInterval: ReturnType<typeof setInterval> | null = null;
-    let reconTriggered = false;
 
     const handleWsMessage = (event: Event) => {
       if (resolved) return;
@@ -315,48 +309,34 @@ export function NodeCard({ node }: NodeCardProps) {
       if (message.type === 'recon_get_response' &&
           message.node_id === node.node_id &&
           message.agent_short_name === shortName) {
-        if (message.recon_result) {
-          resolved = true;
-          if (pollInterval) clearInterval(pollInterval);
-          window.removeEventListener('ws-message', handleWsMessage);
-          const paths: string[] = message.recon_result.project_paths || [];
-          setSessionPathsLoading(false);
-          if (paths.length > 0) {
-            setSessionProjectPaths(paths);
-            setSessionSelectedPath(paths[0]);
-          } else {
-            doCreateSession(shortName, undefined);
-          }
-        } else if (!reconTriggered) {
-          reconTriggered = true;
-          sendAcpNodeRequest(node.node_id, '_praxis/recon', {
-            agent_short_name: shortName,
-            is_semantic: false,
-          }).catch(() => {});
-          pollInterval = setInterval(() => {
-            if (!resolved) {
-              send({ type: 'recon_get', node_id: node.node_id, agent_short_name: shortName });
-            }
-          }, 1000);
-
-          //
-          // Timeout — if no recon after 5s, just create without a path.
-          //
-          setTimeout(() => {
-            if (!resolved) {
-              resolved = true;
-              if (pollInterval) clearInterval(pollInterval);
-              window.removeEventListener('ws-message', handleWsMessage);
-              setSessionPathsLoading(false);
-              doCreateSession(shortName, undefined);
-            }
-          }, 5000);
+        resolved = true;
+        window.removeEventListener('ws-message', handleWsMessage);
+        const paths: string[] = message.recon_result?.project_paths ?? [];
+        setSessionPathsLoading(false);
+        if (paths.length > 0) {
+          setSessionProjectPaths(paths);
+          setSessionSelectedPath(paths[0]);
+        } else {
+          doCreateSession(shortName, undefined);
         }
       }
     };
 
     window.addEventListener('ws-message', handleWsMessage);
     send({ type: 'recon_get', node_id: node.node_id, agent_short_name: shortName });
+
+    //
+    // Hard timeout in case the response never arrives — e.g. node
+    // disconnected mid-flight. Default to no working dir.
+    //
+    setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        window.removeEventListener('ws-message', handleWsMessage);
+        setSessionPathsLoading(false);
+        doCreateSession(shortName, undefined);
+      }
+    }, 3000);
   };
 
   const doCreateSession = async (shortName: string, workingDir: string | undefined, yoloMode: boolean = false) => {
@@ -606,7 +586,7 @@ export function NodeCard({ node }: NodeCardProps) {
         // Intercept status.
         //
         */}
-        {!isRemoteAgent && node.intercept_supported && hasCapability('Interception') && (
+        {node.intercept_supported && hasCapability('Interception') && (
           <div className="px-3 py-1.5 flex items-center justify-between border-b border-subtle">
             <div className="flex items-center gap-1.5 text-[10px]">
               <Shield size={11} className={node.intercept_active ? 'text-[var(--accent-warning)]' : 'text-muted'} />
@@ -705,12 +685,11 @@ export function NodeCard({ node }: NodeCardProps) {
                           : <Play size={11} />}
                       </button>
                     )}
-                    {!isRemoteAgent && (
+                    {hasCapability('Recon') && (
                       <button
                         onClick={() => setShowReconModal({ agentShortName: agent.short_name })}
-                        disabled={!hasCapability('Recon')}
-                        className="p-0.5 text-muted hover:text-[var(--accent-info)] hover:bg-[var(--accent-info)]/20 transition-colors disabled:opacity-50"
-                        title={hasCapability('Recon') ? 'Recon' : 'Node does not support recon'}
+                        className="p-0.5 text-muted hover:text-[var(--accent-info)] hover:bg-[var(--accent-info)]/20 transition-colors"
+                        title="Recon"
                       >
                         <Search size={11} />
                       </button>
@@ -806,11 +785,12 @@ export function NodeCard({ node }: NodeCardProps) {
 
         {/*
         //
-        // Quick actions bar — hidden for remote agent nodes (Codex etc.)
-        // which only support session-based interaction.
+        // Quick actions bar — Op and Chain are available wherever the
+        // node can host a session. Terminal is gated separately on its
+        // own capability.
         //
         */}
-        {!isRemoteAgent && (
+        {hasCapability('Session') && (
         <div className="px-3 py-2 border-t border-subtle flex flex-wrap gap-1.5">
           <button
             onClick={() => setShowRunOpModal(true)}
@@ -1066,22 +1046,6 @@ export function NodeCard({ node }: NodeCardProps) {
         </div>
       </Modal>
 
-      {/*
-      //
-      // Loading overlay when fetching recon for session creation.
-      //
-      */}
-      <Modal
-        isOpen={sessionCreateAgent !== null && sessionPathsLoading}
-        onClose={() => setSessionCreateAgent(null)}
-        title="Starting Session"
-        size="sm"
-      >
-        <div className="flex items-center justify-center py-6 gap-3">
-          <Loader2 size={16} className="animate-spin text-muted" />
-          <span className="text-sm text-muted">Checking for project directories...</span>
-        </div>
-      </Modal>
     </>
   );
 }

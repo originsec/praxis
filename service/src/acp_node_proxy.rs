@@ -22,8 +22,8 @@ use lapin::Channel;
 use serde_json::{json, Value};
 use tokio::sync::{oneshot, OnceCell, RwLock};
 
-use crate::codex_bridge::CodexBridgeManager;
 use crate::messaging::{send_to_client, send_to_node};
+use crate::remote_nodes::RemoteNodeManager;
 
 //
 // Prefix for client_ids that represent the service's own orchestrator
@@ -55,11 +55,11 @@ pub struct AcpNodeProxy {
     //
     text_buffers: RwLock<HashMap<String, String>>,
     //
-    // Optional bridge manager — set after construction so Praxis can
-    // route ACP frames bound for remote-codex nodes through a WS bridge
-    // instead of RabbitMQ.
+    // Optional remote-node manager — set after construction so Praxis
+    // can route ACP frames bound for remote (non-RabbitMQ) nodes through
+    // their bridges instead of the standard node queue.
     //
-    codex_bridge: OnceCell<Arc<CodexBridgeManager>>,
+    remote_node_manager: OnceCell<Arc<RemoteNodeManager>>,
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
@@ -74,11 +74,11 @@ impl AcpNodeProxy {
     }
 
     //
-    // Wire up the optional Codex bridge manager. Should be called once,
+    // Wire up the optional remote-node manager. Should be called once,
     // during service startup, before the dispatcher accepts traffic.
     //
-    pub fn set_codex_bridge(&self, bridge: Arc<CodexBridgeManager>) {
-        let _ = self.codex_bridge.set(bridge);
+    pub fn set_remote_node_manager(&self, manager: Arc<RemoteNodeManager>) {
+        let _ = self.remote_node_manager.set(manager);
     }
 
     pub async fn register_session(&self, session_id: String, node_id: String) {
@@ -126,6 +126,18 @@ impl AcpNodeProxy {
         client_id: &str,
         json_rpc: &str,
     ) -> Result<()> {
+        //
+        // Remote-node bridges don't have a RabbitMQ queue — they
+        // listen for ACP frames via the manager. Route through it
+        // first so service-internal callers (semantic_ops, agent_chat,
+        // tools, etc.) work uniformly across local and remote nodes.
+        //
+        if let Some(manager) = self.remote_node_manager.get() {
+            if manager.is_remote_node(node_id).await {
+                manager.forward_acp(node_id, client_id, json_rpc).await;
+                return Ok(());
+            }
+        }
         let frame = AcpFrame {
             client_id: client_id.to_string(),
             json_rpc: json_rpc.to_string(),
@@ -313,8 +325,34 @@ impl AcpNodeProxy {
         raw_json_rpc: &str,
         msg: &Value,
     ) -> Result<bool> {
-        let Some(method) = msg.get("method").and_then(|m| m.as_str()) else {
-            return Ok(false);
+        //
+        // Response frames (id + result/error, no method) are how clients
+        // reply to bridge-initiated requests like session/request_permission.
+        // We tag those request ids with `rnode:<node_id>:<n>` so the
+        // response can be routed back to the right bridge here.
+        //
+        let method = match msg.get("method").and_then(|m| m.as_str()) {
+            Some(m) => m,
+            None => {
+                //
+                // Response frame (id + result/error, no method). Clients
+                // use this shape to reply to bridge-initiated requests
+                // like `session/request_permission`. We tag those
+                // request ids with `rnode:<node_id>:<n>` so the response
+                // can be routed back to the originating bridge.
+                //
+                if let Some(id_str) = msg.get("id").and_then(|v| v.as_str()) {
+                    if let Some(node_id) = parse_rnode_request_id(id_str) {
+                        if let Some(manager) = self.remote_node_manager.get() {
+                            if manager.is_remote_node(&node_id).await {
+                                manager.forward_acp(&node_id, client_id, raw_json_rpc).await;
+                                return Ok(true);
+                            }
+                        }
+                    }
+                }
+                return Ok(false);
+            }
         };
         let id = msg.get("id").cloned();
 
@@ -331,13 +369,13 @@ impl AcpNodeProxy {
         );
 
         //
-        // Route remote-codex sessions through the WS bridge. The bridge
-        // owns the protocol translation and emits `ClientDirectMessage`s
+        // Route remote-node sessions through their bridge. The bridge
+        // owns protocol translation and emits `ClientDirectMessage`s
         // directly via send_to_client.
         //
-        if let Some(bridge) = self.codex_bridge.get() {
-            if bridge.is_remote_node(&node_id).await {
-                bridge.forward_acp(&node_id, client_id, raw_json_rpc).await;
+        if let Some(manager) = self.remote_node_manager.get() {
+            if manager.is_remote_node(&node_id).await {
+                manager.forward_acp(&node_id, client_id, raw_json_rpc).await;
                 return Ok(true);
             }
         }
@@ -482,6 +520,23 @@ fn make_pending_key(client_id: &str, id: &Value) -> Option<PendingKey> {
         client_id: client_id.to_string(),
         request_id: rid,
     })
+}
+
+//
+// Parse the node_id portion out of a tagged ACP request id minted by a
+// remote-node bridge. Format: `rnode:<node_id>:<n>`. Returns None for
+// any other shape so unrelated string ids fall through to local
+// handling.
+//
+
+fn parse_rnode_request_id(id: &str) -> Option<String> {
+    let rest = id.strip_prefix("rnode:")?;
+    let (node_id, _) = rest.rsplit_once(':')?;
+    if node_id.is_empty() {
+        None
+    } else {
+        Some(node_id.to_string())
+    }
 }
 
 //

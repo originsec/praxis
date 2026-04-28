@@ -93,7 +93,7 @@ pub enum ConfirmKind {
     DeleteAgentScript(String), // script_id
     ResetAgentScripts,
     ResetNode(String), // node_id
-    DeleteRemoteNode(String), // node_id of a remote-codex bridge
+    DeleteNode(String), // node_id — service handles whether it's local or remote
     CloseOrchestratorSession,
     ClearAllTraffic,
     DeleteInterceptRule(i64),
@@ -244,8 +244,8 @@ impl App {
                 self.settings.agent_scripts_loaded = false;
                 self.load_agent_scripts().await;
             }
-            ConfirmKind::DeleteRemoteNode(node_id) => {
-                let _ = self.client.remove_remote_node(&node_id).await;
+            ConfirmKind::DeleteNode(node_id) => {
+                let _ = self.client.remove_node(&node_id).await;
                 let to_drop: Vec<String> = self
                     .nodes
                     .sessions

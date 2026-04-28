@@ -1,5 +1,49 @@
 use super::*;
 
+//
+// Pick the agent-supplied option_id whose kind matches the user's
+// a/l/d choice. Falls back to Cancelled (cancel the prompt turn) if
+// the agent didn't offer a matching kind — preserves intent without
+// guessing.
+//
+fn decision_to_outcome(
+    options: &[crate::acp::PermissionOption],
+    decision: common::PermissionDecision,
+) -> agent_client_protocol::schema::RequestPermissionOutcome {
+    use agent_client_protocol::schema::{
+        PermissionOptionId, PermissionOptionKind, RequestPermissionOutcome,
+        SelectedPermissionOutcome,
+    };
+
+    let target_kind = match decision {
+        common::PermissionDecision::Allow => PermissionOptionKind::AllowOnce,
+        common::PermissionDecision::AllowAlways => PermissionOptionKind::AllowAlways,
+        common::PermissionDecision::Deny => PermissionOptionKind::RejectOnce,
+    };
+
+    if let Some(opt) = options.iter().find(|o| o.kind == target_kind) {
+        return RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+            PermissionOptionId::new(opt.option_id.clone()),
+        ));
+    }
+    //
+    // Try the next-best kind for the chosen decision before giving up.
+    //
+    let fallback_kind = match decision {
+        common::PermissionDecision::Allow => Some(PermissionOptionKind::AllowAlways),
+        common::PermissionDecision::AllowAlways => Some(PermissionOptionKind::AllowOnce),
+        common::PermissionDecision::Deny => Some(PermissionOptionKind::RejectAlways),
+    };
+    if let Some(k) = fallback_kind {
+        if let Some(opt) = options.iter().find(|o| o.kind == k) {
+            return RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                PermissionOptionId::new(opt.option_id.clone()),
+            ));
+        }
+    }
+    RequestPermissionOutcome::Cancelled
+}
+
 impl App {
     //
     // Pull the session/list for every connected node and funnel the
@@ -121,7 +165,21 @@ impl App {
         //
 
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('n') {
-            self.add_remote_node_form = Some(AddRemoteNodeForm::default());
+            self.add_remote_node_form = Some(AddRemoteNodeForm {
+                focused_field: AddRemoteNodeForm::URL_FIELD,
+                editing_text: true,
+                ..AddRemoteNodeForm::default()
+            });
+            return;
+        }
+
+        //
+        // Ctrl+D removes the selected node — same effect as the X button
+        // on the web node card. Works for any node type (synthetic
+        // remote nodes get torn down; real nodes are unregistered).
+        //
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('d') {
+            self.confirm_delete_node();
             return;
         }
 
@@ -176,11 +234,10 @@ impl App {
             }
             KeyCode::Delete | KeyCode::Backspace => {
                 //
-                // Backspace/Delete on a remote-codex node prompts for
-                // removal. Native nodes are not removed via Delete —
-                // ^r resets them and the X button on the web UI removes.
+                // Same affordance as ^d: prompt to remove the selected
+                // node. Mirrors the X button on the web node card.
                 //
-                self.confirm_delete_remote_node();
+                self.confirm_delete_node();
             }
             KeyCode::Char('i') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 //
@@ -400,22 +457,20 @@ impl App {
         }
     }
 
-    pub(crate) fn confirm_delete_remote_node(&mut self) {
+    pub(crate) fn confirm_delete_node(&mut self) {
         let Some(node) = self.nodes.nodes.get(self.nodes.selected) else {
             return;
         };
-        if node.node_type != "remote-codex" {
-            return;
-        }
         let node_id = node.node_id.clone();
         let machine = node.machine_name.clone();
         self.confirm = Some(ConfirmAction {
-            message: format!("Remove remote node '{}'?", machine),
-            action: ConfirmKind::DeleteRemoteNode(node_id),
+            message: format!("Remove node '{}'?", machine),
+            action: ConfirmKind::DeleteNode(node_id),
         });
     }
 
     pub(crate) async fn handle_add_remote_node_form_key(&mut self, key: KeyEvent) {
+        let kinds_len = REMOTE_NODE_KINDS.len().max(1);
         match key.code {
             KeyCode::Esc => {
                 self.add_remote_node_form = None;
@@ -424,6 +479,7 @@ impl App {
                 if let Some(form) = self.add_remote_node_form.as_mut() {
                     form.focused_field =
                         (form.focused_field + 1) % AddRemoteNodeForm::FIELD_COUNT;
+                    form.editing_text = form.focused_field != AddRemoteNodeForm::KIND_FIELD;
                 }
             }
             KeyCode::BackTab | KeyCode::Up => {
@@ -432,56 +488,85 @@ impl App {
                         + AddRemoteNodeForm::FIELD_COUNT
                         - 1)
                         % AddRemoteNodeForm::FIELD_COUNT;
+                    form.editing_text = form.focused_field != AddRemoteNodeForm::KIND_FIELD;
                 }
             }
             KeyCode::Left => {
                 if let Some(form) = self.add_remote_node_form.as_mut() {
-                    let (_, cursor) = form.active_pair_mut();
-                    input::move_left(cursor);
+                    if form.focused_field == AddRemoteNodeForm::KIND_FIELD {
+                        form.kind_idx = (form.kind_idx + kinds_len - 1) % kinds_len;
+                    } else if let Some((_, cursor)) = form.active_pair_mut() {
+                        input::move_left(cursor);
+                    }
                 }
             }
             KeyCode::Right => {
                 if let Some(form) = self.add_remote_node_form.as_mut() {
-                    let (text, cursor) = form.active_pair_mut();
-                    let text_clone = text.clone();
-                    input::move_right(&text_clone, cursor);
+                    if form.focused_field == AddRemoteNodeForm::KIND_FIELD {
+                        form.kind_idx = (form.kind_idx + 1) % kinds_len;
+                    } else if let Some((text, cursor)) = form.active_pair_mut() {
+                        let text_clone = text.clone();
+                        input::move_right(&text_clone, cursor);
+                    }
                 }
             }
             KeyCode::Home => {
                 if let Some(form) = self.add_remote_node_form.as_mut() {
-                    let (_, cursor) = form.active_pair_mut();
-                    input::move_home(cursor);
+                    if let Some((_, cursor)) = form.active_pair_mut() {
+                        input::move_home(cursor);
+                    }
                 }
             }
             KeyCode::End => {
                 if let Some(form) = self.add_remote_node_form.as_mut() {
-                    let (text, cursor) = form.active_pair_mut();
-                    let text_clone = text.clone();
-                    input::move_end(&text_clone, cursor);
+                    if let Some((text, cursor)) = form.active_pair_mut() {
+                        let text_clone = text.clone();
+                        input::move_end(&text_clone, cursor);
+                    }
                 }
             }
             KeyCode::Backspace => {
                 if let Some(form) = self.add_remote_node_form.as_mut() {
-                    let (text, cursor) = form.active_pair_mut();
-                    input::backspace(text, cursor);
+                    if let Some((text, cursor)) = form.active_pair_mut() {
+                        input::backspace(text, cursor);
+                    }
                 }
             }
             KeyCode::Delete => {
                 if let Some(form) = self.add_remote_node_form.as_mut() {
-                    let (text, cursor) = form.active_pair_mut();
-                    input::delete(text, cursor);
+                    if let Some((text, cursor)) = form.active_pair_mut() {
+                        input::delete(text, cursor);
+                    }
                 }
             }
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.submit_add_remote_node_form().await;
             }
             KeyCode::Enter => {
-                self.submit_add_remote_node_form().await;
+                //
+                // Advance focus instead of submitting — saves are ^s,
+                // matching the Add Model form's convention.
+                //
+                if let Some(form) = self.add_remote_node_form.as_mut() {
+                    form.focused_field =
+                        (form.focused_field + 1) % AddRemoteNodeForm::FIELD_COUNT;
+                    form.editing_text = form.focused_field != AddRemoteNodeForm::KIND_FIELD;
+                }
+            }
+            KeyCode::Char(' ') => {
+                if let Some(form) = self.add_remote_node_form.as_mut() {
+                    if form.focused_field == AddRemoteNodeForm::KIND_FIELD {
+                        form.kind_idx = (form.kind_idx + 1) % kinds_len;
+                    } else if let Some((text, cursor)) = form.active_pair_mut() {
+                        input::insert_char(text, cursor, ' ');
+                    }
+                }
             }
             KeyCode::Char(c) => {
                 if let Some(form) = self.add_remote_node_form.as_mut() {
-                    let (text, cursor) = form.active_pair_mut();
-                    input::insert_char(text, cursor, c);
+                    if let Some((text, cursor)) = form.active_pair_mut() {
+                        input::insert_char(text, cursor, c);
+                    }
                 }
             }
             _ => {}
@@ -492,29 +577,32 @@ impl App {
         let Some(form) = self.add_remote_node_form.take() else {
             return;
         };
-        let label = form.label.trim().to_string();
         let url = form.url.trim().to_string();
         let token = if form.token.trim().is_empty() {
             None
         } else {
             Some(form.token.trim().to_string())
         };
-        if label.is_empty() || url.is_empty() {
+        let kind = REMOTE_NODE_KINDS
+            .get(form.kind_idx)
+            .map(|k| k.id.to_string())
+            .unwrap_or_else(|| "codex".to_string());
+        if url.is_empty() {
             //
             // Validation failed — show form again so user can fix it.
             //
             self.add_remote_node_form = Some(AddRemoteNodeForm {
-                label,
-                label_cursor: form.label_cursor,
+                kind_idx: form.kind_idx,
                 url,
                 url_cursor: form.url_cursor,
                 token: token.clone().unwrap_or_default(),
                 token_cursor: form.token_cursor,
-                focused_field: form.focused_field,
+                focused_field: AddRemoteNodeForm::URL_FIELD,
+                editing_text: true,
             });
             return;
         }
-        let _ = self.client.add_remote_node(label, url, token).await;
+        let _ = self.client.add_remote_node(kind, url, token).await;
     }
 
     //
@@ -1004,18 +1092,17 @@ impl App {
                             'd' | 'D' => Some(common::PermissionDecision::Deny),
                             _ => None,
                         };
-                        if let Some(_decision) = decision {
+                        if let Some(decision) = decision {
                             //
-                            // Under ACP the agent-initiated permission
-                            // flow uses `session/request_permission` +
-                            // client response. That wiring isn't hooked
-                            // up to the node ACP server yet, so this is
-                            // a no-op until the node side lands; we still
-                            // consume the decision keypress so the UI
-                            // clears the pending permission.
+                            // Resolve the request_permission ACP request
+                            // through the bridge handle so the agent
+                            // actually unblocks. Use the decision to
+                            // pick a matching option_id by kind.
                             //
-
-                            let _ = session.pending_permission.take();
+                            if let Some(perm) = session.pending_permission.take() {
+                                let outcome = decision_to_outcome(&perm.options, decision);
+                                self.acp.resolve_permission(&perm.permission_id, outcome);
+                            }
                             return;
                         }
                     }

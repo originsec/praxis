@@ -146,6 +146,46 @@ impl NodeRegistry {
         }
     }
 
+    //
+    // Update the version of a single discovered agent on the node by
+    // short_name. Used by remote-node bridges (e.g. Codex) to surface the
+    // upstream agent's reported version on the node card.
+    //
+    pub async fn set_agent_version(&self, node_id: &str, agent_short_name: &str, version: String) {
+        let mut agents = self.agents.write().await;
+        if let Some(node) = agents.get_mut(node_id) {
+            if let Some(ref mut update) = node.last_update {
+                for a in update.discovered_agents.iter_mut() {
+                    if a.short_name == agent_short_name {
+                        a.version = Some(version.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    //
+    // Replace the os_details string on a node. Used by remote-node
+    // bridges to surface the upstream host's OS description after the
+    // remote agent identifies itself.
+    //
+    pub async fn set_os_details(&self, node_id: &str, os_details: String) {
+        let mut agents = self.agents.write().await;
+        if let Some(node) = agents.get_mut(node_id) {
+            node.os_details = os_details;
+        }
+    }
+
+    //
+    // Replace the machine_name string on a node.
+    //
+    pub async fn set_machine_name(&self, node_id: &str, machine_name: String) {
+        let mut agents = self.agents.write().await;
+        if let Some(node) = agents.get_mut(node_id) {
+            node.machine_name = machine_name;
+        }
+    }
+
     pub async fn set_session_id(&self, node_id: &str, session_id: Option<String>) {
         let mut agents = self.agents.write().await;
         if let Some(node) = agents.get_mut(node_id) {

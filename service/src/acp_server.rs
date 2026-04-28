@@ -80,10 +80,28 @@ impl AcpServer {
         let method = msg.get("method").and_then(|m| m.as_str()).map(String::from);
 
         //
-        // Response to an agent request (has id, no method).
+        // Response to an agent request (has id, no method). Try the
+        // node-proxy first — bridge-initiated requests live there. If
+        // the proxy doesn't claim it, fall through to the local
+        // handler.
         //
 
         if id.is_some() && method.is_none() {
+            match self
+                .node_proxy
+                .intercept_request(publish_channel, client_id, json_rpc_str, &msg)
+                .await
+            {
+                Ok(true) => return,
+                Ok(false) => {}
+                Err(e) => {
+                    common::log_warn!(
+                        "AcpNodeProxy intercept failed for {}: {}",
+                        common::short_id(client_id),
+                        e
+                    );
+                }
+            }
             self.handle_client_response(client_id, &msg).await;
             return;
         }

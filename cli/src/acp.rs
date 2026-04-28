@@ -2,15 +2,16 @@ use agent_client_protocol as acp;
 use acp::schema::{
     CancelNotification, CloseSessionRequest, CloseSessionResponse, ContentBlock, Implementation,
     InitializeRequest, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
-    LoadSessionResponse, Meta, NewSessionRequest, NewSessionResponse, PlanEntryStatus,
-    PromptRequest, PromptResponse, ProtocolVersion, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SessionId, SessionNotification,
-    SessionUpdate, TextContent, ToolCallContent, ToolCallStatus,
+    LoadSessionResponse, Meta, NewSessionRequest, NewSessionResponse,
+    PlanEntryStatus, PromptRequest, PromptResponse, ProtocolVersion, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SessionId,
+    SessionNotification, SessionUpdate, TextContent, ToolCallContent, ToolCallStatus,
 };
 use crate::client::Client as PraxisRpcClient;
 use crate::event::AppEvent;
 use common::{OrchestratorPlan, PlanStep, PlanStepStatus};
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -70,11 +71,30 @@ pub enum AcpNotification {
         #[allow(dead_code)]
         request_id: String,
     },
+    //
+    // Agent-initiated `session/request_permission` request. The TUI
+    // surfaces this as `pending_permission` on the matching session,
+    // and the user's a/l/d keypress is fed back via
+    // `AcpBridgeHandle::resolve_permission`.
+    //
+    PermissionRequest {
+        session_id: String,
+        permission_id: String,
+        tool_name: String,
+        tool_input: String,
+        options: Vec<PermissionOption>,
+    },
     Error {
         #[allow(dead_code)]
         request_id: Option<String>,
         message: String,
     },
+}
+
+#[derive(Debug, Clone)]
+pub struct PermissionOption {
+    pub option_id: String,
+    pub kind: acp::schema::PermissionOptionKind,
 }
 
 //
@@ -118,6 +138,14 @@ enum BridgeCommand {
 #[derive(Clone)]
 pub struct AcpBridgeHandle {
     cmd_tx: mpsc::UnboundedSender<BridgeCommand>,
+    //
+    // Outstanding agent-initiated permission prompts awaiting the
+    // user's choice. The on_receive_request handler inserts a oneshot
+    // sender keyed by permission_id; the TUI resolves it from the
+    // session-level a/l/d key handler.
+    //
+    pending_permissions:
+        Arc<Mutex<HashMap<String, oneshot::Sender<RequestPermissionOutcome>>>>,
 }
 
 impl AcpBridgeHandle {
@@ -201,9 +229,15 @@ impl AcpBridgeHandle {
     ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
         let acp_rx = client.subscribe_acp_events();
+        let pending_permissions: Arc<
+            Mutex<HashMap<String, oneshot::Sender<RequestPermissionOutcome>>>,
+        > = Arc::new(Mutex::new(HashMap::new()));
 
+        let perms_for_bridge = pending_permissions.clone();
         tokio::spawn(async move {
-            if let Err(e) = run_bridge(client, event_tx.clone(), acp_rx, cmd_rx).await {
+            if let Err(e) =
+                run_bridge(client, event_tx.clone(), acp_rx, cmd_rx, perms_for_bridge).await
+            {
                 tracing::debug!("ACP bridge ended: {}", e);
                 let _ = event_tx.send(AppEvent::AcpNotification(AcpNotification::Error {
                     request_id: None,
@@ -212,7 +246,25 @@ impl AcpBridgeHandle {
             }
         });
 
-        Self { cmd_tx }
+        Self {
+            cmd_tx,
+            pending_permissions,
+        }
+    }
+
+    //
+    // Resolve an agent-initiated permission request with the user's
+    // choice. Called from the TUI session key handler when the user
+    // picks Allow / Allow-always / Deny on a pending permission.
+    //
+    pub fn resolve_permission(&self, permission_id: &str, outcome: RequestPermissionOutcome) {
+        let tx = {
+            let mut map = self.pending_permissions.lock().unwrap();
+            map.remove(permission_id)
+        };
+        if let Some(tx) = tx {
+            let _ = tx.send(outcome);
+        }
     }
 }
 
@@ -354,6 +406,7 @@ async fn run_bridge(
     event_tx: mpsc::UnboundedSender<AppEvent>,
     mut acp_rx: mpsc::UnboundedReceiver<String>,
     cmd_rx: mpsc::UnboundedReceiver<BridgeCommand>,
+    pending_permissions: Arc<Mutex<HashMap<String, oneshot::Sender<RequestPermissionOutcome>>>>,
 ) -> anyhow::Result<()> {
     //
     // DuplexStream pair: the connection reads from conn_read (data from
@@ -428,18 +481,69 @@ async fn run_bridge(
             },
             acp::on_receive_notification!(),
         )
-        .on_receive_request(
-            async move |_req: RequestPermissionRequest, responder, _cx| {
-                //
-                // TODO: forward to TUI for interactive approval. For now,
-                // auto-cancel to preserve the 0.10 behaviour.
-                //
-                responder.respond(RequestPermissionResponse::new(
-                    RequestPermissionOutcome::Cancelled,
-                ))
-            },
-            acp::on_receive_request!(),
-        )
+        .on_receive_request({
+            let event_tx = event_tx.clone();
+            let pending = pending_permissions.clone();
+            move |req: RequestPermissionRequest,
+                  responder: acp::Responder<RequestPermissionResponse>,
+                  _cx: acp::ConnectionTo<acp::Agent>| {
+                let event_tx = event_tx.clone();
+                let pending = pending.clone();
+                async move {
+                    //
+                    // Stash a oneshot keyed by a fresh permission_id,
+                    // forward the prompt to the TUI session UI, then
+                    // wait for the user's a/l/d decision.
+                    //
+                    let permission_id = uuid::Uuid::new_v4().to_string();
+                    let (tx, rx) = oneshot::channel::<RequestPermissionOutcome>();
+                    pending.lock().unwrap().insert(permission_id.clone(), tx);
+
+                    let tool_name = req
+                        .tool_call
+                        .fields
+                        .title
+                        .clone()
+                        .unwrap_or_else(|| "permission".to_string());
+                    let tool_input = req
+                        .tool_call
+                        .fields
+                        .raw_input
+                        .as_ref()
+                        .map(|v| v.to_string())
+                        .unwrap_or_default();
+                    let options: Vec<PermissionOption> = req
+                        .options
+                        .iter()
+                        .map(|o| PermissionOption {
+                            option_id: o.option_id.0.to_string(),
+                            kind: o.kind,
+                        })
+                        .collect();
+
+                    let _ = event_tx.send(AppEvent::AcpNotification(
+                        AcpNotification::PermissionRequest {
+                            session_id: req.session_id.to_string(),
+                            permission_id: permission_id.clone(),
+                            tool_name,
+                            tool_input,
+                            options,
+                        },
+                    ));
+
+                    let outcome = match rx.await {
+                        Ok(o) => o,
+                        Err(_) => RequestPermissionOutcome::Cancelled,
+                    };
+                    //
+                    // Best-effort cleanup if the TUI never resolved the
+                    // request (race / shutdown).
+                    //
+                    pending.lock().unwrap().remove(&permission_id);
+                    responder.respond(RequestPermissionResponse::new(outcome))
+                }
+            }
+        }, acp::on_receive_request!())
         .connect_with(transport, async move |cx| {
             //
             // Initialize the connection.

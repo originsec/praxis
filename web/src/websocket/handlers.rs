@@ -74,11 +74,8 @@ pub async fn handle_browser_message(
         BrowserMessage::ResetNode { node_id } => {
             state.rabbitmq.reset_node(node_id).await?;
         }
-        BrowserMessage::AddRemoteNode { label, url, token } => {
-            state.rabbitmq.add_remote_node(label, url, token).await?;
-        }
-        BrowserMessage::RemoveRemoteNode { node_id } => {
-            state.rabbitmq.remove_remote_node(node_id).await?;
+        BrowserMessage::AddRemoteNode { kind, url, token } => {
+            state.rabbitmq.add_remote_node(kind, url, token).await?;
         }
         BrowserMessage::ConfigGet { keys } => {
             handle_config_get(state, keys).await?;

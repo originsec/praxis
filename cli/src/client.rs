@@ -879,20 +879,20 @@ impl Client {
         self.publish_signal(message).await
     }
 
-    pub async fn add_remote_node(
-        &self,
-        label: String,
-        url: String,
-        token: Option<String>,
-    ) -> Result<()> {
-        let message = ClientSignalMessage::AddRemoteNode { label, url, token };
+    pub async fn remove_node(&self, node_id: &str) -> Result<()> {
+        let message = ClientSignalMessage::RemoveNode {
+            node_id: node_id.to_string(),
+        };
         self.publish_signal(message).await
     }
 
-    pub async fn remove_remote_node(&self, node_id: &str) -> Result<()> {
-        let message = ClientSignalMessage::RemoveRemoteNode {
-            node_id: node_id.to_string(),
-        };
+    pub async fn add_remote_node(
+        &self,
+        kind: String,
+        url: String,
+        token: Option<String>,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::AddRemoteNode { kind, url, token };
         self.publish_signal(message).await
     }
 

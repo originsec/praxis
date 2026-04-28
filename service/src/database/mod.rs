@@ -390,8 +390,9 @@ impl Database {
         }
 
         //
-        // Migration: Create remote_nodes table for persisting remote agent
-        // node configurations (e.g. Codex app-server WebSocket endpoints).
+        // Migration: Create remote_nodes table for persisting remote
+        // agent node configurations. Each row drives one RemoteNode
+        // bridge instance keyed by `kind` (e.g. "codex").
         //
         match &self.pool {
             DatabasePool::Sqlite(pool) => {
@@ -399,11 +400,22 @@ impl Database {
                     "CREATE TABLE IF NOT EXISTS remote_nodes (
                         id TEXT PRIMARY KEY,
                         node_type TEXT NOT NULL DEFAULT 'remote-codex',
-                        label TEXT NOT NULL,
+                        kind TEXT NOT NULL DEFAULT 'codex',
                         url TEXT NOT NULL,
                         token TEXT,
                         created_at TEXT NOT NULL
                     )"
+                ).execute(pool).await;
+                //
+                // Idempotent column adds/drops for installs that predate
+                // the current schema. SQLite doesn't support IF NOT
+                // EXISTS on columns — both errors are ignored.
+                //
+                let _ = sqlx::query(
+                    "ALTER TABLE remote_nodes ADD COLUMN kind TEXT NOT NULL DEFAULT 'codex'"
+                ).execute(pool).await;
+                let _ = sqlx::query(
+                    "ALTER TABLE remote_nodes DROP COLUMN label"
                 ).execute(pool).await;
             }
             DatabasePool::Postgres(pool) => {
@@ -411,11 +423,17 @@ impl Database {
                     "CREATE TABLE IF NOT EXISTS remote_nodes (
                         id TEXT PRIMARY KEY,
                         node_type TEXT NOT NULL DEFAULT 'remote-codex',
-                        label TEXT NOT NULL,
+                        kind TEXT NOT NULL DEFAULT 'codex',
                         url TEXT NOT NULL,
                         token TEXT,
                         created_at TEXT NOT NULL
                     )"
+                ).execute(pool).await;
+                let _ = sqlx::query(
+                    "ALTER TABLE remote_nodes ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'codex'"
+                ).execute(pool).await;
+                let _ = sqlx::query(
+                    "ALTER TABLE remote_nodes DROP COLUMN IF EXISTS label"
                 ).execute(pool).await;
             }
         }

@@ -3596,6 +3596,7 @@ dependencies = [
  "nom 8.0.0",
  "praxis_common",
  "regex",
+ "reqwest",
  "rmcp",
  "semantic_parser",
  "serde",

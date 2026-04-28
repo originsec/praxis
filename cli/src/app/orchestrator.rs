@@ -660,6 +660,34 @@ impl App {
 
             AcpNotification::SessionLoaded { .. } => {}
 
+            AcpNotification::PermissionRequest {
+                session_id,
+                permission_id,
+                tool_name,
+                tool_input,
+                options,
+            } => {
+                //
+                // Surface the permission prompt on whichever node-session
+                // owns the session_id. Falls through silently if the
+                // session isn't tracked locally — the bridge will time
+                // out the request_permission and fall back to cancel.
+                //
+                let target = self
+                    .nodes
+                    .sessions
+                    .iter_mut()
+                    .find(|(_, s)| s.session_id.as_deref() == Some(session_id.as_str()));
+                if let Some((_, session)) = target {
+                    session.pending_permission = Some(PendingPermission {
+                        permission_id,
+                        tool_name,
+                        tool_input,
+                        options,
+                    });
+                }
+            }
+
             AcpNotification::Error {
                 request_id: _,
                 message,

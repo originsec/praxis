@@ -4,7 +4,7 @@ mod acp_node_proxy;
 mod acp_server;
 mod banner;
 mod claude_bridge;
-mod codex_bridge;
+mod remote_nodes;
 mod config;
 mod conversions;
 mod database;
@@ -293,39 +293,42 @@ async fn run_main_loop() -> Result<()> {
         service_config.clone(),
         acp_node_proxy.clone(),
     ));
-    let codex_bridge_manager = Arc::new(codex_bridge::CodexBridgeManager::new());
-    acp_node_proxy.set_codex_bridge(codex_bridge_manager.clone());
+    let remote_node_manager = Arc::new(remote_nodes::RemoteNodeManager::new());
+    acp_node_proxy.set_remote_node_manager(remote_node_manager.clone());
     common::log_info!("Initialized Orchestrator manager, ACP server, and ACP node proxy");
 
     //
-    // Restore persisted remote-codex nodes from the database. Each one
-    // re-registers as a synthetic node and reconnects its WS bridge.
+    // Restore persisted remote nodes from the database. Each one
+    // re-registers as a synthetic node and reconnects its bridge.
     //
     match database.list_remote_nodes().await {
         Ok(records) => {
             for r in records {
-                let initial_update = codex_bridge::initial_codex_update(&r.id);
+                let kind = r.kind.clone();
+                let initial_update = remote_nodes::initial_update_for_kind(&kind, &r.id);
+                let machine_name = remote_nodes::codex::host_from_ws_url(&r.url);
                 node_registry
                     .register_synthetic(
                         r.id.clone(),
                         r.node_type.clone(),
-                        r.label.clone(),
-                        "Codex Remote Agent".to_string(),
-                        codex_bridge::codex_capabilities(),
+                        machine_name,
+                        remote_nodes::os_label_for_kind(&kind).to_string(),
+                        remote_nodes::capabilities_for_kind(&kind),
                         initial_update,
                     )
                     .await;
-                codex_bridge_manager
-                    .start_bridge(
-                        r.id,
-                        r.url,
-                        r.token,
-                        node_registry.clone(),
-                        publish_channel.clone(),
-                        broadcast_channel.clone(),
-                        acp_node_proxy.clone(),
-                    )
-                    .await;
+                let ctx_for_bridge = remote_nodes::RemoteNodeContext {
+                    node_registry: node_registry.clone(),
+                    publish_channel: publish_channel.clone(),
+                    broadcast_channel: broadcast_channel.clone(),
+                    acp_proxy: acp_node_proxy.clone(),
+                };
+                if let Err(e) = remote_node_manager
+                    .start(&kind, r.id, r.url, r.token, ctx_for_bridge)
+                    .await
+                {
+                    common::log_warn!("Failed to start remote-node bridge: {}", e);
+                }
             }
         }
         Err(e) => {
@@ -699,7 +702,7 @@ async fn run_main_loop() -> Result<()> {
         ccrv2_manager,
         trigger_engine: Some(trigger_engine.clone()),
         intercept_broadcaster,
-        codex_bridge_manager,
+        remote_node_manager,
         publish_channel,
         client_publish_channel,
         broadcast_channel,

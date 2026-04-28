@@ -1563,16 +1563,14 @@ pub enum ClientSignalMessage {
     },
 
     //
-    // Remote (virtual) nodes — currently used for connecting to a Codex
-    // app-server over WebSocket and registering it as a synthetic node.
+    // Remote (virtual) nodes — synthetic node entries backed by a
+    // bridge to an external agent server (e.g. a Codex app-server
+    // over WebSocket). `kind` selects the bridge implementation.
     //
     AddRemoteNode {
-        label: String,
+        kind: String,
         url: String,
         token: Option<String>,
-    },
-    RemoveRemoteNode {
-        node_id: String,
     },
 
     //

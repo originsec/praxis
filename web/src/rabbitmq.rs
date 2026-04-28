@@ -142,20 +142,15 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
-    /// Register a remote agent node (Codex app-server over WebSocket).
+    /// Register a remote agent node. `kind` selects which RemoteNode
+    /// bridge implementation runs (e.g. "codex").
     pub async fn add_remote_node(
         &self,
-        label: String,
+        kind: String,
         url: String,
         token: Option<String>,
     ) -> Result<()> {
-        let message = ClientSignalMessage::AddRemoteNode { label, url, token };
-        self.publish_signal(message).await
-    }
-
-    /// Remove a remote agent node and stop its bridge.
-    pub async fn remove_remote_node(&self, node_id: String) -> Result<()> {
-        let message = ClientSignalMessage::RemoveRemoteNode { node_id };
+        let message = ClientSignalMessage::AddRemoteNode { kind, url, token };
         self.publish_signal(message).await
     }
 
