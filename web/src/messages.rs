@@ -55,6 +55,16 @@ pub enum BrowserMessage {
     ResetNode {
         node_id: String,
     },
+    /// Add a remote agent node (e.g. Codex over WebSocket)
+    AddRemoteNode {
+        label: String,
+        url: String,
+        token: Option<String>,
+    },
+    /// Remove a remote agent node
+    RemoveRemoteNode {
+        node_id: String,
+    },
     /// Get service configuration
     ConfigGet {
         keys: Vec<String>,

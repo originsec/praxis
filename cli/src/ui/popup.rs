@@ -1,5 +1,5 @@
 use crate::app::{
-    Popup, PopupKind, ScheduleKind, TriggerForm, TriggerFormSection, TriggerKind,
+    AddRemoteNodeForm, Popup, PopupKind, ScheduleKind, TriggerForm, TriggerFormSection, TriggerKind,
 };
 use crate::ui::common::centered_rect_fixed;
 use crate::ui::theme::{ACCENT, DIM, MUTED, POPUP_BG, POPUP_HIGHLIGHT_BG, STATUS_RUNNING, TEXT};
@@ -293,6 +293,79 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
     }
     let hints = Line::from(hint_spans);
     f.render_widget(Paragraph::new(hints), chunks[2]);
+}
+
+//
+// Centered popup for the "Add Remote Codex Node" form.
+//
+
+pub fn render_add_remote_node_form(f: &mut Frame, area: Rect, form: &AddRemoteNodeForm) {
+    let width = 60u16.min(area.width.saturating_sub(4)).max(40);
+    let height = 14u16.min(area.height.saturating_sub(2)).max(10);
+    let popup_area = centered_rect_fixed(width, height, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(ACCENT))
+        .title(Span::styled(
+            " Add Remote Codex Node ",
+            Style::default()
+                .fg(ACCENT)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .style(Style::default().bg(POPUP_BG));
+
+    f.render_widget(Clear, popup_area);
+    f.render_widget(block.clone(), popup_area);
+    let inner = block.inner(popup_area);
+
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(""));
+
+    for i in 0..AddRemoteNodeForm::FIELD_COUNT {
+        let is_focused = i == form.focused_field;
+        let label_style = if is_focused {
+            Style::default().fg(ACCENT)
+        } else {
+            Style::default().fg(MUTED)
+        };
+        let value_style = if is_focused {
+            Style::default().fg(TEXT)
+        } else {
+            Style::default().fg(DIM)
+        };
+        let cursor = if is_focused { "\u{258f}" } else { "" };
+
+        let value = match i {
+            0 => form.label.clone(),
+            1 => form.url.clone(),
+            2 => form.token.clone(),
+            _ => String::new(),
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  {:<18}", AddRemoteNodeForm::field_label(i)),
+                label_style,
+            ),
+            Span::styled(value, value_style),
+            Span::styled(cursor, Style::default().fg(ACCENT)),
+        ]));
+        lines.push(Line::from(""));
+    }
+
+    let hints = Line::from(vec![
+        Span::raw(" "),
+        Span::styled("\u{2191}\u{2193}", Style::default().fg(ACCENT)),
+        Span::styled(" navigate  ", Style::default().fg(MUTED)),
+        Span::styled("^s", Style::default().fg(ACCENT)),
+        Span::styled(" save  ", Style::default().fg(MUTED)),
+        Span::styled("esc", Style::default().fg(ACCENT)),
+        Span::styled(" cancel", Style::default().fg(MUTED)),
+    ]);
+    lines.push(hints);
+
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 //

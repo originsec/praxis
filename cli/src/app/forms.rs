@@ -1,3 +1,41 @@
+//
+// Form used by the Nodes window to add a new remote agent node (e.g.
+// a Codex app-server reachable over WebSocket). Submission publishes
+// `ClientSignalMessage::AddRemoteNode`.
+//
+
+#[derive(Default)]
+pub struct AddRemoteNodeForm {
+    pub label: String,
+    pub label_cursor: usize,
+    pub url: String,
+    pub url_cursor: usize,
+    pub token: String,
+    pub token_cursor: usize,
+    pub focused_field: usize, // 0=label, 1=url, 2=token
+}
+
+impl AddRemoteNodeForm {
+    pub const FIELD_COUNT: usize = 3;
+
+    pub fn field_label(idx: usize) -> &'static str {
+        match idx {
+            0 => "Label",
+            1 => "URL",
+            2 => "Token (optional)",
+            _ => "",
+        }
+    }
+
+    pub fn active_pair_mut(&mut self) -> (&mut String, &mut usize) {
+        match self.focused_field {
+            0 => (&mut self.label, &mut self.label_cursor),
+            1 => (&mut self.url, &mut self.url_cursor),
+            _ => (&mut self.token, &mut self.token_cursor),
+        }
+    }
+}
+
 pub struct NewOpForm {
     pub name: String,
     pub short_name: String,

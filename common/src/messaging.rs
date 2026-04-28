@@ -1563,6 +1563,19 @@ pub enum ClientSignalMessage {
     },
 
     //
+    // Remote (virtual) nodes — currently used for connecting to a Codex
+    // app-server over WebSocket and registering it as a synthetic node.
+    //
+    AddRemoteNode {
+        label: String,
+        url: String,
+        token: Option<String>,
+    },
+    RemoveRemoteNode {
+        node_id: String,
+    },
+
+    //
     // Semantic operations.
     //
     /// Run a semantic operation by name - service looks up the definition

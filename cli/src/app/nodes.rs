@@ -74,6 +74,15 @@ impl App {
     }
 
     pub(crate) async fn handle_nodes_key(&mut self, key: KeyEvent) {
+        //
+        // Add-remote-node form takes priority over everything else when
+        // it is open.
+        //
+        if self.add_remote_node_form.is_some() {
+            self.handle_add_remote_node_form_key(key).await;
+            return;
+        }
+
         if self.nodes.terminal.is_some() {
             self.handle_terminal_key(key).await;
             return;
@@ -104,6 +113,15 @@ impl App {
 
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('w') {
             self.toggle_sessions_list();
+            return;
+        }
+
+        //
+        // Ctrl+N opens the add-remote-node form.
+        //
+
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('n') {
+            self.add_remote_node_form = Some(AddRemoteNodeForm::default());
             return;
         }
 
@@ -155,6 +173,14 @@ impl App {
             }
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.confirm_reset_node();
+            }
+            KeyCode::Delete | KeyCode::Backspace => {
+                //
+                // Backspace/Delete on a remote-codex node prompts for
+                // removal. Native nodes are not removed via Delete —
+                // ^r resets them and the X button on the web UI removes.
+                //
+                self.confirm_delete_remote_node();
             }
             KeyCode::Char('i') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 //
@@ -372,6 +398,123 @@ impl App {
                 action: ConfirmKind::ResetNode(node_id),
             });
         }
+    }
+
+    pub(crate) fn confirm_delete_remote_node(&mut self) {
+        let Some(node) = self.nodes.nodes.get(self.nodes.selected) else {
+            return;
+        };
+        if node.node_type != "remote-codex" {
+            return;
+        }
+        let node_id = node.node_id.clone();
+        let machine = node.machine_name.clone();
+        self.confirm = Some(ConfirmAction {
+            message: format!("Remove remote node '{}'?", machine),
+            action: ConfirmKind::DeleteRemoteNode(node_id),
+        });
+    }
+
+    pub(crate) async fn handle_add_remote_node_form_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.add_remote_node_form = None;
+            }
+            KeyCode::Tab | KeyCode::Down => {
+                if let Some(form) = self.add_remote_node_form.as_mut() {
+                    form.focused_field =
+                        (form.focused_field + 1) % AddRemoteNodeForm::FIELD_COUNT;
+                }
+            }
+            KeyCode::BackTab | KeyCode::Up => {
+                if let Some(form) = self.add_remote_node_form.as_mut() {
+                    form.focused_field = (form.focused_field
+                        + AddRemoteNodeForm::FIELD_COUNT
+                        - 1)
+                        % AddRemoteNodeForm::FIELD_COUNT;
+                }
+            }
+            KeyCode::Left => {
+                if let Some(form) = self.add_remote_node_form.as_mut() {
+                    let (_, cursor) = form.active_pair_mut();
+                    input::move_left(cursor);
+                }
+            }
+            KeyCode::Right => {
+                if let Some(form) = self.add_remote_node_form.as_mut() {
+                    let (text, cursor) = form.active_pair_mut();
+                    let text_clone = text.clone();
+                    input::move_right(&text_clone, cursor);
+                }
+            }
+            KeyCode::Home => {
+                if let Some(form) = self.add_remote_node_form.as_mut() {
+                    let (_, cursor) = form.active_pair_mut();
+                    input::move_home(cursor);
+                }
+            }
+            KeyCode::End => {
+                if let Some(form) = self.add_remote_node_form.as_mut() {
+                    let (text, cursor) = form.active_pair_mut();
+                    let text_clone = text.clone();
+                    input::move_end(&text_clone, cursor);
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(form) = self.add_remote_node_form.as_mut() {
+                    let (text, cursor) = form.active_pair_mut();
+                    input::backspace(text, cursor);
+                }
+            }
+            KeyCode::Delete => {
+                if let Some(form) = self.add_remote_node_form.as_mut() {
+                    let (text, cursor) = form.active_pair_mut();
+                    input::delete(text, cursor);
+                }
+            }
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.submit_add_remote_node_form().await;
+            }
+            KeyCode::Enter => {
+                self.submit_add_remote_node_form().await;
+            }
+            KeyCode::Char(c) => {
+                if let Some(form) = self.add_remote_node_form.as_mut() {
+                    let (text, cursor) = form.active_pair_mut();
+                    input::insert_char(text, cursor, c);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) async fn submit_add_remote_node_form(&mut self) {
+        let Some(form) = self.add_remote_node_form.take() else {
+            return;
+        };
+        let label = form.label.trim().to_string();
+        let url = form.url.trim().to_string();
+        let token = if form.token.trim().is_empty() {
+            None
+        } else {
+            Some(form.token.trim().to_string())
+        };
+        if label.is_empty() || url.is_empty() {
+            //
+            // Validation failed — show form again so user can fix it.
+            //
+            self.add_remote_node_form = Some(AddRemoteNodeForm {
+                label,
+                label_cursor: form.label_cursor,
+                url,
+                url_cursor: form.url_cursor,
+                token: token.clone().unwrap_or_default(),
+                token_cursor: form.token_cursor,
+                focused_field: form.focused_field,
+            });
+            return;
+        }
+        let _ = self.client.add_remote_node(label, url, token).await;
     }
 
     //

@@ -71,6 +71,59 @@ impl NodeRegistry {
         node
     }
 
+    //
+    // Register a synthetic node — one without a backing RabbitMQ queue.
+    // Used by the Codex bridge so a remote agent appears in the node list
+    // and broadcasts. `queue_name` is empty: the bridge bypasses
+    // `send_to_node()` entirely.
+    //
+    pub async fn register_synthetic(
+        &self,
+        id: String,
+        node_type: String,
+        machine_name: String,
+        os_details: String,
+        capabilities: Vec<NodeCapability>,
+        initial_update: NodeInformationUpdate,
+    ) -> RegisteredNode {
+        let now = Utc::now();
+        let node = RegisteredNode {
+            id: id.clone(),
+            node_type,
+            capabilities,
+            machine_name,
+            os_details,
+            queue_name: String::new(),
+            registered_at: now,
+            last_update: Some(initial_update),
+            last_update_received: now,
+            intercept_active: false,
+            intercept_supported: false,
+            privileged: false,
+        };
+
+        let mut agents = self.agents.write().await;
+        agents.insert(node.id.clone(), node.clone());
+        common::log_info!(
+            "Registered synthetic node: {} ({})",
+            node.id, node.node_type
+        );
+
+        node
+    }
+
+    //
+    // Update the last_update_received timestamp without changing other
+    // fields. Synthetic nodes use this as a keepalive so they stay Online
+    // in the system state without producing real NodeInformationUpdates.
+    //
+    pub async fn touch_timestamp(&self, node_id: &str) {
+        let mut agents = self.agents.write().await;
+        if let Some(n) = agents.get_mut(node_id) {
+            n.last_update_received = Utc::now();
+        }
+    }
+
     pub async fn update_node_info(&self, update: &NodeInformationUpdate) {
         let mut agents = self.agents.write().await;
         if let Some(node) = agents.get_mut(&update.node_id) {

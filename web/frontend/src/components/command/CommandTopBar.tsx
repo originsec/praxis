@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Wifi, WifiOff, Sun, Moon, RefreshCw, Settings, PanelRightOpen, PanelRightClose, Search } from 'lucide-react';
+import { Wifi, WifiOff, Sun, Moon, RefreshCw, Settings, PanelRightOpen, PanelRightClose, Search, Plus } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { SettingsModal } from './SettingsModal';
+import { AddRemoteNodeModal } from './AddRemoteNodeModal';
 
 interface CommandTopBarProps {
   orchestratorOpen: boolean;
@@ -15,6 +16,7 @@ export function CommandTopBar({ orchestratorOpen, onToggleOrchestrator, filterTe
   const { state } = useApp();
   const { isDark, toggleTheme } = useTheme();
   const [showSettings, setShowSettings] = useState(false);
+  const [showAddRemote, setShowAddRemote] = useState(false);
   const nodeCount = state.systemState?.nodes.length ?? 0;
   const runningOps = state.operations.filter(op => op.status === 'Running').length;
   const runningChains = state.chains.executions.filter(e => e.status === 'Running').length;
@@ -84,6 +86,20 @@ export function CommandTopBar({ orchestratorOpen, onToggleOrchestrator, filterTe
 
           {/*
           //
+          // Add remote node.
+          //
+          */}
+
+          <button
+            onClick={() => setShowAddRemote(true)}
+            className="p-1 rounded hover:bg-[var(--highlight)] transition-colors"
+            title="Add Remote Node"
+          >
+            <Plus size={14} className="text-muted hover:text-primary" />
+          </button>
+
+          {/*
+          //
           // Orchestrator toggle.
           //
           */}
@@ -131,6 +147,7 @@ export function CommandTopBar({ orchestratorOpen, onToggleOrchestrator, filterTe
       </header>
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      <AddRemoteNodeModal isOpen={showAddRemote} onClose={() => setShowAddRemote(false)} />
     </>
   );
 }

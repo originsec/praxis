@@ -4,6 +4,7 @@ mod acp_node_proxy;
 mod acp_server;
 mod banner;
 mod claude_bridge;
+mod codex_bridge;
 mod config;
 mod conversions;
 mod database;
@@ -292,7 +293,45 @@ async fn run_main_loop() -> Result<()> {
         service_config.clone(),
         acp_node_proxy.clone(),
     ));
+    let codex_bridge_manager = Arc::new(codex_bridge::CodexBridgeManager::new());
+    acp_node_proxy.set_codex_bridge(codex_bridge_manager.clone());
     common::log_info!("Initialized Orchestrator manager, ACP server, and ACP node proxy");
+
+    //
+    // Restore persisted remote-codex nodes from the database. Each one
+    // re-registers as a synthetic node and reconnects its WS bridge.
+    //
+    match database.list_remote_nodes().await {
+        Ok(records) => {
+            for r in records {
+                let initial_update = codex_bridge::initial_codex_update(&r.id);
+                node_registry
+                    .register_synthetic(
+                        r.id.clone(),
+                        r.node_type.clone(),
+                        r.label.clone(),
+                        "Codex Remote Agent".to_string(),
+                        codex_bridge::codex_capabilities(),
+                        initial_update,
+                    )
+                    .await;
+                codex_bridge_manager
+                    .start_bridge(
+                        r.id,
+                        r.url,
+                        r.token,
+                        node_registry.clone(),
+                        publish_channel.clone(),
+                        broadcast_channel.clone(),
+                        acp_node_proxy.clone(),
+                    )
+                    .await;
+            }
+        }
+        Err(e) => {
+            common::log_warn!("Failed to load persisted remote nodes: {}", e);
+        }
+    }
 
     //
     // Semantic operations use LLM config from service_config and drive the
@@ -660,6 +699,7 @@ async fn run_main_loop() -> Result<()> {
         ccrv2_manager,
         trigger_engine: Some(trigger_engine.clone()),
         intercept_broadcaster,
+        codex_bridge_manager,
         publish_channel,
         client_publish_channel,
         broadcast_channel,

@@ -1375,6 +1375,8 @@ interface AppContextValue {
   //
   removeNode: (nodeId: string) => void;
   resetNode: (nodeId: string) => void;
+  addRemoteNode: (label: string, url: string, token: string | null) => void;
+  removeRemoteNode: (nodeId: string) => void;
   //
   // Config.
   //
@@ -2159,6 +2161,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     wsClient.send({ type: 'reset_node', node_id: nodeId });
   }, []);
 
+  const addRemoteNode = useCallback((label: string, url: string, token: string | null) => {
+    wsClient.send({ type: 'add_remote_node', label, url, token });
+  }, []);
+
+  const removeRemoteNode = useCallback((nodeId: string) => {
+    wsClient.send({ type: 'remove_remote_node', node_id: nodeId });
+  }, []);
+
   //
   // Config.
   //
@@ -2660,6 +2670,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     clearEventLog,
     removeNode,
     resetNode,
+    addRemoteNode,
+    removeRemoteNode,
     getConfig,
     setConfig,
     clearOpDefStatus,
@@ -2751,6 +2763,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     clearEventLog,
     removeNode,
     resetNode,
+    addRemoteNode,
+    removeRemoteNode,
     getConfig,
     setConfig,
     clearOpDefStatus,

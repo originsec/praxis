@@ -20,8 +20,9 @@ use anyhow::{anyhow, Result};
 use common::{AcpFrame, ClientDirectMessage, NodeDirectMessage};
 use lapin::Channel;
 use serde_json::{json, Value};
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::{oneshot, OnceCell, RwLock};
 
+use crate::codex_bridge::CodexBridgeManager;
 use crate::messaging::{send_to_client, send_to_node};
 
 //
@@ -53,6 +54,12 @@ pub struct AcpNodeProxy {
     // Keyed by client_id (each request uses a unique one).
     //
     text_buffers: RwLock<HashMap<String, String>>,
+    //
+    // Optional bridge manager — set after construction so Praxis can
+    // route ACP frames bound for remote-codex nodes through a WS bridge
+    // instead of RabbitMQ.
+    //
+    codex_bridge: OnceCell<Arc<CodexBridgeManager>>,
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
@@ -64,6 +71,14 @@ struct PendingKey {
 impl AcpNodeProxy {
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
+    }
+
+    //
+    // Wire up the optional Codex bridge manager. Should be called once,
+    // during service startup, before the dispatcher accepts traffic.
+    //
+    pub fn set_codex_bridge(&self, bridge: Arc<CodexBridgeManager>) {
+        let _ = self.codex_bridge.set(bridge);
     }
 
     pub async fn register_session(&self, session_id: String, node_id: String) {
@@ -314,6 +329,18 @@ impl AcpNodeProxy {
             common::short_id(client_id),
             common::short_id(&node_id),
         );
+
+        //
+        // Route remote-codex sessions through the WS bridge. The bridge
+        // owns the protocol translation and emits `ClientDirectMessage`s
+        // directly via send_to_client.
+        //
+        if let Some(bridge) = self.codex_bridge.get() {
+            if bridge.is_remote_node(&node_id).await {
+                bridge.forward_acp(&node_id, client_id, raw_json_rpc).await;
+                return Ok(true);
+            }
+        }
 
         //
         // For session/new we'll need to correlate the node's response back to

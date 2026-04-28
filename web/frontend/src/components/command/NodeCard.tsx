@@ -234,6 +234,12 @@ export function NodeCard({ node }: NodeCardProps) {
     [node.capabilities],
   );
 
+  //
+  // Remote agent nodes (e.g. Codex over WS) only support sessions.
+  // Intercept, Recon, Terminal, Op, and Chain features are hidden.
+  //
+  const isRemoteAgent = node.node_type === 'remote-codex';
+
   const [agentsExpanded, setAgentsExpanded] = useState(node.discovered_agents.length <= 3);
   const [collapsed, setCollapsed] = useState(false);
   const [creatingSessionFor, setCreatingSessionFor] = useState<string | null>(null);
@@ -600,7 +606,7 @@ export function NodeCard({ node }: NodeCardProps) {
         // Intercept status.
         //
         */}
-        {node.intercept_supported && hasCapability('Interception') && (
+        {!isRemoteAgent && node.intercept_supported && hasCapability('Interception') && (
           <div className="px-3 py-1.5 flex items-center justify-between border-b border-subtle">
             <div className="flex items-center gap-1.5 text-[10px]">
               <Shield size={11} className={node.intercept_active ? 'text-[var(--accent-warning)]' : 'text-muted'} />
@@ -699,14 +705,16 @@ export function NodeCard({ node }: NodeCardProps) {
                           : <Play size={11} />}
                       </button>
                     )}
-                    <button
-                      onClick={() => setShowReconModal({ agentShortName: agent.short_name })}
-                      disabled={!hasCapability('Recon')}
-                      className="p-0.5 text-muted hover:text-[var(--accent-info)] hover:bg-[var(--accent-info)]/20 transition-colors disabled:opacity-50"
-                      title={hasCapability('Recon') ? 'Recon' : 'Node does not support recon'}
-                    >
-                      <Search size={11} />
-                    </button>
+                    {!isRemoteAgent && (
+                      <button
+                        onClick={() => setShowReconModal({ agentShortName: agent.short_name })}
+                        disabled={!hasCapability('Recon')}
+                        className="p-0.5 text-muted hover:text-[var(--accent-info)] hover:bg-[var(--accent-info)]/20 transition-colors disabled:opacity-50"
+                        title={hasCapability('Recon') ? 'Recon' : 'Node does not support recon'}
+                      >
+                        <Search size={11} />
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -798,9 +806,11 @@ export function NodeCard({ node }: NodeCardProps) {
 
         {/*
         //
-        // Quick actions bar.
+        // Quick actions bar — hidden for remote agent nodes (Codex etc.)
+        // which only support session-based interaction.
         //
         */}
+        {!isRemoteAgent && (
         <div className="px-3 py-2 border-t border-subtle flex flex-wrap gap-1.5">
           <button
             onClick={() => setShowRunOpModal(true)}
@@ -831,6 +841,7 @@ export function NodeCard({ node }: NodeCardProps) {
             <TerminalIcon size={10} /> Term
           </button>
         </div>
+        )}
         </>)}
 
       </div>
