@@ -691,12 +691,30 @@ async fn run_bridge(
                                 ))
                                 .block_task()
                                 .await;
-                            if result.is_ok() {
-                                let _ = event_tx.send(AppEvent::AcpNotification(
-                                    AcpNotification::PromptComplete {
-                                        request_id: String::new(),
-                                    },
-                                ));
+                            match &result {
+                                Ok(_) => {
+                                    let _ = event_tx.send(AppEvent::AcpNotification(
+                                        AcpNotification::PromptComplete {
+                                            request_id: String::new(),
+                                        },
+                                    ));
+                                }
+                                Err(e) => {
+                                    //
+                                    // Surface prompt errors (rate limit,
+                                    // transport failure, etc.) to the
+                                    // session view. Without this the
+                                    // turn just sits at "thinking..."
+                                    // forever because nothing else
+                                    // closes the streaming state.
+                                    //
+                                    let _ = event_tx.send(AppEvent::AcpNotification(
+                                        AcpNotification::Error {
+                                            request_id: None,
+                                            message: e.to_string(),
+                                        },
+                                    ));
+                                }
                             }
                             let _ = reply.send(result);
                         }
