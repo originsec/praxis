@@ -55,6 +55,15 @@ pub enum BrowserMessage {
     ResetNode {
         node_id: String,
     },
+    /// Add a remote agent node (e.g. Codex over WebSocket).
+    /// `kind` selects which RemoteNode bridge implementation to use.
+    /// Once added, remote nodes are removed via `RemoveNode` like any
+    /// other node — clients don't track that they're remote.
+    AddRemoteNode {
+        kind: String,
+        url: String,
+        token: Option<String>,
+    },
     /// Get service configuration
     ConfigGet {
         keys: Vec<String>,

@@ -11,6 +11,7 @@ mod chain_triggers;
 mod event_log;
 mod lua_agent_scripts;
 mod recon;
+mod remote_nodes;
 mod service_config;
 mod toolkit_actions;
 pub mod config;
@@ -39,6 +40,8 @@ pub use chain_executions::ChainExecutionRecord;
 #[allow(unused_imports)]
 pub use recon::StoredReconResult;
 pub use chain_payloads::PayloadRecord;
+#[allow(unused_imports)]
+pub use remote_nodes::RemoteNodeRecord;
 pub use toolkit_actions::ToolkitActionRecord;
 
 //
@@ -382,6 +385,55 @@ impl Database {
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL
                     )"
+                ).execute(pool).await;
+            }
+        }
+
+        //
+        // Migration: Create remote_nodes table for persisting remote
+        // agent node configurations. Each row drives one RemoteNode
+        // bridge instance keyed by `kind` (e.g. "codex").
+        //
+        match &self.pool {
+            DatabasePool::Sqlite(pool) => {
+                let _ = sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS remote_nodes (
+                        id TEXT PRIMARY KEY,
+                        node_type TEXT NOT NULL DEFAULT 'remote-codex',
+                        kind TEXT NOT NULL DEFAULT 'codex',
+                        url TEXT NOT NULL,
+                        token TEXT,
+                        created_at TEXT NOT NULL
+                    )"
+                ).execute(pool).await;
+                //
+                // Idempotent column adds/drops for installs that predate
+                // the current schema. SQLite doesn't support IF NOT
+                // EXISTS on columns — both errors are ignored.
+                //
+                let _ = sqlx::query(
+                    "ALTER TABLE remote_nodes ADD COLUMN kind TEXT NOT NULL DEFAULT 'codex'"
+                ).execute(pool).await;
+                let _ = sqlx::query(
+                    "ALTER TABLE remote_nodes DROP COLUMN label"
+                ).execute(pool).await;
+            }
+            DatabasePool::Postgres(pool) => {
+                let _ = sqlx::query(
+                    "CREATE TABLE IF NOT EXISTS remote_nodes (
+                        id TEXT PRIMARY KEY,
+                        node_type TEXT NOT NULL DEFAULT 'remote-codex',
+                        kind TEXT NOT NULL DEFAULT 'codex',
+                        url TEXT NOT NULL,
+                        token TEXT,
+                        created_at TEXT NOT NULL
+                    )"
+                ).execute(pool).await;
+                let _ = sqlx::query(
+                    "ALTER TABLE remote_nodes ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'codex'"
+                ).execute(pool).await;
+                let _ = sqlx::query(
+                    "ALTER TABLE remote_nodes DROP COLUMN IF EXISTS label"
                 ).execute(pool).await;
             }
         }

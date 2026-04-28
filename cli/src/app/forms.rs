@@ -1,3 +1,51 @@
+//
+// Form used by the Nodes window to add a new remote agent node (e.g.
+// a Codex app-server reachable over WebSocket). Submission publishes
+// `ClientSignalMessage::AddRemoteNode`. The node's display name is
+// derived from the upstream agent's reported identity once it
+// initializes; the user only enters the URL and an optional token.
+//
+
+#[derive(Default)]
+pub struct AddRemoteNodeForm {
+    //
+    // Index into the static remote-node kinds list. Codex is the only
+    // option today, but the field exists so future kinds plug in
+    // without UI changes.
+    //
+    pub kind_idx: usize,
+    pub url: String,
+    pub url_cursor: usize,
+    pub token: String,
+    pub token_cursor: usize,
+    pub focused_field: usize, // 0=kind, 1=url, 2=token
+    pub editing_text: bool,   // true while typing into URL/Token
+}
+
+impl AddRemoteNodeForm {
+    pub const FIELD_COUNT: usize = 3;
+    pub const KIND_FIELD: usize = 0;
+    pub const URL_FIELD: usize = 1;
+    pub const TOKEN_FIELD: usize = 2;
+
+    pub fn field_label(idx: usize) -> &'static str {
+        match idx {
+            0 => "Type",
+            1 => "URL",
+            2 => "Token (opt)",
+            _ => "",
+        }
+    }
+
+    pub fn active_pair_mut(&mut self) -> Option<(&mut String, &mut usize)> {
+        match self.focused_field {
+            Self::URL_FIELD => Some((&mut self.url, &mut self.url_cursor)),
+            Self::TOKEN_FIELD => Some((&mut self.token, &mut self.token_cursor)),
+            _ => None,
+        }
+    }
+}
+
 pub struct NewOpForm {
     pub name: String,
     pub short_name: String,

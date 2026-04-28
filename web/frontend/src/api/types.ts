@@ -716,6 +716,7 @@ export type BrowserMessage =
   | { type: 'semantic_op_list_request' }
   | { type: 'remove_node'; node_id: string }
   | { type: 'reset_node'; node_id: string }
+  | { type: 'add_remote_node'; kind: string; url: string; token: string | null }
   | { type: 'config_get'; keys: string[] }
   | { type: 'config_set'; values: Record<string, string> }
   | { type: 'op_def_add'; content: string }

@@ -93,6 +93,7 @@ pub enum ConfirmKind {
     DeleteAgentScript(String), // script_id
     ResetAgentScripts,
     ResetNode(String), // node_id
+    DeleteNode(String), // node_id — service handles whether it's local or remote
     CloseOrchestratorSession,
     ClearAllTraffic,
     DeleteInterceptRule(i64),
@@ -242,6 +243,27 @@ impl App {
                 let _ = self.client.reset_lua_agent_script_defaults().await;
                 self.settings.agent_scripts_loaded = false;
                 self.load_agent_scripts().await;
+            }
+            ConfirmKind::DeleteNode(node_id) => {
+                let _ = self.client.remove_node(&node_id).await;
+                let to_drop: Vec<String> = self
+                    .nodes
+                    .sessions
+                    .iter()
+                    .filter(|(_, s)| s.node_id == node_id)
+                    .map(|(k, _)| k.clone())
+                    .collect();
+                for local_id in to_drop {
+                    self.nodes.sessions.remove(&local_id);
+                }
+                if self
+                    .nodes
+                    .active_session_id
+                    .as_ref()
+                    .is_some_and(|id| !self.nodes.sessions.contains_key(id))
+                {
+                    self.nodes.active_session_id = None;
+                }
             }
             ConfirmKind::CloseOrchestratorSession => {
                 self.close_active_orchestrator_session().await;

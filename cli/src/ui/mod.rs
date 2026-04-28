@@ -69,6 +69,9 @@ pub fn render(f: &mut Frame, app: &App) {
     if let Some(ref p) = app.popup {
         popup::render(f, p);
     }
+    if let Some(ref form) = app.add_remote_node_form {
+        popup::render_add_remote_node_form(f, f.area(), form);
+    }
     if let Some(ref confirm) = app.confirm {
         popup::render_confirm(f, confirm);
     }

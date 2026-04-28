@@ -5,6 +5,7 @@ pub mod config;
 pub mod id;
 pub mod logging;
 pub mod mcp;
+pub mod remote_nodes;
 
 pub use messaging::*;
 pub use logging::{init as init_logging, send_event, is_initialized as is_logging_initialized};
@@ -28,6 +29,8 @@ pub use config::{FileConfig, find_config_file, load_from_paths};
 pub use id::short_id;
 
 pub use mcp::{McpClient, PraxisServer, run_stdio_server};
+
+pub use remote_nodes::{RemoteNodeKindInfo, REMOTE_NODE_KINDS};
 
 /// Truncate a string to at most `max_bytes` without panicking on multibyte
 /// character boundaries. Rounds down to the nearest char boundary.

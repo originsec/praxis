@@ -320,6 +320,15 @@ impl OrchestratorManager {
                     // Tool use loop.
                     //
 
+                    //
+                    // Tracks whether the turn loop bailed because a
+                    // final response (error / cancelled) was already
+                    // sent for this prompt id. Prevents the
+                    // unconditional `end_turn` after the loop from
+                    // double-responding.
+                    //
+                    let mut early_response_sent = false;
+
                     loop {
                         if stop_flag_clone.load(Ordering::SeqCst) ||
                            cancel_flag_clone.load(Ordering::SeqCst) {
@@ -424,6 +433,7 @@ impl OrchestratorManager {
                                             &err_msg,
                                         ));
                                     stream_error = true;
+                                    early_response_sent = true;
                                     break;
                                 }
                             }
@@ -543,15 +553,25 @@ impl OrchestratorManager {
 
                     //
                     // Prompt complete. Send JSON-RPC response with the
-                    // original request ID that was encoded in prompt_id.
+                    // original request ID that was encoded in prompt_id —
+                    // unless the turn loop bailed early because we already
+                    // emitted a final response (AI error sent its own
+                    // error response; cancellation sent cancelled via
+                    // cancel_prompt). Sending end_turn here would
+                    // double-respond on the same id.
                     //
 
-                    send_and_log!(acp_response(
-                        prompt_id_to_json_rpc_id(&prompt_id),
-                        serde_json::to_value(agent_client_protocol::schema::PromptResponse::new(
-                            agent_client_protocol::schema::StopReason::EndTurn,
-                        )).unwrap(),
-                    ));
+                    let already_responded = early_response_sent
+                        || cancel_flag_clone.load(Ordering::SeqCst)
+                        || stop_flag_clone.load(Ordering::SeqCst);
+                    if !already_responded {
+                        send_and_log!(acp_response(
+                            prompt_id_to_json_rpc_id(&prompt_id),
+                            serde_json::to_value(agent_client_protocol::schema::PromptResponse::new(
+                                agent_client_protocol::schema::StopReason::EndTurn,
+                            )).unwrap(),
+                        ));
+                    }
                 }
 
                 //

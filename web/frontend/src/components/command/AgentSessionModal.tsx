@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { FloatingPanel } from './FloatingPanel';
 import { nodeSessionKey, useApp, type AgentSessionMessage } from '../../context/AppContext';
+import { wsClient } from '../../api/websocket';
 import { exportAgentSession, downloadTextFile } from '../../utils/export';
 import { useTypewriter } from '../../utils/useTypewriter';
 import type { NodeState, PermissionDecision } from '../../api/types';
@@ -56,14 +57,49 @@ export function AgentSessionModal({ nodeId, agentShortName, node, onClose }: Age
   const [permissionSent, setPermissionSent] = useState<string | null>(null);
 
   //
-  // Permission responses are not yet wired through ACP on the node side. For
-  // now this just clears the local pending UI so the user can dismiss the
-  // prompt. TODO: send `session/request_permission` response over ACP once
-  // the node-side permission plumbing lands.
+  // When the prompt arrived via a real ACP `session/request_permission`
+  // request (e.g. codex bridge) the pendingPermission carries the
+  // request id and the option set the agent advertised. Pick the
+  // option_id whose kind matches the user's choice and send it back as
+  // an ACP response — the praxis service routes by id back to the
+  // originating bridge.
   //
-  const handlePermissionResponse = useCallback((_decision: PermissionDecision) => {
+  const handlePermissionResponse = useCallback((decision: PermissionDecision) => {
     if (!pendingPermission) return;
     setPermissionSent(pendingPermission.permissionId);
+
+    const acpRequestId = pendingPermission.acpRequestId;
+    const options = pendingPermission.options ?? [];
+    if (!acpRequestId || options.length === 0) {
+      //
+      // Legacy SessionUpdate-based permission flow — no real ACP
+      // request id to respond to. Just clear the UI.
+      //
+      return;
+    }
+
+    const targetKind =
+      decision === 'Allow' ? 'allow_once'
+      : decision === 'AllowAlways' ? 'allow_always'
+      : 'reject_once';
+    const fallbackKind =
+      decision === 'Allow' ? 'allow_always'
+      : decision === 'AllowAlways' ? 'allow_once'
+      : 'reject_always';
+    const chosen =
+      options.find(o => o.kind === targetKind) ??
+      options.find(o => o.kind === fallbackKind);
+
+    const result = chosen
+      ? { outcome: { outcome: 'selected', optionId: chosen.optionId } }
+      : { outcome: { outcome: 'cancelled' } };
+
+    const responseFrame = {
+      jsonrpc: '2.0',
+      id: acpRequestId,
+      result,
+    };
+    wsClient.send({ type: 'acp_message', json_rpc: JSON.stringify(responseFrame) });
   }, [pendingPermission]);
 
   const showPermission = pendingPermission && permissionSent !== pendingPermission.permissionId;

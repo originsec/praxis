@@ -142,6 +142,18 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
+    /// Register a remote agent node. `kind` selects which RemoteNode
+    /// bridge implementation runs (e.g. "codex").
+    pub async fn add_remote_node(
+        &self,
+        kind: String,
+        url: String,
+        token: Option<String>,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::AddRemoteNode { kind, url, token };
+        self.publish_signal(message).await
+    }
+
     /// Get service configuration
     pub async fn get_config(&self, keys: Vec<String>) -> Result<()> {
         let message = ClientSignalMessage::ServiceConfigGet {

@@ -4,6 +4,7 @@ mod acp_node_proxy;
 mod acp_server;
 mod banner;
 mod claude_bridge;
+mod remote_nodes;
 mod config;
 mod conversions;
 mod database;
@@ -292,7 +293,48 @@ async fn run_main_loop() -> Result<()> {
         service_config.clone(),
         acp_node_proxy.clone(),
     ));
+    let remote_node_manager = Arc::new(remote_nodes::RemoteNodeManager::new());
+    acp_node_proxy.set_remote_node_manager(remote_node_manager.clone());
     common::log_info!("Initialized Orchestrator manager, ACP server, and ACP node proxy");
+
+    //
+    // Restore persisted remote nodes from the database. Each one
+    // re-registers as a synthetic node and reconnects its bridge.
+    //
+    match database.list_remote_nodes().await {
+        Ok(records) => {
+            for r in records {
+                let kind = r.kind.clone();
+                let initial_update = remote_nodes::initial_update_for_kind(&kind, &r.id);
+                let machine_name = remote_nodes::codex::host_from_ws_url(&r.url);
+                node_registry
+                    .register_synthetic(
+                        r.id.clone(),
+                        r.node_type.clone(),
+                        machine_name,
+                        remote_nodes::os_label_for_kind(&kind).to_string(),
+                        remote_nodes::capabilities_for_kind(&kind),
+                        initial_update,
+                    )
+                    .await;
+                let ctx_for_bridge = remote_nodes::RemoteNodeContext {
+                    node_registry: node_registry.clone(),
+                    publish_channel: publish_channel.clone(),
+                    broadcast_channel: broadcast_channel.clone(),
+                    acp_proxy: acp_node_proxy.clone(),
+                };
+                if let Err(e) = remote_node_manager
+                    .start(&kind, r.id, r.url, r.token, ctx_for_bridge)
+                    .await
+                {
+                    common::log_warn!("Failed to start remote-node bridge: {}", e);
+                }
+            }
+        }
+        Err(e) => {
+            common::log_warn!("Failed to load persisted remote nodes: {}", e);
+        }
+    }
 
     //
     // Semantic operations use LLM config from service_config and drive the
@@ -660,6 +702,7 @@ async fn run_main_loop() -> Result<()> {
         ccrv2_manager,
         trigger_engine: Some(trigger_engine.clone()),
         intercept_broadcaster,
+        remote_node_manager,
         publish_channel,
         client_publish_channel,
         broadcast_channel,

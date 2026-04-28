@@ -83,6 +83,12 @@ pub fn render(
         hint_spans.push(Span::styled("^r", Style::default().fg(ACCENT)));
         hint_spans.push(Span::styled(" reset", Style::default().fg(MUTED)));
 
+        hint_spans.push(Span::styled("  ^d", Style::default().fg(ACCENT)));
+        hint_spans.push(Span::styled(" remove", Style::default().fg(MUTED)));
+
+        hint_spans.push(Span::styled("  ^n", Style::default().fg(ACCENT)));
+        hint_spans.push(Span::styled(" add remote", Style::default().fg(MUTED)));
+
         if has_terminal {
             hint_spans.push(Span::styled("  ^t", Style::default().fg(ACCENT)));
             hint_spans.push(Span::styled(" terminal", Style::default().fg(MUTED)));

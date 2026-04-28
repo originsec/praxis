@@ -34,6 +34,8 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             handle_remove_node(ctx, node_id).await,
         ClientSignalMessage::ResetNode { node_id } =>
             handle_reset_node(ctx, node_id).await,
+        ClientSignalMessage::AddRemoteNode { kind, url, token } =>
+            handle_add_remote_node(ctx, kind, url, token).await,
 
         //
         // Semantic operations.
@@ -400,6 +402,14 @@ async fn handle_remove_node(ctx: &ServiceContext, node_id: String) {
         common::short_id(&node_id)
     );
 
+    //
+    // If this is a remote-node bridge, stop the bridge task and delete
+    // its persisted record. stop is a no-op when there is no matching
+    // bridge, so we can call it unconditionally.
+    //
+    ctx.remote_node_manager.stop(&node_id).await;
+    let _ = ctx.database.delete_remote_node(&node_id).await;
+
     if ctx.node_registry.remove(&node_id).await.is_some() {
         //
         // Broadcast updated state to all clients.
@@ -416,6 +426,72 @@ async fn handle_remove_node(ctx: &ServiceContext, node_id: String) {
         common::log_warn!("Attempted to remove unknown node: {}", node_id);
     }
 }
+
+async fn handle_add_remote_node(
+    ctx: &ServiceContext,
+    kind: String,
+    url: String,
+    token: Option<String>,
+) {
+    common::log_info!(
+        "Received AddRemoteNode request: kind='{}' url='{}'",
+        kind, url
+    );
+
+    if !crate::remote_nodes::is_known_kind(&kind) {
+        common::log_warn!("Rejecting AddRemoteNode for unknown kind '{}'", kind);
+        return;
+    }
+
+    let record = match ctx
+        .database
+        .insert_remote_node(&kind, &url, token.as_deref())
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            common::log_error!("Failed to persist remote node: {}", e);
+            return;
+        }
+    };
+
+    let initial_update = crate::remote_nodes::initial_update_for_kind(&kind, &record.id);
+    let machine_name = crate::remote_nodes::codex::host_from_ws_url(&record.url);
+    ctx.node_registry
+        .register_synthetic(
+            record.id.clone(),
+            record.node_type.clone(),
+            machine_name,
+            crate::remote_nodes::os_label_for_kind(&kind).to_string(),
+            crate::remote_nodes::capabilities_for_kind(&kind),
+            initial_update,
+        )
+        .await;
+
+    let bridge_ctx = crate::remote_nodes::RemoteNodeContext {
+        node_registry: ctx.node_registry.clone(),
+        publish_channel: ctx.publish_channel.clone(),
+        broadcast_channel: ctx.broadcast_channel.clone(),
+        acp_proxy: ctx.acp_node_proxy.clone(),
+    };
+    if let Err(e) = ctx
+        .remote_node_manager
+        .start(&kind, record.id, record.url, record.token, bridge_ctx)
+        .await
+    {
+        common::log_error!("Failed to start remote-node bridge: {}", e);
+    }
+
+    if let Err(e) = broadcast_state_to_clients(
+        &ctx.broadcast_channel,
+        &ctx.node_registry,
+    )
+    .await
+    {
+        common::log_error!("Failed to broadcast state after remote node add: {}", e);
+    }
+}
+
 
 async fn handle_reset_node(ctx: &ServiceContext, node_id: String) {
     common::log_info!(

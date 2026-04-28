@@ -1,5 +1,5 @@
 use crate::app::{
-    Popup, PopupKind, ScheduleKind, TriggerForm, TriggerFormSection, TriggerKind,
+    AddRemoteNodeForm, Popup, PopupKind, ScheduleKind, TriggerForm, TriggerFormSection, TriggerKind,
 };
 use crate::ui::common::centered_rect_fixed;
 use crate::ui::theme::{ACCENT, DIM, MUTED, POPUP_BG, POPUP_HIGHLIGHT_BG, STATUS_RUNNING, TEXT};
@@ -293,6 +293,133 @@ pub fn render_new_op_form(f: &mut Frame, area: Rect, form: &crate::app::NewOpFor
     }
     let hints = Line::from(hint_spans);
     f.render_widget(Paragraph::new(hints), chunks[2]);
+}
+
+//
+// Compact "Add Remote Node" form. Style mirrors the Add Model form
+// (settings) — fixed-label column, inline cursor while editing,
+// arrow-key picker on the kind row, popup sized to its contents.
+//
+
+pub fn render_add_remote_node_form(f: &mut Frame, area: Rect, form: &AddRemoteNodeForm) {
+    let kinds = common::REMOTE_NODE_KINDS;
+    let kind_name = kinds
+        .get(form.kind_idx)
+        .map(|k| k.display_name)
+        .unwrap_or("?");
+
+    //
+    // Fields (3) + blank line + hint = 5 inner rows. Add 2 for
+    // borders.
+    //
+    let height = (AddRemoteNodeForm::FIELD_COUNT as u16) + 4;
+    let width = 56u16.min(area.width.saturating_sub(4));
+    let popup_area = centered_rect_fixed(width, height, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(ACCENT))
+        .title(Span::styled(
+            " Add Remote Node ",
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ))
+        .style(Style::default().bg(POPUP_BG));
+
+    f.render_widget(Clear, popup_area);
+    f.render_widget(block.clone(), popup_area);
+    let inner = block.inner(popup_area);
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    let edit_style = Style::default().fg(TEXT);
+    let cursor_style = Style::default().fg(ACCENT);
+
+    //
+    // Kind row: arrow picker.
+    //
+    let kind_sel = form.focused_field == AddRemoteNodeForm::KIND_FIELD;
+    let prefix = if kind_sel { "\u{25b8} " } else { "  " };
+    let label_style = Style::default().fg(if kind_sel { ACCENT } else { TEXT });
+    let value_style = if kind_sel {
+        edit_style
+    } else {
+        Style::default().fg(MUTED)
+    };
+    lines.push(Line::from(vec![
+        Span::styled(prefix, label_style),
+        Span::styled(format!("{:<14}", AddRemoteNodeForm::field_label(0)), label_style),
+        Span::styled(format!("\u{25c2} {} \u{25b8}", kind_name), value_style),
+    ]));
+
+    //
+    // Helper to render a text field with inline cursor.
+    //
+    let build_field = |idx: usize, text: &str, cursor_pos: usize| -> Line {
+        let selected = form.focused_field == idx;
+        let editing = selected && form.editing_text;
+        let prefix = if selected { "\u{25b8} " } else { "  " };
+        let label_color = if selected { ACCENT } else { TEXT };
+        let label = format!("{:<14}", AddRemoteNodeForm::field_label(idx));
+
+        if editing {
+            //
+            // Show the cursor inline at cursor_pos.
+            //
+            let cursor_byte = text
+                .char_indices()
+                .nth(cursor_pos)
+                .map(|(i, _)| i)
+                .unwrap_or(text.len());
+            let (before, after) = text.split_at(cursor_byte.min(text.len()));
+            Line::from(vec![
+                Span::styled(prefix, Style::default().fg(label_color)),
+                Span::styled(label, Style::default().fg(label_color)),
+                Span::styled(before.to_string(), edit_style),
+                Span::styled("\u{258f}", cursor_style),
+                Span::styled(after.to_string(), edit_style),
+            ])
+        } else {
+            let display = if text.is_empty() && idx == AddRemoteNodeForm::URL_FIELD {
+                "ws://host:port".to_string()
+            } else if text.is_empty() && idx == AddRemoteNodeForm::TOKEN_FIELD {
+                "(none)".to_string()
+            } else if idx == AddRemoteNodeForm::TOKEN_FIELD {
+                "\u{2022}".repeat(text.chars().count())
+            } else {
+                text.to_string()
+            };
+            Line::from(vec![
+                Span::styled(prefix, Style::default().fg(label_color)),
+                Span::styled(label, Style::default().fg(label_color)),
+                Span::styled(display, Style::default().fg(MUTED)),
+            ])
+        }
+    };
+
+    lines.push(build_field(
+        AddRemoteNodeForm::URL_FIELD,
+        &form.url,
+        form.url_cursor,
+    ));
+    lines.push(build_field(
+        AddRemoteNodeForm::TOKEN_FIELD,
+        &form.token,
+        form.token_cursor,
+    ));
+
+    lines.push(Line::raw(""));
+
+    let hints = Line::from(vec![
+        Span::styled("  ^s", Style::default().fg(DIM)),
+        Span::styled(" save  ", Style::default().fg(MUTED)),
+        Span::styled("\u{2190}\u{2192}", Style::default().fg(DIM)),
+        Span::styled(" pick type  ", Style::default().fg(MUTED)),
+        Span::styled("esc", Style::default().fg(DIM)),
+        Span::styled(" cancel", Style::default().fg(MUTED)),
+    ]);
+    lines.push(hints);
+
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 //

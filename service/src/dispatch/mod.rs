@@ -13,6 +13,7 @@ use lapin::Channel;
 
 use crate::agent_chat::AgentChatManager;
 use traffic_broadcast::InterceptBroadcaster;
+use crate::remote_nodes::RemoteNodeManager;
 use crate::config::ServiceConfig;
 use crate::database::Database;
 use crate::handlers::{ClientMessageHandler, NodeMessageHandler};
@@ -47,6 +48,7 @@ pub struct ServiceContext {
     pub ccrv2_manager: Arc<CcrV2Manager>,
     pub trigger_engine: Option<Arc<TriggerEngine>>,
     pub intercept_broadcaster: Arc<InterceptBroadcaster>,
+    pub remote_node_manager: Arc<RemoteNodeManager>,
 
     //
     // Channels for publishing messages.

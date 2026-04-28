@@ -252,7 +252,20 @@ interface AppState {
     content: string;
     transactionId: string;
     toolCalls: Array<{ toolName: string; toolId: string; input: string; output?: string; isError?: boolean }>;
-    pendingPermission: { permissionId: string; toolName: string; toolInput: string } | null;
+    pendingPermission: {
+      permissionId: string;
+      toolName: string;
+      toolInput: string;
+      //
+      // Set when the prompt arrived via a real ACP
+      // `session/request_permission` request (e.g. codex bridge).
+      // Carries the request id and the options the agent advertised so
+      // the click handler can send a properly-shaped response.
+      //
+      acpRequestId?: string;
+      sessionId?: string;
+      options?: { optionId: string; kind: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always' }[];
+    } | null;
     agentStatus: string | null;
     hadToolCall: boolean;
   }>;
@@ -367,6 +380,18 @@ type Action =
   | { type: 'AGENT_SESSION_STREAMING_COMPLETE'; nodeId: string; transactionId: string }
   | { type: 'AGENT_SESSION_STREAMING_CLEAR'; nodeId: string }
   | { type: 'AGENT_SESSION_STREAMING_CHUNK'; nodeId: string; text: string }
+  | {
+      type: 'AGENT_SESSION_STREAMING_PERMISSION';
+      nodeId: string;
+      permission: {
+        permissionId: string;
+        toolName: string;
+        toolInput: string;
+        acpRequestId?: string;
+        sessionId?: string;
+        options?: { optionId: string; kind: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always' }[];
+      };
+    }
   | { type: 'NODE_SESSION_SET'; nodeId: string; sessionId: string; agentShortName: string }
   | { type: 'NODE_SESSION_CLEAR'; nodeId: string; agentShortName: string }
   //
@@ -940,6 +965,24 @@ function reduceAgentSessions(state: AppState, action: Action): AppState | null {
       const { [action.nodeId]: _, ...rest } = state.agentSessionStreaming;
       return { ...state, agentSessionStreaming: rest };
     }
+    case 'AGENT_SESSION_STREAMING_PERMISSION': {
+      const key = action.nodeId;
+      const existing = state.agentSessionStreaming[key] || {
+        content: '',
+        transactionId: '',
+        toolCalls: [],
+        pendingPermission: null,
+        agentStatus: null,
+        hadToolCall: false,
+      };
+      return {
+        ...state,
+        agentSessionStreaming: {
+          ...state.agentSessionStreaming,
+          [key]: { ...existing, pendingPermission: action.permission },
+        },
+      };
+    }
     case 'AGENT_SESSION_STREAMING_CHUNK': {
       const key = action.nodeId;
       const existing = state.agentSessionStreaming[key] || {
@@ -1375,6 +1418,7 @@ interface AppContextValue {
   //
   removeNode: (nodeId: string) => void;
   resetNode: (nodeId: string) => void;
+  addRemoteNode: (kind: string, url: string, token: string | null) => void;
   //
   // Config.
   //
@@ -1569,6 +1613,53 @@ export function AppProvider({ children }: { children: ReactNode }) {
         case 'acp_message': {
           try {
             const rpc = JSON.parse(message.json_rpc) as AcpJsonRpc;
+
+            //
+            // Agent-initiated `session/request_permission`. Surface it
+            // as pendingPermission on the matching agent session; the
+            // session UI sends back the user's choice as an ACP
+            // response on this same id.
+            //
+            if (rpc.method === 'session/request_permission' && rpc.params && rpc.id !== undefined) {
+              const params = rpc.params as Record<string, unknown>;
+              const sessionId = params.sessionId as string;
+              const toolCall = params.toolCall as Record<string, unknown> | undefined;
+              const options = (params.options as Array<{
+                optionId: string;
+                kind: 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always';
+              }> | undefined) ?? [];
+              if (sessionId && toolCall) {
+                //
+                // Find the node hosting this session so the streaming
+                // slot keys correctly. Falls back to broadcasting on
+                // every active node-session if the lookup misses.
+                //
+                const nodeSession = Object.values(state.nodeSessions).find(s => s.sessionId === sessionId);
+                const nodeId = nodeSession?.nodeId;
+                if (nodeId) {
+                  const title = (toolCall.title as string | undefined) ?? 'Permission request';
+                  const rawInput = toolCall.rawInput;
+                  const toolInput = typeof rawInput === 'string'
+                    ? rawInput
+                    : rawInput
+                      ? JSON.stringify(rawInput)
+                      : '';
+                  dispatch({
+                    type: 'AGENT_SESSION_STREAMING_PERMISSION',
+                    nodeId,
+                    permission: {
+                      permissionId: String(rpc.id),
+                      toolName: title,
+                      toolInput,
+                      acpRequestId: String(rpc.id),
+                      sessionId,
+                      options,
+                    },
+                  });
+                }
+              }
+              break;
+            }
 
             if (rpc.method === 'session/update' && rpc.params) {
               //
@@ -2159,6 +2250,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     wsClient.send({ type: 'reset_node', node_id: nodeId });
   }, []);
 
+  const addRemoteNode = useCallback((kind: string, url: string, token: string | null) => {
+    wsClient.send({ type: 'add_remote_node', kind, url, token });
+  }, []);
+
   //
   // Config.
   //
@@ -2660,6 +2755,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     clearEventLog,
     removeNode,
     resetNode,
+    addRemoteNode,
     getConfig,
     setConfig,
     clearOpDefStatus,
@@ -2751,6 +2847,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     clearEventLog,
     removeNode,
     resetNode,
+    addRemoteNode,
     getConfig,
     setConfig,
     clearOpDefStatus,
