@@ -22,6 +22,7 @@ use lapin::Channel;
 use serde_json::{json, Value};
 use tokio::sync::{oneshot, RwLock};
 
+use crate::codex_bridge::CodexBridgeManager;
 use crate::messaging::{send_to_client, send_to_node};
 
 //
@@ -53,6 +54,7 @@ pub struct AcpNodeProxy {
     // Keyed by client_id (each request uses a unique one).
     //
     text_buffers: RwLock<HashMap<String, String>>,
+    codex_bridge: RwLock<Option<Arc<CodexBridgeManager>>>,
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
@@ -64,6 +66,10 @@ struct PendingKey {
 impl AcpNodeProxy {
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
+    }
+
+    pub async fn set_codex_bridge(&self, bridge: Arc<CodexBridgeManager>) {
+        *self.codex_bridge.write().await = Some(bridge);
     }
 
     pub async fn register_session(&self, session_id: String, node_id: String) {
@@ -307,6 +313,16 @@ impl AcpNodeProxy {
         let Some(node_id) = node_id else {
             return Ok(false);
         };
+
+        //
+        // Route remote-codex nodes to the bridge, not RabbitMQ.
+        //
+        if let Some(bridge) = self.codex_bridge.read().await.as_ref() {
+            if bridge.is_remote_node(&node_id).await {
+                bridge.forward_acp(&node_id, client_id, raw_json_rpc).await;
+                return Ok(true);
+            }
+        }
 
         common::log_debug!(
             "AcpNodeProxy: forwarding {} from {} to node {}",

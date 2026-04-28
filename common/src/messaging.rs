@@ -1561,6 +1561,14 @@ pub enum ClientSignalMessage {
     ResetNode {
         node_id: String,
     },
+    AddRemoteNode {
+        label: String,
+        url: String,
+        token: Option<String>,
+    },
+    RemoveRemoteNode {
+        node_id: String,
+    },
 
     //
     // Semantic operations.

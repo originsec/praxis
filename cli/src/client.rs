@@ -1618,4 +1618,12 @@ impl Client {
             }
         }
     }
+
+    pub async fn add_remote_node(&self, label: String, url: String, token: Option<String>) -> Result<()> {
+        self.publish_signal(ClientSignalMessage::AddRemoteNode { label, url, token }).await
+    }
+
+    pub async fn remove_remote_node(&self, node_id: &str) -> Result<()> {
+        self.publish_signal(ClientSignalMessage::RemoveRemoteNode { node_id: node_id.to_string() }).await
+    }
 }

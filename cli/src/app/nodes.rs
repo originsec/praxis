@@ -79,6 +79,11 @@ impl App {
             return;
         }
 
+        if self.add_remote_node_form.is_some() {
+            self.handle_add_remote_node_form_key(key).await;
+            return;
+        }
+
         if self.nodes.session_options.is_some() {
             self.handle_session_options_key(key).await;
             return;
@@ -156,6 +161,9 @@ impl App {
             KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.confirm_reset_node();
             }
+            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.add_remote_node_form = Some(AddRemoteNodeForm::default());
+            }
             KeyCode::Char('i') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 //
                 // `i` while focused in the Nodes window (not in detail
@@ -172,6 +180,16 @@ impl App {
                             .contains(&common::NodeCapability::Terminal)
                     {
                         self.open_terminal();
+                    }
+                }
+            }
+            KeyCode::Delete | KeyCode::Backspace => {
+                if let Some(node) = self.nodes.nodes.get(self.nodes.selected) {
+                    if node.node_type == "remote-codex" {
+                        self.confirm = Some(ConfirmAction {
+                            message: format!("Delete remote node '{}'?", node.machine_name),
+                            action: ConfirmKind::DeleteRemoteNode(node.node_id.clone()),
+                        });
                     }
                 }
             }
@@ -1244,5 +1262,69 @@ impl App {
             return None;
         }
         Some((row - rows_start) as usize)
+    }
+
+    pub(crate) async fn handle_add_remote_node_form_key(&mut self, key: KeyEvent) {
+        use crossterm::event::KeyModifiers;
+        let Some(ref mut form) = self.add_remote_node_form else { return };
+
+        match key.code {
+            KeyCode::Esc => {
+                self.add_remote_node_form = None;
+            }
+            KeyCode::Up => {
+                if form.focused_field > 0 {
+                    form.focused_field -= 1;
+                }
+            }
+            KeyCode::Down | KeyCode::Tab => {
+                if form.focused_field + 1 < AddRemoteNodeForm::FIELD_COUNT {
+                    form.focused_field += 1;
+                }
+            }
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.submit_add_remote_node_form().await;
+            }
+            KeyCode::Char(c) => {
+                let (s, cursor) = form.active_str_mut();
+                crate::app::input::insert_char(s, cursor, c);
+            }
+            KeyCode::Backspace => {
+                let (s, cursor) = form.active_str_mut();
+                crate::app::input::backspace(s, cursor);
+            }
+            KeyCode::Left => {
+                let (_, cursor_mut) = form.active_str_mut();
+                if *cursor_mut > 0 {
+                    *cursor_mut -= 1;
+                }
+            }
+            KeyCode::Right => {
+                let (s, cursor_mut) = form.active_str_mut();
+                if *cursor_mut < s.len() {
+                    *cursor_mut += 1;
+                }
+            }
+            KeyCode::Enter => {
+                if form.focused_field + 1 < AddRemoteNodeForm::FIELD_COUNT {
+                    form.focused_field += 1;
+                } else {
+                    self.submit_add_remote_node_form().await;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) async fn submit_add_remote_node_form(&mut self) {
+        let Some(form) = self.add_remote_node_form.take() else { return };
+        let label = form.label.trim().to_string();
+        let url = form.url.trim().to_string();
+        let token = form.token.trim().to_string();
+        if label.is_empty() || url.is_empty() {
+            return;
+        }
+        let token_opt = if token.is_empty() { None } else { Some(token) };
+        let _ = self.client.add_remote_node(label, url, token_opt).await;
     }
 }

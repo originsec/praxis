@@ -4,6 +4,7 @@ mod acp_node_proxy;
 mod acp_server;
 mod banner;
 mod claude_bridge;
+mod codex_bridge;
 mod config;
 mod conversions;
 mod database;
@@ -293,6 +294,55 @@ async fn run_main_loop() -> Result<()> {
         acp_node_proxy.clone(),
     ));
     common::log_info!("Initialized Orchestrator manager, ACP server, and ACP node proxy");
+
+    //
+    // Initialize Codex bridge manager and wire it into the ACP proxy.
+    //
+    let codex_bridge_manager = codex_bridge::CodexBridgeManager::new();
+    acp_node_proxy.set_codex_bridge(codex_bridge_manager.clone()).await;
+    common::log_info!("Initialized Codex bridge manager");
+
+    //
+    // Restore persisted remote nodes from the database.
+    //
+    if let Ok(records) = database.list_remote_nodes().await {
+        for r in records {
+            let initial_update = common::NodeInformationUpdate {
+                node_id: r.id.clone(),
+                timestamp: chrono::Utc::now(),
+                discovered_agents: vec![common::DiscoveredAgent {
+                    name: "Codex".into(),
+                    short_name: "codex".into(),
+                    available: true,
+                    version: None,
+                }],
+                selected_agent: None,
+                intercept_supported: false,
+                intercept_enabled: false,
+                intercept_method: None,
+                active_terminal_id: None,
+                privileged: false,
+            };
+            node_registry.register_synthetic(
+                r.id.clone(),
+                "remote-codex".to_string(),
+                r.label.clone(),
+                "Codex Remote Agent".to_string(),
+                vec![common::NodeCapability::Session],
+                initial_update,
+            ).await;
+            codex_bridge_manager.start_bridge(
+                r.id,
+                r.url,
+                r.token,
+                node_registry.clone(),
+                publish_channel.clone(),
+                broadcast_channel.clone(),
+                acp_node_proxy.clone(),
+            ).await;
+        }
+        common::log_info!("Restored {} remote Codex node(s) from database", database.list_remote_nodes().await.map(|v| v.len()).unwrap_or(0));
+    }
 
     //
     // Semantic operations use LLM config from service_config and drive the
@@ -660,6 +710,7 @@ async fn run_main_loop() -> Result<()> {
         ccrv2_manager,
         trigger_engine: Some(trigger_engine.clone()),
         intercept_broadcaster,
+        codex_bridge_manager,
         publish_channel,
         client_publish_channel,
         broadcast_channel,

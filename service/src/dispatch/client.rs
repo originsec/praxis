@@ -34,6 +34,10 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             handle_remove_node(ctx, node_id).await,
         ClientSignalMessage::ResetNode { node_id } =>
             handle_reset_node(ctx, node_id).await,
+        ClientSignalMessage::AddRemoteNode { label, url, token } =>
+            handle_add_remote_node(ctx, label, url, token).await,
+        ClientSignalMessage::RemoveRemoteNode { node_id } =>
+            handle_remove_remote_node(ctx, node_id).await,
 
         //
         // Semantic operations.
@@ -400,7 +404,14 @@ async fn handle_remove_node(ctx: &ServiceContext, node_id: String) {
         common::short_id(&node_id)
     );
 
+    ctx.codex_bridge_manager.stop_bridge(&node_id).await;
+
     if ctx.node_registry.remove(&node_id).await.is_some() {
+        //
+        // Also delete from remote_nodes table if this was a synthetic node.
+        //
+        let _ = ctx.database.delete_remote_node(&node_id).await;
+
         //
         // Broadcast updated state to all clients.
         //
@@ -414,6 +425,83 @@ async fn handle_remove_node(ctx: &ServiceContext, node_id: String) {
         }
     } else {
         common::log_warn!("Attempted to remove unknown node: {}", node_id);
+    }
+}
+
+async fn handle_add_remote_node(
+    ctx: &ServiceContext,
+    label: String,
+    url: String,
+    token: Option<String>,
+) {
+    common::log_info!("Received AddRemoteNode: {} -> {}", label, url);
+
+    let record = match ctx.database.insert_remote_node(&label, &url, token.as_deref()).await {
+        Ok(r) => r,
+        Err(e) => {
+            common::log_error!("Failed to insert remote node: {}", e);
+            return;
+        }
+    };
+
+    let initial_update = common::NodeInformationUpdate {
+        node_id: record.id.clone(),
+        timestamp: chrono::Utc::now(),
+        discovered_agents: vec![common::DiscoveredAgent {
+            name: "Codex".into(),
+            short_name: "codex".into(),
+            available: true,
+            version: None,
+        }],
+        selected_agent: None,
+        intercept_supported: false,
+        intercept_enabled: false,
+        intercept_method: None,
+        active_terminal_id: None,
+        privileged: false,
+    };
+
+    ctx.node_registry.register_synthetic(
+        record.id.clone(),
+        "remote-codex".to_string(),
+        label,
+        "Codex Remote Agent".to_string(),
+        vec![NodeCapability::Session],
+        initial_update,
+    )
+    .await;
+
+    ctx.codex_bridge_manager.start_bridge(
+        record.id,
+        url,
+        token,
+        ctx.node_registry.clone(),
+        ctx.publish_channel.clone(),
+        ctx.broadcast_channel.clone(),
+        ctx.acp_node_proxy.clone(),
+    )
+    .await;
+
+    if let Err(e) = broadcast_state_to_clients(&ctx.broadcast_channel, &ctx.node_registry).await {
+        common::log_error!("Failed to broadcast state after adding remote node: {}", e);
+    }
+}
+
+async fn handle_remove_remote_node(ctx: &ServiceContext, node_id: String) {
+    common::log_info!(
+        "Received RemoveRemoteNode request for node {}",
+        common::short_id(&node_id)
+    );
+
+    ctx.codex_bridge_manager.stop_bridge(&node_id).await;
+    ctx.node_registry.remove(&node_id).await;
+
+    if let Err(e) = ctx.database.delete_remote_node(&node_id).await {
+        common::log_error!("Failed to delete remote node from database: {}", e);
+    }
+
+    if let Err(e) = broadcast_state_to_clients(&ctx.broadcast_channel, &ctx.node_registry).await {
+        common::log_error!("Failed to broadcast state after remote node removal: {}", e);
     }
 }
 

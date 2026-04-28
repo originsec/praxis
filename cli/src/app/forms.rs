@@ -11,6 +11,52 @@ pub struct NewOpForm {
     pub focused_field: usize, // 0-8
 }
 
+pub struct AddRemoteNodeForm {
+    pub label: String,
+    pub label_cursor: usize,
+    pub url: String,
+    pub url_cursor: usize,
+    pub token: String,
+    pub token_cursor: usize,
+    pub focused_field: usize, // 0=label, 1=url, 2=token
+}
+
+impl Default for AddRemoteNodeForm {
+    fn default() -> Self {
+        Self {
+            label: String::new(),
+            label_cursor: 0,
+            url: String::new(),
+            url_cursor: 0,
+            token: String::new(),
+            token_cursor: 0,
+            focused_field: 0,
+        }
+    }
+}
+
+impl AddRemoteNodeForm {
+    pub const FIELD_COUNT: usize = 3;
+
+    pub fn field_label(idx: usize) -> &'static str {
+        match idx {
+            0 => "Label",
+            1 => "URL",
+            2 => "Token (optional)",
+            _ => "",
+        }
+    }
+
+    pub fn active_str_mut(&mut self) -> (&mut String, &mut usize) {
+        match self.focused_field {
+            0 => (&mut self.label, &mut self.label_cursor),
+            1 => (&mut self.url, &mut self.url_cursor),
+            2 => (&mut self.token, &mut self.token_cursor),
+            _ => (&mut self.label, &mut self.label_cursor),
+        }
+    }
+}
+
 impl NewOpForm {
     pub fn field_count() -> usize {
         9

@@ -71,6 +71,50 @@ impl NodeRegistry {
         node
     }
 
+    /// Register a synthetic node (no RabbitMQ queue).
+    pub async fn register_synthetic(
+        &self,
+        id: String,
+        node_type: String,
+        machine_name: String,
+        os_details: String,
+        capabilities: Vec<NodeCapability>,
+        initial_update: NodeInformationUpdate,
+    ) -> RegisteredNode {
+        let now = Utc::now();
+        let node = RegisteredNode {
+            id: id.clone(),
+            node_type: node_type.clone(),
+            capabilities: capabilities.clone(),
+            machine_name: machine_name.clone(),
+            os_details: os_details.clone(),
+            queue_name: String::new(),
+            registered_at: now,
+            last_update: Some(initial_update.clone()),
+            last_update_received: now,
+            intercept_active: false,
+            intercept_supported: false,
+            privileged: false,
+        };
+
+        let mut agents = self.agents.write().await;
+        agents.insert(id.clone(), node.clone());
+        common::log_info!(
+            "Registered synthetic node: {} ({})",
+            id, node_type
+        );
+
+        node
+    }
+
+    /// Touch last_update_received; keeps synthetic node Online.
+    pub async fn touch_timestamp(&self, node_id: &str) {
+        let mut agents = self.agents.write().await;
+        if let Some(n) = agents.get_mut(node_id) {
+            n.last_update_received = Utc::now();
+        }
+    }
+
     pub async fn update_node_info(&self, update: &NodeInformationUpdate) {
         let mut agents = self.agents.write().await;
         if let Some(node) = agents.get_mut(&update.node_id) {

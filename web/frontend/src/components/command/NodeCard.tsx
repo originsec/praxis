@@ -234,6 +234,8 @@ export function NodeCard({ node }: NodeCardProps) {
     [node.capabilities],
   );
 
+  const isRemoteCodex = node.node_type === 'remote-codex';
+
   const [agentsExpanded, setAgentsExpanded] = useState(node.discovered_agents.length <= 3);
   const [collapsed, setCollapsed] = useState(false);
   const [creatingSessionFor, setCreatingSessionFor] = useState<string | null>(null);
@@ -796,6 +798,8 @@ export function NodeCard({ node }: NodeCardProps) {
           </div>
         )}
 
+        {!isRemoteCodex && (
+        <>
         {/*
         //
         // Quick actions bar.
@@ -831,6 +835,8 @@ export function NodeCard({ node }: NodeCardProps) {
             <TerminalIcon size={10} /> Term
           </button>
         </div>
+        </>
+        )}
         </>)}
 
       </div>

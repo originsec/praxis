@@ -17,6 +17,7 @@ use crate::config::ServiceConfig;
 use crate::database::Database;
 use crate::handlers::{ClientMessageHandler, NodeMessageHandler};
 use crate::claude_bridge::{CcrV1Manager, CcrV2Manager};
+use crate::codex_bridge::CodexBridgeManager;
 use crate::mcp::McpServerManager;
 use crate::acp_node_proxy::AcpNodeProxy;
 use crate::acp_server::AcpServer;
@@ -47,6 +48,7 @@ pub struct ServiceContext {
     pub ccrv2_manager: Arc<CcrV2Manager>,
     pub trigger_engine: Option<Arc<TriggerEngine>>,
     pub intercept_broadcaster: Arc<InterceptBroadcaster>,
+    pub codex_bridge_manager: Arc<CodexBridgeManager>,
 
     //
     // Channels for publishing messages.

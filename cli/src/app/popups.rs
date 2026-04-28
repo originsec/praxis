@@ -93,6 +93,7 @@ pub enum ConfirmKind {
     DeleteAgentScript(String), // script_id
     ResetAgentScripts,
     ResetNode(String), // node_id
+    DeleteRemoteNode(String), // node_id
     CloseOrchestratorSession,
     ClearAllTraffic,
     DeleteInterceptRule(i64),
@@ -272,6 +273,9 @@ impl App {
                     self.operations.trigger_selected = total - 1;
                 }
                 self.refresh_triggers_after(Duration::from_millis(200));
+            }
+            ConfirmKind::DeleteRemoteNode(node_id) => {
+                let _ = self.client.remove_remote_node(&node_id).await;
             }
             ConfirmKind::Info => {}
         }

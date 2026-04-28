@@ -55,6 +55,14 @@ pub enum BrowserMessage {
     ResetNode {
         node_id: String,
     },
+    AddRemoteNode {
+        label: String,
+        url: String,
+        token: Option<String>,
+    },
+    RemoveRemoteNode {
+        node_id: String,
+    },
     /// Get service configuration
     ConfigGet {
         keys: Vec<String>,

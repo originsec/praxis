@@ -88,6 +88,9 @@ pub fn render(
             hint_spans.push(Span::styled(" terminal", Style::default().fg(MUTED)));
         }
 
+        hint_spans.push(Span::styled("  ^n", Style::default().fg(ACCENT)));
+        hint_spans.push(Span::styled(" add remote", Style::default().fg(MUTED)));
+
         let session_count = state.sessions.len();
         hint_spans.push(Span::styled("  ^w", Style::default().fg(ACCENT)));
         hint_spans.push(Span::styled(

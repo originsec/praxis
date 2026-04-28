@@ -1040,3 +1040,75 @@ fn toggle_line(label: &str, value: bool, focused: bool) -> Line<'static> {
         indicator,
     ])
 }
+
+pub fn render_add_remote_node_form(f: &mut Frame, area: Rect, form: &crate::app::AddRemoteNodeForm) {
+    use crate::app::AddRemoteNodeForm;
+    use ratatui::layout::Constraint;
+    use ratatui::layout::Layout;
+
+    let popup_area = centered_rect_fixed(60, 14, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(ACCENT))
+        .title(Span::styled(
+            " Add Remote Codex Node ",
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+        ))
+        .style(Style::default().bg(POPUP_BG));
+
+    f.render_widget(Clear, popup_area);
+    f.render_widget(block.clone(), popup_area);
+    let inner = block.inner(popup_area);
+
+    let chunks = Layout::vertical([
+        Constraint::Length(1), // blank
+        Constraint::Length(1), // label field
+        Constraint::Length(1), // spacer
+        Constraint::Length(1), // url field
+        Constraint::Length(1), // spacer
+        Constraint::Length(1), // token field
+        Constraint::Length(1), // spacer
+        Constraint::Length(1), // hints
+    ])
+    .split(inner);
+
+    for i in 0..AddRemoteNodeForm::FIELD_COUNT {
+        let is_focused = i == form.focused_field;
+        let label = AddRemoteNodeForm::field_label(i);
+        let value = match i {
+            0 => &form.label,
+            1 => &form.url,
+            2 => &form.token,
+            _ => "",
+        };
+        let cursor = if is_focused { "\u{258f}" } else { "" };
+        let label_style = if is_focused {
+            Style::default().fg(ACCENT)
+        } else {
+            Style::default().fg(MUTED)
+        };
+        let value_style = if is_focused {
+            Style::default().fg(TEXT)
+        } else {
+            Style::default().fg(DIM)
+        };
+
+        let line = Line::from(vec![
+            Span::styled(format!("  {:<18}", label), label_style),
+            Span::styled(value.to_string(), value_style),
+            Span::styled(cursor, Style::default().fg(ACCENT)),
+        ]);
+        f.render_widget(Paragraph::new(line), chunks[1 + i * 2]);
+    }
+
+    let hints = Line::from(vec![
+        Span::styled(" \u{2191}\u{2193}", Style::default().fg(ACCENT)),
+        Span::styled(" navigate  ", Style::default().fg(MUTED)),
+        Span::styled("^s", Style::default().fg(ACCENT)),
+        Span::styled(" save  ", Style::default().fg(MUTED)),
+        Span::styled("esc", Style::default().fg(ACCENT)),
+        Span::styled(" cancel", Style::default().fg(MUTED)),
+    ]);
+    f.render_widget(Paragraph::new(hints), chunks[7]);
+}

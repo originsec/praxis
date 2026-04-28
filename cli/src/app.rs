@@ -55,6 +55,7 @@ pub struct App {
     pub connected: bool,
     pub popup: Option<Popup>,
     pub new_op_form: Option<NewOpForm>,
+    pub add_remote_node_form: Option<AddRemoteNodeForm>,
     pub run_options: Option<RunOptions>,
     pub trigger_form: Option<TriggerForm>,
     pub confirm: Option<ConfirmAction>,
@@ -343,6 +344,7 @@ impl App {
             connected: true,
             popup: None,
             new_op_form: None,
+            add_remote_node_form: None,
             run_options: None,
             trigger_form: None,
             confirm: None,
@@ -967,6 +969,14 @@ impl App {
         //
         if self.new_op_form.is_some() {
             self.handle_new_op_form_key(key).await;
+            return;
+        }
+
+        //
+        // Add remote node form intercepts all keys.
+        //
+        if self.add_remote_node_form.is_some() {
+            self.handle_add_remote_node_form_key(key).await;
             return;
         }
 

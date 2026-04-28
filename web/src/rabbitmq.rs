@@ -142,6 +142,18 @@ impl RabbitMqClient {
         self.publish_signal(message).await
     }
 
+    /// Add a remote Codex node
+    pub async fn add_remote_node(&self, label: String, url: String, token: Option<String>) -> Result<()> {
+        let message = ClientSignalMessage::AddRemoteNode { label, url, token };
+        self.publish_signal(message).await
+    }
+
+    /// Remove a remote Codex node
+    pub async fn remove_remote_node(&self, node_id: String) -> Result<()> {
+        let message = ClientSignalMessage::RemoveRemoteNode { node_id };
+        self.publish_signal(message).await
+    }
+
     /// Get service configuration
     pub async fn get_config(&self, keys: Vec<String>) -> Result<()> {
         let message = ClientSignalMessage::ServiceConfigGet {

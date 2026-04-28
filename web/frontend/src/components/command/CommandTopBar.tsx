@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Wifi, WifiOff, Sun, Moon, RefreshCw, Settings, PanelRightOpen, PanelRightClose, Search } from 'lucide-react';
+import { Wifi, WifiOff, Sun, Moon, RefreshCw, Settings, PanelRightOpen, PanelRightClose, Search, Plus } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useTheme } from '../../context/ThemeContext';
 import { SettingsModal } from './SettingsModal';
+import { AddRemoteNodeModal } from './AddRemoteNodeModal';
 
 interface CommandTopBarProps {
   orchestratorOpen: boolean;
@@ -15,6 +16,7 @@ export function CommandTopBar({ orchestratorOpen, onToggleOrchestrator, filterTe
   const { state } = useApp();
   const { isDark, toggleTheme } = useTheme();
   const [showSettings, setShowSettings] = useState(false);
+  const [showAddRemote, setShowAddRemote] = useState(false);
   const nodeCount = state.systemState?.nodes.length ?? 0;
   const runningOps = state.operations.filter(op => op.status === 'Running').length;
   const runningChains = state.chains.executions.filter(e => e.status === 'Running').length;
@@ -60,6 +62,13 @@ export function CommandTopBar({ orchestratorOpen, onToggleOrchestrator, filterTe
                 <span className="font-medium">{runningOps + runningChains}</span> running
               </span>
             )}
+            <button
+              onClick={() => setShowAddRemote(true)}
+              className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] bg-[var(--accent-info)]/10 text-[var(--accent-info)] hover:bg-[var(--accent-info)]/20 transition-colors"
+              title="Add Remote Codex Node"
+            >
+              <Plus size={10} /> Remote
+            </button>
           </div>
 
           {/*
@@ -131,6 +140,7 @@ export function CommandTopBar({ orchestratorOpen, onToggleOrchestrator, filterTe
       </header>
 
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showAddRemote && <AddRemoteNodeModal onClose={() => setShowAddRemote(false)} />}
     </>
   );
 }
