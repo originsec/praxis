@@ -5,8 +5,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::utils;
 use common::{
-    publish_json, node_queue_name, rabbitmq_url, NodeCapability, NodeDirectMessage,
-    NodeRegistration, NodeRegistrationAck, NodeSignalMessage, NODE_SIGNAL_QUEUE,
+    publish_json, node_queue_name, rabbitmq_url, InterceptTargetConfig, NodeCapability,
+    NodeDirectMessage, NodeRegistration, NodeRegistrationAck, NodeSignalMessage,
+    NODE_SIGNAL_QUEUE,
 };
 
 pub struct RegistrationResult {
@@ -15,6 +16,7 @@ pub struct RegistrationResult {
     pub channel: Channel,
     pub lua_scripts: Vec<String>,
     pub event_logging_enabled: bool,
+    pub intercept_targets: Vec<InterceptTargetConfig>,
 }
 
 pub async fn publish_registration(channel: &Channel, node_id: &str) -> Result<()> {
@@ -218,6 +220,7 @@ pub async fn register_with_service(
                     channel,
                     lua_scripts: ack.lua_scripts,
                     event_logging_enabled: ack.event_logging_enabled,
+                    intercept_targets: ack.intercept_targets,
                 }));
             }
             Ok(None) => {

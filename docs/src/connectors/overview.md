@@ -54,17 +54,17 @@ trait AgentSession {
     // ...
 }
 
-// Optional: traffic interception support
-trait AgentIntercept {
-    fn intercept_domains(&self) -> Vec<&str>;
-    fn intercept_url_pattern(&self) -> Option<&str>;
-}
-
 // Optional: reconnaissance support
 trait AgentRecon {
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult>;
 }
 ```
+
+Traffic interception is no longer per-agent. The set of domains and URL
+filters captured by the proxy is configured centrally in **Settings →
+Intercept** (web/TUI) and pushed to nodes by the service. Connectors do
+not declare intercept domains; they only need to declare a `short_name`
+which intercept targets can reference for traffic attribution.
 
 ## Feature Support
 

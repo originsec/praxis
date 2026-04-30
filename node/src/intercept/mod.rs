@@ -26,7 +26,7 @@ pub use tun_linux::LinuxTunManager;
 pub use wintun::WintunManager;
 
 use anyhow::{Context, Result};
-use common::{InterceptMethod, InterceptedTrafficEntry};
+use common::{InterceptMethod, InterceptTargetConfig, InterceptedTrafficEntry};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
@@ -34,7 +34,6 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use tokio_util::sync::CancellationToken;
-use crate::agent_connectors::Agent;
 use dns_resolver::DomainResolver;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use packet_engine::PacketEngine;
@@ -162,10 +161,10 @@ impl NodeInterceptManager {
         }
     }
 
-    /// Enable interception for all agents that support it
+    /// Enable interception using the supplied target list
     ///
     /// This will:
-    /// 1. Collect intercept domains from all agents
+    /// 1. Collect intercept domains from each target's domains list
     /// 2. Create a root CA certificate
     /// 3. Install the root CA in the system certificate store
     /// 4. Generate leaf certificates for each domain
@@ -176,7 +175,7 @@ impl NodeInterceptManager {
     ///    - Hosts: Configure hosts file entries
     pub async fn enable(
         &mut self,
-        agents: &[Arc<dyn Agent>],
+        targets: &[InterceptTargetConfig],
         method: InterceptMethod,
     ) -> Result<InterceptMethod> {
         if self.is_enabled {
@@ -206,66 +205,63 @@ impl NodeInterceptManager {
         }
 
         //
-        // Collect domains and URL patterns from all agents that support
-        // interception.
+        // Collect domains and URL patterns from the configured target list.
+        // Targets are pushed by the service via the registration ack and
+        // refreshed via NodeBroadcastMessage::InterceptTargetsUpdate.
         //
         self.domains.clear();
         self.domain_to_agent.clear();
         let mut domain_to_url_pattern = HashMap::new();
 
-        for agent in agents {
+        for target in targets {
+            if target.domains.is_empty() {
+                continue;
+            }
+
+            common::log_info!(
+                "Adding intercept domains from target '{}' ({}): {:?}",
+                target.name,
+                target.agent_short_name,
+                target.domains
+            );
+
             //
-            // Check if agent supports interception via the AgentIntercept
-            // trait.
+            // Compile the URL pattern once per target. Uses fancy-regex
+            // so patterns with negative lookahead (e.g. ^(?!.*pacman).*$)
+            // continue to work.
             //
-            if let Some(intercept) = agent.as_intercept() {
-                let domains = intercept.intercept_domains();
-                if !domains.is_empty() {
-                    common::log_info!(
-                        "Adding intercept domains from {}: {:?}",
-                        agent.short_name(),
-                        domains
-                    );
-
-                    //
-                    // Compile URL pattern once for all domains of this agent
-                    // Uses fancy-regex to support negative lookahead, e.g.,
-                    // ^(?!.*pacman).*$.
-                    //
-                    let url_pattern = intercept.intercept_url_pattern().and_then(|pattern| {
-                        match fancy_regex::Regex::new(pattern) {
-                            Ok(re) => {
-                                common::log_info!("  URL filter pattern: {}", pattern);
-                                Some(re)
-                            }
-                            Err(e) => {
-                                common::log_warn!(
-                                    "Invalid URL pattern '{}' for {}: {}",
-                                    pattern,
-                                    agent.short_name(),
-                                    e
-                                );
-                                None
-                            }
-                        }
-                    });
-
-                    for domain in domains {
-                        self.domains.insert(domain.to_string());
-                        self.domain_to_agent
-                            .insert(domain.to_string(), agent.short_name().to_string());
-
-                        if let Some(ref re) = url_pattern {
-                            domain_to_url_pattern.insert(domain.to_string(), re.clone());
-                        }
+            let url_pattern = target.url_pattern.as_deref().and_then(|pattern| {
+                match fancy_regex::Regex::new(pattern) {
+                    Ok(re) => {
+                        common::log_info!("  URL filter pattern: {}", pattern);
+                        Some(re)
                     }
+                    Err(e) => {
+                        common::log_warn!(
+                            "Invalid URL pattern '{}' for target '{}': {}",
+                            pattern,
+                            target.name,
+                            e
+                        );
+                        None
+                    }
+                }
+            });
+
+            for domain in &target.domains {
+                self.domains.insert(domain.clone());
+                self.domain_to_agent
+                    .insert(domain.clone(), target.agent_short_name.clone());
+
+                if let Some(ref re) = url_pattern {
+                    domain_to_url_pattern.insert(domain.clone(), re.clone());
                 }
             }
         }
 
         if self.domains.is_empty() {
             return Err(anyhow::anyhow!(
-                "No agents have intercept domains configured"
+                "No intercept targets configured — add one in Settings → Intercept"
             ));
         }
 

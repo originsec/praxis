@@ -14,9 +14,6 @@ import {
   Terminal as TerminalIcon,
   ChevronDown,
   ChevronRight,
-  Globe,
-  Wifi,
-  FileText,
   FolderOpen,
   X,
   MessageSquare,
@@ -253,7 +250,6 @@ export function NodeCard({ node }: NodeCardProps) {
   //
   const [showRunOpModal, setShowRunOpModal] = useState(false);
   const [showRunChainModal, setShowRunChainModal] = useState(false);
-  const [showMethodSelector, setShowMethodSelector] = useState(false);
   const [showReconModal, setShowReconModal] = useState<{ agentShortName: string } | null>(null);
   const [showTerminalModal, setShowTerminalModal] = useState(false);
   //
@@ -384,21 +380,25 @@ export function NodeCard({ node }: NodeCardProps) {
     }
   };
 
+  //
+  // Auto-select intercept method by OS — TPROXY on Linux, wintun VPN on
+  // Windows, nothing on macOS. The toggle button is already gated by
+  // `intercept_supported && hasCapability('Interception')`, so macOS
+  // nodes never reach this path; the explicit guard here is belt and
+  // braces.
+  //
   const handleToggleIntercept = () => {
     if (node.intercept_active) {
       disableIntercept(node.node_id);
-    } else {
-      setShowMethodSelector(true);
+      return;
     }
-  };
-
-  const handleEnableWithMethod = (method: InterceptMethod) => {
+    const os = node.os_details.toLowerCase();
+    let method: InterceptMethod | null = null;
+    if (os.includes('linux')) method = 'Tproxy';
+    else if (os.includes('windows')) method = 'Vpn';
+    if (method === null) return;
     enableIntercept(node.node_id, method);
-    setShowMethodSelector(false);
   };
-
-  const isWindowsNode = node.os_details.toLowerCase().includes('windows');
-  const isLinuxNode = node.os_details.toLowerCase().includes('linux');
 
   const status = node.status;
   const agents = node.discovered_agents;
@@ -874,68 +874,6 @@ export function NodeCard({ node }: NodeCardProps) {
           runChain(itemId, node.node_id, agentName, undefined, spec);
         }}
       />
-
-      {/*
-      //
-      // Intercept method selector modal.
-      //
-      */}
-      <Modal
-        isOpen={showMethodSelector}
-        onClose={() => setShowMethodSelector(false)}
-        title="Select Interception Method"
-        size="sm"
-      >
-        <div className="space-y-3">
-          <p className="text-sm text-muted">Choose how to intercept traffic on this node.</p>
-          <div className="space-y-2">
-            <button onClick={() => handleEnableWithMethod('Proxy')} className="w-full p-3 bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors text-left">
-              <div className="flex items-center gap-3">
-                <Globe size={18} className="text-[var(--accent-info)]" />
-                <div>
-                  <div className="text-title text-sm font-medium">System Proxy</div>
-                  <div className="text-muted text-xs">Uses system proxy settings</div>
-                </div>
-              </div>
-            </button>
-            <button
-              onClick={() => isWindowsNode && handleEnableWithMethod('Vpn')}
-              disabled={!isWindowsNode}
-              className={`w-full p-3 bg-[var(--bg-secondary)] transition-colors text-left ${isWindowsNode ? 'hover:bg-[var(--bg-tertiary)]' : 'opacity-50 cursor-not-allowed'}`}
-            >
-              <div className="flex items-center gap-3">
-                <Wifi size={18} className={isWindowsNode ? 'text-[var(--accent-info)]' : 'text-muted'} />
-                <div>
-                  <div className={`text-sm font-medium ${isWindowsNode ? 'text-title' : 'text-muted'}`}>VPN</div>
-                  <div className="text-muted text-xs">{isWindowsNode ? 'Virtual network adapter' : 'Windows only'}</div>
-                </div>
-              </div>
-            </button>
-            <button onClick={() => handleEnableWithMethod('Hosts')} className="w-full p-3 bg-[var(--bg-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors text-left">
-              <div className="flex items-center gap-3">
-                <FileText size={18} className="text-[var(--accent-info)]" />
-                <div>
-                  <div className="text-title text-sm font-medium">Hosts File</div>
-                  <div className="text-muted text-xs">Redirects domains via hosts file</div>
-                </div>
-              </div>
-            </button>
-            <button
-              onClick={() => isLinuxNode && handleEnableWithMethod('Tproxy')}
-              disabled={!isLinuxNode}
-              className={`w-full p-3 bg-[var(--bg-secondary)] transition-colors text-left ${isLinuxNode ? 'hover:bg-[var(--bg-tertiary)]' : 'opacity-50 cursor-not-allowed'}`}
-            >
-              <div className="flex items-center gap-3">
-                <Zap size={18} className={isLinuxNode ? 'text-[var(--accent-info)]' : 'text-muted'} />
-                <div>
-                  <div className={`text-sm font-medium ${isLinuxNode ? 'text-title' : 'text-muted'}`}>TPROXY</div>
-                  <div className="text-muted text-xs">{isLinuxNode ? 'Transparent proxy via iptables' : 'Linux only'}</div>
-                </div>
-              </div>
-            </button>
-          </div>
-        </div>
-      </Modal>
 
       {showReconModal && (
         <ReconModal

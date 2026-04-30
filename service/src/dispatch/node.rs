@@ -49,10 +49,23 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                 config.get_bool(APPLICATION_LOGS_ENABLED, false)
             };
 
+            //
+            // Load enabled intercept targets so the node has its
+            // capture configuration before it processes any commands.
+            //
+
+            let intercept_targets = match ctx.database.get_enabled_intercept_targets().await {
+                Ok(targets) => targets,
+                Err(e) => {
+                    common::log_error!("Failed to load intercept targets for registration ack: {}", e);
+                    Vec::new()
+                }
+            };
+
             let reg_node_id = registration.node_id.clone();
             if let Err(e) = ctx
                 .node_handler
-                .handle_node_registration(registration, lua_scripts, event_logging_enabled)
+                .handle_node_registration(registration, lua_scripts, event_logging_enabled, intercept_targets)
                 .await
             {
                 common::log_error!("Failed to handle NodeRegistration: {}", e);

@@ -9,6 +9,7 @@ mod chain_memories;
 mod chain_payloads;
 mod chain_triggers;
 mod event_log;
+mod intercept_targets;
 mod lua_agent_scripts;
 mod recon;
 mod remote_nodes;

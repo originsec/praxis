@@ -3,13 +3,6 @@ local helpers = require("praxis.helpers")
 local AGENT_NAME = "Cursor Agent"
 local AGENT_SHORT_NAME = "cursor"
 
-local INTERCEPT_DOMAINS = {
-  "api.cursor.sh",
-  "agent.api5.cursor.sh",
-  "api2.cursor.sh",
-  "cursor.sh",
-}
-
 local function verify_binary(path)
   local result = praxis.command_run({ program = path, args = { "--version" }, timeout_secs = 10 })
   if result.success then
@@ -479,10 +472,6 @@ return {
       process_path = path,
       version = version,
     }
-  end,
-
-  intercept_domains = function(_ctx)
-    return INTERCEPT_DOMAINS
   end,
 
   recon = function(ctx)

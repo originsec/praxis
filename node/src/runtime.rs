@@ -24,6 +24,7 @@ pub enum RuntimeExit {
     Reset,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     channel: Arc<Channel>,
     node_id: String,
@@ -32,10 +33,15 @@ pub async fn run(
     factory: Arc<AgentFactory>,
     shutdown_token: CancellationToken,
     lua_scripts: Vec<String>,
+    intercept_targets: Vec<common::InterceptTargetConfig>,
 ) -> anyhow::Result<RuntimeExit> {
-    listen_to_queues(channel, node_id, node_queue, registry, factory, shutdown_token, lua_scripts).await
+    listen_to_queues(
+        channel, node_id, node_queue, registry, factory, shutdown_token,
+        lua_scripts, intercept_targets,
+    ).await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn listen_to_queues(
     channel: Arc<Channel>,
     node_id: String,
@@ -44,6 +50,7 @@ async fn listen_to_queues(
     factory: Arc<AgentFactory>,
     shutdown_token: CancellationToken,
     lua_scripts: Vec<String>,
+    intercept_targets: Vec<common::InterceptTargetConfig>,
 ) -> anyhow::Result<RuntimeExit> {
     //
     // Create a private broadcast queue bound to the fanout exchange.
@@ -119,13 +126,18 @@ async fn listen_to_queues(
     common::logging::init("node".to_string(), node_id.clone(), event_log_tx);
 
     //
-    // Node state for intercept and terminal management.
+    // Node state for intercept and terminal management. Seeds the
+    // initial intercept target list from the registration ack.
     //
-    let node_state = Arc::new(RwLock::new(NodeState::new(
-        node_id.clone(),
-        terminal_output_tx,
-        traffic_tx,
-    )));
+    let node_state = Arc::new(RwLock::new({
+        let mut state = NodeState::new(
+            node_id.clone(),
+            terminal_output_tx,
+            traffic_tx,
+        );
+        state.intercept_targets = intercept_targets;
+        state
+    }));
 
     //
     // Node-side ACP server. Handles inbound ACP JSON-RPC frames arriving on
@@ -643,6 +655,16 @@ async fn listen_to_queues(
                         match serde_json::from_slice::<NodeDirectMessage>(&delivery.data) {
                             Ok(message) => match message {
                                 NodeDirectMessage::RegistrationAck(ack) => {
+                                    //
+                                    // Always refresh the intercept target list — even
+                                    // if the script set didn't change, the service
+                                    // may have updated targets.
+                                    //
+                                    {
+                                        let mut state = node_state.write().await;
+                                        state.intercept_targets = ack.intercept_targets;
+                                    }
+
                                     if !ack.lua_scripts.is_empty() {
                                         common::log_info!(
                                             "Re-registration: rebuilding registry with {} scripts",
@@ -766,6 +788,17 @@ async fn handle_broadcast_message(
                 common::log_error!("Failed to send info update after registry rebuild: {}", e);
             }
         }
+        NodeBroadcastMessage::InterceptTargetsUpdate { targets } => {
+            let count = targets.len();
+            {
+                let mut state = node_state.write().await;
+                state.intercept_targets = targets;
+            }
+            common::log_info!(
+                "Received InterceptTargetsUpdate ({} target(s)); will apply on next intercept enable",
+                count
+            );
+        }
     }
 }
 
@@ -789,8 +822,7 @@ async fn handle_command(
 
     let result = match request.command.clone() {
         NodeCommand::Intercept(cmd) => {
-            let agents = registry.read().await.get_all();
-            handle_intercept_command(cmd, &agents, node_state).await
+            handle_intercept_command(cmd, node_state).await
         }
         NodeCommand::Terminal(cmd) => {
             handle_terminal_command(cmd, &request.client_id, node_state).await
@@ -901,26 +933,13 @@ async fn send_node_information_update(
     };
 
     //
-    // Determine if interception is supported on this node. Supported on
-    // Windows (all methods) and Linux (system proxy only).
+    // Determine if interception is supported on this node. Now node-level,
+    // not per-agent: Windows (all methods) and Linux (system proxy / TPROXY
+    // / VPN). The per-target filter is decided server-side via the
+    // configured intercept target list.
     //
 
-    let intercept_supported = {
-        #[cfg(any(windows, target_os = "linux"))]
-        {
-            agents.iter().any(|agent| {
-                if let Some(intercept) = agent.as_intercept() {
-                    !intercept.intercept_domains().is_empty()
-                } else {
-                    false
-                }
-            })
-        }
-        #[cfg(not(any(windows, target_os = "linux")))]
-        {
-            false
-        }
-    };
+    let intercept_supported = cfg!(any(windows, target_os = "linux"));
 
     //
     // Build the update message and publish it to the service. selected_agent

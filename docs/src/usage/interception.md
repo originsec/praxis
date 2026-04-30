@@ -23,6 +23,28 @@ Praxis acts as a man-in-the-middle:
 3. Terminates TLS and captures traffic
 4. Re-encrypts and forwards to the real destination
 
+## Intercept Targets
+
+The set of domains and URL filters captured by the proxy is configured
+centrally on the service and pushed to nodes — there is no per-agent
+hard-coded list. Each **intercept target** groups one or more domains
+under an optional URL regex and is attributed to an agent
+(`agent_short_name`) for traffic routing and recon attribution.
+
+Praxis ships built-in targets for the bundled connectors (Claude Code,
+Claude Desktop, Cursor, Droid, Gemini, M365 Copilot). They are seeded
+on first boot and can be edited, disabled, or deleted.
+
+### Managing targets
+
+- **Web UI:** Settings → Intercept. Add, edit, toggle, or delete targets.
+- **TUI:** Settings → Intercept tab. `enter` to edit, `space` to
+  toggle enable/disable, `^d` to delete.
+
+Changes take effect immediately: the service broadcasts the new list to
+all connected nodes. If interception is currently enabled on a node,
+the new list is applied the next time interception is enabled.
+
 ## Interception Methods
 
 Praxis supports four methods for routing traffic through the proxy. Each has tradeoffs.

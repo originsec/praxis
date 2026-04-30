@@ -1,4 +1,3 @@
-use crate::agent_connectors::Agent;
 use crate::app::NodeState;
 use common::{InterceptCommand, InterceptCommandResult, InterceptMethod, NodeCommandResult};
 use std::sync::Arc;
@@ -6,7 +5,6 @@ use tokio::sync::RwLock;
 
 pub async fn handle_intercept_command(
     cmd: InterceptCommand,
-    agents: &[Arc<dyn Agent>],
     node_state: &Arc<RwLock<NodeState>>,
 ) -> NodeCommandResult {
     match cmd {
@@ -27,10 +25,13 @@ pub async fn handle_intercept_command(
             let method = method.unwrap_or(InterceptMethod::Proxy);
 
             //
-            // Enable node-level interception for all agents with specified
-            // method.
+            // Snapshot the current target list — the borrow checker requires
+            // we copy off the immutable side before taking &mut on
+            // intercept_manager.
             //
-            match state.intercept_manager.enable(agents, method).await {
+            let targets = state.intercept_targets.clone();
+
+            match state.intercept_manager.enable(&targets, method).await {
                 Ok(used_method) => {
                     let domains = state.intercept_manager.intercepted_domains();
                     common::log_info!("Intercept enabled ({:?}) for {} domain(s): {:?}", used_method, domains.len(), domains);

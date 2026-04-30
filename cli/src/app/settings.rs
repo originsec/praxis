@@ -1,13 +1,16 @@
+mod intercept_target_form;
 mod model_form;
 
 use super::*;
 
+pub use self::intercept_target_form::{InterceptTargetForm, InterceptTargetFormField, InterceptTargetFormMode};
 pub use self::model_form::ModelEditForm;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum SettingsTab {
     Llm,
     Agents,
+    Intercept,
     Service,
     About,
 }
@@ -61,6 +64,13 @@ pub struct SettingsState {
     //
     pub agent_scripts: Vec<common::LuaAgentScriptInfo>,
     pub agent_scripts_loaded: bool,
+
+    //
+    // Intercept targets (URLs/filters pushed to nodes).
+    //
+    pub intercept_targets: Vec<common::InterceptTargetInfo>,
+    pub intercept_targets_loaded: bool,
+    pub intercept_target_form: Option<InterceptTargetForm>,
 
     //
     // Connection info (read-only, set at startup).
@@ -119,6 +129,9 @@ impl Default for SettingsState {
             claude_ccrv2_port: "8587".to_string(),
             agent_scripts: Vec::new(),
             agent_scripts_loaded: false,
+            intercept_targets: Vec::new(),
+            intercept_targets_loaded: false,
+            intercept_target_form: None,
             dropdown_open: false,
             dropdown_selected: 0,
             dropdown_field: 0,
@@ -252,6 +265,10 @@ impl App {
                 // Scripts list + "Add new" + "Reset defaults"
                 self.settings.agent_scripts.len() + 2
             }
+            SettingsTab::Intercept => {
+                // Targets list + "Add new"
+                self.settings.intercept_targets.len() + 1
+            }
             SettingsTab::Service => 9, // mcp_enabled, mcp_port, logging, log_query_row_limit, prompt_timeout_secs, ccrv1_enabled, ccrv1_port, ccrv2_enabled, ccrv2_port
             SettingsTab::About => 0,
         }
@@ -266,6 +283,7 @@ impl App {
                 sel == mc + 2
             }
             SettingsTab::Agents => false,
+            SettingsTab::Intercept => false,
             SettingsTab::Service => {
                 // 1 = MCP port, 3 = log query row limit, 4 = prompt timeout,
                 // 6 = CCRv1 port, 8 = CCRv2 port
@@ -349,6 +367,7 @@ impl App {
                 }
             }
             SettingsTab::Agents => String::new(),
+            SettingsTab::Intercept => String::new(),
             SettingsTab::Service => match sel {
                 1 => self.settings.mcp_port.clone(),
                 3 => self.settings.log_query_row_limit.clone(),
@@ -367,6 +386,23 @@ impl App {
         if self.settings.tab == SettingsTab::Agents && !self.settings.agent_scripts_loaded {
             self.load_agent_scripts().await;
         }
+        if self.settings.tab == SettingsTab::Intercept && !self.settings.intercept_targets_loaded {
+            self.load_intercept_targets().await;
+        }
+    }
+
+    pub(crate) async fn load_intercept_targets(&mut self) {
+        if let Err(e) = self.client.request_intercept_targets().await {
+            self.settings.status_message = Some(format!("Failed to request targets: {}", e));
+            self.settings.status_message_at = Some(std::time::Instant::now());
+        }
+    }
+
+    pub(crate) fn poll_intercept_targets(&mut self, targets: Vec<common::InterceptTargetInfo>) {
+        let mut targets = targets;
+        targets.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        self.settings.intercept_targets = targets;
+        self.settings.intercept_targets_loaded = true;
     }
 
     pub(crate) async fn handle_settings_key(&mut self, key: KeyEvent) {
@@ -457,11 +493,17 @@ impl App {
             return;
         }
 
+        if self.settings.intercept_target_form.is_some() {
+            self.handle_intercept_target_form_key(key).await;
+            return;
+        }
+
         match key.code {
             KeyCode::Tab => {
                 let next_tab = match self.settings.tab {
                     SettingsTab::Llm => SettingsTab::Agents,
-                    SettingsTab::Agents => SettingsTab::Service,
+                    SettingsTab::Agents => SettingsTab::Intercept,
+                    SettingsTab::Intercept => SettingsTab::Service,
                     SettingsTab::Service => SettingsTab::About,
                     SettingsTab::About => SettingsTab::Llm,
                 };
@@ -471,7 +513,8 @@ impl App {
                 let next_tab = match self.settings.tab {
                     SettingsTab::Llm => SettingsTab::About,
                     SettingsTab::Agents => SettingsTab::Llm,
-                    SettingsTab::Service => SettingsTab::Agents,
+                    SettingsTab::Intercept => SettingsTab::Agents,
+                    SettingsTab::Service => SettingsTab::Intercept,
                     SettingsTab::About => SettingsTab::Service,
                 };
                 self.switch_settings_tab(next_tab).await;
@@ -531,6 +574,35 @@ impl App {
                     self.confirm = Some(ConfirmAction {
                         message: format!("Delete agent script '{}'?", name),
                         action: ConfirmKind::DeleteAgentScript(id),
+                    });
+                }
+            }
+            KeyCode::Char(' ') if self.settings.tab == SettingsTab::Intercept => {
+                let sel = self.settings.selected;
+                if sel < self.settings.intercept_targets.len() {
+                    let target = &self.settings.intercept_targets[sel];
+                    let id = target.id.clone();
+                    let new_disabled = !target.disabled;
+                    let _ = self
+                        .client
+                        .toggle_intercept_target_disabled(id, new_disabled)
+                        .await;
+                    self.settings.intercept_targets_loaded = false;
+                    self.load_intercept_targets().await;
+                }
+            }
+            KeyCode::Char('d')
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && self.settings.tab == SettingsTab::Intercept =>
+            {
+                let sel = self.settings.selected;
+                if sel < self.settings.intercept_targets.len() {
+                    let target = &self.settings.intercept_targets[sel];
+                    let name = target.name.clone();
+                    let id = target.id.clone();
+                    self.confirm = Some(ConfirmAction {
+                        message: format!("Delete intercept target '{}'?", name),
+                        action: ConfirmKind::DeleteInterceptTarget(id),
                     });
                 }
             }
@@ -607,6 +679,16 @@ impl App {
                         }
                         _ => {}
                     }
+                }
+            }
+            SettingsTab::Intercept => {
+                let target_count = self.settings.intercept_targets.len();
+                if sel < target_count {
+                    let target = &self.settings.intercept_targets[sel];
+                    self.settings.intercept_target_form =
+                        Some(InterceptTargetForm::from_existing(target));
+                } else if sel == target_count {
+                    self.settings.intercept_target_form = Some(InterceptTargetForm::new_create());
                 }
             }
             SettingsTab::Service => {
@@ -725,6 +807,7 @@ impl App {
                 _ => {}
             },
             SettingsTab::Agents => {}
+            SettingsTab::Intercept => {}
             SettingsTab::About => {}
         }
     }
@@ -881,18 +964,25 @@ impl App {
 
             //
             // Tab clicks. Match the rendered tab positions:
-            // "  LLM  |  Agents  |  Service  |  About "
+            // "  LLM  |  Agents  |  Intercept  |  Service  |  About "
             //
             if mouse.row == tabs_area.y {
                 let rel = mouse.column.saturating_sub(tabs_area.x) as usize;
-                // Positions from render_tabs spans: "  " + " LLM " + "  |  " + " Agents " + ...
+                //
+                // Positions from render_tabs spans:
+                // "  " (2) + " LLM " (5) + "  \u{2502}  " (5) + " Agents " (8)
+                //   + "  \u{2502}  " (5) + " Intercept " (11) + "  \u{2502}  " (5)
+                //   + " Service " (9) + "  \u{2502}  " (5) + " About " (7).
+                //
                 if rel >= 2 && rel < 7 {
                     self.switch_settings_tab(SettingsTab::Llm).await;
                 } else if rel >= 12 && rel < 20 {
                     self.switch_settings_tab(SettingsTab::Agents).await;
-                } else if rel >= 25 && rel < 34 {
+                } else if rel >= 25 && rel < 36 {
+                    self.switch_settings_tab(SettingsTab::Intercept).await;
+                } else if rel >= 41 && rel < 50 {
                     self.switch_settings_tab(SettingsTab::Service).await;
-                } else if rel >= 39 && rel < 46 {
+                } else if rel >= 55 && rel < 62 {
                     self.switch_settings_tab(SettingsTab::About).await;
                 }
                 return;
@@ -949,6 +1039,18 @@ impl App {
                             Some(sc)
                         } else if rel_row == 4 + sc {
                             Some(sc + 1)
+                        } else {
+                            None
+                        }
+                    }
+                    SettingsTab::Intercept => {
+                        let tc = self.settings.intercept_targets.len();
+                        // Row 0: header, 1: blank, 2..2+tc: targets, 2+tc: blank,
+                        // 3+tc: "+ Add target" (idx tc).
+                        if rel_row >= 2 && rel_row < 2 + tc {
+                            Some(rel_row - 2)
+                        } else if rel_row == 3 + tc {
+                            Some(tc)
                         } else {
                             None
                         }
@@ -1012,6 +1114,69 @@ impl App {
                             self.auto_enter_edit();
                         }
                     }
+                }
+            }
+        }
+    }
+
+    pub(crate) async fn handle_intercept_target_form_key(&mut self, key: KeyEvent) {
+        let Some(form) = self.settings.intercept_target_form.as_mut() else {
+            return;
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                self.settings.intercept_target_form = None;
+            }
+            KeyCode::Tab => form.focus_next(),
+            KeyCode::BackTab => form.focus_prev(),
+            KeyCode::Enter => {
+                self.save_intercept_target_form().await;
+            }
+            KeyCode::Backspace => form.backspace(),
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                form.type_char(c);
+            }
+            _ => {}
+        }
+    }
+
+    async fn save_intercept_target_form(&mut self) {
+        let Some(form) = self.settings.intercept_target_form.as_mut() else {
+            return;
+        };
+        let (name, agent, domains, url_pattern) = match form.validate() {
+            Ok(v) => v,
+            Err(msg) => {
+                form.error = Some(msg);
+                return;
+            }
+        };
+        let result = match form.mode {
+            InterceptTargetFormMode::Create => {
+                self.client
+                    .add_intercept_target(name, agent, domains, url_pattern)
+                    .await
+            }
+            InterceptTargetFormMode::Edit => {
+                let id = form.editing_id.clone().unwrap_or_default();
+                self.client
+                    .update_intercept_target(id, name, agent, domains, url_pattern)
+                    .await
+            }
+        };
+
+        match result {
+            Ok(_) => {
+                self.settings.intercept_target_form = None;
+                self.settings.status_message = Some("Saved".to_string());
+                self.settings.status_message_at = Some(std::time::Instant::now());
+                self.settings.intercept_targets_loaded = false;
+                self.load_intercept_targets().await;
+            }
+            Err(e) => {
+                if let Some(form) = self.settings.intercept_target_form.as_mut() {
+                    form.error = Some(format!("Save failed: {}", e));
                 }
             }
         }

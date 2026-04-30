@@ -5,9 +5,6 @@ local uia = require("praxis.uiautomation")
 local AGENT_NAME = "Claude Desktop"
 local AGENT_SHORT_NAME = "claudedesktop"
 
-local INTERCEPT_DOMAINS = { "api.anthropic.com", "a-api.anthropic.com" }
-local INTERCEPT_URL_PATTERN = "messages"
-
 local WORKING_DIR_CODE = "Code"
 local WORKING_DIR_CHAT = "Chat"
 
@@ -383,14 +380,6 @@ return {
       process_path = path,
       version = version,
     }
-  end,
-
-  intercept_domains = function(_ctx)
-    return INTERCEPT_DOMAINS
-  end,
-
-  intercept_url_pattern = function(_ctx)
-    return INTERCEPT_URL_PATTERN
   end,
 
   --

@@ -3,9 +3,6 @@ local helpers = require("praxis.helpers")
 local AGENT_NAME = "Claude Code"
 local AGENT_SHORT_NAME = "claudecode"
 
-local INTERCEPT_DOMAINS = { "api.anthropic.com", "a-api.anthropic.com" }
-local INTERCEPT_URL_PATTERN = "messages"
-
 local function verify_binary(path)
   local result = praxis.command_run({ program = path, args = { "--version" }, timeout_secs = 10 })
   if result.success then
@@ -274,14 +271,6 @@ return {
       process_path = path,
       version = version,
     }
-  end,
-
-  intercept_domains = function(_ctx)
-    return INTERCEPT_DOMAINS
-  end,
-
-  intercept_url_pattern = function(_ctx)
-    return INTERCEPT_URL_PATTERN
   end,
 
   recon = function(ctx)

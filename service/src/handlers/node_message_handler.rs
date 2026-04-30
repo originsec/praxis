@@ -1,6 +1,6 @@
 use anyhow::Result;
 use common::{
-    publish_json, publish_json_exchange, ClientBroadcastMessage,
+    publish_json, publish_json_exchange, ClientBroadcastMessage, InterceptTargetConfig,
     NodeBroadcastMessage, NodeDirectMessage, NodeInformationUpdate, NodeRegistration,
     NodeRegistrationAck, CLIENT_BROADCAST_EXCHANGE, NODE_BROADCAST_EXCHANGE,
 };
@@ -29,18 +29,21 @@ impl NodeMessageHandler {
         registration: NodeRegistration,
         lua_scripts: Vec<String>,
         event_logging_enabled: bool,
+        intercept_targets: Vec<InterceptTargetConfig>,
     ) -> Result<()> {
         let node = self.registry.register(&registration).await;
 
         //
-        // Send NodeRegistrationAck with Lua scripts and logging state via the
-        // node's direct queue. This avoids a race condition where a fanout
-        // broadcast arrives before the node binds its consumer to the exchange.
+        // Send NodeRegistrationAck with Lua scripts, logging state, and the
+        // intercept target list via the node's direct queue. This avoids a
+        // race where a fanout broadcast arrives before the node binds its
+        // consumer to the exchange.
         //
         let ack = NodeRegistrationAck {
             id: node.id.clone(),
             lua_scripts,
             event_logging_enabled,
+            intercept_targets,
         };
         let message = NodeDirectMessage::RegistrationAck(ack);
 
@@ -114,6 +117,22 @@ impl NodeMessageHandler {
         publish_json_exchange(&self.channel, NODE_BROADCAST_EXCHANGE, &message).await?;
 
         common::log_warn!("Broadcast NodeRefreshRegistration to all nodes");
+
+        Ok(())
+    }
+
+    //
+    // Push the latest enabled intercept target list to all nodes. Called
+    // after CRUD on intercept targets so capture configuration stays in
+    // sync without requiring node re-registration.
+    //
+
+    pub async fn broadcast_intercept_targets(&self, targets: Vec<InterceptTargetConfig>) -> Result<()> {
+        let count = targets.len();
+        let message = NodeBroadcastMessage::InterceptTargetsUpdate { targets };
+        publish_json_exchange(&self.channel, NODE_BROADCAST_EXCHANGE, &message).await?;
+
+        common::log_info!("Broadcast InterceptTargetsUpdate ({} target(s)) to all nodes", count);
 
         Ok(())
     }

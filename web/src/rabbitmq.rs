@@ -682,6 +682,70 @@ impl RabbitMqClient {
     }
 
     //
+    // Intercept target methods.
+    //
+
+    pub async fn list_intercept_targets(&self) -> Result<()> {
+        let message = ClientSignalMessage::InterceptTargetList {
+            client_id: self.state.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn add_intercept_target(
+        &self,
+        name: String,
+        agent_short_name: String,
+        domains: Vec<String>,
+        url_pattern: Option<String>,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::InterceptTargetAdd {
+            client_id: self.state.client_id.clone(),
+            name,
+            agent_short_name,
+            domains,
+            url_pattern,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn update_intercept_target(
+        &self,
+        target_id: String,
+        name: String,
+        agent_short_name: String,
+        domains: Vec<String>,
+        url_pattern: Option<String>,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::InterceptTargetUpdate {
+            client_id: self.state.client_id.clone(),
+            target_id,
+            name,
+            agent_short_name,
+            domains,
+            url_pattern,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn delete_intercept_target(&self, target_id: String) -> Result<()> {
+        let message = ClientSignalMessage::InterceptTargetDelete {
+            client_id: self.state.client_id.clone(),
+            target_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn toggle_intercept_target_disabled(&self, target_id: String, disabled: bool) -> Result<()> {
+        let message = ClientSignalMessage::InterceptTargetToggleDisabled {
+            client_id: self.state.client_id.clone(),
+            target_id,
+            disabled,
+        };
+        self.publish_signal(message).await
+    }
+
+    //
     // LogQuery methods.
     //
 
@@ -1224,6 +1288,28 @@ impl RabbitMqClient {
             }
             ClientDirectMessage::LuaAgentScriptDisabledToggled { script_id, disabled } => {
                 self.state.broadcast(ServerMessage::LuaAgentScriptDisabledToggled { script_id, disabled });
+            }
+
+            //
+            // Intercept target responses.
+            //
+            ClientDirectMessage::InterceptTargetListResponse { targets } => {
+                self.state.broadcast(ServerMessage::InterceptTargetList { targets });
+            }
+            ClientDirectMessage::InterceptTargetAdded { id, name } => {
+                self.state.broadcast(ServerMessage::InterceptTargetAdded { id, name });
+            }
+            ClientDirectMessage::InterceptTargetUpdated { id, name } => {
+                self.state.broadcast(ServerMessage::InterceptTargetUpdated { id, name });
+            }
+            ClientDirectMessage::InterceptTargetDeleted { target_id, success } => {
+                self.state.broadcast(ServerMessage::InterceptTargetDeleted { target_id, success });
+            }
+            ClientDirectMessage::InterceptTargetDisabledToggled { target_id, disabled } => {
+                self.state.broadcast(ServerMessage::InterceptTargetDisabledToggled { target_id, disabled });
+            }
+            ClientDirectMessage::InterceptTargetError { message } => {
+                self.state.broadcast(ServerMessage::InterceptTargetError { message });
             }
 
             //

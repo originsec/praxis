@@ -42,6 +42,7 @@ import type {
   AgentChatMessageInfo,
   AgentChatSessionState,
   LuaAgentScriptInfo,
+  InterceptTargetInfo,
   ToolkitExecuteResult,
   ToolkitApplyOutcome,
   ToolkitModelOption,
@@ -240,6 +241,7 @@ interface AppState {
   agentChat: AgentChatState;
   toolkit: ToolkitState;
   luaAgentScripts: LuaAgentScriptInfo[];
+  interceptTargets: InterceptTargetInfo[];
   payloads: PayloadInfo[];
   //
   // Agent session messages keyed by session_id.
@@ -314,6 +316,7 @@ function createInitialState(): AppState {
     agentChat: initialAgentChatState,
     toolkit: initialToolkitState,
     luaAgentScripts: [],
+    interceptTargets: [],
     payloads: [],
     agentSessionMessages: {},
     agentSessionStreaming: {},
@@ -449,6 +452,10 @@ type Action =
   //
   | { type: 'SET_LUA_AGENT_SCRIPTS'; scripts: LuaAgentScriptInfo[] }
   //
+  // Intercept target actions.
+  //
+  | { type: 'SET_INTERCEPT_TARGETS'; targets: InterceptTargetInfo[] }
+  //
   // Payload actions.
   //
   | { type: 'SET_PAYLOADS'; payloads: PayloadInfo[] };
@@ -487,6 +494,8 @@ function reduceCore(state: AppState, action: Action): AppState | null {
       return { ...state, opDefSuccess: action.fullName, opDefError: null };
     case 'SET_LUA_AGENT_SCRIPTS':
       return { ...state, luaAgentScripts: action.scripts };
+    case 'SET_INTERCEPT_TARGETS':
+      return { ...state, interceptTargets: action.targets };
     case 'SET_PAYLOADS':
       return { ...state, payloads: action.payloads };
     default:
@@ -1514,6 +1523,14 @@ interface AppContextValue {
   deleteLuaAgentScript: (scriptId: string) => void;
   resetLuaAgentScriptDefaults: () => void;
   toggleLuaAgentScriptDisabled: (scriptId: string, disabled: boolean) => void;
+  //
+  // Intercept targets.
+  //
+  listInterceptTargets: () => void;
+  addInterceptTarget: (name: string, agentShortName: string, domains: string[], urlPattern: string | null) => void;
+  updateInterceptTarget: (targetId: string, name: string, agentShortName: string, domains: string[], urlPattern: string | null) => void;
+  deleteInterceptTarget: (targetId: string) => void;
+  toggleInterceptTargetDisabled: (targetId: string, disabled: boolean) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -2065,6 +2082,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
           break;
         case 'lua_agent_script_list':
           dispatch({ type: 'SET_LUA_AGENT_SCRIPTS', scripts: message.scripts });
+          break;
+
+        //
+        // Intercept target messages.
+        //
+        case 'intercept_target_added':
+        case 'intercept_target_updated':
+        case 'intercept_target_deleted':
+        case 'intercept_target_disabled_toggled':
+          wsClient.send({ type: 'intercept_target_list' });
+          break;
+        case 'intercept_target_list':
+          dispatch({ type: 'SET_INTERCEPT_TARGETS', targets: message.targets });
+          break;
+        case 'intercept_target_error':
+          //
+          // Surfaced through console for now; the modal shows a banner if it
+          // owns the request, but we don't lift this into global state to
+          // avoid stale errors.
+          //
+          console.error('intercept target error:', message.message);
           break;
 
         //
@@ -2738,6 +2776,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
     wsClient.send({ type: 'lua_agent_script_toggle_disabled', script_id: scriptId, disabled });
   }, []);
 
+  //
+  // Intercept target callbacks.
+  //
+  const listInterceptTargets = useCallback(() => {
+    wsClient.send({ type: 'intercept_target_list' });
+  }, []);
+
+  const addInterceptTarget = useCallback((
+    name: string,
+    agentShortName: string,
+    domains: string[],
+    urlPattern: string | null,
+  ) => {
+    wsClient.send({
+      type: 'intercept_target_add',
+      name,
+      agent_short_name: agentShortName,
+      domains,
+      url_pattern: urlPattern,
+    });
+  }, []);
+
+  const updateInterceptTarget = useCallback((
+    targetId: string,
+    name: string,
+    agentShortName: string,
+    domains: string[],
+    urlPattern: string | null,
+  ) => {
+    wsClient.send({
+      type: 'intercept_target_update',
+      target_id: targetId,
+      name,
+      agent_short_name: agentShortName,
+      domains,
+      url_pattern: urlPattern,
+    });
+  }, []);
+
+  const deleteInterceptTarget = useCallback((targetId: string) => {
+    wsClient.send({ type: 'intercept_target_delete', target_id: targetId });
+  }, []);
+
+  const toggleInterceptTargetDisabled = useCallback((targetId: string, disabled: boolean) => {
+    wsClient.send({
+      type: 'intercept_target_toggle_disabled',
+      target_id: targetId,
+      disabled,
+    });
+  }, []);
+
   const value = useMemo<AppContextValue>(() => ({
     state,
     dispatch,
@@ -2830,6 +2919,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     deleteLuaAgentScript,
     resetLuaAgentScriptDefaults,
     toggleLuaAgentScriptDisabled,
+    listInterceptTargets,
+    addInterceptTarget,
+    updateInterceptTarget,
+    deleteInterceptTarget,
+    toggleInterceptTargetDisabled,
   }), [
     state,
     dispatch,
@@ -2907,6 +3001,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     deleteLuaAgentScript,
     resetLuaAgentScriptDefaults,
     toggleLuaAgentScriptDisabled,
+    listInterceptTargets,
+    addInterceptTarget,
+    updateInterceptTarget,
+    deleteInterceptTarget,
+    toggleInterceptTargetDisabled,
   ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

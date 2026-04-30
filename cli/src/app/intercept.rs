@@ -1260,15 +1260,60 @@ impl App {
             .get(&node_id)
             .map(|s| s.enabled)
             .unwrap_or(false);
+
+        if currently_on {
+            self.confirm = Some(ConfirmAction {
+                message: format!(
+                    "Disable interception on node {}?",
+                    common::short_id(&node_id)
+                ),
+                action: ConfirmKind::ToggleIntercept {
+                    node_id,
+                    enable: false,
+                    method: None,
+                },
+            });
+            return;
+        }
+
+        //
+        // Auto-pick method by the node's OS. If we don't know the node
+        // (e.g. it disappeared) or it's macOS, surface an error rather
+        // than guessing.
+        //
+        let os_lower = self
+            .nodes
+            .nodes
+            .iter()
+            .find(|n| n.node_id == node_id)
+            .map(|n| n.os_details.to_lowercase())
+            .unwrap_or_default();
+
+        let method = if os_lower.contains("linux") {
+            common::InterceptMethod::Tproxy
+        } else if os_lower.contains("windows") {
+            common::InterceptMethod::Vpn
+        } else {
+            self.intercept
+                .set_error(format!("Interception not supported on node {}", common::short_id(&node_id)));
+            return;
+        };
+
         self.confirm = Some(ConfirmAction {
             message: format!(
-                "{} interception on node {}...?",
-                if currently_on { "Disable" } else { "Enable" },
-                common::short_id(&node_id)
+                "Enable interception on node {} via {}?",
+                common::short_id(&node_id),
+                match method {
+                    common::InterceptMethod::Tproxy => "TPROXY",
+                    common::InterceptMethod::Vpn => "VPN",
+                    common::InterceptMethod::Proxy => "system proxy",
+                    common::InterceptMethod::Hosts => "hosts file",
+                }
             ),
             action: ConfirmKind::ToggleIntercept {
                 node_id,
-                enable: !currently_on,
+                enable: true,
+                method: Some(method),
             },
         });
     }

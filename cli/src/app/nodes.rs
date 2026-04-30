@@ -300,28 +300,47 @@ impl App {
             .unwrap_or(node.intercept_active);
 
         if currently_on {
-            //
-            // Disable path just needs a confirm prompt.
-            //
             self.confirm = Some(ConfirmAction {
                 message: format!("Disable interception on {}?", machine),
                 action: ConfirmKind::ToggleIntercept {
                     node_id,
                     enable: false,
+                    method: None,
                 },
             });
-        } else {
-            //
-            // Enable path opens the method picker — mirrors the web UI.
-            //
-            self.intercept_method_picker = Some(InterceptMethodPicker {
-                node_id,
-                machine_name: machine,
-                is_windows: os_lower.contains("windows"),
-                is_linux: os_lower.contains("linux"),
-                selected: 0,
-            });
+            return;
         }
+
+        //
+        // Auto-pick the intercept method by OS — TPROXY on Linux,
+        // wintun VPN on Windows, nothing on macOS or unknown
+        // platforms. The capability gate above already excludes
+        // unprivileged nodes; this just picks the right method.
+        //
+        let method = if os_lower.contains("linux") {
+            common::InterceptMethod::Tproxy
+        } else if os_lower.contains("windows") {
+            common::InterceptMethod::Vpn
+        } else {
+            self.intercept
+                .set_error(format!("Interception not supported on {}", node.os_details));
+            return;
+        };
+
+        let method_label = match method {
+            common::InterceptMethod::Tproxy => "TPROXY",
+            common::InterceptMethod::Vpn => "VPN",
+            common::InterceptMethod::Proxy => "system proxy",
+            common::InterceptMethod::Hosts => "hosts file",
+        };
+        self.confirm = Some(ConfirmAction {
+            message: format!("Enable interception on {} via {}?", machine, method_label),
+            action: ConfirmKind::ToggleIntercept {
+                node_id,
+                enable: true,
+                method: Some(method),
+            },
+        });
     }
 
     pub(crate) fn terminal_content_size() -> (u16, u16) {

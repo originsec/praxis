@@ -3,14 +3,6 @@ local helpers = require("praxis.helpers")
 local AGENT_NAME = "Droid CLI"
 local AGENT_SHORT_NAME = "droid"
 
-local INTERCEPT_DOMAINS = {
-  "api.factory.ai",
-  "staging.api.factory.ai",
-  "preprod.api.factory.ai",
-  "dev.api.factory.ai",
-}
-local INTERCEPT_URL_PATTERN = nil
-
 local function verify_binary(path)
   local result = praxis.command_run({ program = path, args = { "--version" }, timeout_secs = 10 })
   if result.success then
@@ -266,10 +258,6 @@ return {
       process_path = path,
       version = version,
     }
-  end,
-
-  intercept_domains = function(_ctx)
-    return INTERCEPT_DOMAINS
   end,
 
   recon = function(ctx)
