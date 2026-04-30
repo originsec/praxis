@@ -945,6 +945,7 @@ impl App {
             input: String::new(),
             cursor_pos: 0,
             scroll_offset: 0,
+            max_scroll: std::cell::Cell::new(0),
             is_waiting: false,
             history: Vec::new(),
             history_index: None,
@@ -1154,7 +1155,8 @@ impl App {
             }
             KeyCode::PageUp => {
                 if let Some(session) = self.nodes.active_session_mut() {
-                    session.scroll_offset = session.scroll_offset.saturating_add(10);
+                    let max = session.max_scroll.get();
+                    session.scroll_offset = session.scroll_offset.saturating_add(10).min(max);
                 }
             }
             KeyCode::PageDown => {
