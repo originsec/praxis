@@ -266,10 +266,28 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
         }
     }
 
-    let total_lines = lines.len() as u16;
+    //
+    // Estimate visual line count accounting for word wrap so the
+    // scrollback bound matches what's actually rendered.
+    //
+    let visible_width = msg_area.width.max(1) as usize;
+    let total_visual_lines: u16 = lines
+        .iter()
+        .map(|line| {
+            let w = line.width();
+            if w == 0 {
+                1u16
+            } else {
+                ((w as f64 / visible_width as f64).ceil() as u16).max(1)
+            }
+        })
+        .sum();
+
     let visible = msg_area.height;
-    let max_scroll = total_lines.saturating_sub(visible);
-    let scroll = max_scroll.saturating_sub(session.scroll_offset);
+    let max_scroll = total_visual_lines.saturating_sub(visible);
+    session.max_scroll.set(max_scroll);
+    let clamped_offset = session.scroll_offset.min(max_scroll);
+    let scroll = max_scroll.saturating_sub(clamped_offset);
 
     let paragraph = Paragraph::new(Text::from(lines))
         .wrap(ratatui::widgets::Wrap { trim: false })
