@@ -33,6 +33,7 @@
 - [Cursor Agent](./connectors/cursor.md)
 - [Gemini CLI](./connectors/gemini.md)
 - [M365 Copilot](./connectors/m365-copilot.md)
+- [Pi Coding Agent](./connectors/pi.md)
 
 # Architecture
 
