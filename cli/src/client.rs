@@ -71,6 +71,7 @@ struct ClientState {
     pending_acp: HashMap<String, PendingAcp>,
     pending_terminal_creates: HashMap<String, oneshot::Sender<Result<String, String>>>,
     cached_project_paths: Vec<String>,
+    recon_cache: HashMap<(String, String), common::ReconResult>,
     operations: Vec<SemanticOpUpdate>,
     operation_definitions: Vec<OperationDefinitionInfo>,
     chain_definitions: Vec<ChainDefinitionInfo>,
@@ -291,12 +292,19 @@ impl Client {
             // Operation and chain responses.
             //
             ClientDirectMessage::ReconGetResponse {
-                recon_result: Some(recon),
+                node_id,
+                agent_short_name,
+                recon_result,
                 ..
             } => {
-                state.cached_project_paths = recon.project_paths.clone();
+                if let Some(ref recon) = recon_result {
+                    state.cached_project_paths = recon.project_paths.clone();
+                    state.recon_cache.insert(
+                        (node_id.clone(), agent_short_name.clone()),
+                        recon.clone(),
+                    );
+                }
             }
-            ClientDirectMessage::ReconGetResponse { .. } => {}
             ClientDirectMessage::SemanticOpQueued { operation_id, .. } => {
                 state.pending_semantic_op = Some(operation_id);
             }
@@ -866,6 +874,19 @@ impl Client {
 
     pub async fn get_cached_project_paths(&self) -> Vec<String> {
         self.state.lock().await.cached_project_paths.clone()
+    }
+
+    pub async fn get_cached_recon(
+        &self,
+        node_id: &str,
+        agent_short_name: &str,
+    ) -> Option<common::ReconResult> {
+        self.state
+            .lock()
+            .await
+            .recon_cache
+            .get(&(node_id.to_string(), agent_short_name.to_string()))
+            .cloned()
     }
 
     //

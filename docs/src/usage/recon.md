@@ -12,6 +12,33 @@ With an agent selected:
 
 For deeper discovery, click **Semantic Recon** (requires Semantic Parser LLM configured).
 
+## TUI
+
+The CLI (`praxis_cli`) provides the same reconnaissance capabilities in
+the terminal. From the **Nodes** window (`Ctrl+L`), navigate into the
+detail pane (`→`), select an agent (`↑`/`↓`), and press **`r`** to open
+the recon overlay.
+
+The overlay shows three tabs:
+
+1. **Config** — discovered configuration files and their contents
+2. **Tools** — MCP servers, skills, and internal tools
+3. **Sessions** — conversation history with parsed transcripts
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `1` `2` `3` | Switch tab |
+| `↑` / `↓` | Navigate left pane |
+| `PgUp` / `PgDn` | Scroll content |
+| `r` | Refresh (static recon) |
+| `d` | Discover (semantic recon) |
+| `Esc` / `q` | Close overlay |
+
+On first open, the TUI checks the service cache. If no recon data is
+stored, it triggers an ACP `_praxis/recon` request on the node and polls
+every second until data arrives (60-second timeout). Cached data is
+displayed instantly on re-open.
+
 ## What Recon Discovers
 
 ### Tools

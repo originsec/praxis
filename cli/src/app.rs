@@ -25,6 +25,7 @@ use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
+use ratatui::widgets::{Block, Borders};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -106,6 +107,34 @@ pub struct NodesState {
     pub terminal: Option<TerminalState>,
     pub detail_focus: bool,
     pub agent_selected: usize,
+    pub recon: Option<ReconOverlay>,
+}
+
+pub struct ReconOverlay {
+    pub node_id: String,
+    pub agent_short_name: String,
+    pub recon_result: Option<common::ReconResult>,
+    pub performed_at: Option<String>,
+    pub is_semantic: bool,
+    pub is_loading: bool,
+    pub error: Option<String>,
+    pub active_tab: ReconTab,
+    pub selected_left: usize,
+    pub selected_right_scroll: u16,
+    pub config_loading: bool,
+    pub config_content_error: Option<String>,
+    pub session_loading: bool,
+    pub session_content_error: Option<String>,
+    pub right_pane_focused: bool,
+    pub recon_split_percent: u16,
+    pub recon_dragging: bool,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum ReconTab {
+    Config,
+    Tools,
+    Sessions,
 }
 
 pub struct TerminalState {
@@ -219,6 +248,7 @@ impl Default for NodesState {
             terminal: None,
             detail_focus: false,
             agent_selected: 0,
+            recon: None,
         }
     }
 }
@@ -786,6 +816,68 @@ impl App {
                     .insert(status.node_id.clone(), status);
                 self.active_window == Window::Intercept
             }
+            AppEvent::ReconGetResponse {
+                node_id,
+                agent_short_name,
+                recon_result,
+                performed_at,
+                is_semantic,
+            } => {
+                if let Some(ref mut recon) = self.nodes.recon {
+                    if recon.node_id == node_id && recon.agent_short_name == agent_short_name {
+                        recon.is_loading = false;
+                        if let Some(result) = recon_result {
+                            recon.recon_result = Some(result);
+                            recon.performed_at = performed_at;
+                            recon.is_semantic = is_semantic.unwrap_or(false);
+                            recon.error = None;
+                        } else if recon.recon_result.is_none() {
+                            recon.error = Some("No recon data available".to_string());
+                        }
+                    }
+                }
+                true
+            }
+            AppEvent::ReconConfigContent {
+                target_idx,
+                content,
+                error,
+            } => {
+                if let Some(ref mut recon) = self.nodes.recon {
+                    if let Some(ref mut result) = recon.recon_result {
+                        if let Some(ref mut item) = result.config.get_mut(target_idx) {
+                            item.contents = content.clone();
+                        }
+                    }
+                    if recon.selected_left == target_idx
+                        && recon.active_tab == ReconTab::Config
+                    {
+                        recon.config_loading = false;
+                        recon.config_content_error = error;
+                    }
+                }
+                true
+            }
+            AppEvent::ReconSessionContent {
+                target_idx,
+                content,
+                error,
+            } => {
+                if let Some(ref mut recon) = self.nodes.recon {
+                    if let Some(ref mut result) = recon.recon_result {
+                        if let Some(ref mut session) = result.sessions.get_mut(target_idx) {
+                            session.content = content.clone();
+                        }
+                    }
+                    if recon.selected_left == target_idx
+                        && recon.active_tab == ReconTab::Sessions
+                    {
+                        recon.session_loading = false;
+                        recon.session_content_error = error;
+                    }
+                }
+                true
+            }
             AppEvent::LogQueryResult(result) => {
                 self.log_query.is_running = false;
                 match result {
@@ -955,6 +1047,14 @@ impl App {
         }
 
         //
+        // Recon overlay intercepts all keys while open.
+        //
+        if self.nodes.recon.is_some() && self.active_window == Window::Nodes {
+            self.handle_recon_key(key).await;
+            return;
+        }
+
+        //
         // Intercept method picker intercepts all keys while open.
         //
         if self.intercept_method_picker.is_some() {
@@ -1113,6 +1213,531 @@ impl App {
         is_dbl
     }
 
+    pub(crate) fn open_recon(&mut self, node_id: String, agent_short_name: String) {
+        self.nodes.recon = Some(ReconOverlay {
+            node_id: node_id.clone(),
+            agent_short_name: agent_short_name.clone(),
+            recon_result: None,
+            performed_at: None,
+            is_semantic: false,
+            is_loading: true,
+            error: None,
+            active_tab: ReconTab::Config,
+            selected_left: 0,
+            selected_right_scroll: 0,
+            config_loading: false,
+            config_content_error: None,
+            session_loading: false,
+            session_content_error: None,
+            right_pane_focused: false,
+            recon_split_percent: 35,
+            recon_dragging: false,
+        });
+
+        let client = self.client.clone();
+        let tx = self.event_tx.clone();
+
+        tokio::spawn(async move {
+            let Some(tx) = tx else { return };
+            client.request_recon(&node_id, &agent_short_name).await;
+            tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+
+            if let Some(recon) = client.get_cached_recon(&node_id, &agent_short_name).await {
+                let _ = tx.send(AppEvent::ReconGetResponse {
+                    node_id: node_id.clone(),
+                    agent_short_name: agent_short_name.clone(),
+                    recon_result: Some(recon),
+                    performed_at: None,
+                    is_semantic: None,
+                });
+                return;
+            }
+
+            let _ = client
+                .acp_request(
+                    &node_id,
+                    "_praxis/recon",
+                    serde_json::json!({
+                        "agent_short_name": agent_short_name,
+                        "is_semantic": false,
+                    }),
+                )
+                .await;
+
+            for _ in 0..60 {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                client.request_recon(&node_id, &agent_short_name).await;
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+                if let Some(recon) = client.get_cached_recon(&node_id, &agent_short_name).await {
+                    let _ = tx.send(AppEvent::ReconGetResponse {
+                        node_id: node_id.clone(),
+                        agent_short_name: agent_short_name.clone(),
+                        recon_result: Some(recon),
+                        performed_at: None,
+                        is_semantic: None,
+                    });
+                    return;
+                }
+            }
+
+            let _ = tx.send(AppEvent::ReconGetResponse {
+                node_id,
+                agent_short_name,
+                recon_result: None,
+                performed_at: None,
+                is_semantic: None,
+            });
+        });
+    }
+
+    pub(crate) fn close_recon(&mut self) {
+        self.nodes.recon = None;
+    }
+
+    async fn trigger_recon_refresh(&mut self, semantic: bool) {
+        let Some(ref mut recon) = self.nodes.recon else { return };
+        recon.is_loading = true;
+        recon.error = None;
+        recon.recon_result = None;
+        recon.config_content_error = None;
+        recon.session_content_error = None;
+
+        let node_id = recon.node_id.clone();
+        let agent_short_name = recon.agent_short_name.clone();
+        let client = self.client.clone();
+        let tx = self.event_tx.clone();
+
+        tokio::spawn(async move {
+            let Some(tx) = tx else { return };
+            let _ = client
+                .acp_request(
+                    &node_id,
+                    "_praxis/recon",
+                    serde_json::json!({
+                        "agent_short_name": agent_short_name,
+                        "is_semantic": semantic,
+                    }),
+                )
+                .await;
+
+            for _ in 0..60 {
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                client.request_recon(&node_id, &agent_short_name).await;
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+                if let Some(recon_result) =
+                    client.get_cached_recon(&node_id, &agent_short_name).await
+                {
+                    let _ = tx.send(AppEvent::ReconGetResponse {
+                        node_id: node_id.clone(),
+                        agent_short_name: agent_short_name.clone(),
+                        recon_result: Some(recon_result),
+                        performed_at: None,
+                        is_semantic: None,
+                    });
+                    return;
+                }
+            }
+
+            let _ = tx.send(AppEvent::ReconGetResponse {
+                node_id,
+                agent_short_name,
+                recon_result: None,
+                performed_at: None,
+                is_semantic: None,
+            });
+        });
+    }
+
+    async fn handle_recon_key(&mut self, key: KeyEvent) {
+        let Some(ref mut recon) = self.nodes.recon else { return };
+
+        let left_max = match recon.active_tab {
+            ReconTab::Config => recon
+                .recon_result
+                .as_ref()
+                .map_or(0, |r| r.config.len().saturating_sub(1)),
+            ReconTab::Tools => 2,
+            ReconTab::Sessions => recon
+                .recon_result
+                .as_ref()
+                .map_or(0, |r| r.sessions.len().saturating_sub(1)),
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                self.close_recon();
+            }
+            KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.close_recon();
+            }
+            KeyCode::Char('1') => {
+                recon.active_tab = ReconTab::Config;
+                recon.selected_left = 0;
+                recon.selected_right_scroll = 0;
+                recon.right_pane_focused = false;
+                recon.config_content_error = None;
+                recon.session_content_error = None;
+                recon.config_loading = false;
+                recon.session_loading = false;
+            }
+            KeyCode::Char('2') => {
+                recon.active_tab = ReconTab::Tools;
+                recon.selected_left = 0;
+                recon.selected_right_scroll = 0;
+                recon.right_pane_focused = false;
+                recon.config_content_error = None;
+                recon.session_content_error = None;
+                recon.config_loading = false;
+                recon.session_loading = false;
+            }
+            KeyCode::Char('3') => {
+                recon.active_tab = ReconTab::Sessions;
+                recon.selected_left = 0;
+                recon.selected_right_scroll = 0;
+                recon.right_pane_focused = false;
+                recon.config_content_error = None;
+                recon.session_content_error = None;
+                recon.config_loading = false;
+                recon.session_loading = false;
+            }
+            KeyCode::Tab => {
+                recon.active_tab = match recon.active_tab {
+                    ReconTab::Config => ReconTab::Tools,
+                    ReconTab::Tools => ReconTab::Sessions,
+                    ReconTab::Sessions => ReconTab::Config,
+                };
+                recon.selected_left = 0;
+                recon.selected_right_scroll = 0;
+                recon.right_pane_focused = false;
+                recon.config_content_error = None;
+                recon.session_content_error = None;
+                recon.config_loading = false;
+                recon.session_loading = false;
+            }
+            KeyCode::BackTab => {
+                recon.active_tab = match recon.active_tab {
+                    ReconTab::Config => ReconTab::Sessions,
+                    ReconTab::Tools => ReconTab::Config,
+                    ReconTab::Sessions => ReconTab::Tools,
+                };
+                recon.selected_left = 0;
+                recon.selected_right_scroll = 0;
+                recon.right_pane_focused = false;
+                recon.config_content_error = None;
+                recon.session_content_error = None;
+                recon.config_loading = false;
+                recon.session_loading = false;
+            }
+            KeyCode::Right => {
+                recon.right_pane_focused = true;
+            }
+            KeyCode::Left => {
+                recon.right_pane_focused = false;
+            }
+            KeyCode::Up => {
+                if recon.right_pane_focused {
+                    if recon.selected_right_scroll > 0 {
+                        recon.selected_right_scroll -= 1;
+                    }
+                } else {
+                    if recon.selected_left > 0 {
+                        recon.selected_left -= 1;
+                    }
+                    recon.config_content_error = None;
+                    recon.session_content_error = None;
+                    recon.selected_right_scroll = 0;
+                    self.handle_recon_enter().await;
+                }
+            }
+            KeyCode::Down => {
+                if recon.right_pane_focused {
+                    recon.selected_right_scroll += 1;
+                } else {
+                    if recon.selected_left < left_max {
+                        recon.selected_left += 1;
+                    }
+                    recon.config_content_error = None;
+                    recon.session_content_error = None;
+                    recon.selected_right_scroll = 0;
+                    self.handle_recon_enter().await;
+                }
+            }
+            KeyCode::PageUp => {
+                if recon.selected_right_scroll > 10 {
+                    recon.selected_right_scroll -= 10;
+                } else {
+                    recon.selected_right_scroll = 0;
+                }
+            }
+            KeyCode::PageDown => {
+                recon.selected_right_scroll += 10;
+            }
+            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.trigger_recon_refresh(false).await;
+            }
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.trigger_recon_refresh(true).await;
+            }
+            _ => {}
+        }
+    }
+
+    async fn handle_recon_enter(&mut self) {
+        let Some(ref mut recon) = self.nodes.recon else { return };
+
+        match recon.active_tab {
+            ReconTab::Config => {
+                let selected = recon.selected_left;
+                let needs_fetch = if let Some(ref result) = recon.recon_result {
+                    result
+                        .config
+                        .get(selected)
+                        .map_or(false, |item| item.contents.is_none())
+                } else {
+                    false
+                };
+
+                if !needs_fetch {
+                    recon.config_loading = false;
+                    return;
+                }
+
+                let path = if let Some(ref result) = recon.recon_result {
+                    result.config.get(selected).map(|item| item.path.clone())
+                } else {
+                    None
+                };
+
+                let Some(path) = path else { return };
+
+                recon.config_loading = true;
+                recon.config_content_error = None;
+
+                let node_id = recon.node_id.clone();
+                let agent_short_name = recon.agent_short_name.clone();
+                let client = self.client.clone();
+                let tx = self.event_tx.clone();
+
+                tokio::spawn(async move {
+                    let Some(tx) = tx else { return };
+
+                    let result = client
+                        .acp_request(
+                            &node_id,
+                            "_praxis/read_file",
+                            serde_json::json!({
+                                "agent_short_name": agent_short_name,
+                                "file_type": "Config",
+                                "path": path,
+                            }),
+                        )
+                        .await;
+
+                    let (content, error) = match result {
+                        Ok(value) => {
+                            if let Some(c) = value.get("content").and_then(|v| v.as_str()) {
+                                (Some(c.to_string()), None)
+                            } else if let Some(e) = value.get("error").and_then(|v| v.as_str()) {
+                                (None, Some(e.to_string()))
+                            } else {
+                                (None, Some("Unknown response format".to_string()))
+                            }
+                        }
+                        Err(e) => (None, Some(format!("{}", e))),
+                    };
+
+                    let _ = tx.send(AppEvent::ReconConfigContent {
+                        target_idx: selected,
+                        content,
+                        error,
+                    });
+                });
+            }
+            ReconTab::Sessions => {
+                let selected = recon.selected_left;
+                let needs_fetch = if let Some(ref result) = recon.recon_result {
+                    result
+                        .sessions
+                        .get(selected)
+                        .map_or(false, |s| s.content.is_none())
+                } else {
+                    false
+                };
+
+                if !needs_fetch {
+                    recon.session_loading = false;
+                    return;
+                }
+
+                let path = if let Some(ref result) = recon.recon_result {
+                    result
+                        .sessions
+                        .get(selected)
+                        .map(|s| s.session_file.clone())
+                } else {
+                    None
+                };
+
+                let Some(path) = path else { return };
+
+                recon.session_loading = true;
+                recon.session_content_error = None;
+
+                let node_id = recon.node_id.clone();
+                let agent_short_name = recon.agent_short_name.clone();
+                let client = self.client.clone();
+                let tx = self.event_tx.clone();
+
+                tokio::spawn(async move {
+                    let Some(tx) = tx else { return };
+
+                    let result = client
+                        .acp_request(
+                            &node_id,
+                            "_praxis/read_file",
+                            serde_json::json!({
+                                "agent_short_name": agent_short_name,
+                                "file_type": "Session",
+                                "path": path,
+                            }),
+                        )
+                        .await;
+
+                    let (content, error) = match result {
+                        Ok(value) => {
+                            if let Some(c) = value.get("content").and_then(|v| v.as_str()) {
+                                (Some(c.to_string()), None)
+                            } else if let Some(e) = value.get("error").and_then(|v| v.as_str()) {
+                                (None, Some(e.to_string()))
+                            } else {
+                                (None, Some("Unknown response format".to_string()))
+                            }
+                        }
+                        Err(e) => (None, Some(format!("{}", e))),
+                    };
+
+                    let _ = tx.send(AppEvent::ReconSessionContent {
+                        target_idx: selected,
+                        content,
+                        error,
+                    });
+                });
+            }
+            _ => {}
+        }
+    }
+
+    async fn handle_recon_mouse(&mut self, mouse: MouseEvent) {
+        let Some(ref mut recon) = self.nodes.recon else { return };
+
+        let h = self.terminal_width;
+        let term_h = crossterm::terminal::size().map(|(_, h)| h).unwrap_or(40);
+        let terminal_area = Rect::new(0, 0, h, term_h);
+        let inner_area = terminal_area.inner(Margin {
+            vertical: 1,
+            horizontal: 2,
+        });
+        let frame_chunks = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
+        .split(inner_area);
+        let content_area = frame_chunks[1];
+
+        let block = Block::default().borders(Borders::ALL);
+        let overlay_inner = block.inner(content_area);
+        let recon_chunks = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
+        .split(overlay_inner);
+        let recon_content = recon_chunks[2];
+
+        let left_pct = recon.recon_split_percent.min(80).max(20);
+        let right_pct = 100u16.saturating_sub(left_pct);
+        let pane_chunks = Layout::horizontal([
+            Constraint::Percentage(left_pct),
+            Constraint::Percentage(right_pct),
+        ])
+        .split(recon_content);
+        let left_area = pane_chunks[0];
+        let right_area = pane_chunks[1];
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                if recon.right_pane_focused {
+                    recon.selected_right_scroll = recon.selected_right_scroll.saturating_sub(3);
+                } else {
+                    recon.selected_left = recon.selected_left.saturating_sub(3);
+                    recon.config_content_error = None;
+                    recon.session_content_error = None;
+                    recon.selected_right_scroll = 0;
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                let left_max = match recon.active_tab {
+                    ReconTab::Config => recon
+                        .recon_result
+                        .as_ref()
+                        .map_or(0, |r| r.config.len().saturating_sub(1)),
+                    ReconTab::Tools => 2,
+                    ReconTab::Sessions => recon
+                        .recon_result
+                        .as_ref()
+                        .map_or(0, |r| r.sessions.len().saturating_sub(1)),
+                };
+                if recon.right_pane_focused {
+                    recon.selected_right_scroll += 3;
+                } else {
+                    recon.selected_left = (recon.selected_left + 3).min(left_max);
+                    recon.config_content_error = None;
+                    recon.session_content_error = None;
+                    recon.selected_right_scroll = 0;
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if crate::ui::common::hit_vertical_border(left_area, mouse.column, mouse.row) {
+                    recon.recon_dragging = true;
+                    return;
+                }
+                if mouse.column >= left_area.x
+                    && mouse.column < left_area.x + left_area.width
+                    && mouse.row >= left_area.y
+                    && mouse.row < left_area.y + left_area.height
+                {
+                    recon.right_pane_focused = false;
+                    return;
+                }
+                if mouse.column >= right_area.x
+                    && mouse.column < right_area.x + right_area.width
+                    && mouse.row >= right_area.y
+                    && mouse.row < right_area.y + right_area.height
+                {
+                    recon.right_pane_focused = true;
+                    return;
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if recon.recon_dragging {
+                    recon.recon_split_percent = crate::ui::common::drag_split_percent(
+                        recon_content.x,
+                        recon_content.width,
+                        mouse.column,
+                    );
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                recon.recon_dragging = false;
+            }
+            _ => {}
+        }
+    }
+
     async fn handle_mouse(&mut self, mouse: MouseEvent) {
         //
         // Terminal mode: forward scroll as escape sequences.
@@ -1131,6 +1756,11 @@ impl App {
                     _ => {}
                 }
             }
+            return;
+        }
+
+        if self.nodes.recon.is_some() && self.active_window == Window::Nodes {
+            self.handle_recon_mouse(mouse).await;
             return;
         }
 

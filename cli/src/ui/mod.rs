@@ -5,6 +5,7 @@ pub mod nodes;
 pub mod operations;
 pub mod orchestrator;
 pub mod popup;
+pub mod recon;
 pub mod settings;
 pub mod status_bar;
 pub mod theme;

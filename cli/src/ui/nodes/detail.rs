@@ -26,7 +26,7 @@ pub(super) fn render_node_detail(
         .borders(Borders::ALL)
         .border_style(border_style)
         .title_style(Style::default().fg(MUTED))
-        .title(" Detail (enter to open session) ");
+        .title(" Detail ");
 
     let Some(node) = state.nodes.get(state.selected) else {
         let empty = Paragraph::new(Line::from(Span::styled(
