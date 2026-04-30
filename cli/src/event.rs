@@ -2,8 +2,8 @@ use crate::acp::AcpNotification;
 use crate::client::Client;
 use common::{
     ChainDefinitionInfo, ChainExecutionUpdate, ChainTriggerInfo, InterceptRule, InterceptStatus,
-    InterceptedTrafficEntry, OperationDefinitionInfo, SemanticOpUpdate, SessionUpdate,
-    SystemState, TerminalOutput, TrafficMatchWithDetails,
+    InterceptedTrafficEntry, OperationDefinitionInfo, ReconResult, SemanticOpUpdate,
+    SessionUpdate, SystemState, TerminalOutput, TrafficMatchWithDetails,
 };
 use crossterm::event::{Event, EventStream};
 use futures_util::StreamExt;
@@ -57,6 +57,23 @@ pub enum AppEvent {
     InterceptEntriesAppended(Vec<InterceptedTrafficEntry>),
     InterceptMatchesAppended(Vec<TrafficMatchWithDetails>),
     InterceptStatusChanged(InterceptStatus),
+    ReconGetResponse {
+        node_id: String,
+        agent_short_name: String,
+        recon_result: Option<ReconResult>,
+        performed_at: Option<String>,
+        is_semantic: Option<bool>,
+    },
+    ReconConfigContent {
+        target_idx: usize,
+        content: Option<String>,
+        error: Option<String>,
+    },
+    ReconSessionContent {
+        target_idx: usize,
+        content: Option<String>,
+        error: Option<String>,
+    },
     //
     // LogQuery result — either a successful result set or an error message
     // returned from the service.

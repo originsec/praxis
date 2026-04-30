@@ -7,6 +7,7 @@ mod terminal;
 pub use sessions_list::sessions_list_rect;
 
 use crate::app::NodesState;
+use crate::ui::recon;
 use crate::ui::theme::{ACCENT, MUTED};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -28,6 +29,11 @@ pub fn render(
 
     if let Some(ref opts) = state.session_options {
         session::render_session_options(f, area, opts);
+        return;
+    }
+
+    if let Some(ref recon) = state.recon {
+        recon::render_recon(f, area, recon);
         return;
     }
 
@@ -75,6 +81,8 @@ pub fn render(
                 hint_spans.push(Span::styled("enter", Style::default().fg(ACCENT)));
                 hint_spans.push(Span::styled(" session  ", Style::default().fg(MUTED)));
             }
+            hint_spans.push(Span::styled("r", Style::default().fg(ACCENT)));
+            hint_spans.push(Span::styled(" recon  ", Style::default().fg(MUTED)));
         } else {
             hint_spans.push(Span::styled("enter", Style::default().fg(ACCENT)));
             hint_spans.push(Span::styled(" select  ", Style::default().fg(MUTED)));

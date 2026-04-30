@@ -57,6 +57,7 @@ Node and agent management with integrated session chat and terminal access:
 - **Session Chat** — direct conversation with agents, with YOLO mode and working directory selection
 - **Active Sessions** overlay (`Ctrl+W`) — see every live session across nodes and connectors; Enter to resume, `d` / `Del` to discard, Esc to dismiss
 - **Terminal** (`Ctrl+R` to create, `Ctrl+T` to toggle) — full PTY terminal emulation with scrollback
+- **Recon** (`r` with an agent selected in the detail pane) — view reconnaissance results directly in the terminal
 
 Inside a chat view, `Esc` or `Ctrl+W` **pauses** the session (leaves it
 running on the node; resume from the Active Sessions overlay). `Ctrl+C`
@@ -65,6 +66,41 @@ The status bar shows `N sessions` whenever any concurrent sessions are
 live. On first connect, whenever you open the Nodes window, and after a
 node reset, the TUI calls `session/list` on each node to pick up
 sessions left alive from previous runs or other clients.
+
+#### Recon Overlay
+
+The recon overlay opens as a full-screen modal from the Nodes detail
+pane. It shows the same data as the web UI ReconModal — config files,
+tools, and sessions — in a tabbed terminal interface.
+
+| Key | Action |
+|-----|--------|
+| `Tab` / `1` `2` `3` | Switch tab (Config / Tools / Sessions) |
+| `↑` / `↓` | Navigate left pane list |
+| `PgUp` / `PgDn` | Scroll right pane content |
+| `r` | Trigger static recon refresh |
+| `d` | Trigger semantic recon (Discover) |
+| `Esc` / `q` | Close overlay |
+
+When opened, the TUI first checks the service cache for existing recon
+data. If none is cached, it sends an ACP `_praxis/recon` request to the
+node and polls `request_recon` every second for up to 60 seconds. Cached
+recon data appears instantly on re-open.
+
+The **Config** tab shows discovered configuration files in the left pane
+and the selected file's contents in the right pane. Pre-fetched contents
+are shown inline; files discovered by static recon but not yet fetched
+display a placeholder. Extracted metadata (user identities, API keys) is
+shown below the tab bar when present.
+
+The **Tools** tab has three categories: MCP Servers, Skills, and Internal
+tools. The left pane shows the category list; the right pane shows
+server details and tool lists for MCP, or flat tool lists for Skills and
+Internal.
+
+The **Sessions** tab shows discovered session files on the left and parsed
+conversation transcripts on the right. Session content is parsed as
+JSONL, JSON array, or raw text depending on the agent's format.
 
 ### Intercept (`Ctrl+I`)
 

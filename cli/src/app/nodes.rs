@@ -204,6 +204,11 @@ impl App {
                         self.nodes.agent_selected += 1;
                     }
                 }
+                KeyCode::Char('r') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    let Some(node) = self.nodes.nodes.get(self.nodes.selected) else { return };
+                    let Some(agent) = node.discovered_agents.get(self.nodes.agent_selected) else { return };
+                    self.open_recon(node.node_id.clone(), agent.short_name.clone());
+                }
                 KeyCode::Enter => {
                     self.start_session_with_selected_agent();
                 }
