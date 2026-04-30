@@ -218,6 +218,21 @@ pub async fn handle(ctx: &ServiceContext, message: ClientSignalMessage) -> Resul
             handle_lua_script_toggle_disabled(ctx, client_id, script_id, disabled).await,
 
         //
+        // Intercept targets.
+        //
+
+        ClientSignalMessage::InterceptTargetList { client_id } =>
+            handle_intercept_target_list(ctx, client_id).await,
+        ClientSignalMessage::InterceptTargetAdd { client_id, name, agent_short_name, domains, url_pattern } =>
+            handle_intercept_target_add(ctx, client_id, name, agent_short_name, domains, url_pattern).await,
+        ClientSignalMessage::InterceptTargetUpdate { client_id, target_id, name, agent_short_name, domains, url_pattern } =>
+            handle_intercept_target_update(ctx, client_id, target_id, name, agent_short_name, domains, url_pattern).await,
+        ClientSignalMessage::InterceptTargetDelete { client_id, target_id } =>
+            handle_intercept_target_delete(ctx, client_id, target_id).await,
+        ClientSignalMessage::InterceptTargetToggleDisabled { client_id, target_id, disabled } =>
+            handle_intercept_target_toggle_disabled(ctx, client_id, target_id, disabled).await,
+
+        //
         // LogQuery.
         //
 
@@ -2780,6 +2795,207 @@ async fn handle_lua_script_toggle_disabled(
         }
         Err(e) => {
             common::log_error!("Failed to toggle disabled for script {}: {}", script_id, e);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Intercept targets
+// ---------------------------------------------------------------------------
+
+//
+// Push the latest enabled intercept target list to all nodes. Used by
+// CRUD handlers below so node capture configuration stays in sync.
+//
+
+async fn broadcast_intercept_targets(ctx: &ServiceContext, action: &str) {
+    let targets = match ctx.database.get_enabled_intercept_targets().await {
+        Ok(t) => t,
+        Err(e) => {
+            common::log_error!("Failed to load intercept targets after {}: {}", action, e);
+            return;
+        }
+    };
+    if let Err(e) = ctx.node_handler.broadcast_intercept_targets(targets).await {
+        common::log_error!("Failed to broadcast intercept targets after {}: {}", action, e);
+    }
+}
+
+async fn handle_intercept_target_list(ctx: &ServiceContext, client_id: String) {
+    common::log_info!(
+        "Received InterceptTargetList from client {}",
+        common::short_id(&client_id)
+    );
+
+    match ctx.database.list_intercept_targets().await {
+        Ok(targets) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::InterceptTargetListResponse { targets },
+            )
+            .await;
+        }
+        Err(e) => {
+            common::log_error!("Failed to list intercept targets: {}", e);
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::InterceptTargetError { message: e.to_string() },
+            )
+            .await;
+        }
+    }
+}
+
+async fn handle_intercept_target_add(
+    ctx: &ServiceContext,
+    client_id: String,
+    name: String,
+    agent_short_name: String,
+    domains: Vec<String>,
+    url_pattern: Option<String>,
+) {
+    common::log_info!(
+        "Received InterceptTargetAdd from client {}",
+        common::short_id(&client_id)
+    );
+
+    let id = uuid::Uuid::new_v4().to_string();
+    match ctx.database.upsert_intercept_target(
+        &id, &name, &agent_short_name, &domains,
+        url_pattern.as_deref(), false, false,
+    ).await {
+        Ok(()) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::InterceptTargetAdded { id, name },
+            )
+            .await;
+            broadcast_intercept_targets(ctx, "add").await;
+        }
+        Err(e) => {
+            common::log_error!("Failed to add intercept target: {}", e);
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::InterceptTargetError { message: e.to_string() },
+            )
+            .await;
+        }
+    }
+}
+
+async fn handle_intercept_target_update(
+    ctx: &ServiceContext,
+    client_id: String,
+    target_id: String,
+    name: String,
+    agent_short_name: String,
+    domains: Vec<String>,
+    url_pattern: Option<String>,
+) {
+    common::log_info!(
+        "Received InterceptTargetUpdate from client {}",
+        common::short_id(&client_id)
+    );
+
+    match ctx.database.update_intercept_target(
+        &target_id, &name, &agent_short_name, &domains, url_pattern.as_deref(),
+    ).await {
+        Ok(_) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::InterceptTargetUpdated { id: target_id, name },
+            )
+            .await;
+            broadcast_intercept_targets(ctx, "update").await;
+        }
+        Err(e) => {
+            common::log_error!("Failed to update intercept target: {}", e);
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::InterceptTargetError { message: e.to_string() },
+            )
+            .await;
+        }
+    }
+}
+
+async fn handle_intercept_target_delete(
+    ctx: &ServiceContext,
+    client_id: String,
+    target_id: String,
+) {
+    common::log_info!(
+        "Received InterceptTargetDelete from client {}",
+        common::short_id(&client_id)
+    );
+
+    match ctx.database.delete_intercept_target(&target_id).await {
+        Ok(success) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::InterceptTargetDeleted {
+                    target_id: target_id.clone(),
+                    success,
+                },
+            )
+            .await;
+            if success {
+                broadcast_intercept_targets(ctx, "delete").await;
+            }
+        }
+        Err(e) => {
+            common::log_error!("Failed to delete intercept target: {}", e);
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::InterceptTargetError { message: e.to_string() },
+            )
+            .await;
+        }
+    }
+}
+
+async fn handle_intercept_target_toggle_disabled(
+    ctx: &ServiceContext,
+    client_id: String,
+    target_id: String,
+    disabled: bool,
+) {
+    common::log_info!(
+        "Received InterceptTargetToggleDisabled from client {}",
+        common::short_id(&client_id)
+    );
+
+    match ctx.database.set_intercept_target_disabled(&target_id, disabled).await {
+        Ok(success) => {
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::InterceptTargetDisabledToggled {
+                    target_id: target_id.clone(),
+                    disabled,
+                },
+            )
+            .await;
+            if success {
+                broadcast_intercept_targets(ctx, "toggle disabled").await;
+            }
+        }
+        Err(e) => {
+            common::log_error!("Failed to toggle intercept target disabled: {}", e);
+            let _ = send_to_client(
+                &ctx.client_publish_channel,
+                &client_id,
+                ClientDirectMessage::InterceptTargetError { message: e.to_string() },
+            )
+            .await;
         }
     }
 }

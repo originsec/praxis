@@ -25,7 +25,6 @@ local helpers = require("praxis.helpers")
 
 local AGENT_NAME = "Example AI"
 local AGENT_SHORT_NAME = "exampleai"
-local INTERCEPT_DOMAINS = { "api.exampleai.com" }
 
 local function verify_binary(path)
   local result = praxis.command_run({ program = path, args = { "--version" } })
@@ -63,10 +62,9 @@ return {
     }
   end,
 
-  -- Optional: traffic interception domains.
-  intercept_domains = function(_ctx)
-    return INTERCEPT_DOMAINS
-  end,
+  -- Traffic interception domains are no longer declared per-agent. To
+  -- capture traffic for this connector, add an entry in
+  -- Settings → Intercept that references AGENT_SHORT_NAME.
 
   -- Optional but recommended: reconnaissance.
   -- Use run_standard_recon + declarative recon_config.
@@ -544,7 +542,7 @@ mod session;
 
 pub use session::ExampleAISession;
 
-use crate::agent_connectors::traits::{Agent, AgentIntercept, AgentRecon, AgentSession};
+use crate::agent_connectors::traits::{Agent, AgentRecon, AgentSession};
 use async_trait::async_trait;
 use common::SessionContext;
 use once_cell::sync::OnceCell;
@@ -581,10 +579,6 @@ impl Agent for ExampleAIAgent {
 
     fn short_name(&self) -> &str {
         AGENT_SHORTNAME
-    }
-
-    fn as_intercept(&self) -> Option<&dyn AgentIntercept> {
-        Some(self)  // Return None if no interception support
     }
 
     fn as_recon(&self) -> Option<&dyn AgentRecon> {
@@ -684,25 +678,23 @@ fn is_process_running(name: &str) -> bool {
 }
 ```
 
-## Step 4: Implement Interception
+## Step 4: Configure Interception
 
-In `intercept.rs`:
+Traffic interception is no longer declared on the connector itself.
+Domains and URL filters live as **intercept targets** in the service
+database and are pushed to nodes at runtime. To enable capture for a
+new connector:
 
-```rust
-use super::ExampleAIAgent;
-use crate::agent_connectors::traits::AgentIntercept;
+1. Open **Settings → Intercept** in the web UI or TUI.
+2. Click **Add intercept target**.
+3. Set `agent_short_name` to the connector's short name (e.g.
+   `exampleai`), list the domains to capture, and optionally set a
+   URL regex filter.
+4. Save. The service broadcasts the new target list to all connected
+   nodes immediately.
 
-impl AgentIntercept for ExampleAIAgent {
-    fn intercept_domains(&self) -> Vec<&str> {
-        vec!["api.exampleai.com"]
-    }
-
-    fn intercept_url_pattern(&self) -> Option<&str> {
-        // Optional: regex to filter which URLs to capture
-        Some("v1/chat")
-    }
-}
-```
+Built-in connectors are seeded with a default intercept target on first
+boot; you can edit, disable, or delete those defaults from the same UI.
 
 ## Step 5: Implement Reconnaissance
 

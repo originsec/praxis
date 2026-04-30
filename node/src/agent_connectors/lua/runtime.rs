@@ -186,8 +186,6 @@ pub struct LuaManifest {
     pub name: String,
     pub short_name: String,
     pub has_recon: bool,
-    pub has_intercept_domains: bool,
-    pub has_intercept_url_pattern: bool,
     pub has_fingerprint: bool,
     pub has_read_session_content: bool,
 }
@@ -205,12 +203,6 @@ pub fn vm_parse_manifest(lua: &Lua) -> Result<LuaManifest> {
         .map_err(|_| anyhow!("Lua connector manifest missing required field 'short_name'"))?;
 
     let has_recon = table.contains_key("recon").map_err(lua_error)?;
-    let has_intercept_domains = table
-        .contains_key("intercept_domains")
-        .map_err(lua_error)?;
-    let has_intercept_url_pattern = table
-        .contains_key("intercept_url_pattern")
-        .map_err(lua_error)?;
     let has_fingerprint = table.contains_key("fingerprint").map_err(lua_error)?;
     let has_read_session_content = table
         .contains_key("read_session_content")
@@ -220,8 +212,6 @@ pub fn vm_parse_manifest(lua: &Lua) -> Result<LuaManifest> {
         name,
         short_name,
         has_recon,
-        has_intercept_domains,
-        has_intercept_url_pattern,
         has_fingerprint,
         has_read_session_content,
     })
@@ -243,28 +233,6 @@ pub fn vm_fingerprint_details(lua: &Lua) -> Result<FingerprintDetails> {
     let ctx = lua.to_value(&json!({})).map_err(lua_error)?;
     let value: Value = func.call(ctx).map_err(lua_error)?;
     parse_fingerprint_details(value)
-}
-
-pub fn vm_intercept_domains(lua: &Lua) -> Result<Vec<String>> {
-    let table = connector_table(lua)?;
-    let func: Function = table
-        .get("intercept_domains")
-        .map_err(lua_error)
-        .map_err(|_| anyhow!("Lua connector missing function 'intercept_domains'"))?;
-    let ctx = lua.to_value(&json!({})).map_err(lua_error)?;
-    let value: Value = func.call(ctx).map_err(lua_error)?;
-    parse_string_list(value)
-}
-
-pub fn vm_intercept_url_pattern(lua: &Lua) -> Result<Option<String>> {
-    let table = connector_table(lua)?;
-    let func: Function = table
-        .get("intercept_url_pattern")
-        .map_err(lua_error)
-        .map_err(|_| anyhow!("Lua connector missing function 'intercept_url_pattern'"))?;
-    let ctx = lua.to_value(&json!({})).map_err(lua_error)?;
-    let value: Value = func.call(ctx).map_err(lua_error)?;
-    parse_optional_string(value)
 }
 
 pub fn vm_recon(
@@ -1717,28 +1685,6 @@ fn parse_fingerprint_details(value: Value) -> Result<FingerprintDetails> {
             })
         }
         _ => Err(anyhow!("fingerprint must return a boolean or table")),
-    }
-}
-
-fn parse_string_list(value: Value) -> Result<Vec<String>> {
-    match value {
-        Value::Table(t) => {
-            let mut out = Vec::new();
-            for v in t.sequence_values::<String>() {
-                out.push(v.map_err(lua_error)?);
-            }
-            Ok(out)
-        }
-        Value::Nil => Ok(Vec::new()),
-        _ => Err(anyhow!("Expected string array")),
-    }
-}
-
-fn parse_optional_string(value: Value) -> Result<Option<String>> {
-    match value {
-        Value::String(s) => Ok(Some(s.to_str().map_err(lua_error)?.to_string())),
-        Value::Nil => Ok(None),
-        _ => Err(anyhow!("Expected string or nil")),
     }
 }
 

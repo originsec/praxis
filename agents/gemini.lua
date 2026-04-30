@@ -3,11 +3,6 @@ local helpers = require("praxis.helpers")
 local AGENT_NAME = "Gemini CLI"
 local AGENT_SHORT_NAME = "gemini"
 
-local INTERCEPT_DOMAINS = {
-  "generativelanguage.googleapis.com",
-  "cloudcode-pa.googleapis.com",
-}
-
 local function is_session_file(name)
   return name and helpers.starts_with(name, "session-") and helpers.ends_with(name, ".json")
 end
@@ -454,10 +449,6 @@ return {
       process_path = path,
       version = version,
     }
-  end,
-
-  intercept_domains = function(_ctx)
-    return INTERCEPT_DOMAINS
   end,
 
   recon = function(ctx)

@@ -19,62 +19,6 @@ pub fn render(f: &mut Frame, popup: &Popup) {
     }
 }
 
-pub fn render_intercept_method_picker(f: &mut Frame, picker: &crate::app::InterceptMethodPicker) {
-    let options = picker.options();
-    let inner_height = options.len() as u16 + 3; // title + options + hint
-    let height = inner_height + 2;
-    let width = 54u16.min(f.area().width.saturating_sub(4)).max(40);
-    let area = centered_rect_fixed(width, height, f.area());
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(ACCENT))
-        .title(Span::styled(
-            " Select Interception Method ",
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-        ))
-        .style(Style::default().bg(POPUP_BG));
-
-    f.render_widget(Clear, area);
-    f.render_widget(block.clone(), area);
-    let inner = block.inner(area);
-
-    let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(Span::styled(
-        format!(" Node: {}", picker.machine_name),
-        Style::default().fg(MUTED),
-    )));
-    lines.push(Line::from(""));
-    for (i, opt) in options.iter().enumerate() {
-        let is_sel = i == picker.selected;
-        let bg = if is_sel { POPUP_HIGHLIGHT_BG } else { POPUP_BG };
-        let label_style = if !opt.enabled {
-            Style::default().fg(DIM).bg(bg)
-        } else if is_sel {
-            Style::default().fg(ACCENT).bg(bg).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(TEXT).bg(bg)
-        };
-        let desc_style = Style::default().fg(DIM).bg(bg);
-        let prefix = if is_sel { " \u{25b6} " } else { "   " };
-        lines.push(Line::from(vec![
-            Span::styled(prefix.to_string(), label_style),
-            Span::styled(format!("{:12}", opt.label), label_style),
-            Span::styled(format!("  {}", opt.description), desc_style),
-        ]));
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::styled(" \u{2191}\u{2193}", Style::default().fg(ACCENT)),
-        Span::styled(" select  ", Style::default().fg(MUTED)),
-        Span::styled("\u{23ce}", Style::default().fg(ACCENT)),
-        Span::styled(" enable  ", Style::default().fg(MUTED)),
-        Span::styled("esc", Style::default().fg(ACCENT)),
-        Span::styled(" cancel", Style::default().fg(MUTED)),
-    ]));
-    f.render_widget(Paragraph::new(lines), inner);
-}
-
 pub fn render_confirm(f: &mut Frame, confirm: &crate::app::ConfirmAction) {
     let is_info = matches!(confirm.action, crate::app::ConfirmKind::Info);
     let width = (confirm.message.len() as u16 + 6)

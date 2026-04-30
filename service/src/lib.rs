@@ -3,6 +3,7 @@
 mod acp_node_proxy;
 mod acp_server;
 mod banner;
+mod builtin_intercept_targets;
 mod claude_bridge;
 mod remote_nodes;
 mod config;
@@ -241,6 +242,69 @@ async fn run_main_loop() -> Result<()> {
             }
             Err(e) => {
                 common::log_warn!("Failed to check Lua agent scripts for seeding: {}", e);
+            }
+        }
+    }
+
+    //
+    // Seed or update built-in intercept targets. Mirrors the Lua-script
+    // seeding above: new built-ins are inserted on first boot,
+    // existing built-in rows are refreshed when the version key changes,
+    // and user-deleted built-ins stay deleted.
+    //
+    {
+        use builtin_intercept_targets::{BUILTIN_INTERCEPT_TARGETS, BUILTIN_INTERCEPT_TARGETS_VERSION};
+        let current_version = BUILTIN_INTERCEPT_TARGETS_VERSION;
+        let last_version = database.get_config("builtin_intercept_targets_version").await.unwrap_or(None);
+        let should_update = last_version.as_deref() != Some(current_version);
+
+        match database.list_intercept_targets().await {
+            Ok(existing) => {
+                let existing_by_id: std::collections::HashMap<&str, &common::InterceptTargetInfo> =
+                    existing.iter().map(|t| (t.id.as_str(), t)).collect();
+                let mut seeded = 0usize;
+                let mut updated = 0usize;
+
+                for bt in BUILTIN_INTERCEPT_TARGETS {
+                    let domains: Vec<String> = bt.domains.iter().map(|s| s.to_string()).collect();
+                    match existing_by_id.get(bt.id) {
+                        None => {
+                            if let Err(e) = database.upsert_intercept_target(
+                                bt.id, bt.name, bt.agent_short_name, &domains,
+                                bt.url_pattern, false, true,
+                            ).await {
+                                common::log_warn!("Failed to seed builtin intercept target '{}': {}", bt.id, e);
+                            } else {
+                                seeded += 1;
+                            }
+                        }
+                        Some(t) if t.is_builtin && should_update => {
+                            if let Err(e) = database.upsert_intercept_target(
+                                bt.id, bt.name, bt.agent_short_name, &domains,
+                                bt.url_pattern, t.disabled, true,
+                            ).await {
+                                common::log_warn!("Failed to update builtin intercept target '{}': {}", bt.id, e);
+                            } else {
+                                updated += 1;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                if seeded > 0 {
+                    common::log_info!("Seeded {} default intercept target(s)", seeded);
+                }
+                if updated > 0 {
+                    common::log_info!("Updated {} builtin intercept target(s) to version {}", updated, current_version);
+                }
+
+                if should_update {
+                    let _ = database.set_config("builtin_intercept_targets_version", current_version).await;
+                }
+            }
+            Err(e) => {
+                common::log_warn!("Failed to check intercept targets for seeding: {}", e);
             }
         }
     }

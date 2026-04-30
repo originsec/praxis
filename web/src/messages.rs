@@ -316,6 +316,36 @@ pub enum BrowserMessage {
     },
 
     //
+    // Intercept target messages.
+    //
+    /// List all intercept targets
+    InterceptTargetList,
+    /// Add a new intercept target
+    InterceptTargetAdd {
+        name: String,
+        agent_short_name: String,
+        domains: Vec<String>,
+        url_pattern: Option<String>,
+    },
+    /// Update an existing intercept target
+    InterceptTargetUpdate {
+        target_id: String,
+        name: String,
+        agent_short_name: String,
+        domains: Vec<String>,
+        url_pattern: Option<String>,
+    },
+    /// Delete an intercept target
+    InterceptTargetDelete {
+        target_id: String,
+    },
+    /// Toggle disabled state for an intercept target
+    InterceptTargetToggleDisabled {
+        target_id: String,
+        disabled: bool,
+    },
+
+    //
     // LogQuery messages.
     //
     LogQuery {
@@ -660,6 +690,32 @@ pub enum ServerMessage {
     LuaAgentScriptDisabledToggled {
         script_id: String,
         disabled: bool,
+    },
+
+    //
+    // Intercept target messages.
+    //
+    InterceptTargetList {
+        targets: Vec<common::InterceptTargetInfo>,
+    },
+    InterceptTargetAdded {
+        id: String,
+        name: String,
+    },
+    InterceptTargetUpdated {
+        id: String,
+        name: String,
+    },
+    InterceptTargetDeleted {
+        target_id: String,
+        success: bool,
+    },
+    InterceptTargetDisabledToggled {
+        target_id: String,
+        disabled: bool,
+    },
+    InterceptTargetError {
+        message: String,
     },
 
     //

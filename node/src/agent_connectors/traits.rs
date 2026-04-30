@@ -56,18 +56,6 @@ pub trait AgentSession: Send + Sync {
 }
 
 //
-// Trait for agents that support traffic interception.
-// Implement this trait to enable interception of network traffic for an agent.
-//
-
-pub trait AgentIntercept: Send + Sync {
-    fn intercept_domains(&self) -> Vec<&str>;           // Domains to intercept.
-    fn intercept_url_pattern(&self) -> Option<&str> {   // Regex pattern applied to full URL for filtering. Collect telemetry on match.
-        None
-    }
-}
-
-//
 // Trait for agents that support reconnaissance.
 // Implement this trait to enable discovery of tools, config, sessions, and project paths.
 //
@@ -92,10 +80,6 @@ pub trait AgentRecon: Send + Sync {
 pub trait Agent: Send + Sync {
     fn name(&self) -> &str;
     fn short_name(&self) -> &str;
-
-    fn as_intercept(&self) -> Option<&dyn AgentIntercept> {
-        None
-    }
 
     fn as_recon(&self) -> Option<&dyn AgentRecon> {
         None

@@ -189,6 +189,18 @@ export interface LuaAgentScriptInfo {
   updated_at: string;
 }
 
+export interface InterceptTargetInfo {
+  id: string;
+  name: string;
+  agent_short_name: string;
+  domains: string[];
+  url_pattern: string | null;
+  disabled: boolean;
+  is_builtin: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export type InterceptCommandResult =
   | { Enabled: { method: InterceptMethod } }
   | 'Disabled';
@@ -785,6 +797,14 @@ export type BrowserMessage =
   | { type: 'lua_agent_script_list' }
   | { type: 'lua_agent_script_toggle_disabled'; script_id: string; disabled: boolean }
   //
+  // Intercept target messages.
+  //
+  | { type: 'intercept_target_list' }
+  | { type: 'intercept_target_add'; name: string; agent_short_name: string; domains: string[]; url_pattern: string | null }
+  | { type: 'intercept_target_update'; target_id: string; name: string; agent_short_name: string; domains: string[]; url_pattern: string | null }
+  | { type: 'intercept_target_delete'; target_id: string }
+  | { type: 'intercept_target_toggle_disabled'; target_id: string; disabled: boolean }
+  //
   // LogQuery messages.
   //
   | { type: 'log_query'; query: string }
@@ -903,6 +923,15 @@ export type ServerMessage =
   | { type: 'lua_agent_script_defaults_reset'; count: number }
   | { type: 'lua_agent_script_list'; scripts: LuaAgentScriptInfo[] }
   | { type: 'lua_agent_script_disabled_toggled'; script_id: string; disabled: boolean }
+  //
+  // Intercept target messages.
+  //
+  | { type: 'intercept_target_list'; targets: InterceptTargetInfo[] }
+  | { type: 'intercept_target_added'; id: string; name: string }
+  | { type: 'intercept_target_updated'; id: string; name: string }
+  | { type: 'intercept_target_deleted'; target_id: string; success: boolean }
+  | { type: 'intercept_target_disabled_toggled'; target_id: string; disabled: boolean }
+  | { type: 'intercept_target_error'; message: string }
   //
   // LogQuery messages.
   //

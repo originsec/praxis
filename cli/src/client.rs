@@ -80,6 +80,7 @@ struct ClientState {
     current_chain: Option<ChainDefinitionFull>,
     pending_semantic_op: Option<String>,
     lua_agent_scripts: Vec<LuaAgentScriptInfo>,
+    intercept_targets: Vec<common::InterceptTargetInfo>,
     session_update_tx: Option<tokio::sync::mpsc::UnboundedSender<common::SessionUpdate>>,
 
     //
@@ -407,6 +408,17 @@ impl Client {
             | ClientDirectMessage::LuaAgentScriptDefaultsReset { .. }
             | ClientDirectMessage::LuaAgentScriptDisabledToggled { .. } => {
                 // Trigger a re-fetch handled by the app layer.
+            }
+
+            ClientDirectMessage::InterceptTargetListResponse { targets } => {
+                state.intercept_targets = targets;
+            }
+            ClientDirectMessage::InterceptTargetAdded { .. }
+            | ClientDirectMessage::InterceptTargetUpdated { .. }
+            | ClientDirectMessage::InterceptTargetDeleted { .. }
+            | ClientDirectMessage::InterceptTargetDisabledToggled { .. }
+            | ClientDirectMessage::InterceptTargetError { .. } => {
+                // Re-fetch handled by the app layer.
             }
 
             ClientDirectMessage::SessionUpdate(update) => {
@@ -1304,6 +1316,78 @@ impl Client {
     pub async fn reset_lua_agent_script_defaults(&self) -> Result<()> {
         let message = ClientSignalMessage::LuaAgentScriptResetDefaults {
             client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    //
+    // Intercept target methods.
+    //
+
+    pub async fn request_intercept_targets(&self) -> Result<()> {
+        let message = ClientSignalMessage::InterceptTargetList {
+            client_id: self.client_id.clone(),
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn get_intercept_targets(&self) -> Vec<common::InterceptTargetInfo> {
+        self.state.lock().await.intercept_targets.clone()
+    }
+
+    pub async fn add_intercept_target(
+        &self,
+        name: String,
+        agent_short_name: String,
+        domains: Vec<String>,
+        url_pattern: Option<String>,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::InterceptTargetAdd {
+            client_id: self.client_id.clone(),
+            name,
+            agent_short_name,
+            domains,
+            url_pattern,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn update_intercept_target(
+        &self,
+        target_id: String,
+        name: String,
+        agent_short_name: String,
+        domains: Vec<String>,
+        url_pattern: Option<String>,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::InterceptTargetUpdate {
+            client_id: self.client_id.clone(),
+            target_id,
+            name,
+            agent_short_name,
+            domains,
+            url_pattern,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn delete_intercept_target(&self, target_id: String) -> Result<()> {
+        let message = ClientSignalMessage::InterceptTargetDelete {
+            client_id: self.client_id.clone(),
+            target_id,
+        };
+        self.publish_signal(message).await
+    }
+
+    pub async fn toggle_intercept_target_disabled(
+        &self,
+        target_id: String,
+        disabled: bool,
+    ) -> Result<()> {
+        let message = ClientSignalMessage::InterceptTargetToggleDisabled {
+            client_id: self.client_id.clone(),
+            target_id,
+            disabled,
         };
         self.publish_signal(message).await
     }

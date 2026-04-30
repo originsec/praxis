@@ -1,6 +1,8 @@
 mod about;
 mod agents;
 mod forms;
+mod intercept;
+mod intercept_target_form;
 mod llm;
 mod service;
 
@@ -34,6 +36,7 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState) {
     match state.tab {
         SettingsTab::Llm => llm::render_llm(f, content, state),
         SettingsTab::Agents => agents::render_agents(f, content, state),
+        SettingsTab::Intercept => intercept::render_intercept(f, content, state),
         SettingsTab::Service => service::render_service(f, content, state),
         SettingsTab::About => about::render_about(f, content, state),
     }
@@ -44,6 +47,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState) {
 
     if let Some(ref form) = state.model_form {
         forms::render_model_form(f, area, form);
+    }
+
+    if let Some(ref form) = state.intercept_target_form {
+        intercept_target_form::render(f, area, form);
     }
 
     if let Some(ref msg) = state.status_message {
@@ -71,6 +78,8 @@ fn render_tabs(f: &mut Frame, area: Rect, state: &SettingsState) {
         Span::styled(" LLM ", tab_style(SettingsTab::Llm)),
         Span::styled("  \u{2502}  ", Style::default().fg(DIM)),
         Span::styled(" Agents ", tab_style(SettingsTab::Agents)),
+        Span::styled("  \u{2502}  ", Style::default().fg(DIM)),
+        Span::styled(" Intercept ", tab_style(SettingsTab::Intercept)),
         Span::styled("  \u{2502}  ", Style::default().fg(DIM)),
         Span::styled(" Service ", tab_style(SettingsTab::Service)),
         Span::styled("  \u{2502}  ", Style::default().fg(DIM)),

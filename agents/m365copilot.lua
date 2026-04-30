@@ -4,9 +4,6 @@ local devtools = require("praxis.devtools")
 local AGENT_NAME = "Microsoft 365 Copilot"
 local AGENT_SHORT_NAME = "m365copilot"
 
-local INTERCEPT_DOMAINS = { "substrate.office.com" }
-local INTERCEPT_URL_PATTERN = "m365Copilot/Chathub"
-
 local WORKING_DIR_WORK = "Work"
 local WORKING_DIR_WEB = "Web"
 local TOGGLE_WORK_SELECTOR = 'button[data-testid="toggle-work"]'
@@ -301,14 +298,6 @@ return {
       available = path ~= nil,
       process_path = path,
     }
-  end,
-
-  intercept_domains = function(_ctx)
-    return INTERCEPT_DOMAINS
-  end,
-
-  intercept_url_pattern = function(_ctx)
-    return INTERCEPT_URL_PATTERN
   end,
 
   recon = function(ctx)

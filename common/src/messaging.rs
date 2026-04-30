@@ -240,6 +240,44 @@ pub struct LuaAgentScriptInfo {
     pub updated_at: String,
 }
 
+//
+// Intercept target configuration sent from the service to nodes. Each
+// target groups one or more domains under an optional URL filter regex
+// and is attributed to a specific agent (by short_name) for routing of
+// captured traffic.
+//
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct InterceptTargetConfig {
+    pub id: String,
+    pub name: String,
+    pub agent_short_name: String,
+    pub domains: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url_pattern: Option<String>,
+}
+
+//
+// Service-side view of an intercept target including persistence
+// metadata. Used by the web/TUI management UIs.
+//
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct InterceptTargetInfo {
+    pub id: String,
+    pub name: String,
+    pub agent_short_name: String,
+    pub domains: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url_pattern: Option<String>,
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default)]
+    pub is_builtin: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 /// Metadata for a registered Lua connector
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LuaRegisteredAgentInfo {
@@ -457,6 +495,12 @@ pub enum NodeBroadcastMessage {
     AgentRegistryUpdate {
         scripts: Vec<String>,
     },
+    /// Replace the node's current intercept target list. Sent whenever the
+    /// service-side target configuration changes. Disabled targets are
+    /// filtered out before broadcast.
+    InterceptTargetsUpdate {
+        targets: Vec<InterceptTargetConfig>,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -473,6 +517,8 @@ pub struct NodeRegistrationAck {
     pub lua_scripts: Vec<String>,
     #[serde(default)]
     pub event_logging_enabled: bool,
+    #[serde(default)]
+    pub intercept_targets: Vec<InterceptTargetConfig>,
 }
 
 //
@@ -1914,6 +1960,37 @@ pub enum ClientSignalMessage {
     },
 
     //
+    // Intercept targets (stored in service database, pushed to nodes).
+    //
+    InterceptTargetList {
+        client_id: String,
+    },
+    InterceptTargetAdd {
+        client_id: String,
+        name: String,
+        agent_short_name: String,
+        domains: Vec<String>,
+        url_pattern: Option<String>,
+    },
+    InterceptTargetUpdate {
+        client_id: String,
+        target_id: String,
+        name: String,
+        agent_short_name: String,
+        domains: Vec<String>,
+        url_pattern: Option<String>,
+    },
+    InterceptTargetDelete {
+        client_id: String,
+        target_id: String,
+    },
+    InterceptTargetToggleDisabled {
+        client_id: String,
+        target_id: String,
+        disabled: bool,
+    },
+
+    //
     // LogQuery - KQL query interface over captured logs.
     //
     LogQuery {
@@ -2285,6 +2362,32 @@ pub enum ClientDirectMessage {
     LuaAgentScriptDisabledToggled {
         script_id: String,
         disabled: bool,
+    },
+
+    //
+    // Intercept target responses.
+    //
+    InterceptTargetListResponse {
+        targets: Vec<InterceptTargetInfo>,
+    },
+    InterceptTargetAdded {
+        id: String,
+        name: String,
+    },
+    InterceptTargetUpdated {
+        id: String,
+        name: String,
+    },
+    InterceptTargetDeleted {
+        target_id: String,
+        success: bool,
+    },
+    InterceptTargetDisabledToggled {
+        target_id: String,
+        disabled: bool,
+    },
+    InterceptTargetError {
+        message: String,
     },
 
     //

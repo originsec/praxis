@@ -60,7 +60,6 @@ pub struct App {
     pub trigger_form: Option<TriggerForm>,
     pub add_remote_node_form: Option<AddRemoteNodeForm>,
     pub confirm: Option<ConfirmAction>,
-    pub intercept_method_picker: Option<InterceptMethodPicker>,
     pub terminal_width: u16,
     pub event_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::event::AppEvent>>,
     pub needs_full_redraw: bool,
@@ -383,7 +382,6 @@ impl App {
             trigger_form: None,
             add_remote_node_form: None,
             confirm: None,
-            intercept_method_picker: None,
             terminal_width: 0,
             event_tx: Some(event_tx),
             needs_full_redraw: false,
@@ -937,6 +935,17 @@ impl App {
                     }
                 }
 
+                if self.active_window == Window::Settings
+                    && self.settings.tab == SettingsTab::Intercept
+                    && !self.settings.intercept_targets_loaded
+                {
+                    let targets = self.client.get_intercept_targets().await;
+                    if !targets.is_empty() {
+                        self.poll_intercept_targets(targets);
+                        redraw = true;
+                    }
+                }
+
                 //
                 // Clear settings status message after 3 seconds.
                 //
@@ -1051,14 +1060,6 @@ impl App {
         //
         if self.nodes.recon.is_some() && self.active_window == Window::Nodes {
             self.handle_recon_key(key).await;
-            return;
-        }
-
-        //
-        // Intercept method picker intercepts all keys while open.
-        //
-        if self.intercept_method_picker.is_some() {
-            self.handle_intercept_method_picker_key(key).await;
             return;
         }
 

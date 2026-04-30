@@ -27,77 +27,23 @@ pub struct ConfirmAction {
 }
 
 //
-// Modal picker shown when enabling intercept on a node — mirrors the
-// four methods exposed by the web UI (proxy / vpn / hosts / tproxy).
-// Platform-specific options are disabled for nodes that can't use them
-// (VPN is Windows-only, TPROXY is Linux-only).
-//
-pub struct InterceptMethodPicker {
-    pub node_id: String,
-    pub machine_name: String,
-    pub is_windows: bool,
-    pub is_linux: bool,
-    pub selected: usize,
-}
-
-impl InterceptMethodPicker {
-    pub fn options(&self) -> Vec<InterceptMethodOption> {
-        vec![
-            InterceptMethodOption {
-                method: common::InterceptMethod::Proxy,
-                label: "System Proxy",
-                description: "Configures system proxy settings",
-                enabled: true,
-            },
-            InterceptMethodOption {
-                method: common::InterceptMethod::Vpn,
-                label: "VPN",
-                description: if self.is_windows {
-                    "Virtual network adapter"
-                } else {
-                    "Windows only"
-                },
-                enabled: self.is_windows,
-            },
-            InterceptMethodOption {
-                method: common::InterceptMethod::Hosts,
-                label: "Hosts File",
-                description: "Redirects domains via /etc/hosts",
-                enabled: true,
-            },
-            InterceptMethodOption {
-                method: common::InterceptMethod::Tproxy,
-                label: "TPROXY",
-                description: if self.is_linux {
-                    "Transparent proxy via iptables"
-                } else {
-                    "Linux only"
-                },
-                enabled: self.is_linux,
-            },
-        ]
-    }
-}
-
-pub struct InterceptMethodOption {
-    pub method: common::InterceptMethod,
-    pub label: &'static str,
-    pub description: &'static str,
-    pub enabled: bool,
-}
-
 pub enum ConfirmKind {
     DeleteOp(String), // full_name
     ClearAllExecutions,
     DeleteModel(usize),        // index into model_definitions
     DeleteAgentScript(String), // script_id
     ResetAgentScripts,
+    DeleteInterceptTarget(String), // target_id
     ResetNode(String), // node_id
     DeleteNode(String), // node_id — service handles whether it's local or remote
     CloseOrchestratorSession,
     ClearAllTraffic,
     DeleteInterceptRule(i64),
-    ToggleIntercept { node_id: String, enable: bool },
+    ToggleIntercept {
+        node_id: String,
+        enable: bool,
+        method: Option<common::InterceptMethod>,
+    },
     DeleteTrigger(String), // trigger_id
     Info,
 }
@@ -244,6 +190,11 @@ impl App {
                 self.settings.agent_scripts_loaded = false;
                 self.load_agent_scripts().await;
             }
+            ConfirmKind::DeleteInterceptTarget(target_id) => {
+                let _ = self.client.delete_intercept_target(target_id).await;
+                self.settings.intercept_targets_loaded = false;
+                self.load_intercept_targets().await;
+            }
             ConfirmKind::DeleteNode(node_id) => {
                 let _ = self.client.remove_node(&node_id).await;
                 let to_drop: Vec<String> = self
@@ -274,9 +225,9 @@ impl App {
             ConfirmKind::DeleteInterceptRule(id) => {
                 self.delete_intercept_rule(id).await;
             }
-            ConfirmKind::ToggleIntercept { node_id, enable } => {
+            ConfirmKind::ToggleIntercept { node_id, enable, method } => {
                 let result = if enable {
-                    self.client.enable_intercept(node_id, None).await
+                    self.client.enable_intercept(node_id, method).await
                 } else {
                     self.client.disable_intercept(node_id).await
                 };
@@ -296,54 +247,6 @@ impl App {
                 self.refresh_triggers_after(Duration::from_millis(200));
             }
             ConfirmKind::Info => {}
-        }
-    }
-
-    pub(crate) async fn handle_intercept_method_picker_key(&mut self, key: KeyEvent) {
-        let Some(picker) = self.intercept_method_picker.as_mut() else {
-            return;
-        };
-        let options = picker.options();
-        match key.code {
-            KeyCode::Esc => {
-                self.intercept_method_picker = None;
-            }
-            KeyCode::Up => {
-                //
-                // Move to previous enabled option, wrapping.
-                //
-                let n = options.len();
-                for _ in 0..n {
-                    picker.selected = (picker.selected + n - 1) % n;
-                    if options[picker.selected].enabled {
-                        break;
-                    }
-                }
-            }
-            KeyCode::Down => {
-                let n = options.len();
-                for _ in 0..n {
-                    picker.selected = (picker.selected + 1) % n;
-                    if options[picker.selected].enabled {
-                        break;
-                    }
-                }
-            }
-            KeyCode::Enter => {
-                let Some(opt) = options.get(picker.selected) else {
-                    return;
-                };
-                if !opt.enabled {
-                    return;
-                }
-                let node_id = picker.node_id.clone();
-                let method = opt.method;
-                self.intercept_method_picker = None;
-                if let Err(e) = self.client.enable_intercept(node_id, Some(method)).await {
-                    self.intercept.set_error(format!("Intercept enable: {}", e));
-                }
-            }
-            _ => {}
         }
     }
 

@@ -177,6 +177,7 @@ async fn async_main() {
             factory.clone(),
             shutdown_token.clone(),
             result.lua_scripts,
+            result.intercept_targets,
         )
         .await
         {
