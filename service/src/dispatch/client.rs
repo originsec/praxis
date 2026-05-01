@@ -11,7 +11,8 @@ use common::{
 use crate::config::service_config::{
     APPLICATION_LOGS_ENABLED, CLAUDE_CCRV1_ENABLED, CLAUDE_CCRV1_PORT,
     CLAUDE_CCRV2_ENABLED, CLAUDE_CCRV2_PORT, KNOWN_CONFIG_KEYS,
-    MCP_SERVER_ENABLED, MCP_SERVER_PORT,
+    MCP_SERVER_ENABLED, MCP_SERVER_PORT, PRAXIS_AGENT_SETTINGS,
+    PRAXIS_AGENT_SYSTEM_PROMPT,
 };
 use crate::conversions::{to_common as convert_chain_element, to_database as convert_msg_chain_element};
 use crate::database::{self, OperationDefinition};
@@ -819,6 +820,7 @@ async fn handle_config_set(
         let mut mcp_server_changed = false;
         let mut ccrv1_changed = false;
         let mut ccrv2_changed = false;
+        let mut praxis_agent_changed = false;
         for (key, value) in values {
             if !KNOWN_CONFIG_KEYS.contains(&key.as_str()) {
                 common::log_warn!("Setting unrecognized config key: '{}'", key);
@@ -836,6 +838,9 @@ async fn handle_config_set(
             }
             if key == CLAUDE_CCRV2_ENABLED || key == CLAUDE_CCRV2_PORT {
                 ccrv2_changed = true;
+            }
+            if key == PRAXIS_AGENT_SETTINGS || key == PRAXIS_AGENT_SYSTEM_PROMPT {
+                praxis_agent_changed = true;
             }
             if let Err(e) = config.set(key, value).await {
                 save_error = Some(e);
@@ -862,6 +867,29 @@ async fn handle_config_set(
                 let _ = publish_json_exchange(&ctx.broadcast_channel, NODE_BROADCAST_EXCHANGE, &node_message).await;
                 let client_message = ClientBroadcastMessage::EventLoggingSet { enabled };
                 let _ = publish_json_exchange(&ctx.broadcast_channel, CLIENT_BROADCAST_EXCHANGE, &client_message).await;
+            }
+
+            if praxis_agent_changed {
+                let settings = config.get_praxis_agent_settings();
+                let enabled = settings.as_ref().map(|s| s.enabled).unwrap_or(false);
+                let resolved_config = config.resolve_praxis_agent_config();
+                if enabled && resolved_config.is_none() {
+                    common::log_warn!(
+                        "Praxis agent is enabled but its selected model could not be resolved"
+                    );
+                }
+
+                let node_message = NodeBroadcastMessage::PraxisAgentEnabled { enabled };
+                let _ = publish_json_exchange(
+                    &ctx.broadcast_channel,
+                    NODE_BROADCAST_EXCHANGE,
+                    &node_message,
+                )
+                .await;
+                common::log_info!(
+                    "Broadcast PraxisAgentEnabled {{ enabled: {} }} after config change",
+                    enabled
+                );
             }
 
             //

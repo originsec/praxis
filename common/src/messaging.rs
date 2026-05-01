@@ -220,6 +220,35 @@ pub struct DiscoveredAgent {
     pub version: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PraxisAgentConfig {
+    pub provider: String,
+    #[serde(alias = "apiKey")]
+    pub api_key: String,
+    #[serde(alias = "endpointUrl")]
+    pub endpoint_url: String,
+    #[serde(alias = "modelName")]
+    pub model_name: String,
+    #[serde(
+        default,
+        alias = "thinkingEffort",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub thinking_effort: Option<String>,
+    #[serde(
+        default,
+        alias = "systemPrompt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub system_prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FactoryConfig {
+    #[serde(default)]
+    pub praxis_agent_enabled: bool,
+}
+
 //
 // Agent Discovery - Discovered LLM endpoints on the network.
 //
@@ -491,6 +520,10 @@ pub enum NodeBroadcastMessage {
     EventLoggingSet {
         enabled: bool,
     },
+    /// Enable/disable the native Praxis agent connector on nodes.
+    PraxisAgentEnabled {
+        enabled: bool,
+    },
     /// Atomic agent registry update: rebuild registry from native agents + these scripts.
     AgentRegistryUpdate {
         scripts: Vec<String>,
@@ -581,6 +614,12 @@ pub struct SessionContext {
     /// permissions unless yolo_mode is enabled. Default: false.
     #[serde(default)]
     pub interactive: bool,
+    /// Optional model requested via ACP-native model metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Resolved Praxis agent config passed through ACP _meta for this session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub praxis_agent_config: Option<PraxisAgentConfig>,
 }
 
 /// Method of interception

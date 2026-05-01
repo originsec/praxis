@@ -43,7 +43,8 @@ pub async fn handle_terminal_command(
                 Ok(_) => {
                     common::log_info!(
                         "Created terminal session {} for client {}",
-                        terminal_id, client_id
+                        terminal_id,
+                        client_id
                     );
                     NodeCommandResult::Terminal(TerminalCommandResult::Created { terminal_id })
                 }
@@ -110,7 +111,10 @@ pub async fn handle_terminal_command(
                 }
             };
 
-            let data = state.terminal_manager.get_scrollback(&terminal_id).unwrap_or_default();
+            let data = state
+                .terminal_manager
+                .get_scrollback(&terminal_id)
+                .unwrap_or_default();
             NodeCommandResult::Terminal(TerminalCommandResult::Replay { data })
         }
         TerminalCommand::Close => {
@@ -132,7 +136,8 @@ pub async fn handle_terminal_command(
                 Ok(_) => {
                     common::log_info!(
                         "Closed terminal session {} for client {}",
-                        terminal_id, client_id
+                        terminal_id,
+                        client_id
                     );
                     NodeCommandResult::Terminal(TerminalCommandResult::Closed)
                 }

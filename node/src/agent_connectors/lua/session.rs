@@ -72,7 +72,9 @@ impl AgentSession for LuaAgentSession {
     }
 
     fn supports_streaming(&self) -> bool {
-        self.is_acp()
+        // Lua agents use their own ACP client (acp_prompt) for streaming,
+        // not the AgentSession trait's stream_sender mechanism.
+        false
     }
 
     fn transact(&self, prompt: &str) -> Result<String> {

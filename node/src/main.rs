@@ -12,6 +12,7 @@ mod utils;
 
 use agent_connectors::{AgentFactory, AgentRegistry};
 use app::register_with_service;
+use common::FactoryConfig;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
@@ -118,7 +119,7 @@ async fn async_main() {
     // registers.
     //
 
-    let factory = Arc::new(AgentFactory::new());
+    let factory = Arc::new(AgentFactory::new(FactoryConfig::default()));
     let mut initial_registry = AgentRegistry::new();
     initial_registry.rebuild(&factory, &[]);
     let registry = Arc::new(RwLock::new(initial_registry));

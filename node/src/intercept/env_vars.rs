@@ -4,7 +4,9 @@ use std::path::PathBuf;
 
 /// Path where we store the exported root CA certificate
 pub fn cert_export_path() -> PathBuf {
-    std::env::temp_dir().join("praxis_certs").join("praxis_root_ca.pem")
+    std::env::temp_dir()
+        .join("praxis_certs")
+        .join("praxis_root_ca.pem")
 }
 
 /// Export the root CA certificate to a file for NODE_EXTRA_CA_CERTS
@@ -15,12 +17,10 @@ pub fn export_ca_cert(cert_pem: &str) -> Result<PathBuf> {
     // Ensure directory exists.
     //
     if let Some(parent) = cert_path.parent() {
-        std::fs::create_dir_all(parent)
-            .context("Failed to create certificate directory")?;
+        std::fs::create_dir_all(parent).context("Failed to create certificate directory")?;
     }
 
-    std::fs::write(&cert_path, cert_pem)
-        .context("Failed to write CA certificate")?;
+    std::fs::write(&cert_path, cert_pem).context("Failed to write CA certificate")?;
 
     common::log_info!("Exported root CA certificate to: {}", cert_path.display());
     Ok(cert_path)
@@ -46,10 +46,8 @@ pub fn set_intercept_env_vars(cert_path: &PathBuf, proxy_addr: Option<&str>) -> 
     //
     if let Some(addr) = proxy_addr {
         let proxy_url = format!("http://{}", addr);
-        windows_env::set("HTTP_PROXY", &proxy_url)
-            .context("Failed to set HTTP_PROXY")?;
-        windows_env::set("HTTPS_PROXY", &proxy_url)
-            .context("Failed to set HTTPS_PROXY")?;
+        windows_env::set("HTTP_PROXY", &proxy_url).context("Failed to set HTTP_PROXY")?;
+        windows_env::set("HTTPS_PROXY", &proxy_url).context("Failed to set HTTPS_PROXY")?;
         common::log_info!("Set HTTP_PROXY={}", proxy_url);
         common::log_info!("Set HTTPS_PROXY={}", proxy_url);
     }
@@ -116,11 +114,18 @@ pub fn set_intercept_env_vars(cert_path: &PathBuf, proxy_addr: Option<&str>) -> 
     // Get all home directories to configure.
     //
     let home_dirs = get_all_home_dirs();
-    common::log_info!("Configuring intercept env vars for {} user(s)", home_dirs.len());
+    common::log_info!(
+        "Configuring intercept env vars for {} user(s)",
+        home_dirs.len()
+    );
 
     for home_dir in &home_dirs {
         if let Err(e) = set_intercept_env_vars_for_home(home_dir, &script_content) {
-            common::log_warn!("Failed to configure env vars for {}: {}", home_dir.display(), e);
+            common::log_warn!(
+                "Failed to configure env vars for {}: {}",
+                home_dir.display(),
+                e
+            );
         }
     }
 
@@ -143,8 +148,7 @@ fn set_intercept_env_vars_for_home(home_dir: &PathBuf, script_content: &str) -> 
     // Create the praxis config directory for this user.
     //
     let config_dir = home_dir.join(".config").join("praxis");
-    std::fs::create_dir_all(&config_dir)
-        .context("Failed to create praxis config directory")?;
+    std::fs::create_dir_all(&config_dir).context("Failed to create praxis config directory")?;
 
     //
     // Write the proxy environment script.
@@ -159,7 +163,10 @@ fn set_intercept_env_vars_for_home(home_dir: &PathBuf, script_content: &str) -> 
     fix_ownership_for_home(home_dir, &config_dir);
     fix_ownership_for_home(home_dir, &env_script_path);
 
-    common::log_info!("Created proxy environment script: {}", env_script_path.display());
+    common::log_info!(
+        "Created proxy environment script: {}",
+        env_script_path.display()
+    );
 
     //
     // Add source line to shell profiles.
@@ -191,11 +198,18 @@ pub fn remove_intercept_env_vars() -> Result<()> {
     // Get all home directories to clean up.
     //
     let home_dirs = get_all_home_dirs();
-    common::log_info!("Removing intercept env vars for {} user(s)", home_dirs.len());
+    common::log_info!(
+        "Removing intercept env vars for {} user(s)",
+        home_dirs.len()
+    );
 
     for home_dir in &home_dirs {
         if let Err(e) = remove_intercept_env_vars_for_home(home_dir) {
-            common::log_warn!("Failed to clean up env vars for {}: {}", home_dir.display(), e);
+            common::log_warn!(
+                "Failed to clean up env vars for {}: {}",
+                home_dir.display(),
+                e
+            );
         }
     }
 
@@ -243,7 +257,10 @@ fn remove_intercept_env_vars_for_home(home_dir: &PathBuf) -> Result<()> {
         if let Err(e) = std::fs::remove_file(&env_script_path) {
             common::log_warn!("Failed to remove proxy environment script: {}", e);
         } else {
-            common::log_info!("Removed proxy environment script: {}", env_script_path.display());
+            common::log_info!(
+                "Removed proxy environment script: {}",
+                env_script_path.display()
+            );
         }
     }
 
@@ -363,8 +380,7 @@ const PRAXIS_MARKER_END: &str = "# PRAXIS-INTERCEPT-END";
 fn add_to_shell_profile(profile_path: &PathBuf, source_line: &str) -> Result<()> {
     use std::io::Write;
 
-    let content = std::fs::read_to_string(profile_path)
-        .context("Failed to read shell profile")?;
+    let content = std::fs::read_to_string(profile_path).context("Failed to read shell profile")?;
 
     //
     // Check if already present.
@@ -392,8 +408,7 @@ fn add_to_shell_profile(profile_path: &PathBuf, source_line: &str) -> Result<()>
 /// Remove the praxis source lines from a shell profile
 #[cfg(target_os = "linux")]
 fn remove_from_shell_profile(profile_path: &PathBuf) -> Result<()> {
-    let content = std::fs::read_to_string(profile_path)
-        .context("Failed to read shell profile")?;
+    let content = std::fs::read_to_string(profile_path).context("Failed to read shell profile")?;
 
     //
     // Check if our markers are present.
@@ -430,8 +445,7 @@ fn remove_from_shell_profile(profile_path: &PathBuf) -> Result<()> {
     }
 
     let new_content = new_lines.join("\n");
-    std::fs::write(profile_path, new_content)
-        .context("Failed to write updated shell profile")?;
+    std::fs::write(profile_path, new_content).context("Failed to write updated shell profile")?;
 
     Ok(())
 }
@@ -455,9 +469,7 @@ fn set_systemd_user_env(cert_path: &str, proxy_addr: Option<&str>) -> Result<()>
         args.push("no_proxy=localhost,127.0.0.1".to_string());
     }
 
-    let output = std::process::Command::new("systemctl")
-        .args(&args)
-        .output();
+    let output = std::process::Command::new("systemctl").args(&args).output();
 
     match output {
         Ok(o) if o.status.success() => {
@@ -487,16 +499,14 @@ fn unset_systemd_user_env() -> Result<()> {
         "no_proxy",
     ];
 
-    let output = std::process::Command::new("systemctl")
-        .args(&args)
-        .output();
+    let output = std::process::Command::new("systemctl").args(&args).output();
 
     match output {
         Ok(o) if o.status.success() => {
             common::log_info!("Unset systemd user environment variables");
             Ok(())
         }
-        Ok(_) => Ok(()), // Ignore errors - vars might not have been set
+        Ok(_) => Ok(()),  // Ignore errors - vars might not have been set
         Err(_) => Ok(()), // Ignore if systemctl not available
     }
 }

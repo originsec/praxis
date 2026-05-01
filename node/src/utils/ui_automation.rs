@@ -50,7 +50,10 @@ impl UIAutomationControl {
             Ok(c) => c,
             Err(_) => return false,
         };
-        let all_elements = match self.window.find_all(TreeScope::Descendants, &true_condition) {
+        let all_elements = match self
+            .window
+            .find_all(TreeScope::Descendants, &true_condition)
+        {
             Ok(e) => e,
             Err(_) => return false,
         };
@@ -98,23 +101,21 @@ impl UIAutomationControl {
                 .into_iter()
                 .find(|w| w.get_process_id().map(|p| p as u32 == pid).unwrap_or(false))
                 .ok_or_else(|| {
-                    common::log_warn!("Window not found for PID {} with prefix '{}'", pid, window_name_prefix);
+                    common::log_warn!(
+                        "Window not found for PID {} with prefix '{}'",
+                        pid,
+                        window_name_prefix
+                    );
                     uiautomation::Error::new(
                         uiautomation::errors::ERR_NOTFOUND,
                         "Window not found for PID",
                     )
                 })?
         } else {
-            filtered_windows
-                .into_iter()
-                .next()
-                .ok_or_else(|| {
-                    common::log_error!("Window not found with prefix '{}'", window_name_prefix);
-                    uiautomation::Error::new(
-                        uiautomation::errors::ERR_NOTFOUND,
-                        "Window not found",
-                    )
-                })?
+            filtered_windows.into_iter().next().ok_or_else(|| {
+                common::log_error!("Window not found with prefix '{}'", window_name_prefix);
+                uiautomation::Error::new(uiautomation::errors::ERR_NOTFOUND, "Window not found")
+            })?
         };
 
         Ok(Self { automation, window })
@@ -154,11 +155,12 @@ impl UIAutomationControl {
                 class_match && name_match
             })
             .ok_or_else(|| {
-                common::log_error!("Element not found with class prefix '{}' and name substring '{}'", class_name_prefix, name_substring);
-                uiautomation::Error::new(
-                    uiautomation::errors::ERR_NOTFOUND,
-                    "Element not found",
-                )
+                common::log_error!(
+                    "Element not found with class prefix '{}' and name substring '{}'",
+                    class_name_prefix,
+                    name_substring
+                );
+                uiautomation::Error::new(uiautomation::errors::ERR_NOTFOUND, "Element not found")
             })?;
 
         Ok(target_element)
@@ -195,11 +197,11 @@ impl UIAutomationControl {
                     .unwrap_or(false)
             })
             .ok_or_else(|| {
-                common::log_error!("Element not found for send_keys with class prefix '{}'", class_name_prefix);
-                uiautomation::Error::new(
-                    uiautomation::errors::ERR_NOTFOUND,
-                    "Element not found",
-                )
+                common::log_error!(
+                    "Element not found for send_keys with class prefix '{}'",
+                    class_name_prefix
+                );
+                uiautomation::Error::new(uiautomation::errors::ERR_NOTFOUND, "Element not found")
             })?;
 
         target_element.set_focus()?;
@@ -223,22 +225,30 @@ impl UIAutomationControl {
             })
             .cloned()
             .ok_or_else(|| {
-                common::log_error!("Element not found for send_text with class prefix '{}'", class_name_prefix);
+                common::log_error!(
+                    "Element not found for send_text with class prefix '{}'",
+                    class_name_prefix
+                );
                 //
                 // Log all available elements for debugging.
                 //
                 for el in &all_elements {
                     let class = el.get_classname().unwrap_or_default();
                     let name = el.get_name().unwrap_or_default();
-                    let ctrl_type = el.get_control_type().map(|t| format!("{:?}", t)).unwrap_or_default();
+                    let ctrl_type = el
+                        .get_control_type()
+                        .map(|t| format!("{:?}", t))
+                        .unwrap_or_default();
                     if !class.is_empty() || !name.is_empty() {
-                        common::log_warn!("  Available element - class: '{}', name: '{}', type: {}", class, name, ctrl_type);
+                        common::log_warn!(
+                            "  Available element - class: '{}', name: '{}', type: {}",
+                            class,
+                            name,
+                            ctrl_type
+                        );
                     }
                 }
-                uiautomation::Error::new(
-                    uiautomation::errors::ERR_NOTFOUND,
-                    "Element not found",
-                )
+                uiautomation::Error::new(uiautomation::errors::ERR_NOTFOUND, "Element not found")
             })?;
 
         target_element.set_focus()?;

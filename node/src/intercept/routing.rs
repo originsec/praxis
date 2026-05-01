@@ -1,6 +1,6 @@
-use anyhow::Result;
 #[cfg(target_os = "windows")]
 use anyhow::Context;
+use anyhow::Result;
 use std::net::IpAddr;
 
 /// Mark for proxy's outgoing connections to bypass VPN/TUN routing.
@@ -55,11 +55,19 @@ impl RouteManager {
     ///
     /// Runs: netsh interface ipv4 set address name="Praxis VPN" static 10.255.0.1 255.255.255.0
     pub fn configure_interface(&mut self) -> Result<()> {
-        common::log_info!("Configuring interface {} with IP {}/{}", self.interface_name, TUN_IP, TUN_NETMASK);
+        common::log_info!(
+            "Configuring interface {} with IP {}/{}",
+            self.interface_name,
+            TUN_IP,
+            TUN_NETMASK
+        );
 
         let output = crate::utils::silent_command("netsh")
             .args([
-                "interface", "ipv4", "set", "address",
+                "interface",
+                "ipv4",
+                "set",
+                "address",
                 &format!("name={}", self.interface_name),
                 "static",
                 TUN_IP,
@@ -75,12 +83,20 @@ impl RouteManager {
             // Sometimes netsh returns non-zero even when it works.
             //
             if !stderr.is_empty() || !stdout.is_empty() {
-                common::log_warn!("netsh set address output: stdout={}, stderr={}", stdout.trim(), stderr.trim());
+                common::log_warn!(
+                    "netsh set address output: stdout={}, stderr={}",
+                    stdout.trim(),
+                    stderr.trim()
+                );
             }
         }
 
         self.interface_configured = true;
-        common::log_info!("Interface {} configured with IP {}", self.interface_name, TUN_IP);
+        common::log_info!(
+            "Interface {} configured with IP {}",
+            self.interface_name,
+            TUN_IP
+        );
         Ok(())
     }
 
@@ -103,7 +119,10 @@ impl RouteManager {
 
         let output = crate::utils::silent_command("netsh")
             .args([
-                "interface", "ipv4", "add", "route",
+                "interface",
+                "ipv4",
+                "add",
+                "route",
                 &format!("{}/32", ip_str),
                 &self.interface_name,
                 TUN_IP,
@@ -121,8 +140,12 @@ impl RouteManager {
             if stderr.contains("exists") || stdout.contains("exists") {
                 common::log_debug!("Route for {} already exists", ip_str);
             } else if !stderr.is_empty() || !stdout.is_empty() {
-                common::log_warn!("netsh add route for {} output: stdout={}, stderr={}",
-                      ip_str, stdout.trim(), stderr.trim());
+                common::log_warn!(
+                    "netsh add route for {} output: stdout={}, stderr={}",
+                    ip_str,
+                    stdout.trim(),
+                    stderr.trim()
+                );
             }
         }
 
@@ -142,7 +165,10 @@ impl RouteManager {
 
         let output = crate::utils::silent_command("netsh")
             .args([
-                "interface", "ipv4", "delete", "route",
+                "interface",
+                "ipv4",
+                "delete",
+                "route",
                 &format!("{}/32", ip_str),
                 &self.interface_name,
             ])
@@ -187,8 +213,10 @@ impl RouteManager {
 impl Drop for RouteManager {
     fn drop(&mut self) {
         if !self.added_routes.is_empty() {
-            common::log_warn!("RouteManager dropped with {} routes still active, cleaning up",
-                  self.added_routes.len());
+            common::log_warn!(
+                "RouteManager dropped with {} routes still active, cleaning up",
+                self.added_routes.len()
+            );
             let _ = self.remove_all_routes();
         }
     }
@@ -224,7 +252,10 @@ impl RouteManager {
 
         common::log_info!(
             "Configuring interface {} with IPv4 {}/24 and IPv6 {}/{}",
-            self.interface_name, TUN_IP, TUN_IP6, TUN_IP6_PREFIX
+            self.interface_name,
+            TUN_IP,
+            TUN_IP6,
+            TUN_IP6_PREFIX
         );
 
         //
@@ -232,9 +263,11 @@ impl RouteManager {
         //
         let output = crate::utils::silent_command("ip")
             .args([
-                "addr", "add",
+                "addr",
+                "add",
                 &format!("{}/24", TUN_IP),
-                "dev", &self.interface_name,
+                "dev",
+                &self.interface_name,
             ])
             .output()
             .context("Failed to execute ip addr add command")?;
@@ -254,9 +287,12 @@ impl RouteManager {
         //
         let output = crate::utils::silent_command("ip")
             .args([
-                "-6", "addr", "add",
+                "-6",
+                "addr",
+                "add",
                 &format!("{}/{}", TUN_IP6, TUN_IP6_PREFIX),
-                "dev", &self.interface_name,
+                "dev",
+                &self.interface_name,
             ])
             .output()
             .context("Failed to execute ip -6 addr add command")?;
@@ -327,7 +363,12 @@ impl RouteManager {
         }
 
         self.interface_configured = true;
-        common::log_info!("Interface {} configured with IPv4 {} and IPv6 {}", self.interface_name, TUN_IP, TUN_IP6);
+        common::log_info!(
+            "Interface {} configured with IPv4 {} and IPv6 {}",
+            self.interface_name,
+            TUN_IP,
+            TUN_IP6
+        );
         Ok(())
     }
 
@@ -351,9 +392,11 @@ impl RouteManager {
         }
         let output = cmd
             .args([
-                "route", "add",
+                "route",
+                "add",
                 &format!("{}/{}", ip_str, prefix),
-                "dev", &self.interface_name,
+                "dev",
+                &self.interface_name,
             ])
             .output()
             .context(format!("Failed to add route for {}", ip_str))?;
@@ -391,9 +434,11 @@ impl RouteManager {
         }
         let output = cmd
             .args([
-                "route", "del",
+                "route",
+                "del",
                 &format!("{}/{}", ip_str, prefix),
-                "dev", &self.interface_name,
+                "dev",
+                &self.interface_name,
             ])
             .output()
             .context(format!("Failed to remove route for {}", ip_str))?;
@@ -412,7 +457,6 @@ impl RouteManager {
     }
 
     pub fn remove_all_routes(&mut self) -> Result<()> {
-
         common::log_info!("Removing {} routes", self.added_routes.len());
 
         let routes_to_remove: Vec<_> = self.added_routes.drain(..).collect();
@@ -464,7 +508,9 @@ impl RouteManager {
     #[allow(dead_code)]
     pub fn configure_interface(&mut self) -> Result<()> {
         common::log_warn!("Route management is only supported on Windows and Linux");
-        Err(anyhow::anyhow!("Route management is only supported on Windows and Linux"))
+        Err(anyhow::anyhow!(
+            "Route management is only supported on Windows and Linux"
+        ))
     }
 
     #[allow(dead_code)]
@@ -534,7 +580,8 @@ impl VpnBypassManager {
         //
         // 1. Discover the default gateway and interface.
         //
-        let (gateway, interface) = self.discover_default_gateway()
+        let (gateway, interface) = self
+            .discover_default_gateway()
             .context("Failed to discover default gateway")?;
 
         common::log_info!("Default gateway: {} via {}", gateway, interface);
@@ -547,10 +594,14 @@ impl VpnBypassManager {
         //
         let output = crate::utils::silent_command("ip")
             .args([
-                "rule", "add",
-                "fwmark", &VPN_BYPASS_MARK.to_string(),
-                "lookup", &VPN_BYPASS_TABLE.to_string(),
-                "priority", "100",
+                "rule",
+                "add",
+                "fwmark",
+                &VPN_BYPASS_MARK.to_string(),
+                "lookup",
+                &VPN_BYPASS_TABLE.to_string(),
+                "priority",
+                "100",
             ])
             .output()
             .context("Failed to add ip rule")?;
@@ -570,11 +621,15 @@ impl VpnBypassManager {
         //
         let output = crate::utils::silent_command("ip")
             .args([
-                "route", "add",
+                "route",
+                "add",
                 "default",
-                "via", &gateway,
-                "dev", &interface,
-                "table", &VPN_BYPASS_TABLE.to_string(),
+                "via",
+                &gateway,
+                "dev",
+                &interface,
+                "table",
+                &VPN_BYPASS_TABLE.to_string(),
             ])
             .output()
             .context("Failed to add bypass route")?;
@@ -590,7 +645,11 @@ impl VpnBypassManager {
         }
 
         self.is_active = true;
-        common::log_info!("VPN bypass routing enabled (mark={}, table={})", VPN_BYPASS_MARK, VPN_BYPASS_TABLE);
+        common::log_info!(
+            "VPN bypass routing enabled (mark={}, table={})",
+            VPN_BYPASS_MARK,
+            VPN_BYPASS_TABLE
+        );
 
         Ok(())
     }
@@ -609,11 +668,15 @@ impl VpnBypassManager {
         if let (Some(gateway), Some(interface)) = (&self.default_gateway, &self.default_interface) {
             let _ = crate::utils::silent_command("ip")
                 .args([
-                    "route", "del",
+                    "route",
+                    "del",
                     "default",
-                    "via", gateway,
-                    "dev", interface,
-                    "table", &VPN_BYPASS_TABLE.to_string(),
+                    "via",
+                    gateway,
+                    "dev",
+                    interface,
+                    "table",
+                    &VPN_BYPASS_TABLE.to_string(),
                 ])
                 .output();
         }
@@ -623,9 +686,12 @@ impl VpnBypassManager {
         //
         let _ = crate::utils::silent_command("ip")
             .args([
-                "rule", "del",
-                "fwmark", &VPN_BYPASS_MARK.to_string(),
-                "lookup", &VPN_BYPASS_TABLE.to_string(),
+                "rule",
+                "del",
+                "fwmark",
+                &VPN_BYPASS_MARK.to_string(),
+                "lookup",
+                &VPN_BYPASS_TABLE.to_string(),
             ])
             .output();
 

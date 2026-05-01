@@ -352,6 +352,7 @@ async fn run_main_loop() -> Result<()> {
     //
     let orchestrator_manager = Arc::new(OrchestratorManager::new());
     let acp_node_proxy = acp_node_proxy::AcpNodeProxy::new();
+    acp_node_proxy.set_service_config(service_config.clone());
     let acp_server = Arc::new(acp_server::AcpServer::new(
         orchestrator_manager.clone(),
         service_config.clone(),

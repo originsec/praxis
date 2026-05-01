@@ -8,10 +8,12 @@ use acp::schema::{
     Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
     ListSessionsResponse, NewSessionRequest, NewSessionResponse, PromptRequest, ProtocolVersion,
     SessionInfo, SessionUpdate, StopReason, TextContent, ToolCall as AcpToolCall, ToolCallContent,
-    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
+    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
 };
-use common::{SessionContext, SessionUpdateKind};
+use common::{PraxisAgentConfig, SessionContext, SessionUpdateKind};
 use serde_json::{json, Value};
+
+use crate::agent_connectors::StreamEvent;
 
 use super::extensions::{
     EXT_PRAXIS_GREP_FILES, EXT_PRAXIS_READ_FILE, EXT_PRAXIS_RECON,
@@ -32,10 +34,17 @@ pub async fn handle_initialize(
 
     let connectors: Vec<Value> = {
         let reg = server.registry().read().await;
-        reg.list_lua_agents()
+        let mut connectors = reg
+            .get_all()
             .into_iter()
-            .map(|info| json!({ "shortName": info.short_name, "name": info.name }))
-            .collect()
+            .map(|agent| json!({ "shortName": agent.short_name(), "name": agent.name() }))
+            .collect::<Vec<_>>();
+        connectors.sort_by(|a, b| {
+            let a = a.get("shortName").and_then(|v| v.as_str()).unwrap_or_default();
+            let b = b.get("shortName").and_then(|v| v.as_str()).unwrap_or_default();
+            a.cmp(b)
+        });
+        connectors
     };
 
     let meta_value = json!({
@@ -103,6 +112,27 @@ pub async fn handle_session_new(
         return;
     };
 
+    let model_name = meta_val
+        .get("model")
+        .and_then(|v| v.as_str())
+        .or_else(|| {
+            praxis
+                .get("agentConfig")
+                .and_then(|c| c.get("modelName"))
+                .and_then(|v| v.as_str())
+        })
+        .map(|s| s.to_string());
+    let praxis_agent_config = praxis.get("agentConfig").cloned().and_then(|mut v| {
+        if let Some(model) = &model_name {
+            if let Some(obj) = v.as_object_mut() {
+                if !obj.contains_key("modelName") && !obj.contains_key("model_name") {
+                    obj.insert("modelName".to_string(), Value::String(model.clone()));
+                }
+            }
+        }
+        serde_json::from_value::<PraxisAgentConfig>(v).ok()
+    });
+
     let context = SessionContext {
         working_dir: Some(req.cwd.to_string_lossy().to_string()),
         yolo_mode: praxis.get("yolo").and_then(|v| v.as_bool()).unwrap_or(false),
@@ -111,6 +141,8 @@ pub async fn handle_session_new(
             .get("interactive")
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
+        model: model_name,
+        praxis_agent_config,
     };
 
     let session_id = Uuid::new_v4();
@@ -244,13 +276,74 @@ pub async fn handle_session_prompt(
 
     //
     // Run transact on a blocking thread so the async runtime isn't held by
-    // the synchronous Lua VM call. ACP sessions stream chunks through the
-    // forwarder above; non-ACP sessions emit a single AgentMessageChunk
-    // with the full response after transact returns.
+    // the synchronous Lua VM call. ACP-backed Lua sessions stream chunks
+    // through the SessionUpdateKind forwarder above. Sessions whose
+    // AgentSession trait reports `supports_streaming() == true` (e.g.
+    // PraxisAgent) push StreamEvents through the channel set up below.
+    // Non-streaming sessions emit a single AgentMessageChunk with the full
+    // response after transact returns.
     //
 
     let session_for_task = Arc::clone(&node_session.session);
+    let session_for_clear = Arc::clone(&node_session.session);
     let cancel = Arc::clone(&node_session.cancel_flag);
+
+    let stream_handle = if session_for_task.supports_streaming() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        session_for_task.set_stream_sender(Some(tx));
+
+        let server_clone = Arc::clone(&server);
+        let client_id_clone = client_id.to_string();
+        let session_id_str_clone = session_id_str.clone();
+        Some(tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                match event {
+                    StreamEvent::Text(text) => {
+                        server_clone.send_session_notification(
+                            &client_id_clone,
+                            &session_id_str_clone,
+                            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                                TextContent::new(text),
+                            ))),
+                        );
+                    }
+                    StreamEvent::ToolCall { id, name, input } => {
+                        let tool_call = AcpToolCall::new(id.clone(), format!("run_command: {}", name))
+                            .kind(ToolKind::Execute)
+                            .status(ToolCallStatus::InProgress)
+                            .raw_input(serde_json::from_str(&input).ok());
+                        server_clone.send_session_notification(
+                            &client_id_clone,
+                            &session_id_str_clone,
+                            SessionUpdate::ToolCall(tool_call),
+                        );
+                    }
+                    StreamEvent::ToolResult { id, success, output } => {
+                        let status = if success {
+                            ToolCallStatus::Completed
+                        } else {
+                            ToolCallStatus::Failed
+                        };
+                        let content = vec![ToolCallContent::from(ContentBlock::Text(
+                            TextContent::new(output),
+                        ))];
+                        let fields = ToolCallUpdateFields::new()
+                            .status(status)
+                            .content(content);
+                        let update = ToolCallUpdate::new(id, fields);
+                        server_clone.send_session_notification(
+                            &client_id_clone,
+                            &session_id_str_clone,
+                            SessionUpdate::ToolCallUpdate(update),
+                        );
+                    }
+                }
+            }
+        }))
+    } else {
+        None
+    };
+
     let result = tokio::task::spawn_blocking(move || {
         if cancel.load(Ordering::SeqCst) {
             return Err(anyhow::anyhow!("cancelled before start"));
@@ -260,23 +353,27 @@ pub async fn handle_session_prompt(
     .await;
 
     //
-    // Wait for the forwarder to drain any in-flight updates. The senders
-    // owned by the Lua acp_prompt call drop when transact returns, which
-    // closes the channel and lets the forwarder finish.
+    // Wait for both forwarders to drain any in-flight updates. The senders
+    // owned by the underlying transact path drop when transact returns,
+    // which closes the channels and lets the forwarders finish.
     //
 
+    session_for_clear.set_stream_sender(None);
+    if let Some(handle) = stream_handle {
+        let _ = handle.await;
+    }
     if let Some(fwd) = forwarder {
         let _ = fwd.await;
     }
 
-    let streaming = acp_handle.is_some();
+    let streaming = acp_handle.is_some() || node_session.session.supports_streaming();
 
     match result {
         Ok(Ok(response)) => {
             //
-            // Only echo the full response for non-streaming agents. ACP
-            // agents already streamed every chunk, so re-sending the
-            // assembled text would duplicate it on the client.
+            // Only echo the full response for non-streaming agents. Streaming
+            // agents already pushed every chunk through one of the forwarders
+            // above, so re-sending the assembled text would duplicate it.
             //
 
             if !streaming {

@@ -1,7 +1,7 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use common::{
-    publish_json, AgentTool, McpServer, McpTransport, NodeSignalMessage, SemanticParserRequest,
-    SemanticParserResponse, NODE_SIGNAL_QUEUE,
+    AgentTool, McpServer, McpTransport, NODE_SIGNAL_QUEUE, NodeSignalMessage,
+    SemanticParserRequest, SemanticParserResponse, publish_json,
 };
 use lapin::Channel;
 use std::collections::HashMap;
@@ -282,8 +282,7 @@ pub fn parse_metadata_from_json(json: &str) -> Option<ExtractedMetadata> {
 //
 
 /// Global semantic parser client (can be updated on reconnection)
-static SEMANTIC_PARSER_CLIENT: RwLock<Option<Arc<SemanticParserClient>>> =
-    RwLock::new(None);
+static SEMANTIC_PARSER_CLIENT: RwLock<Option<Arc<SemanticParserClient>>> = RwLock::new(None);
 
 /// Initialize or update the global semantic parser client.
 /// Called on initial connection and on reconnection to update the channel.
@@ -338,7 +337,11 @@ pub struct SemanticParserClient {
 }
 
 impl SemanticParserClient {
-    pub fn new(channel: Arc<Channel>, node_id: String, tracker: Arc<SemanticParserTracker>) -> Self {
+    pub fn new(
+        channel: Arc<Channel>,
+        node_id: String,
+        tracker: Arc<SemanticParserTracker>,
+    ) -> Self {
         Self {
             channel,
             node_id,
@@ -347,7 +350,12 @@ impl SemanticParserClient {
     }
 
     /// Send a semantic parser request and wait for the response
-    pub async fn parse(&self, instruction: String, text: String, schema: String) -> Result<SemanticParserResponse> {
+    pub async fn parse(
+        &self,
+        instruction: String,
+        text: String,
+        schema: String,
+    ) -> Result<SemanticParserResponse> {
         let request_id = Uuid::new_v4().to_string();
 
         //

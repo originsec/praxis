@@ -512,13 +512,21 @@ async fn listen_to_queues(
     // Rebuild agent registry with Lua scripts received in the RegistrationAck.
     //
 
+    {
+        let mut state = node_state.write().await;
+        state.last_lua_scripts = lua_scripts.clone();
+        factory.set_config(state.factory_config.clone());
+    }
+
     if !lua_scripts.is_empty() {
         common::log_info!(
             "Rebuilding agent registry with {} scripts from service",
             lua_scripts.len()
         );
-        handle_agent_registry_update(lua_scripts, &registry, &factory).await;
+    } else {
+        common::log_info!("Rebuilding agent registry with native and embedded agents");
     }
+    handle_agent_registry_update(lua_scripts, &registry, &factory).await;
 
     //
     // Run initial fingerprint after registry rebuild, then send first update.
@@ -660,28 +668,35 @@ async fn listen_to_queues(
                                     // if the script set didn't change, the service
                                     // may have updated targets.
                                     //
+                                    let scripts = ack.lua_scripts;
                                     {
                                         let mut state = node_state.write().await;
                                         state.intercept_targets = ack.intercept_targets;
+                                        state.last_lua_scripts = scripts.clone();
+                                        factory.set_config(state.factory_config.clone());
                                     }
 
-                                    if !ack.lua_scripts.is_empty() {
+                                    if !scripts.is_empty() {
                                         common::log_info!(
                                             "Re-registration: rebuilding registry with {} scripts",
-                                            ack.lua_scripts.len()
+                                            scripts.len()
                                         );
-                                        handle_agent_registry_update(
-                                            ack.lua_scripts,
-                                            &registry,
-                                            &factory,
-                                        )
-                                        .await;
-                                        fingerprint_all_agents(&registry, &fingerprint_cache).await;
-                                        if let Err(e) = send_node_information_update(
-                                            &channel, &node_id, &registry, &node_state, &fingerprint_cache,
-                                        ).await {
-                                            common::log_error!("Failed to send info update after re-registration: {}", e);
-                                        }
+                                    } else {
+                                        common::log_info!(
+                                            "Re-registration: rebuilding registry with native and embedded agents"
+                                        );
+                                    }
+                                    handle_agent_registry_update(
+                                        scripts,
+                                        &registry,
+                                        &factory,
+                                    )
+                                    .await;
+                                    fingerprint_all_agents(&registry, &fingerprint_cache).await;
+                                    if let Err(e) = send_node_information_update(
+                                        &channel, &node_id, &registry, &node_state, &fingerprint_cache,
+                                    ).await {
+                                        common::log_error!("Failed to send info update after re-registration: {}", e);
                                     }
                                 }
                                 NodeDirectMessage::Command(cmd_request) => {
@@ -775,8 +790,36 @@ async fn handle_broadcast_message(
                 if enabled { "enabled" } else { "disabled" }
             );
         }
+        NodeBroadcastMessage::PraxisAgentEnabled { enabled } => {
+            common::log_info!(
+                "Received PraxisAgentEnabled: {}",
+                if enabled { "enabled" } else { "disabled" }
+            );
+            let lua_scripts = {
+                let mut state = node_state.write().await;
+                state.factory_config.praxis_agent_enabled = enabled;
+                factory.set_config(state.factory_config.clone());
+                state.last_lua_scripts.clone()
+            };
+
+            handle_agent_registry_update(lua_scripts, registry, factory).await;
+
+            fingerprint_all_agents(registry, fingerprint_cache).await;
+            if let Err(e) = send_node_information_update(
+                channel, node_id, registry, node_state, fingerprint_cache,
+            )
+            .await
+            {
+                common::log_error!("Failed to send info update after Praxis agent change: {}", e);
+            }
+        }
         NodeBroadcastMessage::AgentRegistryUpdate { scripts } => {
             common::log_info!("Received AgentRegistryUpdate with {} scripts", scripts.len());
+            {
+                let mut state = node_state.write().await;
+                state.last_lua_scripts = scripts.clone();
+                factory.set_config(state.factory_config.clone());
+            }
             handle_agent_registry_update(scripts, registry, factory).await;
 
             fingerprint_all_agents(registry, fingerprint_cache).await;
@@ -830,6 +873,11 @@ async fn handle_command(
         NodeCommand::Config(cmd) => handle_config_command(cmd, node_state).await,
         NodeCommand::AgentRegistry(cmd) => match cmd {
             common::AgentRegistryCommand::Update { scripts } => {
+                {
+                    let mut state = node_state.write().await;
+                    state.last_lua_scripts = scripts.clone();
+                    factory.set_config(state.factory_config.clone());
+                }
                 handle_agent_registry_update(scripts, registry, factory).await
             }
             common::AgentRegistryCommand::List => {

@@ -1,14 +1,13 @@
 use anyhow::{Context, Result};
+#[allow(unused_imports)]
+#[cfg(target_os = "linux")]
+use libc;
 use rcgen::{
-    BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose,
-    IsCa, Issuer, KeyPair, KeyUsagePurpose, SanType,
+    BasicConstraints, CertificateParams, DistinguishedName, DnType, ExtendedKeyUsagePurpose, IsCa,
+    Issuer, KeyPair, KeyUsagePurpose, SanType,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
-#[allow(unused_imports)]
-
-#[cfg(target_os = "linux")]
-use libc;
 
 /// Linux distribution family for certificate installation
 #[cfg(target_os = "linux")]
@@ -60,8 +59,7 @@ impl CertificateAuthority {
         //
         // Generate key pair for root CA.
         //
-        let root_key_pair = KeyPair::generate()
-            .context("Failed to generate root CA key pair")?;
+        let root_key_pair = KeyPair::generate().context("Failed to generate root CA key pair")?;
 
         //
         // Set up root CA certificate parameters.
@@ -139,8 +137,8 @@ impl CertificateAuthority {
 
         common::log_info!("Generating leaf certificate for domain: {}", domain);
 
-        let leaf_key_pair = KeyPair::generate()
-            .context("Failed to generate leaf certificate key pair")?;
+        let leaf_key_pair =
+            KeyPair::generate().context("Failed to generate leaf certificate key pair")?;
 
         let mut params = CertificateParams::default();
 
@@ -167,16 +165,14 @@ impl CertificateAuthority {
         //
         // Set extended key usage for TLS server authentication.
         //
-        params.extended_key_usages = vec![
-            ExtendedKeyUsagePurpose::ServerAuth,
-        ];
+        params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
 
         //
         // Add Subject Alternative Names.
         //
-        params.subject_alt_names = vec![
-            SanType::DnsName(domain.try_into().context("Invalid domain name")?),
-        ];
+        params.subject_alt_names = vec![SanType::DnsName(
+            domain.try_into().context("Invalid domain name")?,
+        )];
 
         //
         // Also add wildcard if it's not already a wildcard.
@@ -219,7 +215,8 @@ impl CertificateAuthority {
             key_pem: leaf_key_pair.serialize_pem(),
         });
 
-        self.leaf_certs.insert(domain.to_string(), Arc::clone(&cert_data));
+        self.leaf_certs
+            .insert(domain.to_string(), Arc::clone(&cert_data));
 
         Ok(cert_data)
     }
@@ -304,7 +301,10 @@ impl CertificateAuthority {
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
             common::log_error!("Failed to install root CA: {}", stderr);
-            Err(anyhow::anyhow!("Failed to install root CA certificate: {}", stderr))
+            Err(anyhow::anyhow!(
+                "Failed to install root CA certificate: {}",
+                stderr
+            ))
         }
     }
 
@@ -322,7 +322,9 @@ impl CertificateAuthority {
         let is_root = unsafe { libc::geteuid() } == 0;
 
         if !is_root {
-            common::log_info!("Not running as root - skipping system certificate store installation");
+            common::log_info!(
+                "Not running as root - skipping system certificate store installation"
+            );
             common::log_info!("NODE_EXTRA_CA_CERTS will be set for Node.js applications");
             return Ok(());
         }
@@ -354,7 +356,9 @@ impl CertificateAuthority {
                 vec!["trust", "extract-compat"],
             ),
             LinuxDistro::Unknown => {
-                common::log_warn!("Unknown Linux distribution - skipping system certificate installation");
+                common::log_warn!(
+                    "Unknown Linux distribution - skipping system certificate installation"
+                );
                 common::log_info!("NODE_EXTRA_CA_CERTS will be set for Node.js applications");
                 return Ok(());
             }
@@ -364,8 +368,7 @@ impl CertificateAuthority {
         // Create directory if needed.
         //
         if !cert_dir.exists() {
-            std::fs::create_dir_all(cert_dir)
-                .context("Failed to create certificate directory")?;
+            std::fs::create_dir_all(cert_dir).context("Failed to create certificate directory")?;
         }
 
         //
@@ -413,7 +416,10 @@ impl CertificateAuthority {
             }
         };
 
-        common::log_info!("Uninstalling root CA certificate with thumbprint: {}", thumbprint);
+        common::log_info!(
+            "Uninstalling root CA certificate with thumbprint: {}",
+            thumbprint
+        );
 
         let ps_script = format!(
             r#"
@@ -592,8 +598,12 @@ fn detect_linux_distro() -> LinuxDistro {
     //
     // Check for Debian-based distros.
     //
-    if id == "debian" || id == "ubuntu" || id == "linuxmint" || id == "pop"
-        || id_like.contains("debian") || id_like.contains("ubuntu")
+    if id == "debian"
+        || id == "ubuntu"
+        || id == "linuxmint"
+        || id == "pop"
+        || id_like.contains("debian")
+        || id_like.contains("ubuntu")
     {
         return LinuxDistro::DebianBased;
     }
@@ -601,8 +611,13 @@ fn detect_linux_distro() -> LinuxDistro {
     //
     // Check for RHEL-based distros.
     //
-    if id == "fedora" || id == "rhel" || id == "centos" || id == "rocky" || id == "almalinux"
-        || id_like.contains("fedora") || id_like.contains("rhel")
+    if id == "fedora"
+        || id == "rhel"
+        || id == "centos"
+        || id == "rocky"
+        || id == "almalinux"
+        || id_like.contains("fedora")
+        || id_like.contains("rhel")
     {
         return LinuxDistro::RhelBased;
     }
@@ -610,9 +625,7 @@ fn detect_linux_distro() -> LinuxDistro {
     //
     // Check for Arch-based distros.
     //
-    if id == "arch" || id == "manjaro" || id == "endeavouros"
-        || id_like.contains("arch")
-    {
+    if id == "arch" || id == "manjaro" || id == "endeavouros" || id_like.contains("arch") {
         return LinuxDistro::Arch;
     }
 

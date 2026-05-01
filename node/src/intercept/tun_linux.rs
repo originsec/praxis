@@ -42,14 +42,15 @@ impl LinuxTunManager {
         let mut config = tun::Configuration::default();
         config
             .tun_name(ADAPTER_NAME)
-            .layer(tun::Layer::L3)  // Layer 3 (IP packets only, no ethernet header)
+            .layer(tun::Layer::L3) // Layer 3 (IP packets only, no ethernet header)
             .up();
 
         //
         // Create the TUN device.
         //
-        let tun_device = tun::create(&config)
-            .context("Failed to create TUN device. Make sure you have CAP_NET_ADMIN or are running as root.")?;
+        let tun_device = tun::create(&config).context(
+            "Failed to create TUN device. Make sure you have CAP_NET_ADMIN or are running as root.",
+        )?;
 
         common::log_info!("TUN device {} created successfully", ADAPTER_NAME);
 

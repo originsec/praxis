@@ -17,7 +17,7 @@ pub mod wintun;
 pub use certificate::CertificateAuthority;
 pub use proxy::{InterceptProxy, ProxyConfig};
 pub use state::cleanup_stale_state;
-pub use system_proxy::{disable_system_proxy, enable_system_proxy, SavedProxySettings};
+pub use system_proxy::{SavedProxySettings, disable_system_proxy, enable_system_proxy};
 #[cfg(target_os = "linux")]
 pub use tproxy::TproxyManager;
 #[cfg(target_os = "linux")]
@@ -27,17 +27,17 @@ pub use wintun::WintunManager;
 
 use anyhow::{Context, Result};
 use common::{InterceptMethod, InterceptTargetConfig, InterceptedTrafficEntry};
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-use tokio::task::JoinHandle;
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-use tokio_util::sync::CancellationToken;
 use dns_resolver::DomainResolver;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use packet_engine::PacketEngine;
 use routing::{Ipv6Manager, RouteManager, VpnBypassManager};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use tokio::sync::{RwLock, mpsc};
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+use tokio::task::JoinHandle;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+use tokio_util::sync::CancellationToken;
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 use tun_device::SharedTunDevice;
 
@@ -110,7 +110,6 @@ pub struct NodeInterceptManager {
     /// DNS resolver for TPROXY mode
     #[cfg(target_os = "linux")]
     tproxy_dns_resolver: Option<Arc<DomainResolver>>,
-
 }
 
 impl NodeInterceptManager {
@@ -493,14 +492,19 @@ impl NodeInterceptManager {
                     } else {
                         None
                     };
-                    if let Err(e) = env_vars::set_intercept_env_vars(&cert_path, proxy_addr.as_deref()) {
+                    if let Err(e) =
+                        env_vars::set_intercept_env_vars(&cert_path, proxy_addr.as_deref())
+                    {
                         common::log_warn!("Failed to set intercept environment variables: {}", e);
                     } else {
                         intercept_state.env_vars_set = true;
                     }
                 }
                 Err(e) => {
-                    common::log_warn!("Failed to export CA certificate for NODE_EXTRA_CA_CERTS: {}", e);
+                    common::log_warn!(
+                        "Failed to export CA certificate for NODE_EXTRA_CA_CERTS: {}",
+                        e
+                    );
                 }
             }
         }
@@ -642,9 +646,7 @@ impl NodeInterceptManager {
         //    IPv6 traffic doesn't go through our packet engine properly.
         //
         let mut ipv6_manager = Ipv6Manager::new();
-        ipv6_manager
-            .disable()
-            .context("Failed to disable IPv6")?;
+        ipv6_manager.disable().context("Failed to disable IPv6")?;
 
         //
         // 1. Set up VPN bypass routing FIRST (before adding TUN routes).
@@ -748,7 +750,9 @@ impl NodeInterceptManager {
     /// Non-Windows/non-Linux stub for VPN mode.
     #[cfg(all(not(target_os = "windows"), not(target_os = "linux")))]
     async fn enable_vpn_mode(&mut self, _proxy_port: u16) -> Result<()> {
-        Err(anyhow::anyhow!("VPN mode is only supported on Windows and Linux"))
+        Err(anyhow::anyhow!(
+            "VPN mode is only supported on Windows and Linux"
+        ))
     }
 
     /// Enable TPROXY mode with iptables-based packet interception (Linux).
@@ -766,9 +770,7 @@ impl NodeInterceptManager {
         //    TPROXY rules only handle IPv4 currently.
         //
         let mut ipv6_manager = Ipv6Manager::new();
-        ipv6_manager
-            .disable()
-            .context("Failed to disable IPv6")?;
+        ipv6_manager.disable().context("Failed to disable IPv6")?;
         self.ipv6_manager = Some(ipv6_manager);
 
         //
@@ -996,7 +998,6 @@ impl NodeInterceptManager {
     pub fn proxy_port(&self) -> Option<u16> {
         self.proxy_port
     }
-
 }
 
 impl NodeInterceptManager {

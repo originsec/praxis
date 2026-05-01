@@ -59,6 +59,12 @@ I will query the remote agent to list network connections.
 
 The message ends immediately after the tool call JSON. No more text. No completion. No guessing.
 
+### Rule 5: ESCAPE DOUBLE QUOTES IN JSON STRINGS
+When a tool argument value contains double quotes (e.g., shell commands), escape them as \" inside the JSON or use single quotes in the command itself.
+
+WRONG: {"tool": "run_command", "args": {"command": "echo "hello""}}
+CORRECT: {"tool": "run_command", "args": {"command": "echo 'hello'"}}
+
 ### AFTER RECEIVING TOOL RESULT (in next message):
 Tool 'session_prompt' result: tcp 0.0.0.0:22 LISTEN...
 

@@ -1,13 +1,13 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use mlua::{ChunkMode, Function, Lua, LuaSerdeExt, MultiValue, Table, Value};
 use once_cell::sync::Lazy;
 use serde::Deserialize;
-use serde_json::{json, Value as JsonValue};
+use serde_json::{Value as JsonValue, json};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use common::{ReconResult, SessionContext};
 
@@ -401,11 +401,11 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         .set(
             "json_encode",
             lua.create_function(|lua, value: Value| {
-                let json: JsonValue = lua.from_value(value).map_err(lua_error).map_err(|e| {
-                    mlua::Error::RuntimeError(e.to_string())
-                })?;
-                serde_json::to_string(&json)
-                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))
+                let json: JsonValue = lua
+                    .from_value(value)
+                    .map_err(lua_error)
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+                serde_json::to_string(&json).map_err(|e| mlua::Error::RuntimeError(e.to_string()))
             })
             .map_err(lua_error)?,
         )
@@ -494,8 +494,10 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         .set(
             "extract_user_home",
             lua.create_function(|_, path: String| {
-                Ok(crate::agent_connectors::utils::extract_user_home_from_path(&path)
-                    .map(|p| p.to_string_lossy().to_string().replace('\\', "/")))
+                Ok(
+                    crate::agent_connectors::utils::extract_user_home_from_path(&path)
+                        .map(|p| p.to_string_lossy().to_string().replace('\\', "/")),
+                )
             })
             .map_err(lua_error)?,
         )
@@ -523,8 +525,9 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         .set(
             "write_file",
             lua.create_function(|_, (path, content): (String, String)| {
-                std::fs::write(&path, &content)
-                    .map_err(|e| mlua::Error::RuntimeError(format!("write_file '{}': {}", path, e)))?;
+                std::fs::write(&path, &content).map_err(|e| {
+                    mlua::Error::RuntimeError(format!("write_file '{}': {}", path, e))
+                })?;
                 Ok(())
             })
             .map_err(lua_error)?,
@@ -579,7 +582,13 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
                     });
                 for entry in walker.flatten() {
                     if entry.file_type().is_file() {
-                        out.push(entry.path().to_string_lossy().to_string().replace('\\', "/"));
+                        out.push(
+                            entry
+                                .path()
+                                .to_string_lossy()
+                                .to_string()
+                                .replace('\\', "/"),
+                        );
                     }
                 }
                 lua.to_value(&out)
@@ -641,9 +650,10 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         .set(
             "command_run",
             lua.create_function(|lua, spec: Value| {
-                let spec_json: JsonValue = lua.from_value(spec).map_err(lua_error).map_err(|e| {
-                    mlua::Error::RuntimeError(e.to_string())
-                })?;
+                let spec_json: JsonValue = lua
+                    .from_value(spec)
+                    .map_err(lua_error)
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
                 let result = run_command(&spec_json, None)
                     .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
                 lua.to_value(&result)
@@ -656,9 +666,10 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         .set(
             "command_run_handle",
             lua.create_function(|lua, (spec, handle): (Value, String)| {
-                let spec_json: JsonValue = lua.from_value(spec).map_err(lua_error).map_err(|e| {
-                    mlua::Error::RuntimeError(e.to_string())
-                })?;
+                let spec_json: JsonValue = lua
+                    .from_value(spec)
+                    .map_err(lua_error)
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
                 let result = run_command(&spec_json, Some(handle))
                     .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
                 lua.to_value(&result)
@@ -670,10 +681,8 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
     praxis
         .set(
             "command_abort_handle",
-            lua.create_function(|_, handle: String| {
-                Ok(abort_handle(&handle))
-            })
-            .map_err(lua_error)?,
+            lua.create_function(|_, handle: String| Ok(abort_handle(&handle)))
+                .map_err(lua_error)?,
         )
         .map_err(lua_error)?;
 
@@ -716,11 +725,13 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         .set(
             "acp_create_session",
             lua.create_function(|_, (handle, cwd): (String, String)| {
-                crate::acp::with_client(&handle, |client| {
-                    client.create_session(&cwd)
-                })
-                .ok_or_else(|| mlua::Error::RuntimeError(format!("ACP handle '{}' not found", handle)))?
-                .map_err(|e| mlua::Error::RuntimeError(format!("ACP session/new failed: {}", e)))
+                crate::acp::with_client(&handle, |client| client.create_session(&cwd))
+                    .ok_or_else(|| {
+                        mlua::Error::RuntimeError(format!("ACP handle '{}' not found", handle))
+                    })?
+                    .map_err(|e| {
+                        mlua::Error::RuntimeError(format!("ACP session/new failed: {}", e))
+                    })
             })
             .map_err(lua_error)?,
         )
@@ -729,55 +740,68 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
     praxis
         .set(
             "acp_prompt",
-            lua.create_function(|_, (handle, prompt, yolo, interactive): (String, String, bool, bool)| {
-                //
-                // Retrieve channels from the global registries. These are set up
-                // by the session handler before calling transact().
-                //
+            lua.create_function(
+                |_, (handle, prompt, yolo, interactive): (String, String, bool, bool)| {
+                    //
+                    // Retrieve channels from the global registries. These are set up
+                    // by the session handler before calling transact().
+                    //
 
-                let update_tx = crate::acp::take_update_sender(&handle);
-                let permission_rx = crate::acp::take_permission_receiver(&handle);
-                tracing::debug!(
-                    "acp_prompt: handle='{}' has_update_tx={} has_permission_rx={}",
-                    handle, update_tx.is_some(), permission_rx.is_some()
-                );
+                    let update_tx = crate::acp::take_update_sender(&handle);
+                    let permission_rx = crate::acp::take_permission_receiver(&handle);
+                    tracing::debug!(
+                        "acp_prompt: handle='{}' has_update_tx={} has_permission_rx={}",
+                        handle,
+                        update_tx.is_some(),
+                        permission_rx.is_some()
+                    );
 
-                //
-                // If no channels are registered (CLI-mode fallback or misconfigured),
-                // create dummy ones so the ACP client still works.
-                //
+                    //
+                    // If no channels are registered (CLI-mode fallback or misconfigured),
+                    // create dummy ones so the ACP client still works.
+                    //
 
-                let (fallback_tx, _fallback_rx);
-                let update_tx = match update_tx {
-                    Some(tx) => tx,
-                    None => {
-                        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-                        fallback_tx = tx;
-                        _fallback_rx = rx;
-                        fallback_tx.clone()
-                    }
-                };
+                    let (fallback_tx, _fallback_rx);
+                    let update_tx = match update_tx {
+                        Some(tx) => tx,
+                        None => {
+                            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                            fallback_tx = tx;
+                            _fallback_rx = rx;
+                            fallback_tx.clone()
+                        }
+                    };
 
-                let (fallback_perm_tx, fallback_perm_rx_holder);
-                let permission_rx = match permission_rx {
-                    Some(rx) => rx,
-                    None => {
-                        let (tx, rx) = std::sync::mpsc::channel();
-                        fallback_perm_tx = tx;
-                        fallback_perm_rx_holder = rx;
-                        drop(fallback_perm_tx);
-                        fallback_perm_rx_holder
-                    }
-                };
+                    let (fallback_perm_tx, fallback_perm_rx_holder);
+                    let permission_rx = match permission_rx {
+                        Some(rx) => rx,
+                        None => {
+                            let (tx, rx) = std::sync::mpsc::channel();
+                            fallback_perm_tx = tx;
+                            fallback_perm_rx_holder = rx;
+                            drop(fallback_perm_tx);
+                            fallback_perm_rx_holder
+                        }
+                    };
 
-                let cancel_flag = std::sync::atomic::AtomicBool::new(false);
+                    let cancel_flag = std::sync::atomic::AtomicBool::new(false);
 
-                crate::acp::with_client(&handle, |client| {
-                    client.send_prompt(&prompt, &update_tx, permission_rx, yolo, interactive, &cancel_flag)
-                })
-                .ok_or_else(|| mlua::Error::RuntimeError(format!("ACP handle '{}' not found", handle)))?
-                .map_err(|e| mlua::Error::RuntimeError(format!("ACP prompt failed: {}", e)))
-            })
+                    crate::acp::with_client(&handle, |client| {
+                        client.send_prompt(
+                            &prompt,
+                            &update_tx,
+                            permission_rx,
+                            yolo,
+                            interactive,
+                            &cancel_flag,
+                        )
+                    })
+                    .ok_or_else(|| {
+                        mlua::Error::RuntimeError(format!("ACP handle '{}' not found", handle))
+                    })?
+                    .map_err(|e| mlua::Error::RuntimeError(format!("ACP prompt failed: {}", e)))
+                },
+            )
             .map_err(lua_error)?,
         )
         .map_err(lua_error)?;
@@ -786,11 +810,11 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         .set(
             "acp_cancel",
             lua.create_function(|_, handle: String| {
-                crate::acp::with_client(&handle, |client| {
-                    client.cancel()
-                })
-                .ok_or_else(|| mlua::Error::RuntimeError(format!("ACP handle '{}' not found", handle)))?
-                .map_err(|e| mlua::Error::RuntimeError(format!("ACP cancel failed: {}", e)))
+                crate::acp::with_client(&handle, |client| client.cancel())
+                    .ok_or_else(|| {
+                        mlua::Error::RuntimeError(format!("ACP handle '{}' not found", handle))
+                    })?
+                    .map_err(|e| mlua::Error::RuntimeError(format!("ACP cancel failed: {}", e)))
             })
             .map_err(lua_error)?,
         )
@@ -824,8 +848,8 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
         .set(
             "toml_decode",
             lua.create_function(|lua, input: String| {
-                let value: toml::Value = toml::from_str(&input)
-                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
+                let value: toml::Value =
+                    toml::from_str(&input).map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
                 let json: JsonValue = serde_json::to_value(&value)
                     .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
                 lua.to_value(&json)
@@ -978,7 +1002,8 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
             lua.create_function(|lua, (path, use_hidden): (String, Option<bool>)| {
                 let (pid, desktop_id) = spawn_detached_process(&path, use_hidden.unwrap_or(true))
                     .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
-                let tbl = lua.create_table()
+                let tbl = lua
+                    .create_table()
                     .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
                 tbl.set("pid", pid)
                     .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
@@ -997,10 +1022,8 @@ fn install_shared_api(lua: &Lua) -> Result<()> {
     praxis
         .set(
             "minimize_window",
-            lua.create_function(|_, pid: u32| {
-                Ok(crate::utils::minimize_process_window(pid))
-            })
-            .map_err(lua_error)?,
+            lua.create_function(|_, pid: u32| Ok(crate::utils::minimize_process_window(pid)))
+                .map_err(lua_error)?,
         )
         .map_err(lua_error)?;
 
@@ -1180,8 +1203,8 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
         }
     }
 
-    let spec: CommandSpec = serde_json::from_value(spec_value)
-        .map_err(|e| anyhow!("Invalid command spec: {}", e))?;
+    let spec: CommandSpec =
+        serde_json::from_value(spec_value).map_err(|e| anyhow!("Invalid command spec: {}", e))?;
     if spec.program.trim().is_empty() {
         return Err(anyhow!("Command program is required"));
     }
@@ -1191,7 +1214,11 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
 
     let default_tmp = std::env::temp_dir();
     let default_tmp_str = default_tmp.to_string_lossy();
-    let cwd = spec.cwd.as_deref().filter(|s| !s.is_empty()).unwrap_or(&default_tmp_str);
+    let cwd = spec
+        .cwd
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&default_tmp_str);
     cmd.current_dir(cwd);
     crate::agent_connectors::utils::configure_command_for_directory(&mut cmd, Path::new(cwd));
 
@@ -1272,9 +1299,9 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
             // exceeds its time limit.
             //
 
-            let deadline = spec.timeout_secs.map(|s| {
-                std::time::Instant::now() + std::time::Duration::from_secs(s)
-            });
+            let deadline = spec
+                .timeout_secs
+                .map(|s| std::time::Instant::now() + std::time::Duration::from_secs(s));
 
             let status = loop {
                 if is_reset() {
@@ -1310,8 +1337,7 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
             // blocking read_to_end indefinitely.
             //
 
-            let join_deadline = std::time::Instant::now()
-                + std::time::Duration::from_secs(5);
+            let join_deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
 
             let stdout_bytes = loop {
                 if stdout_thread.is_finished() {
@@ -1355,7 +1381,9 @@ fn run_command(spec_json: &JsonValue, handle: Option<String>) -> Result<JsonValu
                     if status.success() {
                         let preview = if stdout.len() > 2000 {
                             let mut end = 2000;
-                            while end > 0 && !stdout.is_char_boundary(end) { end -= 1; }
+                            while end > 0 && !stdout.is_char_boundary(end) {
+                                end -= 1;
+                            }
                             format!("{}... ({} bytes total)", &stdout[..end], stdout.len())
                         } else {
                             stdout.clone()
@@ -1438,7 +1466,10 @@ fn spawn_detached_process(path: &str, use_hidden_desktop: bool) -> Result<(u32, 
 
 #[cfg(windows)]
 pub fn store_desktop_handle(id: &str, desktop: crate::utils::HiddenDesktop) {
-    DESKTOP_HANDLES.lock().unwrap().insert(id.to_string(), desktop);
+    DESKTOP_HANDLES
+        .lock()
+        .unwrap()
+        .insert(id.to_string(), desktop);
 }
 
 //
@@ -1452,7 +1483,9 @@ static ORIGINAL_DESKTOP: once_cell::sync::Lazy<std::sync::Mutex<Option<isize>>> 
 fn switch_to_desktop(id: Option<&str>) -> Result<()> {
     #[cfg(windows)]
     {
-        use windows::Win32::System::StationsAndDesktops::{GetThreadDesktop, SetThreadDesktop, HDESK};
+        use windows::Win32::System::StationsAndDesktops::{
+            GetThreadDesktop, HDESK, SetThreadDesktop,
+        };
 
         let current_thread = unsafe { windows::Win32::System::Threading::GetCurrentThreadId() };
 
@@ -1578,9 +1611,7 @@ fn semantic_discover_internal_tools(response_text: &str) -> Vec<common::AgentToo
     }
 }
 
-fn semantic_extract_metadata(
-    config_items: &[common::ConfigItem],
-) -> Option<common::ReconMetadata> {
+fn semantic_extract_metadata(config_items: &[common::ConfigItem]) -> Option<common::ReconMetadata> {
     if config_items.is_empty() {
         return None;
     }
@@ -1774,8 +1805,8 @@ fn env_get_for_home(key: &str, home: Option<&str>) -> Option<String> {
         }
     }
 
-    use winreg::enums::*;
     use winreg::RegKey;
+    use winreg::enums::*;
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     if let Ok(env) = hkcu.open_subkey("Environment") {

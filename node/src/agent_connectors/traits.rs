@@ -2,7 +2,22 @@ use anyhow::Result;
 use async_trait::async_trait;
 use common::{ReconResult, SessionContext};
 use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
+
+//
+// Event types that can be streamed from an agent session to the client.
+// Text chunks carry incremental assistant output. ToolCall and ToolResult
+// carry structured tool execution notifications so the client can render
+// them as UI elements instead of raw JSON text.
+//
+
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    Text(String),
+    ToolCall { id: String, name: String, input: String },
+    ToolResult { id: String, success: bool, output: String },
+}
 
 //
 // Mode of interaction for an agent session.
@@ -42,6 +57,9 @@ pub trait AgentSession: Send + Sync {
     fn supports_streaming(&self) -> bool {
         false
     }
+
+    #[allow(dead_code)]
+    fn set_stream_sender(&self, _sender: Option<UnboundedSender<StreamEvent>>) {}
 
     //
     // Abort any in-progress transaction by killing the underlying process.

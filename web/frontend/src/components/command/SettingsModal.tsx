@@ -58,6 +58,15 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const [llmView, setLlmView] = useState<LLMView>('models');
 
   //
+  // Praxis agent settings.
+  //
+
+  const [praxisModelRef, setPraxisModelRef] = useState('');
+  const [praxisThinkingEffort, setPraxisThinkingEffort] = useState('');
+  const [praxisEnabled, setPraxisEnabled] = useState(false);
+  const [praxisSystemPrompt, setPraxisSystemPrompt] = useState('');
+
+  //
   // Model definitions state.
   //
 
@@ -168,6 +177,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       'claude_ccrv1_port',
       'claude_ccrv2_enabled',
       'claude_ccrv2_port',
+      'praxis_agent_settings',
+      'praxis_agent_system_prompt',
     ]);
   }, [state.connected, getConfig]);
 
@@ -273,6 +284,18 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       setCcrV2Enabled(false);
     }
     setCcrV2Port(cfg.claude_ccrv2_port || '8587');
+
+    if (cfg.praxis_agent_settings) {
+      try {
+        const s = JSON.parse(cfg.praxis_agent_settings);
+        setPraxisModelRef(s.modelRef || '');
+        setPraxisThinkingEffort(s.thinkingEffort || '');
+        setPraxisEnabled(!!s.enabled);
+      } catch { /* ignore */ }
+    }
+    if (cfg.praxis_agent_system_prompt) {
+      setPraxisSystemPrompt(cfg.praxis_agent_system_prompt);
+    }
   }, [state.config]);
 
   //
@@ -292,6 +315,17 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       llm_orchestrator_max_tokens: maxTokens,
     });
   }, [setConfig]);
+
+  const savePraxisSettings = useCallback(() => {
+    setConfig({
+      praxis_agent_settings: JSON.stringify({
+        modelRef: praxisModelRef,
+        thinkingEffort: praxisThinkingEffort,
+        enabled: praxisEnabled,
+      }),
+      praxis_agent_system_prompt: praxisSystemPrompt,
+    });
+  }, [setConfig, praxisModelRef, praxisThinkingEffort, praxisEnabled, praxisSystemPrompt]);
 
   //
   // Model CRUD handlers.
@@ -618,7 +652,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 ]).map(v => (
                   <button
                     key={v.id}
-                    onClick={() => setLlmView(v.id)}
+                    onClick={() => { setLlmView(v.id); }}
                     className={`px-3 py-1.5 text-xs font-medium transition-colors border-b-2 -mb-px ${
                       llmView === v.id
                         ? 'text-highlight border-[var(--accent-info)]'
@@ -962,6 +996,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                   )}
                 </div>
               )}
+
             </div>
           )}
 
@@ -973,6 +1008,90 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
           {activeTab === 'agents' && (
             <div className="flex flex-col flex-1 min-h-0 p-5 pb-0">
+              <div className="mb-5 flex-shrink-0">
+                <h3 className="text-xs font-semibold text-highlight tracking-wider mb-0.5">PRAXIS AGENT</h3>
+                <p className="text-[10px] text-muted mb-3">Native agent connector exposed by nodes when enabled.</p>
+
+                {modelDefinitions.length === 0 ? (
+                  <div className="p-6 text-center text-muted border border-dashed border-subtle">
+                    <Key size={24} className="mx-auto mb-2 opacity-50" />
+                    <p className="text-xs">No model definitions available</p>
+                    <p className="text-[10px] mt-0.5">
+                      <button onClick={() => { setActiveTab('llm'); setLlmView('models'); }} className="text-[var(--accent-info)] hover:underline">
+                        Add model definitions
+                      </button> to configure the Praxis Agent
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3 p-2.5 bg-[var(--bg-secondary)] border border-dim">
+                      <div className="w-32 flex-shrink-0">
+                        <p className="text-xs font-medium text-highlight">Enabled</p>
+                        <p className="text-[10px] text-muted">Expose connector</p>
+                      </div>
+                      <button
+                        onClick={() => setPraxisEnabled(v => !v)}
+                        className="flex items-center gap-1.5 text-xs text-muted hover:text-highlight transition-colors"
+                      >
+                        {praxisEnabled
+                          ? <CircleCheck size={14} className="text-[var(--accent-success)]" />
+                          : <Circle size={14} className="text-[var(--text-secondary)]" />}
+                        {praxisEnabled ? 'Enabled' : 'Disabled'}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-3 p-2.5 bg-[var(--bg-secondary)] border border-dim">
+                      <div className="w-32 flex-shrink-0">
+                        <p className="text-xs font-medium text-highlight">Model</p>
+                        <p className="text-[10px] text-muted">Session backend</p>
+                      </div>
+                      <select
+                        value={praxisModelRef}
+                        onChange={e => setPraxisModelRef(e.target.value)}
+                        className={`flex-1 ${inputCls}`}
+                      >
+                        <option value="">Select model...</option>
+                        {modelDefinitions.map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-3 p-2.5 bg-[var(--bg-secondary)] border border-dim">
+                      <div className="w-32 flex-shrink-0">
+                        <p className="text-xs font-medium text-highlight">Thinking Effort</p>
+                        <p className="text-[10px] text-muted">Model-specific</p>
+                      </div>
+                      <input
+                        type="text"
+                        value={praxisThinkingEffort}
+                        onChange={e => setPraxisThinkingEffort(e.target.value)}
+                        placeholder="low, medium, high"
+                        className={`flex-1 ${inputCls}`}
+                      />
+                    </div>
+
+                    <div className="p-2.5 bg-[var(--bg-secondary)] border border-dim space-y-2">
+                      <div>
+                        <p className="text-xs font-medium text-highlight">System Prompt</p>
+                        <p className="text-[10px] text-muted">Prompt sent to the model for Praxis agent sessions.</p>
+                      </div>
+                      <textarea
+                        value={praxisSystemPrompt}
+                        onChange={e => setPraxisSystemPrompt(e.target.value)}
+                        rows={4}
+                        placeholder="You are Praxis, an autonomous agent running on the target system..."
+                        className={`${inputCls} resize-y font-mono min-h-[6rem]`}
+                      />
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button onClick={savePraxisSettings} className={btnSave}>
+                        <Save size={12} /> Save Praxis Agent
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="flex items-center justify-between mb-3 flex-shrink-0">
                 <div>
                   <h3 className="text-xs font-semibold text-highlight tracking-wider mb-0.5">AGENT DEFINITIONS</h3>

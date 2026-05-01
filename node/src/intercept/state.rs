@@ -99,9 +99,8 @@ fn get_state_file_path() -> Option<PathBuf> {
 //
 
 pub fn save_state(state: &InterceptState) -> Result<()> {
-    let path = get_state_file_path().ok_or_else(|| {
-        anyhow::anyhow!("Could not determine data directory")
-    })?;
+    let path = get_state_file_path()
+        .ok_or_else(|| anyhow::anyhow!("Could not determine data directory"))?;
 
     //
     // Ensure directory exists.
@@ -111,8 +110,8 @@ pub fn save_state(state: &InterceptState) -> Result<()> {
         fs::create_dir_all(parent).context("Failed to create data directory")?;
     }
 
-    let json = serde_json::to_string_pretty(state)
-        .context("Failed to serialize intercept state")?;
+    let json =
+        serde_json::to_string_pretty(state).context("Failed to serialize intercept state")?;
 
     fs::write(&path, json).context("Failed to write intercept state file")?;
 
@@ -312,7 +311,10 @@ fn uninstall_cert_by_thumbprint(thumbprint: &str) {
             common::log_warn!("Certificate uninstallation may have failed: {}", stderr);
         }
         Err(e) => {
-            common::log_error!("Failed to run PowerShell for certificate uninstallation: {}", e);
+            common::log_error!(
+                "Failed to run PowerShell for certificate uninstallation: {}",
+                e
+            );
         }
     }
 
@@ -434,16 +436,7 @@ fn cleanup_tproxy(ips: &[String], proxy_port: u16) {
 
     let _ = Command::new("iptables")
         .args([
-            "-t",
-            "mangle",
-            "-D",
-            "OUTPUT",
-            "-m",
-            "mark",
-            "--mark",
-            "2",
-            "-j",
-            "RETURN",
+            "-t", "mangle", "-D", "OUTPUT", "-m", "mark", "--mark", "2", "-j", "RETURN",
         ])
         .output();
 
@@ -452,7 +445,16 @@ fn cleanup_tproxy(ips: &[String], proxy_port: u16) {
     //
 
     let _ = Command::new("ip")
-        .args(["route", "del", "local", "0.0.0.0/0", "dev", "lo", "table", "100"])
+        .args([
+            "route",
+            "del",
+            "local",
+            "0.0.0.0/0",
+            "dev",
+            "lo",
+            "table",
+            "100",
+        ])
         .output();
 
     let _ = Command::new("ip")

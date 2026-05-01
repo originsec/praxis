@@ -4,7 +4,7 @@
 
 use common::{AgentTool, McpServer, McpTransport};
 use futures::future::join_all;
-use rmcp::{model::ListToolsResult, transport::TokioChildProcess, ServiceExt};
+use rmcp::{ServiceExt, model::ListToolsResult, transport::TokioChildProcess};
 use std::time::Duration;
 use tokio::process::Command as TokioCommand;
 
@@ -37,7 +37,10 @@ pub async fn fetch_mcp_server_tools(server: &McpServer) -> Vec<AgentTool> {
 
     common::log_debug!(
         "Connecting to MCP server '{}' via: {} {:?} (cwd: {:?})",
-        server.name, program, args, server.context_path
+        server.name,
+        program,
+        args,
+        server.context_path
     );
 
     let mut cmd = TokioCommand::new(program);
@@ -98,7 +101,8 @@ pub async fn fetch_mcp_server_tools(server: &McpServer) -> Vec<AgentTool> {
         Err(e) => {
             common::log_warn!(
                 "Failed to list tools from MCP server '{}': {}",
-                server.name, e
+                server.name,
+                e
             );
             Vec::new()
         }

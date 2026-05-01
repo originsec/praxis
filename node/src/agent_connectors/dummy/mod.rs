@@ -74,13 +74,11 @@ impl DummyAgent {
                 transport: McpTransport::Stdio,
                 address: None,
                 command: Some("npx @modelcontextprotocol/server-postgres".to_string()),
-                tools: vec![
-                    AgentTool {
-                        name: "db_query".to_string(),
-                        description: "Execute SQL queries".to_string(),
-                        ..Default::default()
-                    },
-                ],
+                tools: vec![AgentTool {
+                    name: "db_query".to_string(),
+                    description: "Execute SQL queries".to_string(),
+                    ..Default::default()
+                }],
                 ..Default::default()
             },
         ]
@@ -216,10 +214,7 @@ impl Agent for DummyAgent {
 #[async_trait]
 impl AgentRecon for DummyAgent {
     async fn perform_recon(&self, is_semantic: bool) -> Option<ReconResult> {
-        common::log_info!(
-            "Performing recon (is_semantic={})",
-            is_semantic
-        );
+        common::log_info!("Performing recon (is_semantic={})", is_semantic);
 
         let mut tools = ReconTools::default();
 

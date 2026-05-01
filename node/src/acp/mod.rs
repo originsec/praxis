@@ -16,16 +16,22 @@ static ACP_CLIENTS: Lazy<Mutex<HashMap<String, AcpHandle>>> =
 pub fn register_client(handle: &str, client: AcpHandle) {
     let cancel = client.cancel_flag();
     let pid = client.pid();
-    ACP_CANCEL_FLAGS.lock().unwrap().insert(handle.to_string(), cancel);
+    ACP_CANCEL_FLAGS
+        .lock()
+        .unwrap()
+        .insert(handle.to_string(), cancel);
     ACP_PIDS.lock().unwrap().insert(handle.to_string(), pid);
-    ACP_CLIENTS.lock().unwrap().insert(handle.to_string(), client);
+    ACP_CLIENTS
+        .lock()
+        .unwrap()
+        .insert(handle.to_string(), client);
 }
 
-static ACP_CANCEL_FLAGS: Lazy<Mutex<HashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static ACP_CANCEL_FLAGS: Lazy<
+    Mutex<HashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>>,
+> = Lazy::new(|| Mutex::new(HashMap::new()));
 
-static ACP_PIDS: Lazy<Mutex<HashMap<String, u32>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static ACP_PIDS: Lazy<Mutex<HashMap<String, u32>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 pub fn remove_client(handle: &str) -> Option<AcpHandle> {
     ACP_CANCEL_FLAGS.lock().unwrap().remove(handle);

@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
@@ -193,8 +193,6 @@ pub fn enumerate_user_homes() -> Vec<PathBuf> {
     homes
 }
 
-
-
 //
 // Expand environment variables in a path template.
 //
@@ -278,9 +276,7 @@ pub fn build_command(path: &str) -> Command {
 #[cfg(unix)]
 pub fn get_path_owner(path: &std::path::Path) -> Option<(u32, u32)> {
     use std::os::unix::fs::MetadataExt;
-    std::fs::metadata(path)
-        .ok()
-        .map(|m| (m.uid(), m.gid()))
+    std::fs::metadata(path).ok().map(|m| (m.uid(), m.gid()))
 }
 
 #[cfg(not(unix))]

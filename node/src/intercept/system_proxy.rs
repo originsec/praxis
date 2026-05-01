@@ -13,8 +13,8 @@ pub struct SavedProxySettings {
 /// Enable the system proxy to point to a local address
 #[cfg(target_os = "windows")]
 pub fn enable_system_proxy(proxy_addr: &str) -> Result<SavedProxySettings> {
-    use winreg::enums::*;
     use winreg::RegKey;
+    use winreg::enums::*;
 
     common::log_info!("Enabling system proxy: {}", proxy_addr);
 
@@ -30,7 +30,9 @@ pub fn enable_system_proxy(proxy_addr: &str) -> Result<SavedProxySettings> {
     // Save current settings.
     //
     let saved = SavedProxySettings {
-        proxy_enable: internet_settings.get_value::<u32, _>("ProxyEnable").unwrap_or(0),
+        proxy_enable: internet_settings
+            .get_value::<u32, _>("ProxyEnable")
+            .unwrap_or(0),
         proxy_server: internet_settings.get_value::<String, _>("ProxyServer").ok(),
     };
 
@@ -82,8 +84,8 @@ pub fn enable_system_proxy(proxy_addr: &str) -> Result<SavedProxySettings> {
 /// Disable the system proxy and restore previous settings
 #[cfg(target_os = "windows")]
 pub fn disable_system_proxy(saved: Option<&SavedProxySettings>) -> Result<()> {
-    use winreg::enums::*;
     use winreg::RegKey;
+    use winreg::enums::*;
 
     common::log_info!("Disabling system proxy");
 
@@ -151,8 +153,8 @@ pub fn disable_system_proxy(_saved: Option<&SavedProxySettings>) -> Result<()> {
 #[cfg(target_os = "windows")]
 #[allow(dead_code)]
 pub fn get_proxy_settings() -> Result<SavedProxySettings> {
-    use winreg::enums::*;
     use winreg::RegKey;
+    use winreg::enums::*;
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let internet_settings = hkcu
@@ -163,7 +165,9 @@ pub fn get_proxy_settings() -> Result<SavedProxySettings> {
         .context("Failed to open Internet Settings registry key")?;
 
     Ok(SavedProxySettings {
-        proxy_enable: internet_settings.get_value::<u32, _>("ProxyEnable").unwrap_or(0),
+        proxy_enable: internet_settings
+            .get_value::<u32, _>("ProxyEnable")
+            .unwrap_or(0),
         proxy_server: internet_settings.get_value::<String, _>("ProxyServer").ok(),
     })
 }

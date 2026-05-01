@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chromiumoxide::browser::Browser;
 use chromiumoxide::cdp::browser_protocol::input::InsertTextParams;
 use chromiumoxide::page::Page;
@@ -31,19 +31,32 @@ fn check_shutdown() -> Result<()> {
 //
 
 struct RawCdpWs {
-    write: Arc<Mutex<futures::stream::SplitSink<
-        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
-        Message,
-    >>>,
-    read: Arc<tokio::sync::Mutex<futures::stream::SplitStream<
-        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
-    >>>,
+    write: Arc<
+        Mutex<
+            futures::stream::SplitSink<
+                tokio_tungstenite::WebSocketStream<
+                    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+                >,
+                Message,
+            >,
+        >,
+    >,
+    read: Arc<
+        tokio::sync::Mutex<
+            futures::stream::SplitStream<
+                tokio_tungstenite::WebSocketStream<
+                    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+                >,
+            >,
+        >,
+    >,
     next_id: AtomicU64,
 }
 
 impl RawCdpWs {
     async fn connect(url: &str) -> Result<Self> {
-        let (ws, _) = tokio_tungstenite::connect_async(url).await
+        let (ws, _) = tokio_tungstenite::connect_async(url)
+            .await
             .map_err(|e| anyhow!("WebSocket connect failed: {}", e))?;
         let (write, read) = futures::StreamExt::split(ws);
         Ok(Self {
@@ -89,7 +102,8 @@ impl RawCdpWs {
                     if let Some(err) = resp.get("error") {
                         return Err(anyhow!("CDP error: {}", err));
                     }
-                    let result = resp.get("result")
+                    let result = resp
+                        .get("result")
                         .and_then(|r| r.get("result"))
                         .and_then(|r| r.get("value"))
                         .cloned()
@@ -164,8 +178,14 @@ fn cdp_spawn_and_connect(config: &Table) -> Result<(String, Option<String>)> {
         .get("base_port")
         .map_err(|e| anyhow!("missing base_port: {}", e))?;
     let port_range: u16 = config.get("port_range").unwrap_or(778);
-    let kill_existing = config.get::<Option<bool>>("kill_existing").unwrap_or(None).unwrap_or(true);
-    let use_hidden_desktop = config.get::<Option<bool>>("use_hidden_desktop").unwrap_or(None).unwrap_or(true);
+    let kill_existing = config
+        .get::<Option<bool>>("kill_existing")
+        .unwrap_or(None)
+        .unwrap_or(true);
+    let use_hidden_desktop = config
+        .get::<Option<bool>>("use_hidden_desktop")
+        .unwrap_or(None)
+        .unwrap_or(true);
 
     //
     // Determine debug port delivery mode: env var or CLI arg.
@@ -312,7 +332,12 @@ async fn discover_ws_url(port: u16) -> Result<String> {
 
     for attempt in 0..max_attempts {
         check_shutdown()?;
-        common::log_debug!("CDP: discovery attempt {}/{} on port {}", attempt + 1, max_attempts, port);
+        common::log_debug!(
+            "CDP: discovery attempt {}/{} on port {}",
+            attempt + 1,
+            max_attempts,
+            port
+        );
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
         let version_url = format!("{}/json/version", base_url);
@@ -329,7 +354,9 @@ async fn discover_ws_url(port: u16) -> Result<String> {
             if let Ok(body) = response.json::<serde_json::Value>().await {
                 if let Some(arr) = body.as_array() {
                     for target in arr {
-                        if let Some(url) = target.get("webSocketDebuggerUrl").and_then(|v| v.as_str()) {
+                        if let Some(url) =
+                            target.get("webSocketDebuggerUrl").and_then(|v| v.as_str())
+                        {
                             return Ok(url.to_string());
                         }
                     }
@@ -338,7 +365,10 @@ async fn discover_ws_url(port: u16) -> Result<String> {
         }
     }
 
-    Err(anyhow!("DevTools not available after {} attempts", max_attempts))
+    Err(anyhow!(
+        "DevTools not available after {} attempts",
+        max_attempts
+    ))
 }
 
 //
@@ -389,7 +419,9 @@ where
 fn require_page(conn: &CdpConnection) -> Result<&Page> {
     match &conn.backend {
         CdpBackend::Chrome(page) => Ok(page),
-        CdpBackend::NodeInspector(_) => Err(anyhow!("operation not supported on Node.js inspector connection")),
+        CdpBackend::NodeInspector(_) => Err(anyhow!(
+            "operation not supported on Node.js inspector connection"
+        )),
     }
 }
 
@@ -429,7 +461,10 @@ fn cdp_click(handle: &str, selector: &str) -> Result<()> {
                 .find_element(selector)
                 .await
                 .map_err(|e| anyhow!("element not found: {}", e))?;
-            element.click().await.map_err(|e| anyhow!("click failed: {}", e))?;
+            element
+                .click()
+                .await
+                .map_err(|e| anyhow!("click failed: {}", e))?;
             Ok(())
         })
     })

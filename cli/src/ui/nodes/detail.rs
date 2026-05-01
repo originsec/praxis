@@ -298,8 +298,6 @@ pub(super) fn render_node_detail(
         agent_lines.push(Line::from(Span::styled("  none", Style::default().fg(DIM))));
     } else {
         for (idx, agent) in node.discovered_agents.iter().enumerate() {
-            let version = agent.version.as_deref().unwrap_or("unknown");
-
             let status_indicator = if agent.available {
                 Span::styled("\u{25cf} ", Style::default().fg(STATUS_DONE))
             } else {
@@ -330,12 +328,15 @@ pub(super) fn render_node_detail(
                 Style::default().fg(TEXT)
             };
 
-            agent_lines.push(Line::from(vec![
+            let mut spans = vec![
                 Span::raw("  "),
                 status_indicator,
                 Span::styled(format!(" {} ", &agent.short_name), name_style),
-                Span::styled(format!("  v{}", version), Style::default().fg(DIM)),
-            ]));
+            ];
+            if let Some(version) = agent.version.as_deref() {
+                spans.push(Span::styled(format!("  v{}", version), Style::default().fg(DIM)));
+            }
+            agent_lines.push(Line::from(spans));
         }
     }
 

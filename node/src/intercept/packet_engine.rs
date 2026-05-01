@@ -151,7 +151,10 @@ impl PacketEngine {
                         //
                         match self.device.send(&response) {
                             Ok(()) => {
-                                common::log_trace!("Sent rewritten packet ({} bytes)", response.len());
+                                common::log_trace!(
+                                    "Sent rewritten packet ({} bytes)",
+                                    response.len()
+                                );
                             }
                             Err(e) => {
                                 common::log_error!("Failed to send packet: {}", e);
@@ -238,7 +241,13 @@ impl PacketEngine {
         let src_port = tcp_header.source_port;
         let dst_port = tcp_header.destination_port;
 
-        common::log_trace!("IPv4 TCP packet: {}:{} -> {}:{}", src_ip, src_port, dst_ip, dst_port);
+        common::log_trace!(
+            "IPv4 TCP packet: {}:{} -> {}:{}",
+            src_ip,
+            src_port,
+            dst_ip,
+            dst_port
+        );
 
         //
         // Check if this is an outbound packet to an intercept IP.
@@ -268,7 +277,10 @@ impl PacketEngine {
             //
             common::log_debug!(
                 "Passing through proxy bypass (IPv4): {}:{} -> {}:{}",
-                src_ip, src_port, dst_ip, dst_port
+                src_ip,
+                src_port,
+                dst_ip,
+                dst_port
             );
             return Some(packet.to_vec());
         }
@@ -277,10 +289,7 @@ impl PacketEngine {
         // Check if this is a response from the proxy (destined for virtual
         // client).
         //
-        if dst_ip == virtual_client_ipv4()
-            && src_ip == tun_ipv4()
-            && src_port == self.proxy_port
-        {
+        if dst_ip == virtual_client_ipv4() && src_ip == tun_ipv4() && src_port == self.proxy_port {
             //
             // Response from proxy - reverse NAT.
             //
@@ -334,7 +343,13 @@ impl PacketEngine {
         let src_port = tcp_header.source_port;
         let dst_port = tcp_header.destination_port;
 
-        common::log_trace!("IPv6 TCP packet: [{}]:{} -> [{}]:{}", src_ip, src_port, dst_ip, dst_port);
+        common::log_trace!(
+            "IPv6 TCP packet: [{}]:{} -> [{}]:{}",
+            src_ip,
+            src_port,
+            dst_ip,
+            dst_port
+        );
 
         //
         // Check if this is an outbound packet to an intercept IP.
@@ -363,7 +378,10 @@ impl PacketEngine {
             //
             common::log_debug!(
                 "Passing through proxy bypass (IPv6): [{}]:{} -> [{}]:{}",
-                src_ip, src_port, dst_ip, dst_port
+                src_ip,
+                src_port,
+                dst_ip,
+                dst_port
             );
             return Some(packet.to_vec());
         }
@@ -372,10 +390,7 @@ impl PacketEngine {
         // Check if this is a response from the proxy (destined for virtual
         // client).
         //
-        if dst_ip == virtual_client_ipv6()
-            && src_ip == tun_ipv6()
-            && src_port == self.proxy_port
-        {
+        if dst_ip == virtual_client_ipv6() && src_ip == tun_ipv6() && src_port == self.proxy_port {
             //
             // Response from proxy - reverse NAT.
             //
@@ -402,7 +417,10 @@ impl PacketEngine {
 
         common::log_debug!(
             "NAT outbound (IPv4): {}:{} -> {}:{} => proxy",
-            src_ip, src_port, dst_ip, dst_port
+            src_ip,
+            src_port,
+            dst_ip,
+            dst_port
         );
 
         //
@@ -452,7 +470,10 @@ impl PacketEngine {
 
         common::log_debug!(
             "NAT outbound (IPv6): [{}]:{} -> [{}]:{} => proxy",
-            src_ip, src_port, dst_ip, dst_port
+            src_ip,
+            src_port,
+            dst_ip,
+            dst_port
         );
 
         //
@@ -505,7 +526,8 @@ impl PacketEngine {
 
         common::log_debug!(
             "NAT inbound (IPv4): proxy -> {}:{}",
-            nat_entry.original_dst_ip, nat_entry.original_dst_port
+            nat_entry.original_dst_ip,
+            nat_entry.original_dst_port
         );
 
         //
@@ -539,7 +561,8 @@ impl PacketEngine {
 
         common::log_debug!(
             "NAT inbound (IPv6): proxy -> {}:{}",
-            nat_entry.original_dst_ip, nat_entry.original_dst_port
+            nat_entry.original_dst_ip,
+            nat_entry.original_dst_port
         );
 
         //

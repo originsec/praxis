@@ -3,7 +3,7 @@ pub mod runtime;
 mod session;
 mod uia;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use chrono::Utc;
 use common::{LuaRegisteredAgentInfo, ReconResult, SessionContext};
@@ -99,11 +99,7 @@ impl Agent for LuaAgent {
     }
 
     fn as_recon(&self) -> Option<&dyn AgentRecon> {
-        if self.has_recon {
-            Some(self)
-        } else {
-            None
-        }
+        if self.has_recon { Some(self) } else { None }
     }
 
     async fn do_fingerprint(&self) -> bool {
@@ -113,15 +109,13 @@ impl Agent for LuaAgent {
             let lua = match vm.try_lock() {
                 Ok(lua) => lua,
                 Err(_) => {
-                    common::log_warn!(
-                        "Lua VM busy for '{}', skipping fingerprint",
-                        short_name
-                    );
+                    common::log_warn!("Lua VM busy for '{}', skipping fingerprint", short_name);
                     return None;
                 }
             };
             Some(runtime::vm_fingerprint_details(&lua))
-        }).await;
+        })
+        .await;
 
         let available = match result {
             Ok(Some(Ok(details))) => {
@@ -141,7 +135,11 @@ impl Agent for LuaAgent {
                 self.fingerprint_at.read().unwrap().is_some()
             }
             Err(e) => {
-                common::log_error!("Lua fingerprint task panicked for '{}': {}", self.short_name, e);
+                common::log_error!(
+                    "Lua fingerprint task panicked for '{}': {}",
+                    self.short_name,
+                    e
+                );
                 false
             }
         };
@@ -161,7 +159,12 @@ impl Agent for LuaAgent {
         let process_path = self.fingerprint_process_path.read().unwrap().clone();
         common::log_info!(
             "Lua agent '{}': create_session_with_id (session_id={}, process_path={:?}, working_dir={:?}, yolo={}, prompt_timeout={:?})",
-            self.short_name, session_id, process_path, context.working_dir, context.yolo_mode, context.prompt_timeout_secs
+            self.short_name,
+            session_id,
+            process_path,
+            context.working_dir,
+            context.yolo_mode,
+            context.prompt_timeout_secs
         );
 
         //
@@ -175,7 +178,9 @@ impl Agent for LuaAgent {
             Err(e) => {
                 common::log_error!(
                     "Lua agent '{}': failed to build session VM for {}: {}",
-                    self.short_name, session_id, e
+                    self.short_name,
+                    session_id,
+                    e
                 );
                 return None;
             }
@@ -191,7 +196,9 @@ impl Agent for LuaAgent {
             Err(e) => {
                 common::log_error!(
                     "Lua agent '{}': session creation failed for {}: {}",
-                    self.short_name, session_id, e
+                    self.short_name,
+                    session_id,
+                    e
                 );
                 self.session_vms.write().unwrap().remove(&session_id);
                 None
@@ -200,10 +207,17 @@ impl Agent for LuaAgent {
     }
 
     fn drop_session(&self, session_id: Uuid) {
-        if self.session_vms.write().unwrap().remove(&session_id).is_some() {
+        if self
+            .session_vms
+            .write()
+            .unwrap()
+            .remove(&session_id)
+            .is_some()
+        {
             common::log_debug!(
                 "Lua agent '{}': dropped session VM for {}",
-                self.short_name, session_id
+                self.short_name,
+                session_id
             );
         }
     }
@@ -219,7 +233,8 @@ impl Agent for LuaAgent {
                 Err(e) => {
                     common::log_error!(
                         "Lua read_session_content failed for '{}': {}",
-                        self.short_name, e
+                        self.short_name,
+                        e
                     );
                 }
             }
@@ -243,8 +258,14 @@ impl AgentRecon for LuaAgent {
                     return None;
                 }
             };
-            Some(runtime::vm_recon(&lua, is_semantic, process_path.as_deref()))
-        }).await {
+            Some(runtime::vm_recon(
+                &lua,
+                is_semantic,
+                process_path.as_deref(),
+            ))
+        })
+        .await
+        {
             Ok(Some(Ok(result))) => result,
             Ok(Some(Err(e))) => {
                 common::log_error!("Lua recon failed for '{}': {}", self.short_name, e);
@@ -264,8 +285,7 @@ impl AgentRecon for LuaAgent {
 
         if !result.tools.mcp_servers.is_empty() {
             let servers = std::mem::take(&mut result.tools.mcp_servers);
-            result.tools.mcp_servers =
-                crate::utils::mcp::fetch_all_mcp_server_tools(servers).await;
+            result.tools.mcp_servers = crate::utils::mcp::fetch_all_mcp_server_tools(servers).await;
         }
 
         Some(result)

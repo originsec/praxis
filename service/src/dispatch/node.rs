@@ -5,8 +5,8 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::Utc;
 use common::{
     node_semantic_queue_name, publish_json, publish_json_exchange, ClientBroadcastMessage,
-    ClientDirectMessage, NodeSignalMessage, TrafficMatch, TrafficMatchWithDetails,
-    CLIENT_BROADCAST_EXCHANGE,
+    ClientDirectMessage, NodeBroadcastMessage, NodeSignalMessage, TrafficMatch,
+    TrafficMatchWithDetails, CLIENT_BROADCAST_EXCHANGE, NODE_BROADCAST_EXCHANGE,
 };
 
 use crate::config::service_config::APPLICATION_LOGS_ENABLED;
@@ -70,6 +70,23 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
             {
                 common::log_error!("Failed to handle NodeRegistration: {}", e);
             }
+
+            let praxis_agent_enabled = {
+                let config = ctx.service_config.read().await;
+                config
+                    .get_praxis_agent_settings()
+                    .map(|settings| settings.enabled)
+                    .unwrap_or(false)
+            };
+            let node_message = NodeBroadcastMessage::PraxisAgentEnabled {
+                enabled: praxis_agent_enabled,
+            };
+            let _ = publish_json_exchange(
+                &ctx.broadcast_channel,
+                NODE_BROADCAST_EXCHANGE,
+                &node_message,
+            )
+            .await;
 
             //
             // Fire new-node triggers (delayed to allow agent discovery).
