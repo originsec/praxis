@@ -565,6 +565,9 @@ impl App {
             }
 
             AcpNotification::TextContent { session_id, text } => {
+                if self.dispatch_node_text_chunk(&session_id, &text) {
+                    return;
+                }
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
                     session.active_tool = None;
 
@@ -596,18 +599,29 @@ impl App {
                 }
             }
 
-            AcpNotification::ToolCall { session_id, name, input } => {
+            AcpNotification::ToolCall { session_id, tool_id, name, raw_input } => {
+                //
+                // Node-session sessions live in app.nodes.sessions; check
+                // there first so cursor/claude tool calls render inline in
+                // the node-session view.
+                //
+                if self.dispatch_node_tool_call(&session_id, &tool_id, &name, raw_input.clone()) {
+                    return;
+                }
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
                     if name != "report_plan" {
                         session.active_tool = Some(name);
-                        session.active_tool_input = input;
+                        session.active_tool_input = raw_input;
                     }
                 }
             }
 
-            AcpNotification::ToolResult { session_id, name, success, result } => {
+            AcpNotification::ToolResult { session_id, tool_id, success, result } => {
+                if self.dispatch_node_tool_result(&session_id, &tool_id, success, &result) {
+                    return;
+                }
                 if let Some(session) = self.orchestrator.session_by_id_mut(&session_id) {
-                    let tool_name = session.active_tool.take().unwrap_or(name);
+                    let tool_name = session.active_tool.take().unwrap_or(tool_id);
                     if tool_name != "report_plan" {
                         let input = session.active_tool_input.take();
                         session.pending_tools.push(ToolCall {
@@ -734,6 +748,82 @@ impl App {
             }
         }
     }
+    //
+    // Route a streaming text chunk to a node session matching `session_id`.
+    // Returns true if the session was found and updated. Mirrors the
+    // legacy SessionUpdateKind::TextChunk handling: pending tool calls
+    // get a separator before fresh text, and the typewriter reveal is
+    // restarted on the new text block.
+    //
+
+    fn dispatch_node_text_chunk(&mut self, session_id: &str, text: &str) -> bool {
+        let Some(session) = self
+            .nodes
+            .sessions
+            .values_mut()
+            .find(|s| s.session_id.as_deref() == Some(session_id))
+        else {
+            return false;
+        };
+        session.last_activity_at = std::time::Instant::now();
+        if session.had_tool_call && !session.streaming_content.is_empty() {
+            session.streaming_content.push_str("\n\n");
+            session.had_tool_call = false;
+        }
+        session.streaming_content.push_str(text);
+        true
+    }
+
+    fn dispatch_node_tool_call(
+        &mut self,
+        session_id: &str,
+        tool_id: &str,
+        name: &str,
+        raw_input: Option<String>,
+    ) -> bool {
+        let Some(session) = self
+            .nodes
+            .sessions
+            .values_mut()
+            .find(|s| s.session_id.as_deref() == Some(session_id))
+        else {
+            return false;
+        };
+        session.last_activity_at = std::time::Instant::now();
+        session.had_tool_call = true;
+        session.tool_calls.push(ToolCallEntry {
+            tool_name: name.to_string(),
+            tool_id: tool_id.to_string(),
+            input: raw_input.unwrap_or_default(),
+            output: None,
+            is_error: false,
+        });
+        true
+    }
+
+    fn dispatch_node_tool_result(
+        &mut self,
+        session_id: &str,
+        tool_id: &str,
+        success: bool,
+        result: &str,
+    ) -> bool {
+        let Some(session) = self
+            .nodes
+            .sessions
+            .values_mut()
+            .find(|s| s.session_id.as_deref() == Some(session_id))
+        else {
+            return false;
+        };
+        session.last_activity_at = std::time::Instant::now();
+        if let Some(tc) = session.tool_calls.iter_mut().find(|t| t.tool_id == tool_id) {
+            tc.output = Some(result.to_string());
+            tc.is_error = !success;
+        }
+        true
+    }
+
     pub(crate) fn cycle_tools_display(&mut self) {
         if let Some(session) = self.orchestrator.active_session_mut() {
             if !session.tools_expanded {
