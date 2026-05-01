@@ -179,6 +179,8 @@ async fn async_main() {
             shutdown_token.clone(),
             result.lua_scripts,
             result.intercept_targets,
+            result.praxis_agent_enabled,
+            result.praxis_agent_config,
         )
         .await
         {

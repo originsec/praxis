@@ -18,6 +18,13 @@ pub struct NodeState {
     // intercept handler when enabling capture.
     //
     pub intercept_targets: Vec<InterceptTargetConfig>,
+
+    //
+    // Latest factory config pushed by the service. Currently carries the
+    // resolved Praxis agent config; the AgentFactory reads it on every
+    // registry rebuild and bakes it into a fresh PraxisAgent (or skips the
+    // agent entirely when None).
+    //
     pub factory_config: FactoryConfig,
     pub last_lua_scripts: Vec<String>,
 }

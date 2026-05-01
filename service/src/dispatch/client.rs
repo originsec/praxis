@@ -872,14 +872,22 @@ async fn handle_config_set(
             if praxis_agent_changed {
                 let settings = config.get_praxis_agent_settings();
                 let enabled = settings.as_ref().map(|s| s.enabled).unwrap_or(false);
-                let resolved_config = config.resolve_praxis_agent_config();
-                if enabled && resolved_config.is_none() {
-                    common::log_warn!(
-                        "Praxis agent is enabled but its selected model could not be resolved"
-                    );
-                }
+                let resolved_config = if enabled {
+                    let r = config.resolve_praxis_agent_config();
+                    if r.is_none() {
+                        common::log_warn!(
+                            "Praxis agent is enabled but its selected model could not be resolved"
+                        );
+                    }
+                    r
+                } else {
+                    None
+                };
 
-                let node_message = NodeBroadcastMessage::PraxisAgentEnabled { enabled };
+                let node_message = NodeBroadcastMessage::PraxisAgentEnabled {
+                    enabled,
+                    config: resolved_config.clone(),
+                };
                 let _ = publish_json_exchange(
                     &ctx.broadcast_channel,
                     NODE_BROADCAST_EXCHANGE,
@@ -887,8 +895,9 @@ async fn handle_config_set(
                 )
                 .await;
                 common::log_info!(
-                    "Broadcast PraxisAgentEnabled {{ enabled: {} }} after config change",
-                    enabled
+                    "Broadcast PraxisAgentEnabled {{ enabled: {}, config: {} }} after config change",
+                    enabled,
+                    if resolved_config.is_some() { "present" } else { "absent" },
                 );
             }
 

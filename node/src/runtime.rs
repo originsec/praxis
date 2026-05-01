@@ -34,10 +34,12 @@ pub async fn run(
     shutdown_token: CancellationToken,
     lua_scripts: Vec<String>,
     intercept_targets: Vec<common::InterceptTargetConfig>,
+    praxis_agent_enabled: bool,
+    praxis_agent_config: Option<common::PraxisAgentConfig>,
 ) -> anyhow::Result<RuntimeExit> {
     listen_to_queues(
         channel, node_id, node_queue, registry, factory, shutdown_token,
-        lua_scripts, intercept_targets,
+        lua_scripts, intercept_targets, praxis_agent_enabled, praxis_agent_config,
     ).await
 }
 
@@ -51,6 +53,8 @@ async fn listen_to_queues(
     shutdown_token: CancellationToken,
     lua_scripts: Vec<String>,
     intercept_targets: Vec<common::InterceptTargetConfig>,
+    praxis_agent_enabled: bool,
+    praxis_agent_config: Option<common::PraxisAgentConfig>,
 ) -> anyhow::Result<RuntimeExit> {
     //
     // Create a private broadcast queue bound to the fanout exchange.
@@ -136,6 +140,11 @@ async fn listen_to_queues(
             traffic_tx,
         );
         state.intercept_targets = intercept_targets;
+        state.factory_config.praxis_agent_config = if praxis_agent_enabled {
+            praxis_agent_config
+        } else {
+            None
+        };
         state
     }));
 
@@ -664,15 +673,22 @@ async fn listen_to_queues(
                             Ok(message) => match message {
                                 NodeDirectMessage::RegistrationAck(ack) => {
                                     //
-                                    // Always refresh the intercept target list — even
-                                    // if the script set didn't change, the service
-                                    // may have updated targets.
+                                    // Always refresh the intercept target list and
+                                    // Praxis agent state — even if the script set
+                                    // didn't change, the service may have updated
+                                    // either of those.
                                     //
                                     let scripts = ack.lua_scripts;
                                     {
                                         let mut state = node_state.write().await;
                                         state.intercept_targets = ack.intercept_targets;
                                         state.last_lua_scripts = scripts.clone();
+                                        state.factory_config.praxis_agent_config =
+                                            if ack.praxis_agent_enabled {
+                                                ack.praxis_agent_config
+                                            } else {
+                                                None
+                                            };
                                         factory.set_config(state.factory_config.clone());
                                     }
 
@@ -790,14 +806,16 @@ async fn handle_broadcast_message(
                 if enabled { "enabled" } else { "disabled" }
             );
         }
-        NodeBroadcastMessage::PraxisAgentEnabled { enabled } => {
+        NodeBroadcastMessage::PraxisAgentEnabled { enabled, config } => {
             common::log_info!(
-                "Received PraxisAgentEnabled: {}",
-                if enabled { "enabled" } else { "disabled" }
+                "Received PraxisAgentEnabled: {} (config: {})",
+                if enabled { "enabled" } else { "disabled" },
+                if config.is_some() { "present" } else { "absent" },
             );
             let lua_scripts = {
                 let mut state = node_state.write().await;
-                state.factory_config.praxis_agent_enabled = enabled;
+                state.factory_config.praxis_agent_config =
+                    if enabled { config } else { None };
                 factory.set_config(state.factory_config.clone());
                 state.last_lua_scripts.clone()
             };

@@ -22,7 +22,6 @@ use lapin::Channel;
 use serde_json::{json, Value};
 use tokio::sync::{oneshot, OnceCell, RwLock};
 
-use crate::config::service_config::ServiceConfig;
 use crate::messaging::{send_to_client, send_to_node};
 use crate::remote_nodes::RemoteNodeManager;
 
@@ -61,7 +60,6 @@ pub struct AcpNodeProxy {
     // their bridges instead of the standard node queue.
     //
     remote_node_manager: OnceCell<Arc<RemoteNodeManager>>,
-    service_config: OnceCell<Arc<RwLock<ServiceConfig>>>,
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
@@ -81,10 +79,6 @@ impl AcpNodeProxy {
     //
     pub fn set_remote_node_manager(&self, manager: Arc<RemoteNodeManager>) {
         let _ = self.remote_node_manager.set(manager);
-    }
-
-    pub fn set_service_config(&self, config: Arc<RwLock<ServiceConfig>>) {
-        let _ = self.service_config.set(config);
     }
 
     pub async fn register_session(&self, session_id: String, node_id: String) {
@@ -132,8 +126,6 @@ impl AcpNodeProxy {
         client_id: &str,
         json_rpc: &str,
     ) -> Result<()> {
-        let json_rpc = self.maybe_inject_praxis_config(json_rpc).await;
-
         //
         // Remote-node bridges don't have a RabbitMQ queue — they
         // listen for ACP frames via the manager. Route through it
@@ -142,70 +134,15 @@ impl AcpNodeProxy {
         //
         if let Some(manager) = self.remote_node_manager.get() {
             if manager.is_remote_node(node_id).await {
-                manager.forward_acp(node_id, client_id, &json_rpc).await;
+                manager.forward_acp(node_id, client_id, json_rpc).await;
                 return Ok(());
             }
         }
         let frame = AcpFrame {
             client_id: client_id.to_string(),
-            json_rpc,
+            json_rpc: json_rpc.to_string(),
         };
         send_to_node(channel, node_id, NodeDirectMessage::Acp(frame)).await
-    }
-
-    async fn maybe_inject_praxis_config(&self, json_rpc: &str) -> String {
-        let mut value: Value = match serde_json::from_str(json_rpc) {
-            Ok(v) => v,
-            Err(_) => return json_rpc.to_string(),
-        };
-
-        if value.get("method").and_then(|v| v.as_str()) != Some("session/new") {
-            return json_rpc.to_string();
-        }
-
-        let params = match value.get_mut("params").and_then(|v| v.as_object_mut()) {
-            Some(p) => p,
-            None => return json_rpc.to_string(),
-        };
-
-        let meta = params.entry("_meta").or_insert_with(|| json!({}));
-        let meta_obj = match meta.as_object_mut() {
-            Some(o) => o,
-            None => return json_rpc.to_string(),
-        };
-
-        let praxis = meta_obj.entry("praxis").or_insert_with(|| json!({}));
-        let praxis_obj = match praxis.as_object_mut() {
-            Some(o) => o,
-            None => return json_rpc.to_string(),
-        };
-
-        let connector = praxis_obj.get("connector").and_then(|v| v.as_str());
-        if connector != Some("praxis") {
-            return json_rpc.to_string();
-        }
-
-        if praxis_obj.contains_key("agentConfig") {
-            return json_rpc.to_string();
-        }
-
-        let config_opt = {
-            if let Some(service_config) = self.service_config.get() {
-                let config = service_config.read().await;
-                config.resolve_praxis_agent_config()
-            } else {
-                None
-            }
-        };
-
-        if let Some(config) = config_opt {
-            if let Ok(config_json) = serde_json::to_value(config) {
-                praxis_obj.insert("agentConfig".to_string(), config_json);
-                return serde_json::to_string(&value).unwrap_or_else(|_| json_rpc.to_string());
-            }
-        }
-
-        json_rpc.to_string()
     }
 
     //

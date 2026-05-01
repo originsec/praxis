@@ -220,33 +220,42 @@ pub struct DiscoveredAgent {
     pub version: Option<String>,
 }
 
+//
+// Resolved Praxis agent configuration. Built service-side from
+// `praxis_agent_settings` + the referenced model definition, broadcast to
+// nodes alongside `PraxisAgentEnabled`, and stashed on NodeState for
+// session/new to consume. JSON wire format is camelCase (also embedded in
+// ACP `_meta.praxis.agentConfig` for any external client that might inspect
+// it).
+//
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PraxisAgentConfig {
     pub provider: String,
-    #[serde(alias = "apiKey")]
     pub api_key: String,
-    #[serde(alias = "endpointUrl")]
     pub endpoint_url: String,
-    #[serde(alias = "modelName")]
     pub model_name: String,
-    #[serde(
-        default,
-        alias = "thinkingEffort",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_effort: Option<String>,
-    #[serde(
-        default,
-        alias = "systemPrompt",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
+    /// Maximum tool-call iterations per transact. Defaults to 10 when None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tool_iterations: Option<u32>,
+    /// run_command wall-clock timeout. Defaults to 60s when None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command_timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FactoryConfig {
-    #[serde(default)]
-    pub praxis_agent_enabled: bool,
+    /// Resolved Praxis agent config, or None when the connector is not
+    /// enabled or the service couldn't resolve it (missing model
+    /// definition, empty endpoint URL, etc.). Presence is the gate that
+    /// AgentFactory uses to decide whether to register PraxisAgent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub praxis_agent_config: Option<PraxisAgentConfig>,
 }
 
 //
@@ -520,9 +529,15 @@ pub enum NodeBroadcastMessage {
     EventLoggingSet {
         enabled: bool,
     },
-    /// Enable/disable the native Praxis agent connector on nodes.
+    /// Enable/disable the native Praxis agent connector on nodes, and push
+    /// the resolved per-session config (provider/api key/model/etc.). When
+    /// `enabled` is false `config` is None. Nodes cache `config` on
+    /// NodeState so session/new can read it without round-tripping the
+    /// service.
     PraxisAgentEnabled {
         enabled: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        config: Option<PraxisAgentConfig>,
     },
     /// Atomic agent registry update: rebuild registry from native agents + these scripts.
     AgentRegistryUpdate {
@@ -552,6 +567,12 @@ pub struct NodeRegistrationAck {
     pub event_logging_enabled: bool,
     #[serde(default)]
     pub intercept_targets: Vec<InterceptTargetConfig>,
+    /// Whether the native Praxis agent should be exposed by this node.
+    #[serde(default)]
+    pub praxis_agent_enabled: bool,
+    /// Resolved Praxis agent config (None when disabled or unresolvable).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub praxis_agent_config: Option<PraxisAgentConfig>,
 }
 
 //
@@ -614,12 +635,6 @@ pub struct SessionContext {
     /// permissions unless yolo_mode is enabled. Default: false.
     #[serde(default)]
     pub interactive: bool,
-    /// Optional model requested via ACP-native model metadata.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    /// Resolved Praxis agent config passed through ACP _meta for this session.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub praxis_agent_config: Option<PraxisAgentConfig>,
 }
 
 /// Method of interception

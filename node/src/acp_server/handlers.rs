@@ -8,12 +8,10 @@ use acp::schema::{
     Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
     ListSessionsResponse, NewSessionRequest, NewSessionResponse, PromptRequest, ProtocolVersion,
     SessionInfo, SessionUpdate, StopReason, TextContent, ToolCall as AcpToolCall, ToolCallContent,
-    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind,
+    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
 };
-use common::{PraxisAgentConfig, SessionContext, SessionUpdateKind};
+use common::{SessionContext, SessionUpdateKind};
 use serde_json::{json, Value};
-
-use crate::agent_connectors::StreamEvent;
 
 use super::extensions::{
     EXT_PRAXIS_GREP_FILES, EXT_PRAXIS_READ_FILE, EXT_PRAXIS_RECON,
@@ -112,27 +110,6 @@ pub async fn handle_session_new(
         return;
     };
 
-    let model_name = meta_val
-        .get("model")
-        .and_then(|v| v.as_str())
-        .or_else(|| {
-            praxis
-                .get("agentConfig")
-                .and_then(|c| c.get("modelName"))
-                .and_then(|v| v.as_str())
-        })
-        .map(|s| s.to_string());
-    let praxis_agent_config = praxis.get("agentConfig").cloned().and_then(|mut v| {
-        if let Some(model) = &model_name {
-            if let Some(obj) = v.as_object_mut() {
-                if !obj.contains_key("modelName") && !obj.contains_key("model_name") {
-                    obj.insert("modelName".to_string(), Value::String(model.clone()));
-                }
-            }
-        }
-        serde_json::from_value::<PraxisAgentConfig>(v).ok()
-    });
-
     let context = SessionContext {
         working_dir: Some(req.cwd.to_string_lossy().to_string()),
         yolo_mode: praxis.get("yolo").and_then(|v| v.as_bool()).unwrap_or(false),
@@ -141,8 +118,6 @@ pub async fn handle_session_new(
             .get("interactive")
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
-        model: model_name,
-        praxis_agent_config,
     };
 
     let session_id = Uuid::new_v4();
@@ -177,6 +152,21 @@ pub async fn handle_session_new(
         context,
         cancel_flag: Arc::new(AtomicBool::new(false)),
     });
+
+    //
+    // Sessions that want to participate in single-flag cancellation can
+    // adopt the NodeSession's flag. The handler-side `session/cancel`
+    // already sets it; this just lets the inner transact loop poll the
+    // same atomic.
+    //
+    if let Some(praxis) = node_session
+        .session
+        .as_any()
+        .downcast_ref::<crate::agent_connectors::praxis::PraxisAgentSession>()
+    {
+        praxis.set_cancel_flag(Arc::clone(&node_session.cancel_flag));
+    }
+
     server.store().insert(Arc::clone(&node_session));
 
     if let Some(id) = id {
@@ -236,22 +226,15 @@ pub async fn handle_session_prompt(
     }
 
     //
-    // For ACP-backed Lua sessions (cursor, claude, etc.), register a
-    // SessionUpdateKind sender keyed on the agent's acp_handle. The Lua
-    // `acp_prompt` function takes ownership of the sender before invoking
-    // the underlying ACP client, which then pushes per-event updates
-    // (text chunks, tool calls, tool results) onto the channel as they
-    // arrive from the agent. We drain those here and emit them as
-    // `session/update` JSON-RPC notifications back to the originating
-    // external client. When the prompt completes, all clones of the
-    // sender drop and the forwarder task exits naturally.
+    // Streaming sessions (ACP-backed Lua sessions, native Praxis agent, etc.)
+    // expose an `acp_handle` they own. We register a SessionUpdateKind sender
+    // against that handle before calling transact, then spawn a forwarder that
+    // drains every event and emits it as a JSON-RPC `session/update`
+    // notification back to the originating external client. When transact
+    // returns, all sender clones drop and the forwarder exits naturally.
     //
 
-    let acp_handle = node_session
-        .session
-        .as_any()
-        .downcast_ref::<crate::agent_connectors::lua::LuaAgentSession>()
-        .and_then(|s| s.acp_handle());
+    let acp_handle = node_session.session.acp_handle();
 
     let forwarder = if let Some(handle) = acp_handle.clone() {
         let (update_tx, update_rx) =
@@ -276,73 +259,12 @@ pub async fn handle_session_prompt(
 
     //
     // Run transact on a blocking thread so the async runtime isn't held by
-    // the synchronous Lua VM call. ACP-backed Lua sessions stream chunks
-    // through the SessionUpdateKind forwarder above. Sessions whose
-    // AgentSession trait reports `supports_streaming() == true` (e.g.
-    // PraxisAgent) push StreamEvents through the channel set up below.
-    // Non-streaming sessions emit a single AgentMessageChunk with the full
-    // response after transact returns.
+    // a synchronous Lua VM call. Non-streaming sessions emit a single
+    // AgentMessageChunk with the full response after transact returns.
     //
 
     let session_for_task = Arc::clone(&node_session.session);
-    let session_for_clear = Arc::clone(&node_session.session);
     let cancel = Arc::clone(&node_session.cancel_flag);
-
-    let stream_handle = if session_for_task.supports_streaming() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        session_for_task.set_stream_sender(Some(tx));
-
-        let server_clone = Arc::clone(&server);
-        let client_id_clone = client_id.to_string();
-        let session_id_str_clone = session_id_str.clone();
-        Some(tokio::spawn(async move {
-            while let Some(event) = rx.recv().await {
-                match event {
-                    StreamEvent::Text(text) => {
-                        server_clone.send_session_notification(
-                            &client_id_clone,
-                            &session_id_str_clone,
-                            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
-                                TextContent::new(text),
-                            ))),
-                        );
-                    }
-                    StreamEvent::ToolCall { id, name, input } => {
-                        let tool_call = AcpToolCall::new(id.clone(), format!("run_command: {}", name))
-                            .kind(ToolKind::Execute)
-                            .status(ToolCallStatus::InProgress)
-                            .raw_input(serde_json::from_str(&input).ok());
-                        server_clone.send_session_notification(
-                            &client_id_clone,
-                            &session_id_str_clone,
-                            SessionUpdate::ToolCall(tool_call),
-                        );
-                    }
-                    StreamEvent::ToolResult { id, success, output } => {
-                        let status = if success {
-                            ToolCallStatus::Completed
-                        } else {
-                            ToolCallStatus::Failed
-                        };
-                        let content = vec![ToolCallContent::from(ContentBlock::Text(
-                            TextContent::new(output),
-                        ))];
-                        let fields = ToolCallUpdateFields::new()
-                            .status(status)
-                            .content(content);
-                        let update = ToolCallUpdate::new(id, fields);
-                        server_clone.send_session_notification(
-                            &client_id_clone,
-                            &session_id_str_clone,
-                            SessionUpdate::ToolCallUpdate(update),
-                        );
-                    }
-                }
-            }
-        }))
-    } else {
-        None
-    };
 
     let result = tokio::task::spawn_blocking(move || {
         if cancel.load(Ordering::SeqCst) {
@@ -353,20 +275,16 @@ pub async fn handle_session_prompt(
     .await;
 
     //
-    // Wait for both forwarders to drain any in-flight updates. The senders
-    // owned by the underlying transact path drop when transact returns,
-    // which closes the channels and lets the forwarders finish.
+    // Wait for the forwarder to drain any in-flight updates. The senders
+    // owned by the transact path drop when transact returns, which closes
+    // the channel and lets the forwarder finish.
     //
 
-    session_for_clear.set_stream_sender(None);
-    if let Some(handle) = stream_handle {
-        let _ = handle.await;
-    }
     if let Some(fwd) = forwarder {
         let _ = fwd.await;
     }
 
-    let streaming = acp_handle.is_some() || node_session.session.supports_streaming();
+    let streaming = acp_handle.is_some();
 
     match result {
         Ok(Ok(response)) => {
@@ -384,8 +302,9 @@ pub async fn handle_session_prompt(
                         TextContent::new(response),
                     ))),
                 );
+            } else {
+                let _ = response;
             }
-            let _ = response;
             if let Some(id) = id {
                 let stop = if node_session.cancel_flag.load(Ordering::SeqCst) {
                     StopReason::Cancelled

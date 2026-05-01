@@ -28,8 +28,8 @@ impl AgentFactory {
         let mut agents: Vec<Arc<dyn Agent>> = Vec::new();
         let config = self.config();
 
-        if config.praxis_agent_enabled {
-            agents.push(Arc::new(PraxisAgent::new()));
+        if let Some(praxis_config) = config.praxis_agent_config {
+            agents.push(Arc::new(PraxisAgent::new(praxis_config)));
         }
 
         //

@@ -227,6 +227,8 @@ impl ServiceConfig {
                 Some(settings.thinking_effort)
             },
             system_prompt: self.get_praxis_agent_system_prompt(),
+            max_tool_iterations: None,
+            command_timeout_secs: None,
         })
     }
 

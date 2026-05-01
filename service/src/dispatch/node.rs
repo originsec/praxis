@@ -5,8 +5,8 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::Utc;
 use common::{
     node_semantic_queue_name, publish_json, publish_json_exchange, ClientBroadcastMessage,
-    ClientDirectMessage, NodeBroadcastMessage, NodeSignalMessage, TrafficMatch,
-    TrafficMatchWithDetails, CLIENT_BROADCAST_EXCHANGE, NODE_BROADCAST_EXCHANGE,
+    ClientDirectMessage, NodeSignalMessage, TrafficMatch, TrafficMatchWithDetails,
+    CLIENT_BROADCAST_EXCHANGE,
 };
 
 use crate::config::service_config::APPLICATION_LOGS_ENABLED;
@@ -62,31 +62,40 @@ pub async fn handle(ctx: &ServiceContext, message: NodeSignalMessage) -> Result<
                 }
             };
 
+            //
+            // Resolve current Praxis agent state and include it in the ack so
+            // the node has its config in hand before any session/new arrives.
+            // No separate broadcast is needed at registration time.
+            //
+            let (praxis_agent_enabled, praxis_agent_config) = {
+                let config = ctx.service_config.read().await;
+                let enabled = config
+                    .get_praxis_agent_settings()
+                    .map(|s| s.enabled)
+                    .unwrap_or(false);
+                let resolved = if enabled {
+                    config.resolve_praxis_agent_config()
+                } else {
+                    None
+                };
+                (enabled, resolved)
+            };
+
             let reg_node_id = registration.node_id.clone();
             if let Err(e) = ctx
                 .node_handler
-                .handle_node_registration(registration, lua_scripts, event_logging_enabled, intercept_targets)
+                .handle_node_registration(
+                    registration,
+                    lua_scripts,
+                    event_logging_enabled,
+                    intercept_targets,
+                    praxis_agent_enabled,
+                    praxis_agent_config,
+                )
                 .await
             {
                 common::log_error!("Failed to handle NodeRegistration: {}", e);
             }
-
-            let praxis_agent_enabled = {
-                let config = ctx.service_config.read().await;
-                config
-                    .get_praxis_agent_settings()
-                    .map(|settings| settings.enabled)
-                    .unwrap_or(false)
-            };
-            let node_message = NodeBroadcastMessage::PraxisAgentEnabled {
-                enabled: praxis_agent_enabled,
-            };
-            let _ = publish_json_exchange(
-                &ctx.broadcast_channel,
-                NODE_BROADCAST_EXCHANGE,
-                &node_message,
-            )
-            .await;
 
             //
             // Fire new-node triggers (delayed to allow agent discovery).

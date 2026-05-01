@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use common::{AgentTool, ReconResult, ReconTools, SessionContext};
+use common::{AgentTool, PraxisAgentConfig, ReconResult, ReconTools, SessionContext};
 use uuid::Uuid;
 
 use crate::agent_connectors::traits::{Agent, AgentRecon, AgentSession};
@@ -11,17 +11,13 @@ use super::session::PraxisAgentSession;
 const AGENT_NAME: &str = "Praxis Agent";
 const AGENT_SHORTNAME: &str = "praxis";
 
-pub struct PraxisAgent;
-
-impl PraxisAgent {
-    pub fn new() -> Self {
-        Self
-    }
+pub struct PraxisAgent {
+    config: PraxisAgentConfig,
 }
 
-impl Default for PraxisAgent {
-    fn default() -> Self {
-        Self::new()
+impl PraxisAgent {
+    pub fn new(config: PraxisAgentConfig) -> Self {
+        Self { config }
     }
 }
 
@@ -45,11 +41,11 @@ impl Agent for PraxisAgent {
 
     fn create_session_with_id(
         &self,
-        context: &SessionContext,
+        _context: &SessionContext,
         session_id: Uuid,
     ) -> Option<Arc<dyn AgentSession>> {
-        let config = context.praxis_agent_config.clone()?;
-        Some(Arc::new(PraxisAgentSession::new(config, session_id)) as Arc<dyn AgentSession>)
+        Some(Arc::new(PraxisAgentSession::new(self.config.clone(), session_id))
+            as Arc<dyn AgentSession>)
     }
 }
 
