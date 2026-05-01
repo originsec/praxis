@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use common::PraxisAgentConfig;
 use common::ai::{
-    ChatCompletionRequest, Provider, Role, Tool, build_message, create_ai_client,
+    ChatCompletionRequest, Message, Provider, Role, Tool, build_message, create_ai_client,
     get_system_prompt_with_tools, parse_manual_tool_call,
 };
 use futures::StreamExt;
@@ -28,6 +28,7 @@ pub struct PraxisAgentSession {
     session_id: Uuid,
     cancel_flag: Arc<AtomicBool>,
     stream_sender: Arc<Mutex<Option<UnboundedSender<StreamEvent>>>>,
+    messages: Arc<Mutex<Vec<Message>>>,
 }
 
 impl PraxisAgentSession {
@@ -37,6 +38,7 @@ impl PraxisAgentSession {
             session_id,
             cancel_flag: Arc::new(AtomicBool::new(false)),
             stream_sender: Arc::new(Mutex::new(None)),
+            messages: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -58,36 +60,55 @@ impl PraxisAgentSession {
         )?;
 
         let tools = vec![run_command_tool()];
-        let base_prompt = self
-            .config
-            .system_prompt
-            .as_deref()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or(DEFAULT_SYSTEM_PROMPT);
-        let mut system_prompt = get_system_prompt_with_tools(base_prompt, &tools);
-        if let Some(effort) = self
-            .config
-            .thinking_effort
-            .as_deref()
-            .filter(|s| !s.trim().is_empty())
-        {
-            system_prompt.push_str("\n\nRequested thinking effort: ");
-            system_prompt.push_str(effort);
-            system_prompt.push('.');
-        }
 
-        let mut messages = vec![
-            build_message(Role::System, system_prompt),
-            build_message(Role::User, prompt.to_string()),
-        ];
+        //
+        // Seed the persistent message history with the system prompt on the
+        // first turn of the session, then append the new user prompt. This
+        // preserves context across successive transact() calls so the agent
+        // can refer back to earlier exchanges.
+        //
+        {
+            let mut guard = self
+                .messages
+                .lock()
+                .map_err(|_| anyhow!("praxis message history lock poisoned"))?;
+            if guard.is_empty() {
+                let base_prompt = self
+                    .config
+                    .system_prompt
+                    .as_deref()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or(DEFAULT_SYSTEM_PROMPT);
+                let mut system_prompt = get_system_prompt_with_tools(base_prompt, &tools);
+                if let Some(effort) = self
+                    .config
+                    .thinking_effort
+                    .as_deref()
+                    .filter(|s| !s.trim().is_empty())
+                {
+                    system_prompt.push_str("\n\nRequested thinking effort: ");
+                    system_prompt.push_str(effort);
+                    system_prompt.push('.');
+                }
+                guard.push(build_message(Role::System, system_prompt));
+            }
+            guard.push(build_message(Role::User, prompt.to_string()));
+        }
 
         for _ in 0..MAX_TOOL_ITERATIONS {
             if self.cancel_flag.load(Ordering::SeqCst) {
                 return Err(anyhow!("transaction cancelled"));
             }
 
+            let request_messages = {
+                let guard = self
+                    .messages
+                    .lock()
+                    .map_err(|_| anyhow!("praxis message history lock poisoned"))?;
+                guard.clone()
+            };
             let request =
-                ChatCompletionRequest::new(self.config.model_name.clone(), messages.clone());
+                ChatCompletionRequest::new(self.config.model_name.clone(), request_messages);
 
             let mut full_text = String::new();
             let mut stream = client.chat_completion_stream(request);
@@ -140,11 +161,15 @@ impl PraxisAgentSession {
                             output: result.clone(),
                         });
 
-                        messages.push(build_message(
+                        let mut guard = self
+                            .messages
+                            .lock()
+                            .map_err(|_| anyhow!("praxis message history lock poisoned"))?;
+                        guard.push(build_message(
                             Role::Assistant,
                             format!("Called run_command with command: {}", command),
                         ));
-                        messages.push(build_message(
+                        guard.push(build_message(
                             Role::User,
                             format!("Tool result for run_command:\n{}", result),
                         ));
@@ -154,13 +179,29 @@ impl PraxisAgentSession {
                             success: false,
                             output: format!("Unknown tool: {}", tool_name),
                         });
-                        messages.push(build_message(
+                        let mut guard = self
+                            .messages
+                            .lock()
+                            .map_err(|_| anyhow!("praxis message history lock poisoned"))?;
+                        guard.push(build_message(
                             Role::User,
                             format!("Unknown tool: {}", tool_name),
                         ));
                     }
                 }
-                None => return Ok(full_text),
+                None => {
+                    //
+                    // No tool call in the response - the model's text reply is
+                    // the final answer for this turn. Persist it as the
+                    // assistant's last message so subsequent turns can see it.
+                    //
+                    let mut guard = self
+                        .messages
+                        .lock()
+                        .map_err(|_| anyhow!("praxis message history lock poisoned"))?;
+                    guard.push(build_message(Role::Assistant, full_text.clone()));
+                    return Ok(full_text);
+                }
             }
         }
 
