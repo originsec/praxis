@@ -26,6 +26,7 @@ A connector handles four main capabilities:
 | [`gemini`](./gemini.md) | Gemini CLI | Linux, Windows | CLI | Lua |
 | [`m365copilot`](./m365-copilot.md) | Microsoft 365 Copilot | Windows only | DevTools | Lua |
 | [`pi`](./pi.md) | Pi Coding Agent (`@mariozechner/pi-coding-agent`) | Linux, Windows | CLI | Lua |
+| [`praxis`](./praxis.md) | Native LLM agent (provider-agnostic) | Any | ACP (native streaming) | Native |
 
 Want to add support for another agent? Contributions welcome! See [Adding New Connectors](./adding-new.md).
 
@@ -141,7 +142,7 @@ When a node starts, it runs fingerprinting for all registered connectors. Any ag
 
 Fingerprint results are cached for 60 seconds when the agent is available. Agents that are not found are re-checked on every cycle so they are discovered as soon as they are installed.
 
-All connectors (Claude Code, Claude Desktop, Codex, Cursor, Gemini, M365 Copilot, Pi) are Lua-based and loaded from embedded scripts or the service database. GUI-based agents like Claude Desktop (Electron) and M365 Copilot (WebView) use the `praxis.cdp_*` native API and `praxis.devtools` Lua library for Chrome DevTools Protocol interaction.
+Most connectors (Claude Code, Claude Desktop, Codex, Cursor, Gemini, M365 Copilot, Pi) are Lua-based and loaded from embedded scripts or the service database. GUI-based agents like Claude Desktop (Electron) and M365 Copilot (WebView) use the `praxis.cdp_*` native API and `praxis.devtools` Lua library for Chrome DevTools Protocol interaction. The Praxis Agent and the Claude Bridge are native (Rust) connectors — the Praxis Agent is gated by service config (it appears only when enabled and a model definition is selected), and Claude Bridge is always present.
 
 ## Development Builds
 
