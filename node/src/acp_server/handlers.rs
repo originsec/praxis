@@ -154,18 +154,13 @@ pub async fn handle_session_new(
     });
 
     //
-    // Sessions that want to participate in single-flag cancellation can
-    // adopt the NodeSession's flag. The handler-side `session/cancel`
-    // already sets it; this just lets the inner transact loop poll the
-    // same atomic.
+    // Hand the session our cancellation flag so a single AtomicBool drives
+    // both `session/cancel` and any in-loop cancellation polls. Sessions
+    // that don't care no-op the default.
     //
-    if let Some(praxis) = node_session
+    node_session
         .session
-        .as_any()
-        .downcast_ref::<crate::agent_connectors::praxis::PraxisAgentSession>()
-    {
-        praxis.set_cancel_flag(Arc::clone(&node_session.cancel_flag));
-    }
+        .set_cancel_flag(Arc::clone(&node_session.cancel_flag));
 
     server.store().insert(Arc::clone(&node_session));
 

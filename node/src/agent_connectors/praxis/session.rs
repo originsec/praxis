@@ -57,16 +57,6 @@ impl PraxisAgentSession {
         }
     }
 
-    //
-    // Adopt the NodeSession's cancel flag so a single AtomicBool drives
-    // both `session/cancel` and the in-loop cancellation checks.
-    //
-    pub fn set_cancel_flag(&self, flag: Arc<AtomicBool>) {
-        if let Ok(mut guard) = self.cancel_flag.lock() {
-            *guard = flag;
-        }
-    }
-
     fn current_cancel(&self) -> Arc<AtomicBool> {
         self.cancel_flag
             .lock()
@@ -289,6 +279,12 @@ impl AgentSession for PraxisAgentSession {
     fn abort_transaction(&self) -> bool {
         self.current_cancel().store(true, Ordering::SeqCst);
         true
+    }
+
+    fn set_cancel_flag(&self, flag: Arc<AtomicBool>) {
+        if let Ok(mut guard) = self.cancel_flag.lock() {
+            *guard = flag;
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

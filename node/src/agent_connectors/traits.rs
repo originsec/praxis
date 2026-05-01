@@ -2,6 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use common::{ReconResult, SessionContext};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use uuid::Uuid;
 
 //
@@ -58,6 +59,15 @@ pub trait AgentSession: Send + Sync {
     fn abort_transaction(&self) -> bool {
         false
     }
+
+    //
+    // Adopt a shared cancellation flag. The handler hands the
+    // NodeSession's cancel_flag to the session before calling transact so
+    // a single AtomicBool drives both `session/cancel` and the in-loop
+    // cancellation polls. Default: no-op (the session keeps whatever flag
+    // it constructed itself with, or none).
+    //
+    fn set_cancel_flag(&self, _flag: Arc<AtomicBool>) {}
 
     #[allow(dead_code)]
     fn as_any(&self) -> &dyn std::any::Any;
