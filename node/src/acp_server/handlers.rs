@@ -7,9 +7,10 @@ use acp::schema::{
     CancelNotification, CloseSessionRequest, CloseSessionResponse, ContentBlock, ContentChunk,
     Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
     ListSessionsResponse, NewSessionRequest, NewSessionResponse, PromptRequest, ProtocolVersion,
-    SessionInfo, SessionUpdate, StopReason, TextContent,
+    SessionInfo, SessionUpdate, StopReason, TextContent, ToolCall as AcpToolCall, ToolCallContent,
+    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
 };
-use common::SessionContext;
+use common::{SessionContext, SessionUpdateKind};
 use serde_json::{json, Value};
 
 use super::extensions::{
@@ -203,10 +204,49 @@ pub async fn handle_session_prompt(
     }
 
     //
+    // For ACP-backed Lua sessions (cursor, claude, etc.), register a
+    // SessionUpdateKind sender keyed on the agent's acp_handle. The Lua
+    // `acp_prompt` function takes ownership of the sender before invoking
+    // the underlying ACP client, which then pushes per-event updates
+    // (text chunks, tool calls, tool results) onto the channel as they
+    // arrive from the agent. We drain those here and emit them as
+    // `session/update` JSON-RPC notifications back to the originating
+    // external client. When the prompt completes, all clones of the
+    // sender drop and the forwarder task exits naturally.
+    //
+
+    let acp_handle = node_session
+        .session
+        .as_any()
+        .downcast_ref::<crate::agent_connectors::lua::LuaAgentSession>()
+        .and_then(|s| s.acp_handle());
+
+    let forwarder = if let Some(handle) = acp_handle.clone() {
+        let (update_tx, update_rx) =
+            tokio::sync::mpsc::unbounded_channel::<SessionUpdateKind>();
+        crate::acp::register_update_sender(&handle, update_tx);
+
+        let server_for_fwd = Arc::clone(&server);
+        let client_id_for_fwd = client_id.to_string();
+        let session_id_for_fwd = session_id_str.clone();
+        Some(tokio::spawn(async move {
+            forward_updates(
+                server_for_fwd,
+                client_id_for_fwd,
+                session_id_for_fwd,
+                update_rx,
+            )
+            .await;
+        }))
+    } else {
+        None
+    };
+
+    //
     // Run transact on a blocking thread so the async runtime isn't held by
-    // the synchronous Lua VM call. Stream a single AgentMessageChunk with
-    // the full response; fine-grained streaming can be added later by
-    // plumbing an update channel through the Lua acp_prompt path.
+    // the synchronous Lua VM call. ACP sessions stream chunks through the
+    // forwarder above; non-ACP sessions emit a single AgentMessageChunk
+    // with the full response after transact returns.
     //
 
     let session_for_task = Arc::clone(&node_session.session);
@@ -219,15 +259,36 @@ pub async fn handle_session_prompt(
     })
     .await;
 
+    //
+    // Wait for the forwarder to drain any in-flight updates. The senders
+    // owned by the Lua acp_prompt call drop when transact returns, which
+    // closes the channel and lets the forwarder finish.
+    //
+
+    if let Some(fwd) = forwarder {
+        let _ = fwd.await;
+    }
+
+    let streaming = acp_handle.is_some();
+
     match result {
         Ok(Ok(response)) => {
-            server.send_session_notification(
-                client_id,
-                &session_id_str,
-                SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
-                    TextContent::new(response),
-                ))),
-            );
+            //
+            // Only echo the full response for non-streaming agents. ACP
+            // agents already streamed every chunk, so re-sending the
+            // assembled text would duplicate it on the client.
+            //
+
+            if !streaming {
+                server.send_session_notification(
+                    client_id,
+                    &session_id_str,
+                    SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                        TextContent::new(response),
+                    ))),
+                );
+            }
+            let _ = response;
             if let Some(id) = id {
                 let stop = if node_session.cancel_flag.load(Ordering::SeqCst) {
                     StopReason::Cancelled
@@ -305,6 +366,78 @@ pub async fn handle_session_close(
             id,
             serde_json::to_value(CloseSessionResponse::default()).unwrap_or(Value::Null),
         );
+    }
+}
+
+//
+// Drain SessionUpdateKind events emitted by the underlying ACP client and
+// translate each one into a JSON-RPC `session/update` notification destined
+// for the originating external client. Returns when the channel closes,
+// which happens once the prompt's Lua call has dropped its sender clones.
+//
+
+async fn forward_updates(
+    server: Arc<NodeAcpServer>,
+    client_id: String,
+    session_id: String,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<SessionUpdateKind>,
+) {
+    while let Some(kind) = rx.recv().await {
+        let Some(update) = session_update_to_acp(kind) else {
+            continue;
+        };
+        server.send_session_notification(&client_id, &session_id, update);
+    }
+}
+
+fn session_update_to_acp(kind: SessionUpdateKind) -> Option<SessionUpdate> {
+    match kind {
+        SessionUpdateKind::TextChunk { text } => Some(SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new(text))),
+        )),
+
+        SessionUpdateKind::ToolCall {
+            tool_name,
+            tool_id,
+            input,
+        } => {
+            let mut tc = AcpToolCall::new(tool_id, tool_name);
+            if !input.is_empty() && input != "{}" {
+                if let Ok(v) = serde_json::from_str::<Value>(&input) {
+                    tc = tc.raw_input(v);
+                }
+            }
+            Some(SessionUpdate::ToolCall(tc))
+        }
+
+        SessionUpdateKind::ToolResult {
+            tool_id,
+            output,
+            is_error,
+        } => {
+            let mut fields = ToolCallUpdateFields::new().status(if is_error {
+                ToolCallStatus::Failed
+            } else {
+                ToolCallStatus::Completed
+            });
+            if !output.is_empty() {
+                fields = fields.content(vec![ToolCallContent::Content(
+                    acp::schema::Content::new(output),
+                )]);
+            }
+            Some(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                tool_id, fields,
+            )))
+        }
+
+        //
+        // PermissionRequest, AgentStatus and Error are not currently surfaced
+        // through the ACP wire — see follow-up work to bridge these via the
+        // proper session/request_permission RPC.
+        //
+        SessionUpdateKind::PermissionRequest { .. }
+        | SessionUpdateKind::AgentStatus { .. }
+        | SessionUpdateKind::Error { .. } => None,
     }
 }
 

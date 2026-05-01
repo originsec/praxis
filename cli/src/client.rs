@@ -81,7 +81,6 @@ struct ClientState {
     pending_semantic_op: Option<String>,
     lua_agent_scripts: Vec<LuaAgentScriptInfo>,
     intercept_targets: Vec<common::InterceptTargetInfo>,
-    session_update_tx: Option<tokio::sync::mpsc::UnboundedSender<common::SessionUpdate>>,
 
     //
     // Intercept traffic: per-request one-shot senders and live streaming
@@ -421,11 +420,13 @@ impl Client {
                 // Re-fetch handled by the app layer.
             }
 
-            ClientDirectMessage::SessionUpdate(update) => {
-                if let Some(ref tx) = state.session_update_tx {
-                    let _ = tx.send(update);
-                }
-            }
+            //
+            // ClientDirectMessage::SessionUpdate is the legacy NodeCommand
+            // streaming path; node sessions now stream via ACP `session/update`
+            // notifications carried in `ClientDirectMessage::AcpMessage`. The
+            // variant is still defined for the web client; ignore it here.
+            //
+            ClientDirectMessage::SessionUpdate(_) => {}
 
             //
             // Intercept traffic responses.
@@ -1020,17 +1021,6 @@ impl Client {
         let state = self.state.clone();
         tokio::spawn(async move {
             state.lock().await.terminal_output_tx = Some(tx);
-        });
-        rx
-    }
-
-    pub fn subscribe_session_updates(
-        &self,
-    ) -> tokio::sync::mpsc::UnboundedReceiver<common::SessionUpdate> {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let state = self.state.clone();
-        tokio::spawn(async move {
-            state.lock().await.session_update_tx = Some(tx);
         });
         rx
     }

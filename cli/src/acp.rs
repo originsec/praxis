@@ -49,12 +49,13 @@ pub enum AcpNotification {
     },
     ToolCall {
         session_id: String,
+        tool_id: String,
         name: String,
-        input: Option<String>,
+        raw_input: Option<String>,
     },
     ToolResult {
         session_id: String,
-        name: String,
+        tool_id: String,
         success: bool,
         result: String,
     },
@@ -301,8 +302,9 @@ fn session_update_to_event(notif: SessionNotification) -> Option<AcpNotification
 
         SessionUpdate::ToolCall(tc) => Some(AcpNotification::ToolCall {
             session_id: sid,
+            tool_id: tc.tool_call_id.to_string(),
             name: tc.title.clone(),
-            input: Some(tc.tool_call_id.to_string()),
+            raw_input: tc.raw_input.as_ref().map(|v| v.to_string()),
         }),
 
         SessionUpdate::ToolCallUpdate(update) => {
@@ -338,7 +340,7 @@ fn session_update_to_event(notif: SessionNotification) -> Option<AcpNotification
             let is_error = matches!(update.fields.status, Some(ToolCallStatus::Failed));
             Some(AcpNotification::ToolResult {
                 session_id: sid,
-                name: update.tool_call_id.to_string(),
+                tool_id: update.tool_call_id.to_string(),
                 success: !is_error,
                 result: output,
             })
