@@ -1,4 +1,3 @@
-use agent_client_protocol as acp;
 use acp::schema::{
     CancelNotification, ContentBlock, Implementation, InitializeRequest, NewSessionRequest,
     PermissionOptionId, PermissionOptionKind, PromptRequest, ProtocolVersion,
@@ -6,7 +5,8 @@ use acp::schema::{
     SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate, TextContent,
     ToolCallStatus,
 };
-use anyhow::{anyhow, bail, Context, Result};
+use agent_client_protocol as acp;
+use anyhow::{Context, Result, anyhow, bail};
 use common::{PermissionDecision, SessionUpdateKind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -150,7 +150,8 @@ impl AcpHandle {
 #[derive(Default)]
 struct PromptCtx {
     update_tx: Option<mpsc::UnboundedSender<SessionUpdateKind>>,
-    permission_rx: Option<Arc<Mutex<Option<std::sync::mpsc::Receiver<(String, PermissionDecision)>>>>>,
+    permission_rx:
+        Option<Arc<Mutex<Option<std::sync::mpsc::Receiver<(String, PermissionDecision)>>>>>,
     yolo: bool,
     interactive: bool,
     cancel_flag: Option<Arc<AtomicBool>>,
@@ -162,11 +163,7 @@ struct PromptCtx {
 // connection driver runs on the ambient tokio runtime.
 //
 
-pub fn spawn_acp_client(
-    program: &str,
-    args: &[String],
-    cwd: &str,
-) -> Result<AcpHandle> {
+pub fn spawn_acp_client(program: &str, args: &[String], cwd: &str) -> Result<AcpHandle> {
     let program = program.to_string();
     let args = args.to_vec();
     let cwd = cwd.to_string();
@@ -399,9 +396,8 @@ async fn run_acp_driver(
                                     let deadline = std::time::Instant::now()
                                         + std::time::Duration::from_secs(60);
                                     loop {
-                                        match rx.recv_timeout(
-                                            std::time::Duration::from_millis(250),
-                                        ) {
+                                        match rx.recv_timeout(std::time::Duration::from_millis(250))
+                                        {
                                             Ok((_id, d)) => return d,
                                             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                                                 let cancelled = cancel_for_wait
@@ -448,9 +444,9 @@ async fn run_acp_driver(
                         };
 
                         responder.respond(RequestPermissionResponse::new(
-                            RequestPermissionOutcome::Selected(
-                                SelectedPermissionOutcome::new(option_id),
-                            ),
+                            RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(
+                                option_id,
+                            )),
                         ))
                     }
                 }
@@ -463,11 +459,9 @@ async fn run_acp_driver(
             //
 
             if let Err(e) = cx
-                .send_request(
-                    InitializeRequest::new(ProtocolVersion::V1).client_info(
-                        Implementation::new("praxis", env!("CARGO_PKG_VERSION")).title("Praxis"),
-                    ),
-                )
+                .send_request(InitializeRequest::new(ProtocolVersion::V1).client_info(
+                    Implementation::new("praxis", env!("CARGO_PKG_VERSION")).title("Praxis"),
+                ))
                 .block_task()
                 .await
             {
@@ -522,8 +516,7 @@ async fn run_acp_driver(
                         {
                             let mut guard = ctx.lock().unwrap();
                             guard.update_tx = Some(update_tx);
-                            guard.permission_rx =
-                                Some(Arc::new(Mutex::new(Some(permission_rx))));
+                            guard.permission_rx = Some(Arc::new(Mutex::new(Some(permission_rx))));
                             guard.yolo = yolo;
                             guard.interactive = interactive;
                             guard.cancel_flag = Some(cancel_flag.clone());
@@ -545,8 +538,7 @@ async fn run_acp_driver(
                         let cx_for_cancel = cx.clone();
                         let _ = cx.spawn(async move {
                             loop {
-                                tokio::time::sleep(std::time::Duration::from_millis(100))
-                                    .await;
+                                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                                 if cancel_done_watcher.load(Ordering::Relaxed) {
                                     return Ok(());
                                 }

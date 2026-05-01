@@ -46,7 +46,10 @@ impl SessionStore {
     }
 
     pub fn insert(&self, session: Arc<NodeSession>) {
-        self.inner.write().unwrap().insert(session.session_id, session);
+        self.inner
+            .write()
+            .unwrap()
+            .insert(session.session_id, session);
     }
 
     pub fn get(&self, session_id: &Uuid) -> Option<Arc<NodeSession>> {

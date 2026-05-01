@@ -1,5 +1,6 @@
 pub mod dummy;
 pub mod lua;
+pub mod praxis;
 
 mod factory;
 mod registry;
@@ -13,6 +14,8 @@ pub use common::{AgentTool, McpServer, McpTransport, ReconResult, ReconTools};
 pub use dummy::DummyAgent;
 #[allow(unused_imports)]
 pub use lua::LuaAgent;
+#[allow(unused_imports)]
+pub use praxis::PraxisAgent;
 
 pub use factory::AgentFactory;
 pub use registry::AgentRegistry;

@@ -32,10 +32,17 @@ pub async fn handle_initialize(
 
     let connectors: Vec<Value> = {
         let reg = server.registry().read().await;
-        reg.list_lua_agents()
+        let mut connectors = reg
+            .get_all()
             .into_iter()
-            .map(|info| json!({ "shortName": info.short_name, "name": info.name }))
-            .collect()
+            .map(|agent| json!({ "shortName": agent.short_name(), "name": agent.name() }))
+            .collect::<Vec<_>>();
+        connectors.sort_by(|a, b| {
+            let a = a.get("shortName").and_then(|v| v.as_str()).unwrap_or_default();
+            let b = b.get("shortName").and_then(|v| v.as_str()).unwrap_or_default();
+            a.cmp(b)
+        });
+        connectors
     };
 
     let meta_value = json!({
@@ -145,6 +152,16 @@ pub async fn handle_session_new(
         context,
         cancel_flag: Arc::new(AtomicBool::new(false)),
     });
+
+    //
+    // Hand the session our cancellation flag so a single AtomicBool drives
+    // both `session/cancel` and any in-loop cancellation polls. Sessions
+    // that don't care no-op the default.
+    //
+    node_session
+        .session
+        .set_cancel_flag(Arc::clone(&node_session.cancel_flag));
+
     server.store().insert(Arc::clone(&node_session));
 
     if let Some(id) = id {
@@ -204,22 +221,15 @@ pub async fn handle_session_prompt(
     }
 
     //
-    // For ACP-backed Lua sessions (cursor, claude, etc.), register a
-    // SessionUpdateKind sender keyed on the agent's acp_handle. The Lua
-    // `acp_prompt` function takes ownership of the sender before invoking
-    // the underlying ACP client, which then pushes per-event updates
-    // (text chunks, tool calls, tool results) onto the channel as they
-    // arrive from the agent. We drain those here and emit them as
-    // `session/update` JSON-RPC notifications back to the originating
-    // external client. When the prompt completes, all clones of the
-    // sender drop and the forwarder task exits naturally.
+    // Streaming sessions (ACP-backed Lua sessions, native Praxis agent, etc.)
+    // expose an `acp_handle` they own. We register a SessionUpdateKind sender
+    // against that handle before calling transact, then spawn a forwarder that
+    // drains every event and emits it as a JSON-RPC `session/update`
+    // notification back to the originating external client. When transact
+    // returns, all sender clones drop and the forwarder exits naturally.
     //
 
-    let acp_handle = node_session
-        .session
-        .as_any()
-        .downcast_ref::<crate::agent_connectors::lua::LuaAgentSession>()
-        .and_then(|s| s.acp_handle());
+    let acp_handle = node_session.session.acp_handle();
 
     let forwarder = if let Some(handle) = acp_handle.clone() {
         let (update_tx, update_rx) =
@@ -244,13 +254,13 @@ pub async fn handle_session_prompt(
 
     //
     // Run transact on a blocking thread so the async runtime isn't held by
-    // the synchronous Lua VM call. ACP sessions stream chunks through the
-    // forwarder above; non-ACP sessions emit a single AgentMessageChunk
-    // with the full response after transact returns.
+    // a synchronous Lua VM call. Non-streaming sessions emit a single
+    // AgentMessageChunk with the full response after transact returns.
     //
 
     let session_for_task = Arc::clone(&node_session.session);
     let cancel = Arc::clone(&node_session.cancel_flag);
+
     let result = tokio::task::spawn_blocking(move || {
         if cancel.load(Ordering::SeqCst) {
             return Err(anyhow::anyhow!("cancelled before start"));
@@ -261,8 +271,8 @@ pub async fn handle_session_prompt(
 
     //
     // Wait for the forwarder to drain any in-flight updates. The senders
-    // owned by the Lua acp_prompt call drop when transact returns, which
-    // closes the channel and lets the forwarder finish.
+    // owned by the transact path drop when transact returns, which closes
+    // the channel and lets the forwarder finish.
     //
 
     if let Some(fwd) = forwarder {
@@ -274,9 +284,9 @@ pub async fn handle_session_prompt(
     match result {
         Ok(Ok(response)) => {
             //
-            // Only echo the full response for non-streaming agents. ACP
-            // agents already streamed every chunk, so re-sending the
-            // assembled text would duplicate it on the client.
+            // Only echo the full response for non-streaming agents. Streaming
+            // agents already pushed every chunk through one of the forwarders
+            // above, so re-sending the assembled text would duplicate it.
             //
 
             if !streaming {
@@ -287,8 +297,9 @@ pub async fn handle_session_prompt(
                         TextContent::new(response),
                     ))),
                 );
+            } else {
+                let _ = response;
             }
-            let _ = response;
             if let Some(id) = id {
                 let stop = if node_session.cancel_flag.load(Ordering::SeqCst) {
                     StopReason::Cancelled

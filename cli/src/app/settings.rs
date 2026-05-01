@@ -34,6 +34,12 @@ pub struct SettingsState {
     pub semantic_ops_model: String,
     pub semantic_parser_model: String,
     pub traffic_parser_model: String,
+    pub praxis_agent_model_ref: String,
+    pub praxis_agent_thinking_effort: String,
+    pub praxis_agent_enabled: bool,
+    pub praxis_agent_system_prompt: String,
+    pub praxis_agent_prompt_editing: bool,
+    pub praxis_agent_prompt_buffer: String,
 
     //
     // Service settings.
@@ -57,7 +63,7 @@ pub struct SettingsState {
     //
     pub dropdown_open: bool,
     pub dropdown_selected: usize,
-    pub dropdown_field: usize, // which feature field (1-5) the dropdown is for
+    pub dropdown_field: usize, // which model assignment field (1-6) the dropdown is for
 
     //
     // Agent scripts.
@@ -118,6 +124,12 @@ impl Default for SettingsState {
             semantic_ops_model: String::new(),
             semantic_parser_model: String::new(),
             traffic_parser_model: String::new(),
+            praxis_agent_model_ref: String::new(),
+            praxis_agent_thinking_effort: String::new(),
+            praxis_agent_enabled: false,
+            praxis_agent_system_prompt: String::new(),
+            praxis_agent_prompt_editing: false,
+            praxis_agent_prompt_buffer: String::new(),
             mcp_enabled: true,
             mcp_port: "8585".to_string(),
             logging_enabled: false,
@@ -159,6 +171,8 @@ impl App {
             "claude_ccrv1_port".to_string(),
             "claude_ccrv2_enabled".to_string(),
             "claude_ccrv2_port".to_string(),
+            "praxis_agent_settings".to_string(),
+            "praxis_agent_system_prompt".to_string(),
         ];
 
         match self.client.get_config(keys).await {
@@ -230,6 +244,36 @@ impl App {
                     .cloned()
                     .unwrap_or("8587".to_string());
 
+                s.praxis_agent_model_ref.clear();
+                s.praxis_agent_thinking_effort.clear();
+                s.praxis_agent_enabled = false;
+                if let Some(settings_json) = config.get("praxis_agent_settings") {
+                    if let Ok(settings) = serde_json::from_str::<serde_json::Value>(settings_json) {
+                        s.praxis_agent_model_ref = settings
+                            .get("modelRef")
+                            .or_else(|| settings.get("model_ref"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        s.praxis_agent_thinking_effort = settings
+                            .get("thinkingEffort")
+                            .or_else(|| settings.get("thinking_effort"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        s.praxis_agent_enabled = settings
+                            .get("enabled")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                    }
+                }
+                s.praxis_agent_system_prompt = config
+                    .get("praxis_agent_system_prompt")
+                    .cloned()
+                    .unwrap_or_default();
+                s.praxis_agent_prompt_editing = false;
+                s.praxis_agent_prompt_buffer.clear();
+
                 s.loaded = true;
                 s.status_message = None;
             }
@@ -250,20 +294,119 @@ impl App {
         self.settings.status_message_at = Some(std::time::Instant::now());
     }
 
+    pub(crate) async fn save_praxis_agent_settings(&mut self) {
+        let settings = serde_json::json!({
+            "modelRef": self.settings.praxis_agent_model_ref.clone(),
+            "thinkingEffort": self.settings.praxis_agent_thinking_effort.clone(),
+            "enabled": self.settings.praxis_agent_enabled,
+        })
+        .to_string();
+        self.save_setting("praxis_agent_settings", &settings).await;
+    }
+
+    pub(crate) async fn edit_praxis_agent_system_prompt(&mut self) {
+        use std::io::Write;
+
+        let editor = std::env::var("VISUAL")
+            .or_else(|_| std::env::var("EDITOR"))
+            .unwrap_or_else(|_| {
+                if cfg!(windows) {
+                    "notepad".to_string()
+                } else {
+                    "vi".to_string()
+                }
+            });
+
+        let tmp = match tempfile::Builder::new()
+            .prefix("praxis_agent_system_prompt")
+            .suffix(".md")
+            .tempfile()
+        {
+            Ok(f) => f,
+            Err(e) => {
+                self.settings.status_message = Some(format!("Failed to create temp file: {}", e));
+                self.settings.status_message_at = Some(std::time::Instant::now());
+                return;
+            }
+        };
+
+        self.settings.praxis_agent_prompt_editing = true;
+        self.settings.praxis_agent_prompt_buffer = self.settings.praxis_agent_system_prompt.clone();
+
+        if let Err(e) = tmp
+            .as_file()
+            .write_all(self.settings.praxis_agent_prompt_buffer.as_bytes())
+        {
+            self.settings.status_message = Some(format!("Failed to write temp file: {}", e));
+            self.settings.status_message_at = Some(std::time::Instant::now());
+            self.settings.praxis_agent_prompt_editing = false;
+            return;
+        }
+
+        let path = tmp.path().to_path_buf();
+
+        self.terminal_paused
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        crossterm::terminal::disable_raw_mode().ok();
+        crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen).ok();
+
+        let status = std::process::Command::new(&editor).arg(&path).status();
+
+        crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::EnterAlternateScreen,
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
+        )
+        .ok();
+        crossterm::terminal::enable_raw_mode().ok();
+        self.terminal_paused
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        self.terminal_resume.notify_one();
+
+        while crossterm::event::poll(std::time::Duration::from_millis(50)).unwrap_or(false) {
+            let _ = crossterm::event::read();
+        }
+
+        self.needs_full_redraw = true;
+        self.settings.praxis_agent_prompt_editing = false;
+
+        match status {
+            Ok(s) if s.success() => match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    self.settings.praxis_agent_prompt_buffer = content.clone();
+                    self.settings.praxis_agent_system_prompt = content.clone();
+                    self.save_setting("praxis_agent_system_prompt", &content).await;
+                }
+                Err(e) => {
+                    self.settings.status_message = Some(format!("Failed to read file: {}", e));
+                    self.settings.status_message_at = Some(std::time::Instant::now());
+                }
+            },
+            Ok(_) => {
+                self.settings.status_message = Some("Editor exited with error".to_string());
+                self.settings.status_message_at = Some(std::time::Instant::now());
+            }
+            Err(e) => {
+                self.settings.status_message =
+                    Some(format!("Failed to launch editor '{}': {}", editor, e));
+                self.settings.status_message_at = Some(std::time::Instant::now());
+            }
+        }
+    }
+
     pub(crate) fn settings_item_count(&self) -> usize {
         match self.settings.tab {
             SettingsTab::Llm => {
                 //
                 // Items: one row per model definition, then feature assignments
                 // and max tokens.
-                // Layout: [models...] + add_model + orchestrator + max_tokens +
-                //         semantic_ops + semantic_parser + traffic_parser
+                // Layout: [models...] + add_model + feature assignments.
                 //
                 self.settings.model_definitions.len() + 6
             }
             SettingsTab::Agents => {
-                // Scripts list + "Add new" + "Reset defaults"
-                self.settings.agent_scripts.len() + 2
+                // Praxis Agent (4 items) + scripts list + "Add new" + "Reset defaults"
+                self.settings.agent_scripts.len() + 6
             }
             SettingsTab::Intercept => {
                 // Targets list + "Add new"
@@ -279,10 +422,13 @@ impl App {
         match self.settings.tab {
             SettingsTab::Llm => {
                 let mc = self.settings.model_definitions.len();
-                // mc+2 = Orchestrator Max Tokens
+                // mc+2 = Orchestrator Max Tokens.
                 sel == mc + 2
             }
-            SettingsTab::Agents => false,
+            SettingsTab::Agents => {
+                // 1 = Praxis thinking effort.
+                sel == 1
+            }
             SettingsTab::Intercept => false,
             SettingsTab::Service => {
                 // 1 = MCP port, 3 = log query row limit, 4 = prompt timeout,
@@ -302,6 +448,10 @@ impl App {
             let name = def.name.clone();
             let field = self.settings.dropdown_field;
             match field {
+                0 => {
+                    self.settings.praxis_agent_model_ref = name.clone();
+                    self.save_praxis_agent_settings().await;
+                }
                 1 => {
                     self.settings.orchestrator_model = name.clone();
                     self.save_setting("llm_feature_orchestrator", &name).await;
@@ -318,6 +468,10 @@ impl App {
                 5 => {
                     self.settings.traffic_parser_model = name.clone();
                     self.save_setting("llm_feature_traffic_parser", &name).await;
+                }
+                6 => {
+                    self.settings.praxis_agent_model_ref = name.clone();
+                    self.save_praxis_agent_settings().await;
                 }
                 _ => {}
             }
@@ -366,7 +520,13 @@ impl App {
                     String::new()
                 }
             }
-            SettingsTab::Agents => String::new(),
+            SettingsTab::Agents => {
+                if sel == 1 {
+                    self.settings.praxis_agent_thinking_effort.clone()
+                } else {
+                    String::new()
+                }
+            }
             SettingsTab::Intercept => String::new(),
             SettingsTab::Service => match sel {
                 1 => self.settings.mcp_port.clone(),
@@ -550,8 +710,8 @@ impl App {
             }
             KeyCode::Char(' ') if self.settings.tab == SettingsTab::Agents => {
                 let sel = self.settings.selected;
-                if sel < self.settings.agent_scripts.len() {
-                    let script = &self.settings.agent_scripts[sel];
+                if sel >= 4 && sel < 4 + self.settings.agent_scripts.len() {
+                    let script = &self.settings.agent_scripts[sel - 4];
                     let id = script.id.clone();
                     let new_disabled = !script.disabled;
                     let _ = self
@@ -567,8 +727,8 @@ impl App {
                     && self.settings.tab == SettingsTab::Agents =>
             {
                 let sel = self.settings.selected;
-                if sel < self.settings.agent_scripts.len() {
-                    let script = &self.settings.agent_scripts[sel];
+                if sel >= 4 && sel < 4 + self.settings.agent_scripts.len() {
+                    let script = &self.settings.agent_scripts[sel - 4];
                     let name = script.name.clone();
                     let id = script.id.clone();
                     self.confirm = Some(ConfirmAction {
@@ -656,14 +816,45 @@ impl App {
             }
             SettingsTab::Agents => {
                 let script_count = self.settings.agent_scripts.len();
-                if sel < script_count {
+                if sel < 4 {
+                    match sel {
+                        0 => {
+                            // Praxis model — open dropdown.
+                            let current = &self.settings.praxis_agent_model_ref;
+                            let pos = self
+                                .settings
+                                .model_definitions
+                                .iter()
+                                .position(|d| d.name == *current)
+                                .unwrap_or(0);
+                            self.settings.dropdown_open = true;
+                            self.settings.dropdown_selected = pos;
+                            self.settings.dropdown_field = 0;
+                        }
+                        1 => {
+                            // Praxis thinking effort — free text edit.
+                            self.settings.editing = true;
+                            self.settings.edit_buffer =
+                                self.settings.praxis_agent_thinking_effort.clone();
+                        }
+                        2 => {
+                            self.settings.praxis_agent_enabled =
+                                !self.settings.praxis_agent_enabled;
+                            self.save_praxis_agent_settings().await;
+                        }
+                        3 => {
+                            self.edit_praxis_agent_system_prompt().await;
+                        }
+                        _ => {}
+                    }
+                } else if sel < 4 + script_count {
                     //
                     // Edit existing script — open in external editor.
                     //
-                    let script = self.settings.agent_scripts[sel].clone();
+                    let script = self.settings.agent_scripts[sel - 4].clone();
                     self.edit_agent_script_in_editor(Some(script)).await;
                 } else {
-                    let idx = sel - script_count;
+                    let idx = sel - 4 - script_count;
                     match idx {
                         0 => {
                             // Add new script.
@@ -783,6 +974,15 @@ impl App {
                     }
                 }
             }
+            SettingsTab::Agents => {
+                match sel {
+                    1 => {
+                        self.settings.praxis_agent_thinking_effort = val.clone();
+                        self.save_praxis_agent_settings().await;
+                    }
+                    _ => {}
+                }
+            }
             SettingsTab::Service => match sel {
                 1 => {
                     self.settings.mcp_port = val.clone();
@@ -806,7 +1006,6 @@ impl App {
                 }
                 _ => {}
             },
-            SettingsTab::Agents => {}
             SettingsTab::Intercept => {}
             SettingsTab::About => {}
         }
@@ -1014,7 +1213,7 @@ impl App {
                         // Row 3+mc: blank
                         // Row 4+mc: "Feature Assignments" header
                         // Row 5+mc: blank
-                        // Rows 6+mc..6+mc+5: feature items (idx mc+1..mc+6)
+                        // Rows 6+mc..6+mc+5: feature items (idx mc+1..mc+5)
                         if rel_row >= 2 && rel_row < 2 + mc {
                             Some(rel_row - 2)
                         } else if rel_row == 2 + mc {
@@ -1027,18 +1226,27 @@ impl App {
                     }
                     SettingsTab::Agents => {
                         let sc = self.settings.agent_scripts.len();
-                        // Row 0: header
+                        // Row 0: "PRAXIS AGENT" header
                         // Row 1: blank
-                        // Rows 2..2+sc: scripts (idx 0..sc)
-                        // Row 2+sc: blank
-                        // Row 3+sc: "+ New agent script" (idx sc)
-                        // Row 4+sc: "Reset to defaults" (idx sc+1)
-                        if rel_row >= 2 && rel_row < 2 + sc {
+                        // Row 2: Praxis Model (idx 0)
+                        // Row 3: Thinking Effort (idx 1)
+                        // Row 4: Praxis Agent toggle (idx 2)
+                        // Row 5: System Prompt (idx 3)
+                        // Row 6: blank
+                        // Row 7: "Lua Agent Connector Scripts" header
+                        // Row 8: blank
+                        // Rows 9..9+sc: scripts (idx 4..4+sc)
+                        // Row 9+sc: blank
+                        // Row 10+sc: "+ New agent script" (idx 4+sc)
+                        // Row 11+sc: "Reset to defaults" (idx 4+sc+1)
+                        if rel_row >= 2 && rel_row < 2 + 4 {
                             Some(rel_row - 2)
-                        } else if rel_row == 3 + sc {
-                            Some(sc)
-                        } else if rel_row == 4 + sc {
-                            Some(sc + 1)
+                        } else if rel_row >= 9 && rel_row < 9 + sc {
+                            Some(4 + rel_row - 9)
+                        } else if rel_row == 10 + sc {
+                            Some(4 + sc)
+                        } else if rel_row == 11 + sc {
+                            Some(4 + sc + 1)
                         } else {
                             None
                         }

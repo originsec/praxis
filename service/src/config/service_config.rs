@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::database::Database;
+use common::{Provider, PraxisAgentConfig};
 
 //
 // LLM model definitions config key (JSON array of model definitions).
@@ -16,6 +17,10 @@ pub const LLM_FEATURE_TRAFFIC_PARSER: &str = "llm_feature_traffic_parser";
 pub const LLM_FEATURE_SEMANTIC_OPS: &str = "llm_feature_semantic_ops";
 #[allow(dead_code)]
 pub const LLM_FEATURE_ORCHESTRATOR: &str = "llm_feature_orchestrator";
+
+/// Praxis agent configuration keys.
+pub const PRAXIS_AGENT_SETTINGS: &str = "praxis_agent_settings";
+pub const PRAXIS_AGENT_SYSTEM_PROMPT: &str = "praxis_agent_system_prompt";
 
 /// Centralized application/event logging toggle
 pub const APPLICATION_LOGS_ENABLED: &str = "application_logs_enabled";
@@ -52,6 +57,8 @@ pub const KNOWN_CONFIG_KEYS: &[&str] = &[
     LLM_FEATURE_TRAFFIC_PARSER,
     LLM_FEATURE_SEMANTIC_OPS,
     LLM_FEATURE_ORCHESTRATOR,
+    PRAXIS_AGENT_SETTINGS,
+    PRAXIS_AGENT_SYSTEM_PROMPT,
     APPLICATION_LOGS_ENABLED,
     LOG_QUERY_ROW_LIMIT,
     MCP_SERVER_ENABLED,
@@ -73,6 +80,17 @@ pub struct ModelDefinition {
     pub api_key: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PraxisAgentSettings {
+    #[serde(alias = "model_ref")]
+    pub model_ref: String,
+    #[serde(default, alias = "thinking_effort")]
+    pub thinking_effort: String,
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 /// Service configuration backed by database storage
@@ -165,6 +183,53 @@ impl ServiceConfig {
     pub fn get_orchestrator_model_def(&self) -> Option<ModelDefinition> {
         self.get(LLM_FEATURE_ORCHESTRATOR)
             .and_then(|model_ref| self.find_model_definition(model_ref))
+    }
+
+    /// Get Praxis agent settings from config.
+    pub fn get_praxis_agent_settings(&self) -> Option<PraxisAgentSettings> {
+        self.get(PRAXIS_AGENT_SETTINGS)
+            .and_then(|json_str| serde_json::from_str(json_str).ok())
+    }
+
+    /// Get the configured Praxis agent system prompt.
+    pub fn get_praxis_agent_system_prompt(&self) -> Option<String> {
+        self.get(PRAXIS_AGENT_SYSTEM_PROMPT)
+            .filter(|prompt| !prompt.trim().is_empty())
+            .cloned()
+    }
+
+    /// Resolve Praxis agent settings to concrete endpoint/model credentials.
+    pub fn resolve_praxis_agent_config(&self) -> Option<PraxisAgentConfig> {
+        let settings = self.get_praxis_agent_settings()?;
+        let model_def = self.find_model_definition(&settings.model_ref)?;
+        let endpoint_url = model_def
+            .base_url
+            .clone()
+            .filter(|url| !url.trim().is_empty())
+            .or_else(|| {
+                Provider::from_str(&model_def.provider).map(|provider| provider.base_url().to_string())
+            })?
+            .trim_end_matches('/')
+            .to_string();
+
+        if endpoint_url.is_empty() {
+            return None;
+        }
+
+        Some(PraxisAgentConfig {
+            provider: model_def.provider,
+            api_key: model_def.api_key,
+            endpoint_url,
+            model_name: model_def.model,
+            thinking_effort: if settings.thinking_effort.trim().is_empty() {
+                None
+            } else {
+                Some(settings.thinking_effort)
+            },
+            system_prompt: self.get_praxis_agent_system_prompt(),
+            max_tool_iterations: None,
+            command_timeout_secs: None,
+        })
     }
 
     /// Convert to a HashMap (for backwards compatibility with existing code)

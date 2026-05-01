@@ -91,8 +91,8 @@ mod linux {
     use super::*;
     use std::io::{Read, Write};
     use std::os::fd::{AsRawFd, RawFd};
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     /// Linux TUN device implementation using the tun crate.
     pub struct LinuxTunDevice {
@@ -179,7 +179,8 @@ mod linux {
 
         fn send(&self, packet: &[u8]) -> Result<()> {
             let mut device = self.device.lock().unwrap();
-            device.write_all(packet)
+            device
+                .write_all(packet)
                 .map_err(|e| anyhow::anyhow!("TUN write error: {}", e))?;
             common::log_trace!("Sent {} bytes to TUN", packet.len());
             Ok(())

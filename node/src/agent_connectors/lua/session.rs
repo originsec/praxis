@@ -46,16 +46,6 @@ impl LuaAgentSession {
             .and_then(|v| v.as_str())
             .is_some()
     }
-
-    #[allow(dead_code)]
-    pub fn acp_handle(&self) -> Option<String> {
-        self.state
-            .lock()
-            .unwrap()
-            .get("acp_handle")
-            .and_then(|v| v.as_str())
-            .map(String::from)
-    }
 }
 
 impl AgentSession for LuaAgentSession {
@@ -71,8 +61,13 @@ impl AgentSession for LuaAgentSession {
         }
     }
 
-    fn supports_streaming(&self) -> bool {
-        self.is_acp()
+    fn acp_handle(&self) -> Option<String> {
+        self.state
+            .lock()
+            .unwrap()
+            .get("acp_handle")
+            .and_then(|v| v.as_str())
+            .map(String::from)
     }
 
     fn transact(&self, prompt: &str) -> Result<String> {

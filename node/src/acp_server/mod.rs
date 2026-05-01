@@ -4,16 +4,18 @@ pub mod handlers;
 pub mod sessions;
 
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 
-use agent_client_protocol as acp;
 use acp::JsonRpcMessage;
-use acp::jsonrpcmsg::{Error as JError, Id as JId, Params as JParams, Request as JRequest, Response as JResponse};
+use acp::jsonrpcmsg::{
+    Error as JError, Id as JId, Params as JParams, Request as JRequest, Response as JResponse,
+};
 use acp::schema::{
     ClientNotification, ClientRequest, ExtNotification, ExtRequest, SessionNotification,
 };
-use serde_json::value::RawValue;
+use agent_client_protocol as acp;
 use serde_json::Value;
+use serde_json::value::RawValue;
 
 use crate::agent_connectors::AgentRegistry;
 
@@ -143,17 +145,12 @@ impl NodeAcpServer {
                 let id = id.unwrap();
                 match resp {
                     Ok(ext_resp) => {
-                        let body: Value = serde_json::from_str(ext_resp.0.get())
-                            .unwrap_or(Value::Null);
+                        let body: Value =
+                            serde_json::from_str(ext_resp.0.get()).unwrap_or(Value::Null);
                         self.send_response(&client_id, id, body);
                     }
                     Err(e) => {
-                        self.send_error(
-                            &client_id,
-                            id,
-                            i32::from(e.code) as i64,
-                            &e.message,
-                        );
+                        self.send_error(&client_id, id, i32::from(e.code) as i64, &e.message);
                     }
                 }
             } else {
@@ -176,7 +173,10 @@ impl NodeAcpServer {
                     let (code, msg) = if req_err.code == acp::ErrorCode::MethodNotFound {
                         (-32601, format!("Method not found: {}", method))
                     } else {
-                        (-32602, format!("Invalid params for {}: {}", method, req_err.message))
+                        (
+                            -32602,
+                            format!("Invalid params for {}: {}", method, req_err.message),
+                        )
                     };
                     if let Some(id) = id {
                         self.send_error(&client_id, id, code as i64, &msg);
@@ -186,7 +186,9 @@ impl NodeAcpServer {
         } else {
             match ClientNotification::parse_message(&method, &params_value) {
                 Ok(notification) => {
-                    self.clone().dispatch_notification(client_id, notification).await;
+                    self.clone()
+                        .dispatch_notification(client_id, notification)
+                        .await;
                 }
                 Err(_) => {
                     //
@@ -209,12 +211,9 @@ impl NodeAcpServer {
                 if let Some(id) = id {
                     match resp {
                         Ok(r) => self.send_response(&client_id, id, json_value(&r)),
-                        Err(e) => self.send_error(
-                            &client_id,
-                            id,
-                            i32::from(e.code) as i64,
-                            &e.message,
-                        ),
+                        Err(e) => {
+                            self.send_error(&client_id, id, i32::from(e.code) as i64, &e.message)
+                        }
                     }
                 }
             }
@@ -232,12 +231,9 @@ impl NodeAcpServer {
                 if let Some(id) = id {
                     match resp {
                         Ok(r) => self.send_response(&client_id, id, json_value(&r)),
-                        Err(e) => self.send_error(
-                            &client_id,
-                            id,
-                            i32::from(e.code) as i64,
-                            &e.message,
-                        ),
+                        Err(e) => {
+                            self.send_error(&client_id, id, i32::from(e.code) as i64, &e.message)
+                        }
                     }
                 }
             }
@@ -270,7 +266,9 @@ impl NodeAcpServer {
     pub fn send_response(&self, client_id: &str, id: Value, result: Value) {
         let rid = value_to_request_id(&id);
         let resp = JResponse::success_v2(result, Some(rid));
-        let Ok(json_rpc) = serde_json::to_string(&resp) else { return };
+        let Ok(json_rpc) = serde_json::to_string(&resp) else {
+            return;
+        };
         self.push(client_id, json_rpc);
     }
 
@@ -278,7 +276,9 @@ impl NodeAcpServer {
         let rid = value_to_request_id(&id);
         let err = JError::new(code as i32, message.to_string());
         let resp = JResponse::error_v2(err, Some(rid));
-        let Ok(json_rpc) = serde_json::to_string(&resp) else { return };
+        let Ok(json_rpc) = serde_json::to_string(&resp) else {
+            return;
+        };
         self.push(client_id, json_rpc);
     }
 
@@ -306,7 +306,9 @@ impl NodeAcpServer {
             }
         };
         let request = JRequest::notification_v2("session/update".to_string(), params_obj);
-        let Ok(json_rpc) = serde_json::to_string(&request) else { return };
+        let Ok(json_rpc) = serde_json::to_string(&request) else {
+            return;
+        };
         self.push(client_id, json_rpc);
     }
 

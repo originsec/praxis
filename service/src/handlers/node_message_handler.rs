@@ -2,7 +2,7 @@ use anyhow::Result;
 use common::{
     publish_json, publish_json_exchange, ClientBroadcastMessage, InterceptTargetConfig,
     NodeBroadcastMessage, NodeDirectMessage, NodeInformationUpdate, NodeRegistration,
-    NodeRegistrationAck, CLIENT_BROADCAST_EXCHANGE, NODE_BROADCAST_EXCHANGE,
+    NodeRegistrationAck, PraxisAgentConfig, CLIENT_BROADCAST_EXCHANGE, NODE_BROADCAST_EXCHANGE,
 };
 use lapin::Channel;
 use std::sync::Arc;
@@ -24,26 +24,32 @@ impl NodeMessageHandler {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn handle_node_registration(
         &self,
         registration: NodeRegistration,
         lua_scripts: Vec<String>,
         event_logging_enabled: bool,
         intercept_targets: Vec<InterceptTargetConfig>,
+        praxis_agent_enabled: bool,
+        praxis_agent_config: Option<PraxisAgentConfig>,
     ) -> Result<()> {
         let node = self.registry.register(&registration).await;
 
         //
-        // Send NodeRegistrationAck with Lua scripts, logging state, and the
-        // intercept target list via the node's direct queue. This avoids a
-        // race where a fanout broadcast arrives before the node binds its
-        // consumer to the exchange.
+        // Send NodeRegistrationAck with Lua scripts, logging state, the
+        // intercept target list, and the resolved Praxis agent config via
+        // the node's direct queue. This avoids a race where a fanout
+        // broadcast arrives before the node binds its consumer to the
+        // exchange.
         //
         let ack = NodeRegistrationAck {
             id: node.id.clone(),
             lua_scripts,
             event_logging_enabled,
             intercept_targets,
+            praxis_agent_enabled,
+            praxis_agent_config,
         };
         let message = NodeDirectMessage::RegistrationAck(ack);
 

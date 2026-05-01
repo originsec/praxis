@@ -62,6 +62,9 @@ impl TerminalSession {
     // Get the current scrollback buffer contents.
     //
     pub fn get_scrollback(&self) -> Vec<u8> {
-        self.scrollback.lock().map(|buf| buf.clone()).unwrap_or_default()
+        self.scrollback
+            .lock()
+            .map(|buf| buf.clone())
+            .unwrap_or_default()
     }
 }

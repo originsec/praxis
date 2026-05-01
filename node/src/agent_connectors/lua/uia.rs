@@ -1,7 +1,7 @@
 use anyhow::Result;
-use mlua::{Lua, Table};
 #[cfg(windows)]
 use anyhow::anyhow;
+use mlua::{Lua, Table};
 #[cfg(windows)]
 use once_cell::sync::Lazy;
 #[cfg(windows)]
@@ -10,17 +10,19 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 #[cfg(windows)]
+use uiautomation::UIElement;
+#[cfg(windows)]
 use uiautomation::controls::ControlType;
 #[cfg(windows)]
 use uiautomation::core::UIAutomation;
 #[cfg(windows)]
-use uiautomation::patterns::{UIExpandCollapsePattern, UIInvokePattern, UITogglePattern, UIWindowPattern};
+use uiautomation::patterns::{
+    UIExpandCollapsePattern, UIInvokePattern, UITogglePattern, UIWindowPattern,
+};
 #[cfg(windows)]
 use uiautomation::types::{TreeScope, UIProperty};
 #[cfg(windows)]
 use uiautomation::variants::Variant;
-#[cfg(windows)]
-use uiautomation::UIElement;
 
 #[cfg(windows)]
 struct UiaState {
@@ -63,7 +65,9 @@ where
     F: FnOnce(&UIElement, &UIAutomation) -> Result<R>,
 {
     let state = UIA_STATE.lock().unwrap();
-    let s = state.as_ref().ok_or_else(|| anyhow!("UIA not initialized"))?;
+    let s = state
+        .as_ref()
+        .ok_or_else(|| anyhow!("UIA not initialized"))?;
     let el = s
         .elements
         .get(id)
@@ -187,7 +191,9 @@ fn uia_find_window(config: &Table) -> Result<Option<String>> {
     let pid: Option<u32> = config.get("pid").unwrap_or(None);
 
     let state = UIA_STATE.lock().unwrap();
-    let s = state.as_ref().ok_or_else(|| anyhow!("UIA not initialized"))?;
+    let s = state
+        .as_ref()
+        .ok_or_else(|| anyhow!("UIA not initialized"))?;
 
     let root = s
         .automation
@@ -254,7 +260,9 @@ fn uia_find(parent_id: &str, config: &Table) -> Result<Option<String>> {
 #[cfg(windows)]
 fn uia_find_bfs(parent_id: &str, config: &Table, max_depth: u32) -> Result<Option<String>> {
     let state = UIA_STATE.lock().unwrap();
-    let s = state.as_ref().ok_or_else(|| anyhow!("UIA not initialized"))?;
+    let s = state
+        .as_ref()
+        .ok_or_else(|| anyhow!("UIA not initialized"))?;
     let root = s
         .elements
         .get(parent_id)
@@ -361,9 +369,7 @@ fn uia_invoke(element_id: &str) -> Result<()> {
         let pattern: UIInvokePattern = el
             .get_pattern()
             .map_err(|e| anyhow!("get InvokePattern: {}", e))?;
-        pattern
-            .invoke()
-            .map_err(|e| anyhow!("invoke: {}", e))
+        pattern.invoke().map_err(|e| anyhow!("invoke: {}", e))
     })
 }
 
@@ -377,9 +383,7 @@ fn uia_expand(element_id: &str) -> Result<()> {
         let pattern: UIExpandCollapsePattern = el
             .get_pattern()
             .map_err(|e| anyhow!("get ExpandCollapsePattern: {}", e))?;
-        pattern
-            .expand()
-            .map_err(|e| anyhow!("expand: {}", e))
+        pattern.expand().map_err(|e| anyhow!("expand: {}", e))
     })
 }
 
@@ -390,8 +394,7 @@ fn uia_expand(element_id: &str) -> Result<()> {
 #[cfg(windows)]
 fn uia_focus(element_id: &str) -> Result<()> {
     with_element(element_id, |el, _| {
-        el.set_focus()
-            .map_err(|e| anyhow!("set_focus: {}", e))
+        el.set_focus().map_err(|e| anyhow!("set_focus: {}", e))
     })
 }
 
@@ -402,8 +405,7 @@ fn uia_focus(element_id: &str) -> Result<()> {
 #[cfg(windows)]
 fn uia_send_keys(element_id: &str, keys: &str, interval: u32) -> Result<()> {
     with_element(element_id, |el, _| {
-        el.set_focus()
-            .map_err(|e| anyhow!("set_focus: {}", e))?;
+        el.set_focus().map_err(|e| anyhow!("set_focus: {}", e))?;
         el.send_keys(keys, interval as u64)
             .map_err(|e| anyhow!("send_keys: {}", e))
     })
@@ -419,9 +421,7 @@ fn uia_window_close(element_id: &str) -> Result<()> {
         let pattern: UIWindowPattern = el
             .get_pattern()
             .map_err(|e| anyhow!("get WindowPattern: {}", e))?;
-        pattern
-            .close()
-            .map_err(|e| anyhow!("window close: {}", e))
+        pattern.close().map_err(|e| anyhow!("window close: {}", e))
     })
 }
 
@@ -435,9 +435,7 @@ fn uia_toggle(element_id: &str) -> Result<()> {
         let pattern: UITogglePattern = el
             .get_pattern()
             .map_err(|e| anyhow!("get TogglePattern: {}", e))?;
-        pattern
-            .toggle()
-            .map_err(|e| anyhow!("toggle: {}", e))
+        pattern.toggle().map_err(|e| anyhow!("toggle: {}", e))
     })
 }
 
@@ -508,8 +506,8 @@ fn uia_set_foreground(element_id: &str) -> Result<()> {
 #[cfg(windows)]
 fn uia_click_at(x: i32, y: i32) -> Result<()> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSE_EVENT_FLAGS, MOUSEEVENTF_ABSOLUTE,
-        MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, MOUSEINPUT,
+        INPUT, INPUT_0, INPUT_MOUSE, MOUSE_EVENT_FLAGS, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_LEFTDOWN,
+        MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, MOUSEINPUT, SendInput,
     };
 
     unsafe {
@@ -593,7 +591,9 @@ fn uia_release(element_id: &str) {
 fn uia_root() -> Result<String> {
     ensure_init()?;
     let state = UIA_STATE.lock().unwrap();
-    let s = state.as_ref().ok_or_else(|| anyhow!("UIA not initialized"))?;
+    let s = state
+        .as_ref()
+        .ok_or_else(|| anyhow!("UIA not initialized"))?;
     let root = s
         .automation
         .get_root_element()
@@ -622,10 +622,8 @@ pub fn install_uia_api(lua: &Lua, praxis: &Table) -> Result<()> {
         praxis
             .set(
                 "uia_find_window",
-                lua.create_function(|_, config: Table| {
-                    uia_find_window(&config).map_err(lua_err)
-                })
-                .map_err(|e| anyhow!(e.to_string()))?,
+                lua.create_function(|_, config: Table| uia_find_window(&config).map_err(lua_err))
+                    .map_err(|e| anyhow!(e.to_string()))?,
             )
             .map_err(|e| anyhow!(e.to_string()))?;
 
@@ -644,8 +642,7 @@ pub fn install_uia_api(lua: &Lua, praxis: &Table) -> Result<()> {
                 "uia_find_bfs",
                 lua.create_function(
                     |_, (parent_id, config, max_depth): (String, Table, Option<u32>)| {
-                        uia_find_bfs(&parent_id, &config, max_depth.unwrap_or(10))
-                            .map_err(lua_err)
+                        uia_find_bfs(&parent_id, &config, max_depth.unwrap_or(10)).map_err(lua_err)
                     },
                 )
                 .map_err(|e| anyhow!(e.to_string()))?,
@@ -705,11 +702,9 @@ pub fn install_uia_api(lua: &Lua, praxis: &Table) -> Result<()> {
         praxis
             .set(
                 "uia_send_keys",
-                lua.create_function(
-                    |_, (id, keys, interval): (String, String, Option<u32>)| {
-                        uia_send_keys(&id, &keys, interval.unwrap_or(10)).map_err(lua_err)
-                    },
-                )
+                lua.create_function(|_, (id, keys, interval): (String, String, Option<u32>)| {
+                    uia_send_keys(&id, &keys, interval.unwrap_or(10)).map_err(lua_err)
+                })
                 .map_err(|e| anyhow!(e.to_string()))?,
             )
             .map_err(|e| anyhow!(e.to_string()))?;

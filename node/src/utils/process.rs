@@ -95,7 +95,10 @@ pub fn ensure_firewall_rule() -> bool {
 
     let check = silent_command("netsh")
         .args([
-            "advfirewall", "firewall", "show", "rule",
+            "advfirewall",
+            "firewall",
+            "show",
+            "rule",
             &format!("name={}", rule_name),
         ])
         .output();
@@ -112,7 +115,10 @@ pub fn ensure_firewall_rule() -> bool {
 
     let result = silent_command("netsh")
         .args([
-            "advfirewall", "firewall", "add", "rule",
+            "advfirewall",
+            "firewall",
+            "add",
+            "rule",
             &format!("name={}", rule_name),
             "dir=in",
             "action=allow",
@@ -140,7 +146,10 @@ pub fn remove_firewall_rule() -> bool {
 
     let result = silent_command("netsh")
         .args([
-            "advfirewall", "firewall", "delete", "rule",
+            "advfirewall",
+            "firewall",
+            "delete",
+            "rule",
             &format!("name={}", rule_name),
         ])
         .output();
@@ -395,7 +404,10 @@ impl Drop for HiddenDesktop {
         use windows::Win32::System::StationsAndDesktops::CloseDesktop;
 
         unsafe {
-            let hdesk = std::mem::transmute::<isize, windows::Win32::System::StationsAndDesktops::HDESK>(self.handle);
+            let hdesk = std::mem::transmute::<
+                isize,
+                windows::Win32::System::StationsAndDesktops::HDESK,
+            >(self.handle);
             let _ = CloseDesktop(hdesk);
         }
     }
@@ -414,7 +426,7 @@ mod minimize_impl {
     use std::sync::Mutex;
     use windows::Win32::Foundation::{HWND, LPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, ShowWindow, SW_MINIMIZE,
+        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, SW_MINIMIZE, ShowWindow,
     };
 
     static FOUND_HWNDS: Lazy<Mutex<Vec<isize>>> = Lazy::new(|| Mutex::new(Vec::new()));
@@ -517,7 +529,7 @@ pub fn spawn_on_hidden_desktop(
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
     use windows::Win32::System::Threading::{
-        CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW, STARTF_USESHOWWINDOW,
+        CreateProcessW, PROCESS_INFORMATION, STARTF_USESHOWWINDOW, STARTUPINFOW,
     };
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWMAXIMIZED;
     use windows::core::PWSTR;
@@ -632,22 +644,19 @@ pub fn spawn_process_detached(
         if !want_hidden {
             common::log_debug!(
                 "spawn_process_detached: hidden desktop disabled (use_hidden_desktop={}, not_hidden={})",
-                use_hidden_desktop, not_hidden
+                use_hidden_desktop,
+                not_hidden
             );
         }
 
         if want_hidden {
             let desktop = HiddenDesktop::new();
             if let Some(d) = desktop {
-                let pid = spawn_on_hidden_desktop(
-                    path,
-                    env_pair,
-                    extra_args,
-                    &d.name,
-                )?;
+                let pid = spawn_on_hidden_desktop(path, env_pair, extra_args, &d.name)?;
                 common::log_info!(
                     "spawn_process_detached: spawned on hidden desktop '{}' with PID {}",
-                    d.name, pid
+                    d.name,
+                    pid
                 );
                 return Ok(SpawnResult {
                     pid,
@@ -655,7 +664,9 @@ pub fn spawn_process_detached(
                     hidden_desktop: Some(d),
                 });
             }
-            common::log_warn!("spawn_process_detached: failed to create hidden desktop, spawning normally");
+            common::log_warn!(
+                "spawn_process_detached: failed to create hidden desktop, spawning normally"
+            );
         }
 
         let mut cmd = std::process::Command::new(path);
@@ -669,10 +680,7 @@ pub fn spawn_process_detached(
             .spawn()
             .map_err(|e| anyhow::anyhow!("failed to spawn {}: {}", path, e))?;
         let pid = process.id();
-        common::log_info!(
-            "spawn_process_detached: spawned with PID {}",
-            pid
-        );
+        common::log_info!("spawn_process_detached: spawned with PID {}", pid);
         Ok(SpawnResult {
             pid,
 

@@ -2,8 +2,8 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use agent_client_protocol as acp;
 use acp::schema::{ExtRequest, ExtResponse};
+use agent_client_protocol as acp;
 use common::AgentFileType;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -21,10 +21,7 @@ fn raw_arc<T: Serialize>(v: &T) -> Arc<RawValue> {
 }
 
 pub use common::acp_ext::{
-    EXT_PRAXIS_RECON,
-    EXT_PRAXIS_READ_FILE,
-    EXT_PRAXIS_WRITE_FILE,
-    EXT_PRAXIS_GREP_FILES,
+    EXT_PRAXIS_GREP_FILES, EXT_PRAXIS_READ_FILE, EXT_PRAXIS_RECON, EXT_PRAXIS_WRITE_FILE,
     EXT_PRAXIS_WRITE_SESSION_CONTENT,
 };
 
@@ -345,10 +342,7 @@ async fn handle_grep_files(
                 reg.find_by_short_name(&params.agent_short_name)
             };
             for path in &params.paths {
-                match agent
-                    .as_ref()
-                    .and_then(|a| a.read_session_content(path))
-                {
+                match agent.as_ref().and_then(|a| a.read_session_content(path)) {
                     Some(content) => {
                         let matches = file_ops::grep_content(&content, &re);
                         results.push(common::GrepFileEntry {

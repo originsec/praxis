@@ -16,9 +16,12 @@ pub async fn handle_agent_registry_update(
     //
     #[cfg(debug_assertions)]
     if std::env::var("PRAXIS_IGNORE_SERVICE_AGENTS").unwrap_or_else(|_| "1".to_string()) != "0" {
-        let agent_count = registry.read().await.get_all().len();
+        let agent_count = {
+            let mut reg = registry.write().await;
+            reg.rebuild(factory, &[])
+        };
         common::log_info!(
-            "PRAXIS_IGNORE_SERVICE_AGENTS set, ignoring service registry update ({} scripts skipped)",
+            "PRAXIS_IGNORE_SERVICE_AGENTS set, ignoring service registry update ({} scripts skipped); rebuilt native/embedded agents",
             scripts.len()
         );
         return NodeCommandResult::AgentRegistry(AgentRegistryCommandResult::Updated { agent_count });

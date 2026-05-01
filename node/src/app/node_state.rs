@@ -1,6 +1,6 @@
 use crate::intercept::NodeInterceptManager;
 use crate::terminal::{TerminalManager, TerminalOutputEvent};
-use common::{InterceptTargetConfig, InterceptedTrafficEntry};
+use common::{FactoryConfig, InterceptTargetConfig, InterceptedTrafficEntry};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -18,6 +18,15 @@ pub struct NodeState {
     // intercept handler when enabling capture.
     //
     pub intercept_targets: Vec<InterceptTargetConfig>,
+
+    //
+    // Latest factory config pushed by the service. Currently carries the
+    // resolved Praxis agent config; the AgentFactory reads it on every
+    // registry rebuild and bakes it into a fresh PraxisAgent (or skips the
+    // agent entirely when None).
+    //
+    pub factory_config: FactoryConfig,
+    pub last_lua_scripts: Vec<String>,
 }
 
 impl NodeState {
@@ -32,6 +41,8 @@ impl NodeState {
             terminal_output_tx: Some(terminal_output_tx),
             report_interval_secs: Arc::new(std::sync::atomic::AtomicU64::new(60)),
             intercept_targets: Vec::new(),
+            factory_config: FactoryConfig::default(),
+            last_lua_scripts: Vec::new(),
         }
     }
 }

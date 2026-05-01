@@ -93,7 +93,11 @@ pub fn read_file_range(
     Ok(select_line_range(&content, line_start, line_end))
 }
 
-pub fn select_line_range(content: &str, line_start: Option<usize>, line_end: Option<usize>) -> String {
+pub fn select_line_range(
+    content: &str,
+    line_start: Option<usize>,
+    line_end: Option<usize>,
+) -> String {
     if line_start.is_none() && line_end.is_none() {
         return content.to_string();
     }

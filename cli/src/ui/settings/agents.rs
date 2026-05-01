@@ -1,3 +1,4 @@
+use super::{section_header, setting_row, toggle_row};
 use crate::app::SettingsState;
 use crate::ui::theme::{ACCENT, DIM, MUTED, SETTINGS_HIGHLIGHT_BG, TEXT};
 use ratatui::Frame;
@@ -10,7 +11,58 @@ pub(super) fn render_agents(f: &mut Frame, area: Rect, state: &SettingsState) {
     let mut lines: Vec<Line> = Vec::new();
     let script_count = state.agent_scripts.len();
 
-    let on_script = state.selected < script_count;
+    //
+    // Praxis Agent section.
+    //
+
+    lines.push(section_header("Praxis Agent"));
+    lines.push(Line::raw(""));
+
+    let prompt_display = if state.praxis_agent_system_prompt.trim().is_empty() {
+        "Not set".to_string()
+    } else {
+        let trimmed = state.praxis_agent_system_prompt.replace('\n', " ");
+        if trimmed.chars().count() > 48 {
+            format!("{}...", trimmed.chars().take(45).collect::<String>())
+        } else {
+            trimmed
+        }
+    };
+
+    lines.push(setting_row(
+        "Praxis Model",
+        &state.praxis_agent_model_ref,
+        state.selected == 0,
+        false,
+        "",
+    ));
+    lines.push(setting_row(
+        "Thinking Effort",
+        &state.praxis_agent_thinking_effort,
+        state.selected == 1,
+        state.editing,
+        &state.edit_buffer,
+    ));
+    lines.push(toggle_row(
+        "Praxis Agent",
+        state.praxis_agent_enabled,
+        state.selected == 2,
+    ));
+    lines.push(setting_row(
+        "System Prompt",
+        &prompt_display,
+        state.selected == 3,
+        false,
+        "",
+    ));
+
+    lines.push(Line::raw(""));
+
+    //
+    // Lua agent scripts section.
+    //
+
+    let on_script = state.selected >= 4 && state.selected < 4 + script_count;
     let mut header_spans = vec![
         Span::raw("  "),
         Span::styled(
@@ -45,7 +97,7 @@ pub(super) fn render_agents(f: &mut Frame, area: Rect, state: &SettingsState) {
     }
 
     for (i, script) in state.agent_scripts.iter().enumerate() {
-        let selected = state.selected == i;
+        let selected = state.selected == 4 + i;
         let sel_style = if selected {
             Style::default().fg(ACCENT)
         } else {
@@ -88,7 +140,7 @@ pub(super) fn render_agents(f: &mut Frame, area: Rect, state: &SettingsState) {
 
     lines.push(Line::raw(""));
 
-    let add_sel = state.selected == script_count;
+    let add_sel = state.selected == 4 + script_count;
     lines.push(Line::from(vec![
         Span::styled(
             if add_sel { "\u{25b8} " } else { "  " },
@@ -108,7 +160,7 @@ pub(super) fn render_agents(f: &mut Frame, area: Rect, state: &SettingsState) {
         ),
     ]));
 
-    let reset_sel = state.selected == script_count + 1;
+    let reset_sel = state.selected == 4 + script_count + 1;
     lines.push(Line::from(vec![
         Span::styled(
             if reset_sel { "\u{25b8} " } else { "  " },

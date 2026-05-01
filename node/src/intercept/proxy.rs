@@ -1,14 +1,14 @@
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use common::{InterceptedTrafficEntry, InterceptMethod, TrafficDirection};
-use flate2::read::{GzDecoder, DeflateDecoder};
+use common::{InterceptMethod, InterceptedTrafficEntry, TrafficDirection};
+use flate2::read::{DeflateDecoder, GzDecoder};
 use http_body_util::{BodyExt, Full};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
-use std::collections::{HashMap, HashSet};
 use indexmap::IndexMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, Read};
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -16,8 +16,8 @@ use std::sync::Arc;
 use std::task::{Context as TaskContext, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc, RwLock};
-use tokio::time::{timeout, Duration};
+use tokio::sync::{RwLock, mpsc};
+use tokio::time::{Duration, timeout};
 use tokio_rustls::TlsAcceptor;
 
 use super::certificate::CertificateAuthority;
@@ -97,7 +97,10 @@ impl InterceptProxy {
                     extra_task_handles.push(http_task);
                 }
                 Err(e) => {
-                    common::log_warn!("Could not bind to port 80 (HTTP): {}. Only HTTPS interception will work.", e);
+                    common::log_warn!(
+                        "Could not bind to port 80 (HTTP): {}. Only HTTPS interception will work.",
+                        e
+                    );
                 }
             }
 
@@ -264,7 +267,10 @@ async fn handle_connection(
     // Peek at first byte to detect TLS vs HTTP.
     //
     let mut peek_buf = [0u8; 1];
-    stream.peek(&mut peek_buf).await.context("Failed to peek connection")?;
+    stream
+        .peek(&mut peek_buf)
+        .await
+        .context("Failed to peek connection")?;
 
     //
     // TLS handshake starts with 0x16 (ContentType.handshake).
@@ -281,9 +287,7 @@ async fn handle_connection(
             let ca = Arc::clone(&ca);
             let config = Arc::clone(&config);
             let traffic_tx = traffic_tx.clone();
-            async move {
-                handle_request(req, addr, ca, config, traffic_tx).await
-            }
+            async move { handle_request(req, addr, ca, config, traffic_tx).await }
         });
 
         http1::Builder::new()
@@ -328,7 +332,10 @@ async fn handle_tls_connection(
                 Some(addr)
             }
             Err(e) => {
-                common::log_warn!("Failed to get original destination via SO_ORIGINAL_DST: {}", e);
+                common::log_warn!(
+                    "Failed to get original destination via SO_ORIGINAL_DST: {}",
+                    e
+                );
                 None
             }
         }
@@ -343,7 +350,10 @@ async fn handle_tls_connection(
     // Read enough bytes to parse ClientHello and extract SNI.
     //
     let mut client_hello_buf = vec![0u8; 4096];
-    let n = stream.peek(&mut client_hello_buf).await.context("Failed to peek ClientHello")?;
+    let n = stream
+        .peek(&mut client_hello_buf)
+        .await
+        .context("Failed to peek ClientHello")?;
 
     //
     // Parse SNI from ClientHello.
@@ -361,7 +371,9 @@ async fn handle_tls_connection(
     //
     let should_intercept = {
         let domains = config.intercept_domains.read().await;
-        domains.iter().any(|d| sni == *d || sni.ends_with(&format!(".{}", d)))
+        domains
+            .iter()
+            .any(|d| sni == *d || sni.ends_with(&format!(".{}", d)))
     };
 
     if !should_intercept {
@@ -372,7 +384,8 @@ async fn handle_tls_connection(
         common::log_info!("Passthrough for non-intercepted domain {}", sni);
 
         let pre_resolved_ip = config.domain_to_real_ip.get(&sni).copied();
-        let server = connect_bypass_tun(&sni, dest_port, pre_resolved_ip, config.intercept_method).await
+        let server = connect_bypass_tun(&sni, dest_port, pre_resolved_ip, config.intercept_method)
+            .await
             .context(format!("Failed to connect to {} for passthrough", sni))?;
 
         //
@@ -407,7 +420,8 @@ async fn handle_tls_connection(
     let acceptor = {
         let mut ca_guard = ca.write().await;
         if ca_guard.get_leaf_cert(&sni).is_none() {
-            ca_guard.generate_leaf_cert(&sni)
+            ca_guard
+                .generate_leaf_cert(&sni)
                 .context("Failed to generate leaf certificate")?;
         }
         create_tls_acceptor(&ca_guard, &sni)?
@@ -416,7 +430,9 @@ async fn handle_tls_connection(
     //
     // Perform TLS handshake with client.
     //
-    let tls_stream = acceptor.accept(stream).await
+    let tls_stream = acceptor
+        .accept(stream)
+        .await
         .context("TLS handshake with client failed")?;
 
     //
@@ -531,7 +547,8 @@ fn parse_sni_from_client_hello(data: &[u8]) -> Result<String> {
             //
             while sni_pos + 3 <= pos + ext_len {
                 let name_type = handshake[sni_pos];
-                let name_len = u16::from_be_bytes([handshake[sni_pos + 1], handshake[sni_pos + 2]]) as usize;
+                let name_len =
+                    u16::from_be_bytes([handshake[sni_pos + 1], handshake[sni_pos + 2]]) as usize;
                 sni_pos += 3;
 
                 if name_type == 0x00 && sni_pos + name_len <= handshake.len() {
@@ -583,7 +600,8 @@ async fn connect_bypass_tun(
         std::net::SocketAddr::new(ip, port)
     } else {
         let target = format!("{}:{}", host, port);
-        target.to_socket_addrs()
+        target
+            .to_socket_addrs()
             .context("Failed to resolve target address")?
             .next()
             .context("No addresses found for target")?
@@ -614,7 +632,11 @@ async fn connect_bypass_tun(
             if let Some(iface) = discover_default_interface() {
                 common::log_debug!("VPN bypass: binding to interface {}", iface);
                 if let Err(e) = socket.bind_device(Some(iface.as_bytes())) {
-                    common::log_warn!("Failed to bind to device {}: {} (may need CAP_NET_ADMIN)", iface, e);
+                    common::log_warn!(
+                        "Failed to bind to device {}: {} (may need CAP_NET_ADMIN)",
+                        iface,
+                        e
+                    );
                 }
             }
         }
@@ -656,7 +678,8 @@ async fn connect_bypass_tun(
     #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     let _ = intercept_method; // Silence unused variable warning
 
-    socket.set_nonblocking(true)
+    socket
+        .set_nonblocking(true)
         .context("Failed to set non-blocking")?;
 
     //
@@ -686,10 +709,16 @@ async fn connect_bypass_tun(
         // EINPROGRESS (macOS).
         //
         Err(e) if e.raw_os_error() == Some(36) => {
-            common::log_debug!("connect_bypass_tun: connect() returned EINPROGRESS macOS (expected)");
+            common::log_debug!(
+                "connect_bypass_tun: connect() returned EINPROGRESS macOS (expected)"
+            );
         }
         Err(e) => {
-            common::log_error!("connect_bypass_tun: connect() failed: {} (os_error={:?})", e, e.raw_os_error());
+            common::log_error!(
+                "connect_bypass_tun: connect() failed: {} (os_error={:?})",
+                e,
+                e.raw_os_error()
+            );
             return Err(e).context("Failed to connect");
         }
     }
@@ -698,14 +727,15 @@ async fn connect_bypass_tun(
     // Convert to tokio TcpStream.
     //
     let std_stream: std::net::TcpStream = socket.into();
-    let stream = TcpStream::from_std(std_stream)
-        .context("Failed to convert to tokio stream")?;
+    let stream = TcpStream::from_std(std_stream).context("Failed to convert to tokio stream")?;
 
     //
     // Wait for connection to complete.
     //
     common::log_debug!("connect_bypass_tun: waiting for connection to {}", addr);
-    stream.writable().await
+    stream
+        .writable()
+        .await
         .context("Failed to wait for connection")?;
 
     //
@@ -739,10 +769,19 @@ async fn handle_intercepted_tunnel_vpn(
     //
     // Connect to real server, bypassing TUN routing and hosts file.
     //
-    common::log_debug!("handle_intercepted_tunnel_vpn: connecting to {}:{}", host, port);
-    let server_tcp = connect_bypass_tun(host, port, pre_resolved_ip, config.intercept_method).await
+    common::log_debug!(
+        "handle_intercepted_tunnel_vpn: connecting to {}:{}",
+        host,
+        port
+    );
+    let server_tcp = connect_bypass_tun(host, port, pre_resolved_ip, config.intercept_method)
+        .await
         .context(format!("Failed to connect to {}:{}", host, port))?;
-    common::log_debug!("handle_intercepted_tunnel_vpn: TCP connected to {}:{}", host, port);
+    common::log_debug!(
+        "handle_intercepted_tunnel_vpn: TCP connected to {}:{}",
+        host,
+        port
+    );
 
     //
     // Create TLS connector for server.
@@ -759,7 +798,9 @@ async fn handle_intercepted_tunnel_vpn(
         .map_err(|_| anyhow::anyhow!("Invalid server name"))?;
 
     common::log_debug!("handle_intercepted_tunnel_vpn: starting TLS to {}", host);
-    let server_tls = connector.connect(server_name, server_tcp).await
+    let server_tls = connector
+        .connect(server_name, server_tcp)
+        .await
         .context("Failed to establish TLS with server")?;
     common::log_debug!("handle_intercepted_tunnel_vpn: TLS established to {}", host);
 
@@ -814,7 +855,9 @@ async fn handle_connect(
     //
     let should_intercept = {
         let domains = config.intercept_domains.read().await;
-        domains.iter().any(|d| host == *d || host.ends_with(&format!(".{}", d)))
+        domains
+            .iter()
+            .any(|d| host == *d || host.ends_with(&format!(".{}", d)))
     };
 
     //
@@ -823,7 +866,16 @@ async fn handle_connect(
     tokio::task::spawn(async move {
         match hyper::upgrade::on(req).await {
             Ok(upgraded) => {
-                let _ = tunnel(upgraded, &host, port, should_intercept, ca, &config, &traffic_tx).await;
+                let _ = tunnel(
+                    upgraded,
+                    &host,
+                    port,
+                    should_intercept,
+                    ca,
+                    &config,
+                    &traffic_tx,
+                )
+                .await;
             }
             Err(e) => {
                 common::log_warn!("Upgrade error: {}", e);
@@ -855,7 +907,8 @@ async fn tunnel(
         //
         // Simple passthrough for non-intercepted domains.
         //
-        let mut server = TcpStream::connect(&target).await
+        let mut server = TcpStream::connect(&target)
+            .await
             .context(format!("Failed to connect to {}", target))?;
         let mut upgraded = TokioIo::new(upgraded);
 
@@ -878,7 +931,8 @@ async fn intercept_tls_traffic(
     //
     let (cert_pem, key_pem) = {
         let mut ca_guard = ca.write().await;
-        let cert_data = ca_guard.generate_leaf_cert(host)
+        let cert_data = ca_guard
+            .generate_leaf_cert(host)
             .context("Failed to generate leaf certificate")?;
         (cert_data.cert_pem.clone(), cert_data.key_pem.clone())
     };
@@ -906,7 +960,8 @@ async fn intercept_tls_traffic(
     // Connect to real server with TLS.
     //
     let target = format!("{}:{}", host, port);
-    let server_tcp = TcpStream::connect(&target).await
+    let server_tcp = TcpStream::connect(&target)
+        .await
         .context(format!("Failed to connect to {}", target))?;
 
     //
@@ -923,7 +978,9 @@ async fn intercept_tls_traffic(
     let server_name = rustls_pki_types::ServerName::try_from(host.to_string())
         .map_err(|_| anyhow::anyhow!("Invalid server name"))?;
 
-    let server_tls = connector.connect(server_name, server_tcp).await
+    let server_tls = connector
+        .connect(server_name, server_tcp)
+        .await
         .context("Failed to establish TLS with server")?;
 
     //
@@ -1016,10 +1073,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for PrefixedStream<S> {
         Pin::new(&mut self.inner).poll_write(cx, buf)
     }
 
-    fn poll_flush(
-        mut self: Pin<&mut Self>,
-        cx: &mut TaskContext<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<std::io::Result<()>> {
         Pin::new(&mut self.inner).poll_flush(cx)
     }
 
@@ -1131,9 +1185,7 @@ impl H2Frame {
 }
 
 /// Read an HTTP/2 frame from the stream.
-async fn read_h2_frame<R: tokio::io::AsyncRead + Unpin>(
-    reader: &mut R,
-) -> Result<Option<H2Frame>> {
+async fn read_h2_frame<R: tokio::io::AsyncRead + Unpin>(reader: &mut R) -> Result<Option<H2Frame>> {
     use tokio::io::AsyncReadExt;
 
     //
@@ -1616,7 +1668,11 @@ where
         // The preface itself will be forwarded to the server by proxy_h2_traffic.
         //
 
-        let extra_bytes = if n > 24 { peeked[24..].to_vec() } else { Vec::new() };
+        let extra_bytes = if n > 24 {
+            peeked[24..].to_vec()
+        } else {
+            Vec::new()
+        };
         let client_prefixed = PrefixedStream::new(extra_bytes, client_tls);
         return proxy_h2_traffic(client_prefixed, server_tls, host, config, traffic_tx).await;
     }
@@ -1637,7 +1693,9 @@ where
 
     let host = host.to_string();
     let config_node_id = config.node_id.clone();
-    let agent = config.domain_to_agent.get(&host)
+    let agent = config
+        .domain_to_agent
+        .get(&host)
         .cloned()
         .unwrap_or_else(|| "unknown".to_string());
     let url_pattern = config.domain_to_url_pattern.get(&host);
@@ -1660,7 +1718,11 @@ where
                 break;
             }
             Ok(n) => {
-                common::log_debug!("proxy_https_traffic: read {} bytes: {:?}", n, request_line.trim());
+                common::log_debug!(
+                    "proxy_https_traffic: read {} bytes: {:?}",
+                    n,
+                    request_line.trim()
+                );
             }
             Err(e) => {
                 common::log_warn!("proxy_https_traffic: read error: {}", e);
@@ -1724,7 +1786,9 @@ where
         //
         server_write.write_all(request_line.as_bytes()).await?;
         for (key, value) in &headers {
-            server_write.write_all(format!("{}: {}\r\n", key, value).as_bytes()).await?;
+            server_write
+                .write_all(format!("{}: {}\r\n", key, value).as_bytes())
+                .await?;
         }
         server_write.write_all(b"\r\n").await?;
         if content_length > 0 {
@@ -1739,8 +1803,9 @@ where
         const HEADER_TIMEOUT_SECS: u64 = 30;
         let headers_result = timeout(
             Duration::from_secs(HEADER_TIMEOUT_SECS),
-            read_response_headers(&mut server_reader)
-        ).await;
+            read_response_headers(&mut server_reader),
+        )
+        .await;
 
         let (response_line, status_code, response_headers, body_type) = match headers_result {
             Ok(Ok((line, status, headers, body_type))) => (line, status, headers, body_type),
@@ -1748,7 +1813,12 @@ where
                 //
                 // Error reading response headers.
                 //
-                common::log_warn!("Intercepted [NO RESPONSE]: {} {} - error: {}", method, url, e);
+                common::log_warn!(
+                    "Intercepted [NO RESPONSE]: {} {} - error: {}",
+                    method,
+                    url,
+                    e
+                );
 
                 //
                 // Record request without response if pattern matches.
@@ -1769,7 +1839,11 @@ where
                         url: url.clone(),
                         host: host.clone(),
                         request_headers: Some(headers_map.clone()),
-                        request_body: if body.is_empty() { None } else { Some(body.clone()) },
+                        request_body: if body.is_empty() {
+                            None
+                        } else {
+                            Some(body.clone())
+                        },
                         response_status: None,
                         response_headers: None,
                         response_body: None,
@@ -1782,7 +1856,12 @@ where
                 //
                 // Timeout waiting for response headers.
                 //
-                common::log_warn!("Intercepted [TIMEOUT]: {} {} - no response headers after {}s", method, url, HEADER_TIMEOUT_SECS);
+                common::log_warn!(
+                    "Intercepted [TIMEOUT]: {} {} - no response headers after {}s",
+                    method,
+                    url,
+                    HEADER_TIMEOUT_SECS
+                );
 
                 //
                 // Record request without response if pattern matches.
@@ -1803,7 +1882,11 @@ where
                         url: url.clone(),
                         host: host.clone(),
                         request_headers: Some(headers_map.clone()),
-                        request_body: if body.is_empty() { None } else { Some(body.clone()) },
+                        request_body: if body.is_empty() {
+                            None
+                        } else {
+                            Some(body.clone())
+                        },
                         response_status: None,
                         response_headers: None,
                         response_body: None,
@@ -1819,7 +1902,9 @@ where
         //
         client_write.write_all(response_line.as_bytes()).await?;
         for (key, value) in &response_headers {
-            client_write.write_all(format!("{}: {}\r\n", key, value).as_bytes()).await?;
+            client_write
+                .write_all(format!("{}: {}\r\n", key, value).as_bytes())
+                .await?;
         }
         client_write.write_all(b"\r\n").await?;
         client_write.flush().await?;
@@ -1828,9 +1913,7 @@ where
         // Read and forward body based on type.
         //
         let response_body = match body_type {
-            ResponseBodyType::None => {
-                Vec::new()
-            }
+            ResponseBodyType::None => Vec::new(),
             ResponseBodyType::Chunked => {
                 //
                 // Stream chunks to client as they arrive (with per-chunk
@@ -1854,7 +1937,12 @@ where
                 //
                 const BODY_TIMEOUT_SECS: u64 = 300;
                 let mut body_buf = vec![0u8; len];
-                match timeout(Duration::from_secs(BODY_TIMEOUT_SECS), server_reader.read_exact(&mut body_buf)).await {
+                match timeout(
+                    Duration::from_secs(BODY_TIMEOUT_SECS),
+                    server_reader.read_exact(&mut body_buf),
+                )
+                .await
+                {
                     Ok(Ok(_)) => {
                         //
                         // Forward to client.
@@ -1870,7 +1958,11 @@ where
                         Vec::new()
                     }
                     Err(_) => {
-                        common::log_warn!("Timeout reading response body for {} after {}s", url, BODY_TIMEOUT_SECS);
+                        common::log_warn!(
+                            "Timeout reading response body for {} after {}s",
+                            url,
+                            BODY_TIMEOUT_SECS
+                        );
                         Vec::new()
                     }
                 }
@@ -1883,7 +1975,9 @@ where
         // insensitive key lookup).
         //
         let is_websocket_upgrade = status_code == Some(101)
-            && response_headers.iter().any(|(k, v)| k.eq_ignore_ascii_case("upgrade") && v.to_lowercase().contains("websocket"));
+            && response_headers.iter().any(|(k, v)| {
+                k.eq_ignore_ascii_case("upgrade") && v.to_lowercase().contains("websocket")
+            });
 
         if is_websocket_upgrade {
             //
@@ -1919,12 +2013,19 @@ where
             // Keep using BufReaders to preserve any buffered data.
             //
             handle_websocket_traffic(
-                client_reader, client_write,
-                server_reader, server_write,
-                &url, &host, &agent, &config_node_id,
+                client_reader,
+                client_write,
+                server_reader,
+                server_write,
+                &url,
+                &host,
+                &agent,
+                &config_node_id,
                 config.intercept_method,
-                url_pattern, traffic_tx,
-            ).await?;
+                url_pattern,
+                traffic_tx,
+            )
+            .await?;
 
             return Ok(());
         }
@@ -1948,7 +2049,8 @@ where
             // client as-is)
             // Case-insensitive header lookup.
             //
-            let content_encoding = response_headers.iter()
+            let content_encoding = response_headers
+                .iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case("content-encoding"))
                 .map(|(_, v)| v.as_str());
             let decompressed_body = decompress_body(&response_body, content_encoding);
@@ -1970,7 +2072,11 @@ where
                 request_body: if body.is_empty() { None } else { Some(body) },
                 response_status: status_code,
                 response_headers: Some(response_headers),
-                response_body: if decompressed_body.is_empty() { None } else { Some(decompressed_body) },
+                response_body: if decompressed_body.is_empty() {
+                    None
+                } else {
+                    Some(decompressed_body)
+                },
             };
 
             let _ = traffic_tx.send(entry);
@@ -2220,7 +2326,9 @@ async fn write_websocket_frame<W: tokio::io::AsyncWrite + Unpin>(
     if mask {
         let mask_key: [u8; 4] = rand::random();
         writer.write_all(&mask_key).await?;
-        let masked: Vec<u8> = payload.iter().enumerate()
+        let masked: Vec<u8> = payload
+            .iter()
+            .enumerate()
             .map(|(i, b)| b ^ mask_key[i % 4])
             .collect();
         writer.write_all(&masked).await?;
@@ -2247,7 +2355,14 @@ async fn handle_http_request(
     //
     let (host, port) = match (uri.host(), uri.port_u16()) {
         (Some(h), Some(p)) => (h.to_string(), p),
-        (Some(h), None) => (h.to_string(), if uri.scheme_str() == Some("https") { 443 } else { 80 }),
+        (Some(h), None) => (
+            h.to_string(),
+            if uri.scheme_str() == Some("https") {
+                443
+            } else {
+                80
+            },
+        ),
         _ => {
             //
             // Try Host header.
@@ -2275,7 +2390,8 @@ async fn handle_http_request(
     //
     // Check if this is a WebSocket upgrade.
     //
-    let _is_websocket = req.headers()
+    let _is_websocket = req
+        .headers()
         .get("upgrade")
         .and_then(|v| v.to_str().ok())
         .map(|v| v.to_lowercase().contains("websocket"))
@@ -2311,7 +2427,10 @@ async fn handle_http_request(
             common::log_error!("Failed to connect to {}: {}", target, e);
             return Ok(Response::builder()
                 .status(StatusCode::BAD_GATEWAY)
-                .body(Full::new(Bytes::from(format!("Failed to connect to {}", target))))
+                .body(Full::new(Bytes::from(format!(
+                    "Failed to connect to {}",
+                    target
+                ))))
                 .unwrap());
         }
     };
@@ -2368,7 +2487,8 @@ async fn handle_http_request(
     // Parse status.
     //
     let parts: Vec<&str> = response_line.trim().splitn(3, ' ').collect();
-    let status_code = parts.get(1)
+    let status_code = parts
+        .get(1)
         .and_then(|s| s.parse::<u16>().ok())
         .unwrap_or(502);
 
@@ -2395,7 +2515,9 @@ async fn handle_http_request(
             if original_key.eq_ignore_ascii_case("content-length") {
                 content_length = value.parse().unwrap_or(0);
             }
-            if original_key.eq_ignore_ascii_case("transfer-encoding") && value.to_lowercase().contains("chunked") {
+            if original_key.eq_ignore_ascii_case("transfer-encoding")
+                && value.to_lowercase().contains("chunked")
+            {
                 chunked = true;
             }
             if original_key.eq_ignore_ascii_case("content-encoding") {
@@ -2446,11 +2568,15 @@ async fn handle_http_request(
     //
     let should_intercept = {
         let domains = config.intercept_domains.read().await;
-        domains.iter().any(|d| host == *d || host.ends_with(&format!(".{}", d)))
+        domains
+            .iter()
+            .any(|d| host == *d || host.ends_with(&format!(".{}", d)))
     };
 
     if should_intercept {
-        let agent = config.domain_to_agent.get(&host)
+        let agent = config
+            .domain_to_agent
+            .get(&host)
             .cloned()
             .unwrap_or_else(|| "unknown".to_string());
 
@@ -2474,10 +2600,18 @@ async fn handle_http_request(
                 url: url_str,
                 host: host.clone(),
                 request_headers: Some(req_headers),
-                request_body: if body_bytes.is_empty() { None } else { Some(body_bytes) },
+                request_body: if body_bytes.is_empty() {
+                    None
+                } else {
+                    Some(body_bytes)
+                },
                 response_status: Some(status_code),
                 response_headers: Some(resp_headers.clone()),
-                response_body: if decompressed_body.is_empty() { None } else { Some(decompressed_body) },
+                response_body: if decompressed_body.is_empty() {
+                    None
+                } else {
+                    Some(decompressed_body)
+                },
             };
 
             let _ = traffic_tx.send(entry);
@@ -2487,19 +2621,21 @@ async fn handle_http_request(
     //
     // Build response to return to client.
     //
-    let mut response = Response::builder().status(StatusCode::from_u16(status_code).unwrap_or(StatusCode::BAD_GATEWAY));
+    let mut response = Response::builder()
+        .status(StatusCode::from_u16(status_code).unwrap_or(StatusCode::BAD_GATEWAY));
 
     for (key, value) in &resp_headers {
         response = response.header(key.as_str(), value.as_str());
     }
 
-    Ok(response.body(Full::new(Bytes::from(response_body))).unwrap())
+    Ok(response
+        .body(Full::new(Bytes::from(response_body)))
+        .unwrap())
 }
 
 /// Create a TLS acceptor from CertificateAuthority for a specific host
 fn create_tls_acceptor(ca: &CertificateAuthority, host: &str) -> Result<TlsAcceptor> {
-    let cert_data = ca.get_leaf_cert(host)
-        .context("No certificate for host")?;
+    let cert_data = ca.get_leaf_cert(host).context("No certificate for host")?;
 
     create_tls_acceptor_from_pem(&cert_data.cert_pem, &cert_data.key_pem)
 }
@@ -2526,7 +2662,9 @@ fn create_tls_acceptor_from_pem(cert_pem: &str, key_pem: &str) -> Result<TlsAcce
 /// Read HTTP response from server
 /// Returns (response_line, status_code, headers, body)
 #[allow(dead_code)]
-async fn read_response<R>(reader: &mut tokio::io::BufReader<R>) -> Result<(String, Option<u16>, IndexMap<String, String>, Vec<u8>)>
+async fn read_response<R>(
+    reader: &mut tokio::io::BufReader<R>,
+) -> Result<(String, Option<u16>, IndexMap<String, String>, Vec<u8>)>
 where
     R: tokio::io::AsyncRead + Unpin,
 {
@@ -2536,7 +2674,9 @@ where
     // Read response line.
     //
     let mut response_line = String::new();
-    let bytes_read = reader.read_line(&mut response_line).await
+    let bytes_read = reader
+        .read_line(&mut response_line)
+        .await
         .context("Failed to read response line")?;
 
     if bytes_read == 0 {
@@ -2560,7 +2700,9 @@ where
 
     loop {
         let mut header_line = String::new();
-        reader.read_line(&mut header_line).await
+        reader
+            .read_line(&mut header_line)
+            .await
             .context("Failed to read response header")?;
         let line = header_line.trim();
         if line.is_empty() {
@@ -2572,7 +2714,9 @@ where
             if original_key.eq_ignore_ascii_case("content-length") {
                 response_content_length = value.parse().unwrap_or(0);
             }
-            if original_key.eq_ignore_ascii_case("transfer-encoding") && value.to_lowercase().contains("chunked") {
+            if original_key.eq_ignore_ascii_case("transfer-encoding")
+                && value.to_lowercase().contains("chunked")
+            {
                 is_chunked = true;
             }
             response_headers.insert(original_key, value);
@@ -2586,7 +2730,9 @@ where
         read_chunked_body(reader).await.unwrap_or_default()
     } else if response_content_length > 0 {
         let mut body = vec![0u8; response_content_length];
-        reader.read_exact(&mut body).await
+        reader
+            .read_exact(&mut body)
+            .await
             .context("Failed to read response body")?;
         body
     } else {
@@ -2608,11 +2754,13 @@ where
 
     loop {
         let mut size_line = String::new();
-        reader.read_line(&mut size_line).await
+        reader
+            .read_line(&mut size_line)
+            .await
             .context("Failed to read chunk size")?;
 
-        let chunk_size = usize::from_str_radix(size_line.trim(), 16)
-            .context("Invalid chunk size")?;
+        let chunk_size =
+            usize::from_str_radix(size_line.trim(), 16).context("Invalid chunk size")?;
 
         if chunk_size == 0 {
             //
@@ -2624,7 +2772,9 @@ where
         }
 
         let mut chunk = vec![0u8; chunk_size];
-        reader.read_exact(&mut chunk).await
+        reader
+            .read_exact(&mut chunk)
+            .await
             .context("Failed to read chunk data")?;
         body.extend_from_slice(&chunk);
 
@@ -2653,7 +2803,12 @@ enum ResponseBodyType {
 /// Returns (response_line, status_code, headers, body_type)
 async fn read_response_headers<R>(
     reader: &mut tokio::io::BufReader<R>,
-) -> Result<(String, Option<u16>, IndexMap<String, String>, ResponseBodyType)>
+) -> Result<(
+    String,
+    Option<u16>,
+    IndexMap<String, String>,
+    ResponseBodyType,
+)>
 where
     R: tokio::io::AsyncRead + Unpin,
 {
@@ -2663,7 +2818,9 @@ where
     // Read response line.
     //
     let mut response_line = String::new();
-    let bytes_read = reader.read_line(&mut response_line).await
+    let bytes_read = reader
+        .read_line(&mut response_line)
+        .await
         .context("Failed to read response line")?;
 
     if bytes_read == 0 {
@@ -2687,7 +2844,9 @@ where
 
     loop {
         let mut header_line = String::new();
-        reader.read_line(&mut header_line).await
+        reader
+            .read_line(&mut header_line)
+            .await
             .context("Failed to read response header")?;
         let line = header_line.trim();
         if line.is_empty() {
@@ -2699,7 +2858,9 @@ where
             if original_key.eq_ignore_ascii_case("content-length") {
                 content_length = value.parse().ok();
             }
-            if original_key.eq_ignore_ascii_case("transfer-encoding") && value.to_lowercase().contains("chunked") {
+            if original_key.eq_ignore_ascii_case("transfer-encoding")
+                && value.to_lowercase().contains("chunked")
+            {
                 is_chunked = true;
             }
             response_headers.insert(original_key, value);
@@ -2720,7 +2881,7 @@ where
             // No Content-Length and not chunked = no body.
             //
             None => ResponseBodyType::None,
-        }
+        },
     };
 
     Ok((response_line, status_code, response_headers, body_type))
@@ -2753,8 +2914,9 @@ where
         let mut size_line = String::new();
         let read_result = timeout(
             Duration::from_secs(CHUNK_TIMEOUT_SECS),
-            reader.read_line(&mut size_line)
-        ).await;
+            reader.read_line(&mut size_line),
+        )
+        .await;
 
         let bytes_read = match read_result {
             Ok(Ok(n)) => n,
@@ -2763,7 +2925,10 @@ where
                 //
                 // Timeout - send terminating chunk and return what we have.
                 //
-                common::log_debug!("Chunk read timeout after {}s, terminating stream", CHUNK_TIMEOUT_SECS);
+                common::log_debug!(
+                    "Chunk read timeout after {}s, terminating stream",
+                    CHUNK_TIMEOUT_SECS
+                );
                 writer.write_all(b"0\r\n\r\n").await?;
                 writer.flush().await?;
                 return Ok(body_buffer);
@@ -2813,8 +2978,9 @@ where
         let mut chunk = vec![0u8; chunk_size];
         let chunk_result = timeout(
             Duration::from_secs(CHUNK_TIMEOUT_SECS),
-            reader.read_exact(&mut chunk)
-        ).await;
+            reader.read_exact(&mut chunk),
+        )
+        .await;
 
         match chunk_result {
             Ok(Ok(_)) => {}

@@ -219,7 +219,10 @@ pub fn remove_all_hosts_entries() -> Result<()> {
     fs::write(&hosts_path, new_lines.join("\n")).context("Failed to write updated hosts file")?;
 
     if removed_count > 0 {
-        common::log_info!("Removed {} praxis intercept entries from hosts file", removed_count);
+        common::log_info!(
+            "Removed {} praxis intercept entries from hosts file",
+            removed_count
+        );
     }
     Ok(())
 }

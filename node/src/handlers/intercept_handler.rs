@@ -15,8 +15,13 @@ pub async fn handle_intercept_command(
             // Check if already active.
             //
             if state.intercept_manager.is_enabled() {
-                let current_method = state.intercept_manager.method().unwrap_or(InterceptMethod::Proxy);
-                return NodeCommandResult::Intercept(InterceptCommandResult::Enabled { method: current_method });
+                let current_method = state
+                    .intercept_manager
+                    .method()
+                    .unwrap_or(InterceptMethod::Proxy);
+                return NodeCommandResult::Intercept(InterceptCommandResult::Enabled {
+                    method: current_method,
+                });
             }
 
             //
@@ -34,8 +39,15 @@ pub async fn handle_intercept_command(
             match state.intercept_manager.enable(&targets, method).await {
                 Ok(used_method) => {
                     let domains = state.intercept_manager.intercepted_domains();
-                    common::log_info!("Intercept enabled ({:?}) for {} domain(s): {:?}", used_method, domains.len(), domains);
-                    NodeCommandResult::Intercept(InterceptCommandResult::Enabled { method: used_method })
+                    common::log_info!(
+                        "Intercept enabled ({:?}) for {} domain(s): {:?}",
+                        used_method,
+                        domains.len(),
+                        domains
+                    );
+                    NodeCommandResult::Intercept(InterceptCommandResult::Enabled {
+                        method: used_method,
+                    })
                 }
                 Err(e) => {
                     common::log_error!("Failed to enable intercept: {:?}", e);

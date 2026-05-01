@@ -45,9 +45,14 @@ impl DomainResolver {
         //
         let lookup_domain = domain.trim_start_matches("*.");
 
-        common::log_debug!("Resolving DNS for domain: {} (lookup: {})", domain, lookup_domain);
+        common::log_debug!(
+            "Resolving DNS for domain: {} (lookup: {})",
+            domain,
+            lookup_domain
+        );
 
-        let response = self.resolver
+        let response = self
+            .resolver
             .lookup_ip(lookup_domain)
             .await
             .context(format!("Failed to resolve DNS for {}", lookup_domain))?;
@@ -101,10 +106,7 @@ impl DomainResolver {
 
     /// Re-resolve all domains (for periodic refresh)
     pub async fn refresh_all(&self) -> Result<()> {
-        let domains: Vec<String> = self.domain_to_ips
-            .iter()
-            .map(|e| e.key().clone())
-            .collect();
+        let domains: Vec<String> = self.domain_to_ips.iter().map(|e| e.key().clone()).collect();
 
         for domain in domains {
             if let Err(e) = self.resolve_domain(&domain).await {

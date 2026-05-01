@@ -72,8 +72,7 @@ impl WintunManager {
         // Extract the embedded DLL.
         //
         common::log_info!("Extracting wintun.dll to {:?}", dll_path);
-        fs::write(&dll_path, WINTUN_DLL)
-            .context("Failed to write wintun.dll to temp directory")?;
+        fs::write(&dll_path, WINTUN_DLL).context("Failed to write wintun.dll to temp directory")?;
 
         Ok(dll_path)
     }
@@ -97,10 +96,8 @@ impl WintunManager {
         //
         // Load wintun library.
         //
-        let wintun = unsafe {
-            wintun::load_from_path(&dll_path)
-                .context("Failed to load wintun.dll")?
-        };
+        let wintun =
+            unsafe { wintun::load_from_path(&dll_path).context("Failed to load wintun.dll")? };
 
         //
         // Always create a new adapter. The wintun crate logs errors when open()
@@ -114,8 +111,12 @@ impl WintunManager {
         //
         // Start a packet session with maximum ring buffer capacity.
         //
-        common::log_debug!("Starting wintun session with ring capacity: {}", wintun::MAX_RING_CAPACITY);
-        let session = adapter.start_session(wintun::MAX_RING_CAPACITY)
+        common::log_debug!(
+            "Starting wintun session with ring capacity: {}",
+            wintun::MAX_RING_CAPACITY
+        );
+        let session = adapter
+            .start_session(wintun::MAX_RING_CAPACITY)
             .context("Failed to start wintun session")?;
 
         self.adapter = Some(adapter);
@@ -215,7 +216,9 @@ impl WintunManager {
 
     pub fn start(&mut self) -> Result<()> {
         common::log_warn!("Wintun VPN mode is only supported on Windows");
-        Err(anyhow::anyhow!("Wintun VPN mode is only supported on Windows"))
+        Err(anyhow::anyhow!(
+            "Wintun VPN mode is only supported on Windows"
+        ))
     }
 
     pub fn stop(&mut self) -> Result<()> {

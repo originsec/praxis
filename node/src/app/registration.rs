@@ -5,9 +5,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::utils;
 use common::{
-    publish_json, node_queue_name, rabbitmq_url, InterceptTargetConfig, NodeCapability,
-    NodeDirectMessage, NodeRegistration, NodeRegistrationAck, NodeSignalMessage,
-    NODE_SIGNAL_QUEUE,
+    InterceptTargetConfig, NODE_SIGNAL_QUEUE, NodeCapability, NodeDirectMessage, NodeRegistration,
+    NodeRegistrationAck, NodeSignalMessage, PraxisAgentConfig, node_queue_name, publish_json,
+    rabbitmq_url,
 };
 
 pub struct RegistrationResult {
@@ -17,6 +17,8 @@ pub struct RegistrationResult {
     pub lua_scripts: Vec<String>,
     pub event_logging_enabled: bool,
     pub intercept_targets: Vec<InterceptTargetConfig>,
+    pub praxis_agent_enabled: bool,
+    pub praxis_agent_config: Option<PraxisAgentConfig>,
 }
 
 pub async fn publish_registration(channel: &Channel, node_id: &str) -> Result<()> {
@@ -37,7 +39,9 @@ pub async fn publish_registration(channel: &Channel, node_id: &str) -> Result<()
         capabilities,
     };
     let message = NodeSignalMessage::Registration(registration);
-    publish_json(channel, NODE_SIGNAL_QUEUE, &message).await?.await?;
+    publish_json(channel, NODE_SIGNAL_QUEUE, &message)
+        .await?
+        .await?;
 
     common::log_info!("Sent registration message for node: {}", node_id);
     Ok(())
@@ -164,7 +168,8 @@ pub async fn register_with_service(
             Err(e) => {
                 common::log_warn!(
                     "Failed to create channel: {}. Retrying in {} seconds...",
-                    e, RETRY_INTERVAL_SECS
+                    e,
+                    RETRY_INTERVAL_SECS
                 );
                 if !sleep_with_shutdown(RETRY_INTERVAL_SECS, &shutdown_token).await {
                     return Ok(None);
@@ -187,7 +192,8 @@ pub async fn register_with_service(
         {
             common::log_warn!(
                 "Failed to declare queue: {}. Retrying in {} seconds...",
-                e, RETRY_INTERVAL_SECS
+                e,
+                RETRY_INTERVAL_SECS
             );
             if !sleep_with_shutdown(RETRY_INTERVAL_SECS, &shutdown_token).await {
                 return Ok(None);
@@ -201,7 +207,8 @@ pub async fn register_with_service(
         if let Err(e) = publish_registration(&channel, &node_id).await {
             common::log_warn!(
                 "Failed to publish registration: {}. Retrying in {} seconds...",
-                e, RETRY_INTERVAL_SECS
+                e,
+                RETRY_INTERVAL_SECS
             );
             if !sleep_with_shutdown(RETRY_INTERVAL_SECS, &shutdown_token).await {
                 return Ok(None);
@@ -221,6 +228,8 @@ pub async fn register_with_service(
                     lua_scripts: ack.lua_scripts,
                     event_logging_enabled: ack.event_logging_enabled,
                     intercept_targets: ack.intercept_targets,
+                    praxis_agent_enabled: ack.praxis_agent_enabled,
+                    praxis_agent_config: ack.praxis_agent_config,
                 }));
             }
             Ok(None) => {
@@ -229,7 +238,8 @@ pub async fn register_with_service(
             Err(e) => {
                 common::log_warn!(
                     "Registration not acknowledged: {}. Retrying in {} seconds...",
-                    e, RETRY_INTERVAL_SECS
+                    e,
+                    RETRY_INTERVAL_SECS
                 );
                 if !sleep_with_shutdown(RETRY_INTERVAL_SECS, &shutdown_token).await {
                     return Ok(None);
