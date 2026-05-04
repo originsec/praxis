@@ -112,11 +112,13 @@ claude --sdk-url wss://<approved-anthropic-host>:8586 --output-format stream-jso
 
 ### CCRv2 (HTTP + SSE)
 
+> **You must set `CLAUDE_CODE_USE_CCR_V2=1` to enable the HTTPS transport.** Without it, Claude Code silently does **not** open the HTTPS connection at all -- there is no error message, no log entry on either side, the bridge appears completely dead. If you ran `claude --sdk-url https://...` and praxis logs nothing whatsoever, the missing env var is almost always the cause.
+
 ```powershell
-$env:CLAUDE_CODE_USE_CCR_V2 = "1"
-$env:CLAUDE_CODE_WORKER_EPOCH = "1"
-$env:CLAUDE_CODE_SESSION_ACCESS_TOKEN = "local-token"
-$env:NODE_TLS_REJECT_UNAUTHORIZED = "0"  # or set NODE_EXTRA_CA_CERTS to the bridge CA
+$env:CLAUDE_CODE_USE_CCR_V2 = "1"               # required -- enables the SSE+POST transport
+$env:CLAUDE_CODE_WORKER_EPOCH = "1"             # required -- integer epoch
+$env:CLAUDE_CODE_SESSION_ACCESS_TOKEN = "local-token"  # required -- any non-empty string
+$env:NODE_TLS_REJECT_UNAUTHORIZED = "0"         # or set NODE_EXTRA_CA_CERTS to the bridge CA
 claude --sdk-url https://<approved-anthropic-host>:8587 --output-format stream-json --input-format stream-json
 ```
 
@@ -126,7 +128,7 @@ CCRv2 has stricter requirements:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `CLAUDE_CODE_USE_CCR_V2` | Yes | Set to `"1"` to select the SSE+POST transport |
+| `CLAUDE_CODE_USE_CCR_V2` | **Yes** | Set to `"1"` to select the SSE+POST transport. **Without this Claude won't connect at all -- no error, no log spew, the bridge looks dead.** |
 | `CLAUDE_CODE_WORKER_EPOCH` | Yes | Integer epoch (e.g. `"1"`). Must be present and numeric or Claude exits with `missing_epoch` |
 | `CLAUDE_CODE_SESSION_ACCESS_TOKEN` | Yes | Auth token. Claude exits with `no_auth_headers` if missing. A dummy value like `"local-token"` works since the bridge does not validate tokens |
 
@@ -176,9 +178,15 @@ One session exists per connection. Closing the session from Praxis sends an `end
 
 ## Troubleshooting
 
+### CCRv2 over HTTPS shows no activity in praxis logs
+
+If you ran `claude --sdk-url https://...` and the praxis service logs nothing at all -- no TLS ClientHello, no connection attempt, nothing -- the cause is almost certainly a missing `CLAUDE_CODE_USE_CCR_V2=1` environment variable. Without it, Claude Code does not open the HTTPS connection. There is no client-side error message either; the bridge just appears dead.
+
+Set the full env-var trio (`CLAUDE_CODE_USE_CCR_V2=1`, `CLAUDE_CODE_WORKER_EPOCH=1`, `CLAUDE_CODE_SESSION_ACCESS_TOKEN=local-token`) and retry. If you still see nothing, verify your DNS / `/etc/hosts` redirection of the approved Anthropic hostname actually points at the bridge host (a quick `curl -k https://<host>:<port>/worker` from the same machine will surface this).
+
 ### Claude exits immediately after connecting
 
-**CCRv2**: Ensure all three required environment variables are set (`CLAUDE_CODE_USE_CCR_V2`, `CLAUDE_CODE_WORKER_EPOCH`, `CLAUDE_CODE_SESSION_ACCESS_TOKEN`). Missing any of them causes Claude to exit with a specific error.
+**CCRv2**: Ensure all three required environment variables are set (`CLAUDE_CODE_USE_CCR_V2`, `CLAUDE_CODE_WORKER_EPOCH`, `CLAUDE_CODE_SESSION_ACCESS_TOKEN`). Missing any of them causes Claude to exit with a specific error (or, in the case of `CLAUDE_CODE_USE_CCR_V2`, to silently no-op the HTTPS connection).
 
 **Both versions**: Check that the bridge is enabled and the port is correct. Look at the service logs for connection/handshake errors.
 
