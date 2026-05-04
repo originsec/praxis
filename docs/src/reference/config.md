@@ -95,6 +95,8 @@ Access via **Settings** > **Claude Bridge** in the web UI.
 | `claude_ccrv2_enabled` | `false` | Enable the CCRv2 (HTTP+SSE) bridge listener |
 | `claude_ccrv2_port` | `8587` | Port for CCRv2 HTTP connections |
 
+TLS is always on for both bridges; CCRv1 only accepts `wss://` and CCRv2 only accepts `https://`. Leaf certs are minted per SNI on the fly and signed by a self-signed CA at `~/.praxis_bridge_ca_cert.pem`.
+
 The Claude Bridge allows Claude Code to connect directly to the service as a virtual node, without deploying a full Praxis node. See [Claude Bridge](../connectors/claude-bridge.md) for protocol details and setup instructions.
 
 ### MCP Server Settings

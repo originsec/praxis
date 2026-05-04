@@ -9,7 +9,8 @@ use common::{
 };
 
 use crate::config::service_config::{
-    APPLICATION_LOGS_ENABLED, CLAUDE_CCRV1_ENABLED, CLAUDE_CCRV1_PORT,
+    APPLICATION_LOGS_ENABLED,
+    CLAUDE_CCRV1_ENABLED, CLAUDE_CCRV1_PORT,
     CLAUDE_CCRV2_ENABLED, CLAUDE_CCRV2_PORT, KNOWN_CONFIG_KEYS,
     MCP_SERVER_ENABLED, MCP_SERVER_PORT, PRAXIS_AGENT_SETTINGS,
     PRAXIS_AGENT_SYSTEM_PROMPT,
@@ -919,15 +920,36 @@ async fn handle_config_set(
             }
 
             //
+            // Lazy TLS config: only build it if we are about to start (not
+            // stop) one of the bridges. Both bridges always serve over TLS,
+            // sharing the same dynamic per-SNI resolver.
+            //
+            let need_tls = (ccrv1_changed && config.is_claude_ccrv1_enabled())
+                || (ccrv2_changed && config.is_claude_ccrv2_enabled());
+            let tls_cfg = if need_tls {
+                match crate::claude_bridge::build_server_config() {
+                    Ok(cfg) => Some(cfg),
+                    Err(e) => {
+                        common::log_error!("Failed to build Claude bridge TLS config: {}", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            //
             // Handle Claude CCRv1 bridge start/stop if enabled/port changed.
             //
             if ccrv1_changed {
                 if config.is_claude_ccrv1_enabled() {
-                    let port = config.get_claude_ccrv1_port();
-                    let url = common::rabbitmq_url();
-                    common::log_info!("Claude CCRv1 config changed, starting on port {}", port);
-                    if let Err(e) = ctx.ccrv1_manager.start(&url, port, ctx.node_registry.clone()).await {
-                        common::log_error!("Failed to start Claude CCRv1 bridge: {}", e);
+                    if let Some(tls_cfg) = tls_cfg.clone() {
+                        let port = config.get_claude_ccrv1_port();
+                        let url = common::rabbitmq_url();
+                        common::log_info!("Claude CCRv1 config changed, starting on port {}", port);
+                        if let Err(e) = ctx.ccrv1_manager.start(&url, port, ctx.node_registry.clone(), tls_cfg).await {
+                            common::log_error!("Failed to start Claude CCRv1 bridge: {}", e);
+                        }
                     }
                 } else {
                     common::log_info!("Claude CCRv1 config changed, stopping bridge");
@@ -940,11 +962,13 @@ async fn handle_config_set(
             //
             if ccrv2_changed {
                 if config.is_claude_ccrv2_enabled() {
-                    let port = config.get_claude_ccrv2_port();
-                    let url = common::rabbitmq_url();
-                    common::log_info!("Claude CCRv2 config changed, starting on port {}", port);
-                    if let Err(e) = ctx.ccrv2_manager.start(&url, port, ctx.node_registry.clone()).await {
-                        common::log_error!("Failed to start Claude CCRv2 bridge: {}", e);
+                    if let Some(tls_cfg) = tls_cfg.clone() {
+                        let port = config.get_claude_ccrv2_port();
+                        let url = common::rabbitmq_url();
+                        common::log_info!("Claude CCRv2 config changed, starting on port {}", port);
+                        if let Err(e) = ctx.ccrv2_manager.start(&url, port, ctx.node_registry.clone(), tls_cfg).await {
+                            common::log_error!("Failed to start Claude CCRv2 bridge: {}", e);
+                        }
                     }
                 } else {
                     common::log_info!("Claude CCRv2 config changed, stopping bridge");

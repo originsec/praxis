@@ -229,7 +229,7 @@ async fn handle_get_worker() -> Json<Value> {
 //
 
 async fn handle_put_worker(
-    ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
+    ConnectInfo(addr): ConnectInfo<PeerAddr>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<Value>,
 ) -> Json<Value> {
@@ -427,6 +427,7 @@ impl CcrV2Manager {
         rabbitmq_url: &str,
         port: u16,
         node_registry: Arc<NodeRegistry>,
+        tls: Arc<rustls::ServerConfig>,
     ) -> Result<()> {
         let mut guard = self.cancel.lock().await;
         guard.cancel();
@@ -437,7 +438,7 @@ impl CcrV2Manager {
         let rabbitmq_url = rabbitmq_url.to_string();
 
         tokio::spawn(async move {
-            if let Err(e) = run_ccrv2_server(port, &rabbitmq_url, node_registry, cancel).await {
+            if let Err(e) = run_ccrv2_server(port, &rabbitmq_url, node_registry, cancel, tls).await {
                 common::log_error!("CCRv2 server error: {}", e);
             }
         });
@@ -469,6 +470,7 @@ async fn run_ccrv2_server(
     rabbitmq_url: &str,
     node_registry: Arc<NodeRegistry>,
     cancel: CancellationToken,
+    tls: Arc<rustls::ServerConfig>,
 ) -> Result<()> {
     let (outbound_tx, _) = broadcast::channel::<Value>(256);
     let (inbound_tx, inbound_rx) = mpsc::channel::<Value>(1024);
@@ -502,25 +504,32 @@ async fn run_ccrv2_server(
         .layer(middleware::from_fn(log_requests))
         .with_state(state.clone());
 
-    let addr = format!("0.0.0.0:{}", port);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    common::log_info!("Claude CCRv2 HTTP server listening on {}", addr);
+    let addr: std::net::SocketAddr = format!("0.0.0.0:{}", port).parse()?;
+    let tcp_listener = tokio::net::TcpListener::bind(&addr).await?;
+    let actual_addr = tcp_listener.local_addr().unwrap_or(addr);
+    common::log_info!("Claude CCRv2 server listening on {} (https://)", actual_addr);
 
     //
-    // Serve HTTP in the background. The server stays alive across sessions
-    // and only shuts down when the cancel token fires.
+    // Serve HTTPS in the background using axum::serve over a custom TLS
+    // listener. Doing the TLS handshake ourselves (rather than relying on
+    // axum-server's bundled tls-rustls) lets us log every accept and every
+    // handshake error, which is essential for diagnosing handshake failures
+    // that would otherwise drop the connection silently.
     //
 
     let cancel_serve = cancel.clone();
+    let make_service = app.into_make_service_with_connect_info::<PeerAddr>();
+    let tls_listener = TlsListener {
+        tcp: tcp_listener,
+        acceptor: tokio_rustls::TlsAcceptor::from(tls),
+    };
+
     let server_handle = tokio::spawn(async move {
-        axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-        )
-        .with_graceful_shutdown(async move {
-            cancel_serve.cancelled().await;
-        })
-        .await
+        axum::serve(tls_listener, make_service)
+            .with_graceful_shutdown(async move {
+                cancel_serve.cancelled().await;
+            })
+            .await
     });
 
     //
@@ -569,4 +578,79 @@ async fn run_ccrv2_server(
     let _ = server_handle.await;
 
     Ok(())
+}
+
+//
+// Custom axum::serve listener that performs the TLS handshake on each
+// accepted TCP connection before yielding the stream to axum. Failed
+// handshakes are logged (with peer IP) and the loop continues; this is
+// what makes the "no spew when CCRv2 over HTTPS fails" debugging tractable.
+//
+
+struct TlsListener {
+    tcp: tokio::net::TcpListener,
+    acceptor: tokio_rustls::TlsAcceptor,
+}
+
+//
+// Local newtype around SocketAddr so we can implement axum's Connected
+// trait for it. The blanket impl in axum only covers the stock TcpListener;
+// with a custom listener orphan rules force us to wrap.
+//
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct PeerAddr(pub std::net::SocketAddr);
+
+impl PeerAddr {
+    pub fn ip(&self) -> std::net::IpAddr {
+        self.0.ip()
+    }
+}
+
+impl std::fmt::Display for PeerAddr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl<'a> axum::extract::connect_info::Connected<axum::serve::IncomingStream<'a, TlsListener>>
+    for PeerAddr
+{
+    fn connect_info(stream: axum::serve::IncomingStream<'a, TlsListener>) -> Self {
+        PeerAddr(*stream.remote_addr())
+    }
+}
+
+impl axum::serve::Listener for TlsListener {
+    type Io = tokio_rustls::server::TlsStream<tokio::net::TcpStream>;
+    type Addr = std::net::SocketAddr;
+
+    async fn accept(&mut self) -> (Self::Io, Self::Addr) {
+        loop {
+            let (stream, peer) = match self.tcp.accept().await {
+                Ok(pair) => pair,
+                Err(e) => {
+                    common::log_warn!("CCRv2 TCP accept error: {}", e);
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    continue;
+                }
+            };
+
+            common::log_debug!("CCRv2: TCP accepted from {}, starting TLS handshake", peer);
+            match self.acceptor.accept(stream).await {
+                Ok(tls_stream) => {
+                    common::log_debug!("CCRv2: TLS handshake completed for {}", peer);
+                    return (tls_stream, peer);
+                }
+                Err(e) => {
+                    common::log_warn!("CCRv2 TLS handshake from {} failed: {}", peer, e);
+                    continue;
+                }
+            }
+        }
+    }
+
+    fn local_addr(&self) -> std::io::Result<Self::Addr> {
+        self.tcp.local_addr()
+    }
 }
