@@ -87,6 +87,20 @@ pub(super) fn render_service(f: &mut Frame, area: Rect, state: &SettingsState) {
     ));
 
     lines.push(Line::raw(""));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled("TLS (wss/https, per-SNI cert) ", Style::default().fg(TEXT)),
+        Span::styled("always on", Style::default().fg(MUTED)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            "CA: ~/.praxis_bridge_ca_cert.pem (trust this on the client)",
+            Style::default().fg(MUTED),
+        ),
+    ]));
+
+    lines.push(Line::raw(""));
     lines.push(section_header("Connection"));
     lines.push(Line::raw(""));
 

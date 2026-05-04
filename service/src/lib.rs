@@ -704,18 +704,36 @@ async fn run_main_loop() -> Result<()> {
     let ccrv2_manager = Arc::new(claude_bridge::CcrV2Manager::new());
     {
         let config = service_config.read().await;
-        if config.is_claude_ccrv1_enabled() {
-            let port = config.get_claude_ccrv1_port();
-            let url = rabbitmq_url();
-            if let Err(e) = ccrv1_manager.start(&url, port, node_registry.clone()).await {
-                common::log_error!("Failed to start Claude CCRv1 bridge: {}", e);
+
+        //
+        // Build the shared rustls server config. Both bridges always serve
+        // over TLS using a dynamic per-SNI cert resolver.
+        //
+        let tls_cfg = match claude_bridge::build_server_config() {
+            Ok(cfg) => Some(cfg),
+            Err(e) => {
+                common::log_error!(
+                    "Failed to build Claude bridge TLS config; bridges will not start: {}",
+                    e
+                );
+                None
             }
-        }
-        if config.is_claude_ccrv2_enabled() {
-            let port = config.get_claude_ccrv2_port();
-            let url = rabbitmq_url();
-            if let Err(e) = ccrv2_manager.start(&url, port, node_registry.clone()).await {
-                common::log_error!("Failed to start Claude CCRv2 bridge: {}", e);
+        };
+
+        if let Some(tls_cfg) = tls_cfg {
+            if config.is_claude_ccrv1_enabled() {
+                let port = config.get_claude_ccrv1_port();
+                let url = rabbitmq_url();
+                if let Err(e) = ccrv1_manager.start(&url, port, node_registry.clone(), tls_cfg.clone()).await {
+                    common::log_error!("Failed to start Claude CCRv1 bridge: {}", e);
+                }
+            }
+            if config.is_claude_ccrv2_enabled() {
+                let port = config.get_claude_ccrv2_port();
+                let url = rabbitmq_url();
+                if let Err(e) = ccrv2_manager.start(&url, port, node_registry.clone(), tls_cfg.clone()).await {
+                    common::log_error!("Failed to start Claude CCRv2 bridge: {}", e);
+                }
             }
         }
     }

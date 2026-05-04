@@ -42,4 +42,9 @@ nom = "8"
 similar = "3"
 tokio-tungstenite = { version = "0.29", features = ["native-tls"] }
 reqwest = { version = "0.13", default-features = false }
+rcgen = "0.14"
+time = "0.3"
+rustls = { version = "0.23", features = ["ring"] }
+tokio-rustls = "0.26"
+rustls-pemfile = "2"
 agent-client-protocol = { version = "0.11", features = ["unstable_session_close", "unstable_session_model", "unstable_session_usage"] }

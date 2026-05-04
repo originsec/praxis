@@ -4,6 +4,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::sync::Arc;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 
@@ -84,12 +85,13 @@ impl CcrV1Manager {
         rabbitmq_url: &str,
         port: u16,
         node_registry: Arc<NodeRegistry>,
+        tls: Arc<rustls::ServerConfig>,
     ) -> Result<()> {
         use tokio::net::TcpListener;
 
         let addr = format!("0.0.0.0:{}", port);
         let listener = TcpListener::bind(&addr).await?;
-        common::log_info!("Claude CCRv1 bridge listening on {}", addr);
+        common::log_info!("Claude CCRv1 bridge listening on {} (wss://)", addr);
 
         let mut guard = self.cancel.lock().await;
         guard.cancel();
@@ -97,6 +99,7 @@ impl CcrV1Manager {
         let cancel = guard.clone();
         drop(guard);
         let rabbitmq_url = rabbitmq_url.to_string();
+        let tls_acceptor = tokio_rustls::TlsAcceptor::from(tls);
 
         tokio::spawn(async move {
             loop {
@@ -113,8 +116,15 @@ impl CcrV1Manager {
                                 let url = rabbitmq_url.clone();
                                 let registry = node_registry.clone();
                                 let cancel_child = cancel.clone();
+                                let acceptor = tls_acceptor.clone();
                                 tokio::spawn(async move {
-                                    if let Err(e) = handle_ccrv1_connection(stream, peer_ip, &url, registry, cancel_child).await {
+                                    let result = match acceptor.accept(stream).await {
+                                        Ok(tls_stream) => {
+                                            handle_ccrv1_connection(tls_stream, peer_ip, &url, registry, cancel_child).await
+                                        }
+                                        Err(e) => Err(anyhow::anyhow!("TLS handshake failed: {}", e)),
+                                    };
+                                    if let Err(e) = result {
                                         common::log_error!("CCRv1 session error: {}", e);
                                     }
                                 });
@@ -144,13 +154,16 @@ impl Default for CcrV1Manager {
     }
 }
 
-async fn handle_ccrv1_connection(
-    stream: tokio::net::TcpStream,
+async fn handle_ccrv1_connection<S>(
+    stream: S,
     peer_ip: String,
     rabbitmq_url: &str,
     node_registry: Arc<NodeRegistry>,
     cancel: CancellationToken,
-) -> Result<()> {
+) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let ws_stream = tokio_tungstenite::accept_async(stream).await?;
     let (ws_tx, ws_rx) = ws_stream.split();
     let mut transport = WsTransport::new(ws_tx, ws_rx);

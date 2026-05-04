@@ -503,6 +503,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     }
   };
 
+
   //
   // Agent script handlers.
   //
@@ -1597,7 +1598,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                           max="65535"
                           className={`w-20 ${inputCls}`}
                         />
-                        <span className="text-[10px] text-muted font-mono">ws://localhost:{ccrV1Port}</span>
+                        <span className="text-[10px] text-muted font-mono">wss://&lt;your-host&gt;:{ccrV1Port}</span>
                       </div>
                     )}
                   </div>
@@ -1622,9 +1623,18 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                           max="65535"
                           className={`w-20 ${inputCls}`}
                         />
-                        <span className="text-[10px] text-muted font-mono">http://localhost:{ccrV2Port}</span>
+                        <span className="text-[10px] text-muted font-mono">https://&lt;your-host&gt;:{ccrV2Port}</span>
                       </div>
                     )}
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-subtle/50">
+                    <div className="text-xs text-muted">
+                      <span className="text-highlight">TLS (wss/https, per-SNI cert)</span> is always on.
+                    </div>
+                    <p className="text-[10px] text-muted">
+                      Leaf certs are issued on the fly for whichever hostname the client requests via SNI, signed by a self-signed CA persisted at <code className="font-mono">~/.praxis_bridge_ca_cert.pem</code>. Trust that CA on the client (or run with <code className="font-mono">NODE_TLS_REJECT_UNAUTHORIZED=0</code>).
+                    </p>
                   </div>
                 </div>
               </div>
