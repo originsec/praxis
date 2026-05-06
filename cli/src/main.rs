@@ -2,6 +2,7 @@ mod acp;
 mod app;
 mod client;
 mod commands;
+mod config;
 mod event;
 mod markdown;
 mod output;
@@ -10,7 +11,7 @@ mod ui;
 
 use anyhow::Result;
 use app::App;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
@@ -22,18 +23,11 @@ use std::io;
 use std::sync::Arc;
 
 #[derive(Parser)]
-#[command(name = "praxis_cli")]
 #[command(
     about = "Praxis CLI - terminal interface for the Praxis C2 framework",
-    after_help = "Without an action flag or subcommand, praxis_cli starts the interactive terminal UI.\n\nExamples:\n  praxis_cli\n  praxis_cli --rabbitmq amqp://praxis:praxis@localhost:5672\n  praxis_cli --status\n  praxis_cli -C \"node list\"\n  praxis_cli session create --node abc123 --yolo"
 )]
 #[command(version)]
 struct Cli {
-    /// RabbitMQ URL
-    #[arg(short = 'r', long = "rabbitmq", env = "PRAXIS_RABBITMQ_URL")]
-    #[arg(default_value = "amqp://praxis:praxis@localhost:5672")]
-    rabbitmq_url: String,
-
     /// Connection and command timeout in seconds
     #[arg(short = 't', long = "timeout", default_value = "600")]
     timeout: u64,
@@ -77,6 +71,17 @@ enum Commands {
         #[command(subcommand)]
         command: commands::session::SessionCommand,
     },
+
+    /// Persist the RabbitMQ URL to ~/.config/praxis/config
+    #[command(name = "set-rabbitmqurl")]
+    SetRabbitmqUrl {
+        /// e.g. amqp://user:pass@host:5672
+        url: String,
+    },
+
+    /// Print resolved CLI config (RabbitMQ URL + source).
+    #[command(name = "config")]
+    Config,
 }
 
 impl Commands {
@@ -85,6 +90,9 @@ impl Commands {
             Commands::Node { command } => commands::node::execute(client, command).await,
             Commands::Agent { command } => commands::agent::execute(client, command).await,
             Commands::Session { command } => commands::session::execute(client, command).await,
+            Commands::SetRabbitmqUrl { .. } | Commands::Config => unreachable!(
+                "config subcommands handled before connecting to a client"
+            ),
         }
     }
 }
@@ -105,8 +113,51 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+fn argv0_basename() -> String {
+    std::env::args_os()
+        .next()
+        .and_then(|raw| {
+            std::path::PathBuf::from(raw)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+        })
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "praxis".to_string())
+}
+
+fn parse_cli() -> Result<Cli> {
+    //
+    // clap's name/bin_name require `'static` strings. The binary name
+    // is determined once at startup and lives for the rest of the
+    // process, so we leak it to satisfy the lifetime.
+    //
+
+    let bin: &'static str = Box::leak(argv0_basename().into_boxed_str());
+    let after_help: &'static str = Box::leak(
+        format!(
+            "Without an action flag or subcommand, {bin} starts the interactive terminal UI.\n\n\
+             The RabbitMQ URL is read from ~/.config/praxis/config (key PRAXIS_RABBITMQ_URL).\n\
+             Use `{bin} set-rabbitmqurl <url>` to set it.\n\n\
+             Examples:\n  \
+             {bin}\n  \
+             {bin} set-rabbitmqurl amqp://praxis:praxis@localhost:5672\n  \
+             {bin} --status\n  \
+             {bin} -C \"node list\"\n  \
+             {bin} session create --node abc123 --yolo",
+        )
+        .into_boxed_str(),
+    );
+
+    let cmd = <Cli as CommandFactory>::command()
+        .name(bin)
+        .bin_name(bin)
+        .after_help(after_help);
+    let matches = cmd.get_matches();
+    Ok(Cli::from_arg_matches(&matches)?)
+}
+
 async fn run() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = parse_cli()?;
 
     if cli.clear {
         state::CliState::clear()?;
@@ -114,23 +165,51 @@ async fn run() -> Result<()> {
         return Ok(());
     }
 
+    //
+    // Config-only subcommands run before we resolve a URL or connect
+    // to anything, so they work even with no service available.
+    //
+
+    if let Some(Commands::SetRabbitmqUrl { url }) = &cli.command {
+        let path = config::set("PRAXIS_RABBITMQ_URL", url)?;
+        output::print_success(&format!("Wrote PRAXIS_RABBITMQ_URL to {}", path.display()));
+        return Ok(());
+    }
+
+    if let Some(Commands::Config) = &cli.command {
+        let url = config::resolve_rabbitmq_url();
+        let source = if config::get("PRAXIS_RABBITMQ_URL").is_some() {
+            "config file"
+        } else {
+            "default"
+        };
+        let path = config::config_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        println!("Config file: {}", path);
+        println!("RabbitMQ URL: {} ({})", url, source);
+        return Ok(());
+    }
+
+    let rabbitmq_url = config::resolve_rabbitmq_url();
+
     if cli.status {
-        return run_status(&cli.rabbitmq_url, cli.timeout).await;
+        return run_status(&rabbitmq_url, cli.timeout).await;
     }
 
     if let Some(command_string) = cli.command_string.as_deref() {
-        return run_command_string(&cli.rabbitmq_url, cli.timeout, command_string).await;
+        return run_command_string(&rabbitmq_url, cli.timeout, command_string).await;
     }
 
     if let Some(command) = cli.command {
-        return run_command(&cli.rabbitmq_url, cli.timeout, command).await;
+        return run_command(&rabbitmq_url, cli.timeout, command).await;
     }
 
     if cli.acp {
-        return run_acp_proxy(&cli.rabbitmq_url, cli.timeout).await;
+        return run_acp_proxy(&rabbitmq_url, cli.timeout).await;
     }
 
-    run_tui(&cli.rabbitmq_url, cli.timeout).await
+    run_tui(&rabbitmq_url, cli.timeout).await
 }
 
 async fn run_status(rabbitmq_url: &str, timeout: u64) -> Result<()> {

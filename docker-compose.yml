@@ -1,30 +1,20 @@
 #
-# Praxis Docker Compose Configuration
-# Includes RabbitMQ and Praxis services with optional PostgreSQL.
+# Praxis Docker Compose configuration.
 #
-# Usage:
-#   docker compose up --build                    # SQLite (default)
-#   docker compose --profile postgres up --build # PostgreSQL
+# Bundles RabbitMQ + the Praxis container. The Praxis container
+# runs systemd as PID 1 so `praxisctl` works the same way it does
+# on a native Linux install:
+#
+#   docker compose exec praxis praxisctl status
+#   docker compose exec praxis praxisctl webserver disable
+#   docker compose exec praxis praxisctl set rabbitmq-url <url>
 #
 # Access:
-#   Web UI: http://localhost:8080
-#   MCP Server: http://localhost:8585/sse (enabled by default)
-#   Claude Bridge CCRv1: ws://localhost:8586 (disabled by default)
-#   Claude Bridge CCRv2: http://localhost:8587 (disabled by default)
+#   Web UI:              http://localhost:8080
+#   MCP Server:          http://localhost:8585/sse
+#   Claude Bridge CCRv1: ws://localhost:8586
+#   Claude Bridge CCRv2: http://localhost:8587
 #   RabbitMQ Management: http://localhost:15672 (praxis/praxis)
-#
-# Environment Variables:
-#   PRAXIS_DATABASE_URL - Database connection URL
-#                         Default: ~/.praxis_operations.db (SQLite)
-#   PRAXIS_RABBITMQ_URL - RabbitMQ connection URL
-#                         Default: amqp://praxis:praxis@localhost:5672
-#   PRAXIS_NOT_HIDDEN=1 - Disable hidden desktop for agent windows (Windows only)
-#                         Useful for debugging/testing DevTools-based agents
-#   SKIP_NODE_BUILD=1   - Skip building praxis_node binaries (faster builds)
-#   PRAXIS_HEADLESS=1   - Run without web UI (service + RabbitMQ only)
-#   PRAXIS_MCP_PORT     - MCP server port (default: 8585)
-#   CARGO_PROFILE       - Cargo build profile (default: release)
-#                         Set to release-fast for faster builds with thin LTO
 #
 
 services:
@@ -74,18 +64,26 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+    #
+    # systemd as PID 1 needs cgroup access + a few writable tmpfs mounts.
+    # `cgroup: host` works for both cgroupv1 and cgroupv2 hosts.
+    #
+    cgroup: host
+    privileged: true
+    tmpfs:
+      - /tmp
+      - /run
+      - /run/lock
+    volumes:
+      - praxis_data:/var/lib/praxis
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
     environment:
-      PRAXIS_RABBITMQ_URL: amqp://praxis:praxis@rabbitmq:5672
-      PRAXIS_DATABASE_URL: /app/data/praxis_operations.db
-      PRAXIS_HEADLESS: ${PRAXIS_HEADLESS:-0}
       RUST_LOG: info
     ports:
       - "8080:8080"
       - "${PRAXIS_MCP_PORT:-8585}:${PRAXIS_MCP_PORT:-8585}"
       - "8586:8586"
       - "8587:8587"
-    volumes:
-      - praxis_data:/app/data
     restart: unless-stopped
 
   praxis-postgres:
@@ -100,10 +98,15 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+    cgroup: host
+    privileged: true
+    tmpfs:
+      - /tmp
+      - /run
+      - /run/lock
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
     environment:
-      PRAXIS_RABBITMQ_URL: amqp://praxis:praxis@rabbitmq:5672
-      PRAXIS_DATABASE_URL: postgresql://praxis:praxis_db_2024@postgres:5432/praxis
-      PRAXIS_HEADLESS: ${PRAXIS_HEADLESS:-0}
       RUST_LOG: info
     ports:
       - "8080:8080"

@@ -1,0 +1,15 @@
+[Unit]
+Description=Wait for RabbitMQ to become reachable
+Before=praxis-service.service praxis-web.service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/praxis/env
+ExecStart=/usr/local/bin/praxis-wait-rabbitmq
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

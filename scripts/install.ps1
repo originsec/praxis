@@ -3,39 +3,41 @@
 .SYNOPSIS
     Praxis Installation Script for Windows.
 .DESCRIPTION
-    Windows is supported via Docker only. This installer detects Windows,
-    verifies Docker / Docker Compose, clones the chosen Praxis release,
-    and starts it via `docker compose up --build -d`.
+    The Praxis service is Linux-only, so on Windows it can only be
+    installed via Docker. The CLI ('praxis') is always installed
+    natively by compiling from source (requires Rust + git).
+
+    The interactive menu first asks which components to install:
+      [x] service   (Docker — rabbitmq + service container)
+      [x] cli       (native — compiles 'praxis' for Windows)
+
 .EXAMPLE
     irm https://praxis.originhq.com/install.ps1 | iex
 .EXAMPLE
-    .\install.ps1 -Docker
+    .\install.ps1 -Service docker
+.EXAMPLE
+    .\install.ps1 -Cli
 .EXAMPLE
     .\install.ps1 -Remove
 #>
 
 [CmdletBinding()]
 param(
-    [switch]$Docker,
+    [ValidateSet('docker')]
+    [string]$Service,
+    [switch]$Cli,
     [switch]$Remove,
     [switch]$Help
 )
 
 $ErrorActionPreference = "Stop"
 
-#
-# Configuration.
-#
-
 $HomeDir       = if ($env:USERPROFILE) { $env:USERPROFILE } elseif ($env:HOME) { $env:HOME } else { "~" }
 $PraxisRepo    = "originsec/praxis"
 $PraxisVersion = $env:PRAXIS_VERSION
 $PraxisDir     = if ($env:PRAXIS_DIR) { $env:PRAXIS_DIR } else { Join-Path $HomeDir ".praxis-docker" }
+$CliInstallDir = if ($env:PRAXIS_CLI_DIR) { $env:PRAXIS_CLI_DIR } else { Join-Path $HomeDir ".praxis\bin" }
 $ComposeCmd    = $null
-
-#
-# Console helpers.
-#
 
 function Write-Info    { param($msg) Write-Host "[INFO] "  -ForegroundColor Cyan   -NoNewline; Write-Host $msg }
 function Write-Success { param($msg) Write-Host "[OK] "    -ForegroundColor Green  -NoNewline; Write-Host $msg }
@@ -49,17 +51,12 @@ function Test-Command {
 }
 
 function Print-Banner {
-    $cols   = try { [Console]::WindowWidth } catch { 80 }
+    $cols = try { [Console]::WindowWidth } catch { 80 }
     if (-not $cols -or $cols -lt 1) { $cols = 80 }
-    $logoW  = 46
-    $tagW   = 49
-    $byW    = 13
-    $logoPad = [Math]::Max(0, [int](($cols - $logoW) / 2))
-    $tagPad  = [Math]::Max(0, [int](($cols - $tagW)  / 2))
-    $byPad   = [Math]::Max(0, [int](($cols - $byW)   / 2))
-    $lp = ' ' * $logoPad
-    $tp = ' ' * $tagPad
-    $bp = ' ' * $byPad
+    $logoW = 46; $tagW = 49; $byW = 13
+    $lp = ' ' * [Math]::Max(0, [int](($cols - $logoW) / 2))
+    $tp = ' ' * [Math]::Max(0, [int](($cols - $tagW)  / 2))
+    $bp = ' ' * [Math]::Max(0, [int](($cols - $byW)   / 2))
 
     Write-Host ""
     Write-Host "$lp██████╗ ██████╗  █████╗ ██╗  ██╗██╗███████╗" -ForegroundColor Cyan
@@ -78,17 +75,14 @@ function Print-Usage {
 Usage: install.ps1 [flag]
 
 Flags:
-  -Docker     Docker install (default and only supported flow on Windows)
-  -Remove     Remove a previous Docker install
-  -Help       Show this message
+  -Service docker   Install service via Docker (only mode supported on Windows)
+  -Cli              Install CLI natively (compiles 'praxis' from source)
+  -Remove           Remove a previous install (CLI + Docker)
+  -Help             Show this message
 
 If no flag is given, an interactive menu is shown.
 "@ | Write-Host
 }
-
-#
-# Platform detection. Hard-fail if not on Windows.
-#
 
 function Test-Windows {
     if ($IsWindows -or ($env:OS -eq "Windows_NT") -or ([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows))) {
@@ -101,12 +95,10 @@ function Assert-Windows {
     if (-not (Test-Windows)) {
         Write-Err "install.ps1 only runs on Windows. Use install.sh on Linux/macOS."
     }
-    Write-Success "Detected Windows"
-    Write-Host ""
 }
 
 #
-# Arrow-key menu. Returns the selected index.
+# Single-select arrow menu. Returns selected index.
 #
 
 function Select-Menu {
@@ -117,28 +109,23 @@ function Select-Menu {
 
     $n = $Options.Length
     $sel = 0
-
-    Write-Host $Prompt
-
-    # Reserve lines for each option.
+    Write-Host $Prompt -NoNewline
+    Write-Host " (↑↓ move, enter select, q quit)" -ForegroundColor DarkGray
     foreach ($_ in $Options) { Write-Host "" }
 
     [Console]::CursorVisible = $false
     try {
         while ($true) {
-            # Move cursor up to the start of the menu.
             [Console]::SetCursorPosition(0, [Console]::CursorTop - $n)
-
             for ($i = 0; $i -lt $n; $i++) {
-                $line = "".PadRight([Console]::WindowWidth - 1)
-                [Console]::Write("`r$line`r")
+                $blank = "".PadRight([Console]::WindowWidth - 1)
+                [Console]::Write("`r$blank`r")
                 if ($i -eq $sel) {
                     Write-Host "  ▶ $($Options[$i])" -ForegroundColor Cyan
                 } else {
                     Write-Host "    $($Options[$i])" -ForegroundColor DarkGray
                 }
             }
-
             $key = [Console]::ReadKey($true)
             switch ($key.Key) {
                 'UpArrow'   { $sel = ($sel - 1 + $n) % $n }
@@ -163,8 +150,63 @@ function Select-Menu {
 }
 
 #
-# Version resolution.
+# Multi-select checkbox menu. $Initial: array of [bool] same length as $Options.
+# Returns array of [bool].
 #
+
+function MultiSelect-Menu {
+    param(
+        [string]$Prompt,
+        [string[]]$Options,
+        [bool[]]$Initial
+    )
+
+    $n = $Options.Length
+    $checked = @($Initial)
+    if ($checked.Length -lt $n) {
+        $checked = @(1..$n | ForEach-Object { $true })
+    }
+    $sel = 0
+
+    Write-Host $Prompt -NoNewline
+    Write-Host " (↑↓ move, space toggle, enter next, q quit)" -ForegroundColor DarkGray
+    foreach ($_ in $Options) { Write-Host "" }
+
+    [Console]::CursorVisible = $false
+    try {
+        while ($true) {
+            [Console]::SetCursorPosition(0, [Console]::CursorTop - $n)
+            for ($i = 0; $i -lt $n; $i++) {
+                $blank = "".PadRight([Console]::WindowWidth - 1)
+                [Console]::Write("`r$blank`r")
+                $mark = if ($checked[$i]) { "[x]" } else { "[ ]" }
+                $color = if ($checked[$i]) { "Cyan" } else { "DarkGray" }
+                if ($i -eq $sel) {
+                    Write-Host "  > " -NoNewline -ForegroundColor Cyan
+                    Write-Host "$mark " -NoNewline -ForegroundColor $color
+                    Write-Host "$($Options[$i])"
+                } else {
+                    Write-Host "    " -NoNewline
+                    Write-Host "$mark " -NoNewline -ForegroundColor $color
+                    Write-Host "$($Options[$i])" -ForegroundColor DarkGray
+                }
+            }
+            $key = [Console]::ReadKey($true)
+            switch ($key.Key) {
+                'UpArrow'   { $sel = ($sel - 1 + $n) % $n }
+                'DownArrow' { $sel = ($sel + 1) % $n }
+                'K'         { $sel = ($sel - 1 + $n) % $n }
+                'J'         { $sel = ($sel + 1) % $n }
+                'Spacebar'  { $checked[$sel] = -not $checked[$sel] }
+                'Enter'     { return $checked }
+                'Q'         { [Console]::CursorVisible = $true; Write-Host ""; exit 130 }
+                'Escape'    { [Console]::CursorVisible = $true; Write-Host ""; exit 130 }
+            }
+        }
+    } finally {
+        [Console]::CursorVisible = $true
+    }
+}
 
 function Get-LatestVersion {
     if ($script:PraxisVersion) {
@@ -172,7 +214,6 @@ function Get-LatestVersion {
         Write-Host ""
         return
     }
-
     Write-Info "Fetching latest release version..."
     try {
         $response = Invoke-RestMethod -Uri "https://api.github.com/repos/$PraxisRepo/releases/latest" -UseBasicParsing
@@ -180,27 +221,74 @@ function Get-LatestVersion {
     } catch {
         Write-Err "Could not determine latest version. Check your internet connection."
     }
-
-    if (-not $script:PraxisVersion) {
-        Write-Err "Could not determine latest version."
-    }
-
+    if (-not $script:PraxisVersion) { Write-Err "Could not determine latest version." }
     Write-Success "Latest version: $script:PraxisVersion"
     Write-Host ""
 }
 
 #
-# === Docker install flow =====================================================
+# === CLI native install (Windows) ==========================================
+#
+
+function Ensure-Rust {
+    if (Test-Command "cargo") {
+        Write-Success "Found Rust $((rustc --version) -split ' ' | Select-Object -Index 1)"
+        return
+    }
+    Write-Warn "Rust not found. Install from https://rustup.rs and re-run."
+    Write-Err  "Cannot build CLI without Rust toolchain."
+}
+
+function Install-Cli {
+    if (-not (Test-Command "git"))   { Write-Err "git not found. Install git from https://git-scm.com/download/win" }
+    Ensure-Rust
+
+    Write-Info "Building Praxis CLI for Windows..."
+    if (-not (Test-Path $CliInstallDir)) { New-Item -ItemType Directory -Force -Path $CliInstallDir | Out-Null }
+
+    $repoUrl = "https://github.com/$PraxisRepo"
+    cargo install --git $repoUrl --tag $script:PraxisVersion --root $CliInstallDir.TrimEnd('\') praxis_cli
+    if ($LASTEXITCODE -ne 0) { Write-Err "cargo install failed." }
+
+    $exe = Join-Path $CliInstallDir "bin\praxis_cli.exe"
+    if (-not (Test-Path $exe)) { Write-Err "Build succeeded but praxis_cli.exe not found at $exe" }
+
+    #
+    # Create a `praxis.exe` copy alongside (Windows doesn't follow
+    # symlinks well by default). The CLI derives its display name
+    # from argv[0], so this gives users a clean `praxis` command.
+    #
+
+    $praxisCopy = Join-Path $CliInstallDir "bin\praxis.exe"
+    Copy-Item -Force $exe $praxisCopy
+
+    #
+    # Add to user PATH if not already present.
+    #
+
+    $binDir = (Resolve-Path (Join-Path $CliInstallDir "bin")).Path
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if (-not ($userPath -split ';' | Where-Object { $_ -ieq $binDir })) {
+        $newPath = if ($userPath) { "$userPath;$binDir" } else { $binDir }
+        [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+        Write-Success "Added $binDir to user PATH (open a new shell to use 'praxis')"
+    } else {
+        Write-Success "$binDir already in user PATH"
+    }
+
+    Write-Success "Installed: $praxisCopy"
+    Write-Host ""
+}
+
+#
+# === Docker service install ================================================
 #
 
 function Check-Docker {
-    Write-Info "Checking prerequisites..."
-
+    Write-Info "Checking Docker..."
     if (-not (Test-Command "docker")) {
         Write-Err "Docker not found. Install Docker Desktop: https://www.docker.com/products/docker-desktop/"
     }
-    Write-Success "Found Docker"
-
     try {
         docker info | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "docker info failed" }
@@ -212,116 +300,111 @@ function Check-Docker {
     docker compose version *> $null
     if ($LASTEXITCODE -eq 0) {
         $script:ComposeCmd = "docker compose"
-        Write-Success "Found Docker Compose (plugin)"
     } elseif (Test-Command "docker-compose") {
         $script:ComposeCmd = "docker-compose"
-        Write-Success "Found docker-compose (standalone)"
     } else {
         Write-Err "Docker Compose not found. Install Docker Desktop, which includes Compose."
     }
-
+    Write-Success "Found $script:ComposeCmd"
     if (-not (Test-Command "git")) {
         Write-Err "git not found. Install git from https://git-scm.com/download/win"
     }
-    Write-Success "Found git"
-
     Write-Host ""
 }
 
-function Clone-Repo-Docker {
+function Install-Service-Docker {
+    Check-Docker
     Write-Info "Setting up Praxis $script:PraxisVersion in $PraxisDir..."
     if (Test-Path $PraxisDir) { Remove-Item -Recurse -Force $PraxisDir }
     git clone --depth 1 --branch $script:PraxisVersion "https://github.com/$PraxisRepo.git" $PraxisDir
     if ($LASTEXITCODE -ne 0) { Write-Err "git clone failed." }
-    Set-Location $PraxisDir
-    Write-Success "Praxis $script:PraxisVersion ready"
-    Write-Host ""
-}
 
-function Start-Praxis-Docker {
-    Write-Info "Building and starting Praxis (this may take a few minutes on first run)..."
-    Write-Host ""
-
-    if ($script:ComposeCmd -eq "docker compose") {
-        docker compose up --build -d
-    } else {
-        & $script:ComposeCmd up --build -d
+    Push-Location $PraxisDir
+    try {
+        Write-Info "Building and starting (this may take a few minutes on first run)..."
+        if ($script:ComposeCmd -eq "docker compose") {
+            docker compose up --build -d
+        } else {
+            & $script:ComposeCmd up --build -d
+        }
+        if ($LASTEXITCODE -ne 0) { Write-Err "Failed to start Praxis containers." }
+    } finally {
+        Pop-Location
     }
-    if ($LASTEXITCODE -ne 0) { Write-Err "Failed to start Praxis containers." }
-
-    Write-Host ""
-    Write-Success "Praxis is running!"
+    Write-Success "Praxis is running"
     Write-Host ""
 }
 
 function Print-Docker-Summary {
     Write-Host ""
     Write-Host "==============================================" -ForegroundColor Green
-    Write-Host "  Praxis $script:PraxisVersion is ready!"   -ForegroundColor Green
+    Write-Host "  Praxis $script:PraxisVersion (docker) is ready"   -ForegroundColor Green
     Write-Host "==============================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "Web UI:              http://localhost:8080"
-    Write-Host "RabbitMQ Management: http://localhost:15672"
-    Write-Host "                     (praxis / praxis)"
-    Write-Host ""
+    Write-Host "RabbitMQ Management: http://localhost:15672 (praxis / praxis)"
     Write-Host "Installation:        $PraxisDir"
     Write-Host ""
-
-    $container = $null
-    try {
-        if ($script:ComposeCmd -eq "docker compose") {
-            $container = (docker compose ps -q praxis 2>$null | Select-Object -First 1)
-        } else {
-            $container = (& $script:ComposeCmd ps -q praxis 2>$null | Select-Object -First 1)
-        }
-    } catch { $container = $null }
-    $cpSource = if ($container) { "$container`:/app/praxis_cli.exe" } else { "<container_id>:/app/praxis_cli.exe" }
-
-    Write-Host "CLI:" -ForegroundColor Cyan
-    Write-Host "  docker cp $cpSource .\praxis_cli.exe"
+    Write-Host "Inside the container (systemd-managed):" -ForegroundColor Cyan
+    Write-Host "  $script:ComposeCmd exec praxis praxisctl status"
+    Write-Host "  $script:ComposeCmd exec praxis praxisctl webserver disable"
+    Write-Host "  $script:ComposeCmd exec praxis praxisctl set rabbitmq-url <url>"
     Write-Host ""
-    Write-Host "Commands:" -ForegroundColor Cyan
+    Write-Host "Compose lifecycle:" -ForegroundColor Cyan
     Write-Host "  cd $PraxisDir"
-    Write-Host "  $script:ComposeCmd logs -f      # View logs"
-    Write-Host "  $script:ComposeCmd down         # Stop Praxis"
-    Write-Host "  $script:ComposeCmd up -d        # Start Praxis"
-    Write-Host "  $script:ComposeCmd up --build   # Rebuild and start"
+    Write-Host "  $script:ComposeCmd logs -f"
+    Write-Host "  $script:ComposeCmd down"
+    Write-Host "  $script:ComposeCmd up -d"
     Write-Host ""
 }
 
-function Run-Docker {
-    Check-Docker
-    Get-LatestVersion
-    Clone-Repo-Docker
-    Start-Praxis-Docker
-    Print-Docker-Summary
+function Print-Cli-Summary {
+    Write-Host ""
+    Write-Host "==============================================" -ForegroundColor Green
+    Write-Host "  Praxis CLI installed"                            -ForegroundColor Green
+    Write-Host "==============================================" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Run:                 praxis"
+    Write-Host "Set rabbitmq URL:    praxis set-rabbitmqurl amqp://praxis:praxis@host:5672"
+    Write-Host "Config file:         $env:USERPROFILE\.config\praxis\config (or %APPDATA%\praxis\config)"
+    Write-Host ""
 }
 
 #
-# === Remove ==================================================================
+# === Remove ================================================================
 #
 
-function Remove-Praxis {
-    Write-Info "Removing Praxis (Docker install)..."
-
+function Remove-All {
     if (Test-Path $PraxisDir) {
+        Write-Info "Removing docker install at $PraxisDir..."
         try {
             Push-Location $PraxisDir
             if (Test-Command "docker") {
                 docker compose down -v *> $null
-                if ($LASTEXITCODE -ne 0) {
-                    if (Test-Command "docker-compose") { docker-compose down -v *> $null }
+                if ($LASTEXITCODE -ne 0 -and (Test-Command "docker-compose")) {
+                    docker-compose down -v *> $null
                 }
             }
             Pop-Location
         } catch {
             try { Pop-Location } catch {}
         }
-
         Remove-Item -Recurse -Force $PraxisDir
         Write-Success "Removed $PraxisDir"
-    } else {
-        Write-Warn "No install found at $PraxisDir"
+    }
+
+    if (Test-Path $CliInstallDir) {
+        Write-Info "Removing CLI install at $CliInstallDir..."
+        Remove-Item -Recurse -Force $CliInstallDir
+        Write-Success "Removed $CliInstallDir"
+
+        $binDir = $CliInstallDir.TrimEnd('\') + "\bin"
+        $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+        $newPath = ($userPath -split ';' | Where-Object { $_ -and ($_.TrimEnd('\') -ine $binDir) }) -join ';'
+        if ($newPath -ne $userPath) {
+            [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+            Write-Success "Removed $binDir from user PATH"
+        }
     }
 
     Write-Host ""
@@ -330,22 +413,26 @@ function Remove-Praxis {
 }
 
 #
-# === Menu / dispatch =========================================================
+# === Interactive flow ======================================================
 #
 
-function Interactive-Menu {
-    $options = @(
-        "Docker install   - run via docker compose (recommended on Windows)",
-        "Quit"
-    )
+function Interactive-Install {
+    $checked = MultiSelect-Menu `
+        -Prompt "Choose components to install" `
+        -Options @(
+            "service   - Praxis service + web",
+            "cli       - Praxis CLI"
+        ) `
+        -Initial @($true, $true)
 
-    $idx = Select-Menu -Prompt "Choose how to install Praxis" -Options $options
     Write-Host ""
+    if (-not $checked[0] -and -not $checked[1]) { Write-Err "Nothing selected." }
 
-    switch ($idx) {
-        0 { Run-Docker }
-        1 { Write-Host "Aborted."; exit 0 }
-    }
+    Get-LatestVersion
+
+    if ($checked[1]) { Install-Cli }
+    if ($checked[0]) { Install-Service-Docker; Print-Docker-Summary }
+    if ($checked[1] -and -not $checked[0]) { Print-Cli-Summary }
 }
 
 #
@@ -353,17 +440,15 @@ function Interactive-Menu {
 #
 
 Print-Banner
+if ($Help)    { Print-Usage; exit 0 }
+Assert-Windows
+if ($Remove)  { Remove-All; exit 0 }
 
-if ($Help) {
-    Print-Usage
+if ($Service -or $Cli) {
+    Get-LatestVersion
+    if ($Cli)               { Install-Cli; Print-Cli-Summary }
+    if ($Service -eq 'docker') { Install-Service-Docker; Print-Docker-Summary }
     exit 0
 }
 
-Assert-Windows
-
-if ($Remove) { Remove-Praxis;       exit 0 }
-if ($Docker) { Run-Docker;          exit 0 }
-
-# Legacy positional flags (e.g. piped --remove via iex) are unusual on Windows;
-# rely on the parameters above and fall through to the menu otherwise.
-Interactive-Menu
+Interactive-Install

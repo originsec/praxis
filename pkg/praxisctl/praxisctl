@@ -1,0 +1,252 @@
+#!/usr/bin/env bash
+#
+# praxisctl - control script for the Praxis service and web units.
+#
+# Wraps systemctl. Works identically on native Linux installs
+# and inside the official Praxis docker image (which ships
+# systemd as PID 1).
+#
+
+set -e
+
+PRAXIS_ENV_FILE="${PRAXIS_ENV_FILE:-/etc/praxis/env}"
+SERVICE_UNIT="praxis-service.service"
+WEB_UNIT="praxis-web.service"
+
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+CYAN=$'\033[0;36m'
+BOLD=$'\033[1m'
+NC=$'\033[0m'
+
+err()     { printf '%s[ERROR]%s %s\n' "$RED" "$NC" "$1" >&2; exit 1; }
+warn()    { printf '%s[WARN]%s %s\n'  "$YELLOW" "$NC" "$1" >&2; }
+info()    { printf '%s[INFO]%s %s\n'  "$CYAN" "$NC" "$1"; }
+success() { printf '%s[OK]%s %s\n'    "$GREEN" "$NC" "$1"; }
+
+has_cmd()      { command -v "$1" >/dev/null 2>&1; }
+have_systemd() { has_cmd systemctl && [[ -d /run/systemd/system ]]; }
+
+require_root() {
+    if [[ $EUID -ne 0 ]]; then
+        if has_cmd sudo; then
+            exec sudo -E "$0" "$@"
+        else
+            err "praxisctl must run as root (sudo not found)."
+        fi
+    fi
+}
+
+usage() {
+    cat <<EOF
+${BOLD}praxisctl${NC} - control the Praxis service and web units
+
+${BOLD}Service control${NC}
+  praxisctl start                     Start praxis-service
+  praxisctl stop                      Stop praxis-service
+  praxisctl restart                   Restart praxis-service
+  praxisctl enable                    Enable praxis-service at boot
+  praxisctl disable                   Disable praxis-service at boot
+  praxisctl status                    Show praxis-service status
+  praxisctl logs [-f]                 Show praxis-service logs
+
+${BOLD}Web server control${NC}
+  praxisctl webserver start
+  praxisctl webserver stop
+  praxisctl webserver restart
+  praxisctl webserver enable
+  praxisctl webserver disable
+  praxisctl webserver status
+  praxisctl webserver logs [-f]
+
+${BOLD}Configuration${NC}
+  praxisctl set rabbitmq-url <url>    Set PRAXIS_RABBITMQ_URL in $PRAXIS_ENV_FILE
+  praxisctl get rabbitmq-url          Show PRAXIS_RABBITMQ_URL
+  praxisctl set <key> <value>         Set arbitrary key in env file
+  praxisctl get <key>                 Get arbitrary key from env file
+  praxisctl config show               Show full env file contents
+  praxisctl config edit               Open env file in \$EDITOR
+
+${BOLD}Other${NC}
+  praxisctl version                   Show praxisctl/praxis version
+  praxisctl help                      Show this help
+
+The env file lives at $PRAXIS_ENV_FILE.
+EOF
+}
+
+#
+# === Configuration helpers ==================================================
+#
+
+ensure_env_file() {
+    local dir
+    dir="$(dirname "$PRAXIS_ENV_FILE")"
+    mkdir -p "$dir"
+    [[ -f "$PRAXIS_ENV_FILE" ]] || : > "$PRAXIS_ENV_FILE"
+    chmod 0640 "$PRAXIS_ENV_FILE" 2>/dev/null || true
+    if id -u praxis >/dev/null 2>&1; then
+        chgrp praxis "$PRAXIS_ENV_FILE" 2>/dev/null || true
+    fi
+}
+
+set_env_key() {
+    local key="$1" value="$2"
+    [[ -n "$key" ]] || err "missing key"
+    ensure_env_file
+
+    local tmp
+    tmp="$(mktemp)"
+    if grep -qE "^[[:space:]]*${key}=" "$PRAXIS_ENV_FILE"; then
+        awk -v k="$key" -v v="$value" 'BEGIN{FS=OFS="="} {
+            if ($0 ~ "^[[:space:]]*"k"=") { print k"="v }
+            else { print $0 }
+        }' "$PRAXIS_ENV_FILE" > "$tmp"
+    else
+        cat "$PRAXIS_ENV_FILE" > "$tmp"
+        printf '%s=%s\n' "$key" "$value" >> "$tmp"
+    fi
+    mv "$tmp" "$PRAXIS_ENV_FILE"
+    chmod 0640 "$PRAXIS_ENV_FILE" 2>/dev/null || true
+    if id -u praxis >/dev/null 2>&1; then
+        chgrp praxis "$PRAXIS_ENV_FILE" 2>/dev/null || true
+    fi
+}
+
+get_env_key() {
+    local key="$1"
+    [[ -n "$key" ]] || err "missing key"
+    [[ -f "$PRAXIS_ENV_FILE" ]] || return 0
+    grep -E "^[[:space:]]*${key}=" "$PRAXIS_ENV_FILE" | tail -n1 | sed -E "s/^[[:space:]]*${key}=//"
+}
+
+cmd_set() {
+    case "${1:-}" in
+        rabbitmq-url|rabbitmq_url)
+            shift
+            require_root "$@"
+            local url="${1:-}"
+            [[ -n "$url" ]] || err "usage: praxisctl set rabbitmq-url <url>"
+            set_env_key PRAXIS_RABBITMQ_URL "$url"
+            success "PRAXIS_RABBITMQ_URL=$url"
+            warn "Restart services to apply: praxisctl restart && praxisctl webserver restart"
+            ;;
+        "")
+            err "usage: praxisctl set <key> <value>"
+            ;;
+        *)
+            require_root "$@"
+            local key="$1" value="${2:-}"
+            [[ -n "$value" ]] || err "usage: praxisctl set <key> <value>"
+            set_env_key "$key" "$value"
+            success "$key=$value"
+            ;;
+    esac
+}
+
+cmd_get() {
+    case "${1:-}" in
+        rabbitmq-url|rabbitmq_url) get_env_key PRAXIS_RABBITMQ_URL ;;
+        "") err "usage: praxisctl get <key>" ;;
+        *) get_env_key "$1" ;;
+    esac
+}
+
+cmd_config() {
+    case "${1:-show}" in
+        show)
+            if [[ -f "$PRAXIS_ENV_FILE" ]]; then
+                cat "$PRAXIS_ENV_FILE"
+            else
+                warn "no config at $PRAXIS_ENV_FILE"
+            fi
+            ;;
+        edit)
+            require_root "$@"
+            ensure_env_file
+            "${EDITOR:-vi}" "$PRAXIS_ENV_FILE"
+            ;;
+        path)
+            echo "$PRAXIS_ENV_FILE"
+            ;;
+        *)
+            err "usage: praxisctl config [show|edit|path]"
+            ;;
+    esac
+}
+
+#
+# === Service control ========================================================
+#
+
+unit_action() {
+    local action="$1" unit="$2"
+    have_systemd || err "systemd not available — cannot control $unit"
+    require_root "$@"
+    case "$action" in
+        start|stop|restart|enable|disable)
+            systemctl "$action" "$unit"
+            success "$action $unit"
+            ;;
+        status)
+            systemctl --no-pager status "$unit" || true
+            ;;
+        logs)
+            shift 2
+            journalctl -u "$unit" "$@"
+            ;;
+        *)
+            err "unknown action $action"
+            ;;
+    esac
+}
+
+#
+# === Subcommand dispatch ===================================================
+#
+
+cmd_webserver() {
+    local action="${1:-status}"
+    shift || true
+    case "$action" in
+        start|stop|restart|enable|disable|status|logs)
+            unit_action "$action" "$WEB_UNIT" "$@"
+            ;;
+        ""|help|-h|--help)
+            usage; exit 0 ;;
+        *)
+            err "unknown webserver action: $action"
+            ;;
+    esac
+}
+
+cmd_version() {
+    if has_cmd praxis_service; then
+        praxis_service --version 2>/dev/null || true
+    fi
+    echo "praxisctl 1"
+}
+
+main() {
+    local cmd="${1:-help}"
+    shift || true
+    case "$cmd" in
+        start|stop|restart|enable|disable|status|logs)
+            unit_action "$cmd" "$SERVICE_UNIT" "$@"
+            ;;
+        webserver|web)
+            cmd_webserver "$@"
+            ;;
+        set)        cmd_set "$@" ;;
+        get)        cmd_get "$@" ;;
+        config)     cmd_config "$@" ;;
+        version|--version|-V) cmd_version ;;
+        help|--help|-h|"")    usage ;;
+        *)
+            err "unknown command: $cmd (try 'praxisctl help')"
+            ;;
+    esac
+}
+
+main "$@"
