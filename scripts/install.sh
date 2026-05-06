@@ -525,6 +525,8 @@ print_native_summary() {
     echo
     printf "  %bService control${NC}\n" "${CYAN}${BOLD}"
     printf "    praxisctl status            ${DIM}# praxis-service status${NC}\n"
+    printf "    praxisctl start | stop      ${DIM}# start / stop the service${NC}\n"
+    printf "    praxisctl enable | disable  ${DIM}# auto-start at boot${NC}\n"
     printf "    praxisctl set-rabbitmqurl amqp://praxis:praxis@localhost:5672\n"
     echo
     printf "  %bCLI${NC}\n" "${CYAN}${BOLD}"
