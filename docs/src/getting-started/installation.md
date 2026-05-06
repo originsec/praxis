@@ -26,6 +26,31 @@ curl -fsSL https://praxis.originhq.com/install.sh | bash -s -- --service docker
 curl -fsSL https://praxis.originhq.com/install.sh | bash -s -- --cli
 ```
 
+#### Cross-compiling the Windows node binary (optional)
+
+Add `--with-win-node` to a native install to also cross-compile the Windows
+`praxis_node.exe` and stage it next to the Linux node binary at
+`/usr/local/share/praxis/nodes/praxis_node_windows.exe`. Useful when the
+service needs to deploy nodes to Windows targets without pulling them from
+a release.
+
+```bash
+curl -fsSL https://praxis.originhq.com/install.sh | bash -s -- --service native --with-win-node
+```
+
+Requires `mingw-w64` and `rustup` (the rust target `x86_64-pc-windows-gnu`
+is installed automatically). Install mingw-w64 with your distribution's
+package manager:
+
+- Debian/Ubuntu: `sudo apt-get install mingw-w64`
+- Fedora/RHEL:   `sudo dnf install mingw64-gcc`
+- Arch:          `sudo pacman -S mingw-w64-gcc`
+- macOS:         `brew install mingw-w64`
+
+The flag has no effect with `--cli`, `--service docker`, or interactive
+mode — for those, use `praxis-bin` (AUR) or download the Windows node
+binary from the GitHub release if you need it.
+
 ### Windows
 
 The Praxis service is Linux-only, so on Windows it runs in Docker. The CLI (TUI) is always installed natively (compiled from source, requires Rust + git).

@@ -16,6 +16,9 @@
 # Non-interactive flags:
 #   --service [native|docker]    Install the service in the chosen mode
 #   --cli                        Install the CLI natively
+#   --with-win-node              Also cross-compile + install the Windows
+#                                node binary (combine with --service native;
+#                                requires mingw-w64 + rust)
 #   --remove                     Remove all native + docker installs
 #   --help                       Show usage
 #
@@ -34,6 +37,7 @@ INSTALL_SHARE="$INSTALL_PREFIX/share/praxis"
 OS_KIND=""        # linux | macos
 HAS_DOCKER=false
 COMPOSE_CMD=""
+WITH_WIN_NODE=0
 
 #
 # Colors.
@@ -134,6 +138,9 @@ Usage: install.sh [flag]
 Flags:
   --service [native|docker]   Install the service in the chosen mode
   --cli                       Install the CLI natively
+  --with-win-node             Also cross-compile + install the Windows
+                              node binary (combine with --service native;
+                              requires mingw-w64 + rust)
   --remove                    Remove a previous install (native + docker)
   --help                      Show this message
 
@@ -357,6 +364,67 @@ check_rust() {
     fi
 }
 
+#
+# Cross-compile praxis_node for x86_64-pc-windows-gnu and stage the
+# resulting `praxis_node.exe` at $1 (an output directory). Requires
+# mingw-w64 + the rustup x86_64-pc-windows-gnu target. Used when the
+# user passes --with-win-node.
+#
+
+build_windows_node() {
+    local out_dir="$1"
+    has_cmd x86_64-w64-mingw32-gcc || error "mingw-w64 toolchain not found. Install mingw-w64 and re-run with --with-win-node.
+  - Debian/Ubuntu:  sudo apt-get install mingw-w64
+  - Fedora/RHEL:    sudo dnf install mingw64-gcc
+  - Arch:           sudo pacman -S mingw-w64-gcc
+  - macOS:          brew install mingw-w64"
+    has_cmd rustup || error "rustup not found. The Windows cross-compile needs rustup to install the x86_64-pc-windows-gnu target. Install rustup from https://rustup.rs and re-run."
+
+    info "Adding rust target x86_64-pc-windows-gnu..."
+    rustup target add x86_64-pc-windows-gnu >/dev/null 2>&1 || \
+        error "Failed to install x86_64-pc-windows-gnu rust target."
+
+    #
+    # Try a local checkout first (avoids a re-clone if we're inside the
+    # repo); otherwise clone the tagged release into a tmpdir and build
+    # from there.
+    #
+
+    local script_dir=""
+    if [[ -n "${BASH_SOURCE[0]}" && "${BASH_SOURCE[0]}" != "-" && "${BASH_SOURCE[0]}" != "/dev/stdin" ]]; then
+        script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    fi
+
+    local build_dir="" build_tmp=""
+    if [[ -n "$script_dir" && -f "$script_dir/../Cargo.toml" ]]; then
+        build_dir=$(cd "$script_dir/.." && pwd)
+        info "Using local repository at $build_dir"
+    else
+        build_tmp=$(mktemp -d)
+        build_dir="$build_tmp/repo"
+        info "Cloning $PRAXIS_VERSION..."
+        git clone --depth 1 --branch "$PRAXIS_VERSION" "https://github.com/$PRAXIS_REPO" "$build_dir" \
+            || error "Failed to clone for Windows node build."
+    fi
+
+    info "Cross-compiling praxis_node for windows..."
+    local win_log="$build_dir/win-node.log"
+    if ! ( cd "$build_dir" && \
+           CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc \
+           run_with_progress_bar "$win_log" \
+               cargo build --release -p praxis_node --target x86_64-pc-windows-gnu ); then
+        echo
+        warn "Build output (last 50 lines):"
+        tail -n 50 "$win_log"
+        [[ -n "$build_tmp" ]] && rm -rf "$build_tmp"
+        error "Windows node cross-compile failed."
+    fi
+
+    cp "$build_dir/target/x86_64-pc-windows-gnu/release/praxis_node.exe" "$out_dir/praxis_node.exe"
+    [[ -n "$build_tmp" ]] && rm -rf "$build_tmp"
+    success "Built praxis_node.exe"
+}
+
 get_local_binary() {
     local name="$1"
     local script_dir=""
@@ -420,6 +488,11 @@ install_service_native() {
     local tmproot
     tmproot=$(mktemp -d)
 
+    local script_dir=""
+    if [[ -n "${BASH_SOURCE[0]}" && "${BASH_SOURCE[0]}" != "-" && "${BASH_SOURCE[0]}" != "/dev/stdin" ]]; then
+        script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    fi
+
     local svc_path node_path
     if svc_path=$(get_local_binary "praxis_service") && \
        node_path=$(get_local_binary "praxis_node"); then
@@ -456,17 +529,26 @@ install_service_native() {
 
     $SUDO install -m 0755 "$tmproot/bin/praxis_service" "$INSTALL_BIN/praxis_service"
     $SUDO install -m 0755 "$tmproot/bin/praxis_node"    "$INSTALL_SHARE/nodes/praxis_node_linux"
+
+    if (( WITH_WIN_NODE )); then
+        local win_local=""
+        if [[ -n "$script_dir" && -f "$script_dir/../target/x86_64-pc-windows-gnu/release/praxis_node.exe" ]]; then
+            win_local="$script_dir/../target/x86_64-pc-windows-gnu/release/praxis_node.exe"
+        fi
+        if [[ -n "$win_local" ]]; then
+            success "Using locally cross-compiled praxis_node.exe"
+            cp "$win_local" "$tmproot/bin/praxis_node.exe"
+        else
+            build_windows_node "$tmproot/bin"
+        fi
+        $SUDO install -m 0755 "$tmproot/bin/praxis_node.exe" "$INSTALL_SHARE/nodes/praxis_node_windows.exe"
+    fi
+
     rm -rf "$tmproot"
 
     info "Fetching unit files and praxisctl..."
     local repo_dir=""
     local pkg_tmp=""
-
-    # Detect if we're running from within the praxis repo
-    local script_dir=""
-    if [[ -n "${BASH_SOURCE[0]}" && "${BASH_SOURCE[0]}" != "-" && "${BASH_SOURCE[0]}" != "/dev/stdin" ]]; then
-        script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-    fi
 
     if [[ -n "$script_dir" && -f "$script_dir/../pkg/systemd/praxis-service.service" && -f "$script_dir/../pkg/praxisctl/praxisctl" ]]; then
         info "Using local repository files..."
@@ -522,6 +604,9 @@ print_native_summary() {
     printf "  %bConfig${NC}      /etc/praxis/env\n" "${BOLD}"
     printf "  %bData${NC}        /var/lib/praxis\n" "${BOLD}"
     printf "  %bNode binary${NC} %s/nodes/praxis_node_linux\n" "${BOLD}" "$INSTALL_SHARE"
+    if (( WITH_WIN_NODE )); then
+        printf "  %b           ${NC} %s/nodes/praxis_node_windows.exe\n" "${BOLD}" "$INSTALL_SHARE"
+    fi
     echo
     printf "  %bService control${NC}\n" "${CYAN}${BOLD}"
     printf "    praxisctl status            ${DIM}# praxis-service status${NC}\n"
@@ -783,12 +868,27 @@ main() {
     print_banner
     detect_platform
 
+    #
+    # Pre-scan for modifier flags (currently just --with-win-node) so
+    # they can be combined with --service / --cli in any order.
+    #
+
+    local args=()
+    for a in "$@"; do
+        case "$a" in
+            --with-win-node) WITH_WIN_NODE=1 ;;
+            *)               args+=("$a") ;;
+        esac
+    done
+    set -- "${args[@]}"
+
     case "${1:-}" in
         --help|-h)
             usage; exit 0 ;;
         --remove)
             remove_all; exit 0 ;;
         --cli)
+            (( WITH_WIN_NODE )) && warn "--with-win-node has no effect with --cli; ignoring."
             get_latest_version
             install_cli_native
             print_cli_summary
@@ -796,6 +896,10 @@ main() {
         --service)
             local mode="${2:-}"
             [[ -n "$mode" ]] || error "--service requires native|docker"
+            if (( WITH_WIN_NODE )) && [[ "$mode" != "native" ]]; then
+                warn "--with-win-node only applies to --service native; ignoring."
+                WITH_WIN_NODE=0
+            fi
             get_latest_version
             case "$mode" in
                 native) install_service_native; print_native_summary ;;
@@ -804,6 +908,7 @@ main() {
             esac
             exit 0 ;;
         "")
+            (( WITH_WIN_NODE )) && warn "--with-win-node has no effect in interactive mode; ignoring."
             interactive_install ;;
         *)
             usage; exit 1 ;;
