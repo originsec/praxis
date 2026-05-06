@@ -53,6 +53,80 @@ function Write-Section {
     Write-Host ""
 }
 
+#
+# Run an external command in the background, streaming its output to a
+# log file, and draw a fake-progress bar while we wait. Mirrors the
+# `run_with_progress_bar` helper in install.sh.
+#
+# Returns the command's exit code; on failure, dumps the last 50 log
+# lines so the user can see what went wrong.
+#
+
+function Run-WithProgressBar {
+    param(
+        [string]$LogFile,
+        [string]$Exe,
+        [string[]]$ExeArgs
+    )
+
+    $proc = Start-Process -FilePath $Exe -ArgumentList $ExeArgs `
+        -RedirectStandardOutput $LogFile -RedirectStandardError "$LogFile.err" `
+        -NoNewWindow -PassThru
+
+    $width = 40
+    $percent = 0
+    $step = 2
+    $delayMs = 300
+    $spin = @('⣾','⣽','⣻','⢿','⡿','⣟','⣯','⣷')
+    $spinIdx = 0
+
+    while (-not $proc.HasExited) {
+        $filled = [int]($percent * $width / 100)
+        $empty = $width - $filled
+        $bar = ('█' * $filled) + ('░' * $empty)
+        Write-Host -NoNewline ("`r" + (' ' * ([Console]::WindowWidth - 1)) + "`r")
+        Write-Host -NoNewline "[" -ForegroundColor Cyan
+        Write-Host -NoNewline ('█' * $filled) -ForegroundColor Cyan
+        Write-Host -NoNewline ('░' * $empty)  -ForegroundColor DarkGray
+        Write-Host -NoNewline "] " -ForegroundColor Cyan
+        Write-Host -NoNewline ("{0,3}% {1}" -f $percent, $spin[$spinIdx]) -ForegroundColor Cyan
+
+        Start-Sleep -Milliseconds $delayMs
+        $spinIdx = ($spinIdx + 1) % $spin.Length
+        $percent += $step
+        if ($percent -gt 95) { $percent = 95 }
+    }
+
+    Write-Host -NoNewline ("`r" + (' ' * ([Console]::WindowWidth - 1)) + "`r")
+    Write-Host -NoNewline "[" -ForegroundColor Cyan
+    Write-Host -NoNewline ('█' * $width) -ForegroundColor Cyan
+    Write-Host "] 100%" -ForegroundColor Cyan
+
+    if (Test-Path "$LogFile.err") {
+        Get-Content "$LogFile.err" | Add-Content $LogFile
+        Remove-Item "$LogFile.err" -Force
+    }
+
+    return $proc.ExitCode
+}
+
+#
+# Detect whether install.ps1 is being run from inside a praxis git
+# checkout; returns the absolute path of the repo root or $null.
+#
+
+function Get-LocalRepoRoot {
+    if (-not $PSScriptRoot) { return $null }
+    $candidate = Resolve-Path (Join-Path $PSScriptRoot "..") -ErrorAction SilentlyContinue
+    if (-not $candidate) { return $null }
+    $candidate = $candidate.Path
+    if ((Test-Path (Join-Path $candidate "docker-compose.yml")) -and `
+        (Test-Path (Join-Path $candidate "Dockerfile"))) {
+        return $candidate
+    }
+    return $null
+}
+
 function Test-Command {
     param($cmd)
     $null = Get-Command $cmd -ErrorAction SilentlyContinue
@@ -223,8 +297,19 @@ function Install-Cli {
     if (-not (Test-Path $CliInstallDir)) { New-Item -ItemType Directory -Force -Path $CliInstallDir | Out-Null }
 
     $repoUrl = "https://github.com/$PraxisRepo"
-    cargo install --git $repoUrl --tag $script:PraxisVersion --root $CliInstallDir.TrimEnd('\') praxis_cli
-    if ($LASTEXITCODE -ne 0) { Write-Err "cargo install failed." }
+    $cliRoot = $CliInstallDir.TrimEnd('\')
+    $cargoLog = Join-Path $env:TEMP "praxis-cargo-install.log"
+
+    $exitCode = Run-WithProgressBar -LogFile $cargoLog -Exe "cargo" -ExeArgs @(
+        "install", "--git", $repoUrl, "--tag", $script:PraxisVersion,
+        "--root", $cliRoot, "praxis_cli"
+    )
+    if ($exitCode -ne 0) {
+        Write-Host ""
+        Write-Warn "Build output (last 50 lines):"
+        Get-Content $cargoLog -Tail 50
+        Write-Err "cargo install failed."
+    }
 
     $exe = Join-Path $CliInstallDir "bin\praxis_cli.exe"
     if (-not (Test-Path $exe)) { Write-Err "Build succeeded but praxis_cli.exe not found at $exe" }
@@ -291,12 +376,26 @@ function Check-Docker {
 function Install-Service-Docker {
     Write-Section "Installing Service (Docker)"
     Check-Docker
-    Write-Info "Setting up Praxis $script:PraxisVersion in $PraxisDir..."
-    if (Test-Path $PraxisDir) { Remove-Item -Recurse -Force $PraxisDir }
-    git clone --depth 1 --branch $script:PraxisVersion "https://github.com/$PraxisRepo.git" $PraxisDir
-    if ($LASTEXITCODE -ne 0) { Write-Err "git clone failed." }
 
-    Push-Location $PraxisDir
+    #
+    # If we're running from a local praxis checkout, build directly
+    # against it instead of cloning the tagged release into
+    # ~/.praxis-docker. Mirrors install.sh.
+    #
+
+    $localRoot = Get-LocalRepoRoot
+    if ($localRoot) {
+        Write-Info "Using local repository at $localRoot"
+        $composeDir = $localRoot
+    } else {
+        Write-Info "Setting up Praxis $script:PraxisVersion in $PraxisDir..."
+        if (Test-Path $PraxisDir) { Remove-Item -Recurse -Force $PraxisDir }
+        git clone --depth 1 --branch $script:PraxisVersion "https://github.com/$PraxisRepo.git" $PraxisDir
+        if ($LASTEXITCODE -ne 0) { Write-Err "git clone failed." }
+        $composeDir = $PraxisDir
+    }
+
+    Push-Location $composeDir
     try {
         Write-Info "Building and starting (this may take a few minutes on first run)..."
         if ($script:ComposeCmd -eq "docker compose") {
@@ -310,6 +409,8 @@ function Install-Service-Docker {
     }
     Write-Success "Praxis is running"
     Write-Host ""
+
+    $script:PraxisDir = $composeDir
 }
 
 function Print-Summary-Box {
