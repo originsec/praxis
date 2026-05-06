@@ -529,12 +529,12 @@ print_native_summary() {
     printf "  %bNode binary${NC} %s/nodes/praxis_node_linux\n" "${BOLD}" "$INSTALL_SHARE"
     echo
     printf "  %bService control${NC}\n" "${CYAN}${BOLD}"
-    echo   "    praxisctl status            ${DIM}# praxis-service status${NC}"
-    echo   "    praxisctl webserver status  ${DIM}# praxis-web status${NC}"
-    echo   "    praxisctl set-rabbitmqurl amqp://praxis:praxis@localhost:5672"
+    printf "    praxisctl status            ${DIM}# praxis-service status${NC}\n"
+    printf "    praxisctl webserver status  ${DIM}# praxis-web status${NC}\n"
+    printf "    praxisctl set-rabbitmqurl amqp://praxis:praxis@localhost:5672\n"
     echo
     printf "  %bCLI${NC}\n" "${CYAN}${BOLD}"
-    echo   "    praxis                      ${DIM}# interactive TUI${NC}"
+    printf "    praxis                      ${DIM}# interactive TUI${NC}\n"
     echo
     printf "  %bWeb UI${NC}      http://localhost:8080\n" "${BOLD}"
     echo
