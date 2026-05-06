@@ -1,7 +1,7 @@
 # Maintainer: Origin Security <support@originhq.com>
 pkgname=praxis-bin
 pkgver=0.9.22
-pkgrel=2
+pkgrel=3
 pkgdesc='Praxis - Semantic Command & Control Framework for Agents (pre-built)'
 arch=('x86_64')
 url='https://github.com/originsec/praxis'
@@ -12,9 +12,8 @@ options=('!lto')
 install=praxis.install
 source=(
     "praxis-${pkgver}-x86_64-linux.tar.gz::https://github.com/originsec/praxis/releases/download/v${pkgver}/praxis-${pkgver}-x86_64-linux.tar.gz"
-    'praxis.service'
+    "praxisctl::https://raw.githubusercontent.com/originsec/praxis/v${pkgver}/pkg/praxisctl/praxisctl"
     'praxis-service.service'
-    'praxis-web.service'
     'praxis-sysusers.conf'
     'praxis-tmpfiles.conf'
     'praxis.env'
@@ -28,26 +27,29 @@ sha256sums=(
     'SKIP'
     'SKIP'
     'SKIP'
-    'SKIP'
 )
 
 package() {
     cd "$srcdir/praxis-${pkgver}-x86_64-linux"
 
+    # Binaries — service, CLI, node agent. The web server is intentionally
+    # not installed; manage Praxis via the `praxis` TUI.
     install -Dm755 praxis_service "$pkgdir/usr/bin/praxis_service"
-    install -Dm755 praxis_web     "$pkgdir/usr/bin/praxis_web"
     install -Dm755 praxis_cli     "$pkgdir/usr/bin/praxis_cli"
     ln -s praxis_cli "$pkgdir/usr/bin/praxis"
-    install -Dm755 praxis_node    "$pkgdir/usr/share/praxis/nodes/praxis_node_linux"
 
-    install -Dm644 "$srcdir/praxis.service"        "$pkgdir/usr/lib/systemd/system/praxis.service"
+    install -Dm755 praxis_node "$pkgdir/usr/share/praxis/nodes/praxis_node_linux"
+
+    # praxisctl pulled from the matching release tag.
+    install -Dm755 "$srcdir/praxisctl" "$pkgdir/usr/bin/praxisctl"
+
+    # Systemd unit (single service; no umbrella).
     install -Dm644 "$srcdir/praxis-service.service" "$pkgdir/usr/lib/systemd/system/praxis-service.service"
-    install -Dm644 "$srcdir/praxis-web.service"    "$pkgdir/usr/lib/systemd/system/praxis-web.service"
 
-    install -Dm644 "$srcdir/praxis-sysusers.conf"  "$pkgdir/usr/lib/sysusers.d/praxis.conf"
-    install -Dm644 "$srcdir/praxis-tmpfiles.conf"  "$pkgdir/usr/lib/tmpfiles.d/praxis.conf"
+    install -Dm644 "$srcdir/praxis-sysusers.conf" "$pkgdir/usr/lib/sysusers.d/praxis.conf"
+    install -Dm644 "$srcdir/praxis-tmpfiles.conf" "$pkgdir/usr/lib/tmpfiles.d/praxis.conf"
 
-    install -Dm644 "$srcdir/praxis.env"            "$pkgdir/etc/praxis/env"
+    install -Dm644 "$srcdir/praxis.env" "$pkgdir/etc/praxis/env"
 
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
