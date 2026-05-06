@@ -5,14 +5,13 @@
 #
 # Linux and macOS only. Windows users should use install.ps1.
 #
-# The installer first asks which components to install:
-#   [x] service   (Linux only — installs praxis-service + praxis-web
-#                  systemd units, /etc/praxis/env, praxisctl)
-#   [x] cli       (always native; installs `praxis` to /usr/local/bin)
+# The installer asks how to install the service:
+#   - native       (Linux only; system-wide systemd, requires RabbitMQ)
+#   - docker       (Linux + macOS; rabbitmq + praxis container)
+#   - client only  (no service; just the praxis CLI)
 #
-# Then asks how to install the service:
-#   - native      (Linux only; system-wide systemd, requires RabbitMQ)
-#   - docker      (Linux + macOS; rabbitmq + praxis container)
+# The CLI (`praxis`) is always installed natively to /usr/local/bin
+# regardless of the chosen option.
 #
 # Non-interactive flags:
 #   --service [native|docker]    Install the service in the chosen mode
@@ -49,37 +48,82 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
-info()    { echo -e "${CYAN}[INFO]${NC} $1"; }
-success() { echo -e "${GREEN}[OK]${NC} $1"; }
-warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
-error()   { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+info()    { echo -e "  ${CYAN}▸${NC} $1"; }
+success() { echo -e "  ${GREEN}✓${NC} $1"; }
+warn()    { echo -e "  ${YELLOW}⚠${NC} $1"; }
+error()   { echo -e "  ${RED}✗${NC} $1"; exit 1; }
 has_cmd() { command -v "$1" &> /dev/null; }
 
-print_banner() {
-    local cols logo_w=46 tag_w=49 by_w=13
-    cols=$(tput cols 2>/dev/null || echo 80)
-    local lp=$(( (cols - logo_w) / 2 ))
-    local tp=$(( (cols - tag_w) / 2 ))
-    local bp=$(( (cols - by_w) / 2 ))
-    (( lp < 0 )) && lp=0
-    (( tp < 0 )) && tp=0
-    (( bp < 0 )) && bp=0
-    local lpad tpad bpad
-    lpad=$(printf '%*s' "$lp" '')
-    tpad=$(printf '%*s' "$tp" '')
-    bpad=$(printf '%*s' "$bp" '')
+section() {
+    local title="$1"
+    echo
+    printf "  %b▌%b %b%s%b\n\n" "${CYAN}${BOLD}" "${NC}" "${BOLD}" "$title" "${NC}"
+}
 
+run_with_progress_bar() {
+    local logfile="$1"
+    shift
+    local cmd=("$@")
+
+    "${cmd[@]}" >"$logfile" 2>&1 &
+    local pid=$!
+
+    local width=40
+    local percent=0
+    local step=2
+    local delay=0.3
+    local spin_chars=(⣾ ⣽ ⣻ ⢿ ⡿ ⣟ ⣯ ⣷)
+    local spin_idx=0
+
+    while kill -0 $pid 2>/dev/null; do
+        local filled=$(( percent * width / 100 ))
+        local empty=$(( width - filled ))
+        local fill_bar=""
+        local empty_bar=""
+        for ((i=0; i<filled; i++)); do fill_bar+="█"; done
+        for ((i=0; i<empty; i++)); do empty_bar+="░"; done
+        printf "\r\033[K${CYAN}[${BOLD}%s${NC}${DIM}%s${NC}${CYAN}] %3d%% ${spin_chars[$spin_idx]}${NC}" "$fill_bar" "$empty_bar" "$percent"
+        spin_idx=$(( (spin_idx + 1) % ${#spin_chars[@]} ))
+        sleep "$delay"
+        percent=$(( percent + step ))
+        if (( percent > 95 )); then percent=95; fi
+    done
+
+    local exit_code=0
+    wait $pid || exit_code=$?
+
+    local bar=""
+    for ((i=0; i<width; i++)); do bar+="█"; done
+    printf "\r\033[K${CYAN}[${BOLD}%s${NC}${CYAN}] 100%%${NC}\n" "$bar"
+
+    return $exit_code
+}
+
+cleanup_and_exit() {
+    local job
+    for job in $(jobs -p); do
+        kill -TERM "$job" 2>/dev/null || true
+        sleep 0.1
+        kill -KILL "$job" 2>/dev/null || true
+    done
+    printf '\033[?25h' 2>/dev/null || true
+    stty echo 2>/dev/null || true
+    echo ""
+    exit 130
+}
+trap cleanup_and_exit INT
+
+print_banner() {
     echo
     printf '%b' "${CYAN}${BOLD}"
-    echo "${lpad}██████╗ ██████╗  █████╗ ██╗  ██╗██╗███████╗"
-    echo "${lpad}██╔══██╗██╔══██╗██╔══██╗╚██╗██╔╝██║██╔════╝"
-    echo "${lpad}██████╔╝██████╔╝███████║ ╚███╔╝ ██║███████╗"
-    echo "${lpad}██╔═══╝ ██╔══██╗██╔══██║ ██╔██╗ ██║╚════██║"
-    echo "${lpad}██║     ██║  ██║██║  ██║██╔╝ ██╗██║███████║"
-    echo "${lpad}╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝"
+    echo "██████╗ ██████╗  █████╗ ██╗  ██╗██╗███████╗"
+    echo "██╔══██╗██╔══██╗██╔══██╗╚██╗██╔╝██║██╔════╝"
+    echo "██████╔╝██████╔╝███████║ ╚███╔╝ ██║███████╗"
+    echo "██╔═══╝ ██╔══██╗██╔══██║ ██╔██╗ ██║╚════██║"
+    echo "██║     ██║  ██║██║  ██║██╔╝ ██╗██║███████║"
+    echo "╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝"
     printf '%b' "${NC}"
-    printf '%b\n' "${tpad}${DIM}Semantic Command & Control Framework for Agents${NC}"
-    printf '%b\n' "${bpad}${MAGENTA}by [Ø] Origin${NC}"
+    printf '%b\n' "${DIM}Semantic Command & Control Framework for Agents${NC} ${MAGENTA}by [Ø] Origin${NC}"
     echo
 }
 
@@ -124,6 +168,7 @@ detect_platform() {
 #
 
 SELECTED=0
+MENU_FOOTER=""
 select_menu() {
     local prompt="$1"; shift
     local options=("$@")
@@ -139,10 +184,23 @@ select_menu() {
     fi
 
     printf '\033[?25l' > "$tty_out"
-    trap 'printf "\033[?25h" > '"$tty_out"'; stty echo 2>/dev/null || true' EXIT INT TERM
+    trap 'printf "\033[?25h" > '"$tty_out"'; stty echo 2>/dev/null || true' EXIT
 
     printf "%b %b\n\n" "$prompt" "${DIM}(↑↓ move • enter select • q quit)${NC}" > "$tty_out"
     for ((i=0; i<n; i++)); do printf "\n" > "$tty_out"; done
+
+    #
+    # Render an optional footer below the option list (e.g. an info note).
+    # Printed once and then we move the cursor back up onto the option area
+    # so the redraw loop never overwrites it.
+    #
+
+    local footer_lines=0
+    if [[ -n "$MENU_FOOTER" ]]; then
+        printf "\n%b\n" "$MENU_FOOTER" > "$tty_out"
+        footer_lines=2
+        printf "\033[%dA" "$footer_lines" > "$tty_out"
+    fi
 
     while true; do
         printf "\033[%dA" "$n" > "$tty_out"
@@ -177,82 +235,16 @@ select_menu() {
             sel=$(( (sel + 1) % n ))
         elif [[ $key == "q" || $key == $'\x03' ]]; then
             printf '\033[?25h' > "$tty_out"
+            (( footer_lines > 0 )) && printf "\033[%dB" "$footer_lines" > "$tty_out"
             echo > "$tty_out"
             exit 130
         fi
     done
 
+    (( footer_lines > 0 )) && printf "\033[%dB" "$footer_lines" > "$tty_out"
     printf '\033[?25h' > "$tty_out"
-    trap - EXIT INT TERM
+    trap - EXIT
     SELECTED=$sel
-}
-
-#
-# Multi-select (checkbox) menu. Args: prompt, [pre-checked-flags...], options...
-# pre-checked flags are 1/0 in same order as options; bundled in $CHECKED.
-#
-
-CHECKED=()
-multi_select_menu() {
-    local prompt="$1"; shift
-    local n_opts=$1; shift
-    local checked=()
-    for ((i=0; i<n_opts; i++)); do checked+=("${1:-1}"); shift; done
-    local options=("$@")
-    local sel=0
-    local tty_in=/dev/tty
-    local tty_out=/dev/tty
-
-    if [[ ! -e /dev/tty ]]; then
-        error "No TTY for component selection. Re-run with: --service [native|docker] and/or --cli"
-    fi
-
-    printf '\033[?25l' > "$tty_out"
-    trap 'printf "\033[?25h" > '"$tty_out"'; stty echo 2>/dev/null || true' EXIT INT TERM
-
-    printf "%b %b\n\n" "$prompt" "${DIM}(↑↓ move • space toggle • enter next • q quit)${NC}" > "$tty_out"
-    for ((i=0; i<n_opts; i++)); do printf "\n" > "$tty_out"; done
-
-    while true; do
-        printf "\033[%dA" "$n_opts" > "$tty_out"
-        for ((i=0; i<n_opts; i++)); do
-            local mark="[ ]"
-            (( checked[i] )) && mark="${CYAN}${BOLD}[x]${NC}"
-            if (( i == sel )); then
-                printf "\r\033[K  ${CYAN}${BOLD}▶${NC} %b %s\n" "$mark" "${options[$i]}" > "$tty_out"
-            else
-                printf "\r\033[K    %b %s\n" "$mark" "${options[$i]}" > "$tty_out"
-            fi
-        done
-
-        local key=""
-        IFS= read -rsn1 key < "$tty_in" || true
-
-        if [[ $key == $'\x1b' ]]; then
-            local rest=""
-            IFS= read -rsn2 -t 0.05 rest < "$tty_in" || true
-            case "$rest" in
-                '[A'|'OA') sel=$(( (sel - 1 + n_opts) % n_opts ));;
-                '[B'|'OB') sel=$(( (sel + 1) % n_opts ));;
-            esac
-        elif [[ -z $key || $key == $'\n' || $key == $'\r' ]]; then
-            break
-        elif [[ $key == " " ]]; then
-            checked[sel]=$(( 1 - checked[sel] ))
-        elif [[ $key == "k" ]]; then
-            sel=$(( (sel - 1 + n_opts) % n_opts ))
-        elif [[ $key == "j" ]]; then
-            sel=$(( (sel + 1) % n_opts ))
-        elif [[ $key == "q" || $key == $'\x03' ]]; then
-            printf '\033[?25h' > "$tty_out"
-            echo > "$tty_out"
-            exit 130
-        fi
-    done
-
-    printf '\033[?25h' > "$tty_out"
-    trap - EXIT INT TERM
-    CHECKED=("${checked[@]}")
 }
 
 #
@@ -289,48 +281,55 @@ ensure_sudo() {
         SUDO=""
     elif has_cmd sudo; then
         SUDO="sudo"
+        if ! sudo -n true 2>/dev/null; then
+            info "Root privileges required. Please enter your password."
+            sudo -v || error "Failed to authenticate with sudo."
+        fi
     else
         error "Need root to install system files; sudo not available."
     fi
 }
 
 #
-# === RabbitMQ checks (native service install) ===============================
+# === RabbitMQ setup (runs after native install) ===========================
 #
 
-check_rabbitmq_or_die() {
-    info "Checking RabbitMQ..."
-    if has_cmd rabbitmqctl && rabbitmqctl status >/dev/null 2>&1; then
-        success "RabbitMQ is running"
-    elif has_cmd systemctl && systemctl is-active --quiet rabbitmq-server 2>/dev/null; then
-        success "RabbitMQ service is active"
-    else
-        warn "RabbitMQ does not appear to be installed/running."
-        echo "Praxis (native install) requires a running RabbitMQ broker."
-        echo "Install RabbitMQ first, e.g.:"
-        echo "  - Debian/Ubuntu:  sudo apt-get install rabbitmq-server"
-        echo "  - Fedora/RHEL:    sudo dnf install rabbitmq-server"
-        echo "  - Arch:           sudo pacman -S rabbitmq"
-        echo "Then ensure it's running:"
-        echo "  sudo systemctl enable --now rabbitmq-server"
-        echo ""
-        error "Aborting native install."
-    fi
-}
-
-ensure_rabbitmq_user() {
+setup_rabbitmq_or_warn() {
     if ! has_cmd rabbitmqctl; then
-        warn "rabbitmqctl not found - skipping RabbitMQ user setup."
+        warn "rabbitmqctl not found. Skipping RabbitMQ user setup."
+        echo "Ensure RabbitMQ is installed and a 'praxis' user exists before starting the service."
         return
     fi
+
+    info "Checking RabbitMQ..."
+    if ! $SUDO rabbitmqctl status >/dev/null 2>&1; then
+        warn "RabbitMQ does not appear to be running."
+        echo "Praxis requires a running RabbitMQ broker."
+        echo "Install and start RabbitMQ, then create the user manually:"
+        echo "  sudo rabbitmqctl add_user praxis praxis"
+        echo "  sudo rabbitmqctl set_permissions praxis '.*' '.*' '.*'"
+        echo "  sudo rabbitmqctl set_user_tags praxis administrator"
+        return
+    fi
+
+    success "RabbitMQ is running"
+
     if $SUDO rabbitmqctl list_users 2>/dev/null | awk '{print $1}' | grep -qx 'praxis'; then
         success "RabbitMQ user 'praxis' already exists"
-    else
-        info "Creating RabbitMQ user 'praxis'..."
-        $SUDO rabbitmqctl add_user praxis praxis >/dev/null
-        $SUDO rabbitmqctl set_permissions praxis ".*" ".*" ".*" >/dev/null
+        return
+    fi
+
+    info "Creating RabbitMQ user 'praxis'..."
+    if $SUDO rabbitmqctl add_user praxis praxis >/dev/null 2>&1 && \
+       $SUDO rabbitmqctl set_permissions praxis ".*" ".*" ".*" >/dev/null 2>&1; then
         $SUDO rabbitmqctl set_user_tags praxis administrator >/dev/null 2>&1 || true
         success "Created RabbitMQ user 'praxis'"
+    else
+        warn "Failed to create RabbitMQ user 'praxis'."
+        echo "Create it manually before starting the service:"
+        echo "  sudo rabbitmqctl add_user praxis praxis"
+        echo "  sudo rabbitmqctl set_permissions praxis '.*' '.*' '.*'"
+        echo "  sudo rabbitmqctl set_user_tags praxis administrator"
     fi
 }
 
@@ -358,15 +357,43 @@ check_rust() {
     fi
 }
 
+get_local_binary() {
+    local name="$1"
+    local script_dir=""
+    if [[ -n "${BASH_SOURCE[0]}" && "${BASH_SOURCE[0]}" != "-" && "${BASH_SOURCE[0]}" != "/dev/stdin" ]]; then
+        script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    fi
+    if [[ -n "$script_dir" && -x "$script_dir/../target/release/$name" ]]; then
+        echo "$script_dir/../target/release/$name"
+        return 0
+    fi
+    return 1
+}
+
 install_cli_native() {
-    info "Installing Praxis CLI to $INSTALL_BIN/praxis..."
+    section "Installing CLI"
     has_cmd git || error "git not found. Please install git."
-    check_rust
 
     local repo_url="https://github.com/$PRAXIS_REPO"
     local tmproot
     tmproot=$(mktemp -d)
-    cargo install --git "$repo_url" --tag "$PRAXIS_VERSION" --root "$tmproot" praxis_cli
+
+    local binary_path
+    if binary_path=$(get_local_binary "praxis_cli"); then
+        success "Using locally compiled binary: $binary_path"
+        mkdir -p "$tmproot/bin"
+        cp "$binary_path" "$tmproot/bin/praxis_cli"
+    else
+        check_rust
+        local cargo_log="$tmproot/cargo.log"
+        if ! run_with_progress_bar "$cargo_log" \
+                cargo install --git "$repo_url" --tag "$PRAXIS_VERSION" --root "$tmproot" praxis_cli; then
+            echo ""
+            warn "Build output follows (last 50 lines):"
+            tail -n 50 "$cargo_log"
+            error "cargo install failed for CLI."
+        fi
+    fi
 
     ensure_sudo
     $SUDO install -d "$INSTALL_BIN"
@@ -387,15 +414,35 @@ install_service_native() {
     has_cmd git || error "git not found. Please install git."
 
     ensure_sudo
-    check_rabbitmq_or_die
-    check_rust
+    section "Installing Service"
 
-    info "Building praxis_service, praxis_web, and praxis_node..."
     local repo_url="https://github.com/$PRAXIS_REPO"
     local tmproot
     tmproot=$(mktemp -d)
-    cargo install --git "$repo_url" --tag "$PRAXIS_VERSION" --root "$tmproot" praxis_service praxis_web praxis_node
-    success "Built service binaries"
+
+    local svc_path web_path node_path
+    if svc_path=$(get_local_binary "praxis_service") && \
+       web_path=$(get_local_binary "praxis_web") && \
+       node_path=$(get_local_binary "praxis_node"); then
+        success "Using locally compiled binaries"
+        mkdir -p "$tmproot/bin"
+        cp "$svc_path" "$tmproot/bin/praxis_service"
+        cp "$web_path" "$tmproot/bin/praxis_web"
+        cp "$node_path" "$tmproot/bin/praxis_node"
+    else
+        check_rust
+        info "Building praxis_service, praxis_web, and praxis_node..."
+        local cargo_log="$tmproot/cargo.log"
+        if ! run_with_progress_bar "$cargo_log" \
+                cargo install --git "$repo_url" --tag "$PRAXIS_VERSION" --root "$tmproot" \
+                praxis_service praxis_web praxis_node; then
+            echo ""
+            warn "Build output follows (last 50 lines):"
+            tail -n 50 "$cargo_log"
+            error "cargo install failed for service binaries."
+        fi
+        success "Built service binaries"
+    fi
 
     info "Installing system files..."
     $SUDO install -d "$INSTALL_BIN" "$INSTALL_SHARE/nodes" /etc/praxis /var/lib/praxis
@@ -415,24 +462,38 @@ install_service_native() {
     rm -rf "$tmproot"
 
     info "Fetching unit files and praxisctl..."
-    local pkg_tmp
-    pkg_tmp=$(mktemp -d)
-    git clone --depth 1 --branch "$PRAXIS_VERSION" "$repo_url" "$pkg_tmp/repo" >/dev/null 2>&1
+    local repo_dir=""
+    local pkg_tmp=""
 
-    $SUDO install -m 0644 "$pkg_tmp/repo/pkg/systemd/praxis-service.service" /etc/systemd/system/praxis-service.service
-    $SUDO install -m 0644 "$pkg_tmp/repo/pkg/systemd/praxis-web.service"     /etc/systemd/system/praxis-web.service
+    # Detect if we're running from within the praxis repo
+    local script_dir=""
+    if [[ -n "${BASH_SOURCE[0]}" && "${BASH_SOURCE[0]}" != "-" && "${BASH_SOURCE[0]}" != "/dev/stdin" ]]; then
+        script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    fi
+
+    if [[ -n "$script_dir" && -f "$script_dir/../pkg/systemd/praxis-service.service" && -f "$script_dir/../pkg/praxisctl/praxisctl" ]]; then
+        info "Using local repository files..."
+        repo_dir="$script_dir/.."
+    else
+        pkg_tmp=$(mktemp -d)
+        repo_dir="$pkg_tmp/repo"
+        git clone --depth 1 --branch "$PRAXIS_VERSION" "$repo_url" "$repo_dir" || error "Failed to clone repository. Check your internet connection and version tag: $PRAXIS_VERSION"
+    fi
+
+    $SUDO install -m 0644 "$repo_dir/pkg/systemd/praxis-service.service" /etc/systemd/system/praxis-service.service
+    $SUDO install -m 0644 "$repo_dir/pkg/systemd/praxis-web.service"     /etc/systemd/system/praxis-web.service
 
     if [[ ! -f /etc/praxis/env ]]; then
-        $SUDO install -m 0640 "$pkg_tmp/repo/pkg/systemd/praxis.env.example" /etc/praxis/env
+        $SUDO install -m 0640 "$repo_dir/pkg/systemd/praxis.env.example" /etc/praxis/env
         $SUDO chgrp praxis /etc/praxis/env 2>/dev/null || true
     else
         info "/etc/praxis/env already exists - leaving in place"
     fi
 
-    $SUDO install -m 0755 "$pkg_tmp/repo/pkg/praxisctl/praxisctl" "$INSTALL_BIN/praxisctl"
-    rm -rf "$pkg_tmp"
+    $SUDO install -m 0755 "$repo_dir/pkg/praxisctl/praxisctl" "$INSTALL_BIN/praxisctl"
+    [[ -n "$pkg_tmp" ]] && rm -rf "$pkg_tmp"
 
-    ensure_rabbitmq_user
+    setup_rabbitmq_or_warn
 
     $SUDO systemctl daemon-reload
     info "Enabling praxis-service and praxis-web..."
@@ -443,29 +504,40 @@ install_service_native() {
     echo ""
 }
 
+print_summary_box() {
+    local title="$1"
+    local inner=46
+    local title_len=${#title}
+    local pad=$(( (inner - title_len) / 2 ))
+    local lpad rpad
+    lpad=$(printf '%*s' "$pad" '')
+    rpad=$(printf '%*s' "$(( inner - title_len - pad ))" '')
+    local hbar
+    hbar=$(printf '─%.0s' $(seq 1 "$inner"))
+    echo
+    printf "  %b╭%s╮%b\n" "$GREEN" "$hbar" "$NC"
+    printf "  %b│%b%s%b%s%b%s%b│%b\n" "$GREEN" "$NC" "$lpad" "${GREEN}${BOLD}" "$title" "$NC" "$rpad" "$GREEN" "$NC"
+    printf "  %b╰%s╯%b\n" "$GREEN" "$hbar" "$NC"
+    echo
+}
+
 print_native_summary() {
-    echo -e "${GREEN}"
-    echo "=============================================="
-    echo "  Praxis $PRAXIS_VERSION installed"
-    echo "=============================================="
-    echo -e "${NC}"
-    echo "Binaries:    $INSTALL_BIN/{praxis_service,praxis_web,praxis_cli,praxis,praxisctl}"
-    echo "Config:      /etc/praxis/env"
-    echo "Data:        /var/lib/praxis"
-    echo "Node binary: $INSTALL_SHARE/nodes/praxis_node_linux"
-    echo ""
-    echo -e "${CYAN}Service control:${NC}"
-    echo "  praxisctl status           # praxis-service status"
-    echo "  praxisctl logs -f          # praxis-service logs"
-    echo "  praxisctl webserver status # praxis-web status"
-    echo "  praxisctl set rabbitmq-url amqp://praxis:praxis@localhost:5672"
-    echo ""
-    echo -e "${CYAN}CLI:${NC}"
-    echo "  praxis                     # interactive TUI"
-    echo "  praxis set-rabbitmqurl <url>"
-    echo ""
-    echo "Web UI: http://localhost:8080"
-    echo ""
+    print_summary_box "Praxis $PRAXIS_VERSION installed"
+    printf "  %bBinaries${NC}    %s/{praxis_service,praxis_web,praxis_cli,praxis,praxisctl}\n" "${BOLD}" "$INSTALL_BIN"
+    printf "  %bConfig${NC}      /etc/praxis/env\n" "${BOLD}"
+    printf "  %bData${NC}        /var/lib/praxis\n" "${BOLD}"
+    printf "  %bNode binary${NC} %s/nodes/praxis_node_linux\n" "${BOLD}" "$INSTALL_SHARE"
+    echo
+    printf "  %bService control${NC}\n" "${CYAN}${BOLD}"
+    echo   "    praxisctl status            ${DIM}# praxis-service status${NC}"
+    echo   "    praxisctl webserver status  ${DIM}# praxis-web status${NC}"
+    echo   "    praxisctl set-rabbitmqurl amqp://praxis:praxis@localhost:5672"
+    echo
+    printf "  %bCLI${NC}\n" "${CYAN}${BOLD}"
+    echo   "    praxis                      ${DIM}# interactive TUI${NC}"
+    echo
+    printf "  %bWeb UI${NC}      http://localhost:8080\n" "${BOLD}"
+    echo
 }
 
 #
@@ -491,6 +563,7 @@ check_docker() {
 }
 
 install_service_docker() {
+    section "Installing Service (Docker)"
     check_docker
     info "Setting up Praxis $PRAXIS_VERSION in $PRAXIS_DOCKER_DIR..."
     rm -rf "$PRAXIS_DOCKER_DIR"
@@ -503,26 +576,22 @@ install_service_docker() {
 }
 
 print_docker_summary() {
-    echo -e "${GREEN}"
-    echo "=============================================="
-    echo "  Praxis $PRAXIS_VERSION (docker) is ready"
-    echo "=============================================="
-    echo -e "${NC}"
-    echo "Web UI:              http://localhost:8080"
-    echo "RabbitMQ Management: http://localhost:15672 (praxis / praxis)"
-    echo "Installation:        $PRAXIS_DOCKER_DIR"
-    echo ""
-    echo -e "${CYAN}Inside the container:${NC}"
-    echo "  $COMPOSE_CMD exec praxis praxisctl status"
-    echo "  $COMPOSE_CMD exec praxis praxisctl webserver disable"
-    echo "  $COMPOSE_CMD exec praxis praxisctl set rabbitmq-url <url>"
-    echo ""
-    echo -e "${CYAN}Compose lifecycle:${NC}"
-    echo "  cd $PRAXIS_DOCKER_DIR"
-    echo "  $COMPOSE_CMD logs -f"
-    echo "  $COMPOSE_CMD down"
-    echo "  $COMPOSE_CMD up -d"
-    echo ""
+    print_summary_box "Praxis $PRAXIS_VERSION (docker) ready"
+    printf "  %bWeb UI${NC}              http://localhost:8080\n" "${BOLD}"
+    printf "  %bRabbitMQ Management${NC} http://localhost:15672 ${DIM}(praxis / praxis)${NC}\n" "${BOLD}"
+    printf "  %bInstallation${NC}        %s\n" "${BOLD}" "$PRAXIS_DOCKER_DIR"
+    echo
+    printf "  %bInside the container${NC}\n" "${CYAN}${BOLD}"
+    echo "    $COMPOSE_CMD exec praxis praxisctl status"
+    echo "    $COMPOSE_CMD exec praxis praxisctl webserver disable"
+    echo "    $COMPOSE_CMD exec praxis praxisctl set-rabbitmqurl <url>"
+    echo
+    printf "  %bCompose lifecycle${NC}\n" "${CYAN}${BOLD}"
+    echo "    cd $PRAXIS_DOCKER_DIR"
+    echo "    $COMPOSE_CMD logs -f"
+    echo "    $COMPOSE_CMD down"
+    echo "    $COMPOSE_CMD up -d"
+    echo
 }
 
 #
@@ -580,52 +649,47 @@ remove_all() {
 #
 
 interactive_install() {
-    multi_select_menu "${BOLD}Choose components to install${NC}" 2 1 1 \
-        "service   - Praxis service + web" \
-        "cli       - Praxis CLI"
+    local options=()
+    local actions=()
+    if [[ "$OS_KIND" == "linux" ]]; then
+        options+=("Native install   - system-wide systemd (requires RabbitMQ)")
+        actions+=("native")
+    fi
+    options+=("Docker install   - rabbitmq + service in containers")
+    actions+=("docker")
+    options+=("Client only      - install only the praxis CLI")
+    actions+=("client")
+    options+=("Cancel")
+    actions+=("cancel")
 
-    local want_service=${CHECKED[0]}
-    local want_cli=${CHECKED[1]}
+    MENU_FOOTER="${DIM}\033[3mNote: client will always be installed natively.${NC}"
+    select_menu "${BOLD}Install service as${NC}" "${options[@]}"
+    MENU_FOOTER=""
+    local choice="${actions[$SELECTED]}"
     echo
 
-    if (( want_service == 0 && want_cli == 0 )); then
-        error "Nothing selected."
-    fi
-
-    local service_mode=""
-    if (( want_service )); then
-        local options=()
-        local actions=()
-        if [[ "$OS_KIND" == "linux" ]]; then
-            options+=("Native install   - system-wide systemd (requires RabbitMQ)")
-            actions+=("native")
-        fi
-        options+=("Docker install   - rabbitmq + service in containers")
-        actions+=("docker")
-        options+=("Cancel")
-        actions+=("cancel")
-
-        select_menu "${BOLD}Install service as${NC}" "${options[@]}"
-        service_mode="${actions[$SELECTED]}"
-        echo
-        case "$service_mode" in
-            cancel) error "Aborted." ;;
-        esac
-    fi
+    case "$choice" in
+        cancel) error "Aborted." ;;
+    esac
 
     get_latest_version
 
-    if (( want_cli )); then
-        install_cli_native
-    fi
-    if (( want_service )); then
-        case "$service_mode" in
-            native) install_service_native; print_native_summary ;;
-            docker) install_service_docker; print_docker_summary ;;
-        esac
-    elif (( want_cli )); then
-        echo -e "${GREEN}CLI installed.${NC} Run: praxis"
-    fi
+    case "$choice" in
+        native)
+            install_cli_native
+            install_service_native
+            print_native_summary
+            ;;
+        docker)
+            install_cli_native
+            install_service_docker
+            print_docker_summary
+            ;;
+        client)
+            install_cli_native
+            echo -e "${GREEN}CLI installed.${NC} Run: praxis"
+            ;;
+    esac
 }
 
 #

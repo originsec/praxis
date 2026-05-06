@@ -7,9 +7,10 @@
     installed via Docker. The CLI ('praxis') is always installed
     natively by compiling from source (requires Rust + git).
 
-    The interactive menu first asks which components to install:
-      [x] service   (Docker — rabbitmq + service container)
-      [x] cli       (native — compiles 'praxis' for Windows)
+    The interactive menu asks how to install the service:
+      - Docker install (rabbitmq + service container)
+      - Client only    (no service; just the praxis CLI)
+    The CLI is always installed natively regardless of the choice.
 
 .EXAMPLE
     irm https://praxis.originhq.com/install.ps1 | iex
@@ -39,10 +40,18 @@ $PraxisDir     = if ($env:PRAXIS_DIR) { $env:PRAXIS_DIR } else { Join-Path $Home
 $CliInstallDir = if ($env:PRAXIS_CLI_DIR) { $env:PRAXIS_CLI_DIR } else { Join-Path $HomeDir ".praxis\bin" }
 $ComposeCmd    = $null
 
-function Write-Info    { param($msg) Write-Host "[INFO] "  -ForegroundColor Cyan   -NoNewline; Write-Host $msg }
-function Write-Success { param($msg) Write-Host "[OK] "    -ForegroundColor Green  -NoNewline; Write-Host $msg }
-function Write-Warn    { param($msg) Write-Host "[WARN] "  -ForegroundColor Yellow -NoNewline; Write-Host $msg }
-function Write-Err     { param($msg) Write-Host "[ERROR] " -ForegroundColor Red    -NoNewline; Write-Host $msg; exit 1 }
+function Write-Info    { param($msg) Write-Host "  ▸ " -ForegroundColor Cyan   -NoNewline; Write-Host $msg }
+function Write-Success { param($msg) Write-Host "  ✓ " -ForegroundColor Green  -NoNewline; Write-Host $msg }
+function Write-Warn    { param($msg) Write-Host "  ⚠ " -ForegroundColor Yellow -NoNewline; Write-Host $msg }
+function Write-Err     { param($msg) Write-Host "  ✗ " -ForegroundColor Red    -NoNewline; Write-Host $msg; exit 1 }
+
+function Write-Section {
+    param([string]$Title)
+    Write-Host ""
+    Write-Host "  ▌ " -ForegroundColor Cyan -NoNewline
+    Write-Host $Title
+    Write-Host ""
+}
 
 function Test-Command {
     param($cmd)
@@ -51,22 +60,15 @@ function Test-Command {
 }
 
 function Print-Banner {
-    $cols = try { [Console]::WindowWidth } catch { 80 }
-    if (-not $cols -or $cols -lt 1) { $cols = 80 }
-    $logoW = 46; $tagW = 49; $byW = 13
-    $lp = ' ' * [Math]::Max(0, [int](($cols - $logoW) / 2))
-    $tp = ' ' * [Math]::Max(0, [int](($cols - $tagW)  / 2))
-    $bp = ' ' * [Math]::Max(0, [int](($cols - $byW)   / 2))
-
     Write-Host ""
-    Write-Host "$lp██████╗ ██████╗  █████╗ ██╗  ██╗██╗███████╗" -ForegroundColor Cyan
-    Write-Host "$lp██╔══██╗██╔══██╗██╔══██╗╚██╗██╔╝██║██╔════╝" -ForegroundColor Cyan
-    Write-Host "$lp██████╔╝██████╔╝███████║ ╚███╔╝ ██║███████╗" -ForegroundColor Cyan
-    Write-Host "$lp██╔═══╝ ██╔══██╗██╔══██║ ██╔██╗ ██║╚════██║" -ForegroundColor Cyan
-    Write-Host "$lp██║     ██║  ██║██║  ██║██╔╝ ██╗██║███████║" -ForegroundColor Cyan
-    Write-Host "$lp╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝" -ForegroundColor Cyan
-    Write-Host "${tp}Semantic Command & Control Framework for Agents" -ForegroundColor DarkGray
-    Write-Host "${bp}by [Ø] Origin" -ForegroundColor Magenta
+    Write-Host "██████╗ ██████╗  █████╗ ██╗  ██╗██╗███████╗" -ForegroundColor Cyan
+    Write-Host "██╔══██╗██╔══██╗██╔══██╗╚██╗██╔╝██║██╔════╝" -ForegroundColor Cyan
+    Write-Host "██████╔╝██████╔╝███████║ ╚███╔╝ ██║███████╗" -ForegroundColor Cyan
+    Write-Host "██╔═══╝ ██╔══██╗██╔══██║ ██╔██╗ ██║╚════██║" -ForegroundColor Cyan
+    Write-Host "██║     ██║  ██║██║  ██║██╔╝ ██╗██║███████║" -ForegroundColor Cyan
+    Write-Host "╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝" -ForegroundColor Cyan
+    Write-Host "Semantic Command & Control Framework for Agents " -ForegroundColor DarkGray -NoNewline
+    Write-Host "by [Ø] Origin" -ForegroundColor Magenta
     Write-Host ""
 }
 
@@ -104,7 +106,8 @@ function Assert-Windows {
 function Select-Menu {
     param(
         [string]$Prompt,
-        [string[]]$Options
+        [string[]]$Options,
+        [string]$Footer = ""
     )
 
     $n = $Options.Length
@@ -113,6 +116,19 @@ function Select-Menu {
     Write-Host " (↑↓ move, enter select, q quit)" -ForegroundColor DarkGray
     Write-Host ""
     foreach ($_ in $Options) { Write-Host "" }
+
+    #
+    # Optional footer below the option list. Drawn once; the option redraw
+    # only walks back up across the option rows so the footer stays put.
+    #
+
+    $footerLines = 0
+    if ($Footer) {
+        Write-Host ""
+        Write-Host $Footer -ForegroundColor DarkGray
+        $footerLines = 2
+        [Console]::SetCursorPosition(0, [Console]::CursorTop - $footerLines)
+    }
 
     [Console]::CursorVisible = $false
     try {
@@ -133,76 +149,33 @@ function Select-Menu {
                 'DownArrow' { $sel = ($sel + 1) % $n }
                 'K'         { $sel = ($sel - 1 + $n) % $n }
                 'J'         { $sel = ($sel + 1) % $n }
-                'Enter'     { return $sel }
-                'Spacebar'  { return $sel }
-                'Q'         { [Console]::CursorVisible = $true; Write-Host ""; exit 130 }
-                'Escape'    { [Console]::CursorVisible = $true; Write-Host ""; exit 130 }
+                'Enter'     {
+                    if ($footerLines -gt 0) { [Console]::SetCursorPosition(0, [Console]::CursorTop + $footerLines) }
+                    return $sel
+                }
+                'Spacebar'  {
+                    if ($footerLines -gt 0) { [Console]::SetCursorPosition(0, [Console]::CursorTop + $footerLines) }
+                    return $sel
+                }
+                'Q'         {
+                    [Console]::CursorVisible = $true
+                    if ($footerLines -gt 0) { [Console]::SetCursorPosition(0, [Console]::CursorTop + $footerLines) }
+                    Write-Host ""; exit 130
+                }
+                'Escape'    {
+                    [Console]::CursorVisible = $true
+                    if ($footerLines -gt 0) { [Console]::SetCursorPosition(0, [Console]::CursorTop + $footerLines) }
+                    Write-Host ""; exit 130
+                }
                 default {
                     if ($key.KeyChar -match '^[1-9]$') {
                         $idx = [int]$key.KeyChar.ToString() - 1
-                        if ($idx -lt $n) { return $idx }
+                        if ($idx -lt $n) {
+                            if ($footerLines -gt 0) { [Console]::SetCursorPosition(0, [Console]::CursorTop + $footerLines) }
+                            return $idx
+                        }
                     }
                 }
-            }
-        }
-    } finally {
-        [Console]::CursorVisible = $true
-    }
-}
-
-#
-# Multi-select checkbox menu. $Initial: array of [bool] same length as $Options.
-# Returns array of [bool].
-#
-
-function MultiSelect-Menu {
-    param(
-        [string]$Prompt,
-        [string[]]$Options,
-        [bool[]]$Initial
-    )
-
-    $n = $Options.Length
-    $checked = @($Initial)
-    if ($checked.Length -lt $n) {
-        $checked = @(1..$n | ForEach-Object { $true })
-    }
-    $sel = 0
-
-    Write-Host $Prompt -NoNewline
-    Write-Host " (↑↓ move, space toggle, enter next, q quit)" -ForegroundColor DarkGray
-    Write-Host ""
-    foreach ($_ in $Options) { Write-Host "" }
-
-    [Console]::CursorVisible = $false
-    try {
-        while ($true) {
-            [Console]::SetCursorPosition(0, [Console]::CursorTop - $n)
-            for ($i = 0; $i -lt $n; $i++) {
-                $blank = "".PadRight([Console]::WindowWidth - 1)
-                [Console]::Write("`r$blank`r")
-                $mark = if ($checked[$i]) { "[x]" } else { "[ ]" }
-                $color = if ($checked[$i]) { "Cyan" } else { "DarkGray" }
-                if ($i -eq $sel) {
-                    Write-Host "  > " -NoNewline -ForegroundColor Cyan
-                    Write-Host "$mark " -NoNewline -ForegroundColor $color
-                    Write-Host "$($Options[$i])"
-                } else {
-                    Write-Host "    " -NoNewline
-                    Write-Host "$mark " -NoNewline -ForegroundColor $color
-                    Write-Host "$($Options[$i])" -ForegroundColor DarkGray
-                }
-            }
-            $key = [Console]::ReadKey($true)
-            switch ($key.Key) {
-                'UpArrow'   { $sel = ($sel - 1 + $n) % $n }
-                'DownArrow' { $sel = ($sel + 1) % $n }
-                'K'         { $sel = ($sel - 1 + $n) % $n }
-                'J'         { $sel = ($sel + 1) % $n }
-                'Spacebar'  { $checked[$sel] = -not $checked[$sel] }
-                'Enter'     { return $checked }
-                'Q'         { [Console]::CursorVisible = $true; Write-Host ""; exit 130 }
-                'Escape'    { [Console]::CursorVisible = $true; Write-Host ""; exit 130 }
             }
         }
     } finally {
@@ -242,6 +215,7 @@ function Ensure-Rust {
 }
 
 function Install-Cli {
+    Write-Section "Installing CLI"
     if (-not (Test-Command "git"))   { Write-Err "git not found. Install git from https://git-scm.com/download/win" }
     Ensure-Rust
 
@@ -315,6 +289,7 @@ function Check-Docker {
 }
 
 function Install-Service-Docker {
+    Write-Section "Installing Service (Docker)"
     Check-Docker
     Write-Info "Setting up Praxis $script:PraxisVersion in $PraxisDir..."
     if (Test-Path $PraxisDir) { Remove-Item -Recurse -Force $PraxisDir }
@@ -337,38 +312,48 @@ function Install-Service-Docker {
     Write-Host ""
 }
 
+function Print-Summary-Box {
+    param([string]$Title)
+    $inner = 46
+    $pad = [Math]::Max(0, [int](($inner - $Title.Length) / 2))
+    $lpad = ' ' * $pad
+    $rpad = ' ' * [Math]::Max(0, $inner - $Title.Length - $pad)
+    $hbar = '─' * $inner
+    Write-Host ""
+    Write-Host "  ╭$hbar╮" -ForegroundColor Green
+    Write-Host "  │" -ForegroundColor Green -NoNewline
+    Write-Host "$lpad" -NoNewline
+    Write-Host "$Title" -ForegroundColor Green -NoNewline
+    Write-Host "$rpad" -NoNewline
+    Write-Host "│" -ForegroundColor Green
+    Write-Host "  ╰$hbar╯" -ForegroundColor Green
+    Write-Host ""
+}
+
 function Print-Docker-Summary {
+    Print-Summary-Box "Praxis $script:PraxisVersion (docker) ready"
+    Write-Host "  Web UI              " -NoNewline; Write-Host "http://localhost:8080"
+    Write-Host "  RabbitMQ Management " -NoNewline; Write-Host "http://localhost:15672 " -NoNewline; Write-Host "(praxis / praxis)" -ForegroundColor DarkGray
+    Write-Host "  Installation        $PraxisDir"
     Write-Host ""
-    Write-Host "==============================================" -ForegroundColor Green
-    Write-Host "  Praxis $script:PraxisVersion (docker) is ready"   -ForegroundColor Green
-    Write-Host "==============================================" -ForegroundColor Green
+    Write-Host "  Inside the container (systemd-managed)" -ForegroundColor Cyan
+    Write-Host "    $script:ComposeCmd exec praxis praxisctl status"
+    Write-Host "    $script:ComposeCmd exec praxis praxisctl webserver disable"
+    Write-Host "    $script:ComposeCmd exec praxis praxisctl set-rabbitmqurl <url>"
     Write-Host ""
-    Write-Host "Web UI:              http://localhost:8080"
-    Write-Host "RabbitMQ Management: http://localhost:15672 (praxis / praxis)"
-    Write-Host "Installation:        $PraxisDir"
-    Write-Host ""
-    Write-Host "Inside the container (systemd-managed):" -ForegroundColor Cyan
-    Write-Host "  $script:ComposeCmd exec praxis praxisctl status"
-    Write-Host "  $script:ComposeCmd exec praxis praxisctl webserver disable"
-    Write-Host "  $script:ComposeCmd exec praxis praxisctl set rabbitmq-url <url>"
-    Write-Host ""
-    Write-Host "Compose lifecycle:" -ForegroundColor Cyan
-    Write-Host "  cd $PraxisDir"
-    Write-Host "  $script:ComposeCmd logs -f"
-    Write-Host "  $script:ComposeCmd down"
-    Write-Host "  $script:ComposeCmd up -d"
+    Write-Host "  Compose lifecycle" -ForegroundColor Cyan
+    Write-Host "    cd $PraxisDir"
+    Write-Host "    $script:ComposeCmd logs -f"
+    Write-Host "    $script:ComposeCmd down"
+    Write-Host "    $script:ComposeCmd up -d"
     Write-Host ""
 }
 
 function Print-Cli-Summary {
-    Write-Host ""
-    Write-Host "==============================================" -ForegroundColor Green
-    Write-Host "  Praxis CLI installed"                            -ForegroundColor Green
-    Write-Host "==============================================" -ForegroundColor Green
-    Write-Host ""
-    Write-Host "Run:                 praxis"
-    Write-Host "Set rabbitmq URL:    praxis set-rabbitmqurl amqp://praxis:praxis@host:5672"
-    Write-Host "Config file:         $env:USERPROFILE\.config\praxis\config (or %APPDATA%\praxis\config)"
+    Print-Summary-Box "Praxis CLI installed"
+    Write-Host "  Run          praxis"
+    Write-Host "  Config file  $env:USERPROFILE\.config\praxis\config " -NoNewline
+    Write-Host "(or %APPDATA%\praxis\config)" -ForegroundColor DarkGray
     Write-Host ""
 }
 
@@ -419,22 +404,30 @@ function Remove-All {
 #
 
 function Interactive-Install {
-    $checked = MultiSelect-Menu `
-        -Prompt "Choose components to install" `
+    $idx = Select-Menu `
+        -Prompt "Install service as" `
         -Options @(
-            "service   - Praxis service + web",
-            "cli       - Praxis CLI"
+            "Docker install   - rabbitmq + service in containers",
+            "Client only      - install only the praxis CLI",
+            "Cancel"
         ) `
-        -Initial @($true, $true)
-
+        -Footer "Note: client will always be installed natively."
     Write-Host ""
-    if (-not $checked[0] -and -not $checked[1]) { Write-Err "Nothing selected." }
 
-    Get-LatestVersion
-
-    if ($checked[1]) { Install-Cli }
-    if ($checked[0]) { Install-Service-Docker; Print-Docker-Summary }
-    if ($checked[1] -and -not $checked[0]) { Print-Cli-Summary }
+    switch ($idx) {
+        0 {
+            Get-LatestVersion
+            Install-Cli
+            Install-Service-Docker
+            Print-Docker-Summary
+        }
+        1 {
+            Get-LatestVersion
+            Install-Cli
+            Print-Cli-Summary
+        }
+        2 { Write-Err "Aborted." }
+    }
 }
 
 #

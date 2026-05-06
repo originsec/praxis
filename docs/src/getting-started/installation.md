@@ -134,7 +134,6 @@ praxisctl restart
 praxisctl enable      # auto-start at boot
 praxisctl disable
 praxisctl status
-praxisctl logs -f
 
 # Web server (praxis-web.service)
 praxisctl webserver start
@@ -142,7 +141,6 @@ praxisctl webserver stop
 praxisctl webserver enable
 praxisctl webserver disable
 praxisctl webserver status
-praxisctl webserver logs -f
 
 # Configuration
 praxisctl set rabbitmq-url amqp://praxis:praxis@localhost:5672

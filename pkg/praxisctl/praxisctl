@@ -28,10 +28,18 @@ success() { printf '%s[OK]%s %s\n'    "$GREEN" "$NC" "$1"; }
 has_cmd()      { command -v "$1" >/dev/null 2>&1; }
 have_systemd() { has_cmd systemctl && [[ -d /run/systemd/system ]]; }
 
+#
+# Re-exec the script under sudo when we need root. We must use the
+# original argv (captured in main) — passing the function-local "$@"
+# loses the leading subcommand (e.g. `webserver`) and ends up running
+# the wrong systemd unit.
+#
+
+ORIGINAL_ARGS=()
 require_root() {
     if [[ $EUID -ne 0 ]]; then
         if has_cmd sudo; then
-            exec sudo -E "$0" "$@"
+            exec sudo -E "$0" "${ORIGINAL_ARGS[@]}"
         else
             err "praxisctl must run as root (sudo not found)."
         fi
@@ -49,7 +57,6 @@ ${BOLD}Service control${NC}
   praxisctl enable                    Enable praxis-service at boot
   praxisctl disable                   Disable praxis-service at boot
   praxisctl status                    Show praxis-service status
-  praxisctl logs [-f]                 Show praxis-service logs
 
 ${BOLD}Web server control${NC}
   praxisctl webserver start
@@ -58,11 +65,10 @@ ${BOLD}Web server control${NC}
   praxisctl webserver enable
   praxisctl webserver disable
   praxisctl webserver status
-  praxisctl webserver logs [-f]
 
 ${BOLD}Configuration${NC}
-  praxisctl set rabbitmq-url <url>    Set PRAXIS_RABBITMQ_URL in $PRAXIS_ENV_FILE
-  praxisctl get rabbitmq-url          Show PRAXIS_RABBITMQ_URL
+  praxisctl set-rabbitmqurl <url>     Set PRAXIS_RABBITMQ_URL in $PRAXIS_ENV_FILE
+  praxisctl get-rabbitmqurl           Show PRAXIS_RABBITMQ_URL
   praxisctl set <key> <value>         Set arbitrary key in env file
   praxisctl get <key>                 Get arbitrary key from env file
   praxisctl config show               Show full env file contents
@@ -121,22 +127,26 @@ get_env_key() {
     grep -E "^[[:space:]]*${key}=" "$PRAXIS_ENV_FILE" | tail -n1 | sed -E "s/^[[:space:]]*${key}=//"
 }
 
+cmd_set_rabbitmqurl() {
+    require_root
+    local url="${1:-}"
+    [[ -n "$url" ]] || err "usage: praxisctl set-rabbitmqurl <url>"
+    set_env_key PRAXIS_RABBITMQ_URL "$url"
+    success "PRAXIS_RABBITMQ_URL=$url"
+    warn "Restart services to apply: praxisctl restart && praxisctl webserver restart"
+}
+
+cmd_get_rabbitmqurl() {
+    get_env_key PRAXIS_RABBITMQ_URL
+}
+
 cmd_set() {
     case "${1:-}" in
-        rabbitmq-url|rabbitmq_url)
-            shift
-            require_root "$@"
-            local url="${1:-}"
-            [[ -n "$url" ]] || err "usage: praxisctl set rabbitmq-url <url>"
-            set_env_key PRAXIS_RABBITMQ_URL "$url"
-            success "PRAXIS_RABBITMQ_URL=$url"
-            warn "Restart services to apply: praxisctl restart && praxisctl webserver restart"
-            ;;
         "")
             err "usage: praxisctl set <key> <value>"
             ;;
         *)
-            require_root "$@"
+            require_root
             local key="$1" value="${2:-}"
             [[ -n "$value" ]] || err "usage: praxisctl set <key> <value>"
             set_env_key "$key" "$value"
@@ -147,9 +157,8 @@ cmd_set() {
 
 cmd_get() {
     case "${1:-}" in
-        rabbitmq-url|rabbitmq_url) get_env_key PRAXIS_RABBITMQ_URL ;;
         "") err "usage: praxisctl get <key>" ;;
-        *) get_env_key "$1" ;;
+        *)  get_env_key "$1" ;;
     esac
 }
 
@@ -163,7 +172,7 @@ cmd_config() {
             fi
             ;;
         edit)
-            require_root "$@"
+            require_root
             ensure_env_file
             "${EDITOR:-vi}" "$PRAXIS_ENV_FILE"
             ;;
@@ -183,18 +192,14 @@ cmd_config() {
 unit_action() {
     local action="$1" unit="$2"
     have_systemd || err "systemd not available — cannot control $unit"
-    require_root "$@"
     case "$action" in
         start|stop|restart|enable|disable)
+            require_root
             systemctl "$action" "$unit"
             success "$action $unit"
             ;;
         status)
             systemctl --no-pager status "$unit" || true
-            ;;
-        logs)
-            shift 2
-            journalctl -u "$unit" "$@"
             ;;
         *)
             err "unknown action $action"
@@ -210,7 +215,7 @@ cmd_webserver() {
     local action="${1:-status}"
     shift || true
     case "$action" in
-        start|stop|restart|enable|disable|status|logs)
+        start|stop|restart|enable|disable|status)
             unit_action "$action" "$WEB_UNIT" "$@"
             ;;
         ""|help|-h|--help)
@@ -229,15 +234,18 @@ cmd_version() {
 }
 
 main() {
+    ORIGINAL_ARGS=("$@")
     local cmd="${1:-help}"
     shift || true
     case "$cmd" in
-        start|stop|restart|enable|disable|status|logs)
+        start|stop|restart|enable|disable|status)
             unit_action "$cmd" "$SERVICE_UNIT" "$@"
             ;;
         webserver|web)
             cmd_webserver "$@"
             ;;
+        set-rabbitmqurl) cmd_set_rabbitmqurl "$@" ;;
+        get-rabbitmqurl) cmd_get_rabbitmqurl "$@" ;;
         set)        cmd_set "$@" ;;
         get)        cmd_get "$@" ;;
         config)     cmd_config "$@" ;;
