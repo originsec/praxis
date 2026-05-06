@@ -39,22 +39,13 @@ yay -S praxis-bin    # prebuilt release
 
 ### Use it
 
-Drive Praxis through the `praxis` TUI:
+Launch the TUI:
 
 ```bash
-praxis                                                       # interactive TUI
-praxis set-rabbitmqurl amqp://praxis:praxis@localhost:5672   # point CLI at the service
+praxis
 ```
 
-On a native Linux install, control the service itself with `praxisctl`:
-
-```bash
-praxisctl status
-praxisctl start | stop | restart
-praxisctl set-rabbitmqurl <url>
-```
-
-Configure LLM providers and everything else from the TUI.
+Configure LLM providers and everything else from the TUI. On a native Linux install, control the service itself with `praxisctl status` / `praxisctl start | stop | restart`.
 
 > Detailed install options, cross-compile recipes, and deployment patterns: [full documentation](https://originsec.github.io/praxis/).
 
