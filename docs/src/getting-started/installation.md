@@ -4,25 +4,43 @@ There are a few ways to get Praxis running. The one-liner scripts are the easies
 
 ## Quick Install (One-Liner)
 
-These scripts automatically fetch the **latest release** and set everything up.
+A single script per platform fetches the **latest release** and walks you through an interactive menu.
 
-### Docker (Recommended)
+### Linux / macOS
 
 ```bash
-# Linux/macOS
-curl -fsSL https://praxis.originhq.com/docker.sh | bash
+curl -fsSL https://praxis.originhq.com/install.sh | bash
 ```
+
+The installer detects your platform and offers an arrow-key menu:
+
+- **Native install** — builds from source and sets up a systemd user service (Linux) or runnable binaries (macOS).
+- **Docker install** — clones the release and runs `docker compose up --build -d`.
+- **AUR install** — offered automatically on Arch Linux. Uses `yay` or `paru` if available, otherwise falls back to a manual `makepkg` build.
+
+Use `↑`/`↓` (or `j`/`k`) to navigate, `Enter` to select, `1`–`9` to quick-pick, `q` to abort.
+
+For non-interactive use, pass a flag:
+
+```bash
+curl -fsSL https://praxis.originhq.com/install.sh | bash -s -- --native
+curl -fsSL https://praxis.originhq.com/install.sh | bash -s -- --docker
+curl -fsSL https://praxis.originhq.com/install.sh | bash -s -- --aur
+```
+
+### Windows
+
+Windows is supported via Docker only.
 
 ```powershell
-# Windows
-irm https://praxis.originhq.com/docker.ps1 | iex
+irm https://praxis.originhq.com/install.ps1 | iex
 ```
 
-This clones the latest release, builds with Docker Compose, and starts everything.
+The script verifies you are on Windows, checks Docker Desktop and Docker Compose, then clones the release and runs `docker compose up --build -d`. It exposes the same arrow-key menu and `-Docker` / `-Remove` / `-Help` flags. If Docker is not installed, install [Docker Desktop](https://www.docker.com/products/docker-desktop/) first.
 
 ### Prerequisites
 
-RabbitMQ must be running before starting Praxis. If you're not using Docker (which includes RabbitMQ), install and start it separately:
+RabbitMQ must be running before starting Praxis. The Docker flow includes RabbitMQ automatically. For a native install, install and start it separately:
 
 ```bash
 # Linux
@@ -32,84 +50,52 @@ sudo systemctl start rabbitmq-server
 brew services start rabbitmq
 ```
 
-### Arch Linux (AUR)
+### What native install lays down (Linux/macOS)
 
-```bash
-yay -S praxis
-```
+- `~/.praxis/bin/praxis_service` — backend service
+- `~/.praxis/bin/praxis_web` — web server + frontend
+- `~/.praxis/bin/praxis_cli` — command-line interface
+- `~/.praxis/bin/nodes/<platform>/praxis_node` — node agent (plus a Windows cross-compiled `.exe` if Docker is available)
+- Systemd user services on Linux for automatic startup
+- PATH is configured automatically
 
-Or with `makepkg`:
+### What AUR install lays down
 
-```bash
-git clone https://aur.archlinux.org/praxis.git
-cd praxis
-makepkg -si
-```
+- `/usr/bin/praxis_service`, `/usr/bin/praxis_web`, `/usr/bin/praxis_cli` — binaries
+- `/usr/share/praxis/nodes/praxis_node_linux` — node agent for deployment to targets
+- Systemd system services (runs as a dedicated `praxis` user)
+- `/etc/praxis/env` — configuration
 
-This installs:
-- `/usr/bin/praxis_service`, `/usr/bin/praxis_web`, `/usr/bin/praxis_cli` - binaries
-- `/usr/share/praxis/nodes/praxis_node_linux` - node agent for deployment to targets
-- Systemd system services (runs as dedicated `praxis` user)
-- `/etc/praxis/env` - configuration
-
-After installing:
+After the AUR install:
 
 ```bash
 sudo systemctl enable --now rabbitmq
 sudo systemctl enable --now praxis
 ```
 
-### Native Install (Linux/macOS)
-
-```bash
-curl -fsSL https://praxis.originhq.com/install.sh | bash
-```
-
-This installs Rust if needed, builds from source, and sets up:
-- `~/.praxis/bin/praxis_service` - backend service
-- `~/.praxis/bin/praxis_web` - web server + frontend
-- `~/.praxis/bin/praxis_cli` - command-line interface
-- `~/.praxis/bin/nodes/<platform>/praxis_node` - node agent
-- Systemd user services (Linux) for automatic startup
-- PATH is configured automatically
-
-### Native Install (Windows)
-
-```powershell
-irm https://praxis.originhq.com/install.ps1 | iex
-```
-
 ### Removing
 
-To uninstall Praxis (stops services, removes binaries, config, and PATH entries):
-
 ```bash
-# Linux/macOS
+# Linux/macOS — removes systemd units, binaries, config, and PATH entries
 curl -fsSL https://praxis.originhq.com/install.sh | bash -s -- --remove
 ```
 
 ```powershell
-# Windows
-irm https://praxis.originhq.com/install.ps1 | iex -- --remove
+# Windows — stops containers and removes the install directory
+iex "& { $(irm https://praxis.originhq.com/install.ps1) } -Remove"
 ```
 
 ### Pinning a Specific Version
 
-To install a specific version instead of latest:
+Set `PRAXIS_VERSION` before invoking the installer:
 
 ```bash
-# Docker (Linux/macOS)
-PRAXIS_VERSION=v0.1.0 curl -fsSL https://praxis.originhq.com/docker.sh | bash
-
-# Native (Linux/macOS)
+# Linux/macOS
 PRAXIS_VERSION=v0.1.0 curl -fsSL https://praxis.originhq.com/install.sh | bash
 ```
 
 ```powershell
-# Docker (Windows)
-$env:PRAXIS_VERSION = "v0.1.0"; irm https://praxis.originhq.com/docker.ps1 | iex
-
-# Native (Windows)
+# Windows
 $env:PRAXIS_VERSION = "v0.1.0"; irm https://praxis.originhq.com/install.ps1 | iex
 ```
 

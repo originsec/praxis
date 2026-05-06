@@ -23,16 +23,15 @@ jobs:
 
       - name: Copy scripts to praxis_site
         run: |
-          cp scripts/docker.sh praxis_site/public/
-          cp scripts/docker.ps1 praxis_site/public/
           cp scripts/install.sh praxis_site/public/
           cp scripts/install.ps1 praxis_site/public/
+          rm -f praxis_site/public/docker.sh praxis_site/public/docker.ps1
 
       - name: Commit and push
         working-directory: praxis_site
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add public/docker.sh public/docker.ps1 public/install.sh public/install.ps1
+          git add -A public/install.sh public/install.ps1 public/docker.sh public/docker.ps1
           git diff --staged --quiet || git commit -m "Sync install scripts from praxis ${{ github.ref_name }}"
           git push origin main

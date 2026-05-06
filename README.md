@@ -1,4 +1,4 @@
-<p align="center"><code>curl -fsSL https://praxis.originhq.com/install.sh | bash</code><br />or <code>docker run originsec/praxis</code><br />or <code>yay -S praxis</code></p>
+<p align="center"><code>curl -fsSL https://praxis.originhq.com/install.sh | bash</code><br />or <code>irm https://praxis.originhq.com/install.ps1 | iex</code> (Windows)<br />or <code>yay -S praxis</code> (Arch)</p>
 
 <p align="center"><strong>Praxis</strong> is an open-source research platform for discovering, controlling, and orchestrating AI agents on endpoints.</p>
 
@@ -10,25 +10,25 @@
 
 ### Install
 
-**Linux/macOS:**
+**Linux / macOS:**
 ```bash
 curl -fsSL https://praxis.originhq.com/install.sh | bash
 ```
 
-**Arch Linux (AUR):**
-```bash
-yay -S praxis
-```
+Launches an interactive menu with arrow-key selection:
+
+- **Native install** &mdash; build and run as a user service (systemd on Linux)
+- **Docker install** &mdash; run via `docker compose`
+- **AUR install** &mdash; offered automatically on Arch Linux (uses `yay` / `paru` or falls back to `makepkg`)
+
+You can skip the menu with `--native`, `--docker`, `--aur`, or `--remove`.
 
 **Windows:**
 ```powershell
 irm https://praxis.originhq.com/install.ps1 | iex
 ```
 
-**Docker:**
-```bash
-curl -fsSL https://praxis.originhq.com/docker.sh | bash
-```
+Windows is supported via Docker only. The script detects Windows, checks Docker / Docker Compose, then runs Praxis via `docker compose up --build -d`.
 
 Then open <http://localhost:8080> in your browser.
 
