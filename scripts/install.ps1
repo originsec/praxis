@@ -49,15 +49,27 @@ function Test-Command {
 }
 
 function Print-Banner {
+    $cols   = try { [Console]::WindowWidth } catch { 80 }
+    if (-not $cols -or $cols -lt 1) { $cols = 80 }
+    $logoW  = 46
+    $tagW   = 49
+    $byW    = 13
+    $logoPad = [Math]::Max(0, [int](($cols - $logoW) / 2))
+    $tagPad  = [Math]::Max(0, [int](($cols - $tagW)  / 2))
+    $byPad   = [Math]::Max(0, [int](($cols - $byW)   / 2))
+    $lp = ' ' * $logoPad
+    $tp = ' ' * $tagPad
+    $bp = ' ' * $byPad
+
     Write-Host ""
-    Write-Host "   ██████╗ ██████╗  █████╗ ██╗  ██╗██╗███████╗" -ForegroundColor Cyan
-    Write-Host "   ██╔══██╗██╔══██╗██╔══██╗╚██╗██╔╝██║██╔════╝" -ForegroundColor Cyan
-    Write-Host "   ██████╔╝██████╔╝███████║ ╚███╔╝ ██║███████╗" -ForegroundColor Cyan
-    Write-Host "   ██╔═══╝ ██╔══██╗██╔══██║ ██╔██╗ ██║╚════██║" -ForegroundColor Cyan
-    Write-Host "   ██║     ██║  ██║██║  ██║██╔╝ ██╗██║███████║" -ForegroundColor Cyan
-    Write-Host "   ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝" -ForegroundColor Cyan
-    Write-Host "     Semantic Command & Control Framework for Agents" -ForegroundColor DarkGray
-    Write-Host "                  by [Ø] Origin" -ForegroundColor Magenta
+    Write-Host "$lp██████╗ ██████╗  █████╗ ██╗  ██╗██╗███████╗" -ForegroundColor Cyan
+    Write-Host "$lp██╔══██╗██╔══██╗██╔══██╗╚██╗██╔╝██║██╔════╝" -ForegroundColor Cyan
+    Write-Host "$lp██████╔╝██████╔╝███████║ ╚███╔╝ ██║███████╗" -ForegroundColor Cyan
+    Write-Host "$lp██╔═══╝ ██╔══██╗██╔══██║ ██╔██╗ ██║╚════██║" -ForegroundColor Cyan
+    Write-Host "$lp██║     ██║  ██║██║  ██║██╔╝ ██╗██║███████║" -ForegroundColor Cyan
+    Write-Host "$lp╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝" -ForegroundColor Cyan
+    Write-Host "${tp}Semantic Command & Control Framework for Agents" -ForegroundColor DarkGray
+    Write-Host "${bp}by [Ø] Origin" -ForegroundColor Magenta
     Write-Host ""
 }
 

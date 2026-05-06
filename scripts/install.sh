@@ -60,16 +60,32 @@ error()   { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 has_cmd() { command -v "$1" &> /dev/null; }
 
 print_banner() {
+    local cols logo_w=46 tag_w=49 by_w=13
+    cols=$(tput cols 2>/dev/null || echo 80)
+    local lp=$(( (cols - logo_w) / 2 ))
+    local tp=$(( (cols - tag_w) / 2 ))
+    local bp=$(( (cols - by_w) / 2 ))
+    (( lp < 0 )) && lp=0
+    (( tp < 0 )) && tp=0
+    (( bp < 0 )) && bp=0
+    local lpad tpad bpad
+    lpad=$(printf '%*s' "$lp" '')
+    tpad=$(printf '%*s' "$tp" '')
+    bpad=$(printf '%*s' "$bp" '')
+
     echo
-    echo -e "${CYAN}${BOLD}"
-    echo '   ██████╗ ██████╗  █████╗ ██╗  ██╗██╗███████╗'
-    echo '   ██╔══██╗██╔══██╗██╔══██╗╚██╗██╔╝██║██╔════╝'
-    echo '   ██████╔╝██████╔╝███████║ ╚███╔╝ ██║███████╗'
-    echo '   ██╔═══╝ ██╔══██╗██╔══██║ ██╔██╗ ██║╚════██║'
-    echo '   ██║     ██║  ██║██║  ██║██╔╝ ██╗██║███████║'
-    echo '   ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝'
-    echo -e "${NC}${DIM}     Semantic Command & Control Framework for Agents${NC}"
-    echo -e "                  ${MAGENTA}by [Ø] Origin${NC}"
+    printf '%b' "${CYAN}${BOLD}"
+    echo "${lpad}██████╗ ██████╗  █████╗ ██╗  ██╗██╗███████╗"
+    echo "${lpad}██╔══██╗██╔══██╗██╔══██╗╚██╗██╔╝██║██╔════╝"
+    echo "${lpad}██████╔╝██████╔╝███████║ ╚███╔╝ ██║███████╗"
+    echo "${lpad}██╔═══╝ ██╔══██╗██╔══██║ ██╔██╗ ██║╚════██║"
+    echo "${lpad}██║     ██║  ██║██║  ██║██╔╝ ██╗██║███████║"
+    echo "${lpad}╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝"
+    printf '%b' "${NC}"
+    printf '%b
+' "${tpad}${DIM}Semantic Command & Control Framework for Agents${NC}"
+    printf '%b
+' "${bpad}${MAGENTA}by [Ø] Origin${NC}"
     echo
 }
 
