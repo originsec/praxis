@@ -594,8 +594,10 @@ install_service_docker() {
         compose_dir="$PRAXIS_DOCKER_DIR"
     fi
 
-    info "Building and starting (this may take a few minutes on first run)..."
-    ( cd "$compose_dir" && $COMPOSE_CMD up --build -d )
+    info "Building (this may take a few minutes on first run)..."
+    ( cd "$compose_dir" && $COMPOSE_CMD build )
+    info "Starting..."
+    ( cd "$compose_dir" && $COMPOSE_CMD up -d )
     success "Praxis is running"
     echo ""
 
