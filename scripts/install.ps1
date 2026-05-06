@@ -111,7 +111,6 @@ function Select-Menu {
     $sel = 0
 
     Write-Host $Prompt
-    Write-Host "  (Up/Down arrows · Enter to select · Q to quit)" -ForegroundColor DarkGray
 
     # Reserve lines for each option.
     foreach ($_ in $Options) { Write-Host "" }

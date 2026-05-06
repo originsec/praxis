@@ -741,9 +741,7 @@ interactive_menu() {
     options+=("Quit")
     actions+=("quit")
 
-    local prompt
-    prompt="${BOLD}Choose how to install Praxis${NC}  ${DIM}(↑/↓ arrows · Enter to select · q to quit)${NC}\n"
-    select_menu "$prompt" "${options[@]}"
+    select_menu "${BOLD}Choose how to install Praxis${NC}\n" "${options[@]}"
 
     local action="${actions[$SELECTED]}"
     echo
