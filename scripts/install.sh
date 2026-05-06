@@ -22,6 +22,9 @@
 #   --remove                     Remove all native + docker installs
 #   --help                       Show usage
 #
+# --cli and --service can be combined (e.g. --service docker --cli) to
+# install both in a single run.
+#
 
 set -e
 
@@ -144,6 +147,7 @@ Flags:
   --remove                    Remove a previous install (native + docker)
   --help                      Show this message
 
+--cli and --service can be combined (e.g. --service docker --cli).
 If no flag is given, an interactive menu is shown.
 EOF
 }
@@ -869,50 +873,72 @@ main() {
     detect_platform
 
     #
-    # Pre-scan for modifier flags (currently just --with-win-node) so
-    # they can be combined with --service / --cli in any order.
+    # Parse flags. --cli and --service can be combined to install both in
+    # a single invocation; service runs first, then CLI.
     #
 
-    local args=()
-    for a in "$@"; do
-        case "$a" in
-            --with-win-node) WITH_WIN_NODE=1 ;;
-            *)               args+=("$a") ;;
+    local do_cli=0
+    local do_remove=0
+    local service_mode=""
+    local show_help=0
+
+    while (( $# )); do
+        case "$1" in
+            --help|-h)        show_help=1; shift ;;
+            --remove)         do_remove=1; shift ;;
+            --cli)            do_cli=1; shift ;;
+            --with-win-node)  WITH_WIN_NODE=1; shift ;;
+            --service)
+                service_mode="${2:-}"
+                [[ -n "$service_mode" ]] || error "--service requires native|docker"
+                case "$service_mode" in
+                    native|docker) ;;
+                    *) error "Unknown service mode: $service_mode" ;;
+                esac
+                shift 2 ;;
+            "")               shift ;;
+            *)                usage; exit 1 ;;
         esac
     done
-    set -- "${args[@]}"
 
-    case "${1:-}" in
-        --help|-h)
-            usage; exit 0 ;;
-        --remove)
-            remove_all; exit 0 ;;
-        --cli)
-            (( WITH_WIN_NODE )) && warn "--with-win-node has no effect with --cli; ignoring."
-            get_latest_version
-            install_cli_native
-            print_cli_summary
-            exit 0 ;;
-        --service)
-            local mode="${2:-}"
-            [[ -n "$mode" ]] || error "--service requires native|docker"
-            if (( WITH_WIN_NODE )) && [[ "$mode" != "native" ]]; then
-                warn "--with-win-node only applies to --service native; ignoring."
-                WITH_WIN_NODE=0
-            fi
-            get_latest_version
-            case "$mode" in
-                native) install_service_native; print_native_summary ;;
-                docker) install_service_docker; print_docker_summary ;;
-                *) error "Unknown service mode: $mode" ;;
-            esac
-            exit 0 ;;
-        "")
-            (( WITH_WIN_NODE )) && warn "--with-win-node has no effect in interactive mode; ignoring."
-            interactive_install ;;
-        *)
-            usage; exit 1 ;;
-    esac
+    if (( show_help )); then
+        usage; exit 0
+    fi
+
+    if (( do_remove )); then
+        if (( do_cli )) || [[ -n "$service_mode" ]]; then
+            error "--remove cannot be combined with --cli or --service"
+        fi
+        remove_all; exit 0
+    fi
+
+    if (( WITH_WIN_NODE )) && [[ -n "$service_mode" && "$service_mode" != "native" ]]; then
+        warn "--with-win-node only applies to --service native; ignoring."
+        WITH_WIN_NODE=0
+    fi
+    if (( WITH_WIN_NODE )) && [[ -z "$service_mode" ]]; then
+        warn "--with-win-node has no effect without --service native; ignoring."
+        WITH_WIN_NODE=0
+    fi
+
+    if [[ -z "$service_mode" ]] && (( ! do_cli )); then
+        interactive_install
+        return
+    fi
+
+    get_latest_version
+
+    if [[ -n "$service_mode" ]]; then
+        case "$service_mode" in
+            native) install_service_native; print_native_summary ;;
+            docker) install_service_docker; print_docker_summary ;;
+        esac
+    fi
+
+    if (( do_cli )); then
+        install_cli_native
+        print_cli_summary
+    fi
 }
 
 main "$@"
