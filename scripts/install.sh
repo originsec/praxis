@@ -650,16 +650,72 @@ remove_native() {
 }
 
 remove_docker() {
-    if [[ -d "$PRAXIS_DOCKER_DIR" ]]; then
-        info "Removing docker install at $PRAXIS_DOCKER_DIR..."
-        if has_cmd docker; then
-            ( cd "$PRAXIS_DOCKER_DIR" && \
-                ( docker compose down -v 2>/dev/null || docker-compose down -v 2>/dev/null || true ) )
+    local removed=0
+
+    if has_cmd docker; then
+        local compose_cmd=""
+        if docker compose version >/dev/null 2>&1; then
+            compose_cmd="docker compose"
+        elif has_cmd docker-compose; then
+            compose_cmd="docker-compose"
         fi
+
+        #
+        # Tear down by compose project name regardless of where the compose
+        # file lives — covers both local-checkout installs and the managed
+        # ~/.praxis-docker install.
+        #
+        if [[ -n "$compose_cmd" ]]; then
+            local projects
+            projects=$(docker ps -a --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null \
+                | sort -u | grep -E '^(praxis|praxis-docker)$' || true)
+            for project in $projects; do
+                local project_dir
+                project_dir=$(docker ps -a \
+                    --filter "label=com.docker.compose.project=$project" \
+                    --format '{{.Label "com.docker.compose.project.working_dir"}}' \
+                    2>/dev/null | head -n1)
+                info "Stopping docker compose project '$project'${project_dir:+ ($project_dir)}..."
+                if [[ -n "$project_dir" && -f "$project_dir/docker-compose.yml" ]]; then
+                    ( cd "$project_dir" && $compose_cmd down -v --remove-orphans --rmi local 2>/dev/null || true )
+                else
+                    docker compose -p "$project" down -v --remove-orphans --rmi local 2>/dev/null \
+                        || docker-compose -p "$project" down -v --remove-orphans --rmi local 2>/dev/null \
+                        || true
+                fi
+                removed=1
+            done
+
+            #
+            # Final sweep: any leftover containers/volumes/networks/images
+            # tagged with the praxis compose project (in case the compose
+            # tear-down missed something or labels are inconsistent).
+            #
+            local stragglers
+            stragglers=$(docker ps -aq --filter 'label=com.docker.compose.project=praxis' 2>/dev/null)
+            [[ -n "$stragglers" ]] && docker rm -f $stragglers >/dev/null 2>&1 || true
+            local vols
+            vols=$(docker volume ls -q --filter 'label=com.docker.compose.project=praxis' 2>/dev/null)
+            [[ -n "$vols" ]] && docker volume rm $vols >/dev/null 2>&1 || true
+            local nets
+            nets=$(docker network ls -q --filter 'label=com.docker.compose.project=praxis' 2>/dev/null)
+            [[ -n "$nets" ]] && docker network rm $nets >/dev/null 2>&1 || true
+            local imgs
+            imgs=$(docker images -q 'praxis-praxis' 2>/dev/null; docker images -q 'praxis-docker-praxis' 2>/dev/null)
+            [[ -n "$imgs" ]] && docker rmi -f $imgs >/dev/null 2>&1 || true
+        fi
+    fi
+
+    if [[ -d "$PRAXIS_DOCKER_DIR" ]]; then
+        info "Removing $PRAXIS_DOCKER_DIR..."
         rm -rf "$PRAXIS_DOCKER_DIR"
+        removed=1
+    fi
+
+    if (( removed )); then
         success "Docker install removed"
     else
-        info "No docker install at $PRAXIS_DOCKER_DIR"
+        info "No docker install found"
     fi
 }
 
