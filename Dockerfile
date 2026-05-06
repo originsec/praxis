@@ -61,7 +61,7 @@ RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
         cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_node && \
         cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_node --target x86_64-pc-windows-gnu; \
     fi && \
-    cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_service -p praxis_cli
+    cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_service
 
 # ==============================================================================
 # Stage 4: Build application (only recompiles on source changes)
@@ -83,7 +83,7 @@ RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
         touch "target/$CARGO_PROFILE/praxis_node" "target/x86_64-pc-windows-gnu/$CARGO_PROFILE/praxis_node.exe"; \
     fi
 
-RUN cargo build --profile "$CARGO_PROFILE" -p praxis_service -p praxis_cli
+RUN cargo build --profile "$CARGO_PROFILE" -p praxis_service
 
 # ==============================================================================
 # Stage 6: Runtime image (systemd as PID 1)
@@ -141,8 +141,6 @@ RUN groupadd -r praxis && \
 #
 
 COPY --from=builder /build/target/${CARGO_PROFILE}/praxis_service /usr/local/bin/
-COPY --from=builder /build/target/${CARGO_PROFILE}/praxis_cli     /usr/local/bin/
-RUN ln -sf praxis_cli /usr/local/bin/praxis
 
 #
 # Node binaries (for download / deployment to targets).
@@ -158,7 +156,7 @@ COPY --from=builder /build/target/x86_64-pc-windows-gnu/${CARGO_PROFILE}/praxis_
 COPY pkg/systemd/praxis-service.service /etc/systemd/system/praxis-service.service
 COPY pkg/systemd/praxis.env.example     /etc/praxis/env
 COPY pkg/praxisctl/praxisctl            /usr/local/bin/praxisctl
-RUN chmod +x /usr/local/bin/praxisctl /usr/local/bin/praxis_service /usr/local/bin/praxis_cli
+RUN chmod +x /usr/local/bin/praxisctl /usr/local/bin/praxis_service
 
 #
 # Wait-for-rabbitmq oneshot so praxis-service doesn't crash-loop

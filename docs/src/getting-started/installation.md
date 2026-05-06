@@ -182,7 +182,7 @@ The web server is not built into or run by the docker image — interact with Pr
 
 ### Getting the CLI from Docker
 
-The CLI is built into the image. On Linux/macOS, install it natively via the installer (`--cli`); inside the container itself, `praxis` is already on `PATH`.
+The CLI is **not** built into the image — install it on the host with the installer (`--cli` / `Client only`).
 
 ## Building from Source
 
