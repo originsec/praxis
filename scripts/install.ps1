@@ -354,8 +354,8 @@ function Print-Cli-Summary {
     Write-Host "(or %APPDATA%\praxis\config)" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  CLI" -ForegroundColor Cyan
-    Write-Host "    praxis                       " -NoNewline; Write-Host "# interactive TUI" -ForegroundColor DarkGray
-    Write-Host "    praxis set-rabbitmqurl <url> " -NoNewline; Write-Host "# point CLI at a praxis service" -ForegroundColor DarkGray
+    Write-Host "    praxis                      " -NoNewline; Write-Host "# interactive TUI" -ForegroundColor DarkGray
+    Write-Host "    praxis set-rabbitmqurl amqp://praxis:praxis@localhost:5672"
     Write-Host ""
 }
 

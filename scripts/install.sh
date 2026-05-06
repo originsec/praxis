@@ -528,8 +528,8 @@ print_native_summary() {
     printf "    praxisctl set-rabbitmqurl amqp://praxis:praxis@localhost:5672\n"
     echo
     printf "  %bCLI${NC}\n" "${CYAN}${BOLD}"
-    printf "    praxis                                 ${DIM}# interactive TUI${NC}\n"
-    printf "    praxis set-rabbitmqurl <url>           ${DIM}# configure rabbitmq from CLI${NC}\n"
+    printf "    praxis                      ${DIM}# interactive TUI${NC}\n"
+    printf "    praxis set-rabbitmqurl amqp://praxis:praxis@localhost:5672\n"
     echo
 }
 
@@ -538,8 +538,8 @@ print_cli_summary() {
     printf "  %bBinary${NC}      %s/praxis (and praxis_cli)\n" "${BOLD}" "$INSTALL_BIN"
     echo
     printf "  %bCLI${NC}\n" "${CYAN}${BOLD}"
-    printf "    praxis                                 ${DIM}# interactive TUI${NC}\n"
-    printf "    praxis set-rabbitmqurl <url>           ${DIM}# point CLI at a praxis service${NC}\n"
+    printf "    praxis                      ${DIM}# interactive TUI${NC}\n"
+    printf "    praxis set-rabbitmqurl amqp://praxis:praxis@localhost:5672\n"
     echo
 }
 
