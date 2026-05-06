@@ -44,11 +44,12 @@ jobs:
 
   build-server:
     #
-    # Build on ubuntu-20.04 for maximum glibc compatibility (glibc 2.31).
-    # This is the oldest standard GitHub Actions runner available, producing
-    # binaries that run on Ubuntu 20.04+, Debian 11+, Fedora 33+, etc.
+    # Build on ubuntu-22.04 for broad glibc compatibility (glibc 2.35).
+    # This is the oldest actively-supported GitHub Actions runner,
+    # producing binaries that run on Ubuntu 22.04+, Debian 12+,
+    # Fedora 36+, etc.
     #
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v5
