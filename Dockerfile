@@ -24,26 +24,13 @@ COPY common ./common
 COPY node ./node
 COPY semantic_parser ./semantic_parser
 COPY service ./service
-COPY web ./web
 RUN cargo chef prepare --recipe-path recipe.json
 
 # ==============================================================================
-# Stage 3: Build frontend with Node 22
-# ==============================================================================
-FROM node:22-bookworm-slim AS frontend
-
-WORKDIR /build/web/frontend
-COPY web/frontend/package*.json ./
-RUN npm ci
-COPY web/frontend ./
-RUN npm run build
-
-# ==============================================================================
-# Stage 4: Build Rust dependencies (cached layer)
+# Stage 3: Build Rust dependencies (cached layer)
 # ==============================================================================
 FROM chef AS builder
 ARG SKIP_NODE_BUILD=0
-ARG SKIP_WEB_BUILD=0
 ARG CARGO_PROFILE=release
 
 RUN apt-get update && apt-get install -y pkg-config libssl-dev \
@@ -69,14 +56,10 @@ RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
         cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_node && \
         cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_node --target x86_64-pc-windows-gnu; \
     fi && \
-    if [ "$SKIP_WEB_BUILD" = "1" ]; then \
-        cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_service -p praxis_cli; \
-    else \
-        cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_service -p praxis_web -p praxis_cli; \
-    fi
+    cargo chef cook --profile "$CARGO_PROFILE" --recipe-path recipe.json -p praxis_service -p praxis_cli
 
 # ==============================================================================
-# Stage 5: Build application (only recompiles on source changes)
+# Stage 4: Build application (only recompiles on source changes)
 # ==============================================================================
 COPY Cargo.toml Cargo.lock ./
 COPY agents ./agents
@@ -85,15 +68,6 @@ COPY common ./common
 COPY node ./node
 COPY semantic_parser ./semantic_parser
 COPY service ./service
-COPY web ./web
-
-#
-# Copy pre-built frontend from frontend stage.
-#
-
-COPY --from=frontend /build/web/frontend/dist ./web/frontend/dist
-
-ENV PRAXIS_SKIP_FRONTEND=1
 
 RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
         cargo build --profile "$CARGO_PROFILE" -p praxis_node && \
@@ -103,12 +77,7 @@ RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
         touch "target/$CARGO_PROFILE/praxis_node" "target/x86_64-pc-windows-gnu/$CARGO_PROFILE/praxis_node.exe"; \
     fi
 
-RUN if [ "$SKIP_WEB_BUILD" = "1" ]; then \
-        cargo build --profile "$CARGO_PROFILE" -p praxis_service -p praxis_cli && \
-        touch "target/$CARGO_PROFILE/praxis_web"; \
-    else \
-        cargo build --profile "$CARGO_PROFILE" -p praxis_service -p praxis_web -p praxis_cli; \
-    fi
+RUN cargo build --profile "$CARGO_PROFILE" -p praxis_service -p praxis_cli
 
 # ==============================================================================
 # Stage 6: Runtime image (systemd as PID 1)
@@ -166,7 +135,6 @@ RUN groupadd -r praxis && \
 #
 
 COPY --from=builder /build/target/${CARGO_PROFILE}/praxis_service /usr/local/bin/
-COPY --from=builder /build/target/${CARGO_PROFILE}/praxis_web     /usr/local/bin/
 COPY --from=builder /build/target/${CARGO_PROFILE}/praxis_cli     /usr/local/bin/
 RUN ln -sf praxis_cli /usr/local/bin/praxis
 
@@ -182,10 +150,9 @@ COPY --from=builder /build/target/x86_64-pc-windows-gnu/${CARGO_PROFILE}/praxis_
 #
 
 COPY pkg/systemd/praxis-service.service /etc/systemd/system/praxis-service.service
-COPY pkg/systemd/praxis-web.service     /etc/systemd/system/praxis-web.service
 COPY pkg/systemd/praxis.env.example     /etc/praxis/env
 COPY pkg/praxisctl/praxisctl            /usr/local/bin/praxisctl
-RUN chmod +x /usr/local/bin/praxisctl /usr/local/bin/praxis_service /usr/local/bin/praxis_web /usr/local/bin/praxis_cli
+RUN chmod +x /usr/local/bin/praxisctl /usr/local/bin/praxis_service /usr/local/bin/praxis_cli
 
 #
 # Wait-for-rabbitmq oneshot so praxis-service doesn't crash-loop
@@ -198,11 +165,11 @@ COPY pkg/systemd/praxis-wait-rabbitmq.sh      /usr/local/bin/praxis-wait-rabbitm
 COPY pkg/systemd/docker-overrides/praxis-service-wait.conf /etc/systemd/system/praxis-service.service.d/wait.conf
 
 RUN chmod +x /usr/local/bin/praxis-wait-rabbitmq && \
-    systemctl enable praxis-wait-rabbitmq.service praxis-service.service praxis-web.service
+    systemctl enable praxis-wait-rabbitmq.service praxis-service.service
 
 ENV PRAXIS_NODES_DIR=/usr/local/share/praxis/nodes
 
-EXPOSE 8080 8585 8586 8587
+EXPOSE 8585 8586 8587
 
 STOPSIGNAL SIGRTMIN+3
 

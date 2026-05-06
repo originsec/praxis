@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# praxisctl - control script for the Praxis service and web units.
+# praxisctl - control script for the Praxis service unit.
 #
 # Wraps systemctl. Works identically on native Linux installs
 # and inside the official Praxis docker image (which ships
@@ -11,7 +11,6 @@ set -e
 
 PRAXIS_ENV_FILE="${PRAXIS_ENV_FILE:-/etc/praxis/env}"
 SERVICE_UNIT="praxis-service.service"
-WEB_UNIT="praxis-web.service"
 
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
@@ -48,7 +47,7 @@ require_root() {
 
 usage() {
     cat <<EOF
-${BOLD}praxisctl${NC} - control the Praxis service and web units
+${BOLD}praxisctl${NC} - control the Praxis service unit
 
 ${BOLD}Service control${NC}
   praxisctl start                     Start praxis-service
@@ -57,14 +56,6 @@ ${BOLD}Service control${NC}
   praxisctl enable                    Enable praxis-service at boot
   praxisctl disable                   Disable praxis-service at boot
   praxisctl status                    Show praxis-service status
-
-${BOLD}Web server control${NC}
-  praxisctl webserver start
-  praxisctl webserver stop
-  praxisctl webserver restart
-  praxisctl webserver enable
-  praxisctl webserver disable
-  praxisctl webserver status
 
 ${BOLD}Configuration${NC}
   praxisctl set-rabbitmqurl <url>     Set PRAXIS_RABBITMQ_URL in $PRAXIS_ENV_FILE
@@ -133,7 +124,7 @@ cmd_set_rabbitmqurl() {
     [[ -n "$url" ]] || err "usage: praxisctl set-rabbitmqurl <url>"
     set_env_key PRAXIS_RABBITMQ_URL "$url"
     success "PRAXIS_RABBITMQ_URL=$url"
-    warn "Restart services to apply: praxisctl restart && praxisctl webserver restart"
+    warn "Restart the service to apply: praxisctl restart"
 }
 
 cmd_get_rabbitmqurl() {
@@ -211,21 +202,6 @@ unit_action() {
 # === Subcommand dispatch ===================================================
 #
 
-cmd_webserver() {
-    local action="${1:-status}"
-    shift || true
-    case "$action" in
-        start|stop|restart|enable|disable|status)
-            unit_action "$action" "$WEB_UNIT" "$@"
-            ;;
-        ""|help|-h|--help)
-            usage; exit 0 ;;
-        *)
-            err "unknown webserver action: $action"
-            ;;
-    esac
-}
-
 cmd_version() {
     if has_cmd praxis_service; then
         praxis_service --version 2>/dev/null || true
@@ -240,9 +216,6 @@ main() {
     case "$cmd" in
         start|stop|restart|enable|disable|status)
             unit_action "$cmd" "$SERVICE_UNIT" "$@"
-            ;;
-        webserver|web)
-            cmd_webserver "$@"
             ;;
         set-rabbitmqurl) cmd_set_rabbitmqurl "$@" ;;
         get-rabbitmqurl) cmd_get_rabbitmqurl "$@" ;;

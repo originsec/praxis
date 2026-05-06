@@ -420,22 +420,20 @@ install_service_native() {
     local tmproot
     tmproot=$(mktemp -d)
 
-    local svc_path web_path node_path
+    local svc_path node_path
     if svc_path=$(get_local_binary "praxis_service") && \
-       web_path=$(get_local_binary "praxis_web") && \
        node_path=$(get_local_binary "praxis_node"); then
         success "Using locally compiled binaries"
         mkdir -p "$tmproot/bin"
         cp "$svc_path" "$tmproot/bin/praxis_service"
-        cp "$web_path" "$tmproot/bin/praxis_web"
         cp "$node_path" "$tmproot/bin/praxis_node"
     else
         check_rust
-        info "Building praxis_service, praxis_web, and praxis_node..."
+        info "Building praxis_service and praxis_node..."
         local cargo_log="$tmproot/cargo.log"
         if ! run_with_progress_bar "$cargo_log" \
                 cargo install --git "$repo_url" --tag "$PRAXIS_VERSION" --root "$tmproot" \
-                praxis_service praxis_web praxis_node; then
+                praxis_service praxis_node; then
             echo ""
             warn "Build output follows (last 50 lines):"
             tail -n 50 "$cargo_log"
@@ -457,7 +455,6 @@ install_service_native() {
     $SUDO chmod 0750 /var/lib/praxis
 
     $SUDO install -m 0755 "$tmproot/bin/praxis_service" "$INSTALL_BIN/praxis_service"
-    $SUDO install -m 0755 "$tmproot/bin/praxis_web"     "$INSTALL_BIN/praxis_web"
     $SUDO install -m 0755 "$tmproot/bin/praxis_node"    "$INSTALL_SHARE/nodes/praxis_node_linux"
     rm -rf "$tmproot"
 
@@ -481,7 +478,6 @@ install_service_native() {
     fi
 
     $SUDO install -m 0644 "$repo_dir/pkg/systemd/praxis-service.service" /etc/systemd/system/praxis-service.service
-    $SUDO install -m 0644 "$repo_dir/pkg/systemd/praxis-web.service"     /etc/systemd/system/praxis-web.service
 
     if [[ ! -f /etc/praxis/env ]]; then
         $SUDO install -m 0640 "$repo_dir/pkg/systemd/praxis.env.example" /etc/praxis/env
@@ -496,9 +492,8 @@ install_service_native() {
     setup_rabbitmq_or_warn
 
     $SUDO systemctl daemon-reload
-    info "Enabling praxis-service and praxis-web..."
+    info "Enabling praxis-service..."
     $SUDO systemctl enable --now praxis-service.service
-    $SUDO systemctl enable --now praxis-web.service
 
     success "Installed native service. Check status with: praxisctl status"
     echo ""
@@ -523,20 +518,28 @@ print_summary_box() {
 
 print_native_summary() {
     print_summary_box "Praxis $PRAXIS_VERSION installed"
-    printf "  %bBinaries${NC}    %s/{praxis_service,praxis_web,praxis_cli,praxis,praxisctl}\n" "${BOLD}" "$INSTALL_BIN"
+    printf "  %bBinaries${NC}    %s/{praxis_service,praxis_cli,praxis,praxisctl}\n" "${BOLD}" "$INSTALL_BIN"
     printf "  %bConfig${NC}      /etc/praxis/env\n" "${BOLD}"
     printf "  %bData${NC}        /var/lib/praxis\n" "${BOLD}"
     printf "  %bNode binary${NC} %s/nodes/praxis_node_linux\n" "${BOLD}" "$INSTALL_SHARE"
     echo
     printf "  %bService control${NC}\n" "${CYAN}${BOLD}"
     printf "    praxisctl status            ${DIM}# praxis-service status${NC}\n"
-    printf "    praxisctl webserver status  ${DIM}# praxis-web status${NC}\n"
     printf "    praxisctl set-rabbitmqurl amqp://praxis:praxis@localhost:5672\n"
     echo
     printf "  %bCLI${NC}\n" "${CYAN}${BOLD}"
-    printf "    praxis                      ${DIM}# interactive TUI${NC}\n"
+    printf "    praxis                                 ${DIM}# interactive TUI${NC}\n"
+    printf "    praxis set-rabbitmqurl <url>           ${DIM}# configure rabbitmq from CLI${NC}\n"
     echo
-    printf "  %bWeb UI${NC}      http://localhost:8080\n" "${BOLD}"
+}
+
+print_cli_summary() {
+    print_summary_box "Praxis CLI installed"
+    printf "  %bBinary${NC}      %s/praxis (and praxis_cli)\n" "${BOLD}" "$INSTALL_BIN"
+    echo
+    printf "  %bCLI${NC}\n" "${CYAN}${BOLD}"
+    printf "    praxis                                 ${DIM}# interactive TUI${NC}\n"
+    printf "    praxis set-rabbitmqurl <url>           ${DIM}# point CLI at a praxis service${NC}\n"
     echo
 }
 
@@ -577,13 +580,11 @@ install_service_docker() {
 
 print_docker_summary() {
     print_summary_box "Praxis $PRAXIS_VERSION (docker) ready"
-    printf "  %bWeb UI${NC}              http://localhost:8080\n" "${BOLD}"
     printf "  %bRabbitMQ Management${NC} http://localhost:15672 ${DIM}(praxis / praxis)${NC}\n" "${BOLD}"
     printf "  %bInstallation${NC}        %s\n" "${BOLD}" "$PRAXIS_DOCKER_DIR"
     echo
     printf "  %bInside the container${NC}\n" "${CYAN}${BOLD}"
     echo "    $COMPOSE_CMD exec praxis praxisctl status"
-    echo "    $COMPOSE_CMD exec praxis praxisctl webserver disable"
     echo "    $COMPOSE_CMD exec praxis praxisctl set-rabbitmqurl <url>"
     echo
     printf "  %bCompose lifecycle${NC}\n" "${CYAN}${BOLD}"
@@ -687,7 +688,7 @@ interactive_install() {
             ;;
         client)
             install_cli_native
-            echo -e "${GREEN}CLI installed.${NC} Run: praxis"
+            print_cli_summary
             ;;
     esac
 }
@@ -708,7 +709,7 @@ main() {
         --cli)
             get_latest_version
             install_cli_native
-            success "CLI installed. Run: praxis"
+            print_cli_summary
             exit 0 ;;
         --service)
             local mode="${2:-}"

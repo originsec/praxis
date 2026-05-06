@@ -6,11 +6,9 @@
 # on a native Linux install:
 #
 #   docker compose exec praxis praxisctl status
-#   docker compose exec praxis praxisctl webserver disable
-#   docker compose exec praxis praxisctl set rabbitmq-url <url>
+#   docker compose exec praxis praxisctl set-rabbitmqurl <url>
 #
 # Access:
-#   Web UI:              http://localhost:8080
 #   MCP Server:          http://localhost:8585/sse
 #   Claude Bridge CCRv1: ws://localhost:8586
 #   Claude Bridge CCRv2: http://localhost:8587
@@ -59,7 +57,6 @@ services:
       context: .
       args:
         SKIP_NODE_BUILD: ${SKIP_NODE_BUILD:-0}
-        SKIP_WEB_BUILD: ${PRAXIS_HEADLESS:-0}
         CARGO_PROFILE: ${CARGO_PROFILE:-release}
     depends_on:
       rabbitmq:
@@ -80,7 +77,6 @@ services:
     environment:
       RUST_LOG: info
     ports:
-      - "8080:8080"
       - "${PRAXIS_MCP_PORT:-8585}:${PRAXIS_MCP_PORT:-8585}"
       - "8586:8586"
       - "8587:8587"
@@ -91,7 +87,6 @@ services:
       context: .
       args:
         SKIP_NODE_BUILD: ${SKIP_NODE_BUILD:-0}
-        SKIP_WEB_BUILD: ${PRAXIS_HEADLESS:-0}
         CARGO_PROFILE: ${CARGO_PROFILE:-release}
     depends_on:
       rabbitmq:
@@ -109,7 +104,6 @@ services:
     environment:
       RUST_LOG: info
     ports:
-      - "8080:8080"
       - "${PRAXIS_MCP_PORT:-8585}:${PRAXIS_MCP_PORT:-8585}"
       - "8586:8586"
       - "8587:8587"

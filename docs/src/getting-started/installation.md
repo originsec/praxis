@@ -1,6 +1,6 @@
 # Installation
 
-The Praxis service runs only on Linux (native or in a container). The CLI runs natively on every supported platform. The one-liner installers walk you through choosing components and an install mode.
+The Praxis service runs only on Linux (native or in a container). The CLI (TUI) runs natively on every supported platform. The one-liner installers walk you through how you want the service deployed; the CLI is always built natively.
 
 ## Quick Install (One-Liner)
 
@@ -10,17 +10,13 @@ The Praxis service runs only on Linux (native or in a container). The CLI runs n
 curl -fsSL https://praxis.originhq.com/install.sh | bash
 ```
 
-The installer first asks which components to install:
+The installer asks how to install the service:
 
-- **service** — the Praxis backend service + web (managed via `praxisctl`)
-- **cli** — the Praxis CLI, always built natively, installed as `praxis`
-
-Then asks how to install the service:
-
-- **Native install** *(Linux only)* — installs the binaries to `/usr/local/bin`, the systemd units to `/etc/systemd/system`, config to `/etc/praxis/env`, and data to `/var/lib/praxis`. Requires a running RabbitMQ broker; the installer creates the `praxis` RabbitMQ user automatically.
+- **Native install** *(Linux only)* — installs the binaries to `/usr/local/bin`, the `praxis-service.service` systemd unit to `/etc/systemd/system`, config to `/etc/praxis/env`, and data to `/var/lib/praxis`. Requires a running RabbitMQ broker; the installer creates the `praxis` RabbitMQ user automatically.
 - **Docker install** *(Linux + macOS)* — clones the repo into `~/.praxis-docker` and runs `docker compose up --build -d`. The Praxis container runs systemd as PID 1, so `praxisctl` works the same inside the container as on a native install.
+- **Client only** — only installs the `praxis` CLI (TUI); no service is deployed.
 
-Use `↑`/`↓` (or `j`/`k`) to navigate, `Enter` to select, `Space` to toggle checkboxes, `q` to abort.
+The CLI is always installed natively regardless of the choice.
 
 For non-interactive use:
 
@@ -32,16 +28,16 @@ curl -fsSL https://praxis.originhq.com/install.sh | bash -s -- --cli
 
 ### Windows
 
-The Praxis service is Linux-only, so on Windows it runs in Docker. The CLI is always installed natively (compiled from source, requires Rust + git).
+The Praxis service is Linux-only, so on Windows it runs in Docker. The CLI (TUI) is always installed natively (compiled from source, requires Rust + git).
 
 ```powershell
 irm https://praxis.originhq.com/install.ps1 | iex
 ```
 
-The installer asks which components to install:
+The installer asks how you want to install the service:
 
-- **service** — Docker only on Windows
-- **cli** — native Windows build, installed as `praxis.exe`
+- **Docker install** — runs the Praxis container alongside RabbitMQ
+- **Client only** — only installs the `praxis.exe` CLI; no service
 
 Non-interactive:
 
@@ -76,15 +72,16 @@ The installer creates the `praxis` RabbitMQ user and grants it permissions autom
 ### What native install lays down (Linux)
 
 - `/usr/local/bin/praxis_service` — backend service
-- `/usr/local/bin/praxis_web` — web server + frontend
 - `/usr/local/bin/praxis_cli` — CLI binary
 - `/usr/local/bin/praxis` — symlink to `praxis_cli` (preferred command name)
 - `/usr/local/bin/praxisctl` — service control utility
 - `/usr/local/share/praxis/nodes/praxis_node_linux` — node agent
-- `/etc/systemd/system/praxis-service.service` and `praxis-web.service` — system-wide systemd units
+- `/etc/systemd/system/praxis-service.service` — system-wide systemd unit
 - `/etc/praxis/env` — service config (`PRAXIS_RABBITMQ_URL`, etc.)
 - `/var/lib/praxis/` — data directory (SQLite database lives here by default)
-- A dedicated `praxis` system user runs the services
+- A dedicated `praxis` system user runs the service
+
+The web UI is **not** installed by either the script or the docker image — manage and use Praxis through the `praxis` TUI.
 
 ### What docker install lays down
 
@@ -93,7 +90,7 @@ The repo is cloned into `~/.praxis-docker`. `docker compose` brings up two servi
 - **rabbitmq** — `rabbitmq:3-management` with the `praxis` user pre-created
 - **praxis** — Praxis container running systemd as PID 1; `praxisctl` works inside the container
 
-The web UI, MCP server, and Claude bridges are exposed on the same ports as before (8080, 8585, 8586, 8587).
+The MCP server and Claude bridges are exposed on ports 8585, 8586, and 8587. There is no web UI in the docker image.
 
 ### Removing
 
@@ -135,16 +132,9 @@ praxisctl enable      # auto-start at boot
 praxisctl disable
 praxisctl status
 
-# Web server (praxis-web.service)
-praxisctl webserver start
-praxisctl webserver stop
-praxisctl webserver enable
-praxisctl webserver disable
-praxisctl webserver status
-
 # Configuration
-praxisctl set rabbitmq-url amqp://praxis:praxis@localhost:5672
-praxisctl get rabbitmq-url
+praxisctl set-rabbitmqurl amqp://praxis:praxis@localhost:5672
+praxisctl get-rabbitmqurl
 praxisctl config show
 praxisctl config edit       # opens /etc/praxis/env in $EDITOR
 ```
@@ -156,8 +146,7 @@ Inside the docker install, the same commands work via `docker compose`:
 ```bash
 cd ~/.praxis-docker
 docker compose exec praxis praxisctl status
-docker compose exec praxis praxisctl webserver disable
-docker compose exec praxis praxisctl set rabbitmq-url amqp://praxis:praxis@rabbitmq:5672
+docker compose exec praxis praxisctl set-rabbitmqurl amqp://praxis:praxis@rabbitmq:5672
 ```
 
 ## Configuring the CLI — `praxis set-rabbitmqurl`
@@ -187,20 +176,9 @@ docker compose up --build
 This starts:
 
 - **rabbitmq** — RabbitMQ on ports 5672 (AMQP) and 15672 (management UI, `praxis/praxis`)
-- **praxis** — Praxis container with systemd as PID 1, exposing 8080 (web), 8585 (MCP), 8586/8587 (Claude bridges)
+- **praxis** — Praxis container with systemd as PID 1, exposing 8585 (MCP) and 8586/8587 (Claude bridges)
 
-To run without the web UI (build-time):
-
-```bash
-PRAXIS_HEADLESS=1 docker compose up --build
-```
-
-To disable the web at runtime instead, leave it enabled at build time and use `praxisctl`:
-
-```bash
-docker compose exec praxis praxisctl webserver disable
-docker compose exec praxis praxisctl webserver stop
-```
+The web server is not built into or run by the docker image — interact with Praxis through the `praxis` TUI.
 
 ### Getting the CLI from Docker
 
@@ -214,10 +192,9 @@ cd praxis
 cargo build --release
 ```
 
-This produces four binaries in `target/release/`:
+This produces three binaries in `target/release/` (and the `praxis_web` binary if you build that crate too — note it's not used by the installer or the docker image):
 
 - `praxis_service` — the backend service
-- `praxis_web` — the HTTP/WebSocket server + frontend
 - `praxis_node` — the node agent
 - `praxis_cli` — the CLI
 
@@ -237,7 +214,6 @@ Then run the binaries directly, or install the systemd units from `pkg/systemd/`
 
 Nodes need to run on target systems. Options:
 
-- From the web UI under **Settings → Service**.
 - From [GitHub Releases](https://github.com/originsec/praxis/releases/latest) — Linux, Windows, and macOS-arm64 binaries are published.
 - Build manually:
 

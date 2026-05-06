@@ -332,13 +332,11 @@ function Print-Summary-Box {
 
 function Print-Docker-Summary {
     Print-Summary-Box "Praxis $script:PraxisVersion (docker) ready"
-    Write-Host "  Web UI              " -NoNewline; Write-Host "http://localhost:8080"
     Write-Host "  RabbitMQ Management " -NoNewline; Write-Host "http://localhost:15672 " -NoNewline; Write-Host "(praxis / praxis)" -ForegroundColor DarkGray
     Write-Host "  Installation        $PraxisDir"
     Write-Host ""
     Write-Host "  Inside the container (systemd-managed)" -ForegroundColor Cyan
     Write-Host "    $script:ComposeCmd exec praxis praxisctl status"
-    Write-Host "    $script:ComposeCmd exec praxis praxisctl webserver disable"
     Write-Host "    $script:ComposeCmd exec praxis praxisctl set-rabbitmqurl <url>"
     Write-Host ""
     Write-Host "  Compose lifecycle" -ForegroundColor Cyan
@@ -351,9 +349,13 @@ function Print-Docker-Summary {
 
 function Print-Cli-Summary {
     Print-Summary-Box "Praxis CLI installed"
-    Write-Host "  Run          praxis"
+    Write-Host "  Binary       $CliInstallDir\bin\praxis.exe"
     Write-Host "  Config file  $env:USERPROFILE\.config\praxis\config " -NoNewline
     Write-Host "(or %APPDATA%\praxis\config)" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  CLI" -ForegroundColor Cyan
+    Write-Host "    praxis                       " -NoNewline; Write-Host "# interactive TUI" -ForegroundColor DarkGray
+    Write-Host "    praxis set-rabbitmqurl <url> " -NoNewline; Write-Host "# point CLI at a praxis service" -ForegroundColor DarkGray
     Write-Host ""
 }
 
