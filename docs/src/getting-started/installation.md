@@ -2,7 +2,7 @@
 
 The Praxis service runs only on Linux — natively (systemd) or inside a Docker container. The CLI (TUI) runs natively on every supported platform. The one-liner installers walk you through how you want the service deployed; the CLI is always built natively.
 
-> **Windows** can only run the service in **Docker** — there is no native Windows service. **Linux / macOS** can run it natively (Linux) or in Docker (both); Docker is offered as an alternative when you'd rather not install RabbitMQ + systemd units on the host.
+> The Praxis service is **Linux-only**. **Windows and macOS** can only run it in **Docker** — there is no native service path on either. **Linux** can run it natively (systemd) or in Docker; Docker is offered there as an alternative when you'd rather not install RabbitMQ + systemd units on the host.
 
 ## Quick Install (One-Liner)
 
@@ -15,7 +15,7 @@ curl -fsSL https://praxis.originhq.com/install.sh | bash
 The installer asks how to install the service:
 
 - **Native install** *(Linux only)* — installs the binaries to `/usr/local/bin`, the `praxis-service.service` systemd unit to `/etc/systemd/system`, config to `/etc/praxis/env`, and data to `/var/lib/praxis`. Requires a running RabbitMQ broker; the installer creates the `praxis` RabbitMQ user automatically.
-- **Docker install** *(Linux + macOS)* — clones the repo into `~/.praxis-docker` and runs `docker compose up --build -d`. The Praxis container runs systemd as PID 1, so `praxisctl` works the same inside the container as on a native install. Pick this on Linux if you don't want to install RabbitMQ + systemd units on the host; pick this on macOS because there's no native option.
+- **Docker install** *(Linux + macOS)* — clones the repo into `~/.praxis-docker` and runs `docker compose up --build -d`. The Praxis container runs systemd as PID 1, so `praxisctl` works the same inside the container as on a native install. Pick this on macOS because there's no native option, or on Linux if you don't want to install RabbitMQ + systemd units on the host.
 - **Client only** — only installs the `praxis` CLI (TUI); no service is deployed.
 
 The CLI is always installed natively regardless of the choice.

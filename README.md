@@ -23,12 +23,13 @@ Launches an interactive menu:
 
 The CLI is always installed natively. Skip the menu with `--service native`, `--service docker`, `--cli`, or `--remove`.
 
-**Windows:**
+**Windows / macOS:**
 ```powershell
-irm https://praxis.originhq.com/install.ps1 | iex
+irm https://praxis.originhq.com/install.ps1 | iex     # Windows
+curl -fsSL https://praxis.originhq.com/install.sh | bash   # macOS, then pick Docker
 ```
 
-The Praxis service is Linux-only, so on Windows the installer runs the service in **Docker**. The CLI is always built natively as `praxis.exe`.
+The Praxis service is Linux-only, so Windows and macOS run it in **Docker**. The CLI is always built natively (`praxis` / `praxis.exe`).
 
 **Arch Linux:**
 ```bash
@@ -41,11 +42,11 @@ yay -S praxis-bin    # prebuilt release
 Drive Praxis through the `praxis` TUI:
 
 ```bash
-praxis                                              # interactive TUI
-praxis set-rabbitmqurl amqp://praxis:praxis@localhost:5672
+praxis                                                       # interactive TUI
+praxis set-rabbitmqurl amqp://praxis:praxis@localhost:5672   # point CLI at the service
 ```
 
-On a native Linux install, control the service with `praxisctl`:
+On a native Linux install, control the service itself with `praxisctl`:
 
 ```bash
 praxisctl status
@@ -53,19 +54,26 @@ praxisctl start | stop | restart
 praxisctl set-rabbitmqurl <url>
 ```
 
+Configure LLM providers and everything else from the TUI.
+
 > Detailed install options, cross-compile recipes, and deployment patterns: [full documentation](https://originsec.github.io/praxis/).
 
 ### Deploy a node
 
-Nodes are distributed binaries that run on target systems. They live at `/usr/local/share/praxis/nodes/` after a native install. Run one on a target with:
+Nodes are standalone binaries that run on target systems. After install, find them at:
+
+| Install method | Linux node | Windows node |
+|---|---|---|
+| Native (Linux) | `/usr/local/share/praxis/nodes/praxis_node_linux` | `/usr/local/share/praxis/nodes/praxis_node_windows.exe` *(use `--with-win-node`)* |
+| Docker         | `docker compose exec praxis ls /usr/local/share/praxis/nodes/` (both shipped) | same |
+| AUR (`praxis-bin`) | `/usr/share/praxis/nodes/praxis_node_linux` | `/usr/share/praxis/nodes/praxis_node_windows.exe` |
+| GitHub release | [`praxis_node-linux-x86_64`](https://github.com/originsec/praxis/releases/latest) | [`praxis_node-windows-x86_64.exe`](https://github.com/originsec/praxis/releases/latest) |
+
+Copy the binary to the target system and run it pointed at your RabbitMQ:
 
 ```bash
 PRAXIS_RABBITMQ_URL=amqp://user:pass@your-server:5672 ./praxis_node
 ```
-
-### Configure an LLM provider
-
-Use the `praxis` TUI to add a model and assign it to the features you want (semantic operations, recon, traffic parsing, orchestrator).
 
 ## Documentation
 
