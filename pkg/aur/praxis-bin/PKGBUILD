@@ -12,7 +12,6 @@ options=('!lto')
 install=praxis.install
 source=(
     "praxis-${pkgver}-x86_64-linux.tar.gz::https://github.com/originsec/praxis/releases/download/v${pkgver}/praxis-${pkgver}-x86_64-linux.tar.gz"
-    "praxisctl::https://raw.githubusercontent.com/originsec/praxis/v${pkgver}/pkg/praxisctl/praxisctl"
     'praxis-service.service'
     'praxis-sysusers.conf'
     'praxis-tmpfiles.conf'
@@ -20,7 +19,6 @@ source=(
     'praxis.install'
 )
 sha256sums=(
-    'SKIP'
     'SKIP'
     'SKIP'
     'SKIP'
@@ -40,8 +38,8 @@ package() {
 
     install -Dm755 praxis_node "$pkgdir/usr/share/praxis/nodes/praxis_node_linux"
 
-    # praxisctl pulled from the matching release tag.
-    install -Dm755 "$srcdir/praxisctl" "$pkgdir/usr/bin/praxisctl"
+    # praxisctl ships in the release tarball.
+    install -Dm755 praxisctl "$pkgdir/usr/bin/praxisctl"
 
     # Systemd unit (single service; no umbrella).
     install -Dm644 "$srcdir/praxis-service.service" "$pkgdir/usr/lib/systemd/system/praxis-service.service"

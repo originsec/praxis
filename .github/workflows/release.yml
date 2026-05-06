@@ -58,15 +58,21 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build server binaries
-        run: cargo build --release -p praxis_service -p praxis_web -p praxis_cli -p praxis_node
+        #
+        # `praxis_web` is intentionally not built — the installer and
+        # AUR packages no longer ship the web server.
+        #
+        run: cargo build --release -p praxis_service -p praxis_cli -p praxis_node
 
       - name: Package binaries
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           mkdir -p "praxis-${VERSION}-x86_64-linux"
-          cp target/release/praxis_service target/release/praxis_web \
-             target/release/praxis_cli target/release/praxis_node \
+          cp target/release/praxis_service \
+             target/release/praxis_cli \
+             target/release/praxis_node \
              "praxis-${VERSION}-x86_64-linux/"
+          cp pkg/praxisctl/praxisctl "praxis-${VERSION}-x86_64-linux/"
           cp LICENSE "praxis-${VERSION}-x86_64-linux/"
           tar czf "praxis-${VERSION}-x86_64-linux.tar.gz" "praxis-${VERSION}-x86_64-linux"
 
