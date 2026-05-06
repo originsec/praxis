@@ -36,7 +36,8 @@ package() {
     install -Dm755 praxis_cli     "$pkgdir/usr/bin/praxis_cli"
     ln -s praxis_cli "$pkgdir/usr/bin/praxis"
 
-    install -Dm755 praxis_node "$pkgdir/usr/share/praxis/nodes/praxis_node_linux"
+    install -Dm755 praxis_node              "$pkgdir/usr/share/praxis/nodes/praxis_node_linux"
+    install -Dm644 praxis_node_windows.exe  "$pkgdir/usr/share/praxis/nodes/praxis_node_windows.exe"
 
     # praxisctl ships in the release tarball.
     install -Dm755 praxisctl "$pkgdir/usr/bin/praxisctl"
