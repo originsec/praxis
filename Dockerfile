@@ -10,7 +10,7 @@
 # Stage 1: Prepare recipe for cargo-chef
 # ==============================================================================
 FROM rust:1.88-bookworm AS chef
-RUN cargo install cargo-chef
+RUN cargo install --locked cargo-chef
 WORKDIR /build
 
 # ==============================================================================
