@@ -180,8 +180,8 @@ select_menu() {
             local rest=""
             IFS= read -rsn2 -t 0.05 rest < "$tty_in" || true
             case "$rest" in
-                '[A'|'OA') (( sel = (sel - 1 + n) % n ));;
-                '[B'|'OB') (( sel = (sel + 1) % n ));;
+                '[A'|'OA') sel=$(( (sel - 1 + n) % n ));;
+                '[B'|'OB') sel=$(( (sel + 1) % n ));;
             esac
         elif [[ -z $key ]]; then
             break
@@ -191,9 +191,9 @@ select_menu() {
             local idx=$((key - 1))
             if (( idx >= 0 && idx < n )); then sel=$idx; break; fi
         elif [[ $key == "k" ]]; then
-            (( sel = (sel - 1 + n) % n ))
+            sel=$(( (sel - 1 + n) % n ))
         elif [[ $key == "j" ]]; then
-            (( sel = (sel + 1) % n ))
+            sel=$(( (sel + 1) % n ))
         elif [[ $key == "q" || $key == $'\x03' ]]; then
             printf '\033[?25h' > "$tty_out"
             echo > "$tty_out"
