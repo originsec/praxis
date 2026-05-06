@@ -141,7 +141,7 @@ select_menu() {
     printf '\033[?25l' > "$tty_out"
     trap 'printf "\033[?25h" > '"$tty_out"'; stty echo 2>/dev/null || true' EXIT INT TERM
 
-    printf "%b %b\n" "$prompt" "${DIM}(↑↓ move • enter select • q quit)${NC}" > "$tty_out"
+    printf "%b %b\n\n" "$prompt" "${DIM}(↑↓ move • enter select • q quit)${NC}" > "$tty_out"
     for ((i=0; i<n; i++)); do printf "\n" > "$tty_out"; done
 
     while true; do
@@ -210,7 +210,7 @@ multi_select_menu() {
     printf '\033[?25l' > "$tty_out"
     trap 'printf "\033[?25h" > '"$tty_out"'; stty echo 2>/dev/null || true' EXIT INT TERM
 
-    printf "%b %b\n" "$prompt" "${DIM}(↑↓ move • space toggle • enter next • q quit)${NC}" > "$tty_out"
+    printf "%b %b\n\n" "$prompt" "${DIM}(↑↓ move • space toggle • enter next • q quit)${NC}" > "$tty_out"
     for ((i=0; i<n_opts; i++)); do printf "\n" > "$tty_out"; done
 
     while true; do

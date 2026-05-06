@@ -111,6 +111,7 @@ function Select-Menu {
     $sel = 0
     Write-Host $Prompt -NoNewline
     Write-Host " (↑↓ move, enter select, q quit)" -ForegroundColor DarkGray
+    Write-Host ""
     foreach ($_ in $Options) { Write-Host "" }
 
     [Console]::CursorVisible = $false
@@ -170,6 +171,7 @@ function MultiSelect-Menu {
 
     Write-Host $Prompt -NoNewline
     Write-Host " (↑↓ move, space toggle, enter next, q quit)" -ForegroundColor DarkGray
+    Write-Host ""
     foreach ($_ in $Options) { Write-Host "" }
 
     [Console]::CursorVisible = $false
