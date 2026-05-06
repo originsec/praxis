@@ -3460,7 +3460,7 @@ dependencies = [
 
 [[package]]
 name = "praxis_cli"
-version = "0.9.22"
+version = "0.9.23"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -3486,7 +3486,7 @@ dependencies = [
 
 [[package]]
 name = "praxis_common"
-version = "0.9.22"
+version = "0.9.23"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -3512,7 +3512,7 @@ dependencies = [
 
 [[package]]
 name = "praxis_node"
-version = "0.9.22"
+version = "0.9.23"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -3579,7 +3579,7 @@ dependencies = [
 
 [[package]]
 name = "praxis_service"
-version = "0.9.22"
+version = "0.9.23"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -3618,7 +3618,7 @@ dependencies = [
 
 [[package]]
 name = "praxis_web"
-version = "0.9.22"
+version = "0.9.23"
 dependencies = [
  "agent-client-protocol",
  "anyhow",

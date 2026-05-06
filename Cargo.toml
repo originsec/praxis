@@ -3,7 +3,7 @@ resolver = "3"
 members = ["cli", "common", "node", "semantic_parser", "service", "web"]
 
 [workspace.package]
-version = "0.9.22"
+version = "0.9.23"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/originsec/praxis"
