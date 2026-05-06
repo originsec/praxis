@@ -156,7 +156,8 @@ COPY --from=builder /build/target/x86_64-pc-windows-gnu/${CARGO_PROFILE}/praxis_
 COPY pkg/systemd/praxis-service.service /etc/systemd/system/praxis-service.service
 COPY pkg/systemd/praxis.env.example     /etc/praxis/env
 COPY pkg/praxisctl/praxisctl            /usr/local/bin/praxisctl
-RUN chmod +x /usr/local/bin/praxisctl /usr/local/bin/praxis_service
+RUN chmod +x /usr/local/bin/praxisctl /usr/local/bin/praxis_service && \
+    sed -i 's|@localhost:5672|@rabbitmq:5672|' /etc/praxis/env
 
 #
 # Wait-for-rabbitmq oneshot so praxis-service doesn't crash-loop
