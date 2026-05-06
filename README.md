@@ -15,36 +15,57 @@
 curl -fsSL https://praxis.originhq.com/install.sh | bash
 ```
 
-Launches an interactive menu with arrow-key selection:
+Launches an interactive menu:
 
-- **Native install** &mdash; build and run as a user service (systemd on Linux)
-- **Docker install** &mdash; run via `docker compose`
-- **AUR install** &mdash; offered automatically on Arch Linux (uses `yay` / `paru` or falls back to `makepkg`)
+- **Native install** *(Linux only)* — system-wide systemd service, requires RabbitMQ
+- **Docker install** *(Linux + macOS)* — RabbitMQ + the praxis container
+- **Client only** — just installs the `praxis` TUI
 
-You can skip the menu with `--native`, `--docker`, `--aur`, or `--remove`.
+The CLI is always installed natively. Skip the menu with `--service native`, `--service docker`, `--cli`, or `--remove`.
 
 **Windows:**
 ```powershell
 irm https://praxis.originhq.com/install.ps1 | iex
 ```
 
-Windows is supported via Docker only. The script detects Windows, checks Docker / Docker Compose, then runs Praxis via `docker compose up --build -d`.
+The Praxis service is Linux-only, so on Windows the installer runs the service in **Docker**. The CLI is always built natively as `praxis.exe`.
 
-Then open <http://localhost:8080> in your browser.
+**Arch Linux:**
+```bash
+yay -S praxis        # builds from source
+yay -S praxis-bin    # prebuilt release
+```
 
-> For detailed install options (cross-compilation, deployment patterns), see the [full documentation](https://originsec.github.io/praxis/).
+### Use it
+
+Drive Praxis through the `praxis` TUI:
+
+```bash
+praxis                                              # interactive TUI
+praxis set-rabbitmqurl amqp://praxis:praxis@localhost:5672
+```
+
+On a native Linux install, control the service with `praxisctl`:
+
+```bash
+praxisctl status
+praxisctl start | stop | restart
+praxisctl set-rabbitmqurl <url>
+```
+
+> Detailed install options, cross-compile recipes, and deployment patterns: [full documentation](https://originsec.github.io/praxis/).
 
 ### Deploy a node
 
-1. In the web UI, go to **Settings** → **Service** and download a node binary
-2. Run it on the target system:
+Nodes are distributed binaries that run on target systems. They live at `/usr/local/share/praxis/nodes/` after a native install. Run one on a target with:
+
 ```bash
 PRAXIS_RABBITMQ_URL=amqp://user:pass@your-server:5672 ./praxis_node
 ```
 
 ### Configure an LLM provider
 
-Go to **Settings** → **LLM Providers** in the web UI, add a model, and assign it to the features you want (semantic operations, recon, traffic parsing, orchestrator).
+Use the `praxis` TUI to add a model and assign it to the features you want (semantic operations, recon, traffic parsing, orchestrator).
 
 ## Documentation
 

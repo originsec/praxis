@@ -1,51 +1,12 @@
 # Local Development
 
-This guide covers running Praxis locally for development and testing.
-
-## Quick Start with Docker
-
-The fastest way to get running:
+This guide is for **contributors** working on Praxis itself. To **install** Praxis, use the one-liner installer:
 
 ```bash
-docker compose up --build
+curl -fsSL https://praxis.originhq.com/install.sh | bash
 ```
 
-This starts:
-- RabbitMQ on port 5672 (management UI on 15672)
-- Praxis service and web on port 8080
-- MCP server on port 8585 (when enabled in Settings > MCP Server)
-- Claude Bridge CCRv1 on port 8586 (when enabled in Settings > Claude Bridge)
-- Claude Bridge CCRv2 on port 8587 (when enabled in Settings > Claude Bridge)
-
-Open http://localhost:8080 to access the UI.
-
-To use a different MCP server port:
-
-```bash
-PRAXIS_MCP_PORT=9090 docker compose up --build
-```
-
-### With PostgreSQL
-
-For PostgreSQL instead of SQLite:
-
-```bash
-docker compose --profile postgres up --build
-```
-
-### Faster Builds
-
-Skip praxis_node binaries when you only need the service and web components:
-
-```bash
-SKIP_NODE_BUILD=1 docker compose up --build
-```
-
-Use the `release-optimized` profile for fully optimized production builds (full LTO, single codegen unit — significantly slower):
-
-```bash
-CARGO_PROFILE=release-optimized docker compose up --build
-```
+See [Installation](../getting-started/installation.md) for all install options.
 
 ## Building from Source
 

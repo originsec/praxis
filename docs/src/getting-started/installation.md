@@ -1,6 +1,8 @@
 # Installation
 
-The Praxis service runs only on Linux (native or in a container). The CLI (TUI) runs natively on every supported platform. The one-liner installers walk you through how you want the service deployed; the CLI is always built natively.
+The Praxis service runs only on Linux — natively (systemd) or inside a Docker container. The CLI (TUI) runs natively on every supported platform. The one-liner installers walk you through how you want the service deployed; the CLI is always built natively.
+
+> **Windows** can only run the service in **Docker** — there is no native Windows service. **Linux / macOS** can run it natively (Linux) or in Docker (both); Docker is offered as an alternative when you'd rather not install RabbitMQ + systemd units on the host.
 
 ## Quick Install (One-Liner)
 
@@ -13,7 +15,7 @@ curl -fsSL https://praxis.originhq.com/install.sh | bash
 The installer asks how to install the service:
 
 - **Native install** *(Linux only)* — installs the binaries to `/usr/local/bin`, the `praxis-service.service` systemd unit to `/etc/systemd/system`, config to `/etc/praxis/env`, and data to `/var/lib/praxis`. Requires a running RabbitMQ broker; the installer creates the `praxis` RabbitMQ user automatically.
-- **Docker install** *(Linux + macOS)* — clones the repo into `~/.praxis-docker` and runs `docker compose up --build -d`. The Praxis container runs systemd as PID 1, so `praxisctl` works the same inside the container as on a native install.
+- **Docker install** *(Linux + macOS)* — clones the repo into `~/.praxis-docker` and runs `docker compose up --build -d`. The Praxis container runs systemd as PID 1, so `praxisctl` works the same inside the container as on a native install. Pick this on Linux if you don't want to install RabbitMQ + systemd units on the host; pick this on macOS because there's no native option.
 - **Client only** — only installs the `praxis` CLI (TUI); no service is deployed.
 
 The CLI is always installed natively regardless of the choice.
@@ -53,7 +55,7 @@ binary from the GitHub release if you need it.
 
 ### Windows
 
-The Praxis service is Linux-only, so on Windows it runs in Docker. The CLI (TUI) is always installed natively (compiled from source, requires Rust + git).
+The Praxis service is Linux-only, so on Windows the installer runs the service in **Docker** — that's the only option for the service on Windows. The CLI (TUI) is always installed natively (compiled from source, requires Rust + git).
 
 ```powershell
 irm https://praxis.originhq.com/install.ps1 | iex
@@ -188,66 +190,11 @@ praxis -C "node list" # one-shot command
 
 There is no `--rabbitmq` flag and no `PRAXIS_RABBITMQ_URL` environment variable on the CLI — point users at `praxis set-rabbitmqurl` instead.
 
-## Manual Docker Setup
-
-If you prefer to clone and run Docker by hand:
-
-```bash
-git clone https://github.com/originsec/praxis.git
-cd praxis
-docker compose up --build
-```
-
-This starts:
-
-- **rabbitmq** — RabbitMQ on ports 5672 (AMQP) and 15672 (management UI, `praxis/praxis`)
-- **praxis** — Praxis container with systemd as PID 1, exposing 8585 (MCP) and 8586/8587 (Claude bridges)
-
-The web server is not built into or run by the docker image — interact with Praxis through the `praxis` TUI.
-
-### Getting the CLI from Docker
-
-The CLI is **not** built into the image — install it on the host with the installer (`--cli` / `Client only`).
-
-## Building from Source
-
-```bash
-git clone https://github.com/originsec/praxis.git
-cd praxis
-cargo build --release
-```
-
-This produces three binaries in `target/release/` (and the `praxis_web` binary if you build that crate too — note it's not used by the installer or the docker image):
-
-- `praxis_service` — the backend service
-- `praxis_node` — the node agent
-- `praxis_cli` — the CLI
-
-To stand up a development RabbitMQ:
-
-```bash
-docker run -d --name rabbitmq \
-  -p 5672:5672 -p 15672:15672 \
-  -e RABBITMQ_DEFAULT_USER=praxis \
-  -e RABBITMQ_DEFAULT_PASS=praxis \
-  rabbitmq:3-management
-```
-
-Then run the binaries directly, or install the systemd units from `pkg/systemd/` if you want them managed by `praxisctl`.
-
 ## Getting Node Binaries
 
-Nodes need to run on target systems. Options:
+A native install lays down `praxis_node_linux` at `/usr/local/share/praxis/nodes/`. To also stage the Windows node binary alongside it, use `--with-win-node` (see above).
 
-- From [GitHub Releases](https://github.com/originsec/praxis/releases/latest) — Linux, Windows, and macOS-arm64 binaries are published.
-- Build manually:
-
-```bash
-cargo build --release -p praxis_node
-# Cross-compile for Windows
-rustup target add x86_64-pc-windows-gnu
-cargo build --release -p praxis_node --target x86_64-pc-windows-gnu
-```
+The `praxis-bin` AUR package ships both `praxis_node_linux` and `praxis_node_windows.exe` automatically. The same two binaries are available as standalone assets on every [GitHub Release](https://github.com/originsec/praxis/releases/latest).
 
 ## Running Nodes
 
