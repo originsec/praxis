@@ -56,11 +56,7 @@ function Print-Banner {
     Write-Host "   ██╔═══╝ ██╔══██╗██╔══██║ ██╔██╗ ██║╚════██║" -ForegroundColor Cyan
     Write-Host "   ██║     ██║  ██║██║  ██║██╔╝ ██╗██║███████║" -ForegroundColor Cyan
     Write-Host "   ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝" -ForegroundColor Cyan
-    Write-Host "            discover " -ForegroundColor DarkGray -NoNewline
-    Write-Host "·" -ForegroundColor Gray -NoNewline
-    Write-Host " control " -ForegroundColor DarkGray -NoNewline
-    Write-Host "·" -ForegroundColor Gray -NoNewline
-    Write-Host " orchestrate" -ForegroundColor DarkGray
+    Write-Host "     Semantic Command & Control Framework for Agents" -ForegroundColor DarkGray
     Write-Host "                  by [Ø] Origin" -ForegroundColor Magenta
     Write-Host ""
 }

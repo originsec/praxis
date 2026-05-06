@@ -68,7 +68,7 @@ print_banner() {
     echo '   ██╔═══╝ ██╔══██╗██╔══██║ ██╔██╗ ██║╚════██║'
     echo '   ██║     ██║  ██║██║  ██║██╔╝ ██╗██║███████║'
     echo '   ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝'
-    echo -e "${NC}${DIM}            discover · control · orchestrate${NC}"
+    echo -e "${NC}${DIM}     Semantic Command & Control Framework for Agents${NC}"
     echo -e "                  ${MAGENTA}by [Ø] Origin${NC}"
     echo
 }
