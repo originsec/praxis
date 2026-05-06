@@ -570,14 +570,36 @@ check_docker() {
 install_service_docker() {
     section "Installing Service (Docker)"
     check_docker
-    info "Setting up Praxis $PRAXIS_VERSION in $PRAXIS_DOCKER_DIR..."
-    rm -rf "$PRAXIS_DOCKER_DIR"
-    git clone --depth 1 --branch "$PRAXIS_VERSION" "https://github.com/$PRAXIS_REPO.git" "$PRAXIS_DOCKER_DIR"
+
+    #
+    # If we're running from a local praxis checkout, build directly
+    # against it instead of cloning the tagged release into
+    # ~/.praxis-docker. Detected by the presence of docker-compose.yml
+    # and Dockerfile next to the script.
+    #
+
+    local script_dir=""
+    if [[ -n "${BASH_SOURCE[0]}" && "${BASH_SOURCE[0]}" != "-" && "${BASH_SOURCE[0]}" != "/dev/stdin" ]]; then
+        script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    fi
+
+    local compose_dir=""
+    if [[ -n "$script_dir" && -f "$script_dir/../docker-compose.yml" && -f "$script_dir/../Dockerfile" ]]; then
+        compose_dir=$(cd "$script_dir/.." && pwd)
+        info "Using local repository at $compose_dir"
+    else
+        info "Setting up Praxis $PRAXIS_VERSION in $PRAXIS_DOCKER_DIR..."
+        rm -rf "$PRAXIS_DOCKER_DIR"
+        git clone --depth 1 --branch "$PRAXIS_VERSION" "https://github.com/$PRAXIS_REPO.git" "$PRAXIS_DOCKER_DIR"
+        compose_dir="$PRAXIS_DOCKER_DIR"
+    fi
 
     info "Building and starting (this may take a few minutes on first run)..."
-    ( cd "$PRAXIS_DOCKER_DIR" && $COMPOSE_CMD up --build -d )
+    ( cd "$compose_dir" && $COMPOSE_CMD up --build -d )
     success "Praxis is running"
     echo ""
+
+    PRAXIS_DOCKER_DIR="$compose_dir"
 }
 
 print_docker_summary() {
