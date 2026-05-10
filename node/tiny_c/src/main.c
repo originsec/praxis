@@ -208,6 +208,8 @@ static void publish_acp_envelope(const char *client_id, const char *json_rpc, si
     pthread_mutex_unlock(&G_amqp_mu);
     if (!c) return;
 
+    LOG_DEBUG("ACP send to %s: %.*s", client_id, (int)rpc_len, json_rpc);
+
     buf env = {0};
     buf_puts(&env, "{\"Acp\":{\"node_id\":");
     jb_strz(&env, tiny_node_id);
@@ -460,6 +462,8 @@ static int run_once(const char *host, int port, const char *user, const char *pa
                         char cidbuf[64];
                         if (cn < sizeof(cidbuf)) {
                             memcpy(cidbuf, cid, cn); cidbuf[cn] = 0;
+                            LOG_DEBUG("ACP recv from %s: %.*s",
+                                      cidbuf, (int)rn, rpc);
                             acp_handle_frame(cidbuf, rpc, rn);
                         }
                     }
