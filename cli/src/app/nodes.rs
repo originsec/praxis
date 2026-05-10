@@ -782,10 +782,7 @@ impl App {
 
         session.history.push(input.clone());
         session.history_index = None;
-        session.messages.push(ChatMessage {
-            role: ChatRole::User,
-            text: input.clone(),
-        });
+        session.messages.push(ChatMessage::User(input.clone()));
         session.input.clear();
         session.cursor_pos = 0;
         session.is_waiting = true;
@@ -1062,10 +1059,7 @@ impl App {
                     };
                     let client = self.client.clone();
                     let node_id = session.node_id.clone();
-                    session.messages.push(ChatMessage {
-                        role: ChatRole::System,
-                        text: "Cancelling...".to_string(),
-                    });
+                    session.messages.push(ChatMessage::System("Cancelling...".to_string()));
                     tokio::spawn(async move {
                         //
                         // session/cancel is a JSON-RPC notification

@@ -222,15 +222,18 @@ pub struct ToolCallEntry {
     pub is_error: bool,
 }
 
-pub struct ChatMessage {
-    pub role: ChatRole,
-    pub text: String,
-}
-
-pub enum ChatRole {
-    User,
-    Agent,
-    System,
+pub enum ChatMessage {
+    User(String),
+    Agent(String),
+    System(String),
+    //
+    // Completed tool call retained in the transcript so it stays
+    // visible across subsequent turns. Live (in-flight) tool calls
+    // continue to live in `session.tool_calls` and are rendered
+    // separately while is_waiting; once the prompt finishes they're
+    // drained into ChatMessage::Tool entries.
+    //
+    Tool(ToolCallEntry),
 }
 
 impl Default for NodesState {
@@ -503,13 +506,10 @@ impl App {
                         active_transaction_id: None,
                         created_at: now,
                         last_activity_at: now,
-                        messages: vec![ChatMessage {
-                            role: ChatRole::System,
-                            text: format!(
-                                "Resumed from node (session {}…)",
-                                common::short_id(&entry.session_id)
-                            ),
-                        }],
+                        messages: vec![ChatMessage::System(format!(
+                            "Resumed from node (session {}…)",
+                            common::short_id(&entry.session_id)
+                        ))],
                         input: String::new(),
                         cursor_pos: 0,
                         scroll_offset: 0,
@@ -596,13 +596,10 @@ impl App {
                         if let Some(session) = self.nodes.sessions.get_mut(&session_local_id) {
                             session.session_id = Some(session_id.clone());
                             session.last_activity_at = std::time::Instant::now();
-                            session.messages.push(ChatMessage {
-                                role: ChatRole::System,
-                                text: format!(
-                                    "Session created ({})",
-                                    common::short_id(&session_id)
-                                ),
-                            });
+                            session.messages.push(ChatMessage::System(format!(
+                                "Session created ({})",
+                                common::short_id(&session_id)
+                            )));
                         }
                     }
                     SessionResult::Response {
@@ -630,16 +627,26 @@ impl App {
                             text
                         };
 
-                        session.messages.push(ChatMessage {
-                            role: ChatRole::Agent,
-                            text: final_text,
-                        });
+                        //
+                        // Drain in-flight tool calls into the persistent
+                        // message history so they remain visible across
+                        // subsequent turns. Live ones live in
+                        // session.tool_calls only while is_waiting; once
+                        // the prompt finishes they belong to the
+                        // transcript.
+                        //
+                        for tc in session.tool_calls.drain(..) {
+                            session.messages.push(ChatMessage::Tool(tc));
+                        }
+
+                        if !final_text.trim().is_empty() {
+                            session.messages.push(ChatMessage::Agent(final_text));
+                        }
                         session.is_waiting = false;
                         session.active_transaction_id = None;
                         session.scroll_offset = 0;
                         session.agent_status = None;
                         session.pending_permission = None;
-                        session.tool_calls.clear();
                         session.last_activity_at = std::time::Instant::now();
                     }
                     SessionResult::Cancelled {
@@ -660,20 +667,16 @@ impl App {
                         // it's preserved in the message history.
                         //
 
+                        for tc in session.tool_calls.drain(..) {
+                            session.messages.push(ChatMessage::Tool(tc));
+                        }
                         if !session.streaming_content.is_empty() {
                             let partial = std::mem::take(&mut session.streaming_content);
-                            session.messages.push(ChatMessage {
-                                role: ChatRole::Agent,
-                                text: partial,
-                            });
+                            session.messages.push(ChatMessage::Agent(partial));
                         }
-                        session.messages.push(ChatMessage {
-                            role: ChatRole::System,
-                            text: "Cancelled".to_string(),
-                        });
+                        session.messages.push(ChatMessage::System("Cancelled".to_string()));
                         session.is_waiting = false;
                         session.active_transaction_id = None;
-                        session.tool_calls.clear();
                         session.had_tool_call = false;
                         session.agent_status = None;
                         session.pending_permission = None;
@@ -684,10 +687,9 @@ impl App {
                         message,
                     } => {
                         if let Some(session) = self.nodes.sessions.get_mut(&session_local_id) {
-                            session.messages.push(ChatMessage {
-                                role: ChatRole::System,
-                                text: format!("Error: {}", message),
-                            });
+                            session.messages.push(ChatMessage::System(
+                                format!("Error: {}", message),
+                            ));
                             session.is_waiting = false;
                             session.active_transaction_id = None;
                             session.last_activity_at = std::time::Instant::now();

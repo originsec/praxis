@@ -13,14 +13,80 @@
 #include "bearssl.h"
 
 //
-// Trust anchors are generated at build time by `brssl ta -q` from the
-// system CA bundle (see Makefile target $(TA_FILE)). The generated
-// file declares `static const br_x509_trust_anchor TAs[N]` plus
-// `#define TAs_NUM N`, so it must be #include'd into a translation
-// unit — here.
+// Custom X.509 "validator" that accepts every certificate without any
+// chain or hostname validation, but still extracts the leaf cert's
+// public key so the TLS engine can complete the handshake.
+//
+// This is INTENTIONAL for praxis_node_tiny_c: skipping cert validation
+// drops the system trust-anchor table (~24 KB compiled in) and the
+// X.509 minimal verifier's runtime state. The trade-off is that the
+// agent endpoint is no longer authenticated — anyone able to intercept
+// traffic between the node and the AI endpoint can read or modify it.
+// Acceptable here because tiny_c is meant for trusted network paths
+// (local proxies, in-cluster traffic, etc.); use the full Rust node
+// if you need cert verification.
 //
 
-#include "trust_anchors.inc"
+typedef struct {
+    const br_x509_class      *vtable;
+    br_x509_decoder_context   dec;
+    int                       is_leaf;
+} noverify_ctx;
+
+static void nv_start_chain(const br_x509_class **ctx, const char *server_name)
+{
+    (void)server_name;
+    noverify_ctx *c = (noverify_ctx *)ctx;
+    c->is_leaf = 1;
+    br_x509_decoder_init(&c->dec, NULL, NULL);
+}
+
+static void nv_start_cert(const br_x509_class **ctx, uint32_t length)
+{
+    (void)ctx; (void)length;
+}
+
+static void nv_append(const br_x509_class **ctx,
+                      const unsigned char *buf, size_t len)
+{
+    noverify_ctx *c = (noverify_ctx *)ctx;
+    if (c->is_leaf) br_x509_decoder_push(&c->dec, buf, len);
+}
+
+static void nv_end_cert(const br_x509_class **ctx)
+{
+    noverify_ctx *c = (noverify_ctx *)ctx;
+    //
+    // Only the first cert in the chain is the server's leaf — that's
+    // the one whose public key the TLS engine will use. Stop feeding
+    // bytes into the decoder for subsequent CA certs.
+    //
+    c->is_leaf = 0;
+}
+
+static unsigned nv_end_chain(const br_x509_class **ctx)
+{
+    (void)ctx;
+    return 0;  /* always success */
+}
+
+static const br_x509_pkey *nv_get_pkey(const br_x509_class *const *ctx,
+                                       unsigned *usages)
+{
+    const noverify_ctx *c = (const noverify_ctx *)ctx;
+    if (usages) *usages = BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN;
+    return br_x509_decoder_get_pkey((br_x509_decoder_context *)&c->dec);
+}
+
+static const br_x509_class noverify_vtable = {
+    sizeof(noverify_ctx),
+    nv_start_chain,
+    nv_start_cert,
+    nv_append,
+    nv_end_cert,
+    nv_end_chain,
+    nv_get_pkey,
+};
 
 struct conn {
     int    fd;
@@ -40,7 +106,7 @@ struct conn {
     //
 
     br_ssl_client_context   *sc;
-    br_x509_minimal_context *xc;
+    noverify_ctx            *nv;
     br_sslio_context         ioc;
     unsigned char           *iobuf;
 };
@@ -124,15 +190,39 @@ conn_t *conn_open(const char *host, int port, int use_tls)
 
     if (!use_tls) return c;
 
+    //
+    // One-time warning so operators are aware the TLS layer is doing
+    // an unauthenticated handshake.
+    //
+    static int warned = 0;
+    if (!warned) {
+        warned = 1;
+        LOG_WARN("TLS: cert verification is DISABLED (tiny_c build); "
+                 "use the full Rust node for verified endpoints");
+    }
+
     c->sc     = calloc(1, sizeof(*c->sc));
-    c->xc     = calloc(1, sizeof(*c->xc));
+    c->nv     = calloc(1, sizeof(*c->nv));
     c->iobuf  = malloc(BR_SSL_BUFSIZE_BIDI);
-    if (!c->sc || !c->xc || !c->iobuf) {
+    if (!c->sc || !c->nv || !c->iobuf) {
         conn_close(c);
         return NULL;
     }
 
-    br_ssl_client_init_full(c->sc, c->xc, TAs, TAs_NUM);
+    //
+    // br_ssl_client_init_full configures all the cipher suites and
+    // hash functions; we throw away its X509 minimal validator and
+    // wire in the no-verify one above. We pass a tiny stack-local
+    // X509 minimal context only because init_full requires one — its
+    // state is unused after the override.
+    //
+
+    br_x509_minimal_context dummy_xc;
+    br_ssl_client_init_full(c->sc, &dummy_xc, NULL, 0);
+
+    c->nv->vtable = &noverify_vtable;
+    br_ssl_engine_set_x509(&c->sc->eng, &c->nv->vtable);
+
     br_ssl_engine_set_buffer(&c->sc->eng, c->iobuf, BR_SSL_BUFSIZE_BIDI, 1);
     if (!br_ssl_client_reset(c->sc, host, 0)) {
         LOG_ERROR("TLS: client_reset failed for %s", host);
@@ -142,8 +232,7 @@ conn_t *conn_open(const char *host, int port, int use_tls)
     br_sslio_init(&c->ioc, &c->sc->eng, low_read_cb, c, low_write_cb, c);
 
     //
-    // The handshake runs lazily on the first sslio_read/write; force it
-    // here by writing zero bytes so callers see early failures.
+    // Force the handshake here so callers see early failures.
     //
 
     if (br_sslio_flush(&c->ioc) < 0) {
@@ -222,7 +311,7 @@ void conn_close(conn_t *c)
         }
         free(c->iobuf);
         free(c->sc);
-        free(c->xc);
+        free(c->nv);
     }
     if (c->fd >= 0) close_sock(c->fd);
     free(c);

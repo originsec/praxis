@@ -49,12 +49,19 @@ static int load_or_create_node_id(char out[64])
     char dir[512] = {0};
     char path[640] = {0};
 
+    //
+    // Distinct file from the Rust node's `node_id` so the two binaries
+    // can run side-by-side on the same machine without sharing the
+    // same identity (which would make them collide on the
+    // Node_<id> queue and confuse the service registry).
+    //
+
 #if defined(_WIN32)
     const char *appdata = getenv("LOCALAPPDATA");
     if (!appdata) appdata = getenv("APPDATA");
     if (!appdata) return -1;
     snprintf(dir, sizeof(dir), "%s\\praxis", appdata);
-    snprintf(path, sizeof(path), "%s\\node_id", dir);
+    snprintf(path, sizeof(path), "%s\\node_id_tiny_c", dir);
     mk_dir(dir);
 #else
     const char *xdg = getenv("XDG_DATA_HOME");
@@ -62,7 +69,7 @@ static int load_or_create_node_id(char out[64])
     if (!home) return -1;
     if (xdg && *xdg) snprintf(dir, sizeof(dir), "%s/praxis", xdg);
     else             snprintf(dir, sizeof(dir), "%s/.local/share/praxis", home);
-    snprintf(path, sizeof(path), "%s/node_id", dir);
+    snprintf(path, sizeof(path), "%s/node_id_tiny_c", dir);
 #endif
 
     FILE *f = fopen(path, "r");
@@ -147,7 +154,7 @@ static int publish_registration(amqp *c)
     buf body = {0};
     buf_puts(&body, "{\"Registration\":{\"node_id\":");
     jb_strz(&body, tiny_node_id);
-    buf_puts(&body, ",\"node_type\":\"tiny-c\",\"machine_name\":");
+    buf_puts(&body, ",\"node_type\":\"tiny\",\"machine_name\":");
     jb_strz(&body, host);
     buf_puts(&body, ",\"os_details\":");
     jb_strz(&body, os_d);

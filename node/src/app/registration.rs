@@ -33,7 +33,7 @@ pub async fn publish_registration(channel: &Channel, node_id: &str) -> Result<()
 
     let registration = NodeRegistration {
         node_id: node_id.to_string(),
-        node_type: "native".to_string(),
+        node_type: "full".to_string(),
         machine_name: utils::get_machine_name(),
         os_details: utils::get_os_details(),
         capabilities,

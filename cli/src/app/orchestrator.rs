@@ -856,8 +856,18 @@ impl App {
             return false;
         };
         session.last_activity_at = std::time::Instant::now();
-        if session.had_tool_call && !session.streaming_content.is_empty() {
-            session.streaming_content.push_str("\n\n");
+        //
+        // Reset the post-tool-call flag on the very first text chunk
+        // after a tool call regardless of whether we inserted a
+        // separator. Otherwise the flag stayed true after an empty
+        // streaming_content and the SECOND text chunk got `\n\n`
+        // wedged in front of it — splitting "You are" into "You" and
+        // "are" on separate lines.
+        //
+        if session.had_tool_call {
+            if !session.streaming_content.is_empty() {
+                session.streaming_content.push_str("\n\n");
+            }
             session.had_tool_call = false;
         }
         session.streaming_content.push_str(text);

@@ -73,11 +73,6 @@ tables.
   provider plumbing. The configured `endpoint_url` should be the API
   base; the suffix `/chat/completions` is added if missing. Both
   `http://` and `https://` URLs are accepted.
-- **Tool streaming is text-only.** The node emits `agent_message_chunk`
-  notifications for assistant text and inline `[run_command] …` /
-  result blocks. It does not emit proper ACP `tool_call` / `tool_call_update`
-  updates. (Functionally equivalent for end users; the UI just renders
-  them inline.)
 - **No reset queue, no semantic-parser queue, no event-log forwarder,
   no Lua agents, no MCP, no intercept, no terminal capability.** The
   node only advertises `Session`.

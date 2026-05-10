@@ -616,28 +616,78 @@ async fn run_main_loop() -> Result<()> {
     // Spawn a task to broadcast NodeInformationUpdateRequest every 30 seconds
     // and also broadcast state updates to clients.
     //
+    // The same task also runs a tighter (10s) liveness watcher: when an
+    // individual node's derived status transitions from online → warning
+    // (no update for ≥60s) or warning → offline (≥120s) we fire an
+    // additional NodeInformationUpdateRequest broadcast so a node
+    // that's just slow to publish gets one last nudge before being
+    // marked offline. See common::messaging::NodeStatus thresholds.
+    //
 
     let period = 30;
     let broadcast_channel_clone = broadcast_channel.clone();
     let node_registry_broadcast = node_registry.clone();
 
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(period));
+        use std::collections::HashMap;
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(period));
+        let mut liveness = tokio::time::interval(std::time::Duration::from_secs(10));
+        // Skip the first immediate fire so we don't double-broadcast at startup.
+        liveness.tick().await;
+
+        let mut prev_status: HashMap<String, common::NodeStatus> = HashMap::new();
+
         loop {
-            interval.tick().await;
+            tokio::select! {
+                _ = tick.tick() => {
+                    let message = NodeBroadcastMessage::NodeInformationUpdateRequest;
+                    let _ = publish_json_exchange(&broadcast_channel_clone, NODE_BROADCAST_EXCHANGE, &message).await;
 
-            //
-            // Request updates from all nodes.
-            //
-            let message = NodeBroadcastMessage::NodeInformationUpdateRequest;
-            let _ = publish_json_exchange(&broadcast_channel_clone, NODE_BROADCAST_EXCHANGE, &message).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    if let Err(e) = broadcast_state_to_clients(&broadcast_channel_clone, &node_registry_broadcast).await {
+                        common::log_error!("Failed to broadcast state to clients: {}", e);
+                    }
+                }
+                _ = liveness.tick() => {
+                    let now = chrono::Utc::now();
+                    let nodes = node_registry_broadcast.list().await;
+                    let mut nudge = false;
+                    let mut current: HashMap<String, common::NodeStatus> = HashMap::new();
+                    for n in &nodes {
+                        let age = (now - n.last_update_received).num_seconds();
+                        let status = common::NodeStatus::from_age_seconds(age);
+                        if let Some(prev) = prev_status.get(&n.id) {
+                            //
+                            // Only nudge on the first transition into a
+                            // worse state — staying in warning/offline
+                            // doesn't repeat the broadcast.
+                            //
+                            let worsened = match (prev, &status) {
+                                (common::NodeStatus::Online,  common::NodeStatus::Warning) => true,
+                                (common::NodeStatus::Online,  common::NodeStatus::Offline) => true,
+                                (common::NodeStatus::Warning, common::NodeStatus::Offline) => true,
+                                _ => false,
+                            };
+                            if worsened {
+                                common::log_info!(
+                                    "Node {} went {:?} (age={}s); pinging",
+                                    n.id, status, age,
+                                );
+                                nudge = true;
+                            }
+                        }
+                        current.insert(n.id.clone(), status);
+                    }
+                    //
+                    // Drop entries for nodes that vanished from the registry.
+                    //
+                    prev_status = current;
 
-            //
-            // Wait a bit for nodes to respond, then broadcast state to clients.
-            //
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            if let Err(e) = broadcast_state_to_clients(&broadcast_channel_clone, &node_registry_broadcast).await {
-                common::log_error!("Failed to broadcast state to clients: {}", e);
+                    if nudge {
+                        let message = NodeBroadcastMessage::NodeInformationUpdateRequest;
+                        let _ = publish_json_exchange(&broadcast_channel_clone, NODE_BROADCAST_EXCHANGE, &message).await;
+                    }
+                }
             }
         }
     });
