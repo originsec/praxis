@@ -598,7 +598,7 @@ pub fn render_run_options(f: &mut Frame, area: Rect, opts: &crate::app::RunOptio
     };
     let all_nodes_selected = opts.nodes.iter().all(|(_, _, s)| *s);
     lines.push(Line::from(vec![
-        Span::styled("# Target Nodes", nodes_label_style),
+        Span::styled("Target Nodes", nodes_label_style),
         if all_nodes_selected {
             Span::styled("    (all)", Style::default().fg(DIM))
         } else {
@@ -629,7 +629,7 @@ pub fn render_run_options(f: &mut Frame, area: Rect, opts: &crate::app::RunOptio
     };
     let all_agents_selected = opts.agents.iter().all(|(_, s)| *s);
     lines.push(Line::from(vec![
-        Span::styled("# Target Agents", agents_label_style),
+        Span::styled("Target Agents", agents_label_style),
         if all_agents_selected {
             Span::styled("    (all)", Style::default().fg(DIM))
         } else {
@@ -855,7 +855,7 @@ fn trigger_form_lines(form: &TriggerForm) -> Vec<Line<'static>> {
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "# Target",
+        "Target",
         Style::default()
             .fg(TEXT_BRIGHT)
             .add_modifier(Modifier::BOLD),

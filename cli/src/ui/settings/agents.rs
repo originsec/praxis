@@ -67,7 +67,7 @@ pub(super) fn render_agents(f: &mut Frame, area: Rect, state: &SettingsState) {
 
     let on_script = state.selected >= 4 && state.selected < 4 + script_count;
     let mut header_spans = vec![Span::styled(
-        "# Lua Agent Connector Scripts",
+        "Lua Agent Connector Scripts",
         Style::default()
             .fg(TEXT_BRIGHT)
             .add_modifier(Modifier::BOLD),

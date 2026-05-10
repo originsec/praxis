@@ -16,8 +16,30 @@ pub(super) fn render_model_dropdown(f: &mut Frame, area: Rect, state: &SettingsS
         return;
     }
 
-    let height = (items.len() as u16 + 2).min(area.height.saturating_sub(4));
-    let width = items.iter().map(|d| d.name.len()).max().unwrap_or(20) as u16 + 6;
+    //
+    // Resolve the visible label for each entry the same way the main
+    // settings list does — falling back to `provider::model` when the
+    // user-facing `name` field is empty.
+    //
+    let labels: Vec<String> = items
+        .iter()
+        .map(|d| {
+            if d.name.is_empty() {
+                format!("{}::{}", d.provider, d.model)
+            } else {
+                d.name.clone()
+            }
+        })
+        .collect();
+
+    //
+    // Popup chrome: 1 top pad + 1 title + 1 divider + 1 bottom pad = 4
+    // rows that don't render items, so reserve them in the height
+    // budget. Without this, 1–2 model entries get clipped entirely.
+    //
+    let height = (items.len() as u16 + 4).min(area.height.saturating_sub(4));
+    let max_label = labels.iter().map(|l| l.chars().count()).max().unwrap_or(20) as u16;
+    let width = (max_label + 6).max(20);
     let width = width.min(area.width.saturating_sub(4));
 
     //
@@ -83,7 +105,7 @@ pub(super) fn render_model_dropdown(f: &mut Frame, area: Rect, state: &SettingsS
     };
 
     let mut lines: Vec<Line> = Vec::new();
-    for (i, def) in items.iter().enumerate() {
+    for (i, label) in labels.iter().enumerate() {
         let selected = i == state.dropdown_selected;
         let row_bg = if selected { BG_SELECTED } else { BG_MENU };
         let style = if selected {
@@ -100,7 +122,7 @@ pub(super) fn render_model_dropdown(f: &mut Frame, area: Rect, state: &SettingsS
             .bg(row_bg);
         lines.push(Line::from(vec![
             Span::styled(marker, marker_style),
-            Span::styled(def.name.clone(), style),
+            Span::styled(label.clone(), style),
         ]));
     }
 
@@ -166,7 +188,11 @@ pub(super) fn render_model_form(f: &mut Frame, area: Rect, form: &ModelEditForm)
 
     let show_base_url = form.shows_base_url();
     let field_count: u16 = if show_base_url { 4 } else { 3 }; // provider + apikey + [baseurl] + model
-    let base_lines: u16 = field_count + 2 + 2; // fields + blank + hints + border top/bottom
+    //
+    // Popup chrome: 1 top pad + 1 title + 1 divider + 1 bottom pad = 4.
+    // Content: field_count + 1 blank + 1 hints.
+    //
+    let base_lines: u16 = field_count + 6;
     let dropdown_extra = if form.model_dropdown_open {
         1 + form.available_models.len() as u16 // blank + model list
     } else if form.loading_models {

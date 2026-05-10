@@ -167,7 +167,7 @@ pub(super) fn toggle_row(label: &str, enabled: bool, selected: bool) -> Line<'_>
 
 pub(super) fn section_header(title: &str) -> Line<'_> {
     Line::from(vec![Span::styled(
-        format!("# {}", title),
+        title.to_string(),
         Style::default()
             .fg(TEXT_BRIGHT)
             .add_modifier(Modifier::BOLD),

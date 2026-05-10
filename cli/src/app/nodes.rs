@@ -1341,11 +1341,15 @@ impl App {
         let outer =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(content_area);
         let hints_area = outer[1];
-        let node_chunks = Layout::horizontal([
-            Constraint::Percentage(self.nodes.split_percent),
-            Constraint::Percentage(100 - self.nodes.split_percent),
-        ])
-        .split(outer[0]);
+        let node_chunks = if self.nodes.split_percent_user_set {
+            Layout::horizontal([
+                Constraint::Percentage(self.nodes.split_percent),
+                Constraint::Percentage(100 - self.nodes.split_percent),
+            ])
+            .split(outer[0])
+        } else {
+            Layout::horizontal([Constraint::Min(20), Constraint::Length(30)]).split(outer[0])
+        };
         let list_area = node_chunks[0];
         let detail_area = node_chunks[1];
 
@@ -1461,6 +1465,7 @@ impl App {
                         list_area.width + detail_area.width,
                         mouse.column,
                     );
+                    self.nodes.split_percent_user_set = true;
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {

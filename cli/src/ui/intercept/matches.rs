@@ -175,7 +175,7 @@ fn detail_lines(state: &InterceptState, m: &TrafficMatchWithDetails) -> Vec<Line
 
     if let Some(ref summary) = m.match_info.summary {
         out.push(Line::from(Span::styled(
-            "# AI SUMMARY",
+            "AI SUMMARY",
             Style::default()
                 .fg(TEXT_BRIGHT)
                 .add_modifier(Modifier::BOLD),
@@ -197,7 +197,7 @@ fn detail_lines(state: &InterceptState, m: &TrafficMatchWithDetails) -> Vec<Line
 
     if let Some(body) = state.request_body_for(&m.traffic) {
         out.push(Line::from(Span::styled(
-            format!("# REQUEST BODY ({} bytes)", body.len()),
+            format!("REQUEST BODY ({} bytes)", body.len()),
             Style::default()
                 .fg(TEXT_BRIGHT)
                 .add_modifier(Modifier::BOLD),
@@ -207,7 +207,7 @@ fn detail_lines(state: &InterceptState, m: &TrafficMatchWithDetails) -> Vec<Line
     }
     if let Some(body) = state.response_body_for(&m.traffic) {
         out.push(Line::from(Span::styled(
-            format!("# RESPONSE BODY ({} bytes)", body.len()),
+            format!("RESPONSE BODY ({} bytes)", body.len()),
             Style::default()
                 .fg(TEXT_BRIGHT)
                 .add_modifier(Modifier::BOLD),

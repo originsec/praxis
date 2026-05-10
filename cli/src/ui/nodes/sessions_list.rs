@@ -11,7 +11,7 @@ use ratatui::widgets::{Block, Clear, Paragraph};
 
 pub fn sessions_list_rect(content_area: Rect, count: usize) -> Rect {
     let rows = count.max(1) as u16;
-    let height = (rows + 7).min(content_area.height.saturating_sub(2));
+    let height = (rows + 8).min(content_area.height.saturating_sub(2));
     let max_width = content_area.width.saturating_sub(4);
     let width = max_width.min(140).max(60.min(max_width));
     let x = content_area.x + (content_area.width.saturating_sub(width)) / 2;

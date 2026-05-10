@@ -113,6 +113,12 @@ pub struct OrchestratorState {
     // ~/.praxis/sessions/{session_id}.json after every turn.
     //
     pub stored: Option<crate::session_store::StoredSession>,
+    //
+    // Configured default model — populated from settings at launch so
+    // the meta row can show the right model before SessionCreated
+    // arrives.
+    //
+    pub configured_model: String,
 }
 
 impl OrchestratorState {
@@ -145,6 +151,7 @@ impl Default for OrchestratorState {
             pending_history: None,
             pending_seed_messages: None,
             stored: None,
+            configured_model: String::new(),
         }
     }
 }
@@ -322,6 +329,13 @@ impl App {
         }
 
         match key.code {
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                input::insert_char(
+                    &mut self.orchestrator.input,
+                    &mut self.orchestrator.cursor_pos,
+                    '\n',
+                );
+            }
             KeyCode::Enter => {
                 let input = self.orchestrator.input.trim().to_string();
                 let is_streaming = self

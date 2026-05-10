@@ -26,15 +26,16 @@ pub(super) fn render_about(f: &mut Frame, area: Rect, _state: &SettingsState) {
                 Style::default().fg(DIM),
             ),
             chrome::mid_dot(),
-            Span::styled("by Origin", Style::default().fg(MUTED)),
-            Span::raw(" "),
+            Span::styled("by Origin ", Style::default().fg(MUTED)),
+            Span::styled("[", Style::default().fg(MUTED)),
             Span::styled("\u{00d8}", Style::default().fg(ACCENT)),
+            Span::styled("]", Style::default().fg(MUTED)),
         ]),
         Line::raw(""),
         Line::raw(""),
         Line::from(vec![
             Span::styled(
-                "# About Origin",
+                "About Origin",
                 Style::default()
                     .fg(TEXT_BRIGHT)
                     .add_modifier(Modifier::BOLD),
@@ -67,7 +68,7 @@ pub(super) fn render_about(f: &mut Frame, area: Rect, _state: &SettingsState) {
         Line::raw(""),
         Line::from(vec![
             Span::styled(
-                "# About Praxis",
+                "About Praxis",
                 Style::default()
                     .fg(TEXT_BRIGHT)
                     .add_modifier(Modifier::BOLD),

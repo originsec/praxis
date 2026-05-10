@@ -60,7 +60,7 @@ pub(super) fn render_node_list(f: &mut Frame, area: Rect, state: &NodesState) {
         Constraint::Length(8),
     ];
 
-    let block = crate::ui::common::focused_titled_panel(" Nodes ", !state.detail_focus);
+    let block = crate::ui::common::focused_panel(!state.detail_focus);
     let table = Table::new(rows, widths)
         .header(header)
         .block(block)

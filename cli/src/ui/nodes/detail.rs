@@ -18,7 +18,7 @@ pub(super) fn render_node_detail(
     ops: &[common::SemanticOpUpdate],
     chains: &[common::ChainExecutionUpdate],
 ) {
-    let block = crate::ui::common::focused_titled_panel(" Detail ", state.detail_focus);
+    let block = crate::ui::common::focused_panel(state.detail_focus);
 
     let Some(node) = state.nodes.get(state.selected) else {
         let empty = Paragraph::new(Line::from(Span::styled(

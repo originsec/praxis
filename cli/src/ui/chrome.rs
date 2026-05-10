@@ -89,15 +89,14 @@ pub fn pill(label: &str, color: Color) -> Span<'static> {
 }
 
 //
-// Hash-prefixed section title (opencode signature). Bold accent when
-// focused, bright text otherwise.
+// Section title — bold accent when focused, bright text otherwise.
 //
 
 pub fn section_title(title: &str, focused: bool) -> Line<'static> {
     let style = Style::default()
         .fg(if focused { ACCENT } else { TEXT_BRIGHT })
         .add_modifier(Modifier::BOLD);
-    Line::from(Span::styled(format!("# {}", title), style))
+    Line::from(Span::styled(title.to_string(), style))
 }
 
 //

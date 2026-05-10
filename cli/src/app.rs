@@ -73,6 +73,7 @@ pub struct NodesState {
     pub nodes: Vec<NodeState>,
     pub selected: usize,
     pub split_percent: u16,
+    pub split_percent_user_set: bool,
     pub dragging: bool,
 
     //
@@ -238,6 +239,7 @@ impl Default for NodesState {
             nodes: Vec::new(),
             selected: 0,
             split_percent: 55,
+            split_percent_user_set: false,
             dragging: false,
             sessions: HashMap::new(),
             active_session_id: None,
@@ -403,12 +405,34 @@ impl App {
 
     pub async fn init(&mut self) {
         //
-        // Request initial op list so broadcasts can update it. The
-        // orchestrator service holds no state — sessions are created
-        // on demand when the user types a prompt.
+        // Request initial op list so broadcasts can update it.
         //
 
         let _ = self.client.request_semantic_op_list().await;
+
+        //
+        // Load LLM/orchestrator settings up front so the configured
+        // model name is visible in the meta row before SessionCreated
+        // arrives. Mirrors the lazy load that runs when ^s is pressed.
+        //
+        self.load_settings().await;
+        self.orchestrator.configured_model = self.settings.orchestrator_model.clone();
+
+        //
+        // Pre-create the orchestrator session at startup so the first
+        // prompt the user types doesn't get dropped while waiting for
+        // SessionCreated to arrive. Skip if a stored session is being
+        // resumed (it's already seeded).
+        //
+
+        let already_have_session = self
+            .orchestrator
+            .active_session()
+            .map(|s| !s.session_id.is_empty())
+            .unwrap_or(false);
+        if !already_have_session && self.orchestrator.stored.is_none() {
+            self.create_new_orchestrator_session().await;
+        }
     }
 
 
@@ -831,6 +855,17 @@ impl App {
                 }
 
                 //
+                // Lazy-load main settings config the first time the
+                // Settings window is shown — keeps the ^s switch
+                // instant rather than blocking on the round-trip.
+                //
+
+                if self.active_window == Window::Settings && !self.settings.loaded {
+                    self.load_settings().await;
+                    redraw = true;
+                }
+
+                //
                 // Poll for agent script list response.
                 //
 
@@ -1094,7 +1129,6 @@ impl App {
                 }
                 KeyCode::Char('s') => {
                     self.active_window = Window::Settings;
-                    self.load_settings().await;
                     return;
                 }
                 _ => {}
@@ -2118,7 +2152,6 @@ impl App {
                             Window::Nodes => self.refresh_node_sessions(),
                             Window::Operations => self.refresh_operations(),
                             Window::Intercept => self.enter_intercept().await,
-                            Window::Settings => self.load_settings().await,
                             _ => {}
                         }
                         return;
