@@ -8,61 +8,79 @@ You should have:
 - Praxis service running (via Docker or native build)
 - At least one LLM configured (see [Configuration](./configuration.md))
 - A node running on a system with an AI agent installed
+- The `praxis` TUI installed (see [Installation](./installation.md))
 
 ## Step 1: Check Your Node
 
-Open the web UI at **http://localhost:8080**. You should see your node in the left sidebar under the node list.
+Launch the TUI:
 
-Click on it to select it. The main panel shows:
+```bash
+praxis
+```
+
+Open the **Nodes** window with `Ctrl+L`. You should see your node in the
+node list. Use the arrow keys (or click) to select it. The detail pane
+shows:
+
 - **Machine name** and OS details
-- **Detected agents** - which AI assistants were found
+- **Detected agents** — which AI assistants were found
 - **Status** of interception, sessions, etc.
 
 If no agents show up, make sure the target system actually has Claude Code, Codex CLI, Gemini CLI, or another supported agent installed and configured.
 
 ## Step 2: Select an Agent
 
-From the agent list, click on one to select it. This focuses all operations on that specific agent.
-
-The agent panel shows:
-- **Name** and type
-- **Session status** - whether there's an active session
-- **Recon data** - if you've run reconnaissance
+In the Nodes window, focus the agent list and select one. This focuses
+all subsequent operations on that specific agent.
 
 ## Step 3: Run Reconnaissance
 
-Click the **Recon** button (or go to the Recon tab). This performs static reconnaissance:
+With an agent selected, press `r` to open the **Recon** overlay. This
+performs static reconnaissance:
 
 - Discovers **MCP servers** and other tool integrations
 - Lists **configuration files** and their contents
-- Shows **session history** - past conversations and their locations
+- Shows **session history** — past conversations and their locations
 - Enumerates **project paths** where the agent has been used
 
-The results appear in the Recon panel, organized by category.
+Switch tabs with `Tab` (or `1` `2` `3`) to browse Config, Tools, and
+Sessions. Press `r` to refresh static recon.
 
 ### Semantic Recon
 
-For deeper discovery, click the **Discover** button to run semantic recon (requires an LLM configured for "Semantic Parser"). This uses the LLM to parse configuration files and extract tool definitions that might not be obvious from static analysis. It also creates sessions and communicates directly with the agent to discover its full capabilities, so it takes longer than static recon.
+For deeper discovery, press `d` to run semantic recon (requires an LLM
+configured for "Semantic Parser"). This uses the LLM to parse
+configuration files and extract tool definitions that might not be
+obvious from static analysis. It also creates sessions and communicates
+directly with the agent to discover its full capabilities, so it takes
+longer than static recon.
 
 ## Step 4: Look Around
 
 With recon data, you can:
 
-**View configuration files** - Click on any config file to see its contents. Some files can be edited directly (like Claude's `config.json` or MCP server definitions).
+**View configuration files** — In the Config tab, pick any file to see
+its contents.
 
-**Browse sessions** - See what conversations the agent has had, which projects it's worked on.
+**Browse sessions** — In the Sessions tab, see what conversations the
+agent has had and which projects it's worked on.
 
-**Check tools** - See what MCP servers, skills, or plugins are available to the agent.
+**Check tools** — In the Tools tab, see what MCP servers, skills, or
+plugins are available to the agent.
 
 ## Step 5: Create a Session
 
-Click **Create Session** to start an interactive session with the agent. This spawns the agent process in a controlled context where you can send prompts and receive responses.
+In the Nodes window, with an agent selected, start a session chat. You
+can specify a working directory and toggle YOLO mode.
 
-**Working Directory** - You can specify where the agent should operate. This affects what files it can see and work with.
+**Working Directory** — where the agent should operate. Affects what
+files it can see and work with.
 
-**YOLO Mode** - When enabled, the agent auto-approves all tool calls without asking for confirmation. Use this for automation, but be careful-it will execute whatever the agent decides to run.
+**YOLO Mode** — when enabled, the agent auto-approves all tool calls
+without asking for confirmation. Use this for automation, but be
+careful — it will execute whatever the agent decides to run.
 
-Once the session is created, you can send prompts directly from the Sessions panel.
+Once the session is created, send prompts directly from the chat view.
 
 ## Step 6: Run an Operation
 
@@ -70,8 +88,8 @@ Operations are predefined tasks you can execute through agents. The library star
 
 ### Create Your First Operation
 
-1. Go to **Operations** → **Library**
-2. Click **New Operation**
+1. Open the **Operations** window (`Ctrl+P`) and switch to the **Library** tab
+2. Create a new operation
 3. Fill in:
    - **Name**: `hello-world`
    - **Category**: `test`
@@ -79,38 +97,38 @@ Operations are predefined tasks you can execute through agents. The library star
    - **Prompt**: `Say hello and tell me what directory you're currently in.`
    - **Mode**: `one-shot`
    - **Timeout**: `60`
-4. Click **Save**
+4. Save
 
 ### Run It
 
-1. Go to **Operations** → **Runs**
-2. Click **Run Operation**
-3. Select your node and agent
-4. Choose `test::hello-world` from the dropdown
-5. Click **Run**
+1. Switch to the **Executions** tab
+2. Run the operation, selecting your node and agent
+3. Choose `test::hello-world`
 
-The operation executes through your agent. Watch the output in real-time in the Runs tab - you'll see the agent's response appear as it completes.
+The operation executes through your agent. Watch the output in
+real-time in the Executions tab — you'll see the agent's response
+appear as it completes.
 
 ### Operation Modes
 
 - **One-shot** - sends the prompt directly to the agent and returns the response
 - **Agent** - uses an orchestrating LLM to run multi-turn interactions with the target agent (useful for complex tasks)
 
-For more complex workflows, you can chain multiple operations together with the visual chain builder. See [Semantic Operations](../usage/semantic-operations.md) for details.
+For more complex workflows, you can chain multiple operations together. See [Semantic Operations](../usage/semantic-operations.md) for details.
 
 ## Step 7: Enable Interception (Optional)
 
-To see the traffic between the agent and its LLM backend:
+To see the traffic between the agent and its LLM backend, open the
+**Intercept** window (`Ctrl+I`):
 
-1. Go to **Intercept**
-2. Select your node
-3. Choose a method:
+1. Select your node
+2. Choose a method:
    - **Proxy** - configures system proxy settings
    - **VPN** - uses a TUN adapter for packet-level routing
    - **Hosts** - modifies the hosts file
-4. Click **Enable**
+3. Enable interception
 
-Traffic appears in the **Traffic** tab. You can see:
+Captured traffic streams into the **Log** tab. You can see:
 - Full request/response bodies
 - Prompts and completions
 - Tool calls and results

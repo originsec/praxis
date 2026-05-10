@@ -30,12 +30,12 @@ All Praxis Agent settings live service-side in the `service_config` table:
 
 ### UI
 
-Both the Web UI and the TUI expose the same controls under **Settings → Agents → Praxis Agent**:
+The praxis TUI exposes these controls under **Settings** (`Ctrl+S`) **→ Agents → Praxis Agent**:
 
 - **Enabled** toggle.
 - **Model** dropdown (populated from the LLM Models list).
 - **Thinking Effort** input (free-form text).
-- **System Prompt** editor (textarea in the Web UI; external editor in the TUI).
+- **System Prompt** editor (opens in your `$EDITOR`).
 
 ## Configuration flow
 

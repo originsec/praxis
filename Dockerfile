@@ -24,11 +24,6 @@ COPY common ./common
 COPY node ./node
 COPY semantic_parser ./semantic_parser
 COPY service ./service
-#
-# `web` is a workspace member so cargo metadata needs it, even though
-# we never build the praxis_web binary. Copy the manifest only.
-#
-COPY web ./web
 RUN cargo chef prepare --recipe-path recipe.json
 
 # ==============================================================================
@@ -73,7 +68,6 @@ COPY common ./common
 COPY node ./node
 COPY semantic_parser ./semantic_parser
 COPY service ./service
-COPY web ./web
 
 RUN if [ "$SKIP_NODE_BUILD" = "0" ]; then \
         cargo build --profile "$CARGO_PROFILE" -p praxis_node && \

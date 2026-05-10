@@ -58,7 +58,7 @@ Response completion is detected by checking:
 
 ### Aborting
 
-CDP sessions support `abort_transaction` — when a transaction is cancelled (e.g. via the web UI), the entire process tree is terminated by PID. The session state stores the `process_id` which the Rust session layer uses for process-level cancellation.
+CDP sessions support `abort_transaction` — when a transaction is cancelled (e.g. via the praxis TUI), the entire process tree is terminated by PID. The session state stores the `process_id` which the Rust session layer uses for process-level cancellation.
 
 ### Cleanup Safety Net
 

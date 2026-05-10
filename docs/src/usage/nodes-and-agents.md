@@ -31,15 +31,15 @@ When the node runs as root, it can operate as different users based on the selec
 
 Each node reports whether it is running with elevated privileges. On Linux/macOS this means running as root (UID 0); on Windows this means running as an elevated administrator.
 
-Privileged nodes display a **ROOT** badge in the web UI and CLI. Some features — particularly interception methods that modify system-level configuration (VPN, Hosts, TPROXY) — require elevated privileges. The web UI will disable the intercept Enable button on non-privileged nodes.
+Privileged nodes display a **ROOT** badge in the praxis TUI. Some features — particularly interception methods that modify system-level configuration (VPN, Hosts, TPROXY) — require elevated privileges. The TUI disables the intercept Enable button on non-privileged nodes.
 
 ### Node List
 
-In the web UI, the left sidebar shows all connected nodes. Click a node to select it. The main panel then shows that node's details and agents.
+Open the **Nodes** window (`Ctrl+L`) in the praxis TUI to see all connected nodes. Select a node to view its details and agents.
 
 ### Bridge Nodes
 
-In addition to deployed nodes, Praxis supports **bridge nodes** -- virtual nodes created when Claude Code connects directly to the service using the Claude Bridge. Bridge nodes appear in the UI alongside regular nodes but have some differences:
+In addition to deployed nodes, Praxis supports **bridge nodes** -- virtual nodes created when Claude Code connects directly to the service using the Claude Bridge. Bridge nodes appear in the TUI alongside regular nodes but have some differences:
 
 - They only support sessions (no interception, recon, or terminal)
 - They are ephemeral -- they disappear when Claude disconnects
@@ -99,7 +99,7 @@ discard controls.
 ### Typical Workflow
 
 1. **Deploy node** to target system
-2. **Select node** in the UI
+2. **Select node** in the praxis TUI's Nodes window (`Ctrl+L`)
 3. **Check agents** that were fingerprinted
 4. **Select an agent** to work with
 5. **Run recon** to see what the agent knows

@@ -18,13 +18,13 @@ Discovered agents across all nodes (in-memory).
 
 ### EventLogs
 
-Centralized application log entries from service, web, and nodes. Requires `application_logs_enabled` to be set to `true` in settings.
+Centralized application log entries from service and nodes. Requires `application_logs_enabled` to be set to `true` in settings.
 
 | Column | Description |
 |--------|-------------|
 | timestamp | When the log entry was recorded |
-| source | Origin category: "service", "web", or "node" |
-| source_id | Instance identifier (e.g. node UUID, web client ID; empty for service) |
+| source | Origin category: "service" or "node" |
+| source_id | Instance identifier (e.g. node UUID; empty for service) |
 | level | Log level: error, warn, info, debug, trace |
 | target | Log target/module (may be null) |
 | message | Log message text |

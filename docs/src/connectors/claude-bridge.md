@@ -53,7 +53,7 @@ CCRv2 uses HTTP POST for client-to-server messages and Server-Sent Events (SSE) 
 
 ## Enabling the Bridge
 
-Both bridge versions are disabled by default. Enable them in the web UI under **Settings** > **Claude Bridge**, or in the CLI TUI under **Settings** (`Ctrl+S`) > **Service** tab.
+Both bridge versions are disabled by default. Enable them in the praxis TUI under **Settings** (`Ctrl+S`) > **Service** tab.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -152,22 +152,22 @@ If all return null, V2 crashes and V1 proceeds with empty headers.
 
 ## How Bridge Nodes Appear
 
-When Claude connects, the bridge registers a virtual node with the service. This node appears in the web UI and CLI just like a deployed node, with some differences:
+When Claude connects, the bridge registers a virtual node with the service. This node appears in the praxis TUI just like a deployed node, with some differences:
 
-- **Node type**: `claude-ccrv1` or `claude-ccrv2` (shown in the UI)
+- **Node type**: `claude-ccrv1` or `claude-ccrv2` (shown in the TUI)
 - **Machine name**: Same as the node type
 - **Capabilities**: Session only (no interception, recon, or terminal)
 - **Agent**: Claude Code (auto-selected, with version reported from the `system/init` message)
 - **Session**: Automatically active in YOLO mode (bypassPermissions)
 - **Working directory**: Reported by Claude's `system/init` message (the cwd where Claude was launched)
 
-Bridge nodes are ephemeral -- they exist only while Claude is connected. When Claude disconnects, the node is automatically deregistered and disappears from the UI.
+Bridge nodes are ephemeral -- they exist only while Claude is connected. When Claude disconnects, the node is automatically deregistered and disappears from the TUI.
 
 ## Using Bridge Sessions
 
 Once connected, a bridge session works like any other Praxis session. You can:
 
-- Send prompts from the web UI or CLI
+- Send prompts from the praxis TUI
 - Run semantic operations against the bridge node
 - Include bridge nodes in chain workflows
 - Use the orchestrator with bridge nodes

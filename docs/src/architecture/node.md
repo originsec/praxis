@@ -47,8 +47,9 @@ where a fanout broadcast could arrive before the node's exchange consumer is
 ready. On re-registration (e.g. after connection loss), scripts are also
 delivered via the ack.
 
-Subsequent script changes (add/edit/delete via the web UI) are broadcast to
-nodes via `AgentRegistryUpdate` on the fanout exchange.
+Subsequent script changes (add/edit/delete via the praxis TUI Settings →
+Agents tab) are broadcast to nodes via `AgentRegistryUpdate` on the
+fanout exchange.
 
 Updates are session-gated: if a session is open when an update arrives, it is
 queued and applied after the session closes. If multiple updates arrive while a
@@ -191,7 +192,7 @@ The connection runs on a dedicated thread with a `LocalSet` (since `ClientSideCo
 Sessions are created with:
 - **Working directory** - where the agent operates
 - **YOLO mode** - auto-approve tool calls
-- **Interactive** - whether permission requests should be forwarded to the user (TUI/web) or auto-denied (MCP/orchestrator)
+- **Interactive** - whether permission requests should be forwarded to the user (TUI) or auto-denied (MCP/orchestrator)
 
 ## Terminal Manager
 
@@ -199,7 +200,7 @@ Provides PTY terminal access to the target system:
 
 1. Shell spawned (bash/zsh/powershell)
 2. PTY handles input/output
-3. Terminal data streamed to web UI
+3. Terminal data streamed to the praxis TUI
 4. Supports resize, Ctrl+C, etc.
 
 ## Message Handling
@@ -281,8 +282,8 @@ pub enum NodeCommand {
 Agent and session interaction have moved off `NodeCommand` entirely. The
 legacy `NodeCommand::Agent` and `NodeCommand::Session` variants — along
 with `NodeSignalMessage::ReconResultUpdate` and `::SessionUpdate` — were
-removed once the CLI, web frontend, service orchestrator, and MCP server
-had all been ported to ACP.
+removed once the CLI, service orchestrator, and MCP server had all been
+ported to ACP.
 
 ### Intercept Commands
 

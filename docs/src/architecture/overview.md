@@ -6,15 +6,10 @@ Praxis has a distributed architecture designed for monitoring and controlling AI
 
 ```diagram
                               ┌─────────────────┐
-                              │   Web Browser   │
-                              │  (React SPA)    │
+                              │   praxis TUI    │
+                              │  (terminal UI)  │
                               └────────┬────────┘
-                                       │ HTTP/WebSocket
-                              ┌────────▼────────┐
-                              │      Web        │
-                              │ (HTTP Server)   │
-                              └────────┬────────┘
-                                       │ Internal
+                                       │ RabbitMQ (AMQP)
                               ┌────────▼────────┐
                               │    Service      │
                               │  (Backend)      │
@@ -67,37 +62,19 @@ The service is the central backend that coordinates everything.
 
 See [Service Architecture](./service.md) for details.
 
-### Web
-
-The web component serves the frontend and provides the API.
-
-**What it does:**
-- Serves the React single-page application
-- Provides WebSocket endpoint for real-time communication
-- Handles HTTP requests for static assets
-- Bridges between browser clients and the service
-
-**Key characteristics:**
-- React/TypeScript frontend with Tailwind CSS
-- WebSocket for bidirectional communication
-- Builds into the binary (embedded assets)
-
-See [Web Architecture](./web.md) for details.
-
 ## Communication
 
 ### No direct client↔node traffic
 
-The service is the only component that talks to nodes. Clients (CLI, web,
-external ACP tools) speak to the **service**; the service forwards to the
-relevant node over RabbitMQ. This keeps access control, session routing,
-and request correlation in one place and means node failure modes never
-leak into clients.
+The service is the only component that talks to nodes. Clients (the
+praxis TUI and external ACP tools) speak to the **service**; the service
+forwards to the relevant node over RabbitMQ. This keeps access control,
+session routing, and request correlation in one place and means node
+failure modes never leak into clients.
 
 ```
- CLI ─▶ RabbitMQ ─▶ Service ─▶ RabbitMQ ─▶ Node
-        Web SPA ─▶
-        External ACP client ─▶
+ praxis TUI ─▶ RabbitMQ ─▶ Service ─▶ RabbitMQ ─▶ Node
+ External ACP client ─▶
 ```
 
 ### ACP (Agent Client Protocol)
@@ -123,7 +100,7 @@ extensions (`_praxis/read_file`, `_praxis/write_file`, `_praxis/grep_files`,
 
 ### RabbitMQ
 
-All communication between nodes, service, and web clients flows through RabbitMQ:
+All communication between nodes, service, and clients flows through RabbitMQ:
 
 | Queue | Direction | Purpose |
 |-------|-----------|---------|
@@ -161,17 +138,17 @@ Here's what happens when a CLI driver runs a prompt over ACP:
 ```diagram
 Agent ─HTTPS─▶ Proxy ─▶ Node ─RabbitMQ─▶ Service ─▶ Database
                                            │
-                                           └─▶ Web ─WebSocket─▶ Browser
+                                           └─RabbitMQ─▶ praxis TUI
 ```
 
 ### Operations
 
 ```diagram
-Browser ─▶ Web ─▶ Service ─▶ LLM (planning)
-                     │
-                     └─▶ Node ─▶ Agent (execution)
-                           │
-                           └─▶ Output ─▶ Service ─▶ Browser
+praxis TUI ─▶ Service ─▶ LLM (planning)
+                 │
+                 └─▶ Node ─▶ Agent (execution)
+                       │
+                       └─▶ Output ─▶ Service ─▶ praxis TUI
 ```
 
 ## Database Schema
@@ -193,13 +170,13 @@ The service stores everything in a relational database:
 ### Development
 
 Single machine running everything:
-- Docker Compose with service, web, and RabbitMQ
+- Docker Compose with service and RabbitMQ
 - Node running locally for testing
 
 ### Production
 
 Separate concerns:
-- Service/Web on central server
+- Service on central server
 - RabbitMQ (possibly managed service)
 - Nodes deployed to target systems
 - PostgreSQL for the database
@@ -207,6 +184,6 @@ Separate concerns:
 ### Cloud (Azure)
 
 See [Azure Deployment](../deployment/azure.md):
-- Container Apps for service/web
+- Container Apps for the service
 - Managed RabbitMQ or Container Instance
 - Azure Database for PostgreSQL

@@ -717,14 +717,11 @@ print_docker_summary() {
 remove_native() {
     info "Removing native install..."
     if has_cmd systemctl; then
-        $SUDO systemctl disable --now praxis-web.service     2>/dev/null || true
         $SUDO systemctl disable --now praxis-service.service 2>/dev/null || true
-        $SUDO rm -f /etc/systemd/system/praxis-service.service \
-                    /etc/systemd/system/praxis-web.service
+        $SUDO rm -f /etc/systemd/system/praxis-service.service
         $SUDO systemctl daemon-reload 2>/dev/null || true
     fi
     $SUDO rm -f "$INSTALL_BIN/praxis_service" \
-                "$INSTALL_BIN/praxis_web" \
                 "$INSTALL_BIN/praxis_cli" \
                 "$INSTALL_BIN/praxis" \
                 "$INSTALL_BIN/praxisctl"

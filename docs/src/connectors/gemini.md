@@ -80,7 +80,7 @@ When creating a session, you can specify:
 
 **YOLO Mode** - When enabled, tool permission requests are auto-approved.
 
-**Interactive Mode** - When set (TUI or web sessions), permission requests are forwarded to the user for approval. Non-interactive sessions (MCP, orchestrator) auto-deny permission requests.
+**Interactive Mode** - When set (TUI sessions), permission requests are forwarded to the user for approval. Non-interactive sessions (MCP, orchestrator) auto-deny permission requests.
 
 ### Transacting
 

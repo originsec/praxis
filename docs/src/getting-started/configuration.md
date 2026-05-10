@@ -4,7 +4,7 @@ Praxis uses LLMs for several features-semantic operations, tool discovery during
 
 ## LLM Providers
 
-Go to **Settings** → **LLM Providers** in the web UI.
+Open **Settings** (`Ctrl+S`) → **LLM Providers** in the praxis TUI.
 
 ### Adding a Model
 
@@ -57,7 +57,7 @@ For Semantic Operations, capability matters more than raw speed. Use a model tha
 
 ## Environment Variables
 
-Most configuration is done through the web UI, but some things are set via environment variables:
+Most configuration is done through the praxis TUI, but some things are set via environment variables:
 
 ### Service
 

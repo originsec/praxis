@@ -357,11 +357,11 @@ The service manages Lua agent connector scripts stored in the database. Default 
 
 When a node registers, the service includes all Lua scripts in the `NodeRegistrationAck` message sent to the node's direct queue. This avoids a race condition where a fanout broadcast could arrive before the node's exchange consumer is ready.
 
-Scripts can be added, updated, or deleted via the web UI (Settings > Agents tab). When scripts change, the service broadcasts an `AgentRegistryUpdate` to all connected nodes so they reload the latest scripts.
+Scripts can be added, updated, or deleted via the praxis TUI (**Settings** → **Agents** tab). When scripts change, the service broadcasts an `AgentRegistryUpdate` to all connected nodes so they reload the latest scripts.
 
 A "Reset Defaults" operation clears all scripts and re-inserts the embedded defaults.
 
-Agent version information (extracted during fingerprinting) is included in the `DiscoveredAgent` data reported by nodes and displayed in the web UI.
+Agent version information (extracted during fingerprinting) is included in the `DiscoveredAgent` data reported by nodes and displayed in the praxis TUI.
 
 ## Claude Bridge
 

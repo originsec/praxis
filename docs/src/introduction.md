@@ -32,18 +32,18 @@ This matters for:
 | **Toolkit** | Library of built-in offensive operations with chain integration |
 | **Terminal Access** | PTY terminal on remote nodes |
 
-## The Three Components
+## The Components
 
 Praxis has three main pieces:
 
 ```diagram
 ┌───────────────────────────────────────────────────────────┐
 │                                                           │
-│                       Your Browser                        │
-│                    (Web UI @ :8080)                       │
+│                       praxis (TUI)                        │
 │                                                           │
 └─────────────────────────────┬─────────────────────────────┘
                               │
+                              │ RabbitMQ
                               │
 ┌─────────────────────────────▼─────────────────────────────┐
 │                                                           │
@@ -69,7 +69,7 @@ Praxis has three main pieces:
 
 **Service** is the central backend. It stores operation definitions, chain workflows, intercepted traffic, and recon results. It also runs the semantic operations manager that orchestrates agent tasks.
 
-**Web** is the React frontend that talks to the service over WebSocket. It provides the UI for everything - selecting nodes, viewing agents, running operations, building chains.
+**praxis (TUI)** is the first-party client. It's a terminal user interface that connects to the service to drive everything — selecting nodes, viewing agents, running operations, building chains.
 
 ## Early Release Notice
 

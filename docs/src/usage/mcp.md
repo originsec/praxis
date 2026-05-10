@@ -14,7 +14,7 @@ The MCP server serves two purposes:
 
 The MCP server is controlled via service settings:
 
-1. Go to **Settings** > **MCP Server** (web UI or CLI Settings window)
+1. Open **Settings** (`Ctrl+S`) > **MCP Server** in the praxis TUI
 2. Toggle **Enable** to turn on the server
 3. Configure the port (default: `8585`)
 

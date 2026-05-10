@@ -37,9 +37,8 @@ on first boot and can be edited, disabled, or deleted.
 
 ### Managing targets
 
-- **Web UI:** Settings → Intercept. Add, edit, toggle, or delete targets.
-- **TUI:** Settings → Intercept tab. `enter` to edit, `space` to
-  toggle enable/disable, `^d` to delete.
+- **TUI:** Settings (`Ctrl+S`) → Intercept tab. `enter` to edit, `space`
+  to toggle enable/disable, `^d` to delete.
 
 Changes take effect immediately: the service broadcasts the new list to
 all connected nodes. If interception is currently enabled on a node,
@@ -158,14 +157,14 @@ Praxis supports four methods for routing traffic through the proxy. Each has tra
 
 Most interception methods (VPN, Hosts, TPROXY) require the node to be running with elevated privileges (root on Linux/macOS, administrator on Windows). The Proxy method can work without elevated privileges.
 
-Nodes report their privilege status automatically. In the web UI, the intercept Enable button is disabled on non-privileged nodes — you must restart the node with elevated privileges before enabling interception. Privileged nodes display a **ROOT** badge in the Nodes window.
+Nodes report their privilege status automatically. In the praxis TUI, the intercept Enable button is disabled on non-privileged nodes — you must restart the node with elevated privileges before enabling interception. Privileged nodes display a **ROOT** badge in the Nodes window.
 
 ## Enabling Interception
 
-1. Go to **Intercept** in the web UI
+1. Open the **Intercept** window (`Ctrl+I`) in the praxis TUI
 2. Select your node (must be running privileged for VPN/Hosts/TPROXY methods)
 3. Choose a method (Proxy, VPN, Hosts, or TPROXY)
-4. Click **Enable**
+4. Enable interception
 
 The node will:
 - Create and install a root CA certificate
@@ -219,7 +218,7 @@ Standard HTTP traffic is fully captured with request/response headers and bodies
 
 ### WebSocket
 
-WebSocket connections are detected via HTTP 101 upgrade responses. Individual frames are captured and grouped by connection URL in the UI.
+WebSocket connections are detected via HTTP 101 upgrade responses. Individual frames are captured and grouped by connection URL in the TUI's Intercept window.
 
 ### HTTP/2 and gRPC
 
