@@ -39,6 +39,7 @@
   #include <winsock2.h>
   #include <ws2tcpip.h>
   #include <windows.h>
+  #include <time.h>
   typedef SSIZE_T ssize_t;
   #define close_sock closesocket
   #ifndef MSG_NOSIGNAL
@@ -47,11 +48,20 @@
   #ifndef SOCK_CLOEXEC
     #define SOCK_CLOEXEC 0
   #endif
-  /* gmtime_s has args swapped vs gmtime_r. */
+
+  //
+  // MinGW exposes gmtime_s only when __STDC_WANT_LIB_EXT1__ is set,
+  // which we'd rather not require. gmtime() returns a pointer into a
+  // static buffer; copying the result immediately is good enough for
+  // log timestamps.
+  //
+
   static inline struct tm *tiny_gmtime_r(const time_t *t, struct tm *out) {
-      return gmtime_s(out, t) == 0 ? out : NULL;
+      struct tm *r = gmtime(t);
+      if (!r) return NULL;
+      *out = *r;
+      return out;
   }
-  /* sleep_ms in milliseconds — replaces usleep across platforms. */
   static inline void sleep_ms(unsigned ms) { Sleep(ms); }
 #else
   #include <sys/socket.h>
