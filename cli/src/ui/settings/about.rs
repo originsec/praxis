@@ -1,5 +1,6 @@
 use crate::app::SettingsState;
-use crate::ui::theme::{ACCENT, DIM, MUTED, TEXT};
+use crate::ui::chrome;
+use crate::ui::theme::{ACCENT, DIM, MUTED, OK, TEXT, TEXT_BRIGHT};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -10,6 +11,35 @@ pub(super) fn render_about(f: &mut Frame, area: Rect, _state: &SettingsState) {
     let version = env!("CARGO_PKG_VERSION");
 
     let lines = vec![
+        Line::from(vec![
+            chrome::dot(OK),
+            Span::raw(" "),
+            Span::styled(
+                "praxis",
+                Style::default()
+                    .fg(TEXT_BRIGHT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                format!("v{}", version),
+                Style::default().fg(DIM),
+            ),
+            chrome::mid_dot(),
+            Span::styled("by Origin", Style::default().fg(MUTED)),
+            Span::raw(" "),
+            Span::styled("\u{00d8}", Style::default().fg(ACCENT)),
+        ]),
+        Line::raw(""),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled(
+                "# About Origin",
+                Style::default()
+                    .fg(TEXT_BRIGHT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
         Line::raw(""),
         Line::from(vec![
             Span::styled(
@@ -34,6 +64,16 @@ pub(super) fn render_about(f: &mut Frame, area: Rect, _state: &SettingsState) {
             Style::default().fg(TEXT),
         )),
         Line::raw(""),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled(
+                "# About Praxis",
+                Style::default()
+                    .fg(TEXT_BRIGHT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::raw(""),
         Line::from(vec![
             Span::styled(
                 "Praxis",
@@ -57,17 +97,20 @@ pub(super) fn render_about(f: &mut Frame, area: Rect, _state: &SettingsState) {
             Style::default().fg(TEXT),
         )),
         Line::raw(""),
-        Line::from(vec![
-            Span::styled("Version  ", Style::default().fg(MUTED)),
-            Span::styled(version, Style::default().fg(TEXT)),
-        ]),
         Line::raw(""),
         Line::from(vec![
-            Span::styled("originhq.com", Style::default().fg(ACCENT)),
-            Span::styled("   ", Style::default().fg(DIM)),
+            Span::styled(
+                "originhq.com",
+                Style::default()
+                    .fg(ACCENT)
+                    .add_modifier(Modifier::UNDERLINED),
+            ),
+            chrome::mid_dot(),
             Span::styled(
                 "praxis.originhq.com",
-                Style::default().fg(Color::Rgb(180, 130, 220)),
+                Style::default()
+                    .fg(Color::Rgb(180, 130, 220))
+                    .add_modifier(Modifier::UNDERLINED),
             ),
         ]),
     ];

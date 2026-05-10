@@ -97,7 +97,7 @@ fn render_body(f: &mut Frame, area: Rect, state: &LogQueryState, focused: bool) 
 
     let body_block = Block::default()
         .borders(Borders::NONE)
-        .style(Style::default().bg(crate::ui::theme::BG));
+        .style(Style::default().bg(crate::ui::theme::BG_PANEL));
     let para = Paragraph::new(out).block(body_block).scroll((scroll, 0));
     f.render_widget(para, area);
 }
@@ -142,7 +142,7 @@ fn line_with_cursor(
                 out.push(Span::styled(
                     ch.to_string(),
                     Style::default()
-                        .fg(crate::ui::theme::BG)
+                        .fg(crate::ui::theme::BG_PANEL)
                         .bg(ACCENT)
                         .add_modifier(Modifier::BOLD),
                 ));

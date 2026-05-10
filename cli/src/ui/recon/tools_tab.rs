@@ -1,12 +1,13 @@
 use crate::app::{ReconOverlay, ReconTab};
+use crate::ui::common::focused_titled_panel;
 use crate::ui::theme::{
-    ACCENT, DIM, MUTED, POPUP_BG, POPUP_HIGHLIGHT_BG, STATUS_RUNNING, TEXT,
+    ACCENT, BG_MENU, BG_SELECTED, DIM, MUTED, STATUS_RUNNING, TEXT_BRIGHT,
 };
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 
 pub fn render(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
     if overlay.recon_result.is_none() {
@@ -38,15 +39,9 @@ pub fn render(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
 }
 
 fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &common::ReconResult) {
-    let border_color = if overlay.right_pane_focused { DIM } else { ACCENT };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color))
-        .title_style(Style::default().fg(MUTED))
-        .title(" Categories ");
-
-    f.render_widget(block.clone(), area);
+    let block = focused_titled_panel(" Categories ", !overlay.right_pane_focused);
     let inner = block.inner(area);
+    f.render_widget(block, area);
 
     let categories = [
         ("MCP Servers", result.tools.mcp_servers.len()),
@@ -64,22 +59,24 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
     let mut lines: Vec<Line> = Vec::new();
     for (idx, (name, count)) in categories.iter().enumerate().skip(scroll_offset).take(visible_items) {
         let is_selected = overlay.active_tab == ReconTab::Tools && overlay.selected_left == idx;
-        let bg = if is_selected {
-            POPUP_HIGHLIGHT_BG
-        } else {
-            POPUP_BG
-        };
+        let bg = if is_selected { BG_SELECTED } else { BG_MENU };
 
         let name_style = if is_selected {
-            Style::default().fg(TEXT).bg(bg).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .bg(bg)
+                .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(TEXT).bg(bg)
+            Style::default().fg(TEXT_BRIGHT).bg(bg)
         };
         let count_style = Style::default().fg(DIM).bg(bg);
 
-        let prefix = if is_selected { "> " } else { "  " };
+        let prefix = if is_selected { "\u{276f} " } else { "  " };
+        let prefix_style = Style::default()
+            .fg(if is_selected { ACCENT } else { MUTED })
+            .bg(bg);
         lines.push(Line::from(vec![
-            Span::styled(prefix.to_string(), name_style),
+            Span::styled(prefix.to_string(), prefix_style),
             Span::styled(format!("{} ", name), name_style),
             Span::styled(format!("({})", count), count_style),
         ]));
@@ -95,15 +92,9 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
         _ => " Internal Tools ",
     };
 
-    let border_color = if overlay.right_pane_focused { ACCENT } else { DIM };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color))
-        .title_style(Style::default().fg(MUTED))
-        .title(title);
-
-    f.render_widget(block.clone(), area);
+    let block = focused_titled_panel(title, overlay.right_pane_focused);
     let inner = block.inner(area);
+    f.render_widget(block, area);
 
     let mut lines: Vec<Line> = Vec::new();
 
@@ -116,7 +107,7 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
                     lines.push(Line::from(""));
                     lines.push(Line::from(vec![
                         Span::styled("▸ ", Style::default().fg(ACCENT)),
-                        Span::styled(server.name.clone(), Style::default().fg(TEXT).add_modifier(Modifier::BOLD)),
+                        Span::styled(server.name.clone(), Style::default().fg(TEXT_BRIGHT).add_modifier(Modifier::BOLD)),
                         Span::styled(format!("  [{}]", server.transport), Style::default().fg(MUTED)),
                     ]));
 
@@ -140,7 +131,7 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
                         for tool in &server.tools {
                             lines.push(Line::from(vec![
                                 Span::styled("     • ", Style::default().fg(ACCENT)),
-                                Span::styled(tool.name.clone(), Style::default().fg(TEXT)),
+                                Span::styled(tool.name.clone(), Style::default().fg(TEXT_BRIGHT)),
                             ]));
                             if !tool.description.is_empty() {
                                 lines.push(Line::from(vec![
@@ -160,7 +151,7 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
                 for skill in &result.tools.skills {
                     lines.push(Line::from(vec![
                         Span::styled("• ", Style::default().fg(ACCENT)),
-                        Span::styled(skill.name.clone(), Style::default().fg(TEXT)),
+                        Span::styled(skill.name.clone(), Style::default().fg(TEXT_BRIGHT)),
                     ]));
                     if !skill.description.is_empty() {
                         lines.push(Line::from(vec![
@@ -179,7 +170,7 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
                 for tool in &result.tools.internal_tools {
                     lines.push(Line::from(vec![
                         Span::styled("• ", Style::default().fg(ACCENT)),
-                        Span::styled(tool.name.clone(), Style::default().fg(TEXT)),
+                        Span::styled(tool.name.clone(), Style::default().fg(TEXT_BRIGHT)),
                     ]));
                     if !tool.description.is_empty() {
                         lines.push(Line::from(vec![

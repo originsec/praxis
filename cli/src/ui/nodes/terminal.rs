@@ -1,6 +1,7 @@
 use crate::app::TerminalState;
+use crate::ui::chrome;
 use crate::ui::common::short_id;
-use crate::ui::theme::{ACCENT, BG, DIM, MUTED};
+use crate::ui::theme::{ACCENT, BG, BORDER_SUBTLE, DIM, MUTED, TEXT_BRIGHT};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -22,16 +23,22 @@ pub(super) fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
     //
 
     let header = Line::from(vec![
+        chrome::diamond(ACCENT),
+        Span::raw(" "),
         Span::styled(
-            "  \u{2335} Terminal  ",
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            "Terminal",
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
         ),
+        chrome::mid_dot(),
         Span::styled(
             short_id(&term.node_id).to_string(),
             Style::default().fg(DIM),
         ),
     ]);
     f.render_widget(Paragraph::new(header), chunks[0]);
+    let _ = BORDER_SUBTLE;
 
     //
     // Render terminal screen from vt100 parser.
@@ -66,9 +73,10 @@ pub(super) fn render_terminal(f: &mut Frame, area: Rect, term: &TerminalState) {
     //
 
     let mut hint_spans = vec![
-        Span::styled("  ^t", Style::default().fg(ACCENT)),
-        Span::styled(" close  ", Style::default().fg(MUTED)),
-        Span::styled("scroll", Style::default().fg(ACCENT)),
+        Span::styled("^t", Style::default().fg(TEXT_BRIGHT)),
+        Span::styled(" close", Style::default().fg(MUTED)),
+        Span::raw("    "),
+        Span::styled("scroll", Style::default().fg(TEXT_BRIGHT)),
         Span::styled(" history", Style::default().fg(MUTED)),
     ];
     if term.scroll_offset > 0 {

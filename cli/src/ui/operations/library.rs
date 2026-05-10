@@ -1,7 +1,10 @@
 use super::{CHAIN_COLOR, OP_COLOR};
 use crate::app::{App, OperationsState};
 use crate::ui::common::focused_titled_panel;
-use crate::ui::theme::{ACCENT, DIM, MUTED, PANEL_HIGHLIGHT_BG, STATUS_RUNNING, TEXT};
+use crate::ui::chrome;
+use crate::ui::theme::{
+    ACCENT, BG_SELECTED, DIM, MUTED, STATUS_RUNNING, TEXT_BRIGHT,
+};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -26,7 +29,7 @@ pub(super) fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsS
         Cell::from("Category"),
         Cell::from("Mode"),
     ])
-    .style(Style::default().fg(ACCENT));
+    .style(Style::default().fg(MUTED).add_modifier(Modifier::BOLD));
 
     let mut rows: Vec<Row> = Vec::new();
 
@@ -38,8 +41,14 @@ pub(super) fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsS
         if is_chain {
             let chain = &state.chain_definitions[idx];
             rows.push(Row::new(vec![
-                Cell::from("C").style(Style::default().fg(CHAIN_COLOR)),
-                Cell::from(chain.name.clone()).style(Style::default().fg(TEXT)),
+                Cell::from(Span::styled(
+                    " C ",
+                    Style::default()
+                        .fg(crate::ui::theme::BG)
+                        .bg(CHAIN_COLOR)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Cell::from(chain.name.clone()).style(Style::default().fg(TEXT_BRIGHT)),
                 Cell::from(chain.category.clone()).style(Style::default().fg(DIM)),
                 Cell::from(format!("{} elements", chain.element_count))
                     .style(Style::default().fg(DIM)),
@@ -47,8 +56,14 @@ pub(super) fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsS
         } else {
             let def = &state.op_definitions[idx];
             rows.push(Row::new(vec![
-                Cell::from("O").style(Style::default().fg(OP_COLOR)),
-                Cell::from(def.name.clone()).style(Style::default().fg(TEXT)),
+                Cell::from(Span::styled(
+                    " O ",
+                    Style::default()
+                        .fg(crate::ui::theme::BG)
+                        .bg(OP_COLOR)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Cell::from(def.name.clone()).style(Style::default().fg(TEXT_BRIGHT)),
                 Cell::from(def.category.clone()).style(Style::default().fg(DIM)),
                 Cell::from(def.mode.clone()).style(Style::default().fg(DIM)),
             ]));
@@ -56,7 +71,7 @@ pub(super) fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsS
     }
 
     let widths = [
-        Constraint::Length(1),
+        Constraint::Length(3),
         Constraint::Min(10),
         Constraint::Length(10),
         Constraint::Length(10),
@@ -68,7 +83,11 @@ pub(super) fn render_library_list(f: &mut Frame, area: Rect, state: &OperationsS
             " Operations & Chains ",
             !state.detail_focus,
         ))
-        .row_highlight_style(Style::default().bg(PANEL_HIGHLIGHT_BG));
+        .row_highlight_style(
+            Style::default()
+                .bg(BG_SELECTED)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let mut table_state = TableState::default();
     table_state.select(Some(state.library_selected));
@@ -93,108 +112,89 @@ pub(super) fn render_library_detail(f: &mut Frame, area: Rect, state: &Operation
     if let Some(&(idx, is_chain)) = filtered.get(state.library_selected) {
         if !is_chain {
             let def = &state.op_definitions[idx];
+            lines.push(Line::from(vec![
+                chrome::pill("OP", OP_COLOR),
+                Span::raw(" "),
+                Span::styled(
+                    def.name.clone(),
+                    Style::default()
+                        .fg(TEXT_BRIGHT)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
             lines.push(Line::from(Span::styled(
-                format!(" {}", def.name),
-                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
-            )));
-            lines.push(Line::from(Span::styled(
-                format!(" {}", def.full_name),
+                def.full_name.clone(),
                 Style::default().fg(DIM),
             )));
             lines.push(Line::from(""));
             if !def.description.is_empty() {
                 lines.push(Line::from(Span::styled(
-                    format!(" {}", def.description),
+                    def.description.clone(),
                     Style::default().fg(MUTED),
                 )));
                 lines.push(Line::from(""));
             }
-            lines.push(Line::from(vec![
-                Span::styled(" Mode: ", Style::default().fg(DIM)),
-                Span::styled(&def.mode, Style::default().fg(TEXT)),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled(" Timeout: ", Style::default().fg(DIM)),
-                Span::styled(format!("{}s", def.timeout), Style::default().fg(TEXT)),
-            ]));
+            lines.push(chrome::kv("mode", &def.mode));
+            lines.push(chrome::kv("timeout", &format!("{}s", def.timeout)));
             if def.mode == "agent" {
-                lines.push(Line::from(vec![
-                    Span::styled(" Iterations: ", Style::default().fg(DIM)),
-                    Span::styled(
-                        format!("{}", def.agent_iterations),
-                        Style::default().fg(TEXT),
-                    ),
-                ]));
+                lines.push(chrome::kv("iterations", &format!("{}", def.agent_iterations)));
             }
             lines.push(Line::from(vec![
-                Span::styled(" YOLO: ", Style::default().fg(DIM)),
+                Span::styled("yolo: ", Style::default().fg(MUTED)),
                 Span::styled(
                     if def.yolo_mode { "yes" } else { "no" },
                     Style::default().fg(if def.yolo_mode { STATUS_RUNNING } else { DIM }),
                 ),
             ]));
             if let Some(ref model) = def.model_ref {
-                lines.push(Line::from(vec![
-                    Span::styled(" Model: ", Style::default().fg(DIM)),
-                    Span::styled(model.as_str(), Style::default().fg(TEXT)),
-                ]));
+                lines.push(chrome::kv("model", model.as_str()));
             }
             if !def.operation_prompt.is_empty() {
                 lines.push(Line::from(""));
-                lines.push(Line::from(Span::styled(
-                    " Prompt",
-                    Style::default().fg(ACCENT),
-                )));
+                lines.push(chrome::section_title("Prompt", false));
                 for line in def.operation_prompt.lines().take(10) {
                     lines.push(Line::from(Span::styled(
-                        format!(" {}", line),
+                        line.to_string(),
                         Style::default().fg(MUTED),
                     )));
                 }
             }
         } else {
             let chain = &state.chain_definitions[idx];
-            lines.push(Line::from(Span::styled(
-                format!(" {}", chain.name),
-                Style::default()
-                    .fg(CHAIN_COLOR)
-                    .add_modifier(Modifier::BOLD),
-            )));
+            lines.push(Line::from(vec![
+                chrome::pill("CHAIN", CHAIN_COLOR),
+                Span::raw(" "),
+                Span::styled(
+                    chain.name.clone(),
+                    Style::default()
+                        .fg(TEXT_BRIGHT)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
             lines.push(Line::from(""));
             if !chain.description.is_empty() {
                 lines.push(Line::from(Span::styled(
-                    format!(" {}", chain.description),
+                    chain.description.clone(),
                     Style::default().fg(MUTED),
                 )));
                 lines.push(Line::from(""));
             }
-            lines.push(Line::from(vec![
-                Span::styled(" Elements: ", Style::default().fg(DIM)),
-                Span::styled(
-                    format!("{}", chain.element_count),
-                    Style::default().fg(TEXT),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled(" Operations: ", Style::default().fg(DIM)),
-                Span::styled(
-                    format!("{}", chain.operation_count),
-                    Style::default().fg(TEXT),
-                ),
-            ]));
+            lines.push(chrome::kv("elements", &format!("{}", chain.element_count)));
+            lines.push(chrome::kv(
+                "operations",
+                &format!("{}", chain.operation_count),
+            ));
             if let Some(timeout) = chain.timeout {
-                lines.push(Line::from(vec![
-                    Span::styled(" Timeout: ", Style::default().fg(DIM)),
-                    Span::styled(format!("{}s", timeout), Style::default().fg(TEXT)),
-                ]));
+                lines.push(chrome::kv("timeout", &format!("{}s", timeout)));
             }
         }
     } else {
         lines.push(Line::from(Span::styled(
-            " No item selected",
-            Style::default().fg(DIM),
+            "No item selected",
+            Style::default().fg(MUTED).add_modifier(Modifier::ITALIC),
         )));
     }
+    let _ = ACCENT;
 
     f.render_widget(
         Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
