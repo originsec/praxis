@@ -9,69 +9,100 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+#
+# Per-platform jobs build every binary that targets that platform in a
+# single cargo invocation, so common dependencies are compiled once per
+# OS instead of once per binary. The three platform jobs run in
+# parallel; the `release` job assembles and publishes assets.
+#
+
 jobs:
-  build-node:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact_name: praxis_node
-            asset_name: praxis_node-linux-x86_64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact_name: praxis_node.exe
-            asset_name: praxis_node-windows-x86_64.exe
-          - os: macos-26
-            target: aarch64-apple-darwin
-            artifact_name: praxis_node
-            asset_name: praxis_node-macos-arm64
-
-    runs-on: ${{ matrix.os }}
-
+  build-linux:
+    #
+    # ubuntu-22.04 for glibc 2.35 compatibility — produces binaries
+    # that run on Ubuntu 22.04+, Debian 12+, Fedora 36+, etc.
+    #
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
 
-      - name: Build
-        run: cargo build --release --package praxis_node --target ${{ matrix.target }}
+      - name: Build Rust binaries (node, cli, service)
+        run: cargo build --release -p praxis_node -p praxis_cli -p praxis_service
 
-      - name: Upload artifact
+      - name: Build praxis_node_tiny_c
+        run: make -C node/tiny_c release
+
+      - name: Upload praxis_node-linux-x86_64
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset_name }}
-          path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+          name: praxis_node-linux-x86_64
+          path: target/release/praxis_node
 
-  build-node-tiny-c:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact_path: node/tiny_c/praxis_node_tiny_c
-            asset_name: praxis_node_tiny_c-linux-x86_64
-            shell: bash
-          - os: macos-26
-            artifact_path: node/tiny_c/praxis_node_tiny_c
-            asset_name: praxis_node_tiny_c-macos-arm64
-            shell: bash
-          - os: windows-latest
-            artifact_path: node/tiny_c/praxis_node_tiny_c.exe
-            asset_name: praxis_node_tiny_c-windows-x86_64.exe
-            shell: msys2 {0}
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: ${{ matrix.shell }}
+      - name: Upload praxis_cli-linux-x86_64
+        uses: actions/upload-artifact@v4
+        with:
+          name: praxis_cli-linux-x86_64
+          path: target/release/praxis_cli
 
+      - name: Upload praxis_service-linux-x86_64
+        uses: actions/upload-artifact@v4
+        with:
+          name: praxis_service-linux-x86_64
+          path: target/release/praxis_service
+
+      - name: Upload praxis_node_tiny_c-linux-x86_64
+        uses: actions/upload-artifact@v4
+        with:
+          name: praxis_node_tiny_c-linux-x86_64
+          path: node/tiny_c/praxis_node_tiny_c
+
+  build-macos:
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up MSYS2 (Windows)
-        if: runner.os == 'Windows'
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Rust binaries (node, cli)
+        run: cargo build --release -p praxis_node -p praxis_cli
+
+      - name: Build praxis_node_tiny_c
+        run: make -C node/tiny_c release
+
+      - name: Upload praxis_node-macos-arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: praxis_node-macos-arm64
+          path: target/release/praxis_node
+
+      - name: Upload praxis_cli-macos-arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: praxis_cli-macos-arm64
+          path: target/release/praxis_cli
+
+      - name: Upload praxis_node_tiny_c-macos-arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: praxis_node_tiny_c-macos-arm64
+          path: node/tiny_c/praxis_node_tiny_c
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Rust binaries (node, cli)
+        run: cargo build --release -p praxis_node -p praxis_cli
+
+      - name: Set up MSYS2 (for tiny_c make)
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -80,149 +111,75 @@ jobs:
             mingw-w64-x86_64-make
             make
 
-      - name: Build
-        working-directory: node/tiny_c
-        run: make release
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.asset_name }}
-          path: ${{ matrix.artifact_path }}
-
-  build-cli:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact_name: praxis_cli
-            asset_name: praxis_cli-linux-x86_64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact_name: praxis_cli.exe
-            asset_name: praxis_cli-windows-x86_64.exe
-          - os: macos-26
-            target: aarch64-apple-darwin
-            artifact_name: praxis_cli
-            asset_name: praxis_cli-macos-arm64
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Build CLI
-        run: cargo build --release --package praxis_cli --target ${{ matrix.target }}
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.asset_name }}
-          path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
-
-  build-server:
-    #
-    # Build on ubuntu-22.04 for broad glibc compatibility (glibc 2.35).
-    # This is the oldest actively-supported GitHub Actions runner,
-    # producing binaries that run on Ubuntu 22.04+, Debian 12+,
-    # Fedora 36+, etc.
-    #
-    needs: [build-node, build-node-tiny-c]
-    runs-on: ubuntu-22.04
-
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build server binaries
-        #
-        # `praxis_web` is intentionally not built — the installer and
-        # AUR packages no longer ship the web server.
-        #
-        run: cargo build --release -p praxis_service -p praxis_cli -p praxis_node
-
-      - name: Build praxis_node_tiny_c (Linux)
+      - name: Build praxis_node_tiny_c
+        shell: msys2 {0}
         run: make -C node/tiny_c release
 
-      - name: Download Windows node binary
-        uses: actions/download-artifact@v4
+      - name: Upload praxis_node-windows-x86_64.exe
+        uses: actions/upload-artifact@v4
         with:
           name: praxis_node-windows-x86_64.exe
-          path: artifacts/windows-node
+          path: target/release/praxis_node.exe
 
-      - name: Download tiny C node (Windows)
-        uses: actions/download-artifact@v4
+      - name: Upload praxis_cli-windows-x86_64.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: praxis_cli-windows-x86_64.exe
+          path: target/release/praxis_cli.exe
+
+      - name: Upload praxis_node_tiny_c-windows-x86_64.exe
+        uses: actions/upload-artifact@v4
         with:
           name: praxis_node_tiny_c-windows-x86_64.exe
-          path: artifacts/windows-node-tiny-c
-
-      - name: Package binaries
-        run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          mkdir -p "praxis-${VERSION}-x86_64-linux"
-          cp target/release/praxis_service \
-             target/release/praxis_cli \
-             target/release/praxis_node \
-             "praxis-${VERSION}-x86_64-linux/"
-          cp node/tiny_c/praxis_node_tiny_c \
-             "praxis-${VERSION}-x86_64-linux/praxis_node_tiny_c"
-          cp artifacts/windows-node/praxis_node.exe \
-             "praxis-${VERSION}-x86_64-linux/praxis_node_windows.exe"
-          cp artifacts/windows-node-tiny-c/praxis_node_tiny_c.exe \
-             "praxis-${VERSION}-x86_64-linux/praxis_node_tiny_c_windows.exe"
-          cp pkg/praxisctl/praxisctl "praxis-${VERSION}-x86_64-linux/"
-          cp LICENSE "praxis-${VERSION}-x86_64-linux/"
-          tar czf "praxis-${VERSION}-x86_64-linux.tar.gz" "praxis-${VERSION}-x86_64-linux"
-
-      - name: Upload tarball artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: praxis-server-linux-x86_64
-          path: praxis-*-x86_64-linux.tar.gz
-
-      - name: Upload standalone praxis_service (Linux)
-        uses: actions/upload-artifact@v4
-        with:
-          name: praxis_service-linux-x86_64
-          path: target/release/praxis_service
+          path: node/tiny_c/praxis_node_tiny_c.exe
 
   release:
-    needs: [build-node, build-node-tiny-c, build-server, build-cli]
+    needs: [build-linux, build-macos, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
+      - uses: actions/checkout@v5
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Prepare release assets
+      - name: Assemble release assets
         run: |
-          mv artifacts/praxis_node-linux-x86_64/praxis_node praxis_node-linux-x86_64
-          mv artifacts/praxis_node-windows-x86_64.exe/praxis_node.exe praxis_node-windows-x86_64.exe
-          mv artifacts/praxis_node-macos-arm64/praxis_node praxis_node-macos-arm64
-          mv artifacts/praxis_node_tiny_c-linux-x86_64/praxis_node_tiny_c praxis_node_tiny_c-linux-x86_64
-          mv artifacts/praxis_node_tiny_c-macos-arm64/praxis_node_tiny_c praxis_node_tiny_c-macos-arm64
-          mv artifacts/praxis_node_tiny_c-windows-x86_64.exe/praxis_node_tiny_c.exe praxis_node_tiny_c-windows-x86_64.exe
-          mv artifacts/praxis_cli-linux-x86_64/praxis_cli praxis_cli-linux-x86_64
-          mv artifacts/praxis_cli-windows-x86_64.exe/praxis_cli.exe praxis_cli-windows-x86_64.exe
-          mv artifacts/praxis_cli-macos-arm64/praxis_cli praxis_cli-macos-arm64
-          mv artifacts/praxis_service-linux-x86_64/praxis_service praxis_service-linux-x86_64
+          set -eux
+          VERSION=${GITHUB_REF_NAME#v}
+
+          # Flatten upload-artifact's per-name directories into top-level files.
+          mv artifacts/praxis_node-linux-x86_64/praxis_node                          praxis_node-linux-x86_64
+          mv artifacts/praxis_node-windows-x86_64.exe/praxis_node.exe                praxis_node-windows-x86_64.exe
+          mv artifacts/praxis_node-macos-arm64/praxis_node                           praxis_node-macos-arm64
+          mv artifacts/praxis_node_tiny_c-linux-x86_64/praxis_node_tiny_c            praxis_node_tiny_c-linux-x86_64
+          mv artifacts/praxis_node_tiny_c-macos-arm64/praxis_node_tiny_c             praxis_node_tiny_c-macos-arm64
+          mv artifacts/praxis_node_tiny_c-windows-x86_64.exe/praxis_node_tiny_c.exe  praxis_node_tiny_c-windows-x86_64.exe
+          mv artifacts/praxis_cli-linux-x86_64/praxis_cli                            praxis_cli-linux-x86_64
+          mv artifacts/praxis_cli-windows-x86_64.exe/praxis_cli.exe                  praxis_cli-windows-x86_64.exe
+          mv artifacts/praxis_cli-macos-arm64/praxis_cli                             praxis_cli-macos-arm64
+          mv artifacts/praxis_service-linux-x86_64/praxis_service                    praxis_service-linux-x86_64
           chmod +x praxis_node-linux-x86_64 praxis_node-macos-arm64 \
                    praxis_node_tiny_c-linux-x86_64 praxis_node_tiny_c-macos-arm64 \
                    praxis_cli-linux-x86_64 praxis_cli-macos-arm64 \
                    praxis_service-linux-x86_64
-          cp artifacts/praxis-server-linux-x86_64/praxis-*-x86_64-linux.tar.gz .
+
+          # Build the praxis-<ver>-x86_64-linux server tarball by repackaging
+          # the standalone artifacts above — no rebuild needed.
+          mkdir -p "praxis-${VERSION}-x86_64-linux"
+          cp praxis_service-linux-x86_64           "praxis-${VERSION}-x86_64-linux/praxis_service"
+          cp praxis_cli-linux-x86_64               "praxis-${VERSION}-x86_64-linux/praxis_cli"
+          cp praxis_node-linux-x86_64              "praxis-${VERSION}-x86_64-linux/praxis_node"
+          cp praxis_node_tiny_c-linux-x86_64       "praxis-${VERSION}-x86_64-linux/praxis_node_tiny_c"
+          cp praxis_node-windows-x86_64.exe        "praxis-${VERSION}-x86_64-linux/praxis_node_windows.exe"
+          cp praxis_node_tiny_c-windows-x86_64.exe "praxis-${VERSION}-x86_64-linux/praxis_node_tiny_c_windows.exe"
+          cp pkg/praxisctl/praxisctl               "praxis-${VERSION}-x86_64-linux/"
+          cp LICENSE                               "praxis-${VERSION}-x86_64-linux/"
+          tar czf "praxis-${VERSION}-x86_64-linux.tar.gz" "praxis-${VERSION}-x86_64-linux"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
