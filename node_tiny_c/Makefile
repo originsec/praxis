@@ -31,10 +31,14 @@ $(BIN): $(OBJS)
 %.o: %.c $(SRC_DIR)/tiny.h
 	$(CC) $(CFLAGS) -I$(SRC_DIR) -c -o $@ $<
 
-# Smaller release build, stripped.
+# Smaller release build, stripped. NDEBUG removes LOG_DEBUG and any
+# debug-only code paths.
 release: CFLAGS = -Os -Wall -Wextra -Wno-unused-parameter -std=c11 \
-                  -D_GNU_SOURCE -fno-strict-aliasing -ffunction-sections -fdata-sections
-release: LDFLAGS = -Wl,--gc-sections -Wl,-s
+                  -D_GNU_SOURCE -DNDEBUG \
+                  -fno-strict-aliasing -ffunction-sections -fdata-sections \
+                  -fvisibility=hidden -fno-asynchronous-unwind-tables \
+                  -fno-unwind-tables
+release: LDFLAGS = -Wl,--gc-sections -Wl,-s -Wl,--build-id=none
 release: clean $(BIN)
 
 clean:

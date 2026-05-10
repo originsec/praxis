@@ -9,8 +9,6 @@
 #include <unistd.h>
 #include <pthread.h>
 
-int tiny_debug = 0;
-
 static pthread_mutex_t log_mu = PTHREAD_MUTEX_INITIALIZER;
 
 void log_msg(const char *level, const char *fmt, ...)

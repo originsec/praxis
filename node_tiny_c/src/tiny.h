@@ -35,9 +35,16 @@ void log_msg(const char *level, const char *fmt, ...);
 #define LOG_INFO(...)  log_msg("INFO",  __VA_ARGS__)
 #define LOG_WARN(...)  log_msg("WARN",  __VA_ARGS__)
 #define LOG_ERROR(...) log_msg("ERROR", __VA_ARGS__)
-#define LOG_DEBUG(...) do { if (tiny_debug) log_msg("DEBUG", __VA_ARGS__); } while (0)
 
-extern int tiny_debug;
+/*
+ * LOG_DEBUG is compiled out entirely in release builds. The release
+ * Makefile target defines NDEBUG; the debug target does not.
+ */
+#ifdef NDEBUG
+#define LOG_DEBUG(...) ((void)0)
+#else
+#define LOG_DEBUG(...) log_msg("DEBUG", __VA_ARGS__)
+#endif
 
 void rand_bytes(unsigned char *out, size_t n);
 void uuid_v4(char out[37]);

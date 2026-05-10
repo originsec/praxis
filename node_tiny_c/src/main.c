@@ -458,8 +458,6 @@ int main(int argc, char **argv)
 {
     (void)argc; (void)argv;
 
-    if (getenv("TINY_DEBUG") && atoi(getenv("TINY_DEBUG"))) tiny_debug = 1;
-
     /* signal handling */
     struct sigaction sa = {0};
     sa.sa_handler = handle_signal;

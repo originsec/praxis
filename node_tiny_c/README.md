@@ -39,7 +39,9 @@ node id in `~/.local/share/praxis/node_id`.
 PRAXIS_RABBITMQ_URL=amqp://praxis:praxis@localhost:5672/ ./praxis_node_tiny_c
 ```
 
-`TINY_DEBUG=1` enables verbose tracing.
+Use `make` (debug build) for verbose tracing — `LOG_DEBUG` is compiled
+out of `make release` entirely, along with all assertions and unwind
+tables.
 
 ## Limitations vs the Rust tiny node
 
