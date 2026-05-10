@@ -16,9 +16,15 @@
 # Non-interactive flags:
 #   --service [native|docker]    Install the service in the chosen mode
 #   --cli                        Install the CLI natively
-#   --with-win-node              Also cross-compile + install the Windows
-#                                node binary (combine with --service native;
-#                                requires mingw-w64 + rust)
+#   --src                        Build native binaries from source instead of
+#                                downloading prebuilt release artifacts
+#                                (default). Has no effect on --service docker,
+#                                which always builds from source.
+#   --with-win-node              Also install the Windows node binary
+#                                (combine with --service native). Without
+#                                --src this downloads the prebuilt
+#                                praxis_node.exe; with --src it cross-compiles
+#                                (requires mingw-w64 + rust).
 #   --remove                     Remove all native + docker installs
 #   --help                       Show usage
 #
@@ -38,9 +44,11 @@ INSTALL_BIN="$INSTALL_PREFIX/bin"
 INSTALL_SHARE="$INSTALL_PREFIX/share/praxis"
 
 OS_KIND=""        # linux | macos
+ARCH_KIND=""      # x86_64 (only supported binary arch today)
 HAS_DOCKER=false
 COMPOSE_CMD=""
 WITH_WIN_NODE=0
+BUILD_FROM_SOURCE=0
 
 #
 # Colors.
@@ -141,9 +149,15 @@ Usage: install.sh [flag]
 Flags:
   --service [native|docker]   Install the service in the chosen mode
   --cli                       Install the CLI natively
-  --with-win-node             Also cross-compile + install the Windows
-                              node binary (combine with --service native;
-                              requires mingw-w64 + rust)
+  --src                       Build native binaries from source instead of
+                              downloading prebuilt release artifacts.
+                              Has no effect on --service docker (always
+                              builds from source).
+  --with-win-node             Also install the Windows node binary
+                              (combine with --service native). Without
+                              --src this downloads the prebuilt
+                              praxis_node.exe; with --src it cross-compiles
+                              (requires mingw-w64 + rust).
   --remove                    Remove a previous install (native + docker)
   --help                      Show this message
 
@@ -170,6 +184,29 @@ detect_platform() {
             warn "Unknown OS '$os' - assuming Linux."
             ;;
     esac
+
+    local arch
+    arch="$(uname -m 2>/dev/null || echo unknown)"
+    case "$arch" in
+        x86_64|amd64) ARCH_KIND="x86_64" ;;
+        *)            ARCH_KIND="$arch" ;;
+    esac
+}
+
+#
+# Prebuilt release artifacts are only published for x86_64 today. Anything
+# else must build from source — auto-flip BUILD_FROM_SOURCE so the user
+# doesn't get a download error halfway through.
+#
+
+ensure_binary_supported_or_force_source() {
+    if (( BUILD_FROM_SOURCE )); then
+        return
+    fi
+    if [[ "$ARCH_KIND" != "x86_64" ]]; then
+        warn "Prebuilt binaries are only published for x86_64; arch is '$ARCH_KIND'. Falling back to --src (build from source)."
+        BUILD_FROM_SOURCE=1
+    fi
 }
 
 #
@@ -345,6 +382,51 @@ setup_rabbitmq_or_warn() {
 }
 
 #
+# === Release binary download ================================================
+#
+
+#
+# Map an artifact name to the URL on the praxis GitHub release for the
+# resolved $PRAXIS_VERSION. Asset names match what release.yml uploads.
+#
+
+release_asset_url() {
+    local asset="$1"
+    echo "https://github.com/$PRAXIS_REPO/releases/download/$PRAXIS_VERSION/$asset"
+}
+
+download_to() {
+    local url="$1" dest="$2"
+    curl -fL --retry 3 --retry-delay 2 -o "$dest" "$url" \
+        || error "Failed to download $url"
+}
+
+#
+# Download the linux server tarball for $PRAXIS_VERSION and extract it
+# into $1 (the caller's tmpdir). The tarball contains praxis_service,
+# praxis_cli, praxis_node, praxisctl, and praxis_node_windows.exe.
+# Caller is expected to consume whichever of those it needs.
+#
+
+download_server_tarball_linux() {
+    local out_dir="$1"
+    local version_tag="$PRAXIS_VERSION"
+    local version_num="${version_tag#v}"
+    local asset="praxis-${version_num}-x86_64-linux.tar.gz"
+    local url
+    url=$(release_asset_url "$asset")
+    info "Downloading $asset..."
+    local archive="$out_dir/$asset"
+    download_to "$url" "$archive"
+    tar -xzf "$archive" -C "$out_dir" \
+        || error "Failed to extract $asset"
+    rm -f "$archive"
+    local extracted="$out_dir/praxis-${version_num}-x86_64-linux"
+    [[ -d "$extracted" ]] || error "Tarball did not contain the expected directory."
+    echo "$extracted"
+}
+
+#
 # === Native CLI install =====================================================
 #
 
@@ -444,19 +526,19 @@ get_local_binary() {
 
 install_cli_native() {
     section "Installing CLI"
-    has_cmd git || error "git not found. Please install git."
 
-    local repo_url="https://github.com/$PRAXIS_REPO"
     local tmproot
     tmproot=$(mktemp -d)
+    mkdir -p "$tmproot/bin"
 
     local binary_path
     if binary_path=$(get_local_binary "praxis_cli"); then
         success "Using locally compiled binary: $binary_path"
-        mkdir -p "$tmproot/bin"
         cp "$binary_path" "$tmproot/bin/praxis_cli"
-    else
+    elif (( BUILD_FROM_SOURCE )); then
+        has_cmd git || error "git not found. Please install git."
         check_rust
+        local repo_url="https://github.com/$PRAXIS_REPO"
         local cargo_log="$tmproot/cargo.log"
         if ! run_with_progress_bar "$cargo_log" \
                 cargo install --git "$repo_url" --tag "$PRAXIS_VERSION" --root "$tmproot" praxis_cli; then
@@ -465,6 +547,23 @@ install_cli_native() {
             tail -n 50 "$cargo_log"
             error "cargo install failed for CLI."
         fi
+    else
+        case "$OS_KIND" in
+            linux)
+                local extracted
+                extracted=$(download_server_tarball_linux "$tmproot")
+                cp "$extracted/praxis_cli" "$tmproot/bin/praxis_cli"
+                rm -rf "$extracted"
+                ;;
+            macos)
+                info "Downloading praxis_cli-macos-x86_64..."
+                download_to "$(release_asset_url praxis_cli-macos-x86_64)" \
+                    "$tmproot/bin/praxis_cli"
+                chmod +x "$tmproot/bin/praxis_cli"
+                ;;
+            *) error "Unsupported OS for binary install: $OS_KIND" ;;
+        esac
+        success "Downloaded CLI binary"
     fi
 
     ensure_sudo
@@ -483,7 +582,6 @@ install_cli_native() {
 install_service_native() {
     [[ "$OS_KIND" == "linux" ]] || error "Native service install is Linux-only. Use docker instead."
     has_cmd systemctl || error "systemctl not found - native install requires systemd."
-    has_cmd git || error "git not found. Please install git."
 
     ensure_sudo
     section "Installing Service"
@@ -497,14 +595,31 @@ install_service_native() {
         script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
     fi
 
+    #
+    # Resolve binaries via three paths (in order):
+    #   1. Locally compiled artifacts under ../target/release (running from
+    #      a checkout where the user has already `cargo build`d).
+    #   2. With --src: cargo install from the tagged release.
+    #   3. Default: download the prebuilt server tarball from the GitHub
+    #      release, which contains praxis_service, praxis_cli, praxis_node,
+    #      praxisctl, and praxis_node_windows.exe.
+    #
+    # When binaries come from the tarball we also reuse the bundled
+    # praxisctl + windows node (instead of cloning the repo for unit
+    # files); systemd unit files still come from the repo since they
+    # are not part of the tarball.
+    #
+
     local svc_path node_path
+    local tarball_dir=""
     if svc_path=$(get_local_binary "praxis_service") && \
        node_path=$(get_local_binary "praxis_node"); then
         success "Using locally compiled binaries"
         mkdir -p "$tmproot/bin"
         cp "$svc_path" "$tmproot/bin/praxis_service"
         cp "$node_path" "$tmproot/bin/praxis_node"
-    else
+    elif (( BUILD_FROM_SOURCE )); then
+        has_cmd git || error "git not found. Please install git."
         check_rust
         info "Building praxis_service and praxis_node..."
         local cargo_log="$tmproot/cargo.log"
@@ -517,6 +632,12 @@ install_service_native() {
             error "cargo install failed for service binaries."
         fi
         success "Built service binaries"
+    else
+        tarball_dir=$(download_server_tarball_linux "$tmproot")
+        mkdir -p "$tmproot/bin"
+        cp "$tarball_dir/praxis_service" "$tmproot/bin/praxis_service"
+        cp "$tarball_dir/praxis_node"    "$tmproot/bin/praxis_node"
+        success "Downloaded service binaries"
     fi
 
     info "Installing system files..."
@@ -542,13 +663,18 @@ install_service_native() {
         if [[ -n "$win_local" ]]; then
             success "Using locally cross-compiled praxis_node.exe"
             cp "$win_local" "$tmproot/bin/praxis_node.exe"
-        else
+        elif (( BUILD_FROM_SOURCE )); then
             build_windows_node "$tmproot/bin"
+        elif [[ -n "$tarball_dir" && -f "$tarball_dir/praxis_node_windows.exe" ]]; then
+            success "Using praxis_node.exe from release tarball"
+            cp "$tarball_dir/praxis_node_windows.exe" "$tmproot/bin/praxis_node.exe"
+        else
+            info "Downloading praxis_node-windows-x86_64.exe..."
+            download_to "$(release_asset_url praxis_node-windows-x86_64.exe)" \
+                "$tmproot/bin/praxis_node.exe"
         fi
         $SUDO install -m 0755 "$tmproot/bin/praxis_node.exe" "$INSTALL_SHARE/nodes/praxis_node_windows.exe"
     fi
-
-    rm -rf "$tmproot"
 
     info "Fetching unit files and praxisctl..."
     local repo_dir=""
@@ -558,6 +684,7 @@ install_service_native() {
         info "Using local repository files..."
         repo_dir="$script_dir/.."
     else
+        has_cmd git || error "git not found. Please install git."
         pkg_tmp=$(mktemp -d)
         repo_dir="$pkg_tmp/repo"
         git clone --depth 1 --branch "$PRAXIS_VERSION" "$repo_url" "$repo_dir" || error "Failed to clone repository. Check your internet connection and version tag: $PRAXIS_VERSION"
@@ -574,6 +701,7 @@ install_service_native() {
 
     $SUDO install -m 0755 "$repo_dir/pkg/praxisctl/praxisctl" "$INSTALL_BIN/praxisctl"
     [[ -n "$pkg_tmp" ]] && rm -rf "$pkg_tmp"
+    rm -rf "$tmproot"
 
     setup_rabbitmq_or_warn
 
@@ -844,6 +972,24 @@ interactive_install() {
         cancel) error "Aborted." ;;
     esac
 
+    #
+    # Ask binary-vs-source for paths that install native binaries (everything
+    # except docker, which always builds from source). Default is "binaries".
+    #
+
+    if [[ "$choice" != "docker" ]]; then
+        MENU_FOOTER="${DIM}\033[3mDocker installs always build from source regardless of this choice.${NC}"
+        select_menu "${BOLD}Native binaries${NC}" \
+            "Download prebuilt binaries from GitHub (recommended)" \
+            "Build from source (requires Rust + git)"
+        MENU_FOOTER=""
+        if (( SELECTED == 1 )); then
+            BUILD_FROM_SOURCE=1
+        fi
+        echo
+    fi
+
+    ensure_binary_supported_or_force_source
     get_latest_version
 
     case "$choice" in
@@ -887,6 +1033,7 @@ main() {
             --help|-h)        show_help=1; shift ;;
             --remove)         do_remove=1; shift ;;
             --cli)            do_cli=1; shift ;;
+            --src)            BUILD_FROM_SOURCE=1; shift ;;
             --with-win-node)  WITH_WIN_NODE=1; shift ;;
             --service)
                 service_mode="${2:-}"
@@ -926,6 +1073,7 @@ main() {
         return
     fi
 
+    ensure_binary_supported_or_force_source
     get_latest_version
 
     if [[ -n "$service_mode" ]]; then
