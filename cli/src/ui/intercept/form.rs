@@ -1,49 +1,60 @@
 //
-// Rule form overlay. Styled to match the "New Operation" form so the
-// look & feel is consistent across the TUI.
+// Rule form overlay. Same opencode-style header + bar block style as
+// other forms.
 //
 
 use common::TargetDirection;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 
 use crate::app::intercept::{FormMode, RuleForm, RuleFormField};
-use crate::ui::theme::{ACCENT, DIM, MUTED, STATUS_FAIL, STATUS_RUNNING, TEXT};
+use crate::ui::chrome;
+use crate::ui::theme::{
+    ACCENT, BG, BG_ELEMENT, BORDER_SUBTLE, DIM, MUTED, STATUS_FAIL, STATUS_RUNNING, TEXT,
+    TEXT_BRIGHT,
+};
 
 pub fn render(f: &mut Frame, area: Rect, form: &RuleForm) {
     let chunks = Layout::vertical([
-        Constraint::Length(2), // title
+        Constraint::Length(1), // title
+        Constraint::Length(1), // divider
         Constraint::Min(1),    // fields
         Constraint::Length(1), // hints
     ])
     .split(area);
 
     let title_text = match form.mode {
-        FormMode::Create => " New Intercept Rule",
-        FormMode::Edit(_) => " Edit Intercept Rule",
+        FormMode::Create => "New Intercept Rule",
+        FormMode::Edit(_) => "Edit Intercept Rule",
     };
-    let title = Paragraph::new(Line::from(Span::styled(
-        title_text,
-        Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
-    )));
-    f.render_widget(title, chunks[0]);
+    let title = Line::from(vec![
+        chrome::diamond(ACCENT),
+        Span::raw(" "),
+        Span::styled(
+            title_text,
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]);
+    f.render_widget(Paragraph::new(title), chunks[0]);
 
-    let inner = Rect {
-        x: chunks[1].x + 2,
-        width: chunks[1].width.saturating_sub(4),
-        ..chunks[1]
-    };
+    let divider = "\u{2500}".repeat(chunks[1].width as usize);
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            divider,
+            Style::default().fg(BORDER_SUBTLE),
+        ))),
+        chunks[1],
+    );
 
     let fields = form.fields();
     let mut lines: Vec<Line> = Vec::new();
 
     for (idx, field) in fields.iter().enumerate() {
-        //
-        // Gap between the core identity group (Name/Regex) and the rest.
-        //
         if idx == 2 {
             lines.push(Line::from(""));
         }
@@ -55,44 +66,52 @@ pub fn render(f: &mut Frame, area: Rect, form: &RuleForm) {
 
     if let Some(ref err) = form.last_error {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            err.clone(),
-            Style::default().fg(STATUS_FAIL),
-        )));
+        lines.push(Line::from(vec![
+            Span::styled("\u{25b3} ", Style::default().fg(STATUS_FAIL)),
+            Span::styled(
+                err.clone(),
+                Style::default()
+                    .fg(STATUS_FAIL)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
     }
 
     f.render_widget(
         Paragraph::new(lines).wrap(Wrap { trim: false }),
-        inner,
+        chunks[2],
     );
 
-    render_hints(f, chunks[2]);
+    render_hints(f, chunks[3]);
+    let _ = (BG, BG_ELEMENT, TEXT);
 }
 
 fn render_field(out: &mut Vec<Line<'static>>, form: &RuleForm, field: RuleFormField) {
     let focused = form.focus == field;
     let label_style = if focused {
-        Style::default().fg(ACCENT)
+        Style::default()
+            .fg(ACCENT)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(MUTED)
     };
     let value_style = if focused {
-        Style::default().fg(TEXT)
+        Style::default().fg(TEXT_BRIGHT)
     } else {
         Style::default().fg(DIM)
     };
-    let cursor = if focused { "\u{258f}" } else { "" };
+    let cursor = if focused { "\u{2588}" } else { "" };
 
-    let (label, spans): (&str, Vec<Span>) = match field {
+    let (label, mut spans): (&str, Vec<Span>) = match field {
         RuleFormField::Name => (
-            "Name",
+            "name",
             vec![
                 Span::styled(form.name.clone(), value_style),
                 Span::styled(cursor, Style::default().fg(ACCENT)),
             ],
         ),
         RuleFormField::Regex => (
-            "Regex",
+            "regex",
             vec![
                 Span::styled(form.regex.clone(), value_style),
                 Span::styled(cursor, Style::default().fg(ACCENT)),
@@ -106,42 +125,42 @@ fn render_field(out: &mut Vec<Line<'static>>, form: &RuleForm, field: RuleFormFi
             ];
             let mut spans: Vec<Span> = Vec::new();
             for (dir, label) in &dirs {
-                let selected = std::mem::discriminant(dir) == std::mem::discriminant(&form.direction);
+                let selected =
+                    std::mem::discriminant(dir) == std::mem::discriminant(&form.direction);
                 if selected {
-                    spans.push(Span::styled(
-                        format!(" {} ", label),
-                        Style::default().fg(Color::Black).bg(ACCENT),
-                    ));
+                    spans.push(chrome::pill(label, ACCENT));
                 } else {
                     spans.push(Span::styled(
                         format!(" {} ", label),
-                        Style::default().fg(DIM),
+                        Style::default().fg(DIM).bg(BG_ELEMENT),
                     ));
                 }
                 spans.push(Span::raw(" "));
             }
-            ("Direction", spans)
+            ("direction", spans)
         }
         RuleFormField::Scope => (
-            "Scope",
-            vec![Span::styled(
-                format!(" {} ", form.scope.label()),
+            "scope",
+            vec![
                 if focused {
-                    Style::default().fg(Color::Black).bg(ACCENT)
+                    chrome::pill(form.scope.label(), ACCENT)
                 } else {
-                    Style::default().fg(TEXT)
+                    Span::styled(
+                        format!(" {} ", form.scope.label()),
+                        Style::default().fg(TEXT_BRIGHT).bg(BG_ELEMENT),
+                    )
                 },
-            )],
+            ],
         ),
         RuleFormField::ScopeNode => (
-            "Node ID",
+            "node id",
             vec![
                 Span::styled(form.scope_node.clone(), value_style),
                 Span::styled(cursor, Style::default().fg(ACCENT)),
             ],
         ),
         RuleFormField::ScopeAgent => (
-            "Agent",
+            "agent",
             vec![
                 Span::styled(form.scope_agent.clone(), value_style),
                 Span::styled(cursor, Style::default().fg(ACCENT)),
@@ -149,43 +168,42 @@ fn render_field(out: &mut Vec<Line<'static>>, form: &RuleForm, field: RuleFormFi
         ),
         RuleFormField::Summarize => {
             let indicator = if form.summarize_enabled {
-                Span::styled(
-                    " \u{25cf} on ",
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(STATUS_RUNNING),
-                )
+                chrome::pill("on", STATUS_RUNNING)
             } else {
-                Span::styled(" \u{25cb} off ", Style::default().fg(DIM))
+                Span::styled(" off ", Style::default().fg(DIM).bg(BG_ELEMENT))
             };
             let mut spans = vec![indicator];
             if form.summarize_enabled {
-                spans.push(Span::raw(" "));
+                spans.push(Span::raw("  "));
                 spans.push(Span::styled(form.summarize.clone(), value_style));
                 spans.push(Span::styled(cursor, Style::default().fg(ACCENT)));
             }
-            ("LLM summary", spans)
+            ("llm summary", spans)
         }
     };
 
-    let mut full = vec![Span::styled(format!("{}: ", label), label_style)];
-    for s in spans {
-        full.push(s);
-    }
+    let mut full = vec![
+        Span::styled(format!("{:>14}  ", label), label_style),
+    ];
+    full.append(&mut spans);
     out.push(Line::from(full));
 }
 
 pub fn render_hints(f: &mut Frame, area: Rect) {
+    let key = Style::default().fg(TEXT_BRIGHT);
+    let label = Style::default().fg(MUTED);
     let line = Line::from(vec![
-        Span::raw(" "),
-        Span::styled("\u{2191}\u{2193}/tab", Style::default().fg(ACCENT)),
-        Span::styled(" fields  ", Style::default().fg(MUTED)),
-        Span::styled("space/\u{2190}\u{2192}", Style::default().fg(ACCENT)),
-        Span::styled(" cycle  ", Style::default().fg(MUTED)),
-        Span::styled("^s", Style::default().fg(ACCENT)),
-        Span::styled(" save  ", Style::default().fg(MUTED)),
-        Span::styled("esc", Style::default().fg(ACCENT)),
-        Span::styled(" cancel", Style::default().fg(MUTED)),
+        Span::styled("\u{2191}\u{2193}/tab", key),
+        Span::styled(" fields", label),
+        Span::raw("    "),
+        Span::styled("space/\u{2190}\u{2192}", key),
+        Span::styled(" cycle", label),
+        Span::raw("    "),
+        Span::styled("^s", key),
+        Span::styled(" save", label),
+        Span::raw("    "),
+        Span::styled("esc", key),
+        Span::styled(" cancel", label),
     ]);
     f.render_widget(Paragraph::new(line), area);
 }

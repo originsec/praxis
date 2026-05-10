@@ -1,14 +1,15 @@
 use crate::app::NodesState;
+use crate::ui::chrome;
 use crate::ui::common::short_id;
 use crate::ui::theme::{
-    ACCENT, DIM, MUTED, POPUP_HIGHLIGHT_BG, STATUS_DONE, STATUS_FAIL, STATUS_QUEUED,
-    STATUS_RUNNING, TEXT,
+    ACCENT, BG, BG_PANEL, BG_SELECTED, DIM, MUTED, OK, SECONDARY, STATUS_DONE, STATUS_FAIL,
+    STATUS_QUEUED, STATUS_RUNNING, TEXT, TEXT_BRIGHT,
 };
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 
 pub(super) fn render_node_detail(
     f: &mut Frame,
@@ -17,16 +18,7 @@ pub(super) fn render_node_detail(
     ops: &[common::SemanticOpUpdate],
     chains: &[common::ChainExecutionUpdate],
 ) {
-    let border_style = if state.detail_focus {
-        Style::default().fg(ACCENT)
-    } else {
-        Style::default().fg(DIM)
-    };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(border_style)
-        .title_style(Style::default().fg(MUTED))
-        .title(" Detail ");
+    let block = crate::ui::common::focused_titled_panel(" Detail ", state.detail_focus);
 
     let Some(node) = state.nodes.get(state.selected) else {
         let empty = Paragraph::new(Line::from(Span::styled(
@@ -42,40 +34,44 @@ pub(super) fn render_node_detail(
     f.render_widget(block, area);
 
     //
-    // Build activity lines first to determine if section is needed.
+    // Compute activity lines first so we can size the section.
     //
     let mut activity_lines: Vec<Line> = Vec::new();
 
     if let Some(ref agent) = node.selected_agent {
         if let Some(ref sid) = agent.session_id {
-            activity_lines.push(Line::from(Span::styled(
-                " Active Session",
-                Style::default().fg(ACCENT),
-            )));
+            activity_lines.push(chrome::rubric("Active Session"));
             activity_lines.push(Line::from(vec![
-                Span::styled("  agent: ", Style::default().fg(MUTED)),
-                Span::styled(&agent.short_name, Style::default().fg(TEXT)),
-                Span::styled(format!("  ({})", short_id(sid)), Style::default().fg(DIM)),
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    &agent.short_name,
+                    Style::default()
+                        .fg(TEXT_BRIGHT)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                chrome::mid_dot(),
+                Span::styled(short_id(sid), Style::default().fg(DIM)),
             ]));
             if agent.yolo_mode {
-                activity_lines.push(Line::from(Span::styled(
-                    "  YOLO mode enabled",
-                    Style::default().fg(STATUS_RUNNING),
-                )));
+                activity_lines.push(Line::from(vec![
+                    Span::styled("  ", Style::default()),
+                    chrome::pill("YOLO", STATUS_RUNNING),
+                ]));
             }
             if let Some(ref wd) = agent.working_dir {
                 activity_lines.push(Line::from(vec![
-                    Span::styled("  dir: ", Style::default().fg(MUTED)),
-                    Span::styled(wd.as_str(), Style::default().fg(DIM)),
+                    Span::styled("  dir ", Style::default().fg(MUTED)),
+                    Span::styled(wd.as_str(), Style::default().fg(TEXT)),
                 ]));
             }
             if let Some(ref prompt_text) = agent.active_prompt_text {
-                activity_lines.push(Line::from(Span::styled(
-                    "  \u{25cf} Session Prompt",
-                    Style::default().fg(STATUS_RUNNING),
-                )));
+                activity_lines.push(Line::from(vec![
+                    Span::styled("  ", Style::default()),
+                    chrome::dot(STATUS_RUNNING),
+                    Span::styled(" prompt running", Style::default().fg(STATUS_RUNNING)),
+                ]));
                 let short = if prompt_text.len() > 80 {
-                    format!("{}...", &prompt_text[..80])
+                    format!("{}…", &prompt_text[..80])
                 } else {
                     prompt_text.clone()
                 };
@@ -84,10 +80,11 @@ pub(super) fn render_node_detail(
                     Style::default().fg(MUTED),
                 )));
             } else if agent.active_transaction_id.is_some() {
-                activity_lines.push(Line::from(Span::styled(
-                    "  \u{25cf} prompt executing...",
-                    Style::default().fg(STATUS_RUNNING),
-                )));
+                activity_lines.push(Line::from(vec![
+                    Span::styled("  ", Style::default()),
+                    chrome::dot(STATUS_RUNNING),
+                    Span::styled(" prompt executing…", Style::default().fg(STATUS_RUNNING)),
+                ]));
             }
         }
     }
@@ -107,30 +104,28 @@ pub(super) fn render_node_detail(
         if !activity_lines.is_empty() {
             activity_lines.push(Line::from(""));
         }
-        activity_lines.push(Line::from(Span::styled(
-            " Active Operations",
-            Style::default().fg(ACCENT),
-        )));
+        activity_lines.push(chrome::rubric("Active Operations"));
         for op in &node_ops {
-            let (status_str, status_color) = match op.status {
+            let (status_glyph, status_color) = match op.status {
                 common::SemanticOpStatus::Running => ("\u{25cf}", STATUS_RUNNING),
                 common::SemanticOpStatus::Queued => ("\u{25cb}", STATUS_QUEUED),
                 _ => ("\u{25cb}", DIM),
             };
             activity_lines.push(Line::from(vec![
                 Span::styled(
-                    format!("  {} ", status_str),
+                    format!("  {} ", status_glyph),
                     Style::default().fg(status_color),
                 ),
-                Span::styled(&op.spec.name, Style::default().fg(TEXT)),
                 Span::styled(
-                    format!("  {} / {}", op.agent_short_name, op.spec.mode),
+                    &op.spec.name,
+                    Style::default().fg(TEXT_BRIGHT),
+                ),
+                chrome::mid_dot(),
+                Span::styled(
+                    format!("{} / {}", op.agent_short_name, op.spec.mode),
                     Style::default().fg(DIM),
                 ),
             ]));
-            //
-            // Show last line of streaming output if available.
-            //
             if let Some(ref output) = op.output {
                 let last_line = output
                     .lines()
@@ -148,9 +143,6 @@ pub(super) fn render_node_detail(
         }
     }
 
-    //
-    // Active chain executions on this node.
-    //
     let node_chains: Vec<_> = chains
         .iter()
         .filter(|c| c.node_id == node.node_id)
@@ -166,12 +158,9 @@ pub(super) fn render_node_detail(
         if !activity_lines.is_empty() {
             activity_lines.push(Line::from(""));
         }
-        activity_lines.push(Line::from(Span::styled(
-            " Active Chains",
-            Style::default().fg(ACCENT),
-        )));
+        activity_lines.push(chrome::rubric("Active Chains"));
         for chain in &node_chains {
-            let (status_str, status_color) = match chain.status {
+            let (status_glyph, status_color) = match chain.status {
                 common::ChainExecutionStatus::Running => ("\u{25cf}", STATUS_RUNNING),
                 common::ChainExecutionStatus::Queued => ("\u{25cb}", STATUS_QUEUED),
                 _ => ("\u{25cb}", DIM),
@@ -184,157 +173,154 @@ pub(super) fn render_node_detail(
             let total = chain.elements.len();
             activity_lines.push(Line::from(vec![
                 Span::styled(
-                    format!("  {} ", status_str),
+                    format!("  {} ", status_glyph),
                     Style::default().fg(status_color),
                 ),
-                Span::styled(&chain.chain_name, Style::default().fg(TEXT)),
                 Span::styled(
-                    format!("  {}/{} elements", done, total),
+                    &chain.chain_name,
+                    Style::default().fg(TEXT_BRIGHT),
+                ),
+                chrome::mid_dot(),
+                Span::styled(
+                    format!("{}/{} elements", done, total),
                     Style::default().fg(DIM),
                 ),
             ]));
         }
     }
 
-    //
-    // Only surface the intercept toggle for nodes that advertise the
-    // Interception capability. Empty capabilities list is treated as
-    // "supports everything" for backward compatibility with nodes that
-    // haven't reported capabilities yet.
-    //
     let supports_intercept = node.capabilities.is_empty()
         || node
             .capabilities
             .contains(&common::NodeCapability::Interception);
 
     if supports_intercept {
+        if !activity_lines.is_empty() {
+            activity_lines.push(Line::from(""));
+        }
+        let (label, color) = if node.intercept_active {
+            ("active", STATUS_RUNNING)
+        } else {
+            ("off", DIM)
+        };
         activity_lines.push(Line::from(vec![
-            Span::styled("  intercept: ", Style::default().fg(MUTED)),
-            if node.intercept_active {
-                Span::styled(
-                    "active",
-                    Style::default().fg(STATUS_RUNNING).add_modifier(Modifier::BOLD),
-                )
-            } else {
-                Span::styled("off", Style::default().fg(DIM))
-            },
-            Span::styled("   i toggle", Style::default().fg(DIM)),
+            Span::styled("  intercept ", Style::default().fg(MUTED)),
+            Span::styled(
+                label,
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("    i toggle", Style::default().fg(DIM)),
         ]));
     }
 
     let activity_height = if activity_lines.is_empty() {
         0
     } else {
-        (activity_lines.len() as u16 + 1).min(10) // +1 for spacing
+        (activity_lines.len() as u16 + 1).min(14)
     };
 
     let chunks = Layout::vertical([
-        Constraint::Length(3),               // node header + capabilities
-        Constraint::Min(1),                  // agents
-        Constraint::Length(activity_height), // activity (0 if none)
+        Constraint::Length(3),
+        Constraint::Min(1),
+        Constraint::Length(activity_height),
     ])
     .split(inner);
 
     //
-    // Node header.
-    //
-    //
-    // Capabilities inline with header.
+    // Header: machine + os + caps.
     //
     let caps_str = if node.capabilities.is_empty() {
         String::new()
     } else {
-        let caps: Vec<String> = node
-            .capabilities
+        node.capabilities
             .iter()
             .map(|c| format!("{:?}", c).to_lowercase())
-            .collect();
-        caps.join(", ")
+            .collect::<Vec<_>>()
+            .join(", ")
     };
-    let priv_str = if node.privileged { "privileged" } else { "" };
-
     let header_lines = vec![
         Line::from(vec![
-            Span::styled(" ", Style::default()),
             Span::styled(
                 node.machine_name.clone(),
-                Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(TEXT_BRIGHT)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!("  {}", short_id(&node.node_id)),
                 Style::default().fg(DIM),
             ),
-        ]),
-        Line::from(vec![
-            Span::styled("  ", Style::default()),
-            Span::styled(&node.os_details, Style::default().fg(MUTED)),
-        ]),
-        Line::from(vec![
-            Span::styled("  ", Style::default()),
-            Span::styled(caps_str, Style::default().fg(DIM)),
-            if !priv_str.is_empty() {
-                Span::styled(
-                    format!("  {}", priv_str),
-                    Style::default().fg(STATUS_RUNNING),
-                )
+            if node.privileged {
+                Span::styled("  ", Style::default())
+            } else {
+                Span::raw("")
+            },
+            if node.privileged {
+                chrome::pill("priv", SECONDARY)
             } else {
                 Span::raw("")
             },
         ]),
+        Line::from(vec![
+            Span::styled(&node.os_details, Style::default().fg(MUTED)),
+        ]),
+        Line::from(vec![Span::styled(caps_str, Style::default().fg(DIM))]),
     ];
     f.render_widget(Paragraph::new(header_lines), chunks[0]);
 
     //
-    // Agents list.
+    // Agents.
     //
     let mut agent_lines: Vec<Line> = Vec::new();
     agent_lines.push(Line::from(""));
-    agent_lines.push(Line::from(Span::styled(
-        " Agents",
-        Style::default().fg(ACCENT),
-    )));
+    agent_lines.push(chrome::rubric("Agents"));
 
     if node.discovered_agents.is_empty() {
-        agent_lines.push(Line::from(Span::styled("  none", Style::default().fg(DIM))));
+        agent_lines.push(Line::from(Span::styled(
+            "  none",
+            Style::default().fg(DIM),
+        )));
     } else {
         for (idx, agent) in node.discovered_agents.iter().enumerate() {
-            let status_indicator = if agent.available {
-                Span::styled("\u{25cf} ", Style::default().fg(STATUS_DONE))
+            let avail_dot = if agent.available {
+                chrome::dot(OK)
             } else {
-                Span::styled("\u{25cf} ", Style::default().fg(STATUS_FAIL))
+                chrome::dot(STATUS_FAIL)
             };
-
-            //
-            // Highlight: * for node's active agent, bg for cursor-selected.
-            //
-            //
-            // Green bg + dark text when agent has an active session.
-            //
             let has_session = node
                 .selected_agent
                 .as_ref()
                 .is_some_and(|s| s.short_name == agent.short_name && s.session_id.is_some());
-
             let is_cursor = state.detail_focus && idx == state.agent_selected;
 
+            let mut spans: Vec<Span> = Vec::new();
+            spans.push(Span::raw("  "));
+            spans.push(avail_dot);
+            spans.push(Span::raw(" "));
+
             let name_style = if has_session {
-                Style::default().fg(Color::Rgb(20, 20, 25)).bg(ACCENT)
+                Style::default().fg(BG).bg(ACCENT).add_modifier(Modifier::BOLD)
             } else if is_cursor {
                 Style::default()
-                    .fg(TEXT)
-                    .bg(POPUP_HIGHLIGHT_BG)
+                    .fg(TEXT_BRIGHT)
+                    .bg(BG_SELECTED)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(TEXT)
+                Style::default().fg(TEXT_BRIGHT)
             };
+            spans.push(Span::styled(format!(" {} ", agent.short_name), name_style));
 
-            let mut spans = vec![
-                Span::raw("  "),
-                status_indicator,
-                Span::styled(format!(" {} ", &agent.short_name), name_style),
-            ];
+            if has_session {
+                spans.push(Span::styled(
+                    " session",
+                    Style::default().fg(ACCENT),
+                ));
+            }
             if let Some(version) = agent.version.as_deref() {
-                spans.push(Span::styled(format!("  v{}", version), Style::default().fg(DIM)));
+                spans.push(Span::styled(
+                    format!("   v{}", version),
+                    Style::default().fg(DIM),
+                ));
             }
             agent_lines.push(Line::from(spans));
         }
@@ -345,13 +331,12 @@ pub(super) fn render_node_detail(
         chunks[1],
     );
 
-    //
-    // Activity section — only rendered when there's something active.
-    //
     if !activity_lines.is_empty() {
         f.render_widget(
             Paragraph::new(Text::from(activity_lines)).wrap(Wrap { trim: false }),
             chunks[2],
         );
     }
+
+    let _ = (BG_PANEL, STATUS_DONE);
 }

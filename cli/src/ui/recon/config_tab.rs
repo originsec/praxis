@@ -1,12 +1,13 @@
 use crate::app::{ReconOverlay, ReconTab};
+use crate::ui::common::focused_titled_panel;
 use crate::ui::theme::{
-    ACCENT, DIM, MUTED, POPUP_BG, POPUP_HIGHLIGHT_BG, STATUS_FAIL, STATUS_RUNNING, TEXT,
+    ACCENT, BG_MENU, BG_SELECTED, DIM, MUTED, STATUS_FAIL, STATUS_RUNNING, TEXT, TEXT_BRIGHT,
 };
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 
 pub fn render(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
     if overlay.recon_result.is_none() {
@@ -44,15 +45,13 @@ pub fn render(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
 }
 
 fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &common::ReconResult) {
-    let border_color = if overlay.right_pane_focused { DIM } else { ACCENT };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color))
-        .title_style(Style::default().fg(MUTED))
-        .title(format!(" Config Files ({}) ", result.config.len()));
+    let block = focused_titled_panel(
+        &format!(" Config Files ({}) ", result.config.len()),
+        !overlay.right_pane_focused,
+    );
 
-    f.render_widget(block.clone(), area);
     let inner = block.inner(area);
+    f.render_widget(block, area);
 
     if result.config.is_empty() {
         f.render_widget(
@@ -72,33 +71,35 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
     let mut lines: Vec<Line> = Vec::new();
     for (idx, item) in result.config.iter().enumerate().skip(scroll_offset).take(visible_items) {
         let is_selected = overlay.active_tab == ReconTab::Config && overlay.selected_left == idx;
-        let bg = if is_selected {
-            POPUP_HIGHLIGHT_BG
-        } else {
-            POPUP_BG
-        };
+        let bg = if is_selected { BG_SELECTED } else { BG_MENU };
 
         let name_style = if is_selected {
-            Style::default().fg(TEXT).bg(bg).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .bg(bg)
+                .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(TEXT).bg(bg)
+            Style::default().fg(TEXT_BRIGHT).bg(bg)
         };
-        let path_style = Style::default().fg(DIM).bg(bg);
-        let type_style = Style::default().fg(MUTED).bg(bg);
+        let path_style = Style::default().fg(MUTED).bg(bg);
+        let type_style = Style::default().fg(DIM).bg(bg);
 
-        let prefix = if is_selected { "> " } else { "  " };
+        let prefix = if is_selected { "\u{276f} " } else { "  " };
+        let prefix_style = Style::default()
+            .fg(if is_selected { ACCENT } else { MUTED })
+            .bg(bg);
         let path_display = if item.path.len() > 40 {
-            format!("...{}", &item.path[item.path.len().saturating_sub(37)..])
+            format!("…{}", &item.path[item.path.len().saturating_sub(39)..])
         } else {
             item.path.clone()
         };
 
         lines.push(Line::from(vec![
-            Span::styled(prefix.to_string(), name_style),
-            Span::styled(path_display, path_style),
+            Span::styled(prefix.to_string(), prefix_style),
+            Span::styled(path_display, name_style),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("     ", type_style),
+            Span::styled("    ", path_style),
             Span::styled(format!("[{}]", item.config_type), type_style),
         ]));
     }
@@ -116,15 +117,10 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
         return;
     };
 
-    let border_color = if overlay.right_pane_focused { ACCENT } else { DIM };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color))
-        .title_style(Style::default().fg(MUTED))
-        .title(format!(" {} ", item.path));
+    let block = focused_titled_panel(&format!(" {} ", item.path), overlay.right_pane_focused);
 
-    f.render_widget(block.clone(), area);
     let inner = block.inner(area);
+    f.render_widget(block, area);
 
     if overlay.config_loading {
         f.render_widget(

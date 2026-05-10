@@ -1,12 +1,13 @@
 use crate::app::{ReconOverlay, ReconTab};
+use crate::ui::common::focused_titled_panel;
 use crate::ui::theme::{
-    ACCENT, DIM, MUTED, POPUP_BG, POPUP_HIGHLIGHT_BG, STATUS_FAIL, STATUS_RUNNING, TEXT,
+    ACCENT, BG_MENU, BG_SELECTED, DIM, MUTED, STATUS_FAIL, STATUS_RUNNING, TEXT, TEXT_BRIGHT,
 };
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 use serde_json::Value;
 
 pub fn render(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
@@ -39,15 +40,12 @@ pub fn render(f: &mut Frame, area: Rect, overlay: &ReconOverlay) {
 }
 
 fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &common::ReconResult) {
-    let border_color = if overlay.right_pane_focused { DIM } else { ACCENT };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color))
-        .title_style(Style::default().fg(MUTED))
-        .title(format!(" Sessions ({}) ", result.sessions.len()));
-
-    f.render_widget(block.clone(), area);
+    let block = focused_titled_panel(
+        &format!(" Sessions ({}) ", result.sessions.len()),
+        !overlay.right_pane_focused,
+    );
     let inner = block.inner(area);
+    f.render_widget(block, area);
 
     if result.sessions.is_empty() {
         f.render_widget(
@@ -68,40 +66,42 @@ fn render_left_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: &
     let mut lines: Vec<Line> = Vec::new();
     for (idx, session) in result.sessions.iter().enumerate().skip(scroll_offset).take(visible_items) {
         let is_selected = overlay.active_tab == ReconTab::Sessions && overlay.selected_left == idx;
-        let bg = if is_selected {
-            POPUP_HIGHLIGHT_BG
-        } else {
-            POPUP_BG
-        };
+        let bg = if is_selected { BG_SELECTED } else { BG_MENU };
 
         let id_style = if is_selected {
-            Style::default().fg(TEXT).bg(bg).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .bg(bg)
+                .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(TEXT).bg(bg)
+            Style::default().fg(TEXT_BRIGHT).bg(bg)
         };
         let meta_style = Style::default().fg(DIM).bg(bg);
 
-        let prefix = if is_selected { "> " } else { "  " };
+        let prefix = if is_selected { "\u{276f} " } else { "  " };
+        let prefix_style = Style::default()
+            .fg(if is_selected { ACCENT } else { MUTED })
+            .bg(bg);
         let short_id = if session.session_id.len() > 12 {
-            format!("{}...", &session.session_id[..12])
+            format!("{}…", &session.session_id[..12])
         } else {
             session.session_id.clone()
         };
 
         lines.push(Line::from(vec![
-            Span::styled(prefix.to_string(), id_style),
+            Span::styled(prefix.to_string(), prefix_style),
             Span::styled(short_id, id_style),
-            Span::styled(format!("  ({}) msgs", session.message_count), meta_style),
+            Span::styled(format!("  {} msgs", session.message_count), meta_style),
         ]));
         if !session.context_path.is_empty() {
             lines.push(Line::from(vec![
-                Span::styled("     ", meta_style),
+                Span::styled("    ", meta_style),
                 Span::styled(session.context_path.clone(), meta_style),
             ]));
         }
         if !session.last_modified.is_empty() {
             lines.push(Line::from(vec![
-                Span::styled("     ", meta_style),
+                Span::styled("    ", meta_style),
                 Span::styled(session.last_modified.clone(), meta_style),
             ]));
         }
@@ -120,15 +120,12 @@ fn render_right_pane(f: &mut Frame, area: Rect, overlay: &ReconOverlay, result: 
         return;
     };
 
-    let border_color = if overlay.right_pane_focused { ACCENT } else { DIM };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color))
-        .title_style(Style::default().fg(MUTED))
-        .title(format!(" {} ", session.session_id));
-
-    f.render_widget(block.clone(), area);
+    let block = focused_titled_panel(
+        &format!(" {} ", session.session_id),
+        overlay.right_pane_focused,
+    );
     let inner = block.inner(area);
+    f.render_widget(block, area);
 
     if overlay.session_loading {
         f.render_widget(
@@ -252,15 +249,18 @@ fn format_parsed_messages(messages: &[ParsedMessage]) -> Vec<Line<'static>> {
     let mut lines: Vec<Line> = Vec::new();
 
     for msg in messages {
-        let (role_badge, role_color) = match msg.role.as_str() {
-            "user" | "human" => ("[USER]", ACCENT),
-            "assistant" | "model" | "gemini" => ("[AGENT]", ratatui::style::Color::Rgb(180, 130, 220)),
-            "system" => ("[SYS]", DIM),
-            _ => ("[?]", MUTED),
+        let (role_label, role_color) = match msg.role.as_str() {
+            "user" | "human" => ("USER", ACCENT),
+            "assistant" | "model" | "gemini" => (
+                "AGENT",
+                ratatui::style::Color::Rgb(180, 130, 220),
+            ),
+            "system" => ("SYS", DIM),
+            _ => ("?", MUTED),
         };
 
         lines.push(Line::from(vec![
-            Span::styled(format!(" {} ", role_badge), Style::default().fg(role_color).add_modifier(Modifier::BOLD)),
+            crate::ui::chrome::pill(role_label, role_color),
         ]));
 
         for content_line in msg.content.lines() {

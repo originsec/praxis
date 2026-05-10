@@ -1,34 +1,17 @@
 use crate::app::NodesState;
 use crate::ui::common::short_id;
 use crate::ui::theme::{
-    ACCENT, DIM, MUTED, POPUP_BG, POPUP_HIGHLIGHT_BG, STATUS_DONE, STATUS_RUNNING, TEXT,
+    ACCENT, BG_MENU, BG_SELECTED, BORDER_SUBTLE, DIM, MUTED, OK, STATUS_RUNNING, TEXT_BRIGHT,
 };
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-
-//
-// Compute the overlay panel rect given the content area and the number
-// of sessions. Shared with the mouse hit-test in app/nodes.rs so both
-// stay in sync.
-//
+use ratatui::widgets::{Block, Clear, Paragraph};
 
 pub fn sessions_list_rect(content_area: Rect, count: usize) -> Rect {
-    //
-    // Panel layout: top border(1) + title(1) + separator(1) + rows(N) +
-    // separator(1) + hints(1) + bottom border(1). N is clamped to at
-    // least 1 so the empty state still has space.
-    //
-
     let rows = count.max(1) as u16;
-    let height = (rows + 6).min(content_area.height.saturating_sub(2));
-    //
-    // Cap at 140 wide but never exceed the content area. `.min(140)` sets
-    // the upper bound; the outer `.min(content_area.width - 4)` protects
-    // against narrow terminals where 60 would overshoot.
-    //
+    let height = (rows + 7).min(content_area.height.saturating_sub(2));
     let max_width = content_area.width.saturating_sub(4);
     let width = max_width.min(140).max(60.min(max_width));
     let x = content_area.x + (content_area.width.saturating_sub(width)) / 2;
@@ -40,50 +23,94 @@ pub(super) fn render(f: &mut Frame, area: Rect, state: &NodesState) {
     let panel = sessions_list_rect(area, state.sessions.len());
     f.render_widget(Clear, panel);
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(ACCENT))
-        .style(Style::default().bg(POPUP_BG))
-        .title_style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD))
-        .title(" Active Sessions ");
+    let block = Block::default().style(Style::default().bg(BG_MENU));
     f.render_widget(block, panel);
 
     let inner = Rect {
-        x: panel.x + 1,
+        x: panel.x + 2,
         y: panel.y + 1,
-        width: panel.width.saturating_sub(2),
+        width: panel.width.saturating_sub(4),
         height: panel.height.saturating_sub(2),
     };
+
+    //
+    // Header row: title left, dismiss hint right.
+    //
+    let title_row = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: 1,
+    };
+    let title_line = Line::from(vec![
+        Span::styled(
+            "Active Sessions",
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("   {} active", state.sessions.len()),
+            Style::default().fg(DIM),
+        ),
+    ]);
+    f.render_widget(Paragraph::new(title_line), title_row);
+
+    let hint_row = Rect {
+        x: inner.x + inner.width.saturating_sub(4),
+        y: inner.y,
+        width: 4,
+        height: 1,
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "esc",
+            Style::default().fg(MUTED),
+        ))),
+        hint_row,
+    );
+
+    //
+    // Slim divider.
+    //
+    let divider = Rect {
+        x: inner.x,
+        y: inner.y + 1,
+        width: inner.width,
+        height: 1,
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "\u{2500}".repeat(inner.width as usize),
+            Style::default().fg(BORDER_SUBTLE),
+        ))),
+        divider,
+    );
+
+    let body = Rect {
+        x: inner.x,
+        y: inner.y + 2,
+        width: inner.width,
+        height: inner.height.saturating_sub(4),
+    };
+
+    //
+    // Column headers.
+    //
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        format!(
+            "  {:<10} {:<14} {:<10} {:<10} CREATED",
+            "NODE", "AGENT", "SESSION", "STATUS"
+        ),
+        Style::default().fg(MUTED).add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(""));
 
     let sessions = state.sessions_sorted();
     let now = std::time::Instant::now();
 
-    let mut lines: Vec<Line> = Vec::new();
-
-    //
-    // Header row.
-    //
-
-    lines.push(Line::from(Span::styled(
-        format!(
-            "  {:<10} {:<14} {:<10} {:<12} {}",
-            "NODE", "AGENT", "SESSION", "STATUS", "CREATED"
-        ),
-        Style::default().fg(MUTED),
-    )));
-
-    //
-    // Separator.
-    //
-
-    let sep_width = inner.width.saturating_sub(4) as usize;
-    lines.push(Line::from(Span::styled(
-        format!("  {}", "\u{2500}".repeat(sep_width)),
-        Style::default().fg(DIM),
-    )));
-
     if sessions.is_empty() {
-        lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             "  No active sessions. Open one from the Nodes view.",
             Style::default().fg(DIM),
@@ -91,87 +118,79 @@ pub(super) fn render(f: &mut Frame, area: Rect, state: &NodesState) {
     } else {
         for (i, session) in sessions.iter().enumerate() {
             let is_selected = i == state.sessions_list_selected;
-            let style = if is_selected {
-                Style::default()
-                    .fg(TEXT)
-                    .bg(POPUP_HIGHLIGHT_BG)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(TEXT)
-            };
-
-            let marker = if is_selected { "\u{25b8} " } else { "  " };
 
             let (status_label, status_color) = if session.is_waiting {
-                ("working".to_string(), STATUS_RUNNING)
+                ("working", STATUS_RUNNING)
             } else {
-                ("idle".to_string(), STATUS_DONE)
+                ("idle", OK)
             };
 
-            let sid_display = session
-                .session_id
-                .as_deref()
-                .map(short_id)
-                .unwrap_or("…");
-
+            let sid_display = session.session_id.as_deref().map(short_id).unwrap_or("…");
             let created_ago = format_ago(now.saturating_duration_since(session.created_at));
 
+            let row_bg = if is_selected { BG_SELECTED } else { BG_MENU };
+            let marker = if is_selected { "\u{276f} " } else { "  " };
+            let marker_color = if is_selected { ACCENT } else { MUTED };
+            let name_style = if is_selected {
+                Style::default()
+                    .fg(TEXT_BRIGHT)
+                    .bg(row_bg)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(TEXT_BRIGHT).bg(row_bg)
+            };
+
             lines.push(Line::from(vec![
-                Span::styled(marker, style),
+                Span::styled(marker, Style::default().fg(marker_color).bg(row_bg)),
                 Span::styled(
                     format!("{:<10} ", short_id(&session.node_id)),
-                    Style::default().fg(MUTED),
+                    Style::default().fg(MUTED).bg(row_bg),
                 ),
                 Span::styled(
                     format!("{:<14} ", truncate(&session.agent_name, 14)),
-                    style,
+                    name_style,
                 ),
-                Span::styled(format!("{:<10} ", sid_display), Style::default().fg(DIM)),
                 Span::styled(
-                    format!("{:<12} ", status_label),
-                    Style::default().fg(status_color),
+                    format!("{:<10} ", sid_display),
+                    Style::default().fg(DIM).bg(row_bg),
                 ),
-                Span::styled(created_ago, Style::default().fg(DIM)),
+                Span::styled(
+                    format!("{:<10} ", status_label),
+                    Style::default().fg(status_color).bg(row_bg),
+                ),
+                Span::styled(created_ago, Style::default().fg(DIM).bg(row_bg)),
             ]));
         }
     }
 
-    //
-    // Push separator and hints at the bottom of the panel. We draw the
-    // hints with a fixed position so they sit on the last inner row
-    // regardless of list length.
-    //
-
-    let list_area = Rect {
-        x: inner.x,
-        y: inner.y,
-        width: inner.width,
-        height: inner.height.saturating_sub(2),
-    };
     f.render_widget(
-        Paragraph::new(lines).style(Style::default().bg(POPUP_BG)),
-        list_area,
+        Paragraph::new(lines).style(Style::default().bg(BG_MENU)),
+        body,
     );
 
+    //
+    // Hints row at the bottom.
+    //
     let hints_row = Rect {
         x: inner.x,
         y: inner.y + inner.height.saturating_sub(1),
         width: inner.width,
         height: 1,
     };
-
     let hints = Line::from(vec![
-        Span::styled(" enter", Style::default().fg(ACCENT)),
-        Span::styled(" resume  ", Style::default().fg(MUTED)),
-        Span::styled("d", Style::default().fg(ACCENT)),
-        Span::styled("/", Style::default().fg(DIM)),
-        Span::styled("del", Style::default().fg(ACCENT)),
-        Span::styled(" discard  ", Style::default().fg(MUTED)),
-        Span::styled("esc", Style::default().fg(ACCENT)),
+        Span::styled("\u{21B5}", Style::default().fg(TEXT_BRIGHT)),
+        Span::styled(" resume", Style::default().fg(MUTED)),
+        Span::raw("    "),
+        Span::styled("d", Style::default().fg(TEXT_BRIGHT)),
+        Span::styled(" / ", Style::default().fg(DIM)),
+        Span::styled("del", Style::default().fg(TEXT_BRIGHT)),
+        Span::styled(" discard", Style::default().fg(MUTED)),
+        Span::raw("    "),
+        Span::styled("esc", Style::default().fg(TEXT_BRIGHT)),
         Span::styled(" close", Style::default().fg(MUTED)),
     ]);
     f.render_widget(
-        Paragraph::new(hints).style(Style::default().bg(POPUP_BG)),
+        Paragraph::new(hints).style(Style::default().bg(BG_MENU)),
         hints_row,
     );
 }

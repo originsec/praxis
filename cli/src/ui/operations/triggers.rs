@@ -1,6 +1,9 @@
 use crate::app::OperationsState;
 use crate::ui::common::titled_panel;
-use crate::ui::theme::{ACCENT, DIM, MUTED, PANEL_HIGHLIGHT_BG, STATUS_DONE, STATUS_FAIL, TEXT};
+use crate::ui::chrome;
+use crate::ui::theme::{
+    ACCENT, BG_SELECTED, DIM, MUTED, OK, STATUS_FAIL, TEXT, TEXT_BRIGHT,
+};
 use common::{ChainTriggerInfo, ScheduleSpec, TriggerConfig};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -26,9 +29,9 @@ fn render_triggers_list(f: &mut Frame, area: Rect, state: &OperationsState) {
         Cell::from("Type"),
         Cell::from("Summary"),
         Cell::from("Next"),
-        Cell::from("Enabled"),
+        Cell::from("On"),
     ])
-    .style(Style::default().fg(ACCENT));
+    .style(Style::default().fg(MUTED).add_modifier(Modifier::BOLD));
 
     let mut rows: Vec<Row> = Vec::new();
     for t in &state.triggers {
@@ -43,35 +46,46 @@ fn render_triggers_list(f: &mut Frame, area: Rect, state: &OperationsState) {
             .next_fire_at
             .map(|t| t.format("%m-%d %H:%M").to_string())
             .unwrap_or_else(|| "-".to_string());
-        let (enabled_str, enabled_color) = if t.enabled {
-            ("ON", STATUS_DONE)
+
+        let on_cell = if t.enabled {
+            chrome::dot(OK)
         } else {
-            ("OFF", STATUS_FAIL)
+            chrome::dot(DIM)
         };
 
         rows.push(Row::new(vec![
-            Cell::from("T").style(Style::default().fg(super::CHAIN_COLOR)),
-            Cell::from(chain_name.to_string()).style(Style::default().fg(TEXT)),
+            Cell::from(Span::styled(
+                " T ",
+                Style::default()
+                    .fg(crate::ui::theme::BG)
+                    .bg(super::CHAIN_COLOR)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Cell::from(chain_name.to_string()).style(Style::default().fg(TEXT_BRIGHT)),
             Cell::from(type_label).style(Style::default().fg(MUTED)),
             Cell::from(summary).style(Style::default().fg(DIM)),
-            Cell::from(next).style(Style::default().fg(DIM)),
-            Cell::from(enabled_str).style(Style::default().fg(enabled_color)),
+            Cell::from(next).style(Style::default().fg(MUTED)),
+            Cell::from(on_cell),
         ]));
     }
 
     let widths = [
-        Constraint::Length(1),
+        Constraint::Length(3),
         Constraint::Min(12),
         Constraint::Length(10),
         Constraint::Min(14),
         Constraint::Length(12),
-        Constraint::Length(7),
+        Constraint::Length(3),
     ];
 
     let table = Table::new(rows, widths)
         .header(header)
         .block(titled_panel(" Triggers "))
-        .row_highlight_style(Style::default().bg(PANEL_HIGHLIGHT_BG));
+        .row_highlight_style(
+            Style::default()
+                .bg(BG_SELECTED)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let mut table_state = TableState::default();
     table_state.select(Some(state.trigger_selected));
@@ -105,36 +119,48 @@ fn render_trigger_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
     let (type_label, summary) = describe_trigger(trigger, &state.intercept_rules);
 
     let mut lines: Vec<Line> = Vec::new();
-    lines.push(Line::from(Span::styled(
-        format!(" {}", chain_name),
-        Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
-    )));
+    lines.push(Line::from(vec![
+        chrome::pill("CHAIN", super::CHAIN_COLOR),
+        Span::raw(" "),
+        Span::styled(
+            chain_name,
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
     lines.push(Line::from(""));
-    lines.push(kv(" Type", type_label));
-    lines.push(kv(" Config", summary));
-    lines.push(kv(
-        " Enabled",
-        if trigger.enabled { "yes" } else { "no" }.to_string(),
-    ));
+    lines.push(chrome::kv("type", &type_label));
+    lines.push(chrome::kv("config", &summary));
+    lines.push(Line::from(vec![
+        Span::styled("enabled: ", Style::default().fg(MUTED)),
+        if trigger.enabled {
+            chrome::pill("ON", OK)
+        } else {
+            Span::styled(
+                " OFF ",
+                Style::default()
+                    .fg(STATUS_FAIL)
+                    .bg(crate::ui::theme::BG_ELEMENT),
+            )
+        },
+    ]));
 
     if let Some(last) = trigger.last_fired_at {
-        lines.push(kv(
-            " Last fired",
-            last.format("%Y-%m-%d %H:%M:%S").to_string(),
+        lines.push(chrome::kv(
+            "last fired",
+            &last.format("%Y-%m-%d %H:%M:%S").to_string(),
         ));
     }
     if let Some(next) = trigger.next_fire_at {
-        lines.push(kv(
-            " Next fire",
-            next.format("%Y-%m-%d %H:%M:%S").to_string(),
+        lines.push(chrome::kv(
+            "next fire",
+            &next.format("%Y-%m-%d %H:%M:%S").to_string(),
         ));
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        " Target",
-        Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-    )));
+    lines.push(chrome::section_title("Target", true));
 
     let spec = &trigger.target_spec;
     let nodes_txt = if spec.node_ids.is_empty() {
@@ -146,21 +172,22 @@ fn render_trigger_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
             .collect::<Vec<_>>()
             .join(", ")
     };
-    lines.push(kv(" Nodes", nodes_txt));
+    lines.push(chrome::kv("nodes", &nodes_txt));
     if let Some(ref os) = spec.os_filter
         && !os.is_empty()
     {
-        lines.push(kv(" OS filter", os.clone()));
+        lines.push(chrome::kv("os filter", os));
     }
     let agents_txt = if spec.agent_short_names.is_empty() {
         "(all agents)".to_string()
     } else {
         spec.agent_short_names.join(", ")
     };
-    lines.push(kv(" Agents", agents_txt));
+    lines.push(chrome::kv("agents", &agents_txt));
     if spec.include_triggering_node {
-        lines.push(kv(" Include triggering", "yes".to_string()));
+        lines.push(chrome::kv("include triggering", "yes"));
     }
+    let _ = ACCENT;
 
     f.render_widget(
         Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
@@ -168,9 +195,10 @@ fn render_trigger_detail(f: &mut Frame, area: Rect, state: &OperationsState) {
     );
 }
 
+#[allow(dead_code)]
 fn kv(label: &str, value: String) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{}: ", label), Style::default().fg(DIM)),
+        Span::styled(format!("{}: ", label), Style::default().fg(MUTED)),
         Span::styled(value, Style::default().fg(TEXT)),
     ])
 }

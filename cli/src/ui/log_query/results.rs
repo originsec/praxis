@@ -16,8 +16,8 @@ use crate::app::LogQueryState;
 use crate::app::log_query::{LogQueryFocus, SortDirection, cell_to_string};
 use crate::ui::common::focused_titled_panel;
 use crate::ui::theme::{
-    ACCENT, DIM, MUTED, PANEL_HIGHLIGHT_BG, STATUS_2XX, STATUS_3XX, STATUS_4XX, STATUS_5XX,
-    TEXT,
+    ACCENT, BG_SELECTED, DIM, MUTED, STATUS_2XX, STATUS_3XX, STATUS_4XX, STATUS_5XX, TEXT,
+    TEXT_BRIGHT,
 };
 
 use super::detail;
@@ -80,8 +80,8 @@ fn render_table(f: &mut Frame, area: Rect, state: &LogQueryState) {
         .map(|(i, name)| {
             let indicator = if Some(i) == state.sort_column {
                 match state.sort_direction {
-                    SortDirection::Asc => " ▲",
-                    SortDirection::Desc => " ▼",
+                    SortDirection::Asc => " \u{25b2}",
+                    SortDirection::Desc => " \u{25bc}",
                 }
             } else {
                 ""
@@ -89,7 +89,9 @@ fn render_table(f: &mut Frame, area: Rect, state: &LogQueryState) {
             Cell::from(Line::from(vec![
                 Span::styled(
                     truncate(name, widths[i] as usize),
-                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(MUTED)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(indicator, Style::default().fg(ACCENT)),
             ]))
@@ -117,8 +119,13 @@ fn render_table(f: &mut Frame, area: Rect, state: &LogQueryState) {
 
     let table = Table::new(rows_iter, constraints)
         .header(header)
-        .row_highlight_style(Style::default().bg(PANEL_HIGHLIGHT_BG))
+        .row_highlight_style(
+            Style::default()
+                .bg(BG_SELECTED)
+                .add_modifier(Modifier::BOLD),
+        )
         .column_spacing(1);
+    let _ = TEXT_BRIGHT;
 
     f.render_stateful_widget(table, inner, &mut table_state);
 }

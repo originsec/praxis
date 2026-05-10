@@ -1,19 +1,32 @@
 use crate::app::{ChatRole, SessionOptions};
+use crate::ui::chrome;
 use crate::ui::common::{short_id, spinner_char};
 use crate::ui::theme::{
-    ACCENT, DIM, INPUT_BORDER, MUTED, POPUP_HIGHLIGHT_BG, STATUS_DONE, STATUS_FAIL,
-    STATUS_RUNNING, TEXT,
+    ACCENT, BG_ELEMENT, BG_SELECTED, DIM, ERROR, MUTED, OK, SECONDARY, STATUS_DONE, STATUS_FAIL,
+    STATUS_RUNNING, TERTIARY, TEXT_BRIGHT,
 };
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
+use ratatui::symbols::border;
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Borders, Padding, Paragraph};
+
+const HEAVY_LEFT: border::Set = border::Set {
+    vertical_left: "\u{2503}",
+    vertical_right: " ",
+    horizontal_top: " ",
+    horizontal_bottom: " ",
+    top_left: " ",
+    top_right: " ",
+    bottom_left: " ",
+    bottom_right: " ",
+};
 
 pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::app::SessionChat) {
     let chunks = Layout::vertical([
         Constraint::Length(1), // header
-        Constraint::Length(1), // separator
+        Constraint::Length(1), // spacer
         Constraint::Min(1),    // messages
         Constraint::Length(3), // input
         Constraint::Length(1), // hints
@@ -21,57 +34,43 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
     .split(area);
 
     //
-    // Header.
+    // Header — model · session id · yolo pill.
     //
-    let header = Line::from(vec![
-        Span::styled("  Session: ", Style::default().fg(MUTED)),
-        Span::styled(
-            &session.agent_name,
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!("  @ {}", short_id(&session.node_id)),
-            Style::default().fg(DIM),
-        ),
-        if let Some(ref sid) = session.session_id {
-            Span::styled(format!("  ({})", short_id(sid)), Style::default().fg(DIM))
-        } else {
-            Span::styled("  (connecting...)", Style::default().fg(DIM))
-        },
-        if let Some(ref wd) = session.working_dir {
-            Span::styled(format!("  dir:{}", wd), Style::default().fg(DIM))
-        } else {
-            Span::raw("")
-        },
-        if session.yolo {
-            Span::styled("  YOLO", Style::default().fg(STATUS_RUNNING))
-        } else {
-            Span::raw("")
-        },
-    ]);
-    f.render_widget(Paragraph::new(header), chunks[0]);
-
-    //
-    // Separator.
-    //
-    let sep_width = chunks[1].width.saturating_sub(4) as usize;
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            format!("  {}", "\u{2500}".repeat(sep_width)),
-            Style::default().fg(DIM),
-        ))),
-        chunks[1],
-    );
+    let mut header_spans: Vec<Span> = Vec::new();
+    header_spans.push(chrome::diamond(ACCENT));
+    header_spans.push(Span::raw(" "));
+    header_spans.push(Span::styled(
+        &session.agent_name,
+        Style::default()
+            .fg(TEXT_BRIGHT)
+            .add_modifier(Modifier::BOLD),
+    ));
+    header_spans.push(chrome::mid_dot());
+    header_spans.push(Span::styled(
+        format!("@ {}", short_id(&session.node_id)),
+        Style::default().fg(MUTED),
+    ));
+    if let Some(ref sid) = session.session_id {
+        header_spans.push(chrome::mid_dot());
+        header_spans.push(Span::styled(short_id(sid), Style::default().fg(DIM)));
+    } else {
+        header_spans.push(chrome::mid_dot());
+        header_spans.push(Span::styled("connecting…", Style::default().fg(DIM)));
+    }
+    if let Some(ref wd) = session.working_dir {
+        header_spans.push(Span::raw("  "));
+        header_spans.push(Span::styled(format!("dir: {}", wd), Style::default().fg(DIM)));
+    }
+    if session.yolo {
+        header_spans.push(Span::raw("  "));
+        header_spans.push(chrome::pill("YOLO", STATUS_RUNNING));
+    }
+    f.render_widget(Paragraph::new(Line::from(header_spans)), chunks[0]);
 
     //
     // Messages.
     //
-    let msg_area = Rect {
-        x: chunks[2].x + 2,
-        width: chunks[2].width.saturating_sub(4),
-        ..chunks[2]
-    };
-
+    let msg_area = chunks[2];
     let mut lines: Vec<Line> = Vec::new();
 
     for (mi, msg) in session.messages.iter().enumerate() {
@@ -80,30 +79,34 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
                 if mi > 0 {
                     lines.push(Line::from(""));
                 }
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        "\u{25b8} ",
-                        Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        msg.text.clone(),
-                        Style::default().fg(TEXT).add_modifier(Modifier::BOLD),
-                    ),
-                ]));
+                for line in msg.text.lines() {
+                    lines.push(Line::from(vec![
+                        Span::styled("\u{2503}", Style::default().fg(ACCENT)),
+                        Span::styled(
+                            format!("  {}", line),
+                            Style::default()
+                                .fg(TEXT_BRIGHT)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+                }
             }
             ChatRole::Agent => {
                 let trimmed = msg.text.trim();
                 if !trimmed.is_empty() {
                     lines.push(Line::from(""));
-                    let md_lines = crate::markdown::render(trimmed, "");
+                    let md_lines = crate::markdown::render(trimmed, "  ");
                     lines.extend(md_lines);
                 }
             }
             ChatRole::System => {
-                lines.push(Line::from(Span::styled(
-                    msg.text.clone(),
-                    Style::default().fg(MUTED),
-                )));
+                lines.push(Line::from(vec![
+                    Span::styled("\u{2503}", Style::default().fg(SECONDARY)),
+                    Span::styled(
+                        format!("  {}", msg.text),
+                        Style::default().fg(MUTED),
+                    ),
+                ]));
             }
         }
     }
@@ -111,18 +114,7 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
     if session.is_waiting {
         let spinner = spinner_char();
 
-        lines.push(Line::from(""));
-
-        //
-        // Streaming content from ACP agents.
-        //
-
         if !session.streaming_content.is_empty() {
-            //
-            // Typewriter reveal while waiting. After completion, the
-            // finalized text is pushed as a ChatMessage and rendered
-            // in full above.
-            //
             let total_chars = session.streaming_content.chars().count();
             let sliced_owned: String;
             let display: &str = if session.revealed_chars < total_chars {
@@ -136,140 +128,136 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
                 &session.streaming_content
             };
             if !display.trim().is_empty() {
-                let md_lines = crate::markdown::render(display.trim(), "");
+                lines.push(Line::from(""));
+                let md_lines = crate::markdown::render(display.trim(), "  ");
                 lines.extend(md_lines);
             }
         }
 
-        //
-        // Tool calls in progress.
-        //
-
         for tc in &session.tool_calls {
-            let status = if tc.output.is_some() {
+            let (status_glyph, status_color) = if tc.output.is_some() {
                 if tc.is_error {
-                    Span::styled(" ✗", Style::default().fg(STATUS_FAIL))
+                    ("\u{2717}", ERROR)
                 } else {
-                    Span::styled(" ✓", Style::default().fg(STATUS_DONE))
+                    ("\u{2713}", OK)
                 }
             } else {
-                Span::styled(format!(" {}", spinner), Style::default().fg(MUTED))
+                ("\u{25cf}", STATUS_RUNNING)
             };
             lines.push(Line::from(vec![
-                Span::styled("  \u{2502} ", Style::default().fg(DIM)),
-                Span::styled(&tc.tool_name, Style::default().fg(STATUS_RUNNING)),
-                status,
+                Span::styled("\u{2503}", Style::default().fg(TERTIARY)),
+                Span::styled(
+                    format!("  {} ", status_glyph),
+                    Style::default().fg(status_color),
+                ),
+                Span::styled(
+                    &tc.tool_name,
+                    Style::default()
+                        .fg(TEXT_BRIGHT)
+                        .add_modifier(Modifier::BOLD),
+                ),
             ]));
-
-            //
-            // Show tool input if non-empty.
-            //
 
             if !tc.input.is_empty() && tc.input != "{}" {
                 let display_input = if tc.input.len() > 200 {
-                    format!("{}...", &tc.input[..197])
+                    format!("{}…", &tc.input[..197])
                 } else {
                     tc.input.clone()
                 };
-                lines.push(Line::from(Span::styled(
-                    format!("  \u{2502}   {}", display_input),
-                    Style::default().fg(DIM),
-                )));
+                lines.push(Line::from(vec![
+                    Span::styled("\u{2503}", Style::default().fg(TERTIARY)),
+                    Span::styled(
+                        format!("    in  {}", display_input),
+                        Style::default().fg(MUTED),
+                    ),
+                ]));
             }
-
-            //
-            // Show tool output if completed.
-            //
 
             if let Some(ref output) = tc.output {
                 if !output.is_empty() {
-                    let color = if tc.is_error { STATUS_FAIL } else { DIM };
+                    let label_color = if tc.is_error { ERROR } else { DIM };
+                    let text_color = if tc.is_error { ERROR } else { MUTED };
                     let truncated = if output.len() > 200 {
-                        format!("{}...", &output[..197])
+                        format!("{}…", &output[..197])
                     } else {
                         output.clone()
                     };
-                    for line in truncated.lines().take(3) {
-                        lines.push(Line::from(Span::styled(
-                            format!("  \u{2502}   {}", line),
-                            Style::default().fg(color),
-                        )));
+                    let prefix = if tc.is_error { "err " } else { "out " };
+                    for (i, line) in truncated.lines().take(3).enumerate() {
+                        let pfx = if i == 0 { prefix } else { "    " };
+                        lines.push(Line::from(vec![
+                            Span::styled("\u{2503}", Style::default().fg(TERTIARY)),
+                            Span::styled("    ", Style::default()),
+                            Span::styled(pfx.to_string(), Style::default().fg(label_color)),
+                            Span::styled(line.to_string(), Style::default().fg(text_color)),
+                        ]));
                     }
                 }
             }
         }
 
-        //
-        // Permission prompt.
-        //
-
         if let Some(ref perm) = session.pending_permission {
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
-                Span::styled("  \u{26a0} ", Style::default().fg(STATUS_RUNNING)),
+                Span::styled("\u{2503}", Style::default().fg(SECONDARY)),
+                Span::styled(
+                    "  \u{25b3} ",
+                    Style::default().fg(SECONDARY),
+                ),
                 Span::styled(
                     &perm.tool_name,
                     Style::default()
-                        .fg(STATUS_RUNNING)
+                        .fg(SECONDARY)
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(" wants to run:", Style::default().fg(MUTED)),
+                Span::styled(" wants to run", Style::default().fg(MUTED)),
             ]));
             let truncated = if perm.tool_input.len() > 120 {
-                format!("{}...", &perm.tool_input[..117])
+                format!("{}…", &perm.tool_input[..117])
             } else {
                 perm.tool_input.clone()
             };
-            lines.push(Line::from(Span::styled(
-                format!("    {}", truncated),
-                Style::default().fg(DIM),
-            )));
             lines.push(Line::from(vec![
-                Span::styled("    [", Style::default().fg(DIM)),
-                Span::styled(
-                    "a",
-                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("]llow  [", Style::default().fg(DIM)),
-                Span::styled(
-                    "l",
-                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("]always  [", Style::default().fg(DIM)),
-                Span::styled(
-                    "d",
-                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("]eny", Style::default().fg(DIM)),
+                Span::styled("\u{2503}", Style::default().fg(SECONDARY)),
+                Span::styled(format!("    {}", truncated), Style::default().fg(DIM)),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("\u{2503}", Style::default().fg(SECONDARY)),
+                Span::styled("    ", Style::default()),
+                chrome::pill("a", ACCENT),
+                Span::styled(" allow   ", Style::default().fg(MUTED)),
+                chrome::pill("l", ACCENT),
+                Span::styled(" always   ", Style::default().fg(MUTED)),
+                chrome::pill("d", ERROR),
+                Span::styled(" deny", Style::default().fg(MUTED)),
             ]));
         }
 
-        //
-        // Status / spinner line.
-        //
-
         if session.streaming_content.is_empty() && session.pending_permission.is_none() {
             let status_text = session.agent_status.as_deref().unwrap_or("thinking");
-            lines.push(Line::from(Span::styled(
-                format!("{} {}", spinner, status_text),
-                Style::default().fg(MUTED),
-            )));
-        } else if session.pending_permission.is_none() {
-            lines.push(Line::from(Span::styled(
-                format!(
-                    "{} {}",
-                    spinner,
-                    session.agent_status.as_deref().unwrap_or("streaming")
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled("\u{2503}", Style::default().fg(ACCENT)),
+                Span::styled(
+                    format!("  {} {}", spinner, status_text),
+                    Style::default().fg(MUTED),
                 ),
-                Style::default().fg(MUTED),
-            )));
+            ]));
+        } else if session.pending_permission.is_none() {
+            lines.push(Line::from(vec![
+                Span::styled("\u{2503}", Style::default().fg(ACCENT)),
+                Span::styled(
+                    format!(
+                        "  {} {}",
+                        spinner,
+                        session.agent_status.as_deref().unwrap_or("streaming")
+                    ),
+                    Style::default().fg(MUTED),
+                ),
+            ]));
         }
     }
 
-    //
-    // Estimate visual line count accounting for word wrap so the
-    // scrollback bound matches what's actually rendered.
-    //
     let visible_width = msg_area.width.max(1) as usize;
     let total_visual_lines: u16 = lines
         .iter()
@@ -297,53 +285,66 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
     //
     // Input.
     //
-    let input_area = Rect {
-        x: chunks[3].x + 2,
-        width: chunks[3].width.saturating_sub(4),
-        ..chunks[3]
-    };
+    let block = Block::default()
+        .borders(Borders::LEFT)
+        .border_set(HEAVY_LEFT)
+        .border_style(Style::default().fg(ACCENT))
+        .style(Style::default().bg(BG_ELEMENT))
+        .padding(Padding::new(1, 1, 1, 0));
 
-    let input_style = if session.is_waiting {
-        Style::default().fg(DIM)
-    } else {
-        Style::default().fg(TEXT)
-    };
+    let input_inner = block.inner(chunks[3]);
+    f.render_widget(block, chunks[3]);
 
-    let mut spans = vec![Span::styled("\u{25b8} ", Style::default().fg(ACCENT))];
+    let mut spans: Vec<Span> = Vec::new();
+    spans.push(Span::styled(
+        "\u{276f}",
+        Style::default()
+            .fg(ACCENT)
+            .add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::raw(" "));
 
     if session.session_id.is_none() {
-        spans.push(Span::styled("connecting...", Style::default().fg(DIM)));
+        spans.push(Span::styled("connecting…", Style::default().fg(DIM)));
     } else if session.is_waiting {
-        spans.push(Span::styled("^c to cancel", Style::default().fg(DIM)));
+        spans.push(Span::styled("^c to cancel", Style::default().fg(MUTED)));
+    } else if session.input.is_empty() {
+        spans.push(Span::styled("\u{2588}", Style::default().fg(ACCENT)));
+        spans.push(Span::styled(
+            "  Send to agent…",
+            Style::default()
+                .fg(DIM)
+                .add_modifier(Modifier::ITALIC),
+        ));
     } else {
         let pos = session.cursor_pos;
         let before = &session.input[..pos];
         let after = &session.input[pos..];
         if !before.is_empty() {
-            spans.push(Span::styled(before.to_string(), input_style));
+            spans.push(Span::styled(
+                before.to_string(),
+                Style::default().fg(TEXT_BRIGHT),
+            ));
         }
-        spans.push(Span::styled("\u{258f}", Style::default().fg(ACCENT)));
+        spans.push(Span::styled("\u{2588}", Style::default().fg(ACCENT)));
         if !after.is_empty() {
-            spans.push(Span::styled(after.to_string(), input_style));
+            spans.push(Span::styled(
+                after.to_string(),
+                Style::default().fg(TEXT_BRIGHT),
+            ));
         }
     }
 
-    let input_block = ratatui::widgets::Block::default()
-        .borders(ratatui::widgets::Borders::ALL)
-        .border_style(Style::default().fg(INPUT_BORDER));
+    f.render_widget(Paragraph::new(Line::from(spans)), input_inner);
 
-    let paragraph = Paragraph::new(Line::from(spans)).block(input_block);
-    f.render_widget(paragraph, input_area);
-
-    //
-    // Hints below input.
-    //
     let hints = Line::from(vec![
-        Span::styled("  enter", Style::default().fg(ACCENT)),
-        Span::styled(" send  ", Style::default().fg(MUTED)),
-        Span::styled("^w", Style::default().fg(ACCENT)),
-        Span::styled(" pause  ", Style::default().fg(MUTED)),
-        Span::styled("^c", Style::default().fg(ACCENT)),
+        Span::styled("\u{21B5}", Style::default().fg(TEXT_BRIGHT)),
+        Span::styled(" send", Style::default().fg(MUTED)),
+        Span::raw("    "),
+        Span::styled("^w", Style::default().fg(TEXT_BRIGHT)),
+        Span::styled(" pause", Style::default().fg(MUTED)),
+        Span::raw("    "),
+        Span::styled("^c", Style::default().fg(TEXT_BRIGHT)),
         Span::styled(" close", Style::default().fg(MUTED)),
     ]);
     f.render_widget(Paragraph::new(hints), chunks[4]);
@@ -351,70 +352,59 @@ pub(super) fn render_session_chat(f: &mut Frame, area: Rect, session: &crate::ap
 
 pub(super) fn render_session_options(f: &mut Frame, area: Rect, opts: &SessionOptions) {
     let chunks = Layout::vertical([
-        Constraint::Length(2), // title
-        Constraint::Min(1),    // options
+        Constraint::Length(1), // title
+        Constraint::Length(1), // divider
+        Constraint::Min(1),    // body
         Constraint::Length(1), // hints
     ])
     .split(area);
 
-    //
-    // Title.
-    //
     let title = Line::from(vec![
-        Span::styled("  New Session: ", Style::default().fg(MUTED)),
+        chrome::diamond(ACCENT),
+        Span::raw(" "),
+        Span::styled(
+            "New Session",
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
+        ),
+        chrome::mid_dot(),
         Span::styled(
             &opts.agent_name,
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            Style::default().fg(ACCENT),
         ),
+        chrome::mid_dot(),
         Span::styled(
-            format!("  @ {}", short_id(&opts.node_id)),
+            format!("@ {}", short_id(&opts.node_id)),
             Style::default().fg(DIM),
         ),
     ]);
     f.render_widget(Paragraph::new(title), chunks[0]);
 
-    //
-    // Options.
-    //
-    let inner = Rect {
-        x: chunks[1].x + 2,
-        width: chunks[1].width.saturating_sub(4),
-        ..chunks[1]
-    };
+    let divider = "\u{2500}".repeat(chunks[1].width as usize);
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            divider,
+            Style::default().fg(crate::ui::theme::BORDER_SUBTLE),
+        ))),
+        chunks[1],
+    );
 
     let mut lines: Vec<Line> = Vec::new();
 
-    //
-    // Working directory.
-    //
-    //
-    // YOLO mode — always toggleable with Tab.
-    //
     let yolo_indicator = if opts.yolo {
-        Span::styled(
-            " \u{25cf} enabled ",
-            Style::default().fg(Color::Black).bg(STATUS_RUNNING),
-        )
+        chrome::pill("ON", STATUS_RUNNING)
     } else {
-        Span::styled(" \u{25cb} disabled ", Style::default().fg(DIM))
+        Span::styled(" off ", Style::default().fg(DIM).bg(BG_ELEMENT))
     };
-
     lines.push(Line::from(vec![
-        Span::styled("YOLO Mode: ", Style::default().fg(MUTED)),
+        Span::styled("YOLO mode  ", Style::default().fg(MUTED)),
         yolo_indicator,
-        Span::styled("  (tab)", Style::default().fg(DIM)),
+        Span::styled("    tab to toggle", Style::default().fg(DIM)),
     ]));
 
-    //
-    // Working directory — always focused for Up/Down navigation.
-    //
     lines.push(Line::from(""));
-    let dir_label_style = Style::default().fg(ACCENT);
-
-    lines.push(Line::from(Span::styled(
-        "Working Directory:",
-        dir_label_style,
-    )));
+    lines.push(chrome::section_title("Working directory", true));
 
     let mut dir_options = vec!["Default".to_string()];
     dir_options.extend(opts.working_dirs.iter().cloned());
@@ -423,41 +413,44 @@ pub(super) fn render_session_options(f: &mut Frame, area: Rect, opts: &SessionOp
         let is_selected = i == opts.selected_dir;
         let style = if is_selected {
             Style::default()
-                .fg(TEXT)
-                .bg(POPUP_HIGHLIGHT_BG)
+                .fg(TEXT_BRIGHT)
+                .bg(BG_SELECTED)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(DIM)
         };
-
-        let marker = if is_selected { " \u{25b8} " } else { "   " };
-        lines.push(Line::from(Span::styled(
-            format!("{}{}", marker, dir),
-            style,
-        )));
+        let marker = if is_selected { "\u{276f} " } else { "  " };
+        let marker_color = if is_selected { ACCENT } else { DIM };
+        lines.push(Line::from(vec![
+            Span::styled(marker, Style::default().fg(marker_color)),
+            Span::styled(dir.clone(), style),
+        ]));
     }
 
     if opts.working_dirs.is_empty() {
         lines.push(Line::from(Span::styled(
-            "   (loading paths from recon...)",
+            "  (loading paths from recon…)",
             Style::default().fg(DIM),
         )));
     }
 
-    f.render_widget(Paragraph::new(lines), inner);
+    f.render_widget(Paragraph::new(lines), chunks[2]);
 
-    //
-    // Hints.
-    //
     let hints = Line::from(vec![
-        Span::styled("  \u{2191}\u{2193}", Style::default().fg(ACCENT)),
-        Span::styled(" navigate  ", Style::default().fg(MUTED)),
-        Span::styled("tab", Style::default().fg(ACCENT)),
-        Span::styled(" toggle  ", Style::default().fg(MUTED)),
-        Span::styled("enter", Style::default().fg(ACCENT)),
-        Span::styled(" start  ", Style::default().fg(MUTED)),
-        Span::styled("esc", Style::default().fg(ACCENT)),
+        Span::styled("\u{2191}\u{2193}", Style::default().fg(TEXT_BRIGHT)),
+        Span::styled(" navigate", Style::default().fg(MUTED)),
+        Span::raw("    "),
+        Span::styled("tab", Style::default().fg(TEXT_BRIGHT)),
+        Span::styled(" toggle", Style::default().fg(MUTED)),
+        Span::raw("    "),
+        Span::styled("\u{21B5}", Style::default().fg(TEXT_BRIGHT)),
+        Span::styled(" start", Style::default().fg(MUTED)),
+        Span::raw("    "),
+        Span::styled("esc", Style::default().fg(TEXT_BRIGHT)),
         Span::styled(" cancel", Style::default().fg(MUTED)),
     ]);
-    f.render_widget(Paragraph::new(hints), chunks[2]);
+    f.render_widget(Paragraph::new(hints), chunks[3]);
+
+    let _ = STATUS_DONE;
+    let _ = STATUS_FAIL;
 }

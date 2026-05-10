@@ -12,13 +12,13 @@ mod schema;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use crate::app::LogQueryState;
 use crate::app::log_query::LogQueryFocus;
-use crate::ui::theme::{ACCENT, DIM, MUTED, STATUS_FAIL};
+use crate::ui::theme::{ACCENT, MUTED, STATUS_FAIL, TEXT_BRIGHT};
 
 const EDITOR_HEIGHT: u16 = 9;
 
@@ -26,10 +26,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &LogQueryState) {
     let show_error = state.last_error.is_some();
 
     let chunks = Layout::vertical([
-        Constraint::Length(EDITOR_HEIGHT),              // editor
+        Constraint::Length(EDITOR_HEIGHT),                  // editor
         Constraint::Length(if show_error { 1 } else { 0 }), // error banner
-        Constraint::Min(1),                             // results
-        Constraint::Length(1),                          // hint line
+        Constraint::Min(1),                                 // results
+        Constraint::Length(1),                              // hint line
     ])
     .split(area);
 
@@ -43,17 +43,10 @@ pub fn render(f: &mut Frame, area: Rect, state: &LogQueryState) {
 
     render_hints(f, chunks[3], state);
 
-    //
-    // Autocomplete popup must render last so it layers on top of the
-    // editor.
-    //
     if state.autocomplete_open {
         autocomplete::render(f, chunks[0], state);
     }
 
-    //
-    // Schema popup overlays the whole window when open.
-    //
     if state.schema_open {
         schema::render_popup(f, area, state);
     }
@@ -64,103 +57,101 @@ fn render_error(f: &mut Frame, area: Rect, state: &LogQueryState) {
         return;
     };
     let line = Line::from(vec![
-        Span::styled(" ! ", Style::default().fg(STATUS_FAIL)),
-        Span::styled(msg.clone(), Style::default().fg(STATUS_FAIL)),
+        Span::styled("\u{25b3} ", Style::default().fg(STATUS_FAIL)),
+        Span::styled(
+            msg.clone(),
+            Style::default()
+                .fg(STATUS_FAIL)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]);
     f.render_widget(Paragraph::new(line), area);
 }
 
 fn render_hints(f: &mut Frame, area: Rect, state: &LogQueryState) {
-    let sep = Span::styled("  ", Style::default().fg(DIM));
-
     let mut spans: Vec<Span> = Vec::new();
+    let key = Style::default().fg(TEXT_BRIGHT);
+    let label = Style::default().fg(MUTED);
+    let gap = Span::raw("    ");
 
     match state.focus {
         LogQueryFocus::Editor => {
             if state.autocomplete_open {
                 spans.extend([
-                    hint_key("↑↓"),
-                    hint_txt(" select"),
-                    sep.clone(),
-                    hint_key("⏎"),
-                    hint_txt(" accept"),
-                    sep.clone(),
-                    hint_key("esc"),
-                    hint_txt(" dismiss"),
+                    Span::styled("\u{2191}\u{2193}", key),
+                    Span::styled(" select", label),
+                    gap.clone(),
+                    Span::styled("\u{21B5}", key),
+                    Span::styled(" accept", label),
+                    gap.clone(),
+                    Span::styled("esc", key),
+                    Span::styled(" dismiss", label),
                 ]);
             } else {
                 spans.extend([
-                    hint_key("^r"),
-                    hint_txt(" run"),
-                    sep.clone(),
-                    hint_key("tab"),
-                    hint_txt(" autocomplete"),
-                    sep.clone(),
-                    hint_key("?"),
-                    hint_txt(" schema"),
-                    sep.clone(),
-                    hint_key("^j"),
-                    hint_txt(" → results"),
+                    Span::styled("^r", key),
+                    Span::styled(" run", label),
+                    gap.clone(),
+                    Span::styled("tab", key),
+                    Span::styled(" autocomplete", label),
+                    gap.clone(),
+                    Span::styled("?", key),
+                    Span::styled(" schema", label),
+                    gap.clone(),
+                    Span::styled("^j", key),
+                    Span::styled(" results", label),
                 ]);
             }
         }
         LogQueryFocus::Results => {
             spans.extend([
-                hint_key("↑↓"),
-                hint_txt(" row"),
-                sep.clone(),
-                hint_key("⏎"),
-                hint_txt(" expand"),
-                sep.clone(),
-                hint_key("/"),
-                hint_txt(" filter"),
-                sep.clone(),
-                hint_key("s/S"),
-                hint_txt(" sort"),
-                sep.clone(),
-                hint_key("r"),
-                hint_txt(" rerun"),
-                sep.clone(),
-                hint_key("i"),
-                hint_txt(" → editor"),
-                sep.clone(),
-                hint_key("?"),
-                hint_txt(" schema"),
+                Span::styled("\u{2191}\u{2193}", key),
+                Span::styled(" row", label),
+                gap.clone(),
+                Span::styled("\u{21B5}", key),
+                Span::styled(" expand", label),
+                gap.clone(),
+                Span::styled("/", key),
+                Span::styled(" filter", label),
+                gap.clone(),
+                Span::styled("s/S", key),
+                Span::styled(" sort", label),
+                gap.clone(),
+                Span::styled("r", key),
+                Span::styled(" rerun", label),
+                gap.clone(),
+                Span::styled("i", key),
+                Span::styled(" editor", label),
+                gap.clone(),
+                Span::styled("?", key),
+                Span::styled(" schema", label),
             ]);
         }
         LogQueryFocus::RowSearch => {
             spans.extend([
-                hint_txt("filter: "),
+                Span::styled("filter ", Style::default().fg(MUTED)),
                 Span::styled(
                     state.search_input.clone(),
-                    Style::default().fg(ACCENT),
+                    Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
                 ),
-                Span::styled("▏", Style::default().fg(ACCENT)),
-                sep.clone(),
-                hint_key("⏎"),
-                hint_txt(" apply"),
-                sep.clone(),
-                hint_key("esc"),
-                hint_txt(" clear"),
+                Span::styled("\u{2588}", Style::default().fg(ACCENT)),
+                gap.clone(),
+                Span::styled("\u{21B5}", key),
+                Span::styled(" apply", label),
+                gap.clone(),
+                Span::styled("esc", key),
+                Span::styled(" clear", label),
             ]);
         }
     }
 
     if state.is_running {
-        spans.push(sep.clone());
+        spans.push(gap);
         spans.push(Span::styled(
-            format!(" {} running…", crate::ui::common::spinner_char()),
-            Style::default().fg(ACCENT),
+            format!("{} running…", crate::ui::common::spinner_char()),
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
         ));
     }
 
     f.render_widget(Paragraph::new(Line::from(spans)), area);
-}
-
-fn hint_key(label: &str) -> Span<'static> {
-    Span::styled(label.to_string(), Style::default().fg(ACCENT))
-}
-
-fn hint_txt(label: &str) -> Span<'static> {
-    Span::styled(label.to_string(), Style::default().fg(MUTED))
 }

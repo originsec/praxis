@@ -1,9 +1,9 @@
 use super::{section_header, setting_row};
 use crate::app::SettingsState;
-use crate::ui::theme::{ACCENT, DIM, MUTED, SETTINGS_HIGHLIGHT_BG, TEXT};
+use crate::ui::theme::{ACCENT, BG_SELECTED, DIM, MUTED, OK, TEXT_BRIGHT};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 
@@ -16,17 +16,15 @@ pub(super) fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
     //
 
     let on_model_def = state.selected < model_count;
-    let mut header_spans = vec![
-        Span::raw("  "),
-        Span::styled(
-            "Model Definitions",
-            Style::default()
-                .fg(Color::Rgb(160, 160, 160))
-                .add_modifier(Modifier::BOLD),
-        ),
-    ];
+    let mut header_spans = vec![Span::styled(
+        "# Model Definitions",
+        Style::default()
+            .fg(TEXT_BRIGHT)
+            .add_modifier(Modifier::BOLD),
+    )];
     if on_model_def {
-        header_spans.push(Span::styled("   ^d", Style::default().fg(DIM)));
+        header_spans.push(Span::raw("    "));
+        header_spans.push(Span::styled("^d", Style::default().fg(TEXT_BRIGHT)));
         header_spans.push(Span::styled(" delete", Style::default().fg(MUTED)));
     }
     lines.push(Line::from(header_spans));
@@ -41,29 +39,38 @@ pub(super) fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
             def.name.clone()
         };
 
-        let api_hint = if def.api_key.is_empty() {
-            " (no key)"
+        let api_hint_color = if def.api_key.is_empty() {
+            DIM
         } else {
-            " \u{2713}"
+            OK
+        };
+        let api_hint = if def.api_key.is_empty() {
+            "(no key)".to_string()
+        } else {
+            "\u{2713}".to_string()
         };
 
         let sel_style = if selected {
-            Style::default().fg(ACCENT)
+            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(TEXT)
+            Style::default().fg(MUTED)
         };
 
         lines.push(Line::from(vec![
-            Span::styled(if selected { "\u{25b8} " } else { "  " }, sel_style),
+            Span::styled(if selected { "\u{276f} " } else { "  " }, sel_style),
             Span::styled(
                 display,
                 if selected {
-                    Style::default().fg(TEXT).bg(SETTINGS_HIGHLIGHT_BG)
+                    Style::default()
+                        .fg(TEXT_BRIGHT)
+                        .bg(BG_SELECTED)
+                        .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(MUTED)
+                    Style::default().fg(TEXT_BRIGHT)
                 },
             ),
-            Span::styled(api_hint, Style::default().fg(DIM)),
+            Span::raw("  "),
+            Span::styled(api_hint, Style::default().fg(api_hint_color)),
         ]));
     }
 
@@ -74,7 +81,7 @@ pub(super) fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
     let add_sel = state.selected == model_count;
     lines.push(Line::from(vec![
         Span::styled(
-            if add_sel { "\u{25b8} " } else { "  " },
+            if add_sel { "\u{276f} " } else { "  " },
             if add_sel {
                 Style::default().fg(ACCENT)
             } else {
@@ -84,7 +91,7 @@ pub(super) fn render_llm(f: &mut Frame, area: Rect, state: &SettingsState) {
         Span::styled(
             "+ Add model",
             if add_sel {
-                Style::default().fg(ACCENT)
+                Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(DIM)
             },

@@ -7,25 +7,35 @@ mod llm;
 mod service;
 
 use crate::app::{SettingsState, SettingsTab};
-use crate::ui::theme::{ACCENT, BG, DIM, MUTED, SETTINGS_HIGHLIGHT_BG, TEXT};
+use crate::ui::chrome;
+use crate::ui::theme::{
+    ACCENT, BG_SELECTED, BORDER_SUBTLE, DIM, MUTED, OK, STATUS_FAIL, TEXT_BRIGHT,
+};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-pub(super) const EDIT_FG: Color = Color::Rgb(220, 220, 220);
+pub(super) const EDIT_FG: Color = Color::Rgb(225, 228, 232);
 
 pub fn render(f: &mut Frame, area: Rect, state: &SettingsState) {
     let chunks = Layout::vertical([
         Constraint::Length(1), // tabs
-        Constraint::Length(1), // spacer
+        Constraint::Length(1), // divider
         Constraint::Min(1),    // content
         Constraint::Length(1), // status
     ])
     .split(area);
 
     render_tabs(f, chunks[0], state);
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "\u{2500}".repeat(chunks[1].width as usize),
+            Style::default().fg(BORDER_SUBTLE),
+        ))),
+        chunks[1],
+    );
 
     let content = Rect {
         x: area.x + 2,
@@ -54,42 +64,41 @@ pub fn render(f: &mut Frame, area: Rect, state: &SettingsState) {
     }
 
     if let Some(ref msg) = state.status_message {
-        let style = if msg.starts_with("Failed") || msg.starts_with("Save failed") {
-            Style::default().fg(Color::Rgb(180, 60, 60))
+        let (icon, style) = if msg.starts_with("Failed") || msg.starts_with("Save failed") {
+            (
+                chrome::dot(STATUS_FAIL),
+                Style::default()
+                    .fg(STATUS_FAIL)
+                    .add_modifier(Modifier::BOLD),
+            )
         } else {
-            Style::default().fg(MUTED)
+            (chrome::dot(OK), Style::default().fg(MUTED))
         };
-        let line = Line::from(vec![Span::raw("  "), Span::styled(msg.as_str(), style)]);
+        let line = Line::from(vec![icon, Span::raw(" "), Span::styled(msg.as_str(), style)]);
         f.render_widget(Paragraph::new(line), chunks[3]);
     }
 }
 
 fn render_tabs(f: &mut Frame, area: Rect, state: &SettingsState) {
-    let tab_style = |tab: SettingsTab| -> Style {
-        if state.tab == tab {
-            Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(MUTED)
+    let mut spans: Vec<Span> = Vec::new();
+    let pairs: &[(SettingsTab, &str)] = &[
+        (SettingsTab::Llm, "LLM"),
+        (SettingsTab::Agents, "Agents"),
+        (SettingsTab::Intercept, "Intercept"),
+        (SettingsTab::Service, "Service"),
+        (SettingsTab::About, "About"),
+    ];
+    for (i, (tab, label)) in pairs.iter().enumerate() {
+        if i > 0 {
+            spans.push(chrome::tab_sep());
         }
-    };
+        spans.extend(chrome::tab(label, None, state.tab == *tab));
+    }
+    spans.push(Span::raw("      "));
+    spans.push(Span::styled("tab", Style::default().fg(TEXT_BRIGHT)));
+    spans.push(Span::styled(" switch", Style::default().fg(MUTED)));
 
-    let line = Line::from(vec![
-        Span::raw("  "),
-        Span::styled(" LLM ", tab_style(SettingsTab::Llm)),
-        Span::styled("  \u{2502}  ", Style::default().fg(DIM)),
-        Span::styled(" Agents ", tab_style(SettingsTab::Agents)),
-        Span::styled("  \u{2502}  ", Style::default().fg(DIM)),
-        Span::styled(" Intercept ", tab_style(SettingsTab::Intercept)),
-        Span::styled("  \u{2502}  ", Style::default().fg(DIM)),
-        Span::styled(" Service ", tab_style(SettingsTab::Service)),
-        Span::styled("  \u{2502}  ", Style::default().fg(DIM)),
-        Span::styled(" About ", tab_style(SettingsTab::About)),
-        Span::raw("      "),
-        Span::styled("tab", Style::default().fg(DIM)),
-        Span::styled(" switch", Style::default().fg(MUTED)),
-    ]);
-
-    f.render_widget(Paragraph::new(line), area);
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 pub(super) fn setting_row<'a>(
@@ -100,9 +109,11 @@ pub(super) fn setting_row<'a>(
     edit_buffer: &'a str,
 ) -> Line<'a> {
     let label_style = if selected {
-        Style::default().fg(ACCENT)
+        Style::default()
+            .fg(ACCENT)
+            .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(TEXT)
+        Style::default().fg(MUTED)
     };
 
     let val_display = if editing && selected {
@@ -114,15 +125,16 @@ pub(super) fn setting_row<'a>(
     let val_style = if editing && selected {
         Style::default().fg(EDIT_FG)
     } else if selected {
-        Style::default().fg(TEXT)
+        Style::default().fg(TEXT_BRIGHT)
     } else {
-        Style::default().fg(MUTED)
+        Style::default().fg(DIM)
     };
 
-    let cursor = if editing && selected { "\u{258f}" } else { "" };
+    let cursor = if editing && selected { "\u{2588}" } else { "" };
+    let prefix = if selected { "\u{276f} " } else { "  " };
 
     Line::from(vec![
-        Span::styled(if selected { "\u{25b8} " } else { "  " }, label_style),
+        Span::styled(prefix, label_style),
         Span::styled(format!("{:<28}", label), label_style),
         Span::styled(val_display.to_string(), val_style),
         Span::styled(cursor, Style::default().fg(ACCENT)),
@@ -131,40 +143,38 @@ pub(super) fn setting_row<'a>(
 
 pub(super) fn toggle_row(label: &str, enabled: bool, selected: bool) -> Line<'_> {
     let label_style = if selected {
-        Style::default().fg(ACCENT)
+        Style::default()
+            .fg(ACCENT)
+            .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(TEXT)
+        Style::default().fg(MUTED)
     };
 
-    let (indicator, indicator_style) = if enabled {
-        (
-            "\u{25cf} enabled",
-            Style::default().fg(Color::Rgb(80, 160, 80)),
-        )
+    let (indicator_text, indicator_color) = if enabled {
+        ("\u{25cf} enabled", OK)
     } else {
-        (
-            "\u{25cb} disabled",
-            Style::default().fg(Color::Rgb(160, 80, 80)),
-        )
+        ("\u{25cb} disabled", DIM)
     };
 
-    let bg = if selected { SETTINGS_HIGHLIGHT_BG } else { BG };
+    let prefix = if selected { "\u{276f} " } else { "  " };
 
     Line::from(vec![
-        Span::styled(if selected { "\u{25b8} " } else { "  " }, label_style),
+        Span::styled(prefix, label_style),
         Span::styled(format!("{:<28}", label), label_style),
-        Span::styled(indicator, indicator_style.bg(bg)),
+        Span::styled(indicator_text, Style::default().fg(indicator_color)),
     ])
 }
 
 pub(super) fn section_header(title: &str) -> Line<'_> {
-    Line::from(vec![
-        Span::raw("  "),
-        Span::styled(
-            title,
-            Style::default()
-                .fg(Color::Rgb(160, 160, 160))
-                .add_modifier(Modifier::BOLD),
-        ),
-    ])
+    Line::from(vec![Span::styled(
+        format!("# {}", title),
+        Style::default()
+            .fg(TEXT_BRIGHT)
+            .add_modifier(Modifier::BOLD),
+    )])
+}
+
+#[allow(dead_code)]
+fn _unused() {
+    let _ = (BG_SELECTED, ACCENT);
 }

@@ -1,10 +1,23 @@
 use ratatui::layout::Rect;
-use ratatui::style::Style;
-use ratatui::widgets::{Block, Borders};
+use ratatui::style::{Modifier, Style};
+use ratatui::symbols::border;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Padding};
 
-use super::theme::{ACCENT, DIM, MUTED};
+use super::theme::{ACCENT, BG_PANEL, BORDER, BORDER_SUBTLE, DIM, MUTED, TEXT_BRIGHT};
 
 const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+const HEAVY_LEFT: border::Set = border::Set {
+    vertical_left: "\u{2503}",
+    vertical_right: " ",
+    horizontal_top: " ",
+    horizontal_bottom: " ",
+    top_left: " ",
+    top_right: " ",
+    bottom_left: " ",
+    bottom_right: " ",
+};
 
 pub fn centered_rect_fixed(width: u16, height: u16, area: Rect) -> Rect {
     let x = area.x + (area.width.saturating_sub(width)) / 2;
@@ -16,16 +29,63 @@ pub fn short_id(value: &str) -> &str {
     common::short_id(value)
 }
 
-pub fn titled_panel<'a>(title: &'a str) -> Block<'a> {
+//
+// Default panel chrome: heavy single left bar, slight panel-tint
+// background, padding so content sits clear of the bar. Title is
+// rendered into the top edge as a "# Title" rubric — opencode style.
+//
+
+pub fn titled_panel(title: &str) -> Block<'static> {
+    let title_text = title.trim();
+    let title_line = Line::from(vec![
+        Span::styled(
+            "# ",
+            Style::default().fg(MUTED),
+        ),
+        Span::styled(
+            title_text.to_string(),
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]);
+
     Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(DIM))
-        .title_style(Style::default().fg(MUTED))
-        .title(title)
+        .borders(Borders::LEFT)
+        .border_set(HEAVY_LEFT)
+        .border_style(Style::default().fg(BORDER_SUBTLE))
+        .style(Style::default().bg(BG_PANEL))
+        .padding(Padding::new(2, 1, 1, 0))
+        .title(title_line)
 }
 
-pub fn focused_titled_panel<'a>(title: &'a str, focused: bool) -> Block<'a> {
-    titled_panel(title).border_style(Style::default().fg(if focused { ACCENT } else { DIM }))
+pub fn focused_titled_panel(title: &str, focused: bool) -> Block<'static> {
+    let title_text = title.trim();
+    let (border_color, title_color) = if focused {
+        (ACCENT, ACCENT)
+    } else {
+        (BORDER_SUBTLE, TEXT_BRIGHT)
+    };
+    let title_line = Line::from(vec![
+        Span::styled(
+            "# ",
+            Style::default().fg(if focused { ACCENT } else { MUTED }),
+        ),
+        Span::styled(
+            title_text.to_string(),
+            Style::default()
+                .fg(title_color)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]);
+
+    Block::default()
+        .borders(Borders::LEFT)
+        .border_set(HEAVY_LEFT)
+        .border_style(Style::default().fg(border_color))
+        .style(Style::default().bg(BG_PANEL))
+        .padding(Padding::new(2, 1, 1, 0))
+        .title(title_line)
 }
 
 //
@@ -63,4 +123,18 @@ pub fn spinner_char() -> char {
         / 100) as usize
         % SPINNER_FRAMES.len();
     SPINNER_FRAMES[frame_idx]
+}
+
+#[allow(dead_code)]
+pub fn border_color_for(focused: bool) -> ratatui::style::Color {
+    if focused {
+        ACCENT
+    } else {
+        BORDER
+    }
+}
+
+#[allow(dead_code)]
+pub fn dim_color() -> ratatui::style::Color {
+    DIM
 }

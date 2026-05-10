@@ -2,8 +2,8 @@ use super::{CHAIN_COLOR, OP_COLOR};
 use crate::app::{App, OperationsState};
 use crate::ui::common::{focused_titled_panel, short_id};
 use crate::ui::theme::{
-    ACCENT, DIM, MUTED, PANEL_HIGHLIGHT_BG, POPUP_HIGHLIGHT_BG, STATUS_DONE, STATUS_FAIL,
-    STATUS_QUEUED, STATUS_RUNNING, TEXT,
+    ACCENT, BG_SELECTED, DIM, MUTED, STATUS_DONE, STATUS_FAIL, STATUS_QUEUED, STATUS_RUNNING,
+    TEXT, TEXT_BRIGHT,
 };
 use common::{ChainExecutionStatus, SemanticOpStatus};
 use ratatui::Frame;
@@ -46,7 +46,7 @@ fn render_exec_list(
         Cell::from("Started"),
         Cell::from("Duration"),
     ])
-    .style(Style::default().fg(ACCENT));
+    .style(Style::default().fg(MUTED).add_modifier(Modifier::BOLD));
 
     let now = chrono::Utc::now();
 
@@ -64,13 +64,23 @@ fn render_exec_list(
             let node_short = short_id(&op.node_id);
 
             rows.push(Row::new(vec![
-                Cell::from("O").style(Style::default().fg(OP_COLOR)),
-                Cell::from(op.spec.name.clone()).style(Style::default().fg(TEXT)),
+                Cell::from(Span::styled(
+                    " O ",
+                    Style::default()
+                        .fg(crate::ui::theme::BG)
+                        .bg(OP_COLOR)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Cell::from(op.spec.name.clone()).style(Style::default().fg(TEXT_BRIGHT)),
                 Cell::from(node_short.to_string()).style(Style::default().fg(DIM)),
-                Cell::from(op.agent_short_name.clone()).style(Style::default().fg(DIM)),
-                Cell::from(status_str).style(Style::default().fg(status_color)),
+                Cell::from(op.agent_short_name.clone()).style(Style::default().fg(MUTED)),
+                Cell::from(status_str).style(
+                    Style::default()
+                        .fg(status_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Cell::from(started).style(Style::default().fg(DIM)),
-                Cell::from(duration).style(Style::default().fg(DIM)),
+                Cell::from(duration).style(Style::default().fg(MUTED)),
             ]));
         } else {
             let exec = &state.chain_executions[idx];
@@ -83,19 +93,29 @@ fn render_exec_list(
             let node_short = short_id(&exec.node_id);
 
             rows.push(Row::new(vec![
-                Cell::from("C").style(Style::default().fg(CHAIN_COLOR)),
-                Cell::from(exec.chain_name.clone()).style(Style::default().fg(TEXT)),
+                Cell::from(Span::styled(
+                    " C ",
+                    Style::default()
+                        .fg(crate::ui::theme::BG)
+                        .bg(CHAIN_COLOR)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Cell::from(exec.chain_name.clone()).style(Style::default().fg(TEXT_BRIGHT)),
                 Cell::from(node_short.to_string()).style(Style::default().fg(DIM)),
-                Cell::from(exec.agent_short_name.clone()).style(Style::default().fg(DIM)),
-                Cell::from(status_str).style(Style::default().fg(status_color)),
+                Cell::from(exec.agent_short_name.clone()).style(Style::default().fg(MUTED)),
+                Cell::from(status_str).style(
+                    Style::default()
+                        .fg(status_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Cell::from(started).style(Style::default().fg(DIM)),
-                Cell::from(duration).style(Style::default().fg(DIM)),
+                Cell::from(duration).style(Style::default().fg(MUTED)),
             ]));
         }
     }
 
     let widths = [
-        Constraint::Length(2),
+        Constraint::Length(3),
         Constraint::Min(10),
         Constraint::Length(10),
         Constraint::Length(12),
@@ -107,7 +127,11 @@ fn render_exec_list(
     let table = Table::new(rows, widths)
         .header(header)
         .block(focused_titled_panel(" Executions ", !state.detail_focus))
-        .row_highlight_style(Style::default().bg(PANEL_HIGHLIGHT_BG));
+        .row_highlight_style(
+            Style::default()
+                .bg(BG_SELECTED)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let mut table_state = TableState::default();
     table_state.select(Some(state.exec_selected));
@@ -497,7 +521,7 @@ fn section_header_line(label: &str, collapsed: bool, focused: bool) -> Vec<Line<
     let style = if focused {
         Style::default()
             .fg(TEXT)
-            .bg(POPUP_HIGHLIGHT_BG)
+            .bg(BG_SELECTED)
             .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(ACCENT)

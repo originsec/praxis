@@ -1,9 +1,9 @@
 use super::{section_header, setting_row, toggle_row};
 use crate::app::SettingsState;
-use crate::ui::theme::{MUTED, TEXT};
+use crate::ui::theme::{DIM, MUTED, TEXT_BRIGHT};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 
@@ -89,14 +89,19 @@ pub(super) fn render_service(f: &mut Frame, area: Rect, state: &SettingsState) {
     lines.push(Line::raw(""));
     lines.push(Line::from(vec![
         Span::raw("  "),
-        Span::styled("TLS (wss/https, per-SNI cert) ", Style::default().fg(TEXT)),
+        Span::styled(
+            "TLS (wss/https, per-SNI cert)  ",
+            Style::default()
+                .fg(TEXT_BRIGHT)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled("always on", Style::default().fg(MUTED)),
     ]));
     lines.push(Line::from(vec![
         Span::raw("  "),
         Span::styled(
             "CA: ~/.praxis/bridge/ca_cert.pem (trust this on the client)",
-            Style::default().fg(MUTED),
+            Style::default().fg(DIM).add_modifier(Modifier::ITALIC),
         ),
     ]));
 
@@ -106,13 +111,19 @@ pub(super) fn render_service(f: &mut Frame, area: Rect, state: &SettingsState) {
 
     lines.push(Line::from(vec![
         Span::raw("  "),
-        Span::styled("RabbitMQ     ", Style::default().fg(TEXT)),
-        Span::styled(&state.rabbitmq_url, Style::default().fg(MUTED)),
+        Span::styled("rabbitmq    ", Style::default().fg(MUTED)),
+        Span::styled(
+            &state.rabbitmq_url,
+            Style::default().fg(TEXT_BRIGHT),
+        ),
     ]));
     lines.push(Line::from(vec![
         Span::raw("  "),
-        Span::styled("Client ID    ", Style::default().fg(TEXT)),
-        Span::styled(&state.client_id, Style::default().fg(MUTED)),
+        Span::styled("client id   ", Style::default().fg(MUTED)),
+        Span::styled(
+            &state.client_id,
+            Style::default().fg(TEXT_BRIGHT),
+        ),
     ]));
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
