@@ -228,9 +228,10 @@ impl App {
     }
 
     //
-    // Reset the orchestrator: close any live service session, drop the
-    // local transcript, delete the on-disk record, and start a fresh
-    // empty session.
+    // Start a fresh orchestrator conversation in place. Closes the
+    // live service session and clears the local transcript, but leaves
+    // the prior session's record under ~/.praxis/sessions/ so it can
+    // be brought back later with `praxis --resume`.
     //
 
     pub(crate) async fn clear_orchestrator_session(&mut self) {
@@ -243,12 +244,7 @@ impl App {
             let _ = self.acp.close_session(&sid).await;
         }
 
-        if let Some(stored) = self.orchestrator.stored.take() {
-            if let Ok(path) = crate::session_store::session_path(&stored.session_id) {
-                let _ = std::fs::remove_file(path);
-            }
-        }
-
+        self.orchestrator.stored = None;
         self.orchestrator.sessions.clear();
         self.orchestrator.active_session_index = None;
         self.orchestrator.pending_history = None;
