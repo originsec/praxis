@@ -99,7 +99,7 @@ Configure via environment or `.env` file:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PRAXIS_RABBITMQ_URL` | `amqp://praxis:praxis@localhost:5672` | RabbitMQ connection |
-| `PRAXIS_DATABASE_URL` | `~/.praxis_operations.db` | Database path |
+| `PRAXIS_DATABASE_URL` | `~/.praxis/operations.db` | Database path |
 | `RUST_LOG` | `info` | Log level |
 
 ## Database Options
